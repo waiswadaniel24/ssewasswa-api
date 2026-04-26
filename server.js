@@ -1,20 +1,45 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+dotenv.config();
+
 const app = express();
+const PORT = process.env.PORT || 3000;
+
 app.use(cors());
 app.use(express.json());
-app.get('/api/health', (req, res) => res.json({version:'10.1.0',rating:'19/10',donation_fee:'0%',mode:'PURE_CHARITY'}));
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-app.post('/api/donate/create', async (req, res) => {
-  const { amount, donor_name, donor_email } = req.body;
-  const session = await stripe.checkout.sessions.create({
-    payment_method_types: ['card'],
-    line_items: [{ price_data: { currency: 'usd', product_data: { name: 'Donation' }, unit_amount: amount * 100 }, quantity: 1 }],
-    mode: 'payment',
-    success_url: 'http://localhost:3000/success',
-    cancel_url: 'http://localhost:3000/cancel'
-  });
-  res.json({ url: session.url });
+
+// ADD THIS: Catch bad JSON and stop crashes
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('Bad JSON received:', err.message);
+    return res.status(400).json({ error: 'Invalid JSON' });
+  }
+  next();
 });
-app.listen(process.env.PORT, () => console.log(`API running on ${process.env.PORT}`));
+
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Ssewasswa Backend API is running!',
+    status: 'ok'
+  });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body;
+  if (email === 'admin@ssewasswajuniorschool.org' && password === 'admin123') {
+    res.json({
+      success: true,
+      token: 'fake-jwt-token-12345',
+      admin: { email: email, role: 'super_admin' }
+    });
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+});
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+app.listen(PORT, () => {
+  console.log(`✅ Server running on http://localhost:${PORT}`);
+});
