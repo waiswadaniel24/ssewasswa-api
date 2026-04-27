@@ -7,33 +7,35 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: Arial, sans-serif; background: #f5f5f5; }
-   .header { background: #2c5aa0; color: white; padding: 15px; text-align: center; }
-   .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-   .tabs { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-   .tab { padding: 10px 20px; background: #ddd; border: none; cursor: pointer; border-radius: 5px; }
-   .tab.active { background: #2c5aa0; color: white; }
-   .content { background: white; padding: 20px; border-radius: 10px; display: none; }
-   .content.active { display: block; }
-   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
-   .stat { background: #e8f5e8; padding: 20px; border-radius: 8px; text-align: center; }
-   .stat h3 { font-size: 24px; color: #2c5aa0; }
+  .header { background: #2c5aa0; color: white; padding: 15px; text-align: center; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  .tabs { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  .tab { padding: 10px 20px; background: #ddd; border: none; cursor: pointer; border-radius: 5px; }
+  .tab.active { background: #2c5aa0; color: white; }
+  .content { background: white; padding: 20px; border-radius: 10px; display: none; }
+  .content.active { display: block; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+  .stat { background: #e8f5e8; padding: 20px; border-radius: 8px; text-align: center; }
+  .stat h3 { font-size: 24px; color: #2c5aa0; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
     th { background: #f8f9fa; }
-   .btn { padding: 6px 12px; border: none; border-radius: 3px; cursor: pointer; margin: 2px; font-size: 12px; }
-   .btn-success { background: #28a745; color: white; }
-   .btn-danger { background: #dc3545; color: white; }
-   .btn-primary { background: #2c5aa0; color: white; }
-   .btn-warning { background: #ffc107; color: black; }
+  .btn { padding: 6px 12px; border: none; border-radius: 3px; cursor: pointer; margin: 2px; font-size: 12px; }
+  .btn-success { background: #28a745; color: white; }
+  .btn-danger { background: #dc3545; color: white; }
+  .btn-primary { background: #2c5aa0; color: white; }
+  .btn-warning { background: #ffc107; color: black; }
     input, select, textarea { width: 100%; padding: 8px; margin: 5px 0 15px; border: 1px solid #ddd; border-radius: 4px; }
-   .search-box { display: flex; gap: 10px; margin-bottom: 15px; }
-   .search-box input { flex: 1; }
-   .badge { padding: 3px 8px; border-radius: 12px; font-size: 11px; }
-   .badge-pending { background: #fff3cd; color: #856404; }
-   .badge-verified { background: #d4edda; color: #155724; }
-   .badge-rejected { background: #f8d7da; color: #721c24; }
-   .login-box { max-width: 400px; margin: 100px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-   .section-title { background: #2c5aa0; color: white; padding: 10px; margin: 20px 0 10px; border-radius: 5px; }
+  .search-box { display: flex; gap: 10px; margin-bottom: 15px; }
+  .search-box input { flex: 1; }
+  .badge { padding: 3px 8px; border-radius: 12px; font-size: 11px; }
+  .badge-pending { background: #fff3cd; color: #856404; }
+  .badge-verified { background: #d4edda; color: #155724; }
+  .badge-rejected { background: #f8d7da; color: #721c24; }
+  .login-box { max-width: 400px; margin: 100px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+  .section-title { background: #2c5aa0; color: white; padding: 10px; margin: 20px 0 10px; border-radius: 5px; }
+  .checkbox-group { margin: 10px 0; }
+  .checkbox-group label { display: block; margin: 5px 0; }
   </style>
 </head>
 <body>
@@ -43,13 +45,15 @@
 
   <div id="loginScreen" class="login-box" style="display:none;">
     <h2>Admin Login</h2>
-    <input type="password" id="passwordInput" placeholder="Enter password" />
+    <input type="text" id="usernameInput" placeholder="Username" />
+    <input type="password" id="passwordInput" placeholder="Password" />
     <button class="btn btn-primary" onclick="login()" style="width:100%;">Login</button>
   </div>
 
   <div id="dashboard" class="container" style="display:none;">
     <div class="tabs">
       <button class="tab active" onclick="showTab('payments')">Payments</button>
+      <button class="tab" onclick="showTab('users')" id="usersTab" style="display:none;">Users</button>
       <button class="tab" onclick="showTab('notifications')">Notifications</button>
       <button class="tab" onclick="showTab('settings')">Settings</button>
       <button class="tab" onclick="logout()" style="margin-left:auto;background:#dc3545;color:white;">Logout</button>
@@ -76,6 +80,36 @@
         </thead>
         <tbody id="paymentsTable"></tbody>
       </table>
+    </div>
+
+    <div id="users" class="content">
+      <h2>User Management - Control Access</h2>
+      <button class="btn btn-success" onclick="showAddUser()">+ Add New User</button>
+      <table style="margin-top:20px;">
+        <thead>
+          <tr><th>Username</th><th>Role</th><th>View Finances</th><th>Verify Payments</th><th>View Reports</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="usersTable"></tbody>
+      </table>
+
+      <div id="addUserForm" style="display:none;margin-top:20px;padding:20px;background:#f8f9fa;border-radius:5px;">
+        <h3>Add/Edit User</h3>
+        <input type="text" id="newUsername" placeholder="Username" />
+        <input type="password" id="newPassword" placeholder="Password" />
+        <select id="newRole">
+          <option value="bursar">Bursar</option>
+          <option value="headteacher">Head Teacher</option>
+          <option value="teacher">Class Teacher</option>
+          <option value="secretary">Secretary</option>
+        </select>
+        <div class="checkbox-group">
+          <label><input type="checkbox" id="permFinances" /> Can View Financial Details</label>
+          <label><input type="checkbox" id="permVerify" /> Can Verify Payments</label>
+          <label><input type="checkbox" id="permReports" /> Can View Class Reports</label>
+        </div>
+        <button class="btn btn-success" onclick="saveUser()">Save User</button>
+        <button class="btn btn-danger" onclick="cancelAddUser()">Cancel</button>
+      </div>
     </div>
 
     <div id="notifications" class="content">
@@ -115,23 +149,17 @@
       <div class="section-title">Payment Rules</div>
       <label><input type="checkbox" id="auto_verify_enabled" /> Auto-Verify Payments</label><br>
 
-      <div class="section-title">Security</div>
-      <label><input type="checkbox" id="admin_password_enabled" /> Enable Admin Password</label><br>
-      <label>Admin Password</label><input type="password" id="admin_password" />
-
       <button class="btn btn-success" onclick="saveSettings()" style="margin-top:20px;">Save All Changes</button>
     </div>
   </div>
 
   <script>
-    let isLoggedIn = false;
+    let currentUser = null;
 
     async function checkAuth() {
       const res = await fetch('/api/admin/auth-required');
       const data = await res.json();
       if (!data.required) {
-        isLoggedIn = true;
-        document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         loadPayments();
         loadSettings();
@@ -141,20 +169,25 @@
     }
 
     async function login() {
+      const username = document.getElementById('usernameInput').value;
       const password = document.getElementById('passwordInput').value;
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ username, password })
       });
       if (res.ok) {
-        isLoggedIn = true;
+        const data = await res.json();
+        currentUser = data;
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
+        if (data.role === 'bursar' || data.role === 'admin') {
+          document.getElementById('usersTab').style.display = 'block';
+        }
         loadPayments();
         loadSettings();
       } else {
-        alert('Wrong password');
+        alert('Wrong username or password');
       }
     }
 
@@ -169,6 +202,7 @@
       event.target.classList.add('active');
       document.getElementById(tab).classList.add('active');
       if (tab === 'payments') loadPayments();
+      if (tab === 'users') loadUsers();
       if (tab === 'notifications') loadNotifications();
       if (tab === 'settings') loadSettings();
     }
@@ -177,17 +211,22 @@
       const search = document.getElementById('searchInput').value;
       const status = document.getElementById('statusFilter').value;
       const res = await fetch(`/api/admin/payments?search=${search}&status=${status}`);
+      if (!res.ok) {
+        document.getElementById('paymentsTable').innerHTML = '<tr><td colspan="9">No access to financial data</td></tr>';
+        return;
+      }
       const payments = await res.json();
 
       const statsRes = await fetch('/api/admin/stats');
-      const stats = await statsRes.json();
-
-      document.getElementById('stats').innerHTML = `
-        <div class="stat"><h3>${stats.total}</h3><p>Total Payments</p></div>
-        <div class="stat"><h3>UGX ${stats.total_verified.toLocaleString()}</h3><p>Verified Total</p></div>
-        <div class="stat"><h3>${stats.pending_count}</h3><p>Pending</p></div>
-        <div class="stat"><h3>${stats.verified_count}</h3><p>Verified</p></div>
-      `;
+      if (statsRes.ok) {
+        const stats = await statsRes.json();
+        document.getElementById('stats').innerHTML = `
+          <div class="stat"><h3>${stats.total}</h3><p>Total Payments</p></div>
+          <div class="stat"><h3>UGX ${stats.total_verified.toLocaleString()}</h3><p>Verified Total</p></div>
+          <div class="stat"><h3>${stats.pending_count}</h3><p>Pending</p></div>
+          <div class="stat"><h3>${stats.verified_count}</h3><p>Verified</p></div>
+        `;
+      }
 
       document.getElementById('paymentsTable').innerHTML = payments.map(p => `
         <tr>
@@ -205,7 +244,6 @@
               <button class="btn btn-danger" onclick="rejectPayment('${p.reference}')">Reject</button>
             ` : ''}
             ${p.status === 'verified'? `<a href="/api/receipt-pdf/${p.reference}" class="btn btn-primary" style="text-decoration:none;">PDF</a>` : ''}
-            <button class="btn btn-warning" onclick="addNote('${p.reference}')">Note</button>
           </td>
         </tr>
       `).join('');
@@ -213,8 +251,9 @@
 
     async function verifyPayment(ref) {
       if (!confirm('Verify this payment?')) return;
-      await fetch(`/api/admin/verify/${ref}`, { method: 'POST' });
-      loadPayments();
+      const res = await fetch(`/api/admin/verify/${ref}`, { method: 'POST' });
+      if (res.ok) loadPayments();
+      else alert('No permission to verify');
     }
 
     async function rejectPayment(ref) {
@@ -228,19 +267,72 @@
       loadPayments();
     }
 
-    async function addNote(ref) {
-      const note = prompt('Add admin note:');
-      if (!note) return;
-      await fetch(`/api/admin/add-note/${ref}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note })
-      });
-      loadPayments();
-    }
-
     async function exportCSV() {
       window.location.href = '/api/admin/export';
+    }
+
+    async function loadUsers() {
+      const res = await fetch('/api/admin/users');
+      if (!res.ok) return;
+      const users = await res.json();
+      document.getElementById('usersTable').innerHTML = users.map(u => `
+        <tr>
+          <td>${u.username}</td>
+          <td>${u.role}</td>
+          <td>${u.can_view_finances? '?' : '?'}</td>
+          <td>${u.can_verify_payments? '?' : '?'}</td>
+          <td>${u.can_view_reports? '?' : '?'}</td>
+          <td>
+            <button class="btn btn-warning" onclick='editUser(${JSON.stringify(u)})'>Edit</button>
+            ${u.username!== 'bursar'? `<button class="btn btn-danger" onclick="deleteUser('${u.username}')">Delete</button>` : ''}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function showAddUser() {
+      document.getElementById('addUserForm').style.display = 'block';
+      document.getElementById('newUsername').value = '';
+      document.getElementById('newPassword').value = '';
+    }
+
+    function cancelAddUser() {
+      document.getElementById('addUserForm').style.display = 'none';
+    }
+
+    function editUser(u) {
+      document.getElementById('addUserForm').style.display = 'block';
+      document.getElementById('newUsername').value = u.username;
+      document.getElementById('newPassword').value = '';
+      document.getElementById('newRole').value = u.role;
+      document.getElementById('permFinances').checked = u.can_view_finances;
+      document.getElementById('permVerify').checked = u.can_verify_payments;
+      document.getElementById('permReports').checked = u.can_view_reports;
+    }
+
+    async function saveUser() {
+      const data = {
+        username: document.getElementById('newUsername').value,
+        password: document.getElementById('newPassword').value,
+        role: document.getElementById('newRole').value,
+        can_view_finances: document.getElementById('permFinances').checked? 1 : 0,
+        can_verify_payments: document.getElementById('permVerify').checked? 1 : 0,
+        can_view_reports: document.getElementById('permReports').checked? 1 : 0
+      };
+      if (!data.username ||!data.password) return alert('Username and password required');
+      await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      cancelAddUser();
+      loadUsers();
+    }
+
+    async function deleteUser(username) {
+      if (!confirm(`Delete user ${username}?`)) return;
+      await fetch(`/api/admin/users/${username}`, { method: 'DELETE' });
+      loadUsers();
     }
 
     async function loadNotifications() {
