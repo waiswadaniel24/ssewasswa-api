@@ -94,14 +94,15 @@ app.get('/admin', (req, res) => {
         * { box-sizing: border-box; font-family: system-ui, sans-serif; }
         body { max-width: 600px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
         h1 { color: #1a1a1a; }
-        form { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        input { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; }
+        form, .card { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input, select { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; }
         button { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
         button:hover { background: #1d4ed8; }
-        #dashboard { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        #students p { padding: 10px; border-bottom: 1px solid #eee; margin: 0; }
+        #students p { padding: 10px; border-bottom: 1px solid #eee; margin: 0; cursor: pointer; }
+        #students p:hover { background: #f0f0f0; }
         .logout { background: #dc2626; margin-top: 20px; }
         .logout:hover { background: #b91c1c; }
+        .success { color: #16a34a; font-weight: 600; }
       </style>
     </head>
     <body>
@@ -116,6 +117,7 @@ app.get('/admin', (req, res) => {
 
       <div id="dashboard" style="display:none">
         <h2>Welcome <span id="user"></span></h2>
+        
         <form id="addStudent">
           <h3>Add Student</h3>
           <input name="name" placeholder="Student Name" required>
@@ -123,8 +125,30 @@ app.get('/admin', (req, res) => {
           <input name="balance" type="number" placeholder="Starting Balance" value="0">
           <button>Add Student</button>
         </form>
-        <h3>Students List</h3>
-        <div id="students"></div>
+
+        <div class="card">
+          <h3>Record Payment</h3>
+          <form id="addPayment">
+            <select name="student_id" id="studentSelect" required>
+              <option value="">Select Student</option>
+            </select>
+            <input name="amount" type="number" placeholder="Amount Paid" required>
+            <input name="paid_by" placeholder="Paid By - e.g Parent Name" required>
+            <select name="method">
+              <option value="cash">Cash</option>
+              <option value="mobile_money">Mobile Money</option>
+              <option value="bank">Bank</option>
+            </select>
+            <button>Record Payment</button>
+          </form>
+          <div id="payMsg"></div>
+        </div>
+
+        <div class="card">
+          <h3>Students List</h3>
+          <div id="students"></div>
+        </div>
+        
         <button class="logout" onclick="logout()">Logout</button>
       </div>
 
@@ -177,12 +201,38 @@ app.get('/admin', (req, res) => {
           } else alert('Failed to add student');
         }
 
+        document.getElementById('addPayment').onsubmit = async (e) => {
+          e.preventDefault();
+          const form = new FormData(e.target);
+          const res = await fetch('/api/payments', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'include',
+            body: JSON.stringify({
+              student_id: parseInt(form.get('student_id')),
+              amount: parseInt(form.get('amount')),
+              paid_by: form.get('paid_by'),
+              method: form.get('method')
+            })
+          });
+          if(res.ok) {
+            document.getElementById('payMsg').innerHTML = '<p class="success">Payment recorded!</p>';
+            e.target.reset();
+            loadStudents();
+            setTimeout(() => document.getElementById('payMsg').innerHTML = '', 3000);
+          } else alert('Payment failed');
+        }
+
         async function loadStudents() {
           const res = await fetch('/api/students', {credentials: 'include'});
           const students = await res.json();
           document.getElementById('students').innerHTML = students.map(s =>
             \`<p><b>\${s.name}</b> - \${s.class} - Balance: UGX \${s.balance.toLocaleString()}</p>\`
           ).join('') || '<p>No students yet</p>';
+          
+          document.getElementById('studentSelect').innerHTML = 
+            '<option value="">Select Student</option>' + 
+            students.map(s => \`<option value="\${s.id}">\${s.name} - \${s.class} - UGX \${s.balance}</option>\`).join('');
         }
 
         function logout() {
