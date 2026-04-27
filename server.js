@@ -21,8 +21,12 @@ const pool = new Pool({
 })
 
 async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
+  const client = await pool.connect();
+
+  await client.query(`DROP TABLE IF EXISTS users;`);
+
+  await client.query(`
+    CREATE TABLE users (
       id SERIAL PRIMARY KEY,
       username TEXT UNIQUE,
       password TEXT,
@@ -35,11 +39,12 @@ async function initDB() {
   `);
 
   const hash = await bcrypt.hash('bursar123', 10);
-  await pool.query(`
+  await client.query(`
     INSERT INTO users (username, password, role, can_view_finances, can_verify_payments, can_view_reports)
     VALUES ('bursar', $1, 'bursar', 1, 1, 1)
-    ON CONFLICT (username) DO UPDATE SET password = $1
-  `, );
+  `, [hash]);
+
+  client.release();
   console.log('✅ Bursar user ready');
 }
 initDB();
