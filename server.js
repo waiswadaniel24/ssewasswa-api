@@ -5,6 +5,7 @@ import fs from "fs";
 import cookieParser from "cookie-parser";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
+import PDFDocument from "pdfkit";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -200,6 +201,43 @@ app.get("/api/receipt/:ref", async (req, res) => {
   res.json({ ...payment, school: config.school_name, school_address: config.school_address, receipt_footer: config.receipt_footer });
 });
 
+app.get("/api/receipt-pdf/:ref", async (req, res) => {
+  const payment = await db.get('SELECT * FROM payments WHERE reference = ?', req.params.ref);
+  if (!payment || payment.status !== 'verified') return res.status(404).json({ error: "Receipt not available" });
+  const config = getConfig();
+  
+  const doc = new PDFDocument({ margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=Receipt-${payment.reference}.pdf`);
+  doc.pipe(res);
+  
+  doc.fontSize(20).text(config.school_name, { align: 'center' });
+  doc.fontSize(12).text(config.school_address || 'Kampala, Uganda', { align: 'center' });
+  doc.moveDown();
+  doc.fontSize(16).text('OFFICIAL FEES RECEIPT', { align: 'center', underline: true });
+  doc.moveDown();
+  
+  doc.fontSize(12);
+  doc.text(`Receipt No: ${payment.reference}`);
+  doc.text(`Date: ${new Date(payment.verified_at || payment.created_at).toLocaleDateString()}`);
+  doc.moveDown();
+  doc.text(`Student Name: ${payment.student_name}`);
+  doc.text(`Class: ${payment.student_class}`);
+  doc.text(`Parent Phone: ${payment.parent_phone}`);
+  doc.moveDown();
+  doc.fontSize(14).text(`Amount Paid: UGX ${payment.amount.toLocaleString()}`, { underline: true });
+  doc.fontSize(12);
+  doc.text(`Payment Method: Mobile Money`);
+  doc.text(`Transaction ID: ${payment.mtn_transaction_id}`);
+  doc.moveDown(2);
+  doc.text(config.receipt_footer || 'Thank you for your payment.', { align: 'center' });
+  doc.moveDown();
+  doc.text('_________________________', { align: 'right' });
+  doc.text('Authorized Signature', { align: 'right' });
+  
+  doc.end();
+});
+
 app.post("/api/admin/login", (req, res) => {
   const config = getConfig();
   if (!config.admin_password_enabled) return res.json({ success: true });
@@ -231,6 +269,7 @@ app.get("/api/admin/auth-required", (req, res) => {
   res.json({ required: getConfig().admin_password_enabled });
 });
 
+app.get("/health", (req, res) => res.json({ status: "ok" }));
 app.get("/admin", (req, res) => res.sendFile(join(__dirname, "public", "admin.html")));
 app.get("/receipt/:ref", (req, res) => res.sendFile(join(__dirname, "public", "receipt.html")));
 app.get("/report", (req, res) => res.sendFile(join(__dirname, "public", "report.html")));
