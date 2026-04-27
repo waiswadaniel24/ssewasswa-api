@@ -19,6 +19,23 @@ app.use(express.static(join(__dirname, "public")));
 let db;
 (async () => {
   db = await open({ filename: './payments.db', driver: sqlite3.Database });
+
+  // Auto-create users table and bursar on startup
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE,
+      password TEXT,
+      role TEXT DEFAULT 'teacher',
+      can_view_finances INTEGER DEFAULT 0,
+      can_verify_payments INTEGER DEFAULT 0,
+      can_view_reports INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await db.run(`INSERT OR IGNORE INTO users (username, password, role, can_view_finances, can_verify_payments, can_view_reports) VALUES ('bursar', 'bursar123', 'bursar', 1, 1, 1)`);
+  console.log('? Bursar user ready');
+
   
 await db.exec(`
     CREATE TABLE IF NOT EXISTS payments (
