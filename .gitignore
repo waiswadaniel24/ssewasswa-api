@@ -1,0 +1,5 @@
+node_modules
+payments.db
+*.log
+.env
+.DS_Store
