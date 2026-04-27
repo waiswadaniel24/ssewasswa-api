@@ -1,5 +1,5 @@
 node_modules
-payments.db
-*.log
+*.db
 .env
+*.log
 .DS_Store
