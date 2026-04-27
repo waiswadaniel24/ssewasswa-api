@@ -1,208 +1,195 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Admin Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - St. Ssewasswa</title>
   <style>
-    body { font-family: Arial; max-width: 1400px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
-   .card { background: white; padding: 20px; margin: 15px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    input, button, select, textarea { padding: 10px; margin: 8px 4px; font-size: 14px; border-radius: 4px; border: 1px solid #ddd; box-sizing: border-box; }
-    button { background: #007bff; color: white; border: none; cursor: pointer; }
-    button:hover { background: #0056b3; }
-   .logout { background: #dc3545; float: right; }
-   .verify { background: #28a745; padding: 6px 12px; font-size: 12px; }
-   .reject { background: #dc3545; padding: 6px 12px; font-size: 12px; }
-   .export { background: #17a2b8; }
-   .test { background: #ffc107; color: #000; }
-   .success { background: #d4edda; padding: 10px; margin-top: 10px; display: none; border-radius: 4px; }
-    #dashboard, #login { display: none; }
-   .header { display: flex; justify-content: space-between; align-items: center; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
-    th { background: #f8f9fa; position: sticky; top: 0; }
-   .status-pending { color: #ff9800; font-weight: bold; }
-   .status-pending_verification { color: #007bff; font-weight: bold; }
-   .status-verified { color: #28a745; font-weight: bold; }
-   .status-rejected { color: #dc3545; font-weight: bold; }
-   .tab { background: #e9ecef; border: none; padding: 10px 20px; margin-right: 5px; }
-   .tab.active { background: #007bff; color: white; }
-   .tabcontent { display: none; }
-   .tabcontent.active { display: block; }
-   .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 15px 0; }
-   .stat { background: #f8f9fa; padding: 15px; border-radius: 6px; }
-   .stat-num { font-size: 24px; font-weight: bold; color: #007bff; }
-   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-   .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
-   label { font-weight: bold; display: block; margin-top: 10px; }
-   small { color: #666; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #f5f5f5; }
+   .header { background: #2c5aa0; color: white; padding: 15px; text-align: center; }
+   .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+   .tabs { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+   .tab { padding: 10px 20px; background: #ddd; border: none; cursor: pointer; border-radius: 5px; }
+   .tab.active { background: #2c5aa0; color: white; }
+   .content { background: white; padding: 20px; border-radius: 10px; display: none; }
+   .content.active { display: block; }
+   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+   .stat { background: #e8f5e8; padding: 20px; border-radius: 8px; text-align: center; }
+   .stat h3 { font-size: 24px; color: #2c5aa0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #f8f9fa; }
+   .btn { padding: 6px 12px; border: none; border-radius: 3px; cursor: pointer; margin: 2px; font-size: 12px; }
+   .btn-success { background: #28a745; color: white; }
+   .btn-danger { background: #dc3545; color: white; }
+   .btn-primary { background: #2c5aa0; color: white; }
+   .btn-warning { background: #ffc107; color: black; }
+    input, select, textarea { width: 100%; padding: 8px; margin: 5px 0 15px; border: 1px solid #ddd; border-radius: 4px; }
+   .search-box { display: flex; gap: 10px; margin-bottom: 15px; }
+   .search-box input { flex: 1; }
+   .badge { padding: 3px 8px; border-radius: 12px; font-size: 11px; }
+   .badge-pending { background: #fff3cd; color: #856404; }
+   .badge-verified { background: #d4edda; color: #155724; }
+   .badge-rejected { background: #f8d7da; color: #721c24; }
+   .login-box { max-width: 400px; margin: 100px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+   .section-title { background: #2c5aa0; color: white; padding: 10px; margin: 20px 0 10px; border-radius: 5px; }
   </style>
 </head>
 <body>
-  <div id="login" class="card">
-    <h2>Admin Login</h2>
-    <input id="password" type="password" placeholder="Enter admin password" style="width:100%">
-    <button onclick="login()" style="width:100%">Login</button>
+  <div class="header">
+    <h1>St. Ssewasswa Memorial College Dashboard</h1>
   </div>
 
-  <div id="dashboard">
-    <div class="card">
-      <div class="header">
-        <h2 id="schoolTitle">Payment Dashboard</h2>
-        <button class="logout" onclick="logout()">Logout</button>
-      </div>
-    </div>
+  <div id="loginScreen" class="login-box" style="display:none;">
+    <h2>Admin Login</h2>
+    <input type="password" id="passwordInput" placeholder="Enter password" />
+    <button class="btn btn-primary" onclick="login()" style="width:100%;">Login</button>
+  </div>
 
-    <div class="card">
+  <div id="dashboard" class="container" style="display:none;">
+    <div class="tabs">
       <button class="tab active" onclick="showTab('payments')">Payments</button>
       <button class="tab" onclick="showTab('notifications')">Notifications</button>
       <button class="tab" onclick="showTab('settings')">Settings</button>
+      <button class="tab" onclick="logout()" style="margin-left:auto;background:#dc3545;color:white;">Logout</button>
     </div>
 
-    <div id="payments" class="tabcontent active card">
-      <div class="stats">
-        <div class="stat"><div>Total Verified</div><div class="stat-num" id="totalAmt">0 UGX</div></div>
-        <div class="stat"><div>Pending Verification</div><div class="stat-num" id="pendingCount">0</div></div>
-        <div class="stat"><div>Verified</div><div class="stat-num" id="verifiedCount">0</div></div>
-        <div class="stat"><div>Total Records</div><div class="stat-num" id="totalCount">0</div></div>
-      </div>
-      <div class="toolbar">
-        <input id="searchBox" placeholder="Search name, ref, phone, TxID..." onkeyup="loadPayments()" style="flex:1">
-        <select id="statusFilter" onchange="loadPayments()">
+    <div id="payments" class="content active">
+      <div class="stats" id="stats"></div>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Search name, ref, phone, TxID..." />
+        <select id="statusFilter">
           <option value="">All Status</option>
-          <option value="pending_verification">Pending Verification</option>
+          <option value="pending_verification">Pending</option>
           <option value="verified">Verified</option>
           <option value="rejected">Rejected</option>
         </select>
-        <button class="export" onclick="exportCSV()">?? Export CSV</button>
-        <button onclick="loadPayments()">?? Refresh</button>
+        <button class="btn btn-primary" onclick="loadPayments()">Search</button>
+        <button class="btn btn-success" onclick="exportCSV()">Export CSV</button>
       </div>
-      <div style="overflow-x:auto; max-height:600px;">
-        <table id="paymentsTable">
-          <thead><tr><th>Ref</th><th>Student</th><th>Class</th><th>Phone</th><th>Amount</th><th>TxID</th><th>Method</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Ref</th><th>Student</th><th>Class</th><th>Phone</th><th>Amount</th><th>TxID</th><th>Status</th><th>Date</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="paymentsTable"></tbody>
+      </table>
     </div>
 
-    <div id="notifications" class="tabcontent card">
-      <h3>Notification Logs</h3>
-      <button onclick="loadNotifications()">?? Refresh</button>
-      <div style="overflow-x:auto; max-height:500px;">
-        <table>
-          <thead><tr><th>Date</th><th>Type</th><th>Message</th><th>Status</th></tr></thead>
-          <tbody id="notifTable"></tbody>
-        </table>
-      </div>
+    <div id="notifications" class="content">
+      <button class="btn btn-primary" onclick="testNotification()">Send Test Notification</button>
+      <div id="notifLogs" style="margin-top:20px;"></div>
     </div>
 
-    <div id="settings" class="tabcontent card">
-      <h3>All Settings - 100% Editable</h3>
-      <form id="configForm">
-        <div class="grid-3">
-          <div>
-            <h4>School Details</h4>
-            <label>School Name</label>
-            <input id="school" style="width:100%">
-            <label>School Address</label>
-            <input id="address" style="width:100%">
-            <label>School Email</label>
-            <input id="email" type="email" style="width:100%">
-            <label>Receipt Footer Text</label>
-            <textarea id="footer" style="width:100%" rows="2"></textarea>
-          </div>
-          <div>
-            <h4>Payment Details</h4>
-            <label>MTN Number</label>
-            <input id="mtn" style="width:100%">
-            <label>MTN Registered Name</label>
-            <input id="mtnName" style="width:100%">
-            <label>Airtel Number</label>
-            <input id="airtel" style="width:100%">
-            <label>Airtel Name</label>
-            <input id="airtelName" style="width:100%">
-            <label>WhatsApp Number</label>
-            <input id="whatsapp" style="width:100%">
-          </div>
-          <div>
-            <h4>Bank Details</h4>
-            <label>Bank Name</label>
-            <input id="bankName" style="width:100%">
-            <label>Account Number</label>
-            <input id="bankAccount" style="width:100%">
-            <label>Branch</label>
-            <input id="bankBranch" style="width:100%">
-          </div>
-        </div>
-        
-        <div class="grid">
-          <div>
-            <h4>Notification Settings</h4>
-            <label><input type="checkbox" id="notifEnabled"> Enable Push Notifications</label>
-            <label>ntfy Topic Name</label>
-            <input id="ntfyTopic" style="width:100%">
-            <small>Install ntfy app and subscribe to this topic</small><br>
-            <button type="button" class="test" onclick="testNotif()">Send Test Notification</button>
-          </div>
-          <div>
-            <h4>Payment Rules</h4>
-            <label><input type="checkbox" id="requireTxId"> Require Transaction ID</label>
-            <label><input type="checkbox" id="autoVerify"> Auto-Verify Payments</label>
-            <small>?? Only enable if you trust the system</small>
-            <label>Payment Instructions for Parents</label>
-            <textarea id="instructions" style="width:100%" rows="3"></textarea>
-          </div>
-        </div>
+    <div id="settings" class="content">
+      <h2>All Settings - 100% Editable</h2>
 
-        <h4>Security</h4>
-        <label><input type="checkbox" id="passEnabled"> Enable Admin Password</label>
-        <div id="passBox" style="display:none">
-          <input id="adminPass" type="password" placeholder="Leave blank to keep current" style="width:100%">
-        </div>
-        <button type="submit" style="width:100%; margin-top:15px; background:#28a745;">Save All Changes</button>
-      </form>
-      <div id="msg" class="success">? Settings saved!</div>
+      <div class="section-title">School Details</div>
+      <label>School Name</label><input type="text" id="school_name" />
+      <label>School Address</label><input type="text" id="school_address" />
+      <label>School Phone</label><input type="text" id="school_phone" />
+      <label>School Email</label><input type="text" id="school_email" />
+      <label>School Motto</label><input type="text" id="school_motto" />
+      <label>Receipt Footer Text</label><input type="text" id="receipt_footer" />
+
+      <div class="section-title">Document Header/Footer</div>
+      <label>Header Title</label><input type="text" id="header_title" />
+      <label>Header Subtitle</label><input type="text" id="header_subtitle" />
+      <label>School Logo URL (shows top left)</label><input type="text" id="school_logo_url" placeholder="https://i.imgur.com/logo.png" />
+      <label>School Badge URL (shows top right)</label><input type="text" id="school_badge_url" placeholder="https://i.imgur.com/badge.png" />
+      <label>Signature Name</label><input type="text" id="signature_name" />
+      <label>Signature Title</label><input type="text" id="signature_title" />
+      <label>Primary Color (Hex)</label><input type="text" id="primary_color" />
+      <label>Secondary Color (Hex)</label><input type="text" id="secondary_color" />
+
+      <div class="section-title">Payment Details</div>
+      <label>MTN Number</label><input type="text" id="mtn_merchant_number" />
+      <label>Airtel Number</label><input type="text" id="airtel_merchant_number" />
+
+      <div class="section-title">Notification Settings</div>
+      <label><input type="checkbox" id="notifications_enabled" /> Enable Push Notifications</label><br>
+      <label>ntfy Topic Name</label><input type="text" id="ntfy_topic" />
+
+      <div class="section-title">Payment Rules</div>
+      <label><input type="checkbox" id="auto_verify_enabled" /> Auto-Verify Payments</label><br>
+
+      <div class="section-title">Security</div>
+      <label><input type="checkbox" id="admin_password_enabled" /> Enable Admin Password</label><br>
+      <label>Admin Password</label><input type="password" id="admin_password" />
+
+      <button class="btn btn-success" onclick="saveSettings()" style="margin-top:20px;">Save All Changes</button>
     </div>
   </div>
 
   <script>
-    fetch("/api/admin/auth-required").then(r => r.json()).then(data => {
-      if (!data.required) loadDashboard();
-      else document.getElementById("login").style.display = "block";
-    });
+    let isLoggedIn = false;
+
+    async function checkAuth() {
+      const res = await fetch('/api/admin/auth-required');
+      const data = await res.json();
+      if (!data.required) {
+        isLoggedIn = true;
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('dashboard').style.display = 'block';
+        loadPayments();
+        loadSettings();
+      } else {
+        document.getElementById('loginScreen').style.display = 'block';
+      }
+    }
 
     async function login() {
-      const res = await fetch("/api/admin/login", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: document.getElementById("password").value })
+      const password = document.getElementById('passwordInput').value;
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
       });
-      if (res.ok) loadDashboard(); else alert("Wrong password");
+      if (res.ok) {
+        isLoggedIn = true;
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('dashboard').style.display = 'block';
+        loadPayments();
+        loadSettings();
+      } else {
+        alert('Wrong password');
+      }
     }
 
-    async function logout() { await fetch("/api/admin/logout", { method: "POST" }); location.reload(); }
-
-    async function loadDashboard() {
-      document.getElementById("login").style.display = "none";
-      document.getElementById("dashboard").style.display = "block";
-      loadPayments(); loadSettings(); loadNotifications(); loadStats();
+    async function logout() {
+      await fetch('/api/admin/logout', { method: 'POST' });
+      location.reload();
     }
 
-    async function loadStats() {
-      const res = await fetch('/api/admin/stats');
-      const s = await res.json();
-      document.getElementById("totalAmt").textContent = (s.total_verified || 0).toLocaleString() + " UGX";
-      document.getElementById("pendingCount").textContent = s.pending_count || 0;
-      document.getElementById("verifiedCount").textContent = s.verified_count || 0;
-      document.getElementById("totalCount").textContent = s.total || 0;
+    function showTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById(tab).classList.add('active');
+      if (tab === 'payments') loadPayments();
+      if (tab === 'notifications') loadNotifications();
+      if (tab === 'settings') loadSettings();
     }
 
     async function loadPayments() {
-      const search = document.getElementById("searchBox").value;
-      const status = document.getElementById("statusFilter").value;
+      const search = document.getElementById('searchInput').value;
+      const status = document.getElementById('statusFilter').value;
       const res = await fetch(`/api/admin/payments?search=${search}&status=${status}`);
       const payments = await res.json();
-      const tbody = document.querySelector("#paymentsTable tbody");
-      tbody.innerHTML = payments.map(p => `
+
+      const statsRes = await fetch('/api/admin/stats');
+      const stats = await statsRes.json();
+
+      document.getElementById('stats').innerHTML = `
+        <div class="stat"><h3>${stats.total}</h3><p>Total Payments</p></div>
+        <div class="stat"><h3>UGX ${stats.total_verified.toLocaleString()}</h3><p>Verified Total</p></div>
+        <div class="stat"><h3>${stats.pending_count}</h3><p>Pending</p></div>
+        <div class="stat"><h3>${stats.verified_count}</h3><p>Verified</p></div>
+      `;
+
+      document.getElementById('paymentsTable').innerHTML = payments.map(p => `
         <tr>
           <td>${p.reference}</td>
           <td>${p.student_name}</td>
@@ -210,153 +197,97 @@
           <td>${p.parent_phone}</td>
           <td>${p.amount.toLocaleString()}</td>
           <td>${p.mtn_transaction_id || '-'}</td>
-          <td>${p.payment_method}</td>
+          <td><span class="badge badge-${p.status.split('_')[0]}">${p.status.replace('_', ' ')}</span></td>
           <td>${new Date(p.created_at).toLocaleDateString()}</td>
-          <td class="status-${p.status}">${p.status.replace('_', ' ')}</td>
           <td>
-            ${p.status === 'pending_verification' ? `<button class="verify" onclick="verify('${p.reference}')">Verify</button><button class="reject" onclick="rejectPay('${p.reference}')">Reject</button>` : ''}
-            <button onclick="addNote('${p.reference}')">Note</button>
-            <button onclick="window.open('/receipt/${p.reference}')">Receipt</button>
-            <button class="reject" onclick="delPay('${p.reference}')">Del</button>
+            ${p.status === 'pending_verification'? `
+              <button class="btn btn-success" onclick="verifyPayment('${p.reference}')">Verify</button>
+              <button class="btn btn-danger" onclick="rejectPayment('${p.reference}')">Reject</button>
+            ` : ''}
+            ${p.status === 'verified'? `<a href="/api/receipt-pdf/${p.reference}" class="btn btn-primary" style="text-decoration:none;">PDF</a>` : ''}
+            <button class="btn btn-warning" onclick="addNote('${p.reference}')">Note</button>
           </td>
         </tr>
       `).join('');
-      loadStats();
+    }
+
+    async function verifyPayment(ref) {
+      if (!confirm('Verify this payment?')) return;
+      await fetch(`/api/admin/verify/${ref}`, { method: 'POST' });
+      loadPayments();
+    }
+
+    async function rejectPayment(ref) {
+      const reason = prompt('Rejection reason:');
+      if (!reason) return;
+      await fetch(`/api/admin/reject/${ref}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      loadPayments();
+    }
+
+    async function addNote(ref) {
+      const note = prompt('Add admin note:');
+      if (!note) return;
+      await fetch(`/api/admin/add-note/${ref}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note })
+      });
+      loadPayments();
+    }
+
+    async function exportCSV() {
+      window.location.href = '/api/admin/export';
     }
 
     async function loadNotifications() {
       const res = await fetch('/api/admin/notifications');
       const logs = await res.json();
-      document.getElementById('notifTable').innerHTML = logs.map(l => `
-        <tr>
-          <td>${new Date(l.sent_at).toLocaleString()}</td>
-          <td>${l.type}</td>
-          <td>${l.message.substring(0,60)}...</td>
-          <td class="status-${l.status}">${l.status}</td>
-        </tr>
+      document.getElementById('notifLogs').innerHTML = logs.map(l => `
+        <div style="border:1px solid #ddd;padding:10px;margin:5px 0;border-radius:5px;">
+          <strong>${l.type}</strong> - ${l.status} - ${new Date(l.sent_at).toLocaleString()}<br>
+          ${l.message}
+        </div>
       `).join('');
     }
 
-    async function verify(ref) {
-      if(confirm('Verify this payment?')) {
-        await fetch(`/api/admin/verify/${ref}`, { method: "POST" });
-        loadPayments(); loadNotifications();
-      }
-    }
-
-    async function rejectPay(ref) {
-      const reason = prompt('Reason for rejection:');
-      if(reason) {
-        await fetch(`/api/admin/reject/${ref}`, { 
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason })
-        });
-        loadPayments();
-      }
-    }
-
-    async function addNote(ref) {
-      const note = prompt('Add admin note:');
-      if(note) {
-        await fetch(`/api/admin/add-note/${ref}`, { 
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ note })
-        });
-        loadPayments();
-      }
-    }
-
-    async function delPay(ref) {
-      if(confirm('Delete this payment? Cannot undo.')) {
-        await fetch(`/api/admin/payment/${ref}`, { method: "DELETE" });
-        loadPayments();
-      }
-    }
-
-    function exportCSV() { window.open('/api/admin/export'); }
-
-    async function loadSettings() {
-      const res = await fetch("/api/admin/config");
-      const c = await res.json();
-      document.getElementById("school").value = c.school_name;
-      document.getElementById("address").value = c.school_address;
-      document.getElementById("email").value = c.school_email;
-      document.getElementById("footer").value = c.receipt_footer;
-      document.getElementById("mtn").value = c.mtn_number;
-      document.getElementById("mtnName").value = c.mtn_name;
-      document.getElementById("airtel").value = c.airtel_number;
-      document.getElementById("airtelName").value = c.airtel_name;
-      document.getElementById("whatsapp").value = c.whatsapp_number;
-      document.getElementById("bankName").value = c.bank_name;
-      document.getElementById("bankAccount").value = c.bank_account;
-      document.getElementById("bankBranch").value = c.bank_branch;
-      document.getElementById("ntfyTopic").value = c.ntfy_topic;
-      document.getElementById("notifEnabled").checked = c.notifications_enabled;
-      document.getElementById("requireTxId").checked = c.require_transaction_id;
-      document.getElementById("autoVerify").checked = c.auto_verify_enabled;
-      document.getElementById("instructions").value = c.payment_instructions;
-      document.getElementById("passEnabled").checked = c.admin_password_enabled;
-      document.getElementById("schoolTitle").textContent = c.school_name + " Dashboard";
-      togglePassBox();
-    }
-
-    async function testNotif() {
+    async function testNotification() {
       const res = await fetch('/api/admin/test-notification', { method: 'POST' });
-      const result = await res.json();
-      alert(result.status === 'sent' ? 'Notification sent! Check your phone.' : 'Failed: ' + (result.error || 'Check topic name'));
+      const data = await res.json();
+      alert(data.status === 'sent'? 'Test sent!' : 'Failed: ' + data.error);
       loadNotifications();
     }
 
-    function showTab(tab) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.tabcontent').forEach(t => t.classList.remove('active'));
-      event.target.classList.add('active');
-      document.getElementById(tab).classList.add('active');
-    }
-
-    function togglePassBox() {
-      document.getElementById("passBox").style.display =
-        document.getElementById("passEnabled").checked ? "block" : "none";
-    }
-
-    document.getElementById("passEnabled").addEventListener("change", togglePassBox);
-
-    document.getElementById("configForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const newPass = document.getElementById("adminPass").value;
-      await fetch("/api/admin/config", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          school_name: document.getElementById("school").value,
-          school_address: document.getElementById("address").value,
-          school_email: document.getElementById("email").value,
-          receipt_footer: document.getElementById("footer").value,
-          mtn_number: document.getElementById("mtn").value,
-          mtn_name: document.getElementById("mtnName").value,
-          airtel_number: document.getElementById("airtel").value,
-          airtel_name: document.getElementById("airtelName").value,
-          whatsapp_number: document.getElementById("whatsapp").value,
-          bank_name: document.getElementById("bankName").value,
-          bank_account: document.getElementById("bankAccount").value,
-          bank_branch: document.getElementById("bankBranch").value,
-          ntfy_topic: document.getElementById("ntfyTopic").value,
-          notifications_enabled: document.getElementById("notifEnabled").checked,
-          require_transaction_id: document.getElementById("requireTxId").checked,
-          auto_verify_enabled: document.getElementById("autoVerify").checked,
-          payment_instructions: document.getElementById("instructions").value,
-          admin_password_enabled: document.getElementById("passEnabled").checked,
-          admin_password: newPass || undefined
-        })
+    async function loadSettings() {
+      const res = await fetch('/api/admin/config');
+      const config = await res.json();
+      Object.keys(config).forEach(key => {
+        const el = document.getElementById(key);
+        if (el) {
+          if (el.type === 'checkbox') el.checked = config[key];
+          else el.value = config[key];
+        }
       });
-      document.getElementById("msg").style.display = "block";
-      setTimeout(() => msg.style.display = "none", 3000);
-      if (newPass) document.getElementById("adminPass").value = "";
-      loadSettings();
-    });
+    }
 
-    setInterval(loadPayments, 30000);
+    async function saveSettings() {
+      const config = {};
+      document.querySelectorAll('#settings input, #settings select').forEach(el => {
+        if (el.type === 'checkbox') config[el.id] = el.checked;
+        else config[el.id] = el.value;
+      });
+      const res = await fetch('/api/admin/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+      if (res.ok) alert('Settings saved! New receipts will use these details.');
+    }
+
+    checkAuth();
   </script>
 </body>
 </html>
