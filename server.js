@@ -85,7 +85,6 @@ app.post("/api/report-payment", async (req, res) => {
   const reference = "DIR-" + Date.now();
   const config = getConfig();
   
-  // Basic TxID format check: MTN usually starts with MP, Airtel with AP
   const txidValid = /^(MP|AP|TX|TR)\d{6,}/i.test(transaction_id) || transaction_id.length > 8;
   if (!txidValid) return res.status(400).json({ error: "Invalid Transaction ID format" });
 
@@ -235,6 +234,7 @@ app.get("/api/admin/auth-required", (req, res) => {
 app.get("/admin", (req, res) => res.sendFile(join(__dirname, "public", "admin.html")));
 app.get("/receipt/:ref", (req, res) => res.sendFile(join(__dirname, "public", "receipt.html")));
 app.get("/report", (req, res) => res.sendFile(join(__dirname, "public", "report.html")));
+app.get("/", (req, res) => res.sendFile(join(__dirname, "public", "index.html")));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => {
