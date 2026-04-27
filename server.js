@@ -34,7 +34,7 @@ async function initDB() {
       can_view_reports INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-  `);
+  `, );
 
   const hash = await bcrypt.hash('bursar123', 10);
   await client.query(`
