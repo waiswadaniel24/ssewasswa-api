@@ -317,3 +317,94 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`? SERVER RUNNING on http://127.0.0.1:${PORT}`);
 });
+app.get("/api/admin/class-report/:class", checkAdmin, async (req, res) => {
+  const className = req.params.class;
+  const payments = await db.all(`
+    SELECT student_name, parent_phone, SUM(CASE WHEN status='verified' THEN amount ELSE 0 END) as total_paid,
+           GROUP_CONCAT(mtn_transaction_id) as txids, MAX(verified_at) as last_payment
+    FROM payments 
+    WHERE student_class = ? 
+    GROUP BY student_name, parent_phone 
+    ORDER BY student_name
+  `, className);
+  
+  const totalExpected = payments.length * 50000; // Change 50000 to your term fee
+  const totalCollected = payments.reduce((sum, p) => sum + p.total_paid, 0);
+  
+  res.json({ 
+    class: className, 
+    students: payments, 
+    totalExpected, 
+    totalCollected,
+    totalUnpaid: totalExpected - totalCollected,
+    paidCount: payments.filter(p => p.total_paid > 0).length,
+    unpaidCount: payments.filter(p => p.total_paid === 0).length
+  });
+});
+
+app.get("/api/admin/class-report-pdf/:class", checkAdmin, async (req, res) => {
+  const className = req.params.class;
+  const config = getConfig();
+  const report = await db.all(`
+    SELECT student_name, parent_phone, SUM(CASE WHEN status='verified' THEN amount ELSE 0 END) as total_paid
+    FROM payments WHERE student_class = ? GROUP BY student_name, parent_phone ORDER BY student_name
+  `, className);
+  
+  const doc = new PDFDocument({ margin: 40, size: 'A4', layout: 'landscape' });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=Class-Report-${className}.pdf`);
+  doc.pipe(res);
+  
+  await drawDocumentHeader(doc, config);
+  const blue = config.primary_color || '#2c5aa0';
+  
+  doc.fillColor(blue).fontSize(14).text(`CLASS FEES REPORT - ${className.toUpperCase()}`, { align: 'center', underline: true });
+  doc.moveDown();
+  
+  doc.fillColor('black').fontSize(10);
+  doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 50);
+  doc.moveDown();
+  
+  // Table Header
+  doc.fillColor(blue).fontSize(9);
+  doc.text('No.', 50, doc.y, { width: 30 });
+  doc.text('Student Name', 85, doc.y - 12, { width: 200 });
+  doc.text('Parent Phone', 290, doc.y - 12, { width: 100 });
+  doc.text('Amount Paid', 395, doc.y - 12, { width: 80 });
+  doc.text('Balance', 480, doc.y - 12, { width: 80 });
+  doc.text('Status', 565, doc.y - 12, { width: 60 });
+  doc.moveTo(50, doc.y).lineTo(650, doc.y).stroke();
+  doc.moveDown(0.5);
+  
+  // Table Rows
+  const termFee = 50000; // Change this to your term fee
+  let totalPaid = 0;
+  doc.fillColor('black').fontSize(8);
+  
+  report.forEach((s, i) => {
+    const balance = termFee - s.total_paid;
+    const status = s.total_paid >= termFee ? 'CLEARED' : s.total_paid > 0 ? 'PARTIAL' : 'UNPAID';
+    totalPaid += s.total_paid;
+    
+    if (doc.y > 500) { doc.addPage(); doc.y = 50; }
+    
+    doc.text(i + 1, 50, doc.y, { width: 30 });
+    doc.text(s.student_name, 85, doc.y - 10, { width: 200 });
+    doc.text(s.parent_phone, 290, doc.y - 10, { width: 100 });
+    doc.text(s.total_paid.toLocaleString(), 395, doc.y - 10, { width: 80 });
+    doc.text(balance.toLocaleString(), 480, doc.y - 10, { width: 80 });
+    doc.fillColor(status === 'CLEARED' ? 'green' : status === 'PARTIAL' ? 'orange' : 'red');
+    doc.text(status, 565, doc.y - 10, { width: 60 });
+    doc.fillColor('black');
+    doc.moveDown(0.3);
+  });
+  
+  doc.moveDown();
+  doc.fillColor(blue).fontSize(10);
+  doc.text(`Total Students: ${report.length} | Total Collected: UGX ${totalPaid.toLocaleString()} | Expected: UGX ${(report.length * termFee).toLocaleString()}`, 50);
+  
+  drawDocumentFooter(doc, config);
+  doc.end();
+});
+
+app.get("/class-report", (req, res) => res.sendFile(join(__dirname, "public", "class-report.html")));
