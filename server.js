@@ -86,6 +86,43 @@ app.get('/api/admin/check', (req, res) => {
     res.status(401).json({ loggedIn: false });
   }
 })
+// ===== SERVE BASIC HTML PAGES =====
+app.get('/admin', (req, res) => {
+  res.send(`
+    <h1>Bursar Admin</h1>
+    <form id="login">
+      <input name="username" placeholder="Username" value="bursar">
+      <input name="password" type="password" placeholder="Password" value="bursar123">
+      <button>Login</button>
+    </form>
+    <div id="result"></div>
+    <script>
+      document.getElementById('login').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = new FormData(e.target);
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          credentials: 'include',
+          body: JSON.stringify({
+            username: form.get('username'),
+            password: form.get('password')
+          })
+        });
+        const data = await res.json();
+        document.getElementById('result').innerText = JSON.stringify(data);
+      }
+    </script>
+  `);
+});
+
+app.get('/parent', (req, res) => {
+  res.send('<h1>Parent Portal - Coming Soon</h1>');
+});
+
+app.get('/', (req, res) => {
+  res.send('<h1>Ssewasswa API</h1><a href="/admin">Admin Login</a> | <a href="/parent">Parent</a>');
+});
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`)
 })
