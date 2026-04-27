@@ -36,14 +36,11 @@ async function initDB() {
     );
   `,);
 
-  const hash = await bcrypt.hash('bursar123', 10);
-  console.log('HASH VALUE:', hash);
-  console.log('QUERY PARAMS WILL BE:', [hash]);
-  await client.query(`
-    INSERT INTO users (username, password, role, can_view_finances, can_verify_payments, can_view_reports)
-    VALUES ('bursar', $1, 'bursar', 1, 1, 1)
-    ON CONFLICT (username) DO UPDATE SET password = $1
-  `,);
+ await client.query(`
+  INSERT INTO users (username, password, role, can_view_finances, can_verify_payments, can_view_reports)
+  VALUES ('bursar', $1, 'bursar', 1, 1, 1)
+  ON CONFLICT (username) DO UPDATE SET password = $1
+`, );
 
   client.release();
   console.log('✅ Bursar user ready');
