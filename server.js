@@ -12,14 +12,17 @@ app.use(cors({
   credentials: true
 }))
 app.use(express.json())
+app.set('trust proxy', 1) // ADD THIS LINE
 app.use(session({
   secret: process.env.SESSION_SECRET || 'ssewasswa-secret',
   resave: false,
   saveUninitialized: false,
+  proxy: true, // ADD THIS LINE
   cookie: { 
-    secure: true,      // Required for HTTPS on Render
-    sameSite: 'none',  // Required for fetch with credentials
-    maxAge: 24 * 60 * 60 * 1000 // 1 day
+    secure: true,
+    sameSite: 'none',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000
   }
 }))
 
@@ -82,95 +85,115 @@ app.post('/api/admin/login', async (req, res) => {
 
 app.get('/admin', (req, res) => {
   res.send(`
-    <h1>Bursar Admin</h1>
-    <div id="login-box">
-      <form id="login">
-        <input name="username" placeholder="Username" value="bursar">
-        <input name="password" type="password" placeholder="Password" value="bursar123">
-        <button>Login</button>
-      </form>
-    </div>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Bursar Admin</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+        body { max-width: 600px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #1a1a1a; }
+        form { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ddd; border-radius: 4px; }
+        button { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        button:hover { background: #1d4ed8; }
+        #dashboard { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        #students p { padding: 10px; border-bottom: 1px solid #eee; margin: 0; }
+        .logout { background: #dc2626; margin-top: 20px; }
+        .logout:hover { background: #b91c1c; }
+      </style>
+    </head>
+    <body>
+      <h1>Bursar Admin</h1>
+      <div id="login-box">
+        <form id="login">
+          <input name="username" placeholder="Username" value="bursar" required>
+          <input name="password" type="password" placeholder="Password" value="bursar123" required>
+          <button>Login</button>
+        </form>
+      </div>
 
-    <div id="dashboard" style="display:none">
-      <h2>Welcome <span id="user"></span></h2>
-      <button onclick="logout()">Logout</button>
+      <div id="dashboard" style="display:none">
+        <h2>Welcome <span id="user"></span></h2>
+        <form id="addStudent">
+          <h3>Add Student</h3>
+          <input name="name" placeholder="Student Name" required>
+          <input name="class" placeholder="Class e.g P.6" required>
+          <input name="balance" type="number" placeholder="Starting Balance" value="0">
+          <button>Add Student</button>
+        </form>
+        <h3>Students List</h3>
+        <div id="students"></div>
+        <button class="logout" onclick="logout()">Logout</button>
+      </div>
 
-      <h3>Add Student</h3>
-      <form id="addStudent">
-        <input name="name" placeholder="Student Name" required>
-        <input name="class" placeholder="Class e.g P.6" required>
-        <input name="balance" type="number" placeholder="Starting Balance" value="0">
-        <button>Add Student</button>
-      </form>
-
-      <h3>Students List</h3>
-      <div id="students"></div>
-    </div>
-
-    <script>
-      async function check() {
-        const res = await fetch('/api/admin/check', {credentials: 'include'});
-        if(res.ok) {
-          const data = await res.json();
-          document.getElementById('login-box').style.display = 'none';
-          document.getElementById('dashboard').style.display = 'block';
-          document.getElementById('user').innerText = data.username;
-          loadStudents();
+      <script>
+        async function check() {
+          try {
+            const res = await fetch('/api/admin/check', {credentials: 'include'});
+            if(res.ok) {
+              const data = await res.json();
+              document.getElementById('login-box').style.display = 'none';
+              document.getElementById('dashboard').style.display = 'block';
+              document.getElementById('user').innerText = data.username;
+              loadStudents();
+            }
+          } catch(e) { console.log('Not logged in'); }
         }
-      }
 
-      document.getElementById('login').onsubmit = async (e) => {
-        e.preventDefault();
-        const form = new FormData(e.target);
-        const res = await fetch('/api/admin/login', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          credentials: 'include',
-          body: JSON.stringify({
-            username: form.get('username'),
-            password: form.get('password')
-          })
-        });
-        if(res.ok) check();
-        else alert('Login failed');
-      }
-
-      document.getElementById('addStudent').onsubmit = async (e) => {
-        e.preventDefault();
-        const form = new FormData(e.target);
-        const res = await fetch('/api/students', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          credentials: 'include',
-          body: JSON.stringify({
-            name: form.get('name'),
-            class: form.get('class'),
-            balance: parseInt(form.get('balance'))
-          })
-        });
-        if(res.ok) {
-          e.target.reset();
-          loadStudents();
-        } else {
-          alert('Failed to add student');
+        document.getElementById('login').onsubmit = async (e) => {
+          e.preventDefault();
+          const form = new FormData(e.target);
+          const res = await fetch('/api/admin/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'include',
+            body: JSON.stringify({
+              username: form.get('username'),
+              password: form.get('password')
+            })
+          });
+          if(res.ok) check();
+          else alert('Invalid credentials');
         }
-      }
 
-      async function loadStudents() {
-        const res = await fetch('/api/students', {credentials: 'include'});
-        const students = await res.json();
-        document.getElementById('students').innerHTML = students.map(s =>
-          \`<p><b>\${s.name}</b> - \${s.class} - Balance: UGX \${s.balance}</p>\`
-        ).join('') || 'No students yet';
-      }
+        document.getElementById('addStudent').onsubmit = async (e) => {
+          e.preventDefault();
+          const form = new FormData(e.target);
+          const res = await fetch('/api/students', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'include',
+            body: JSON.stringify({
+              name: form.get('name'),
+              class: form.get('class'),
+              balance: parseInt(form.get('balance'))
+            })
+          });
+          if(res.ok) {
+            e.target.reset();
+            loadStudents();
+          } else alert('Failed to add student');
+        }
 
-      function logout() {
-        document.cookie = 'connect.sid=; Max-Age=0; path=/';
-        location.reload();
-      }
+        async function loadStudents() {
+          const res = await fetch('/api/students', {credentials: 'include'});
+          const students = await res.json();
+          document.getElementById('students').innerHTML = students.map(s =>
+            \`<p><b>\${s.name}</b> - \${s.class} - Balance: UGX \${s.balance.toLocaleString()}</p>\`
+          ).join('') || '<p>No students yet</p>';
+        }
 
-      check();
-    </script>
+        function logout() {
+          document.cookie = 'connect.sid=; Max-Age=0; path=/; domain=' + location.hostname;
+          location.reload();
+        }
+
+        check();
+      </script>
+    </body>
+    </html>
   `);
 });
 app.get('/parent', (req, res) => {
