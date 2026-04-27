@@ -389,6 +389,34 @@ app.get('/api/admin/check', (req, res) => {
     res.status(401).json({ loggedIn: false });
   }
 })
+// Record payment and update student balance
+app.post('/api/payments', async (req, res) => {
+  if (!req.session.user || req.session.user.role !== 'bursar') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  const { student_id, amount, paid_by, method } = req.body;
+  
+  try {
+    // 1. Insert payment record
+    await pool.query(
+      `INSERT INTO payments (student_id, amount, paid_by, method, created_at) 
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [student_id, amount, paid_by, method]
+    );
+    
+    // 2. Reduce student balance
+    await pool.query(
+      `UPDATE students SET balance = balance - $1 WHERE id = $2`,
+      [amount, student_id]
+    );
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Payment failed' });
+  }
+})
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`)
 })
