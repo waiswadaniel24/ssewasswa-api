@@ -245,7 +245,7 @@ app.get('/api/student-balance', async (req, res) => {
     res.status(500).json({ error: 'Search failed' });
   }
 })
-app.get('/favicon.ico', (req, res) => res.status(204).end());
+
 app.get('/', (req, res) => {
   res.send('<h1>Ssewasswa API</h1><a href="/admin">Admin Login</a> | <a href="/parent">Parent</a>');
 });
