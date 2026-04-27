@@ -426,3 +426,4 @@ app.get("/api/admin/class-report-pdf/:class", checkAdmin, async (req, res) => {
 });
 
 app.get("/class-report", (req, res) => res.sendFile(join(__dirname, "public", "class-report.html")));
+
