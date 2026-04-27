@@ -6,6 +6,7 @@ import cookieParser from "cookie-parser";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import PDFDocument from "pdfkit";
+import https from "https";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,10 +18,7 @@ app.use(express.static(join(__dirname, "public")));
 
 let db;
 (async () => {
-  db = await open({
-    filename: './payments.db',
-    driver: sqlite3.Database
-  });
+  db = await open({ filename: './payments.db', driver: sqlite3.Database });
   await db.exec(`
     CREATE TABLE IF NOT EXISTS payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,11 +72,67 @@ const checkAdmin = (req, res, next) => {
   res.status(401).json({ error: "Unauthorized" });
 };
 
+// Helper: Draw standard header/footer on PDF
+const drawDocumentHeader = async (doc, config) => {
+  const blue = config.primary_color || '#2c5aa0';
+  const cream = config.secondary_color || '#FFF8E7';
+  
+  doc.rect(0, 0, doc.page.width, doc.page.height).fill(cream);
+  
+  // Logo
+  if (config.school_logo_url) {
+    try {
+      await new Promise((resolve) => {
+        https.get(config.school_logo_url, (response) => {
+          const chunks = [];
+          response.on('data', chunk => chunks.push(chunk));
+          response.on('end', () => {
+            try {
+              doc.image(Buffer.concat(chunks), 50, 40, { width: 60 });
+              resolve();
+            } catch(e) { resolve(); }
+          });
+        }).on('error', () => resolve());
+      });
+    } catch(e) {}
+  }
+  
+  // Badge
+  if (config.school_badge_url) {
+    try {
+      await new Promise((resolve) => {
+        https.get(config.school_badge_url, (response) => {
+          const chunks = [];
+          response.on('data', chunk => chunks.push(chunk));
+          response.on('end', () => {
+            try {
+              doc.image(Buffer.concat(chunks), doc.page.width - 110, 40, { width: 60 });
+              resolve();
+            } catch(e) { resolve(); }
+          });
+        }).on('error', () => resolve());
+      });
+    } catch(e) {}
+  }
+  
+  // Header Text
+  doc.fillColor(blue).fontSize(18).text(config.header_title || config.school_name, 50, 50, { align: 'center', width: doc.page.width - 100 });
+  doc.fontSize(10).text(config.header_subtitle || config.school_address, { align: 'center', width: doc.page.width - 100 });
+  if (config.school_motto) doc.fontSize(9).text(`"${config.school_motto}"`, { align: 'center', width: doc.page.width - 100 });
+  
+  doc.moveTo(50, 120).lineTo(doc.page.width - 50, 120).stroke(blue);
+  doc.y = 140;
+};
+
+const drawDocumentFooter = (doc, config) => {
+  const blue = config.primary_color || '#2c5aa0';
+  doc.fillColor(blue).fontSize(8);
+  doc.text(config.receipt_footer || 'Thank you.', 50, doc.page.height - 50, { align: 'center', width: doc.page.width - 100 });
+};
+
 app.post("/api/report-payment", async (req, res) => {
   const { transaction_id, student_name, student_class, parent_phone, amount, payment_method } = req.body;
-  if (!transaction_id || !student_name || !amount) {
-    return res.status(400).json({ error: "Transaction ID, Student Name, and Amount required" });
-  }
+  if (!transaction_id || !student_name || !amount) return res.status(400).json({ error: "Transaction ID, Student Name, and Amount required" });
   const existing = await db.get('SELECT reference FROM payments WHERE mtn_transaction_id = ?', transaction_id);
   if (existing) return res.status(400).json({ error: "This Transaction ID was already reported" });
   const reference = "DIR-" + Date.now();
@@ -184,28 +238,12 @@ app.get("/api/receipt-pdf/:ref", async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename=Receipt-${payment.reference}.pdf`);
   doc.pipe(res);
   
-  // Blue + Cream colors
-  const blue = '#2c5aa0';
-  const cream = '#FFF8E7';
+  await drawDocumentHeader(doc, config);
   
-  // Background
-  doc.rect(0, 0, doc.page.width, doc.page.height).fill(cream);
-  
-  // Header
-  doc.fillColor(blue).fontSize(22).text(config.school_name, 50, 50, { align: 'center' });
-  doc.fontSize(11).text(config.school_address || 'Kampala, Uganda', { align: 'center' });
-  if (config.school_logo_url) {
-    try {
-      doc.image(config.school_logo_url, 50, 45, { width: 60 });
-    } catch(e) {}
-  }
-  doc.moveDown(2);
-  
-  // Receipt Title
+  const blue = config.primary_color || '#2c5aa0';
   doc.fillColor(blue).fontSize(16).text('OFFICIAL FEES RECEIPT', { align: 'center', underline: true });
   doc.moveDown();
   
-  // Receipt Body
   doc.fillColor('black').fontSize(12);
   doc.text(`Receipt No: ${payment.reference}`, 50);
   doc.text(`Date: ${new Date(payment.verified_at || payment.created_at).toLocaleDateString('en-GB')}`, 50);
@@ -222,15 +260,11 @@ app.get("/api/receipt-pdf/:ref", async (req, res) => {
   doc.text(`Transaction ID: ${payment.mtn_transaction_id}`, 50);
   doc.moveDown(3);
   
-  // Signature
   doc.text(config.signature_name || 'Bursar', 400, doc.y, { align: 'right' });
   doc.moveTo(400, doc.y).lineTo(550, doc.y).stroke();
-  doc.text('Authorized Signature', 400, doc.y + 5, { align: 'right' });
+  doc.text(config.signature_title || 'Authorized Signature', 400, doc.y + 5, { align: 'right' });
   
-  // Footer
-  doc.moveDown(2);
-  doc.fillColor(blue).fontSize(10).text(config.receipt_footer || 'Thank you for your payment.', 50, 750, { align: 'center' });
-  
+  drawDocumentFooter(doc, config);
   doc.end();
 });
 
