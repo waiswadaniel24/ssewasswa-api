@@ -6,24 +6,24 @@
   <title>Parent Portal - St. Ssewasswa</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+    body { font-family: Arial, sans-serif; background: #FFF8E7; padding: 20px; }
     .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
     h1 { color: #2c5aa0; text-align: center; margin-bottom: 20px; }
-    input { width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #ddd; border-radius: 5px; font-size: 16px; }
+    input { width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #2c5aa0; border-radius: 5px; font-size: 16px; }
     button { width: 100%; padding: 12px; background: #2c5aa0; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; }
     button:hover { background: #1e3d6f; }
-    .payment { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+    .payment { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; background: #FFF8E7; }
     .verified { border-left: 4px solid #28a745; }
     .pending { border-left: 4px solid #ffc107; }
     .rejected { border-left: 4px solid #dc3545; }
-    .total { background: #e8f5e8; padding: 15px; border-radius: 5px; text-align: center; font-size: 18px; margin: 20px 0; }
+    .total { background: #2c5aa0; color: white; padding: 15px; border-radius: 5px; text-align: center; font-size: 18px; margin: 20px 0; }
     .download { background: #28a745; padding: 8px 15px; color: white; text-decoration: none; border-radius: 3px; font-size: 14px; display: inline-block; margin-top: 10px; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Parent Portal</h1>
-    <p style="text-align:center;margin-bottom:20px;">St. Ssewasswa Memorial College</p>
+    <p style="text-align:center;margin-bottom:20px;color:#2c5aa0;">St. Ssewasswa Memorial College</p>
     
     <div id="login">
       <input type="tel" id="phone" placeholder="Enter your phone: 0771234567" />
@@ -41,20 +41,16 @@
     async function loadPayments() {
       const phone = document.getElementById('phone').value.trim();
       if (!phone) return alert('Enter phone number');
-      
       const res = await fetch(`/api/parent/payments/${phone}`);
       const data = await res.json();
-      
       document.getElementById('login').style.display = 'none';
       document.getElementById('results').style.display = 'block';
       document.getElementById('totalPaid').textContent = data.totalPaid.toLocaleString();
-      
       const list = document.getElementById('paymentsList');
       if (data.payments.length === 0) {
         list.innerHTML = '<p style="text-align:center;color:#666;">No payments found for this number.</p>';
         return;
       }
-      
       list.innerHTML = data.payments.map(p => `
         <div class="payment ${p.status}">
           <strong>${p.student_name} - ${p.student_class}</strong><br>
