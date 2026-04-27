@@ -19,7 +19,8 @@ app.use(express.static(join(__dirname, "public")));
 let db;
 (async () => {
   db = await open({ filename: './payments.db', driver: sqlite3.Database });
-  await db.exec(`
+  
+await db.exec(`
     CREATE TABLE IF NOT EXISTS payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       reference TEXT UNIQUE,
