@@ -75,28 +75,33 @@ app.post('/api/admin/login', async (req, res) => {
   }
 })
 
-app.get('/api/admin/check', (req, res) => {
-  if (req.session.user) {
-    res.json({ 
-      loggedIn: true, 
-      username: req.session.user.username,
-      role: req.session.user.role 
-    });
-  } else {
-    res.status(401).json({ loggedIn: false });
-  }
-})
-// ===== SERVE BASIC HTML PAGES =====
 app.get('/admin', (req, res) => {
   res.send(`
     <h1>Bursar Admin</h1>
-    <form id="login">
-      <input name="username" placeholder="Username" value="bursar">
-      <input name="password" type="password" placeholder="Password" value="bursar123">
-      <button>Login</button>
-    </form>
-    <div id="result"></div>
+    <div id="app">
+      <form id="login">
+        <input name="username" placeholder="Username" value="bursar">
+        <input name="password" type="password" placeholder="Password" value="bursar123">
+        <button>Login</button>
+      </form>
+      <div id="dashboard" style="display:none">
+        <h2>Welcome <span id="user"></span></h2>
+        <button onclick="logout()">Logout</button>
+        <h3>Students</h3>
+        <div id="students"></div>
+      </div>
     <script>
+      async function check() {
+        const res = await fetch('/api/admin/check', {credentials: 'include'});
+        if(res.ok) {
+          const data = await res.json();
+          document.getElementById('login').style.display = 'none';
+          document.getElementById('dashboard').style.display = 'block';
+          document.getElementById('user').innerText = data.username;
+          loadStudents();
+        }
+      }
+      
       document.getElementById('login').onsubmit = async (e) => {
         e.preventDefault();
         const form = new FormData(e.target);
@@ -109,13 +114,27 @@ app.get('/admin', (req, res) => {
             password: form.get('password')
           })
         });
-        const data = await res.json();
-        document.getElementById('result').innerText = JSON.stringify(data);
+        if(res.ok) check();
+        else alert('Login failed');
       }
+      
+      async function loadStudents() {
+        const res = await fetch('/api/students', {credentials: 'include'});
+        const students = await res.json();
+        document.getElementById('students').innerHTML = students.map(s => 
+          \`<p>\${s.name} - \${s.class} - Balance: \${s.balance}</p>\`
+        ).join('') || 'No students yet';
+      }
+      
+      function logout() {
+        document.cookie = 'connect.sid=; Max-Age=0';
+        location.reload();
+      }
+      
+      check();
     </script>
   `);
 });
-
 app.get('/parent', (req, res) => {
   res.send('<h1>Parent Portal - Coming Soon</h1>');
 });
