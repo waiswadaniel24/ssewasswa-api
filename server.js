@@ -12,12 +12,12 @@ app.use(cors({
   credentials: true
 }))
 app.use(express.json())
-app.set('trust proxy', 1) // ADD THIS LINE
+app.set('trust proxy', 1) // BEFORE session
 app.use(session({
   secret: process.env.SESSION_SECRET || 'ssewasswa-secret',
   resave: false,
   saveUninitialized: false,
-  proxy: true, // ADD THIS LINE
+  proxy: true,
   cookie: { 
     secure: true,
     sameSite: 'none',
@@ -322,6 +322,14 @@ app.post('/api/payments', requireBursar, async (req, res) => {
     res.status(500).json({ error: 'Payment failed' });
   } finally {
     client.release();
+  }
+})
+// Check if bursar is logged in
+app.get('/api/admin/check', (req, res) => {
+  if (req.session.user && req.session.user.role === 'bursar') {
+    res.json({ loggedIn: true, username: req.session.user.username });
+  } else {
+    res.status(401).json({ loggedIn: false });
   }
 })
 app.listen(PORT, '0.0.0.0', () => {
