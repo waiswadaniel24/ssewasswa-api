@@ -174,8 +174,54 @@ app.get('/admin', (req, res) => {
   `);
 });
 app.get('/parent', (req, res) => {
-  res.send('<h1>Parent Portal - Coming Soon</h1>');
+  res.send(`
+    <h1>Parent Portal - Check Fees Balance</h1>
+    <form id="search">
+      <input name="name" placeholder="Student Name" required>
+      <input name="class" placeholder="Class e.g P.6" required>
+      <button>Check Balance</button>
+    </form>
+    <div id="result"></div>
+
+    <script>
+      document.getElementById('search').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = new FormData(e.target);
+        const name = form.get('name');
+        const className = form.get('class');
+        const res = await fetch(\`/api/student-balance?name=\${name}&class=\${className}\`);
+        const data = await res.json();
+        if(res.ok) {
+          document.getElementById('result').innerHTML = \`
+            <h3>\${data.name} - \${data.class}</h3>
+            <p><b>Balance: UGX \${data.balance}</b></p>
+            <p>\${data.balance > 0? 'Please clear balance' : 'Account is clear'}</p>
+          \`;
+        } else {
+          document.getElementById('result').innerHTML = '<p style="color:red">Student not found</p>';
+        }
+      }
+    </script>
+  `);
 });
+
+// Public API route for parents - no login needed
+app.get('/api/student-balance', async (req, res) => {
+  const { name, class: className } = req.query;
+  try {
+    const result = await pool.query(
+      'SELECT name, class, balance FROM students WHERE LOWER(name) = LOWER($1) AND LOWER(class) = LOWER($2)',
+      [name, className]
+    );
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      res.status(404).json({ error: 'Student not found' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Search failed' });
+  }
+})
 
 app.get('/', (req, res) => {
   res.send('<h1>Ssewasswa API</h1><a href="/admin">Admin Login</a> | <a href="/parent">Parent</a>');
