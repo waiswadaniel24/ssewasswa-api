@@ -24,7 +24,7 @@ async function initDB() {
   const client = await pool.connect();
 
   await client.query(`
-    CREATE TABLE users (
+    CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       username TEXT UNIQUE,
       password TEXT,
@@ -40,12 +40,13 @@ async function initDB() {
   await client.query(`
     INSERT INTO users (username, password, role, can_view_finances, can_verify_payments, can_view_reports)
     VALUES ('bursar', $1, 'bursar', 1, 1, 1)
-  `, [hash]);
+    ON CONFLICT (username) DO UPDATE SET password = $1
+  `,);
 
   client.release();
   console.log('✅ Bursar user ready');
 }
-initDB();
+initDB(); // <-- Make sure this line exists once
 
 app.get('/health', (req, res) => {
   res.json({ status: 'API is running' })
