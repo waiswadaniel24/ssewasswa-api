@@ -333,18 +333,27 @@ function requireBursar(req, res, next) {
   }
 }
 
-app.post('/api/students', requireBursar, async (req, res) => {
-  const { name, class: className, balance = 0 } = req.body;
+app.post('/api/students', async (req, res) => {
+  const { name, class: className, balance } = req.body;
   try {
+    const exists = await pool.query(
+      'SELECT id FROM students WHERE LOWER(name) = LOWER($1) AND LOWER(class) = LOWER($2)',
+      [name, className]
+    );
+
+    if (exists.rows.length > 0) {
+      return res.status(400).json({ error: 'Student already exists in that class' });
+    }
+
     const result = await pool.query(
       'INSERT INTO students (name, class, balance) VALUES ($1, $2, $3) RETURNING *',
       [name, className, balance]
     );
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to add student' });
+    res.status(500).json({ error: err.message });
   }
-})
+});
 
 app.get('/api/students', requireBursar, async (req, res) => {
   const result = await pool.query('SELECT * FROM students ORDER BY name');
