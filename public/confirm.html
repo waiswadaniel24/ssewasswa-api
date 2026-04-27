@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Confirm Payment</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial; max-width: 500px; margin: 50px auto; padding: 20px; }
+    .card { background: #f9f9f9; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { color: #333; text-align: center; }
+    input, button { width: 100%; padding: 12px; margin: 10px 0; font-size: 16px; border-radius: 4px; border: 1px solid #ddd; box-sizing: border-box; }
+    button { background: #28a745; color: white; border: none; cursor: pointer; font-weight: bold; }
+    button:hover { background: #218838; }
+    .info { background: #e7f3ff; padding: 15px; border-radius: 4px; margin: 15px 0; }
+    .success { background: #d4edda; color: #155724; padding: 15px; border-radius: 4px; display: none; }
+    .error { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 4px; display: none; }
+    .status { padding: 10px; border-radius: 4px; margin: 10px 0; text-align: center; font-weight: bold; }
+    .pending { background: #fff3cd; color: #856404; }
+    .pending_verification { background: #cce5ff; color: #004085; }
+    .verified { background: #d4edda; color: #155724; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Confirm Your Payment</h1>
+    <div id="paymentInfo"></div>
+    
+    <div id="confirmForm">
+      <div class="info">
+        <strong>Step 1:</strong> Dial *165# and send money to <span id="mtnNum"></span><br>
+        <strong>Step 2:</strong> Copy the Transaction ID from MTN SMS<br>
+        <strong>Step 3:</strong> Paste it below and confirm
+      </div>
+      <input id="txid" placeholder="MTN Transaction ID - e.g. MP240427.1234.A12345" required>
+      <button onclick="confirmPayment()">Confirm I Have Paid</button>
+    </div>
+
+    <div id="success" class="success"></div>
+    <div id="error" class="error"></div>
+  </div>
+
+  <script>
+    const ref = window.location.pathname.split('/').pop();
+    
+    async function loadPayment() {
+      const res = await fetch(`/api/payment-status/${ref}`);
+      if (!res.ok) {
+        document.getElementById('error').textContent = 'Payment not found';
+        document.getElementById('error').style.display = 'block';
+        return;
+      }
+      const p = await res.json();
+      const config = await fetch('/api/admin/config').then(r => r.json()).catch(() => ({mtn_number: '0789736737'}));
+      
+      document.getElementById('mtnNum').textContent = config.mtn_number;
+      document.getElementById('paymentInfo').innerHTML = `
+        <div class="info">
+          <strong>Reference:</strong> ${p.reference}<br>
+          <strong>Student:</strong> ${p.student_name}<br>
+          <strong>Amount:</strong> ${p.amount.toLocaleString()} UGX
+        </div>
+        <div class="status ${p.status}">${p.status.replace('_', ' ').toUpperCase()}</div>
+      `;
+      
+      if (p.status !== 'pending') {
+        document.getElementById('confirmForm').style.display = 'none';
+        if (p.status === 'verified') {
+          document.getElementById('success').textContent = 'Payment verified by school ?';
+          document.getElementById('success').style.display = 'block';
+        } else if (p.status === 'pending_verification') {
+          document.getElementById('success').textContent = `Confirmed with TxID: ${p.mtn_transaction_id}. Waiting for school verification.`;
+          document.getElementById('success').style.display = 'block';
+        }
+      }
+    }
+
+    async function confirmPayment() {
+      const txid = document.getElementById('txid').value.trim();
+      if (!txid) return alert('Enter Transaction ID');
+      
+      const res = await fetch('/api/confirm-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: ref, transaction_id: txid })
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        document.getElementById('confirmForm').style.display = 'none';
+        document.getElementById('success').textContent = data.message;
+        document.getElementById('success').style.display = 'block';
+        setTimeout(loadPayment, 1000);
+      } else {
+        document.getElementById('error').textContent = data.error;
+        document.getElementById('error').style.display = 'block';
+      }
+    }
+
+    loadPayment();
+    setInterval(loadPayment, 10000);
+  </script>
+</body>
+</html>

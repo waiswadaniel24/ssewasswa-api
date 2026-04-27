@@ -1,0 +1,22 @@
+{
+  "school_name": "St. Ssewasswa Memorial College",
+  "mtn_number": "0789736737",
+  "mtn_name": "St. Ssewasswa Memorial College",
+  "airtel_number": "",
+  "airtel_name": "",
+  "bank_name": "Centenary Bank",
+  "bank_account": "3200080123",
+  "bank_branch": "Mubende",
+  "whatsapp_number": "0752971118",
+  "school_email": "",
+  "school_address": "P.O. Box 123, Mubende",
+  "admin_password": "admin123",
+  "admin_password_enabled": false,
+  "notifications_enabled": true,
+  "ntfy_topic": "ssewasswa-payments-2026ug",
+  "payment_instructions": "Dial *165*1*1*0789736737*Amount# then report here with Transaction ID",
+  "require_transaction_id": true,
+  "auto_verify_enabled": false,
+  "receipt_footer": "Thank you for your payment. God bless you.",
+  "school_logo_url": ""
+}
