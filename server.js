@@ -79,44 +79,24 @@ app.post("/api/report-payment", async (req, res) => {
   if (!transaction_id || !student_name || !amount) {
     return res.status(400).json({ error: "Transaction ID, Student Name, and Amount required" });
   }
-
   const existing = await db.get('SELECT reference FROM payments WHERE mtn_transaction_id = ?', transaction_id);
   if (existing) return res.status(400).json({ error: "This Transaction ID was already reported" });
-
   const reference = "DIR-" + Date.now();
   const config = getConfig();
-  
   const txidValid = /^(MP|AP|TX|TR)\d{6,}/i.test(transaction_id) || transaction_id.length > 8;
   if (!txidValid) return res.status(400).json({ error: "Invalid Transaction ID format" });
-
   const autoVerify = config.auto_verify_enabled;
   const status = autoVerify ? 'verified' : 'pending_verification';
   const verified_at = autoVerify ? new Date().toISOString() : null;
-
-  await db.run(
-    `INSERT INTO payments (reference, student_name, student_class, parent_phone, amount, mtn_transaction_id, status, payment_method, verified_at) 
-     VALUES (?,?,?,?,?,?,?,?,?)`,
-    [reference, student_name, student_class, parent_phone, amount, transaction_id, status, payment_method || 'direct_momo', verified_at]
-  );
-
-  const msg = autoVerify 
-    ? `Auto-Verified Payment ?\nStudent: ${student_name} - ${student_class}\nAmount: ${parseInt(amount).toLocaleString()} UGX\nTxID: ${transaction_id}\nRef: ${reference}`
-    : `Direct Payment Reported\nStudent: ${student_name} - ${student_class}\nAmount: ${parseInt(amount).toLocaleString()} UGX\nTxID: ${transaction_id}\nRef: ${reference}\nREADY TO VERIFY`;
-  
+  await db.run(`INSERT INTO payments (reference, student_name, student_class, parent_phone, amount, mtn_transaction_id, status, payment_method, verified_at) VALUES (?,?,?,?,?,?,?,?,?)`, [reference, student_name, student_class, parent_phone, amount, transaction_id, status, payment_method || 'direct_momo', verified_at]);
+  const msg = autoVerify ? `Auto-Verified Payment ?\nStudent: ${student_name} - ${student_class}\nAmount: ${parseInt(amount).toLocaleString()} UGX\nTxID: ${transaction_id}\nRef: ${reference}` : `Direct Payment Reported\nStudent: ${student_name} - ${student_class}\nAmount: ${parseInt(amount).toLocaleString()} UGX\nTxID: ${transaction_id}\nRef: ${reference}\nREADY TO VERIFY`;
   sendNotification(msg, autoVerify ? 'auto_verified' : 'direct_payment');
-
-  res.json({ 
-    success: true, 
-    reference, 
-    auto_verified: autoVerify,
-    message: autoVerify ? "Payment auto-verified! You can download receipt." : "Payment reported. School will verify shortly." 
-  });
+  res.json({ success: true, reference, auto_verified: autoVerify, message: autoVerify ? "Payment auto-verified! You can download receipt." : "Payment reported. School will verify shortly." });
 });
 
 app.post("/api/admin/verify/:ref", checkAdmin, async (req, res) => {
   const payment = await db.get('SELECT * FROM payments WHERE reference = ?', req.params.ref);
   if (!payment) return res.status(404).json({ error: "Not found" });
-  
   await db.run('UPDATE payments SET status = "verified", verified_at = CURRENT_TIMESTAMP WHERE reference = ?', req.params.ref);
   const msg = `Payment VERIFIED ?\nRef: ${payment.reference}\nStudent: ${payment.student_name}\nTxID: ${payment.mtn_transaction_id}\nAmount: ${payment.amount.toLocaleString()} UGX`;
   sendNotification(msg, 'verified');
@@ -156,14 +136,7 @@ app.get("/api/admin/payments", checkAdmin, async (req, res) => {
 });
 
 app.get("/api/admin/stats", checkAdmin, async (req, res) => {
-  const stats = await db.get(`
-    SELECT 
-      COUNT(*) as total,
-      SUM(CASE WHEN status = 'verified' THEN amount ELSE 0 END) as total_verified,
-      SUM(CASE WHEN status = 'pending_verification' THEN 1 ELSE 0 END) as pending_count,
-      SUM(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) as verified_count
-    FROM payments
-  `);
+  const stats = await db.get(`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'verified' THEN amount ELSE 0 END) as total_verified, SUM(CASE WHEN status = 'pending_verification' THEN 1 ELSE 0 END) as pending_count, SUM(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) as verified_count FROM payments`);
   res.json(stats);
 });
 
@@ -206,36 +179,66 @@ app.get("/api/receipt-pdf/:ref", async (req, res) => {
   if (!payment || payment.status !== 'verified') return res.status(404).json({ error: "Receipt not available" });
   const config = getConfig();
   
-  const doc = new PDFDocument({ margin: 50 });
+  const doc = new PDFDocument({ margin: 50, size: 'A4' });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename=Receipt-${payment.reference}.pdf`);
   doc.pipe(res);
   
-  doc.fontSize(20).text(config.school_name, { align: 'center' });
-  doc.fontSize(12).text(config.school_address || 'Kampala, Uganda', { align: 'center' });
-  doc.moveDown();
-  doc.fontSize(16).text('OFFICIAL FEES RECEIPT', { align: 'center', underline: true });
+  // Blue + Cream colors
+  const blue = '#2c5aa0';
+  const cream = '#FFF8E7';
+  
+  // Background
+  doc.rect(0, 0, doc.page.width, doc.page.height).fill(cream);
+  
+  // Header
+  doc.fillColor(blue).fontSize(22).text(config.school_name, 50, 50, { align: 'center' });
+  doc.fontSize(11).text(config.school_address || 'Kampala, Uganda', { align: 'center' });
+  if (config.school_logo_url) {
+    try {
+      doc.image(config.school_logo_url, 50, 45, { width: 60 });
+    } catch(e) {}
+  }
+  doc.moveDown(2);
+  
+  // Receipt Title
+  doc.fillColor(blue).fontSize(16).text('OFFICIAL FEES RECEIPT', { align: 'center', underline: true });
   doc.moveDown();
   
-  doc.fontSize(12);
-  doc.text(`Receipt No: ${payment.reference}`);
-  doc.text(`Date: ${new Date(payment.verified_at || payment.created_at).toLocaleDateString()}`);
+  // Receipt Body
+  doc.fillColor('black').fontSize(12);
+  doc.text(`Receipt No: ${payment.reference}`, 50);
+  doc.text(`Date: ${new Date(payment.verified_at || payment.created_at).toLocaleDateString('en-GB')}`, 50);
   doc.moveDown();
-  doc.text(`Student Name: ${payment.student_name}`);
-  doc.text(`Class: ${payment.student_class}`);
-  doc.text(`Parent Phone: ${payment.parent_phone}`);
+  
+  doc.text(`Student Name: ${payment.student_name}`, 50);
+  doc.text(`Class: ${payment.student_class}`, 50);
+  doc.text(`Parent Phone: ${payment.parent_phone}`, 50);
   doc.moveDown();
-  doc.fontSize(14).text(`Amount Paid: UGX ${payment.amount.toLocaleString()}`, { underline: true });
-  doc.fontSize(12);
-  doc.text(`Payment Method: Mobile Money`);
-  doc.text(`Transaction ID: ${payment.mtn_transaction_id}`);
+  
+  doc.fillColor(blue).fontSize(14).text(`Amount Paid: UGX ${payment.amount.toLocaleString()}`, 50, doc.y, { underline: true });
+  doc.fillColor('black').fontSize(12);
+  doc.text(`Payment Method: Mobile Money`, 50);
+  doc.text(`Transaction ID: ${payment.mtn_transaction_id}`, 50);
+  doc.moveDown(3);
+  
+  // Signature
+  doc.text(config.signature_name || 'Bursar', 400, doc.y, { align: 'right' });
+  doc.moveTo(400, doc.y).lineTo(550, doc.y).stroke();
+  doc.text('Authorized Signature', 400, doc.y + 5, { align: 'right' });
+  
+  // Footer
   doc.moveDown(2);
-  doc.text(config.receipt_footer || 'Thank you for your payment.', { align: 'center' });
-  doc.moveDown();
-  doc.text('_________________________', { align: 'right' });
-  doc.text('Authorized Signature', { align: 'right' });
+  doc.fillColor(blue).fontSize(10).text(config.receipt_footer || 'Thank you for your payment.', 50, 750, { align: 'center' });
   
   doc.end();
+});
+
+app.get("/api/parent/payments/:phone", async (req, res) => {
+  const phone = req.params.phone;
+  const payments = await db.all('SELECT reference, student_name, student_class, amount, status, mtn_transaction_id, verified_at, created_at FROM payments WHERE parent_phone = ? ORDER BY created_at DESC', phone);
+  const totalPaid = payments.filter(p => p.status === 'verified').reduce((sum, p) => sum + p.amount, 0);
+  res.json({ payments, totalPaid, phone });
 });
 
 app.post("/api/admin/login", (req, res) => {
@@ -273,21 +276,10 @@ app.get("/health", (req, res) => res.json({ status: "ok" }));
 app.get("/admin", (req, res) => res.sendFile(join(__dirname, "public", "admin.html")));
 app.get("/receipt/:ref", (req, res) => res.sendFile(join(__dirname, "public", "receipt.html")));
 app.get("/report", (req, res) => res.sendFile(join(__dirname, "public", "report.html")));
+app.get("/parent", (req, res) => res.sendFile(join(__dirname, "public", "parent.html")));
 app.get("/", (req, res) => res.sendFile(join(__dirname, "public", "index.html")));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`? SERVER RUNNING on http://127.0.0.1:${PORT}`);
 });
-// Add this route to server.js before the health check
-app.get("/api/parent/payments/:phone", async (req, res) => {
-  const phone = req.params.phone;
-  const payments = await db.all(
-    'SELECT reference, student_name, student_class, amount, status, mtn_transaction_id, verified_at, created_at FROM payments WHERE parent_phone = ? ORDER BY created_at DESC', 
-    phone
-  );
-  const totalPaid = payments.filter(p => p.status === 'verified').reduce((sum, p) => sum + p.amount, 0);
-  res.json({ payments, totalPaid, phone });
-});
-
-app.get("/parent", (req, res) => res.sendFile(join(__dirname, "public", "parent.html")));
