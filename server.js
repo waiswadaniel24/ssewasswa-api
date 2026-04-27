@@ -78,30 +78,42 @@ app.post('/api/admin/login', async (req, res) => {
 app.get('/admin', (req, res) => {
   res.send(`
     <h1>Bursar Admin</h1>
-    <div id="app">
+    <div id="login-box">
       <form id="login">
         <input name="username" placeholder="Username" value="bursar">
         <input name="password" type="password" placeholder="Password" value="bursar123">
         <button>Login</button>
       </form>
-      <div id="dashboard" style="display:none">
-        <h2>Welcome <span id="user"></span></h2>
-        <button onclick="logout()">Logout</button>
-        <h3>Students</h3>
-        <div id="students"></div>
-      </div>
+    </div>
+
+    <div id="dashboard" style="display:none">
+      <h2>Welcome <span id="user"></span></h2>
+      <button onclick="logout()">Logout</button>
+
+      <h3>Add Student</h3>
+      <form id="addStudent">
+        <input name="name" placeholder="Student Name" required>
+        <input name="class" placeholder="Class e.g P.6" required>
+        <input name="balance" type="number" placeholder="Starting Balance" value="0">
+        <button>Add Student</button>
+      </form>
+
+      <h3>Students List</h3>
+      <div id="students"></div>
+    </div>
+
     <script>
       async function check() {
         const res = await fetch('/api/admin/check', {credentials: 'include'});
         if(res.ok) {
           const data = await res.json();
-          document.getElementById('login').style.display = 'none';
+          document.getElementById('login-box').style.display = 'none';
           document.getElementById('dashboard').style.display = 'block';
           document.getElementById('user').innerText = data.username;
           loadStudents();
         }
       }
-      
+
       document.getElementById('login').onsubmit = async (e) => {
         e.preventDefault();
         const form = new FormData(e.target);
@@ -117,20 +129,41 @@ app.get('/admin', (req, res) => {
         if(res.ok) check();
         else alert('Login failed');
       }
-      
+
+      document.getElementById('addStudent').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = new FormData(e.target);
+        const res = await fetch('/api/students', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          credentials: 'include',
+          body: JSON.stringify({
+            name: form.get('name'),
+            class: form.get('class'),
+            balance: parseInt(form.get('balance'))
+          })
+        });
+        if(res.ok) {
+          e.target.reset();
+          loadStudents();
+        } else {
+          alert('Failed to add student');
+        }
+      }
+
       async function loadStudents() {
         const res = await fetch('/api/students', {credentials: 'include'});
         const students = await res.json();
-        document.getElementById('students').innerHTML = students.map(s => 
-          \`<p>\${s.name} - \${s.class} - Balance: \${s.balance}</p>\`
+        document.getElementById('students').innerHTML = students.map(s =>
+          \`<p><b>\${s.name}</b> - \${s.class} - Balance: UGX \${s.balance}</p>\`
         ).join('') || 'No students yet';
       }
-      
+
       function logout() {
-        document.cookie = 'connect.sid=; Max-Age=0';
+        document.cookie = 'connect.sid=; Max-Age=0; path=/';
         location.reload();
       }
-      
+
       check();
     </script>
   `);
@@ -142,6 +175,81 @@ app.get('/parent', (req, res) => {
 app.get('/', (req, res) => {
   res.send('<h1>Ssewasswa API</h1><a href="/admin">Admin Login</a> | <a href="/parent">Parent</a>');
 });
+// ===== STUDENTS + PAYMENTS =====
+async function initTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS students (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      class TEXT NOT NULL,
+      balance INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payments (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER REFERENCES students(id),
+      amount INTEGER NOT NULL,
+      method TEXT DEFAULT 'cash',
+      paid_by TEXT,
+      verified_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  console.log('✅ Students + Payments tables ready');
+}
+initTables();
+
+function requireBursar(req, res, next) {
+  if (req.session.user && req.session.user.role === 'bursar') {
+    next();
+  } else {
+    res.status(403).json({ error: 'Bursar access required' });
+  }
+}
+
+app.post('/api/students', requireBursar, async (req, res) => {
+  const { name, class: className, balance = 0 } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO students (name, class, balance) VALUES ($1, $2, $3) RETURNING *',
+      [name, className, balance]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to add student' });
+  }
+})
+
+app.get('/api/students', requireBursar, async (req, res) => {
+  const result = await pool.query('SELECT * FROM students ORDER BY name');
+  res.json(result.rows);
+})
+
+app.post('/api/payments', requireBursar, async (req, res) => {
+  const { student_id, amount, method = 'cash', paid_by } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const payment = await client.query(
+      `INSERT INTO payments (student_id, amount, method, paid_by, verified_by)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [student_id, amount, method, paid_by, req.session.user.id]
+    );
+    await client.query(
+      'UPDATE students SET balance = balance - $1 WHERE id = $2',
+      [amount, student_id]
+    );
+    await client.query('COMMIT');
+    res.json(payment.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Payment failed' });
+  } finally {
+    client.release();
+  }
+})
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`)
 })
