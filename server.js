@@ -7,7 +7,10 @@ const session = require('express-session')
 const app = express()
 const PORT = process.env.PORT || 10000
 
-app.use(cors())
+app.use(cors({
+  origin: true,
+  credentials: true
+}))
 app.use(express.json())
 app.use(session({
   secret: process.env.SESSION_SECRET || 'ssewasswa-secret',
@@ -22,30 +25,35 @@ const pool = new Pool({
 
 async function initDB() {
   const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE,
+        password TEXT,
+        role TEXT DEFAULT 'teacher',
+        can_view_finances INTEGER DEFAULT 0,
+        can_verify_payments INTEGER DEFAULT 0,
+        can_view_reports INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      username TEXT UNIQUE,
-      password TEXT,
-      role TEXT DEFAULT 'teacher',
-      can_view_finances INTEGER DEFAULT 0,
-      can_verify_payments INTEGER DEFAULT 0,
-      can_view_reports INTEGER DEFAULT 0,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    const hash = await bcrypt.hash('bursar123', 10);
+    await client.query(
+      `INSERT INTO users (username, password, role, can_view_finances, can_verify_payments, can_view_reports)
+       VALUES ('bursar', $1, 'bursar', 1, 1, 1)
+       ON CONFLICT (username) DO NOTHING`,
+      [hash]
     );
-  `,);
-
- await client.query(`
-  INSERT INTO users (username, password, role, can_view_finances, can_verify_payments, can_view_reports)
-  VALUES ('bursar', $1, 'bursar', 1, 1, 1)
-  ON CONFLICT (username) DO UPDATE SET password = $1
-`, );
-
-  client.release();
-  console.log('✅ Bursar user ready');
+    console.log('✅ Bursar user ready');
+  } catch (err) {
+    console.error('DB init error:', err.message);
+  } finally {
+    client.release();
+  }
 }
-initDB(); // <-- Make sure this line exists once
+initDB();
 
 app.get('/health', (req, res) => {
   res.json({ status: 'API is running' })
@@ -67,6 +75,17 @@ app.post('/api/admin/login', async (req, res) => {
   }
 })
 
+app.get('/api/admin/check', (req, res) => {
+  if (req.session.user) {
+    res.json({ 
+      loggedIn: true, 
+      username: req.session.user.username,
+      role: req.session.user.role 
+    });
+  } else {
+    res.status(401).json({ loggedIn: false });
+  }
+})
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`)
 })
