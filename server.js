@@ -279,3 +279,15 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`? SERVER RUNNING on http://127.0.0.1:${PORT}`);
 });
+// Add this route to server.js before the health check
+app.get("/api/parent/payments/:phone", async (req, res) => {
+  const phone = req.params.phone;
+  const payments = await db.all(
+    'SELECT reference, student_name, student_class, amount, status, mtn_transaction_id, verified_at, created_at FROM payments WHERE parent_phone = ? ORDER BY created_at DESC', 
+    phone
+  );
+  const totalPaid = payments.filter(p => p.status === 'verified').reduce((sum, p) => sum + p.amount, 0);
+  res.json({ payments, totalPaid, phone });
+});
+
+app.get("/parent", (req, res) => res.sendFile(join(__dirname, "public", "parent.html")));
