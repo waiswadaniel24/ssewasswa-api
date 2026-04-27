@@ -245,7 +245,7 @@ app.get('/api/student-balance', async (req, res) => {
     res.status(500).json({ error: 'Search failed' });
   }
 })
-
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.get('/', (req, res) => {
   res.send('<h1>Ssewasswa API</h1><a href="/admin">Admin Login</a> | <a href="/parent">Parent</a>');
 });
@@ -325,6 +325,13 @@ app.post('/api/payments', requireBursar, async (req, res) => {
   }
 })
 // Check if bursar is logged in
+app.get('/api/admin/check', (req, res) => {
+  if (req.session.user && req.session.user.role === 'bursar') {
+    res.json({ loggedIn: true, username: req.session.user.username });
+  } else {
+    res.status(401).json({ loggedIn: false });
+  }
+})
 app.get('/api/admin/check', (req, res) => {
   if (req.session.user && req.session.user.role === 'bursar') {
     res.json({ loggedIn: true, username: req.session.user.username });
