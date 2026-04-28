@@ -407,7 +407,7 @@ app.post('/parent/check', async (req, res) => {
     ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td></tr>`).join('')}
     </table></div></body></html>`);
 });
-app.post('/admin/change-password', requireLogin, async (req, res) => {
+app.post('/admin/change-password', requireAuth, async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
     const user = await pool.query('SELECT password FROM admins WHERE username = $1', [req.session.user.username]);
