@@ -46,23 +46,18 @@ async function initDB() {
     );
   `);
 
-  // Add missing columns to existing tables
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS class VARCHAR(50) DEFAULT 'P.6'`);
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS term VARCHAR(20) DEFAULT 'term1'`);
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS year INTEGER DEFAULT 2025`);
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS total_fees INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS balance INTEGER DEFAULT 0`);
-
   await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS method VARCHAR(50)`);
   await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference VARCHAR(100)`);
-
   await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS number VARCHAR(50)`);
   await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS account_name VARCHAR(100)`);
   await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS instructions TEXT`);
-
   await pool.query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'bursar'`);
 
-  // Create default admin
   const admin = await pool.query('SELECT * FROM admins WHERE username = $1', ['bursar']);
   if (admin.rows.length === 0) {
     const hash = await bcrypt.hash('bursar123', 10);
@@ -83,8 +78,8 @@ app.get('/', (req, res) => {
     <!DOCTYPE html><html><head><title>Ssewasswa Primary</title>
     <style>
       body{font-family:Arial;text-align:center;padding-top:100px;background:#f4f6f9}
-     .btn{background:#3498db;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;margin:10px;display:inline-block;font-size:18px}
-     .btn-green{background:#27ae60}
+    .btn{background:#3498db;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;margin:10px;display:inline-block;font-size:18px}
+    .btn-green{background:#27ae60}
     </style></head><body>
       <h1>Ssewasswa Primary School</h1>
       <h2>Fees Management System</h2>
@@ -155,15 +150,15 @@ app.get('/admin', requireLogin, async (req, res) => {
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body{font-family:Arial;margin:0;background:#f4f6f9;padding:20px}
-  .container{max-width:1400px;margin:auto}
-  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;margin-bottom:20px}
-  .card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
-  .card h3{margin:0 0 10px 0;color:#666;font-size:14px;font-weight:normal}
-  .card.num{font-size:32px;font-weight:bold;color:#2c3e50}
-  .grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}
-  .btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px 5px 0}
-  .btn-red{background:#e74c3c}
+ .container{max-width:1400px;margin:auto}
+ .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+ .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;margin-bottom:20px}
+ .card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+ .card h3{margin:0 0 10px 0;color:#666;font-size:14px;font-weight:normal}
+ .card.num{font-size:32px;font-weight:bold;color:#2c3e50}
+ .grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}
+ .btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px 5px 0}
+ .btn-red{background:#e74c3c}
     table{width:100%;background:white;border-collapse:collapse;margin-top:10px}
     th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
     th{background:#34495e;color:white;font-size:14px}
@@ -186,7 +181,7 @@ app.get('/admin', requireLogin, async (req, res) => {
       <a href="/admin/payments/methods" class="btn">Payment Methods</a>
       <a href="/admin/students" class="btn">All Students</a>
       <a href="/admin/export/students" class="btn">Export Students CSV</a>
-<a href="/admin/export/payments" class="btn">Export Payments CSV</a>
+      <a href="/admin/export/payments" class="btn">Export Payments CSV</a>
     </div>
 
     <div class="grid">
@@ -276,29 +271,29 @@ app.get('/admin/students', requireLogin, async (req, res) => {
   const search = req.query.search || '';
   let query = 'SELECT * FROM students';
   let params = [];
-  
+
   if (search) {
     query += ' WHERE LOWER(name) LIKE $1 OR LOWER(class) LIKE $1';
     params.push(`%${search.toLowerCase()}%`);
   }
-  
+
   query += ' ORDER BY class, name';
   const students = await pool.query(query, params);
-  
+
   res.send(`<!DOCTYPE html><html><head><title>Students</title>
   <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;margin:5px}.search-box{display:flex;gap:10px;margin:20px 0}input[type="text"]{flex:1;padding:10px;border:1px solid #ddd;border-radius:4px}</style>
   </head><body><h2>All Students</h2>
-  <a href="/admin" class="btn">Dashboard</a> 
+  <a href="/admin" class="btn">Dashboard</a>
   <a href="/admin/students/add" class="btn">Add Student</a>
-  
+
   <form method="GET" action="/admin/students" class="search-box">
     <input type="text" name="search" placeholder="Search by name or class..." value="${search}">
     <button type="submit" class="btn">Search</button>
-    ${search ? '<a href="/admin/students" class="btn" style="background:#95a5a6">Clear</a>' : ''}
+    ${search? '<a href="/admin/students" class="btn" style="background:#95a5a6">Clear</a>' : ''}
   </form>
-  
-  ${search ? `<p>Found ${students.rows.length} results for "${search}"</p>` : ''}
-  
+
+  ${search? `<p>Found ${students.rows.length} results for "${search}"</p>` : ''}
+
   <table>
     <tr><th>Name</th><th>Class</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th><th></th></tr>
     ${students.rows.map(s => `
@@ -309,32 +304,7 @@ app.get('/admin/students', requireLogin, async (req, res) => {
     `).join('')}
   </table></body></html>`);
 });
-// ========== EDIT STUDENT ==========
-app.get('/admin/students/:id/edit', requireLogin, async (req, res) => {
-  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
-  if (!student.rows.length) return res.send('Student not found');
-  const s = student.rows[0];
-  res.send(`<!DOCTYPE html><html><head><title>Edit Student</title>
-  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}.btn{background:#3498db;color:white;text-decoration:none;padding:10px;display:inline-block;border-radius:4px}.btn-red{background:#e74c3c}</style>
-  </head><body><h2>Edit Student</h2><a href="/admin/students/${s.id}" class="btn">Cancel</a>
-  <form method="POST" action="/admin/students/${s.id}/edit">
-    <input name="name" value="${s.name}" placeholder="Student Name" required>
-    <input name="class" value="${s.class}" placeholder="Class e.g P.6" required>
-    <input name="term" value="${s.term}" placeholder="Term" required>
-    <input name="year" type="number" value="${s.year}" required>
-    <input name="total_fees" type="number" value="${s.total_fees}" placeholder="Total Fees" required>
-    <button type="submit">Update Student</button>
-  </form>
-  <form method="POST" action="/admin/students/${s.id}/delete" onsubmit="return confirm('Delete this student? All payments will be lost!')" style="margin-top:20px">
-    <button type="submit" class="btn btn-red">Delete Student</button>
-  </form></body></html>`);
-});
 
-app.post('/admin/students/:id/delete', requireLogin, async (req, res) => {
-  await pool.query('DELETE FROM students WHERE id = $1', [req.params.id]);
-  res.redirect('/admin/students');
-});
-// ========== EDIT STUDENT ==========
 app.get('/admin/students/:id/edit', requireLogin, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   if (!student.rows.length) return res.send('Student not found');
@@ -361,7 +331,6 @@ app.post('/admin/students/:id/edit', requireLogin, async (req, res) => {
     'UPDATE students SET name=$1, class=$2, term=$3, year=$4, total_fees=$5 WHERE id=$6',
     [name, cls, term, year, total_fees, req.params.id]
   );
-  // Recalculate balance after fee change
   await pool.query(`
     UPDATE students SET balance = total_fees - COALESCE((
       SELECT SUM(amount) FROM payments WHERE payments.student_id = students.id
@@ -374,6 +343,7 @@ app.post('/admin/students/:id/delete', requireLogin, async (req, res) => {
   await pool.query('DELETE FROM students WHERE id = $1', [req.params.id]);
   res.redirect('/admin/students');
 });
+
 app.get('/admin/students/:id', requireLogin, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.id]);
@@ -384,23 +354,23 @@ app.get('/admin/students/:id', requireLogin, async (req, res) => {
   </head><body><a href="/admin/students">Back to Students</a>
     <h2>${s.name} - ${s.class}</h2>
   <p><b>Term:</b> ${s.term} ${s.year} | <b>Total Fees:</b> UGX ${Number(s.total_fees).toLocaleString()} | <b>Balance:</b> UGX ${Number(s.balance).toLocaleString()}</p>
-<a href="/admin/students/${s.id}/edit" class="btn">Edit Student</a>
-    <a href="/admin/students/${s.id}/statement" class="btn" target="_blank">Print Statement</a>
-    <h3>Payment History</h3><table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th></th></tr>
-${payments.rows.map(p => `
-  <tr>
-    <td>${new Date(p.payment_date).toLocaleDateString()}</td>
-    <td>UGX ${Number(p.amount).toLocaleString()}</td>
-    <td>${p.method || '-'}</td>
-    <td>${p.reference || '-'}</td>
-    <td>
-      <form method="POST" action="/admin/payments/${p.id}/delete" style="display:inline" onsubmit="return confirm('Delete this payment? Balance will be updated.')">
-        <button type="submit" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:3px;cursor:pointer">Delete</button>
-      </form>
-    </td>
-  </tr>
-`).join('')}
-</table>
+  <a href="/admin/students/${s.id}/edit" class="btn">Edit Student</a>
+  <a href="/admin/students/${s.id}/statement" class="btn" target="_blank">Print Statement</a>
+  <h3>Payment History</h3><table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th></th></tr>
+  ${payments.rows.map(p => `
+    <tr>
+      <td>${new Date(p.payment_date).toLocaleDateString()}</td>
+      <td>UGX ${Number(p.amount).toLocaleString()}</td>
+      <td>${p.method || '-'}</td>
+      <td>${p.reference || '-'}</td>
+      <td>
+        <form method="POST" action="/admin/payments/${p.id}/delete" style="display:inline" onsubmit="return confirm('Delete this payment? Balance will be updated.')">
+          <button type="submit" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:3px;cursor:pointer">Delete</button>
+        </form>
+      </td>
+    </tr>
+  `).join('')}
+  </table></body></html>`);
 });
 
 app.get('/admin/students/:id/statement', requireLogin, async (req, res) => {
@@ -444,6 +414,7 @@ app.post('/admin/payments/add', requireLogin, async (req, res) => {
   await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
   res.redirect(`/admin/payments/receipt/${payment.rows[0].id}`);
 });
+
 app.get('/admin/payments/receipt/:id', requireLogin, async (req, res) => {
   const result = await pool.query(`
     SELECT p.*, s.name, s.class, s.term, s.year, s.total_fees, s.balance
@@ -458,11 +429,11 @@ app.get('/admin/payments/receipt/:id', requireLogin, async (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Receipt #${r.id}</title>
   <style>
     body{font-family:Arial;max-width:700px;margin:20px auto;padding:20px}
-   .receipt{border:2px solid #000;padding:30px}
-   .header{text-align:center;border-bottom:2px solid #000;padding-bottom:15px;margin-bottom:20px}
-   .school{font-size:24px;font-weight:bold}
+  .receipt{border:2px solid #000;padding:30px}
+  .header{text-align:center;border-bottom:2px solid #000;padding-bottom:15px;margin-bottom:20px}
+  .school{font-size:24px;font-weight:bold}
     table{width:100%;margin:20px 0}td{padding:8px}
-   .amount{font-size:28px;font-weight:bold;color:#27ae60}
+  .amount{font-size:28px;font-weight:bold;color:#27ae60}
     @media print{.no-print{display:none}}
   </style>
   </head><body>
@@ -488,6 +459,16 @@ app.get('/admin/payments/receipt/:id', requireLogin, async (req, res) => {
       <p style="margin-top:60px">_____________________<br>Bursar Signature</p>
     </div>
   </body></html>`);
+});
+
+app.post('/admin/payments/:id/delete', requireLogin, async (req, res) => {
+  const payment = await pool.query('SELECT student_id, amount FROM payments WHERE id = $1', [req.params.id]);
+  if (payment.rows.length) {
+    const { student_id, amount } = payment.rows[0];
+    await pool.query('DELETE FROM payments WHERE id = $1', [req.params.id]);
+    await pool.query('UPDATE students SET balance = balance + $1 WHERE id = $2', [amount, student_id]);
+  }
+  res.redirect('back');
 });
 
 app.get('/admin/payments/methods', requireLogin, async (req, res) => {
@@ -543,6 +524,7 @@ app.post('/parent/check', async (req, res) => {
     ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td></tr>`).join('')}
     </table></div></body></html>`);
 });
+
 // ========== EXPORT TO CSV ==========
 app.get('/admin/export/students', requireLogin, async (req, res) => {
   const { rows } = await pool.query(`
@@ -583,4 +565,5 @@ app.get('/admin/export/payments', requireLogin, async (req, res) => {
   res.attachment(`payments_${new Date().toISOString().slice(0,10)}.csv`);
   res.send(csv);
 });
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
