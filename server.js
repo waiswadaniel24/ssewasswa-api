@@ -383,11 +383,5 @@ app.post('/parent/check', async (req, res) => {
     ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td></tr>`).join('')}
     </table></div></body></html>`);
 });
-app.get('/make-admin', async (req, res) => {
-  const hash = await bcrypt.hash('bursar123', 10);
-  await pool.query(`DELETE FROM admins WHERE username = 'admin'`);
-  await pool.query(`INSERT INTO admins (username, password, role, full_name) VALUES ('admin', $1, 'admin', 'System Admin')`, [hash]);
-  await pool.query(`INSERT INTO user_permissions (username, can_manage_users, can_manage_terms, can_view_reports, can_record_payments, can_manage_students) VALUES ('admin', true, true, true, true, true) ON CONFLICT (username) DO UPDATE SET can_manage_users = true, can_manage_terms = true`);
-  res.send('Admin created. Username: admin | Password: bursar123. DELETE THIS ROUTE NOW!');
-});
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
