@@ -378,18 +378,29 @@ app.post('/parent/check', async (req, res) => {
 });
 
 app.get('/reset-admin', async (req, res) => {
-  const hash = await bcrypt.hash('bursar123', 10);
-  await pool.query(`
-    INSERT INTO admins (username, password, role, full_name)
-    VALUES ('admin', $1, 'admin', 'System Admin')
-    ON CONFLICT (username) DO UPDATE SET password = $1, role = 'admin'
-  `, [hash]);
-  await pool.query(`
-    INSERT INTO user_permissions (username, can_manage_users, can_manage_terms, can_view_reports, can_record_payments, can_manage_students)
-    VALUES ('admin', true, true, true)
-    ON CONFLICT (username) DO UPDATE SET can_manage_users = true, can_manage_terms = true, can_view_reports = true, can_record_payments = true, can_manage_students = true
-  `);
-  res.send('Admin reset complete. Username: admin | Password: bursar123');
+  try {
+    const hash = await bcrypt.hash('bursar123', 10);
+    await pool.query(`
+      INSERT INTO admins (username, password, role, full_name)
+      VALUES ('admin', $1, 'admin', 'System Admin')
+      ON CONFLICT (username) DO UPDATE SET password = $1, role = 'admin'
+    `, [hash]);
+    
+    await pool.query(`
+      INSERT INTO user_permissions (username, can_manage_users, can_manage_terms, can_view_reports, can_record_payments, can_manage_students)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (username) DO UPDATE SET 
+        can_manage_users = $2, 
+        can_manage_terms = $3, 
+        can_view_reports = $4, 
+        can_record_payments = $5, 
+        can_manage_students = $6
+    `, ['admin', true, true, true, true, true]);
+    
+    res.send('Admin reset complete. Username: admin | Password: bursar123');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
