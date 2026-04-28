@@ -324,6 +324,46 @@ app.post('/admin/students/:id/delete', requireLogin, async (req, res) => {
   await pool.query('DELETE FROM students WHERE id = $1', [req.params.id]);
   res.redirect('/admin/students');
 });
+// ========== EDIT STUDENT ==========
+app.get('/admin/students/:id/edit', requireLogin, async (req, res) => {
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
+  if (!student.rows.length) return res.send('Student not found');
+  const s = student.rows[0];
+  res.send(`<!DOCTYPE html><html><head><title>Edit Student</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}.btn{background:#3498db;color:white;text-decoration:none;padding:10px;display:inline-block;border-radius:4px}.btn-red{background:#e74c3c}</style>
+  </head><body><h2>Edit Student</h2><a href="/admin/students/${s.id}" class="btn">Cancel</a>
+  <form method="POST" action="/admin/students/${s.id}/edit">
+    <input name="name" value="${s.name}" placeholder="Student Name" required>
+    <input name="class" value="${s.class}" placeholder="Class e.g P.6" required>
+    <input name="term" value="${s.term}" placeholder="Term" required>
+    <input name="year" type="number" value="${s.year}" required>
+    <input name="total_fees" type="number" value="${s.total_fees}" placeholder="Total Fees" required>
+    <button type="submit">Update Student</button>
+  </form>
+  <form method="POST" action="/admin/students/${s.id}/delete" onsubmit="return confirm('Delete this student? All payments will be lost!')" style="margin-top:20px">
+    <button type="submit" class="btn btn-red">Delete Student</button>
+  </form></body></html>`);
+});
+
+app.post('/admin/students/:id/edit', requireLogin, async (req, res) => {
+  const { name, class: cls, term, year, total_fees } = req.body;
+  await pool.query(
+    'UPDATE students SET name=$1, class=$2, term=$3, year=$4, total_fees=$5 WHERE id=$6',
+    [name, cls, term, year, total_fees, req.params.id]
+  );
+  // Recalculate balance after fee change
+  await pool.query(`
+    UPDATE students SET balance = total_fees - COALESCE((
+      SELECT SUM(amount) FROM payments WHERE payments.student_id = students.id
+    ), 0) WHERE id = $1
+  `, [req.params.id]);
+  res.redirect(`/admin/students/${req.params.id}`);
+});
+
+app.post('/admin/students/:id/delete', requireLogin, async (req, res) => {
+  await pool.query('DELETE FROM students WHERE id = $1', [req.params.id]);
+  res.redirect('/admin/students');
+});
 app.get('/admin/students/:id', requireLogin, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.id]);
@@ -333,7 +373,8 @@ app.get('/admin/students/:id', requireLogin, async (req, res) => {
   <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}.btn{background:#3498db;color:white;padding:10px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:10px;border-bottom:1px solid #ddd}</style>
   </head><body><a href="/admin/students">Back to Students</a>
     <h2>${s.name} - ${s.class}</h2>
-    <p><b>Term:</b> ${s.term} ${s.year} | <b>Total Fees:</b> UGX ${Number(s.total_fees).toLocaleString()} | <b>Balance:</b> UGX ${Number(s.balance).toLocaleString()}</p>
+  <p><b>Term:</b> ${s.term} ${s.year} | <b>Total Fees:</b> UGX ${Number(s.total_fees).toLocaleString()} | <b>Balance:</b> UGX ${Number(s.balance).toLocaleString()}</p>
+<a href="/admin/students/${s.id}/edit" class="btn">Edit Student</a>
 <a href="/admin/students/${s.id}/edit" class="btn">Edit Student</a>
     <a href="/admin/students/${s.id}/statement" class="btn" target="_blank">Print Statement</a>
     <h3>Payment History</h3><table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr>
