@@ -413,9 +413,9 @@ function requireAuth(req, res, next) {
 
 function requirePermission(perm) {
   return async (req, res, next) => {
-    if (req.session.user.role === 'admin') return next();
+    if (req.session.user.role === 'admin') return next(); // admin bypasses all checks
     const result = await pool.query('SELECT * FROM user_permissions WHERE username = $1', [req.session.user.username]);
-    if (result.rows[0] && result.rows[0][perm]) return next();
+    if (result.rows[0] && result.rows[0][perm] === true) return next(); // <-- FIXED
     res.status(403).send('You do not have permission for this task');
   };
 }
