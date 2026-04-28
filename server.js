@@ -422,16 +422,25 @@ app.post('/parent/check', async (req, res) => {
 app.post('/admin/change-password', requireAuth, async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
-    const user = await pool.query('SELECT password FROM admins WHERE username = $1', [req.session.user.username]);
-    const match = await bcrypt.compare(oldPassword, user.rows[0].password);
-    if (!match) return res.status(400).send('Old password incorrect');
+    const userId = req.session.user.id;
+
+    const result = await pool.query('SELECT password FROM users WHERE id = $1', [userId]);
+    if (result.rows.length === 0) return res.status(404).send('User not found');
+
+    const match = await bcrypt.compare(oldPassword, result.rows[0].password);
+    if (!match) {
+      await logAction(req.session.user.username, 'PASSWORD_CHANGE_FAIL', { reason: 'Wrong old password' });
+      return res.status(401).send('Wrong old password');
+    }
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE admins SET password = $1 WHERE username = $2', );
-    await logAction(req.session.user.username, 'PASSWORD_CHANGE', { ip: req.ip });
-    res.send('Password changed');
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hash][userId]); // <- 2 params now
+
+    await logAction(req.session.user.username, 'PASSWORD_CHANGE_SUCCESS', {});
+    res.send('Password changed successfully');
   } catch (err) {
-    res.status(500).send('Error: ' + err.message);
+    console.error(err);
+    res.status(500).send('Server error');
   }
 });
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
