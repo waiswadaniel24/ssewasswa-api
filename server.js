@@ -1,7 +1,7 @@
 const rateLimit = require('express-rate-limit');
 const express = require('express');
 const session = require('express-session');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt'); // not bcryptjs
 const { Pool } = require('pg');
 
 const app = express();
@@ -33,9 +33,11 @@ async function logAction(username, action, details = {}) {
   try {
     await pool.query(
       'INSERT INTO audit_logs (username, action, details) VALUES ($1, $2, $3)',
-      [username, action, details]
+      [username, action, JSON.stringify(details)]
     );
-  } catch (e) { console.error('Audit log failed:', e); }
+  } catch (err) {
+    console.error('Audit log failed:', err);
+  }
 }
 app.use(session({
   secret: process.env.SESSION_SECRET,
@@ -434,12 +436,12 @@ app.post('/admin/change-password', requireAuth, async (req, res) => {
     }
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hash][userId]); // <- 2 params now
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hash, userId]);
 
     await logAction(req.session.user.username, 'PASSWORD_CHANGE_SUCCESS', {});
     res.send('Password changed successfully');
   } catch (err) {
-    console.error(err);
+    console.error('Password change error:', err);
     res.status(500).send('Server error');
   }
 });
