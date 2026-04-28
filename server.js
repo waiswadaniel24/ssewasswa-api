@@ -178,7 +178,7 @@ app.post('/admin/login', async (req, res) => {
   if (result.rows.length && await bcrypt.compare(password, result.rows[0].password)) {
     req.session.adminId = result.rows[0].id;
     req.session.adminRole = result.rows[0].role;
-    req.session.adminName = result.rows[0].full_name;
+    req.session.adminName = result.rows[0].full_name || result.rows[0].username; // <-- ADD THIS LINE
     res.redirect('/admin');
   } else {
     res.send('Invalid login. <a href="/admin/login">Try again</a>');
