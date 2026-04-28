@@ -185,6 +185,8 @@ app.get('/admin', requireLogin, async (req, res) => {
       <a href="/admin/payments/add" class="btn">Record Payment</a>
       <a href="/admin/payments/methods" class="btn">Payment Methods</a>
       <a href="/admin/students" class="btn">All Students</a>
+      <a href="/admin/export/students" class="btn">Export Students CSV</a>
+<a href="/admin/export/payments" class="btn">Export Payments CSV</a>
     </div>
 
     <div class="grid">
