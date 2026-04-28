@@ -18,7 +18,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   proxy: true,
-  cookie: { 
+  cookie: {
     secure: true,
     sameSite: 'none',
     httpOnly: true,
@@ -125,7 +125,51 @@ app.get('/admin', (req, res) => {
           <input name="balance" type="number" placeholder="Starting Balance" value="0">
           <button>Add Student</button>
         </form>
+       <h3>Payment Methods</h3>
+<form id="addMethod">
+  <select name="type" required>
+    <option value="">Select Type</option>
+    <option value="mtn">MTN Mobile Money</option>
+    <option value="airtel">Airtel Money</option>
+    <option value="bank">Bank Transfer</option>
+  </select>
+  <input name="name" placeholder="Display Name e.g MTN Pay" required>
+  <input name="account_number" placeholder="Number: 0772123456 or Bank Acc" required>
+  <input name="account_name" placeholder="Account Name" required>
+  <input name="instructions" placeholder="Use StudentName-Class as reference">
+  <button>Add Method</button>
+</form>
+<div id="methodsList"></div>
 
+<!-- prettier-ignore -->
+<script>
+async function loadMethods() {
+  const res = await fetch('/api/payment-methods');
+  const methods = await res.json();
+  document.getElementById('methodsList').innerHTML = methods.map(m => `
+    < p > <b>${m.name}</b> - ${ m.account_number }
+  < button onclick = "deleteMethod(${m.id})" > Delete</button ></p >
+  `).join('');
+}
+loadMethods();
+
+document.getElementById('addMethod').onsubmit = async (e) => {
+  e.preventDefault();
+  const form = new FormData(e.target);
+  await fetch('/api/payment-methods', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.fromEntries(form))
+  });
+  e.target.reset();
+  loadMethods();
+};
+
+async function deleteMethod(id) {
+  await fetch(`/ api / payment - methods / ${ id }`, {method: 'DELETE'});
+  loadMethods();
+}
+</script>
         <div class="card">
           <h3>Record Payment</h3>
           <form id="addPayment">
@@ -403,9 +447,9 @@ app.post('/api/payments', async (req, res) => {
   if (!req.session.user || req.session.user.role !== 'bursar') {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  
+
   const { student_id, amount, paid_by, method } = req.body;
-  
+
   try {
     // 1. Insert payment record
     await pool.query(
@@ -413,19 +457,82 @@ app.post('/api/payments', async (req, res) => {
        VALUES ($1, $2, $3, $4, NOW())`,
       [student_id, amount, paid_by, method]
     );
-    
+
     // 2. Reduce student balance
     await pool.query(
       `UPDATE students SET balance = balance - $1 WHERE id = $2`,
       [amount, student_id]
     );
-    
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Payment failed' });
   }
 })
+// Get all payment methods
+app.get('/api/payment-methods', async (req, res) => {
+  const result = await pool.query('SELECT * FROM payment_methods WHERE active=true ORDER BY id');
+  res.json(result.rows);
+});
+
+// Add payment method
+app.post('/api/payment-methods', async (req, res) => {
+  const { name, type, account_number, account_name, instructions } = req.body;
+  try {
+    const result = await pool.query(
+      `INSERT INTO payment_methods (name, type, account_number, account_name, instructions)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [name, type, account_number, account_name, instructions]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete method
+app.delete('/api/payment-methods/:id', async (req, res) => {
+  await pool.query('UPDATE payment_methods SET active=false WHERE id=$1', [req.params.id]);
+  res.sendStatus(200);
+});
+
+// Universal payment webhook
+app.post('/api/payment-webhook', async (req, res) => {
+  try {
+    const { amount, reference, status, provider } = req.body;
+
+    if (status !== 'SUCCESSFUL' && status !== 'success') return res.sendStatus(200);
+
+    const cleanRef = reference.toLowerCase().replace(/-/g, ' ').trim();
+    const parts = cleanRef.split(' ');
+    const className = parts.pop();
+    const name = parts.join(' ');
+
+    const student = await pool.query(
+      'SELECT id, balance FROM students WHERE LOWER(name)=$1 AND LOWER(class)=$2',
+      [name, className]
+    );
+
+    if (student.rows.length === 0) return res.sendStatus(200);
+
+    const studentId = student.rows[0].id;
+    const newBalance = student.rows[0].balance - parseInt(amount);
+    const method = await pool.query('SELECT id FROM payment_methods WHERE type=$1 AND active=true LIMIT 1', [provider]);
+
+    await pool.query(
+      `INSERT INTO payments (student_id, amount, method_id, transaction_ref, auto_recorded)
+       VALUES ($1, $2, $3, $4, true)`,
+      [studentId, amount, method.rows[0]?.id, reference]
+    );
+
+    await pool.query('UPDATE students SET balance=$1 WHERE id=$2', [newBalance, studentId]);
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('Webhook error:', err);
+    res.sendStatus(500);
+  }
+});
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`)
 })
