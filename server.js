@@ -207,15 +207,36 @@ app.get('/admin/logout', (req, res) => {
 
 // DASHBOARD
 app.get('/admin', requireLogin, async (req, res) => {
+  const user = req.session.user;
+  
+  // Redirect class teachers to their class
+  if (user.role === 'class_teacher') {
+    return res.send(`
+      <h1>Welcome ${user.username}</h1>
+      <p>Your assigned class: ${user.assigned_class}</p>
+      <a href="/admin/class/${user.assigned_class}" style="padding:15px 30px; background:#3498db; color:white; text-decoration:none; border-radius:5px; font-size:18px;">View ${user.assigned_class} Students</a>
+      <br><br><a href="/admin/logout">Logout</a>
+    `);
+  }
+
+  // Admin dashboard
   res.send(`<!DOCTYPE html><html><head><title>Admin Dashboard</title>
   <style>body{font-family:Arial;max-width:800px;margin:50px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}.btn{background:#3498db;color:white;padding:12px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:10px 10px 0 0}</style>
   </head><body><div class="card">
     <h1>Admin Dashboard</h1>
-    <p>Logged in as: ${req.session.user.username} (${req.session.user.role})</p>
+    <p>Logged in as: ${user.username} (${user.role})</p>
+    <h3>Quick Access by Class:</h3>
+    <a href="/admin/class/P1" class="btn">P1</a>
+    <a href="/admin/class/P2" class="btn">P2</a>
+    <a href="/admin/class/P3" class="btn">P3</a>
+    <a href="/admin/class/P4" class="btn">P4</a>
+    <a href="/admin/class/P5" class="btn">P5</a>
+    <a href="/admin/class/P6" class="btn">P6</a>
+    <a href="/admin/class/P7" class="btn">P7</a>
+    <br><br>
     <a href="/admin/users/add" class="btn">Create User</a>
     <a href="/admin/students" class="btn">All Students</a>
     <a href="/admin/payments/add" class="btn">Record Payment</a>
-    <a href="/admin/settings" class="btn">Settings</a>
     <a href="/admin/logout" class="btn" style="background:#e74c3c">Logout</a>
   </div></body></html>`);
 });
@@ -291,6 +312,16 @@ app.post('/admin/users/add', requireLogin, async (req, res) => {
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
   }
+});
+// Class Teacher Dashboard
+app.get('/admin/my-class', requireLogin, async (req, res) => {
+  const user = req.session.user;
+  
+  if (user.role !== 'class_teacher' || !user.assigned_class) {
+    return res.redirect('/admin');
+  }
+  
+  res.redirect(`/admin/class/${user.assigned_class}`);
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
