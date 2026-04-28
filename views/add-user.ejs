@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head><title>Add Staff</title></head>
+<body>
+<h1>Add New Staff Member</h1>
+<form method="POST" action="/admin/users/add">
+  <label>Username:</label><br>
+  <input type="text" name="username" required><br><br>
+
+  <label>Password:</label><br>
+  <input type="password" name="password" required><br><br>
+
+  <label>Role:</label><br>
+  <select name="role" required>
+    <option value="admin">Admin - Full Access</option>
+    <option value="bursar">Bursar - Fees Only</option>
+    <option value="secretary">Secretary - Students + Payments</option>
+    <option value="class_teacher">Class Teacher - Own Class Only</option>
+  </select><br><br>
+
+  <label>Assign to Class (for Class Teachers only):</label><br>
+  <select name="assigned_class">
+    <option value="">None</option>
+    <option value="P1">P1</option>
+    <option value="P2">P2</option>
+    <option value="P3">P3</option>
+    <option value="P4">P4</option>
+    <option value="P5">P5</option>
+    <option value="P6">P6</option>
+    <option value="P7">P7</option>
+  </select><br><br>
+
+  <h3>Permissions:</h3>
+  <input type="checkbox" name="permissions[view_students]" checked> View Students<br>
+  <input type="checkbox" name="permissions[add_student]"> Add Students<br>
+  <input type="checkbox" name="permissions[record_payment]"> Record Payments<br>
+  <input type="checkbox" name="permissions[manage_users]"> Manage Users<br>
+  <input type="checkbox" name="permissions[manage_permissions]"> Manage Permissions<br>
+  <input type="checkbox" name="permissions[view_audit]"> View Audit Logs<br><br>
+
+  <button type="submit">Create Staff</button>
+</form>
+<a href="/admin">Back to Dashboard</a>
+</body>
+</html>
