@@ -112,50 +112,29 @@ const requireLogin = (req, res, next) => {
   res.redirect('/admin/login');
 };
 
-const requireRole = (roles) => (req, res, next) => {
-  if (req.session.adminRole && roles.includes(req.session.adminRole)) return next();
-  res.send('Access denied. <a href="/admin">Back</a>');
+const requirePermission = (permission) => {
+  return async (req, res, next) => {
+    if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
+    
+    // Super admin always passes
+    if (req.session.user.role === 'admin') return next();
+    
+    const result = await pool.query(
+      'SELECT * FROM user_permissions WHERE username = $1', 
+      [req.session.user.username]
+    );
+    
+    if (result.rows.length === 0 || !result.rows[0][permission]) {
+      return res.status(403).json({ error: 'You do not have permission for this task' });
+    }
+    next();
+  };
 };
 
-// ========== SMS HELPER - FREE METHOD ==========
-async function sendSMS(phone, message) {
-  // For production: uncomment below when you have API key:
-  try {
-    const response = await fetch('https://api.africastalking.com/version1/messaging', {
-      method: 'POST',
-      headers: {
-        'apiKey': process.env.AT_API_KEY, 
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json'
-      },
-      body: `username=${process.env.AT_USERNAME}&to=${phone}&message=${encodeURIComponent(message)}`
-    });
-    const data = await response.json();
-    console.log('SMS API Response:', data);
-    return data.SMSMessageData.Recipients[0].status === 'Success';
-  } catch (err) {
-    console.log(`SMS Failed, logged only: ${phone}: ${message}`);
-    return false;
-  }
-}
-
 // ========== PUBLIC ROUTES ==========
-app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html><html><head><title>Ssewasswa Primary</title>
-    <style>
-      body{font-family:Arial;text-align:center;padding-top:100px;background:#f4f6f9}
-   .btn{background:#3498db;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;margin:10px;display:inline-block;font-size:18px}
-   .btn-green{background:#27ae60}
-    </style></head><body>
-      <h1>Ssewasswa Primary School</h1>
-      <h2>Fees Management System</h2>
-      <a href="/admin/login" class="btn">Staff Login</a>
-      <a href="/parent" class="btn btn-green">Parent Portal</a>
-    </body></html>
-  `);
-});
-
+app.get('/admin/users', requirePermission('can_manage_users'), (req, res) => { ... });
+app.post('/admin/term', requirePermission('can_manage_terms'), (req, res) => { ... });
+app.post('/payments', requirePermission('can_record_payments'), (req, res) => { ... });
 app.get('/health', (req, res) => res.json({ status: 'API is running', timestamp: new Date() }));
 
 // ========== AUTH ROUTES ==========
@@ -171,7 +150,36 @@ app.get('/admin/login', (req, res) => {
   <p style="font-size:12px;color:#666;margin-top:20px">Default: bursar/bursar123 or headteacher/bursar123</p>
   </div></body></html>`);
 });
+app.get('/admin/permissions', requireRole(['admin']), async (req, res) => {
+  const users = await pool.query(`
+    SELECT a.username, a.full_name, a.role, p.* 
+    FROM admins a 
+    LEFT JOIN user_permissions p ON a.username = p.username 
+    ORDER BY a.username
+  `);
+  res.render('permissions', { users: users.rows });
+});
 
+app.post('/admin/permissions', requireRole(['admin']), async (req, res) => {
+  const { username, permissions } = req.body;
+  await pool.query(`
+    UPDATE user_permissions SET 
+      can_manage_users = $1,
+      can_manage_terms = $2,
+      can_view_reports = $3,
+      can_record_payments = $4,
+      can_manage_students = $5
+    WHERE username = $6
+  `, [
+    permissions.can_manage_users || false,
+    permissions.can_manage_terms || false, 
+    permissions.can_view_reports || false,
+    permissions.can_record_payments || false,
+    permissions.can_manage_students || false,
+    username
+  ]);
+  res.json({ success: true });
+});
 app.post('/admin/login', async (req, res) => {
   const { username, password } = req.body;
   const result = await pool.query('SELECT * FROM admins WHERE username = $1', [username]);
