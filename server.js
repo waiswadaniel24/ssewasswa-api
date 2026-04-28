@@ -93,10 +93,9 @@ initDB();
 
 // MIDDLEWARE - MOVED UP BEFORE ROUTES
 function requireAuth(req, res, next) {
-  if (req.session.user) return next();
-  res.redirect('/admin/login');
+  if (!req.session.user) return res.status(401).send('Not logged in');
+  next();
 }
-
 function requirePermission(perm) {
   return async (req, res, next) => {
     if (req.session.user.role === 'admin') return next();
@@ -121,10 +120,7 @@ app.get('/admin/login', (req, res) => {
   <p style="font-size:12px;color:#666;margin-top:20px">Default: admin/bursar123</p>
   </div></body></html>`);
 });
-const requireAuth = (req, res, next) => {
-  if (!req.session.user) return res.status(401).send('Not logged in');
-  next();
-};
+
 app.post('/admin/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
 
