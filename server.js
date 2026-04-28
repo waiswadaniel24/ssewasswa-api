@@ -340,25 +340,15 @@ app.get('/admin/class/:className', requireLogin, async (req, res) => {
                 UGX ${Number(s.balance).toLocaleString()}
               </td>
               <td class="no-print">
-  <a href="/admin/payments/add?student_id=${s.id}" class="btn" style="padding:6px 12px;font-size:12px">+ Payment</a>
-  <a href="/admin/students/${s.id}" class="btn" style="padding:6px 12px;font-size:12px;background:#95a5a6">View</a>
-</td>
-app.get('/admin/payments/add', requireLogin, async (req, res) => {
-  const preselectedId = req.query.student_id || '';
-  const students = await pool.query('SELECT id, name, class, balance FROM students WHERE balance > 0 ORDER BY name');
-  res.send(`<!DOCTYPE html><html><head><title>Record Payment</title>
-  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
-  </head><body><h2>Record Payment</h2><form method="POST" action="/admin/payments/add">
-    <select name="student_id" required>
-      <option value="">Select Student</option>
-      ${students.rows.map(s => `<option value="${s.id}" ${s.id == preselectedId ? 'selected' : ''}>${s.name} - ${s.class} - Bal: UGX ${Number(s.balance).toLocaleString()}</option>`).join('')}
-    </select>
-    <input name="amount" type="number" placeholder="Amount UGX" required>
-    <input name="method" placeholder="Payment Method e.g MTN" required>
-    <input name="reference" placeholder="Reference/TxID">
-    <button type="submit">Save Payment</button>
-  </form><a href="/admin">Back</a></body></html>`);
-});
+                <a href="/admin/payments/add?student_id=${s.id}" class="btn" style="padding:6px 12px;font-size:12px">+ Payment</a>
+                <a href="/admin/students/${s.id}" class="btn" style="padding:6px 12px;font-size:12px;background:#95a5a6">View</a>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <script>
         function filterTable() {
           const input = document.getElementById('searchBox');
           const filter = input.value.toLowerCase();
@@ -378,6 +368,24 @@ app.get('/admin/payments/add', requireLogin, async (req, res) => {
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
   }
+});
+
+// PAYMENTS ADD - WITH PRE-SELECT
+app.get('/admin/payments/add', requireLogin, async (req, res) => {
+  const preselectedId = req.query.student_id || '';
+  const students = await pool.query('SELECT id, name, class, balance FROM students WHERE balance > 0 ORDER BY name');
+  res.send(`<!DOCTYPE html><html><head><title>Record Payment</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
+  </head><body><h2>Record Payment</h2><form method="POST" action="/admin/payments/add">
+    <select name="student_id" required>
+      <option value="">Select Student</option>
+      ${students.rows.map(s => `<option value="${s.id}" ${s.id == preselectedId ? 'selected' : ''}>${s.name} - ${s.class} - Bal: UGX ${Number(s.balance).toLocaleString()}</option>`).join('')}
+    </select>
+    <input name="amount" type="number" placeholder="Amount UGX" required>
+    <input name="method" placeholder="Payment Method e.g MTN" required>
+    <input name="reference" placeholder="Reference/TxID">
+    <button type="submit">Save Payment</button>
+  </form><a href="/admin">Back</a></body></html>`);
 });
 
 // CREATE USER - GET
@@ -410,33 +418,3 @@ app.get('/admin/users/add', requireLogin, (req, res) => {
     <button type="submit">Create User</button>
   </form><a href="/admin">Back</a></div></body></html>`);
 });
-
-// CREATE USER - POST
-app.post('/admin/users/add', requireLogin, async (req, res) => {
-  try {
-    const { username, password, role, assigned_class } = req.body;
-    const hash = await bcrypt.hash(password, 10);
-
-    await pool.query(
-      'INSERT INTO admins (username, password, role, assigned_class) VALUES ($1, $2, $3, $4)',
-      [username, hash, role, assigned_class || null]
-    );
-
-    await logAction(req.session.user.username, 'USER_CREATED', { newUser: username, role, assigned_class });
-    res.send(`User ${username} created. <a href="/admin">Dashboard</a>`);
-  } catch (err) {
-    res.status(500).send('Error: ' + err.message);
-  }
-});
-// Class Teacher Dashboard
-app.get('/admin/my-class', requireLogin, async (req, res) => {
-  const user = req.session.user;
-  
-  if (user.role !== 'class_teacher' || !user.assigned_class) {
-    return res.redirect('/admin');
-  }
-  
-  res.redirect(`/admin/class/${user.assigned_class}`);
-});
-
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
