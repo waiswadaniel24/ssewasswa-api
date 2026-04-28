@@ -947,8 +947,9 @@ app.get('/admin/export/payments', requireLogin, async (req, res) => {
 // TEMP ROUTE - DELETE AFTER USE
 app.get('/make-admin', async (req, res) => {
   const hash = await bcrypt.hash('bursar123', 10);
-  await pool.query(`DELETE FROM admins WHERE username = 'headteacher'`);
-  await pool.query(`INSERT INTO admins (username, password, role, full_name) VALUES ('headteacher', $1, 'headteacher', 'Head Teacher')`, [hash]);
-  res.send(`Done. Hash: ${hash} <br> Now login: headteacher/bursar123 <br> DELETE THIS ROUTE!`);
+  await pool.query(`DELETE FROM admins WHERE username IN ('headteacher', 'secretary')`);
+  await pool.query(`INSERT INTO admins (username, password, role, full_name) VALUES ('headteacher', $1, 'headteacher', 'Head Teacher')`, );
+  await pool.query(`INSERT INTO admins (username, password, role, full_name) VALUES ('secretary', $1, 'secretary', 'School Secretary')`, );
+  res.send('Done. Now login: headteacher/bursar123. DELETE THIS ROUTE FROM CODE!');
 });
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
