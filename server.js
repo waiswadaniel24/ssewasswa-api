@@ -425,9 +425,12 @@ app.get('/admin/payments/add', requireLogin, async (req, res) => {
 
 app.post('/admin/payments/add', requireLogin, async (req, res) => {
   const { student_id, amount, method, reference } = req.body;
-  await pool.query('INSERT INTO payments (student_id, amount, method, reference) VALUES ($1,$2,$3,$4)', [student_id, amount, method, reference]);
+  const payment = await pool.query(
+    'INSERT INTO payments (student_id, amount, method, reference) VALUES ($1,$2,$3,$4) RETURNING id',
+    [student_id, amount, method, reference]
+  );
   await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
-  res.redirect('/admin');
+  res.redirect(`/admin/payments/receipt/${payment.rows[0].id}`);
 });
 
 app.get('/admin/payments/methods', requireLogin, async (req, res) => {
