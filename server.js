@@ -383,5 +383,49 @@ app.post('/parent/check', async (req, res) => {
     ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td></tr>`).join('')}
     </table></div></body></html>`);
 });
+app.get('/make-admin', async (req, res) => {
+  const hash = await bcrypt.hash('bursar123', 10);
+  await pool.query(`DELETE FROM admins WHERE username = 'admin'`);
+  await pool.query(`INSERT INTO admins (username, password, role, full_name) VALUES ('admin', $1, 'admin', 'System Admin')`, [hash]);
+  await pool.query(`INSERT INTO user_permissions (username, can_manage_users, can_manage_terms, can_view_reports, can_record_payments, can_manage_students) VALUES ('admin', true, true, true, true, true) ON CONFLICT (username) DO UPDATE SET can_manage_users = true, can_manage_terms = true`);
+  res.send('Admin created. Username: admin | Password: bursar123. DELETE THIS ROUTE NOW!');
+});
+// --- PERMISSIONS MANAGEMENT ROUTE ---
+app.get('/admin/permissions', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  const users = await pool.query(`
+    SELECT a.username, a.role,
+           COALESCE(p.can_manage_users, false) as can_manage_users,
+           COALESCE(p.can_manage_terms, true) as can_manage_terms,
+           COALESCE(p.can_view_reports, true) as can_view_reports,
+           COALESCE(p.can_record_payments, true) as can_record_payments,
+           COALESCE(p.can_manage_students, true) as can_manage_students
+    FROM admins a
+    LEFT JOIN user_permissions p ON a.username = p.username
+    WHERE a.role NOT IN ('admin', 'headteacher', 'principal')
+    ORDER BY a.role, a.username
+  `);
+  res.render('permissions', { user: req.session.user, users: users.rows });
+});
+function requireAuth(req, res, next) {
+  if (req.session.user) return next();
+  res.redirect('/admin/login');
+}
 
+function requirePermission(perm) {
+  return async (req, res, next) => {
+    if (req.session.user.role === 'admin') return next();
+    const result = await pool.query('SELECT * FROM user_permissions WHERE username = $1', [req.session.user.username]);
+    if (result.rows[0] && result.rows[0][perm]) return next();
+    res.status(403).send('You do not have permission for this task');
+  };
+}
+app.post('/admin/permissions/update', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  const { username, permission, value } = req.body;
+  await pool.query(`
+    INSERT INTO user_permissions (username, ${permission})
+    VALUES ($1, $2)
+    ON CONFLICT (username) DO UPDATE SET ${permission} = $2
+  `, [username, value === 'true']);
+  res.json({ success: true });
+});
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
