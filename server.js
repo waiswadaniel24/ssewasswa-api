@@ -399,7 +399,7 @@ app.get('/create-bursar', async (req, res) => {
       INSERT INTO admins (username, password, role, full_name)
       VALUES ('bursar', $1, 'bursar', 'School Bursar')
       ON CONFLICT (username) DO NOTHING
-    `, ); // FIXED: Added [hash]
+    `, );
     res.send('Bursar created. Username: bursar | Password: bursar123');
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
