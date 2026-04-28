@@ -432,6 +432,51 @@ app.post('/admin/payments/add', requireLogin, async (req, res) => {
   await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
   res.redirect(`/admin/payments/receipt/${payment.rows[0].id}`);
 });
+app.get('/admin/payments/receipt/:id', requireLogin, async (req, res) => {
+  const result = await pool.query(`
+    SELECT p.*, s.name, s.class, s.term, s.year, s.total_fees, s.balance
+    FROM payments p
+    JOIN students s ON p.student_id = s.id
+    WHERE p.id = $1
+  `, [req.params.id]);
+
+  if (!result.rows.length) return res.send('Receipt not found');
+  const r = result.rows[0];
+
+  res.send(`<!DOCTYPE html><html><head><title>Receipt #${r.id}</title>
+  <style>
+    body{font-family:Arial;max-width:700px;margin:20px auto;padding:20px}
+   .receipt{border:2px solid #000;padding:30px}
+   .header{text-align:center;border-bottom:2px solid #000;padding-bottom:15px;margin-bottom:20px}
+   .school{font-size:24px;font-weight:bold}
+    table{width:100%;margin:20px 0}td{padding:8px}
+   .amount{font-size:28px;font-weight:bold;color:#27ae60}
+    @media print{.no-print{display:none}}
+  </style>
+  </head><body>
+    <button class="no-print" onclick="window.print()" style="padding:10px 20px;background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer;margin-bottom:20px">Print Receipt</button>
+    <a href="/admin" class="no-print" style="padding:10px 20px;background:#95a5a6;color:white;text-decoration:none;border-radius:4px;margin-left:10px">Back to Dashboard</a>
+
+    <div class="receipt">
+      <div class="header">
+        <div class="school">SSEWASSWA PRIMARY SCHOOL</div>
+        <div>Fees Payment Receipt</div>
+      </div>
+
+      <table>
+        <tr><td><b>Receipt No:</b></td><td>#${r.id}</td><td><b>Date:</b></td><td>${new Date(r.payment_date).toLocaleDateString()}</td></tr>
+        <tr><td><b>Student Name:</b></td><td colspan="3">${r.name}</td></tr>
+        <tr><td><b>Class:</b></td><td>${r.class}</td><td><b>Term:</b></td><td>${r.term} ${r.year}</td></tr>
+        <tr><td><b>Amount Paid:</b></td><td colspan="3" class="amount">UGX ${Number(r.amount).toLocaleString()}</td></tr>
+        <tr><td><b>Payment Method:</b></td><td>${r.method}</td><td><b>Reference:</b></td><td>${r.reference || '-'}</td></tr>
+        <tr><td><b>Total Fees:</b></td><td>UGX ${Number(r.total_fees).toLocaleString()}</td><td><b>Balance:</b></td><td>UGX ${Number(r.balance).toLocaleString()}</td></tr>
+      </table>
+
+      <p style="margin-top:40px;text-align:center">Received with thanks</p>
+      <p style="margin-top:60px">_____________________<br>Bursar Signature</p>
+    </div>
+  </body></html>`);
+});
 
 app.get('/admin/payments/methods', requireLogin, async (req, res) => {
   const methods = await pool.query('SELECT * FROM payment_methods');
