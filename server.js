@@ -377,7 +377,6 @@ app.get('/admin/students/:id', requireLogin, async (req, res) => {
     <h2>${s.name} - ${s.class}</h2>
   <p><b>Term:</b> ${s.term} ${s.year} | <b>Total Fees:</b> UGX ${Number(s.total_fees).toLocaleString()} | <b>Balance:</b> UGX ${Number(s.balance).toLocaleString()}</p>
 <a href="/admin/students/${s.id}/edit" class="btn">Edit Student</a>
-<a href="/admin/students/${s.id}/edit" class="btn">Edit Student</a>
     <a href="/admin/students/${s.id}/statement" class="btn" target="_blank">Print Statement</a>
     <h3>Payment History</h3><table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr>
     ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td><td>${p.reference || '-'}</td></tr>`).join('')}
