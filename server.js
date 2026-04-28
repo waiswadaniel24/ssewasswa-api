@@ -1,8 +1,9 @@
 const rateLimit = require('express-rate-limit');
 const express = require('express');
 const session = require('express-session');
-const bcrypt = require('bcrypt'); // not bcryptjs
+const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -12,9 +13,43 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production'? { rejectUnauthorized: false } : false
 });
 
+// Email alerts - DB controlled
+let transporter = null;
+let ADMIN_EMAIL = '';
+
+async function loadEmailSettings() {
+  try {
+    const res = await pool.query(`SELECT key, value FROM settings WHERE key IN ('alert_email_user', 'alert_email_pass', 'admin_email')`);
+    const settings = Object.fromEntries(res.rows.map(r => [r.key, r.value]));
+    
+    ADMIN_EMAIL = settings.admin_email || '';
+    
+    if (settings.alert_email_user && settings.alert_email_pass) {
+      transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: settings.alert_email_user,
+          pass: settings.alert_email_pass
+        }
+      });
+      console.log('✅ Email alerts enabled for:', settings.alert_email_user);
+    } else {
+      transporter = null;
+      console.log('⚠️ Email alerts disabled - configure in /admin/settings');
+    }
+  } catch (err) {
+    console.error('Failed to load email settings:', err);
+    transporter = null;
+  }
+}
+
+// Call on startup after DB is ready
+loadEmailSettings();
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use(express.static('public')); // add this line
+app.use(express.static('public'));
+
 // Rate limiting: stop brute force on login
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -25,9 +60,6 @@ const loginLimiter = rateLimit({
 });
 app.use('/admin/login', loginLimiter);
 
-// Audit log table - run once in psql
-// CREATE TABLE audit_logs (id SERIAL PRIMARY KEY, username VARCHAR(255), action TEXT, details JSONB, created_at TIMESTAMP DEFAULT NOW());
-
 // Audit log helper
 async function logAction(username, action, details = {}) {
   try {
@@ -35,12 +67,24 @@ async function logAction(username, action, details = {}) {
       'INSERT INTO audit_logs (username, action, details) VALUES ($1, $2, $3)',
       [username, action, JSON.stringify(details)]
     );
+
+    // Email alerts for security events
+    const securityActions = ['LOGIN_FAIL', 'PASSWORD_CHANGE_SUCCESS', 'USER_CREATED', 'PERMISSION_CHANGED'];
+    if (securityActions.includes(action) && transporter && ADMIN_EMAIL) {
+      transporter.sendMail({
+        from: ADMIN_EMAIL,
+        to: ADMIN_EMAIL,
+        subject: `[Ssewasswa API] Security Alert: ${action}`,
+        text: `User: ${username}\nAction: ${action}\nDetails: ${JSON.stringify(details, null, 2)}\nTime: ${new Date().toLocaleString()}`
+      }).catch(err => console.error('Email alert failed:', err));
+    }
   } catch (err) {
     console.error('Audit log failed:', err);
   }
 }
+
 app.use(session({
-  secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET || 'fallback-secret-change-me',
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 24 * 60 * 60 * 1000 }
@@ -125,32 +169,26 @@ app.get('/admin/login', (req, res) => {
 
 app.post('/admin/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
-
   try {
-    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-
+    const result = await pool.query('SELECT * FROM admins WHERE username = $1', [username]);
     if (result.rows.length === 0) {
       await logAction(username, 'LOGIN_FAIL', { reason: 'User not found' });
       return res.status(401).send('Invalid credentials');
     }
-
     const user = result.rows[0];
     const match = await bcrypt.compare(password, user.password);
-
     if (!match) {
       await logAction(username, 'LOGIN_FAIL', { reason: 'Wrong password' });
       return res.status(401).send('Invalid credentials');
     }
-
     req.session.user = { id: user.id, username: user.username, role: user.role };
     await logAction(username, 'LOGIN_SUCCESS', {});
-    res.send('Logged in'); // This line is key - no redirect
+    res.send('Logged in');
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error');
   }
 });
-
 app.get('/admin/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/admin/login'));
 });
@@ -189,6 +227,8 @@ app.get('/admin', requireAuth, async (req, res) => {
       </div>
       <div>
         <a href="/admin/students/add" class="btn">Add Student</a>
+        <a href="/admin/change-password" class="btn">Change Password</a>
+        <a href="/admin/users/add" class="btn">Create User</a>
         <a href="/admin/payments/add" class="btn">Record Payment</a>
         <a href="/admin/payments/methods" class="btn">Payment Methods</a>
         <a href="/admin/students" class="btn">All Students</a>
@@ -252,14 +292,12 @@ app.get('/admin/permissions', requireAuth, requirePermission('can_manage_users')
           </tr>
         `).join('')}
       </table>
-      ${users.rows.length === 0? '<p>No other users yet. Create a bursar account first.</p>' : ''}
     </div></body></html>`);
   } catch (err) {
     console.error(err);
     res.status(500).send('Database error: ' + err.message);
   }
 });
-
 app.post('/admin/permissions/update', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
   const { username, permission, value } = req.body;
   await pool.query(`
@@ -268,6 +306,78 @@ app.post('/admin/permissions/update', requireAuth, requirePermission('can_manage
     ON CONFLICT (username) DO UPDATE SET ${permission} = $2
   `, [username, value === true || value === 'true']);
   res.json({ success: true });
+});
+// SETTINGS - GET
+app.get('/admin/settings', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  try {
+    const settings = await pool.query(`SELECT key, value FROM settings`);
+    const s = Object.fromEntries(settings.rows.map(r => [r.key, r.value]));
+    
+    res.send(`<!DOCTYPE html><html><head><title>Settings</title>
+    <style>
+      body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px;background:#f4f6f9}
+     .card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+      input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}
+      button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer;font-size:16px}
+      button:hover{background:#229954}
+      label{font-weight:bold;display:block;margin-top:15px}
+     .btn-link{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;display:inline-block;margin-top:10px}
+     .status{padding:10px;margin:10px 0;border-radius:4px}
+     .enabled{background:#d4edda;color:#155724}
+     .disabled{background:#f8d7da;color:#721c24}
+    </style>
+    </head><body><div class="card">
+    <h2>Email Alert Settings</h2>
+    <div class="status ${transporter ? 'enabled' : 'disabled'}">
+      Status: Email alerts ${transporter ? 'ENABLED' : 'DISABLED - Configure below'}
+    </div>
+    <form method="POST" action="/admin/settings">
+      <label>Gmail Address</label>
+      <input name="alert_email_user" type="email" value="${s.alert_email_user || ''}" placeholder="your@gmail.com" required>
+      
+      <label>Gmail App Password 
+        <a href="https://myaccount.google.com/apppasswords" target="_blank" style="font-weight:normal;font-size:12px">(Get App Password)</a>
+      </label>
+      <input name="alert_email_pass" type="password" value="${s.alert_email_pass || ''}" placeholder="16-character password" required>
+      
+      <label>Send Alerts To</label>
+      <input name="admin_email" type="email" value="${s.admin_email || ''}" placeholder="your@gmail.com" required>
+      
+      <button type="submit">Save Settings</button>
+    </form>
+    <p style="font-size:12px;color:#666;margin-top:20px">
+      Changes take effect immediately. Test by failing a login with wrong password.
+    </p>
+    <a href="/admin" class="btn-link">Back to Dashboard</a>
+    </div></body></html>`);
+  } catch (err) {
+    res.status(500).send('Database error: ' + err.message);
+  }
+});
+
+// SETTINGS - POST
+app.post('/admin/settings', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  try {
+    const { alert_email_user, alert_email_pass, admin_email } = req.body;
+    
+    await pool.query(`INSERT INTO settings (key, value) VALUES ('alert_email_user', $1) ON CONFLICT (key) DO UPDATE SET value = $1`, [alert_email_user]);
+    await pool.query(`INSERT INTO settings (key, value) VALUES ('alert_email_pass', $1) ON CONFLICT (key) DO UPDATE SET value = $1`, [alert_email_pass]);
+    await pool.query(`INSERT INTO settings (key, value) VALUES ('admin_email', $1) ON CONFLICT (key) DO UPDATE SET value = $1`, [admin_email]);
+    
+    await loadEmailSettings(); // Reload transporter
+    await logAction(req.session.user.username, 'SETTINGS_UPDATED', { alert_email_user });
+    
+    res.send(`
+      <div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)">
+        <h2>Settings Saved</h2>
+        <p>Email alerts are now <strong>${transporter ? 'ENABLED' : 'DISABLED - Check your Gmail/App Password'}</strong></p>
+        <a href="/admin/settings" class="btn">Email Settings</a>
+	<a href="/admin/settings" style="background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px">Back to Settings</a>
+      </div>
+    `);
+  } catch (err) {
+    res.status(500).send('Error saving: ' + err.message);
+  }
 });
 
 // OTHER ROUTES...
@@ -426,7 +536,7 @@ app.post('/admin/change-password', requireAuth, async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     const userId = req.session.user.id;
 
-    const result = await pool.query('SELECT password FROM users WHERE id = $1', [userId]);
+    const result = await pool.query('SELECT password FROM admins WHERE id = $1', [userId]);
     if (result.rows.length === 0) return res.status(404).send('User not found');
 
     const match = await bcrypt.compare(oldPassword, result.rows[0].password);
@@ -436,7 +546,7 @@ app.post('/admin/change-password', requireAuth, async (req, res) => {
     }
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hash, userId]);
+    await pool.query('UPDATE admins SET password = $1 WHERE id = $2', [hash, userId]);
 
     await logAction(req.session.user.username, 'PASSWORD_CHANGE_SUCCESS', {});
     res.send('Password changed successfully');
@@ -461,5 +571,56 @@ app.get('/admin/change-password', requireAuth, (req, res) => {
   </form>
   <a href="/admin" style="display:block;text-align:center;margin-top:15px">Back to Dashboard</a>
   </div></body></html>`);
+});
+// CREATE USER - GET form
+app.get('/admin/users/add', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Create User</title>
+  <style>body{font-family:Arial;max-width:500px;margin:50px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,select,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Create New User</h2>
+  <form method="POST" action="/admin/users/add">
+    <input name="username" placeholder="Username" required>
+    <input type="password" name="password" placeholder="Password" required>
+    <select name="role" required>
+      <option value="bursar">Bursar</option>
+      <option value="admin">Admin</option>
+    </select>
+    <button type="submit">Create User</button>
+  </form><a href="/admin">Back</a></div></body></html>`);
+});
+
+// CREATE USER - POST
+app.post('/admin/users/add', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  try {
+    const { username, password, role } = req.body;
+
+    const exists = await pool.query('SELECT 1 FROM admins WHERE username = $1', [username]);
+    if (exists.rows.length) return res.status(400).send('Username already exists. <a href="/admin/users/add">Try again</a>');
+
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query('INSERT INTO admins (username, password, role) VALUES ($1, $2, $3)', [username, hash, role]);
+
+    if (role === 'bursar') {
+      await pool.query(`INSERT INTO user_permissions (username) VALUES ($1) ON CONFLICT DO NOTHING`, [username]);
+    }
+
+    await logAction(req.session.user.username, 'USER_CREATED', { newUser: username, role });
+    res.send(`User ${username} created. <a href="/admin">Dashboard</a>`);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Update permission route to also log + email
+app.post('/admin/permissions/update', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  const { username, permission, value } = req.body;
+  await pool.query(`
+    INSERT INTO user_permissions (username, ${permission})
+    VALUES ($1, $2)
+    ON CONFLICT (username) DO UPDATE SET ${permission} = $2
+  `, [username, value === true || value === 'true']);
+
+  await logAction(req.session.user.username, 'PERMISSION_CHANGED', { targetUser: username, permission, value });
+  res.json({ success: true });
 });
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
