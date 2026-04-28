@@ -20,13 +20,14 @@ app.use(session({
   cookie: { maxAge: 24 * 60 * 60 * 1000 }
 }));
 
-// Initialize DB
+// ========== DATABASE SETUP ==========
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admins (
       id SERIAL PRIMARY KEY,
       username VARCHAR(50) UNIQUE NOT NULL,
-      password VARCHAR(255) NOT NULL
+      password VARCHAR(255) NOT NULL,
+      role VARCHAR(20) DEFAULT 'bursar'
     );
     CREATE TABLE IF NOT EXISTS students (
       id SERIAL PRIMARY KEY,
@@ -45,30 +46,27 @@ async function initDB() {
     );
   `);
 
+  // Add missing columns to existing tables
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS class VARCHAR(50) DEFAULT 'P.6'`);
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS term VARCHAR(20) DEFAULT 'term1'`);
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS year INTEGER DEFAULT 2025`);
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS total_fees INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS balance INTEGER DEFAULT 0`);
-  
+
   await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS method VARCHAR(50)`);
   await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference VARCHAR(100)`);
-  
+
   await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS number VARCHAR(50)`);
   await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS account_name VARCHAR(100)`);
   await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS instructions TEXT`);
 
+  await pool.query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'bursar'`);
+
+  // Create default admin
   const admin = await pool.query('SELECT * FROM admins WHERE username = $1', ['bursar']);
   if (admin.rows.length === 0) {
     const hash = await bcrypt.hash('bursar123', 10);
-    await pool.query('INSERT INTO admins (username, password) VALUES ($1, $2)', ['bursar', hash]);
-  }
-  console.log('✅ Database ready');
-}
-  const admin = await pool.query('SELECT * FROM admins WHERE username = $1', ['bursar']);
-  if (admin.rows.length === 0) {
-    const hash = await bcrypt.hash('bursar123', 10);
-    await pool.query('INSERT INTO admins (username, password) VALUES ($1, $2)', ['bursar', hash]);
+    await pool.query('INSERT INTO admins (username, password, role) VALUES ($1, $2, $3)', ['bursar', hash, 'bursar']);
   }
   console.log('✅ Database ready');
 }
@@ -79,19 +77,35 @@ const requireLogin = (req, res, next) => {
   res.redirect('/admin/login');
 };
 
-// HEALTH
-app.get('/health', (req, res) => res.json({ status: 'API is running' }));
+// ========== PUBLIC ROUTES ==========
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html><html><head><title>Ssewasswa Primary</title>
+    <style>
+      body{font-family:Arial;text-align:center;padding-top:100px;background:#f4f6f9}
+     .btn{background:#3498db;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;margin:10px;display:inline-block;font-size:18px}
+     .btn-green{background:#27ae60}
+    </style></head><body>
+      <h1>Ssewasswa Primary School</h1>
+      <h2>Fees Management System</h2>
+      <a href="/admin/login" class="btn">Bursar Login</a>
+      <a href="/parent" class="btn btn-green">Parent Portal</a>
+    </body></html>
+  `);
+});
 
-// LOGIN
+app.get('/health', (req, res) => res.json({ status: 'API is running', timestamp: new Date() }));
+
+// ========== AUTH ROUTES ==========
 app.get('/admin/login', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Login</title>
-  <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:20px}input,button{width:100%;padding:10px;margin:8px 0}</style>
-  </head><body><h2>Bursar Login</h2>
+  <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}button{background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer;font-size:16px}</style>
+  </head><body><div class="card"><h2>Bursar Login</h2>
   <form method="POST" action="/admin/login">
     <input name="username" placeholder="Username" required>
     <input type="password" name="password" placeholder="Password" required>
     <button type="submit">Login</button>
-  </form></body></html>`);
+  </form></div></body></html>`);
 });
 
 app.post('/admin/login', async (req, res) => {
@@ -99,6 +113,7 @@ app.post('/admin/login', async (req, res) => {
   const result = await pool.query('SELECT * FROM admins WHERE username = $1', [username]);
   if (result.rows.length && await bcrypt.compare(password, result.rows[0].password)) {
     req.session.adminId = result.rows[0].id;
+    req.session.adminRole = result.rows[0].role;
     res.redirect('/admin');
   } else {
     res.send('Invalid login. <a href="/admin/login">Try again</a>');
@@ -109,7 +124,7 @@ app.get('/admin/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/admin/login'));
 });
 
-// DASHBOARD WITH CHARTS
+// ========== ADMIN DASHBOARD ==========
 app.get('/admin', requireLogin, async (req, res) => {
   const stats = await pool.query(`
     SELECT
@@ -140,15 +155,15 @@ app.get('/admin', requireLogin, async (req, res) => {
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body{font-family:Arial;margin:0;background:#f4f6f9;padding:20px}
-   .container{max-width:1400px;margin:auto}
-   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
-   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;margin-bottom:20px}
-   .card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
-   .card h3{margin:0 0 10px 0;color:#666;font-size:14px;font-weight:normal}
-   .card.num{font-size:32px;font-weight:bold;color:#2c3e50}
-   .grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}
-   .btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px 5px 0}
-   .btn-red{background:#e74c3c}
+  .container{max-width:1400px;margin:auto}
+  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;margin-bottom:20px}
+  .card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+  .card h3{margin:0 0 10px 0;color:#666;font-size:14px;font-weight:normal}
+  .card.num{font-size:32px;font-weight:bold;color:#2c3e50}
+  .grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}
+  .btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px 5px 0}
+  .btn-red{background:#e74c3c}
     table{width:100%;background:white;border-collapse:collapse;margin-top:10px}
     th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
     th{background:#34495e;color:white;font-size:14px}
@@ -232,18 +247,18 @@ app.get('/admin', requireLogin, async (req, res) => {
   </script></body></html>`);
 });
 
-// ADD STUDENT
+// ========== STUDENT ROUTES ==========
 app.get('/admin/students/add', requireLogin, (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Add Student</title>
-  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
-  </head><body><h2>Add Student</h2><form method="POST" action="/admin/students/add">
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}</style>
+  </head><body><h2>Add Student</h2><a href="/admin">Back to Dashboard</a><form method="POST" action="/admin/students/add">
     <input name="name" placeholder="Student Name" required>
     <input name="class" placeholder="Class e.g P.6" required>
     <input name="term" placeholder="Term e.g term1" required>
-    <input name="year" type="number" placeholder="Year e.g 2025" required>
+    <input name="year" type="number" value="2025" required>
     <input name="total_fees" type="number" placeholder="Total Fees UGX" required>
     <button type="submit">Save Student</button>
-  </form><a href="/admin">Back</a></body></html>`);
+  </form></body></html>`);
 });
 
 app.post('/admin/students/add', requireLogin, async (req, res) => {
@@ -255,12 +270,11 @@ app.post('/admin/students/add', requireLogin, async (req, res) => {
   res.redirect('/admin');
 });
 
-// ALL STUDENTS
 app.get('/admin/students', requireLogin, async (req, res) => {
   const students = await pool.query('SELECT * FROM students ORDER BY class, name');
   res.send(`<!DOCTYPE html><html><head><title>Students</title>
-  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#34495e;color:white}</style>
-  </head><body><h2>All Students</h2><a href="/admin">Dashboard</a><table>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px}</style>
+  </head><body><h2>All Students</h2><a href="/admin" class="btn">Dashboard</a> <a href="/admin/students/add" class="btn">Add Student</a><table>
     <tr><th>Name</th><th>Class</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th><th></th></tr>
     ${students.rows.map(s => `
       <tr><td>${s.name}</td><td>${s.class}</td><td>${s.term}</td><td>${s.year}</td>
@@ -271,7 +285,6 @@ app.get('/admin/students', requireLogin, async (req, res) => {
   </table></body></html>`);
 });
 
-// VIEW STUDENT
 app.get('/admin/students/:id', requireLogin, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.id]);
@@ -279,7 +292,7 @@ app.get('/admin/students/:id', requireLogin, async (req, res) => {
   const s = student.rows[0];
   res.send(`<!DOCTYPE html><html><head><title>${s.name}</title>
   <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}.btn{background:#3498db;color:white;padding:10px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:10px;border-bottom:1px solid #ddd}</style>
-  </head><body><a href="/admin/students">Back</a>
+  </head><body><a href="/admin/students">Back to Students</a>
     <h2>${s.name} - ${s.class}</h2>
     <p><b>Term:</b> ${s.term} ${s.year} | <b>Total Fees:</b> UGX ${Number(s.total_fees).toLocaleString()} | <b>Balance:</b> UGX ${Number(s.balance).toLocaleString()}</p>
     <a href="/admin/students/${s.id}/statement" class="btn" target="_blank">Print Statement</a>
@@ -288,7 +301,6 @@ app.get('/admin/students/:id', requireLogin, async (req, res) => {
     </table></body></html>`);
 });
 
-// PRINT STATEMENT
 app.get('/admin/students/:id/statement', requireLogin, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date', [req.params.id]);
@@ -305,12 +317,12 @@ app.get('/admin/students/:id/statement', requireLogin, async (req, res) => {
     </table><p style="margin-top:40px">Generated: ${new Date().toLocaleString()}</p></body></html>`);
 });
 
-// RECORD PAYMENT
+// ========== PAYMENT ROUTES ==========
 app.get('/admin/payments/add', requireLogin, async (req, res) => {
   const students = await pool.query('SELECT id, name, class, balance FROM students WHERE balance > 0 ORDER BY name');
   res.send(`<!DOCTYPE html><html><head><title>Record Payment</title>
-  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
-  </head><body><h2>Record Payment</h2><form method="POST" action="/admin/payments/add">
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}</style>
+  </head><body><h2>Record Payment</h2><a href="/admin">Back</a><form method="POST" action="/admin/payments/add">
     <select name="student_id" required><option value="">Select Student</option>
       ${students.rows.map(s => `<option value="${s.id}">${s.name} - ${s.class} - Bal: UGX ${Number(s.balance).toLocaleString()}</option>`).join('')}
     </select>
@@ -318,7 +330,7 @@ app.get('/admin/payments/add', requireLogin, async (req, res) => {
     <input name="method" placeholder="Payment Method e.g MTN" required>
     <input name="reference" placeholder="Reference/TxID">
     <button type="submit">Save Payment</button>
-  </form><a href="/admin">Back</a></body></html>`);
+  </form></body></html>`);
 });
 
 app.post('/admin/payments/add', requireLogin, async (req, res) => {
@@ -328,11 +340,10 @@ app.post('/admin/payments/add', requireLogin, async (req, res) => {
   res.redirect('/admin');
 });
 
-// PAYMENT METHODS
 app.get('/admin/payments/methods', requireLogin, async (req, res) => {
   const methods = await pool.query('SELECT * FROM payment_methods');
   res.send(`<!DOCTYPE html><html><head><title>Payment Methods</title>
-  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}input,textarea,button{width:100%;padding:10px;margin:8px 0}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:10px;border-bottom:1px solid #ddd}</style>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}input,textarea,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:10px;border-bottom:1px solid #ddd}</style>
   </head><body><h2>Payment Methods</h2><a href="/admin">Back</a>
   <form method="POST" action="/admin/payments/methods">
     <input name="type" placeholder="Type e.g MTN Mobile Money" required>
@@ -353,7 +364,7 @@ app.post('/admin/payments/methods', requireLogin, async (req, res) => {
   res.redirect('/admin/payments/methods');
 });
 
-// PARENT PORTAL
+// ========== PARENT PORTAL ==========
 app.get('/parent', async (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Parent Portal</title>
   <style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
