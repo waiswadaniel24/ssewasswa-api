@@ -952,8 +952,5 @@ app.get('/make-admin', async (req, res) => {
   await pool.query(`INSERT INTO admins (username, password, role, full_name) VALUES ('secretary', $1, 'secretary', 'School Secretary')`, );
   res.send('Done. Now login: headteacher/bursar123. DELETE THIS ROUTE FROM CODE!');
 });
-app.get('/gen-hash', async (req, res) => {
-  const hash = await bcrypt.hash('bursar123', 10);
-  res.json({ password: 'bursar123', hash: hash });
-});
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
