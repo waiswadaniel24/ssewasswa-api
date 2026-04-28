@@ -47,6 +47,13 @@ async function loadEmailSettings() {
 loadEmailSettings();
 
 app.use(express.urlencoded({ extended: true }));
+// Middleware to protect admin routes
+function requireLogin(req, res, next) {
+  if (!req.session.user) {
+    return res.redirect('/admin/login');
+  }
+  next();
+}
 app.use(express.json());
 app.use(express.static('public'));
 
