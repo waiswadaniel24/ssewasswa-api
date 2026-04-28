@@ -67,6 +67,20 @@ async function initDB() {
 }
 initDB();
 
+// MIDDLEWARE - MOVED UP BEFORE ROUTES
+function requireAuth(req, res, next) {
+  if (req.session.user) return next();
+  res.redirect('/admin/login');
+}
+
+function requirePermission(perm) {
+  return async (req, res, next) => {
+    if (req.session.user.role === 'admin') return next();
+    const result = await pool.query('SELECT * FROM user_permissions WHERE username = $1', [req.session.user.username]);
+    if (result.rows[0] && result.rows[0][perm] === true) return next();
+    res.status(403).send('You do not have permission for this task');
+  };
+}
 
 // HEALTH
 app.get('/health', (req, res) => res.json({ status: 'API is running' }));
@@ -83,6 +97,7 @@ app.get('/admin/login', (req, res) => {
   <p style="font-size:12px;color:#666;margin-top:20px">Default: admin/bursar123</p>
   </div></body></html>`);
 });
+
 app.post('/admin/login', async (req, res) => {
   const { username, password } = req.body;
   const result = await pool.query('SELECT * FROM admins WHERE username = $1', [username]);
@@ -105,8 +120,7 @@ app.get('/admin/logout', (req, res) => {
 // DASHBOARD WITH CHARTS
 app.get('/admin', requireAuth, async (req, res) => {
   const role = req.session.user.role;
-  
-  // If admin, show admin dashboard with permissions link
+
   if (role === 'admin') {
     return res.send(`<!DOCTYPE html><html><head><title>Admin Dashboard</title>
     <style>body{font-family:Arial;max-width:800px;margin:50px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}.btn{background:#3498db;color:white;padding:12px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:10px 10px 0 0}</style>
@@ -119,25 +133,15 @@ app.get('/admin', requireAuth, async (req, res) => {
       <a href="/admin/logout" class="btn" style="background:#e74c3c">Logout</a>
     </div></body></html>`);
   }
-  
-  // If bursar, show your existing bursar dashboard code
+
   if (role === 'bursar') {
-    const stats = await pool.query(`
-      SELECT COUNT(*) as total_students, COALESCE(SUM(total_fees),0) as total_fees, COALESCE(SUM(balance),0) as total_balance FROM students
-    `);
+    const stats = await pool.query(`SELECT COUNT(*) as total_students, COALESCE(SUM(total_fees),0) as total_fees, COALESCE(SUM(balance),0) as total_balance FROM students`);
     const payStats = await pool.query(`SELECT COUNT(*) as total_payments, COALESCE(SUM(amount),0) as total_collected FROM payments`);
-    const classData = await pool.query(`SELECT class, SUM(balance) as balance, SUM(total_fees - balance) as paid FROM students GROUP BY class ORDER BY class`);
-    const recentPayments = await pool.query(`SELECT p.*, s.name, s.class FROM payments p JOIN students s ON p.student_id = s.id ORDER BY p.id DESC LIMIT 5`);
-    const allStudents = await pool.query('SELECT * FROM students ORDER BY id DESC LIMIT 10');
-    const paymentMethods = await pool.query('SELECT * FROM payment_methods');
     const s = stats.rows[0];
     const p = payStats.rows[0];
-    
-    // paste your existing res.send(`<!DOCTYPE html>...`) bursar dashboard here
-    // I'm skipping it for brevity but keep your current dashboard HTML
+
     return res.send(`<!DOCTYPE html><html><head><title>Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>body{font-family:Arial;margin:0;background:#f4f6f9;padding:20px}.container{max-width:1400px;margin:auto}.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;margin-bottom:20px}.card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}.card h3{margin:0 0 10px 0;color:#666;font-size:14px;font-weight:normal}.num{font-size:32px;font-weight:bold;color:#2c3e50}.grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px 5px 0}.btn-red{background:#e74c3c}table{width:100%;background:white;border-collapse:collapse;margin-top:10px}th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}th{background:#34495e;color:white;font-size:14px}</style></head><body><div class="container">
+    <style>body{font-family:Arial;margin:0;background:#f4f6f9;padding:20px}.container{max-width:1400px;margin:auto}.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;margin-bottom:20px}.card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}.card h3{margin:0 0 10px 0;color:#666;font-size:14px;font-weight:normal}.num{font-size:32px;font-weight:bold;color:#2c3e50}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px 5px 0}.btn-red{background:#e74c3c}</style></head><body><div class="container">
       <div class="header"><h1>Ssewasswa Primary - Bursar Dashboard</h1><a href="/admin/logout" class="btn btn-red">Logout</a></div>
       <div class="stats">
         <div class="card"><h3>Total Students</h3><div class="num">${s.total_students}</div></div>
@@ -153,11 +157,82 @@ app.get('/admin', requireAuth, async (req, res) => {
       </div>
     </div></body></html>`);
   }
-  
-  // Default fallback
+
   res.send('Access denied. Unknown role.');
 });
-// ADD STUDENT
+
+// PERMISSIONS MANAGEMENT ROUTE - FIXED
+app.get('/admin/permissions', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  try {
+    const users = await pool.query(`
+      SELECT a.username, a.role,
+             COALESCE(p.can_manage_users, false) as can_manage_users,
+             COALESCE(p.can_manage_terms, true) as can_manage_terms,
+             COALESCE(p.can_view_reports, true) as can_view_reports,
+             COALESCE(p.can_record_payments, true) as can_record_payments,
+             COALESCE(p.can_manage_students, true) as can_manage_students
+      FROM admins a
+      LEFT JOIN user_permissions p ON a.username = p.username
+      WHERE a.role NOT IN ('admin')
+      ORDER BY a.role, a.username
+    `);
+
+    res.send(`<!DOCTYPE html><html><head><title>User Permissions</title>
+    <style>
+      body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}
+     .card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+      table{width:100%;border-collapse:collapse;margin-top:20px}
+      th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
+      th{background:#34495e;color:white}
+      input[type=checkbox]{transform:scale(1.3);cursor:pointer}
+     .btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px}
+    </style>
+    <script>
+      async function updatePerm(username, permission, checked) {
+        const res = await fetch('/admin/permissions/update', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({username, permission, value: checked})
+        });
+        if(!res.ok) alert('Failed to update');
+      }
+    </script>
+    </head><body><div class="card">
+      <a href="/admin" class="btn">Back to Dashboard</a>
+      <h2>Manage User Permissions</h2>
+      <table>
+        <tr><th>Username</th><th>Role</th><th>Manage Users</th><th>Terms</th><th>Reports</th><th>Payments</th><th>Students</th></tr>
+        ${users.rows.map(u => `
+          <tr>
+            <td>${u.username}</td>
+            <td>${u.role}</td>
+            <td><input type="checkbox" ${u.can_manage_users? 'checked' : ''} onchange="updatePerm('${u.username}','can_manage_users',this.checked)"></td>
+            <td><input type="checkbox" ${u.can_manage_terms? 'checked' : ''} onchange="updatePerm('${u.username}','can_manage_terms',this.checked)"></td>
+            <td><input type="checkbox" ${u.can_view_reports? 'checked' : ''} onchange="updatePerm('${u.username}','can_view_reports',this.checked)"></td>
+            <td><input type="checkbox" ${u.can_record_payments? 'checked' : ''} onchange="updatePerm('${u.username}','can_record_payments',this.checked)"></td>
+            <td><input type="checkbox" ${u.can_manage_students? 'checked' : ''} onchange="updatePerm('${u.username}','can_manage_students',this.checked)"></td>
+          </tr>
+        `).join('')}
+      </table>
+      ${users.rows.length === 0? '<p>No other users yet. Create a bursar account first.</p>' : ''}
+    </div></body></html>`);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Database error: ' + err.message);
+  }
+});
+
+app.post('/admin/permissions/update', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
+  const { username, permission, value } = req.body;
+  await pool.query(`
+    INSERT INTO user_permissions (username, ${permission})
+    VALUES ($1, $2)
+    ON CONFLICT (username) DO UPDATE SET ${permission} = $2
+  `, [username, value === true || value === 'true']);
+  res.json({ success: true });
+});
+
+// OTHER ROUTES...
 app.get('/admin/students/add', requireAuth, (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Add Student</title>
   <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
@@ -180,7 +255,6 @@ app.post('/admin/students/add', requireAuth, async (req, res) => {
   res.redirect('/admin');
 });
 
-// ALL STUDENTS
 app.get('/admin/students', requireAuth, async (req, res) => {
   const students = await pool.query('SELECT * FROM students ORDER BY class, name');
   res.send(`<!DOCTYPE html><html><head><title>Students</title>
@@ -196,7 +270,6 @@ app.get('/admin/students', requireAuth, async (req, res) => {
   </table></body></html>`);
 });
 
-// VIEW STUDENT
 app.get('/admin/students/:id', requireAuth, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.id]);
@@ -213,7 +286,6 @@ app.get('/admin/students/:id', requireAuth, async (req, res) => {
     </table></body></html>`);
 });
 
-// PRINT STATEMENT
 app.get('/admin/students/:id/statement', requireAuth, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date', [req.params.id]);
@@ -230,7 +302,6 @@ app.get('/admin/students/:id/statement', requireAuth, async (req, res) => {
     </table><p style="margin-top:40px">Generated: ${new Date().toLocaleString()}</p></body></html>`);
 });
 
-// RECORD PAYMENT
 app.get('/admin/payments/add', requireAuth, async (req, res) => {
   const students = await pool.query('SELECT id, name, class, balance FROM students WHERE balance > 0 ORDER BY name');
   res.send(`<!DOCTYPE html><html><head><title>Record Payment</title>
@@ -253,7 +324,6 @@ app.post('/admin/payments/add', requireAuth, async (req, res) => {
   res.redirect('/admin');
 });
 
-// PAYMENT METHODS
 app.get('/admin/payments/methods', requireAuth, async (req, res) => {
   const methods = await pool.query('SELECT * FROM payment_methods');
   res.send(`<!DOCTYPE html><html><head><title>Payment Methods</title>
@@ -278,7 +348,6 @@ app.post('/admin/payments/methods', requireAuth, async (req, res) => {
   res.redirect('/admin/payments/methods');
 });
 
-// PARENT PORTAL
 app.get('/parent', async (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Parent Portal</title>
   <style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
@@ -307,46 +376,20 @@ app.post('/parent/check', async (req, res) => {
     ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td></tr>`).join('')}
     </table></div></body></html>`);
 });
-app.get('/make-admin', async (req, res) => {
-  const hash = await bcrypt.hash('bursar123', 10);
-  await pool.query(`DELETE FROM admins WHERE username = 'admin'`);
-  await pool.query(`INSERT INTO admins (username, password, role, full_name) VALUES ('admin', $1, 'admin', 'System Admin')`, [hash]);
-  await pool.query(`INSERT INTO user_permissions (username, can_manage_users, can_manage_terms, can_view_reports, can_record_payments, can_manage_students) VALUES ('admin', true, true, true, true, true) ON CONFLICT (username) DO UPDATE SET can_manage_users = true, can_manage_terms = true`);
-  res.send('Admin created. Username: admin | Password: bursar123. DELETE THIS ROUTE NOW!');
-});
-// --- PERMISSIONS MANAGEMENT ROUTE ---
-/admin/permissions
-app.post('/admin/permissions/update', requireAuth, requirePermission('can_manage_users'), async (req, res) => {
-  const { username, permission, value } = req.body;
-  await pool.query(`
-    INSERT INTO user_permissions (username, ${permission})
-    VALUES ($1, $2)
-    ON CONFLICT (username) DO UPDATE SET ${permission} = $2
-  `, [username, value === 'true']);
-  res.json({ success: true });
-});
-app.get('/debug-user', (req, res) => {
-  res.json({ session: req.session.user || 'No session' });
-});
+
 app.get('/reset-admin', async (req, res) => {
   const hash = await bcrypt.hash('bursar123', 10);
   await pool.query(`
     INSERT INTO admins (username, password, role, full_name)
     VALUES ('admin', $1, 'admin', 'System Admin')
-    ON CONFLICT (username) DO UPDATE SET
-      password = $1,
-      role = 'admin'
+    ON CONFLICT (username) DO UPDATE SET password = $1, role = 'admin'
   `, [hash]);
   await pool.query(`
     INSERT INTO user_permissions (username, can_manage_users, can_manage_terms, can_view_reports, can_record_payments, can_manage_students)
-    VALUES ('admin', true, true, true, true, true)
-    ON CONFLICT (username) DO UPDATE SET
-      can_manage_users = true,
-      can_manage_terms = true,
-      can_view_reports = true,
-      can_record_payments = true,
-      can_manage_students = true
+    VALUES ('admin', true, true, true)
+    ON CONFLICT (username) DO UPDATE SET can_manage_users = true, can_manage_terms = true, can_view_reports = true, can_record_payments = true, can_manage_students = true
   `);
   res.send('Admin reset complete. Username: admin | Password: bursar123');
 });
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
