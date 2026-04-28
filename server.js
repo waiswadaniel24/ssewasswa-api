@@ -307,21 +307,6 @@ app.get('/admin/students/:id/edit', requireLogin, async (req, res) => {
   </form></body></html>`);
 });
 
-app.post('/admin/students/:id/edit', requireLogin, async (req, res) => {
-  const { name, class: cls, term, year, total_fees } = req.body;
-  await pool.query(
-    'UPDATE students SET name=$1, class=$2, term=$3, year=$4, total_fees=$5 WHERE id=$6',
-    [name, cls, term, year, total_fees, req.params.id]
-  );
-  // Recalculate balance after fee change
-  await pool.query(`
-    UPDATE students SET balance = total_fees - COALESCE((
-      SELECT SUM(amount) FROM payments WHERE payments.student_id = students.id
-    ), 0) WHERE id = $1
-  `, [req.params.id]);
-  res.redirect(`/admin/students/${req.params.id}`);
-});
-
 app.post('/admin/students/:id/delete', requireLogin, async (req, res) => {
   await pool.query('DELETE FROM students WHERE id = $1', [req.params.id]);
   res.redirect('/admin/students');
