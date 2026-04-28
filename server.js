@@ -474,5 +474,44 @@ app.post('/parent/check', async (req, res) => {
     ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td></tr>`).join('')}
     </table></div></body></html>`);
 });
+// ========== EXPORT TO CSV ==========
+app.get('/admin/export/students', requireLogin, async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT 
+      s.id, s.name, s.class, s.term, s.year, s.total_fees,
+      COALESCE(SUM(p.amount), 0) as paid,
+      s.balance
+    FROM students s 
+    LEFT JOIN payments p ON s.id = p.student_id 
+    GROUP BY s.id 
+    ORDER BY s.class, s.name
+  `);
+  
+  let csv = 'ID,Name,Class,Term,Year,Total Fees,Amount Paid,Balance\n';
+  rows.forEach(r => {
+    csv += `${r.id},"${r.name}",${r.class},${r.term},${r.year},${r.total_fees},${r.paid},${r.balance}\n`;
+  });
+  
+  res.header('Content-Type', 'text/csv');
+  res.attachment(`students_${new Date().toISOString().slice(0,10)}.csv`);
+  res.send(csv);
+});
 
+app.get('/admin/export/payments', requireLogin, async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT p.id, s.name as student, p.amount, p.method, p.reference, p.payment_date 
+    FROM payments p 
+    JOIN students s ON p.student_id = s.id 
+    ORDER BY p.payment_date DESC
+  `);
+  
+  let csv = 'ID,Student,Amount,Method,Reference,Date\n';
+  rows.forEach(r => {
+    csv += `${r.id},"${r.student}",${r.amount},"${r.method || ''}","${r.reference || ''}",${r.payment_date}\n`;
+  });
+  
+  res.header('Content-Type', 'text/csv');
+  res.attachment(`payments_${new Date().toISOString().slice(0,10)}.csv`);
+  res.send(csv);
+});
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
