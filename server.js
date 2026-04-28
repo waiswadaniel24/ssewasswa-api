@@ -1,3 +1,4 @@
+const rateLimit = require('express-rate-limit');
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
@@ -13,6 +14,29 @@ const pool = new Pool({
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+app.use(express.static('public')); // add this line
+// Rate limiting: stop brute force on login
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 attempts per IP
+  message: 'Too many login attempts. Try again in 15 minutes.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/admin/login', loginLimiter);
+
+// Audit log table - run once in psql
+// CREATE TABLE audit_logs (id SERIAL PRIMARY KEY, username VARCHAR(255), action TEXT, details JSONB, created_at TIMESTAMP DEFAULT NOW());
+
+// Audit log helper
+async function logAction(username, action, details = {}) {
+  try {
+    await pool.query(
+      'INSERT INTO audit_logs (username, action, details) VALUES ($1, $2, $3)',
+      [username, action, details]
+    );
+  } catch (e) { console.error('Audit log failed:', e); }
+}
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
@@ -318,10 +342,17 @@ app.get('/admin/payments/add', requireAuth, async (req, res) => {
 });
 
 app.post('/admin/payments/add', requireAuth, async (req, res) => {
-  const { student_id, amount, method, reference } = req.body;
-  await pool.query('INSERT INTO payments (student_id, amount, method, reference) VALUES ($1,$2,$3,$4)', [student_id, amount, method, reference]);
-  await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
-  res.redirect('/admin');
+  try {
+    const { student_id, amount, method, reference } = req.body;
+    await pool.query('INSERT INTO payments (student_id, amount, method, reference) VALUES ($1,$2,$3,$4)', [student_id, amount, method, reference]);
+    await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
+    
+    await logAction(req.session.user.username, 'RECORD_PAYMENT', { student_id, amount, method, reference });
+    
+    res.redirect('/admin');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
 });
 
 app.get('/admin/payments/methods', requireAuth, async (req, res) => {
@@ -376,5 +407,19 @@ app.post('/parent/check', async (req, res) => {
     ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td></tr>`).join('')}
     </table></div></body></html>`);
 });
+app.post('/admin/change-password', requireLogin, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+    const user = await pool.query('SELECT password FROM admins WHERE username = $1', [req.session.user.username]);
+    const match = await bcrypt.compare(oldPassword, user.rows[0].password);
+    if (!match) return res.status(400).send('Old password incorrect');
 
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE admins SET password = $1 WHERE username = $2', );
+    await logAction(req.session.user.username, 'PASSWORD_CHANGE', { ip: req.ip });
+    res.send('Password changed');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
