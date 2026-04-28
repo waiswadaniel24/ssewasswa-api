@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Permission Management</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+    h1 { color: #333; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #4CAF50; color: white; }
+    tr:hover { background: #f5f5f5; }
+    .checkbox { transform: scale(1.3); }
+    .save-btn { background: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+    .save-btn:hover { background: #45a049; }
+    .role-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+    .role-admin { background: #ff4444; color: white; }
+    .role-staff { background: #2196F3; color: white; }
+    .disabled { opacity: 0.5; pointer-events: none; }
+    .alert { padding: 10px; margin: 10px 0; border-radius: 4px; display: none; }
+    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Permission Management</h1>
+    <p>Only <strong>admin</strong> can change these settings. Tick boxes to grant access to specific work tasks.</p>
+    
+    <div id="alert" class="alert alert-success">Permissions updated successfully!</div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Role</th>
+          <th>Manage Users</th>
+          <th>Manage Terms</th>
+          <th>View Reports</th>
+          <th>Record Payments</th>
+          <th>Manage Students</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% users.forEach(user => { %>
+          <tr data-username="<%= user.username %>">
+            <td>
+              <strong><%= user.full_name %></strong><br>
+              <small>@<%= user.username %></small>
+            </td>
+            <td>
+              <span class="role-badge <%= user.role === 'admin' ? 'role-admin' : 'role-staff' %>">
+                <%= user.role %>
+              </span>
+            </td>
+            <td><input type="checkbox" class="checkbox perm" data-perm="can_manage_users" 
+                <%= user.can_manage_users ? 'checked' : '' %> 
+                <%= user.role === 'admin' ? 'disabled' : '' %>></td>
+            <td><input type="checkbox" class="checkbox perm" data-perm="can_manage_terms" 
+                <%= user.can_manage_terms ? 'checked' : '' %>
+                <%= user.role === 'admin' ? 'disabled' : '' %>></td>
+            <td><input type="checkbox" class="checkbox perm" data-perm="can_view_reports" 
+                <%= user.can_view_reports ? 'checked' : '' %>
+                <%= user.role === 'admin' ? 'disabled' : '' %>></td>
+            <td><input type="checkbox" class="checkbox perm" data-perm="can_record_payments" 
+                <%= user.can_record_payments ? 'checked' : '' %>
+                <%= user.role === 'admin' ? 'disabled' : '' %>></td>
+            <td><input type="checkbox" class="checkbox perm" data-perm="can_manage_students" 
+                <%= user.can_manage_students ? 'checked' : '' %>
+                <%= user.role === 'admin' ? 'disabled' : '' %>></td>
+            <td>
+              <% if (user.role !== 'admin') { %>
+                <button class="save-btn" onclick="savePermissions('<%= user.username %>')">Save</button>
+              <% } else { %>
+                <span class="disabled">Full Access</span>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+    
+    <br>
+    <a href="/dashboard">← Back to Dashboard</a>
+  </div>
+
+  <script>
+    async function savePermissions(username) {
+      const row = document.querySelector(`tr[data-username="${username}"]`);
+      const permissions = {};
+      
+      row.querySelectorAll('.perm').forEach(checkbox => {
+        permissions[checkbox.dataset.perm] = checkbox.checked;
+      });
+
+      const res = await fetch('/admin/permissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, permissions })
+      });
+
+      if (res.ok) {
+        const alert = document.getElementById('alert');
+        alert.style.display = 'block';
+        setTimeout(() => alert.style.display = 'none', 3000);
+      } else {
+        alert('Failed to update permissions');
+      }
+    }
+  </script>
+</body>
+</html>
