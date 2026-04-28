@@ -1,234 +1,376 @@
-const express = require('express')
-const cors = require('cors')
-const { Pool } = require('pg')
-const bcrypt = require('bcryptjs')
-const session = require('express-session')
+const express = require('express');
+const session = require('express-session');
+const bcrypt = require('bcryptjs');
+const { Pool } = require('pg');
 
-const app = express()
-const PORT = process.env.PORT || 10000
+const app = express();
+const PORT = process.env.PORT || 10000;
 
-app.use(cors({ origin: true, credentials: true }))
-app.use(express.json())
-app.set('trust proxy', 1)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production'? { rejectUnauthorized: false } : false
+});
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  proxy: true,
-  cookie: { secure: true, sameSite: 'none', httpOnly: true, maxAge: 86400000 }
-}))
+  cookie: { maxAge: 24 * 60 * 60 * 1000 }
+}));
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-})
-
-// AUTO-CREATE ALL TABLES ON STARTUP
+// Initialize DB
 async function initDB() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE IF NOT EXISTS admins (
       id SERIAL PRIMARY KEY,
-      username TEXT UNIQUE,
-      password TEXT,
-      role TEXT DEFAULT 'bursar',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      username VARCHAR(50) UNIQUE NOT NULL,
+      password VARCHAR(255) NOT NULL
     );
     CREATE TABLE IF NOT EXISTS students (
       id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      class TEXT NOT NULL,
-      balance INTEGER DEFAULT 0,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(name, class)
-    );
-    CREATE TABLE IF NOT EXISTS payment_methods (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      account_number TEXT,
-      account_name TEXT,
-      instructions TEXT,
-      active BOOLEAN DEFAULT true
+      name VARCHAR(100) NOT NULL,
+      class VARCHAR(50) NOT NULL,
+      term VARCHAR(20) NOT NULL,
+      year INTEGER NOT NULL,
+      total_fees INTEGER NOT NULL,
+      balance INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS payments (
       id SERIAL PRIMARY KEY,
-      student_id INTEGER REFERENCES students(id),
+      student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
       amount INTEGER NOT NULL,
-      method TEXT DEFAULT 'cash',
-      method_id INT REFERENCES payment_methods(id),
-      paid_by TEXT,
-      transaction_ref TEXT,
-      auto_recorded BOOLEAN DEFAULT false,
-      verified_by INTEGER REFERENCES users(id),
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      payment_date DATE DEFAULT CURRENT_DATE,
+      method VARCHAR(50),
+      reference VARCHAR(100)
+    );
+    CREATE TABLE IF NOT EXISTS payment_methods (
+      id SERIAL PRIMARY KEY,
+      type VARCHAR(50) NOT NULL,
+      name VARCHAR(100) NOT NULL,
+      number VARCHAR(50),
+      account_name VARCHAR(100),
+      instructions TEXT
     );
   `);
-  const hash = await bcrypt.hash('bursar123', 10);
-  await pool.query(`INSERT INTO users (username, password, role) VALUES ('bursar', $1, 'bursar') ON CONFLICT (username) DO NOTHING`, [hash]);
+
+  const admin = await pool.query('SELECT * FROM admins WHERE username = $1', ['bursar']);
+  if (admin.rows.length === 0) {
+    const hash = await bcrypt.hash('bursar123', 10);
+    await pool.query('INSERT INTO admins (username, password) VALUES ($1, $2)', ['bursar', hash]);
+  }
   console.log('✅ Database ready');
 }
 initDB();
 
-function requireBursar(req, res, next) {
-  if (req.session.user?.role === 'bursar') next();
-  else res.status(403).json({ error: 'Login required' });
-}
+const requireLogin = (req, res, next) => {
+  if (req.session.adminId) return next();
+  res.redirect('/admin/login');
+};
 
-app.get('/health', (req, res) => res.json({ status: 'OK' }))
+// HEALTH
+app.get('/health', (req, res) => res.json({ status: 'API is running' }));
 
-// AUTH
-app.post('/api/admin/login', async (req, res) => {
+// LOGIN
+app.get('/admin/login', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Login</title>
+  <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:20px}input,button{width:100%;padding:10px;margin:8px 0}</style>
+  </head><body><h2>Bursar Login</h2>
+  <form method="POST" action="/admin/login">
+    <input name="username" placeholder="Username" required>
+    <input type="password" name="password" placeholder="Password" required>
+    <button type="submit">Login</button>
+  </form></body></html>`);
+});
+
+app.post('/admin/login', async (req, res) => {
   const { username, password } = req.body;
-  const user = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-  if (user.rows[0] && await bcrypt.compare(password, user.rows[0].password)) {
-    req.session.user = user.rows[0];
-    res.json({ success: true });
-  } else res.status(401).json({ error: 'Invalid credentials' });
-})
-
-app.get('/api/admin/check', (req, res) => {
-  if (req.session.user?.role === 'bursar') res.json({ loggedIn: true, username: req.session.user.username });
-  else res.status(401).json({ loggedIn: false });
-})
-
-// STUDENTS
-app.post('/api/students', requireBursar, async (req, res) => {
-  const { name, class: c, balance = 0 } = req.body;
-  try {
-    const r = await pool.query('INSERT INTO students (name, class, balance) VALUES ($1, $2, $3) RETURNING *', [name, c, balance]);
-    res.json(r.rows[0]);
-  } catch (e) { res.status(400).json({ error: 'Student exists in that class' }); }
+  const result = await pool.query('SELECT * FROM admins WHERE username = $1', [username]);
+  if (result.rows.length && await bcrypt.compare(password, result.rows[0].password)) {
+    req.session.adminId = result.rows[0].id;
+    res.redirect('/admin');
+  } else {
+    res.send('Invalid login. <a href="/admin/login">Try again</a>');
+  }
 });
 
-app.get('/api/students', requireBursar, async (req, res) => {
-  const r = await pool.query('SELECT * FROM students ORDER BY name');
-  res.json(r.rows);
-})
-
-// PAYMENTS - MANUAL
-app.post('/api/payments', requireBursar, async (req, res) => {
-  const { student_id, amount, method, paid_by } = req.body;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('INSERT INTO payments (student_id, amount, method, paid_by, verified_by) VALUES ($1, $2, $3, $4, $5)',
-      [student_id, amount, method, paid_by, req.session.user.id]);
-    await client.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
-    await client.query('COMMIT');
-    res.json({ success: true });
-  } catch (e) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ error: 'Payment failed' });
-  } finally { client.release(); }
-})
-
-// PAYMENT METHODS - EDITABLE BY ADMIN
-app.get('/api/payment-methods', async (req, res) => {
-  const r = await pool.query('SELECT * FROM payment_methods WHERE active=true ORDER BY id');
-  res.json(r.rows);
+app.get('/admin/logout', (req, res) => {
+  req.session.destroy(() => res.redirect('/admin/login'));
 });
 
-app.post('/api/payment-methods', requireBursar, async (req, res) => {
-  const { name, type, account_number, account_name, instructions } = req.body;
-  const r = await pool.query(
-    'INSERT INTO payment_methods (name, type, account_number, account_name, instructions) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-    [name, type, account_number, account_name, instructions]
+// DASHBOARD WITH CHARTS
+app.get('/admin', requireLogin, async (req, res) => {
+  const stats = await pool.query(`
+    SELECT
+      COUNT(*) as total_students,
+      COALESCE(SUM(total_fees),0) as total_fees,
+      COALESCE(SUM(balance),0) as total_balance
+    FROM students
+  `);
+  const payStats = await pool.query(`
+    SELECT COUNT(*) as total_payments, COALESCE(SUM(amount),0) as total_collected FROM payments
+  `);
+  const classData = await pool.query(`
+    SELECT class, SUM(balance) as balance, SUM(total_fees - balance) as paid
+    FROM students GROUP BY class ORDER BY class
+  `);
+  const recentPayments = await pool.query(`
+    SELECT p.*, s.name, s.class FROM payments p
+    JOIN students s ON p.student_id = s.id
+    ORDER BY p.id DESC LIMIT 5
+  `);
+  const allStudents = await pool.query('SELECT * FROM students ORDER BY id DESC LIMIT 10');
+  const paymentMethods = await pool.query('SELECT * FROM payment_methods');
+
+  const s = stats.rows[0];
+  const p = payStats.rows[0];
+
+  res.send(`<!DOCTYPE html><html><head><title>Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body{font-family:Arial;margin:0;background:#f4f6f9;padding:20px}
+   .container{max-width:1400px;margin:auto}
+   .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;margin-bottom:20px}
+   .card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+   .card h3{margin:0 0 10px 0;color:#666;font-size:14px;font-weight:normal}
+   .card.num{font-size:32px;font-weight:bold;color:#2c3e50}
+   .grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}
+   .btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px 5px 0}
+   .btn-red{background:#e74c3c}
+    table{width:100%;background:white;border-collapse:collapse;margin-top:10px}
+    th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
+    th{background:#34495e;color:white;font-size:14px}
+  </style></head><body><div class="container">
+    <div class="header">
+      <h1>Ssewasswa Primary - Bursar Dashboard</h1>
+      <a href="/admin/logout" class="btn btn-red">Logout</a>
+    </div>
+
+    <div class="stats">
+      <div class="card"><h3>Total Students</h3><div class="num">${s.total_students}</div></div>
+      <div class="card"><h3>Total Fees Expected</h3><div class="num">UGX ${Number(s.total_fees).toLocaleString()}</div></div>
+      <div class="card"><h3>Total Collected</h3><div class="num">UGX ${Number(p.total_collected).toLocaleString()}</div></div>
+      <div class="card"><h3>Outstanding Balance</h3><div class="num">UGX ${Number(s.total_balance).toLocaleString()}</div></div>
+    </div>
+
+    <div>
+      <a href="/admin/students/add" class="btn">Add Student</a>
+      <a href="/admin/payments/add" class="btn">Record Payment</a>
+      <a href="/admin/payments/methods" class="btn">Payment Methods</a>
+      <a href="/admin/students" class="btn">All Students</a>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Fees Collection by Class</h3>
+        <canvas id="classChart"></canvas>
+      </div>
+      <div class="card">
+        <h3>Collection vs Outstanding</h3>
+        <canvas id="pieChart"></canvas>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:20px">
+      <div class="card">
+        <h3>Recent Students</h3>
+        <table><tr><th>Name</th><th>Class</th><th>Balance</th><th></th></tr>
+        ${allStudents.rows.map(st => `
+          <tr><td>${st.name}</td><td>${st.class}</td><td>UGX ${Number(st.balance).toLocaleString()}</td>
+          <td><a href="/admin/students/${st.id}">View</a></td></tr>
+        `).join('')}</table>
+      </div>
+      <div class="card">
+        <h3>Recent Payments</h3>
+        <table><tr><th>Student</th><th>Amount</th><th>Date</th></tr>
+        ${recentPayments.rows.map(pm => `
+          <tr><td>${pm.name}</td><td>UGX ${Number(pm.amount).toLocaleString()}</td>
+          <td>${new Date(pm.payment_date).toLocaleDateString()}</td></tr>
+        `).join('')}</table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <h3>Payment Methods</h3>
+      <table><tr><th>Type</th><th>Name</th><th>Number</th><th>Account</th></tr>
+      ${paymentMethods.rows.map(pm => `
+        <tr><td>${pm.type}</td><td>${pm.name}</td><td>${pm.number || '-'}</td><td>${pm.account_name || '-'}</td></tr>
+      `).join('')}</table>
+    </div>
+
+  </div><script>
+    new Chart(document.getElementById('classChart'), {
+      type: 'bar',
+      data: {
+        labels: ${JSON.stringify(classData.rows.map(c => c.class))},
+        datasets: [
+          {label: 'Paid', data: ${JSON.stringify(classData.rows.map(c => c.paid))}, backgroundColor: '#27ae60'},
+          {label: 'Balance', data: ${JSON.stringify(classData.rows.map(c => c.balance))}, backgroundColor: '#e74c3c'}
+        ]
+      },
+      options: {responsive: true, scales: {x: {stacked: true}, y: {stacked: true, beginAtZero: true}}}
+    });
+    new Chart(document.getElementById('pieChart'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Collected', 'Outstanding'],
+        datasets: [{data: [${p.total_collected}, ${s.total_balance}], backgroundColor: ['#27ae60','#e74c3c']}]
+      }
+    });
+  </script></body></html>`);
+});
+
+// ADD STUDENT
+app.get('/admin/students/add', requireLogin, (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Student</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
+  </head><body><h2>Add Student</h2><form method="POST" action="/admin/students/add">
+    <input name="name" placeholder="Student Name" required>
+    <input name="class" placeholder="Class e.g P.6" required>
+    <input name="term" placeholder="Term e.g term1" required>
+    <input name="year" type="number" placeholder="Year e.g 2025" required>
+    <input name="total_fees" type="number" placeholder="Total Fees UGX" required>
+    <button type="submit">Save Student</button>
+  </form><a href="/admin">Back</a></body></html>`);
+});
+
+app.post('/admin/students/add', requireLogin, async (req, res) => {
+  const { name, class: cls, term, year, total_fees } = req.body;
+  await pool.query(
+    'INSERT INTO students (name, class, term, year, total_fees, balance) VALUES ($1,$2,$3,$4,$5,$5)',
+    [name, cls, term, year, total_fees]
   );
-  res.json(r.rows[0]);
+  res.redirect('/admin');
 });
 
-app.delete('/api/payment-methods/:id', requireBursar, async (req, res) => {
-  await pool.query('UPDATE payment_methods SET active=false WHERE id=$1', [req.params.id]);
-  res.sendStatus(200);
+// ALL STUDENTS
+app.get('/admin/students', requireLogin, async (req, res) => {
+  const students = await pool.query('SELECT * FROM students ORDER BY class, name');
+  res.send(`<!DOCTYPE html><html><head><title>Students</title>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#34495e;color:white}</style>
+  </head><body><h2>All Students</h2><a href="/admin">Dashboard</a><table>
+    <tr><th>Name</th><th>Class</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th><th></th></tr>
+    ${students.rows.map(s => `
+      <tr><td>${s.name}</td><td>${s.class}</td><td>${s.term}</td><td>${s.year}</td>
+      <td>UGX ${Number(s.total_fees).toLocaleString()}</td>
+      <td>UGX ${Number(s.balance).toLocaleString()}</td>
+      <td><a href="/admin/students/${s.id}">View</a></td></tr>
+    `).join('')}
+  </table></body></html>`);
 });
 
-// AUTO-RECORD WEBHOOK - FOR MTN/AIRTEL API
-app.post('/api/payment-webhook', async (req, res) => {
-  try {
-    const { amount, reference, status, provider } = req.body;
-    if (status!== 'SUCCESSFUL' && status!== 'success') return res.sendStatus(200);
-    const ref = reference.toLowerCase().replace(/-/g, ' ').trim();
-    const parts = ref.split(' ');
-    const className = parts.pop();
-    const name = parts.join(' ');
-    const student = await pool.query('SELECT id, balance FROM students WHERE LOWER(name)=$1 AND LOWER(class)=$2', [name, className]);
-    if (!student.rows[0]) return res.sendStatus(200);
-    const method = await pool.query('SELECT id FROM payment_methods WHERE type=$1 AND active=true LIMIT 1', [provider]);
-    await pool.query('INSERT INTO payments (student_id, amount, method_id, transaction_ref, auto_recorded) VALUES ($1, $2, $3, $4, true)',
-      [student.rows[0].id, amount, method.rows[0]?.id, reference]);
-    await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student.rows[0].id]);
-    res.sendStatus(200);
-  } catch (e) { res.sendStatus(500); }
+// VIEW STUDENT
+app.get('/admin/students/:id', requireLogin, async (req, res) => {
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
+  const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.id]);
+  if (!student.rows.length) return res.send('Student not found');
+  const s = student.rows[0];
+  res.send(`<!DOCTYPE html><html><head><title>${s.name}</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}.btn{background:#3498db;color:white;padding:10px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:10px;border-bottom:1px solid #ddd}</style>
+  </head><body><a href="/admin/students">Back</a>
+    <h2>${s.name} - ${s.class}</h2>
+    <p><b>Term:</b> ${s.term} ${s.year} | <b>Total Fees:</b> UGX ${Number(s.total_fees).toLocaleString()} | <b>Balance:</b> UGX ${Number(s.balance).toLocaleString()}</p>
+    <a href="/admin/students/${s.id}/statement" class="btn" target="_blank">Print Statement</a>
+    <h3>Payment History</h3><table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr>
+    ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td><td>${p.reference || '-'}</td></tr>`).join('')}
+    </table></body></html>`);
+});
+
+// PRINT STATEMENT
+app.get('/admin/students/:id/statement', requireLogin, async (req, res) => {
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
+  const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date', [req.params.id]);
+  const s = student.rows[0];
+  const totalPaid = payments.rows.reduce((sum, p) => sum + Number(p.amount), 0);
+  res.send(`<!DOCTYPE html><html><head><title>Statement</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}@media print{.no-print{display:none}}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:8px;border:1px solid #000;text-align:left}</style>
+  </head><body><button class="no-print" onclick="window.print()">Print</button>
+    <h2>Ssewasswa Primary School - Fees Statement</h2>
+    <p><b>Student:</b> ${s.name} | <b>Class:</b> ${s.class} | <b>Term:</b> ${s.term} ${s.year}</p>
+    <p><b>Total Fees:</b> UGX ${Number(s.total_fees).toLocaleString()} | <b>Total Paid:</b> UGX ${totalPaid.toLocaleString()} | <b>Balance:</b> UGX ${Number(s.balance).toLocaleString()}</p>
+    <table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr>
+    ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td><td>${p.reference || '-'}</td></tr>`).join('')}
+    </table><p style="margin-top:40px">Generated: ${new Date().toLocaleString()}</p></body></html>`);
+});
+
+// RECORD PAYMENT
+app.get('/admin/payments/add', requireLogin, async (req, res) => {
+  const students = await pool.query('SELECT id, name, class, balance FROM students WHERE balance > 0 ORDER BY name');
+  res.send(`<!DOCTYPE html><html><head><title>Record Payment</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
+  </head><body><h2>Record Payment</h2><form method="POST" action="/admin/payments/add">
+    <select name="student_id" required><option value="">Select Student</option>
+      ${students.rows.map(s => `<option value="${s.id}">${s.name} - ${s.class} - Bal: UGX ${Number(s.balance).toLocaleString()}</option>`).join('')}
+    </select>
+    <input name="amount" type="number" placeholder="Amount UGX" required>
+    <input name="method" placeholder="Payment Method e.g MTN" required>
+    <input name="reference" placeholder="Reference/TxID">
+    <button type="submit">Save Payment</button>
+  </form><a href="/admin">Back</a></body></html>`);
+});
+
+app.post('/admin/payments/add', requireLogin, async (req, res) => {
+  const { student_id, amount, method, reference } = req.body;
+  await pool.query('INSERT INTO payments (student_id, amount, method, reference) VALUES ($1,$2,$3,$4)', [student_id, amount, method, reference]);
+  await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
+  res.redirect('/admin');
+});
+
+// PAYMENT METHODS
+app.get('/admin/payments/methods', requireLogin, async (req, res) => {
+  const methods = await pool.query('SELECT * FROM payment_methods');
+  res.send(`<!DOCTYPE html><html><head><title>Payment Methods</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}input,textarea,button{width:100%;padding:10px;margin:8px 0}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:10px;border-bottom:1px solid #ddd}</style>
+  </head><body><h2>Payment Methods</h2><a href="/admin">Back</a>
+  <form method="POST" action="/admin/payments/methods">
+    <input name="type" placeholder="Type e.g MTN Mobile Money" required>
+    <input name="name" placeholder="Display Name e.g School MTN" required>
+    <input name="number" placeholder="Number/Account">
+    <input name="account_name" placeholder="Account Name">
+    <textarea name="instructions" placeholder="Payment Instructions"></textarea>
+    <button type="submit">Add Method</button>
+  </form>
+  <table><tr><th>Type</th><th>Name</th><th>Number</th><th>Account</th></tr>
+  ${methods.rows.map(m => `<tr><td>${m.type}</td><td>${m.name}</td><td>${m.number || '-'}</td><td>${m.account_name || '-'}</td></tr>`).join('')}
+  </table></body></html>`);
+});
+
+app.post('/admin/payments/methods', requireLogin, async (req, res) => {
+  const { type, name, number, account_name, instructions } = req.body;
+  await pool.query('INSERT INTO payment_methods (type, name, number, account_name, instructions) VALUES ($1,$2,$3,$4,$5)', [type, name, number, account_name, instructions]);
+  res.redirect('/admin/payments/methods');
 });
 
 // PARENT PORTAL
-app.get('/api/student-balance', async (req, res) => {
-  const { name, class: c } = req.query;
-  const r = await pool.query('SELECT name, class, balance FROM students WHERE LOWER(name) = LOWER($1) AND LOWER(class) = LOWER($2)', [name, c]);
-  if (r.rows[0]) res.json(r.rows[0]);
-  else res.status(404).json({ error: 'Student not found' });
-})
-
-// FRONTEND
-app.get('/admin', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Bursar Admin</title><meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>*{box-sizing:border-box;font-family:system-ui}body{max-width:600px;margin:20px auto;padding:20px;background:#f5f5f5}
-  form,.card{background:white;padding:20px;border-radius:8px;margin:20px 0;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
-  input,select{width:100%;padding:10px;margin:8px 0;border:1px solid #ddd;border-radius:4px}
-  button{width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:600}
- .delete{background:#dc2626;width:auto;padding:6px 12px;margin-left:10px}.logout{background:#dc2626;margin-top:20px}
-  p{padding:10px;border-bottom:1px solid #eee;margin:0}.success{color:#16a34a;font-weight:600}</style></head><body>
-  <h1>Bursar Admin</h1><div id="login-box"><form id="login"><input name="username" placeholder="Username" value="bursar" required>
-  <input name="password" type="password" placeholder="Password" value="bursar123" required><button>Login</button></form></div>
-  <div id="dashboard" style="display:none"><h2>Welcome <span id="user"></span></h2>
-  <form id="addStudent"><h3>Add Student</h3><input name="name" placeholder="Student Name" required>
-  <input name="class" placeholder="Class e.g P.6" required><input name="balance" type="number" placeholder="Starting Balance" value="0">
-  <button>Add Student</button></form><h3>Payment Methods</h3><form id="addMethod"><select name="type" required>
-  <option value="">Select Type</option><option value="mtn">MTN Mobile Money</option><option value="airtel">Airtel Money</option>
-  <option value="bank">Bank Transfer</option></select><input name="name" placeholder="Display Name e.g MTN Pay" required>
-  <input name="account_number" placeholder="Number: 0772123456" required><input name="account_name" placeholder="Account Name" required>
-  <input name="instructions" placeholder="Use StudentName-Class as reference"><button>Add Method</button></form><div id="methodsList"></div>
-  <div class="card"><h3>Record Payment</h3><form id="addPayment"><select name="student_id" id="studentSelect" required>
-  <option value="">Select Student</option></select><input name="amount" type="number" placeholder="Amount Paid" required>
-  <input name="paid_by" placeholder="Paid By" required><select name="method"><option value="cash">Cash</option>
-  <option value="mobile_money">Mobile Money</option><option value="bank">Bank</option></select><button>Record Payment</button></form>
-  <div id="payMsg"></div></div><div class="card"><h3>Students List</h3><div id="students"></div></div>
-  <button class="logout" onclick="logout()">Logout</button></div><script>
-  async function check(){try{const r=await fetch('/api/admin/check',{credentials:'include'});if(r.ok){const d=await r.json();
-  document.getElementById('login-box').style.display='none';document.getElementById('dashboard').style.display='block';
-  document.getElementById('user').innerText=d.username;loadStudents();loadMethods();}}catch(e){}}
-  document.getElementById('login').onsubmit=async(e)=>{e.preventDefault();const f=new FormData(e.target);
-  const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-  body:JSON.stringify({username:f.get('username'),password:f.get('password')})});if(r.ok)check();else alert('Invalid credentials');}
-  document.getElementById('addStudent').onsubmit=async(e)=>{e.preventDefault();const f=new FormData(e.target);
-  const r=await fetch('/api/students',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-  body:JSON.stringify({name:f.get('name'),class:f.get('class'),balance:parseInt(f.get('balance'))})});
-  if(r.ok){e.target.reset();loadStudents();}else{const err=await r.json();alert(err.error);}}
-  document.getElementById('addPayment').onsubmit=async(e)=>{e.preventDefault();const f=new FormData(e.target);
-  const r=await fetch('/api/payments',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-  body:JSON.stringify({student_id:parseInt(f.get('student_id')),amount:parseInt(f.get('amount')),paid_by:f.get('paid_by'),method:f.get('method')})});
-  if(r.ok){document.getElementById('payMsg').innerHTML='<p class="success">Payment recorded!</p>';e.target.reset();loadStudents();
-  setTimeout(()=>document.getElementById('payMsg').innerHTML='',3000);}else alert('Payment failed');}
-  async function loadStudents(){const r=await fetch('/api/students',{credentials:'include'});const s=await r.json();
-  document.getElementById('students').innerHTML=s.map(x=>\`<p><b>\${x.name}</b> - \${x.class} - Balance: UGX \${x.balance.toLocaleString()}</p>\`).join('')||'<p>No students</p>';
-  document.getElementById('studentSelect').innerHTML='<option value="">Select Student</option>'+s.map(x=>\`<option value="\${x.id}">\${x.name} - \${x.class} - UGX \${x.balance}</option>\`).join('');}
-  async function loadMethods(){const r=await fetch('/api/payment-methods');const m=await r.json();
-  document.getElementById('methodsList').innerHTML=m.map(x=>\`<p><b>\${x.name}</b> - \${x.account_number}<button class="delete" onclick="deleteMethod(\${x.id})">Delete</button></p>\`).join('');}
-  document.getElementById('addMethod').onsubmit=async(e)=>{e.preventDefault();const f=new FormData(e.target);
-  await fetch('/api/payment-methods',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify(Object.fromEntries(f))});
-  e.target.reset();loadMethods();};async function deleteMethod(id){await fetch(\`/api/payment-methods/\${id}\`,{method:'DELETE',credentials:'include'});loadMethods();}
-  function logout(){document.cookie='connect.sid=; Max-Age=0; path=/';location.reload();}check();</script></body></html>`);
+app.get('/parent', async (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Parent Portal</title>
+  <style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Parent Portal - Check Fees Balance</h2>
+  <form method="POST" action="/parent/check">
+    <input name="name" placeholder="Student Name" required>
+    <input name="class" placeholder="Class e.g P.6" required>
+    <button type="submit">Check Balance</button>
+  </form></div></body></html>`);
 });
 
-app.get('/parent', (req, res) => {
-  res.send(`<h1>Parent Portal - Check Fees Balance</h1><form id="search"><input name="name" placeholder="Student Name" required>
-  <input name="class" placeholder="Class e.g P.6" required><button>Check Balance</button></form><div id="result"></div>
-  <script>document.getElementById('search').onsubmit=async(e)=>{e.preventDefault();const f=new FormData(e.target);
-  const r=await fetch(\`/api/student-balance?name=\${f.get('name')}&class=\${f.get('class')}\`);const d=await r.json();
-  if(r.ok){document.getElementById('result').innerHTML=\`<h3>\${d.name} - \${d.class}</h3><p><b>Balance: UGX \${d.balance}</b></p>
-  <p>\${d.balance>0?'Please clear balance':'Account is clear'}</p>\`;}else{document.getElementById('result').innerHTML='<p style="color:red">Student not found</p>';}}</script>`);
+app.post('/parent/check', async (req, res) => {
+  const { name, class: cls } = req.body;
+  const student = await pool.query('SELECT * FROM students WHERE LOWER(name) = LOWER($1) AND LOWER(class) = LOWER($2) LIMIT 1', [name, cls]);
+  if (!student.rows.length) return res.send('Student not found. <a href="/parent">Try again</a>');
+  const s = student.rows[0];
+  const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [s.id]);
+  res.send(`<!DOCTYPE html><html><head><title>Balance</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:10px;border-bottom:1px solid #eee;text-align:left}.balance{font-size:32px;color:#e74c3c;font-weight:bold}</style>
+  </head><body><div class="card"><a href="/parent">New Search</a>
+    <h2>Fees Balance</h2>
+    <p><b>Name:</b> ${s.name} | <b>Class:</b> ${s.class} | <b>Term:</b> ${s.term} ${s.year}</p>
+    <p><b>Total Fees:</b> UGX ${Number(s.total_fees).toLocaleString()}</p>
+    <p class="balance">Outstanding Balance: UGX ${Number(s.balance).toLocaleString()}</p>
+    <h3>Payment History</h3><table><tr><th>Date</th><th>Amount</th><th>Method</th></tr>
+    ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method || '-'}</td></tr>`).join('')}
+    </table></div></body></html>`);
 });
 
-app.get('/', (req, res) => res.send('<h1>Ssewasswa API</h1><a href="/admin">Admin Login</a> | <a href="/parent">Parent Portal</a>'));
-
-app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`))
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
