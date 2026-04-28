@@ -182,6 +182,9 @@ app.get('/admin', requireLogin, async (req, res) => {
       <a href="/admin/students" class="btn">All Students</a>
       <a href="/admin/export/students" class="btn">Export Students CSV</a>
       <a href="/admin/export/payments" class="btn">Export Payments CSV</a>
+      <a href="/admin/reports" class="btn" style="background:#9b59b6">Financial Reports</a>
+<a href="/admin/receipts" class="btn" style="background:#16a085">All Receipts</a>
+<a href="/admin/payments/bulk" class="btn" style="background:#e67e22">Bulk Payment</a>
     </div>
 
     <div class="grid">
@@ -565,5 +568,175 @@ app.get('/admin/export/payments', requireLogin, async (req, res) => {
   res.attachment(`payments_${new Date().toISOString().slice(0,10)}.csv`);
   res.send(csv);
 });
+// ========== PAYMENT REPORTS & MANAGEMENT ==========
 
+// 1. FINANCIAL REPORTS PAGE
+app.get('/admin/reports', requireLogin, async (req, res) => {
+  const { from, to, class: cls } = req.query;
+  let whereClause = '1=1';
+  let params = [];
+  
+  if (from) { params.push(from); whereClause += ` AND payment_date >= $${params.length}`; }
+  if (to) { params.push(to); whereClause += ` AND payment_date <= $${params.length}`; }
+  if (cls) { params.push(cls); whereClause += ` AND s.class = $${params.length}`; }
+  
+  const summary = await pool.query(`
+    SELECT 
+      COUNT(*) as total_transactions,
+      COALESCE(SUM(p.amount), 0) as total_collected,
+      COUNT(DISTINCT p.student_id) as students_paid
+    FROM payments p JOIN students s ON p.student_id = s.id
+    WHERE ${whereClause}
+  `, params);
+  
+  const byMethod = await pool.query(`
+    SELECT p.method, COUNT(*) as count, COALESCE(SUM(p.amount), 0) as total
+    FROM payments p JOIN students s ON p.student_id = s.id
+    WHERE ${whereClause} AND p.method IS NOT NULL
+    GROUP BY p.method ORDER BY total DESC
+  `, params);
+  
+  const byClass = await pool.query(`
+    SELECT s.class, COUNT(*) as count, COALESCE(SUM(p.amount), 0) as total
+    FROM payments p JOIN students s ON p.student_id = s.id
+    WHERE ${whereClause}
+    GROUP BY s.class ORDER BY total DESC
+  `, params);
+  
+  const payments = await pool.query(`
+    SELECT p.*, s.name, s.class FROM payments p
+    JOIN students s ON p.student_id = s.id
+    WHERE ${whereClause}
+    ORDER BY p.payment_date DESC, p.id DESC
+  `, params);
+  
+  const classes = await pool.query('SELECT DISTINCT class FROM students ORDER BY class');
+  
+  res.send(`<!DOCTYPE html><html><head><title>Financial Reports</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}
+    .card{background:white;padding:20px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin:20px 0}
+    .stat h3{margin:0;color:#666;font-size:14px}.stat .num{font-size:28px;font-weight:bold;color:#2c3e50}
+    .filters{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}
+    .filters input,.filters select{padding:10px;border:1px solid #ddd;border-radius:4px}
+    .btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}
+    table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #eee;text-align:left}th{background:#34495e;color:white}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  </style></head><body>
+    <h2>Financial Reports</h2>
+    <a href="/admin" class="btn">Dashboard</a>
+    
+    <div class="card">
+      <form method="GET" class="filters">
+        <input type="date" name="from" value="${from || ''}" placeholder="From Date">
+        <input type="date" name="to" value="${to || ''}" placeholder="To Date">
+        <select name="class">
+          <option value="">All Classes</option>
+          ${classes.rows.map(c => `<option value="${c.class}" ${cls === c.class ? 'selected' : ''}>${c.class}</option>`).join('')}
+        </select>
+        <button type="submit" class="btn">Filter</button>
+        <a href="/admin/reports" class="btn" style="background:#95a5a6">Reset</a>
+        <a href="/admin/export/payments${from || to || cls ? '?' + new URLSearchParams({from, to, class: cls}).toString() : ''}" class="btn" style="background:#27ae60">Export CSV</a>
+      </form>
+    </div>
+    
+    <div class="stats">
+      <div class="card stat"><h3>Total Collected</h3><div class="num">UGX ${Number(summary.rows[0].total_collected).toLocaleString()}</div></div>
+      <div class="card stat"><h3>Transactions</h3><div class="num">${summary.rows[0].total_transactions}</div></div>
+      <div class="card stat"><h3>Students Paid</h3><div class="num">${summary.rows[0].students_paid}</div></div>
+    </div>
+    
+    <div class="grid">
+      <div class="card"><h3>By Payment Method</h3><canvas id="methodChart"></canvas>
+        <table><tr><th>Method</th><th>Count</th><th>Total</th></tr>
+        ${byMethod.rows.map(m => `<tr><td>${m.method || 'Cash'}</td><td>${m.count}</td><td>UGX ${Number(m.total).toLocaleString()}</td></tr>`).join('')}
+        </table>
+      </div>
+      <div class="card"><h3>By Class</h3><canvas id="classChart"></canvas>
+        <table><tr><th>Class</th><th>Count</th><th>Total</th></tr>
+        ${byClass.rows.map(c => `<tr><td>${c.class}</td><td>${c.count}</td><td>UGX ${Number(c.total).toLocaleString()}</td></tr>`).join('')}
+        </table>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>Payment Details (${payments.rows.length} records)</h3>
+      <table>
+        <tr><th>Date</th><th>Receipt</th><th>Student</th><th>Class</th><th>Amount</th><th>Method</th><th>Reference</th><th></th></tr>
+        ${payments.rows.map(p => `
+          <tr>
+            <td>${new Date(p.payment_date).toLocaleDateString()}</td>
+            <td>#${p.id}</td>
+            <td>${p.name}</td>
+            <td>${p.class}</td>
+            <td>UGX ${Number(p.amount).toLocaleString()}</td>
+            <td>${p.method || '-'}</td>
+            <td>${p.reference || '-'}</td>
+            <td><a href="/admin/payments/receipt/${p.id}" target="_blank">Receipt</a></td>
+          </tr>
+        `).join('')}
+      </table>
+    </div>
+    
+  <script>
+    new Chart(document.getElementById('methodChart'), {
+      type: 'pie',
+      data: {labels: ${JSON.stringify(byMethod.rows.map(m => m.method || 'Cash'))}, datasets: [{data: ${JSON.stringify(byMethod.rows.map(m => m.total))}, backgroundColor: ['#3498db','#27ae60','#e74c3c','#f39c12','#9b59b6']}]}
+    });
+    new Chart(document.getElementById('classChart'), {
+      type: 'bar',
+      data: {labels: ${JSON.stringify(byClass.rows.map(c => c.class))}, datasets: [{label: 'Amount', data: ${JSON.stringify(byClass.rows.map(c => c.total))}, backgroundColor: '#3498db'}]}
+    });
+  </script></body></html>`);
+});
+
+// 2. ALL RECEIPTS LIST
+app.get('/admin/receipts', requireLogin, async (req, res) => {
+  const payments = await pool.query(`
+    SELECT p.id, p.amount, p.payment_date, p.method, s.name, s.class
+    FROM payments p JOIN students s ON p.student_id = s.id
+    ORDER BY p.id DESC LIMIT 100
+  `);
+  res.send(`<!DOCTYPE html><html><head><title>All Receipts</title>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #ddd}th{background:#34495e;color:white}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px}</style>
+  </head><body><h2>All Payment Receipts</h2><a href="/admin" class="btn">Dashboard</a>
+  <table><tr><th>Receipt #</th><th>Date</th><th>Student</th><th>Class</th><th>Amount</th><th>Method</th><th></th></tr>
+  ${payments.rows.map(p => `
+    <tr><td>#${p.id}</td><td>${new Date(p.payment_date).toLocaleDateString()}</td>
+    <td>${p.name}</td><td>${p.class}</td><td>UGX ${Number(p.amount).toLocaleString()}</td>
+    <td>${p.method || '-'}</td><td><a href="/admin/payments/receipt/${p.id}" target="_blank">View/Print</a></td></tr>
+  `).join('')}</table></body></html>`);
+});
+
+// 3. BULK PAYMENT - Record same amount for multiple students
+app.get('/admin/payments/bulk', requireLogin, async (req, res) => {
+  const students = await pool.query('SELECT id, name, class, balance FROM students WHERE balance > 0 ORDER BY class, name');
+  res.send(`<!DOCTYPE html><html><head><title>Bulk Payment</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}.student{padding:10px;border-bottom:1px solid #eee}input,button{padding:10px;margin:5px}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><h2>Bulk Payment Entry</h2><a href="/admin">Back</a>
+  <form method="POST" action="/admin/payments/bulk">
+    <input name="amount" type="number" placeholder="Amount for each student" required>
+    <input name="method" placeholder="Payment Method" required>
+    <input name="reference" placeholder="Reference (optional)">
+    <h3>Select Students:</h3>
+    ${students.rows.map(s => `
+      <div class="student">
+        <label><input type="checkbox" name="student_ids" value="${s.id}"> ${s.name} - ${s.class} - Bal: UGX ${Number(s.balance).toLocaleString()}</label>
+      </div>
+    `).join('')}
+    <button type="submit">Record Payments for Selected Students</button>
+  </form></body></html>`);
+});
+
+app.post('/admin/payments/bulk', requireLogin, async (req, res) => {
+  const { amount, method, reference, student_ids } = req.body;
+  const ids = Array.isArray(student_ids) ? student_ids : [student_ids];
+  for (const id of ids) {
+    await pool.query('INSERT INTO payments (student_id, amount, method, reference) VALUES ($1,$2,$3,$4)', [id, amount, method, reference]);
+    await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, id]);
+  }
+  res.redirect('/admin?msg=bulk_success');
+});
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
