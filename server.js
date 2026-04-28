@@ -67,10 +67,6 @@ async function initDB() {
 }
 initDB();
 
-const requireLogin = (req, res, next) => {
-  if (req.session.adminId) return next();
-  res.redirect('/admin/login');
-};
 
 // HEALTH
 app.get('/health', (req, res) => res.json({ status: 'API is running' }));
@@ -107,7 +103,7 @@ app.get('/admin/logout', (req, res) => {
 });
 
 // DASHBOARD WITH CHARTS
-app.get('/admin', requireLogin, async (req, res) => {
+app.get('/admin', requireAuth, async (req, res) => {
   const stats = await pool.query(`
     SELECT
       COUNT(*) as total_students,
@@ -230,7 +226,7 @@ app.get('/admin', requireLogin, async (req, res) => {
 });
 
 // ADD STUDENT
-app.get('/admin/students/add', requireLogin, (req, res) => {
+app.get('/admin/students/add', requireAuth, (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Add Student</title>
   <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
   </head><body><h2>Add Student</h2><form method="POST" action="/admin/students/add">
@@ -243,7 +239,7 @@ app.get('/admin/students/add', requireLogin, (req, res) => {
   </form><a href="/admin">Back</a></body></html>`);
 });
 
-app.post('/admin/students/add', requireLogin, async (req, res) => {
+app.post('/admin/students/add', requireAuth, async (req, res) => {
   const { name, class: cls, term, year, total_fees } = req.body;
   await pool.query(
     'INSERT INTO students (name, class, term, year, total_fees, balance) VALUES ($1,$2,$3,$4,$5,$5)',
@@ -253,7 +249,7 @@ app.post('/admin/students/add', requireLogin, async (req, res) => {
 });
 
 // ALL STUDENTS
-app.get('/admin/students', requireLogin, async (req, res) => {
+app.get('/admin/students', requireAuth, async (req, res) => {
   const students = await pool.query('SELECT * FROM students ORDER BY class, name');
   res.send(`<!DOCTYPE html><html><head><title>Students</title>
   <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#34495e;color:white}</style>
@@ -269,7 +265,7 @@ app.get('/admin/students', requireLogin, async (req, res) => {
 });
 
 // VIEW STUDENT
-app.get('/admin/students/:id', requireLogin, async (req, res) => {
+app.get('/admin/students/:id', requireAuth, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.id]);
   if (!student.rows.length) return res.send('Student not found');
@@ -286,7 +282,7 @@ app.get('/admin/students/:id', requireLogin, async (req, res) => {
 });
 
 // PRINT STATEMENT
-app.get('/admin/students/:id/statement', requireLogin, async (req, res) => {
+app.get('/admin/students/:id/statement', requireAuth, async (req, res) => {
   const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
   const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date', [req.params.id]);
   const s = student.rows[0];
@@ -303,7 +299,7 @@ app.get('/admin/students/:id/statement', requireLogin, async (req, res) => {
 });
 
 // RECORD PAYMENT
-app.get('/admin/payments/add', requireLogin, async (req, res) => {
+app.get('/admin/payments/add', requireAuth, async (req, res) => {
   const students = await pool.query('SELECT id, name, class, balance FROM students WHERE balance > 0 ORDER BY name');
   res.send(`<!DOCTYPE html><html><head><title>Record Payment</title>
   <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
@@ -318,7 +314,7 @@ app.get('/admin/payments/add', requireLogin, async (req, res) => {
   </form><a href="/admin">Back</a></body></html>`);
 });
 
-app.post('/admin/payments/add', requireLogin, async (req, res) => {
+app.post('/admin/payments/add', requireAuth, async (req, res) => {
   const { student_id, amount, method, reference } = req.body;
   await pool.query('INSERT INTO payments (student_id, amount, method, reference) VALUES ($1,$2,$3,$4)', [student_id, amount, method, reference]);
   await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
@@ -326,7 +322,7 @@ app.post('/admin/payments/add', requireLogin, async (req, res) => {
 });
 
 // PAYMENT METHODS
-app.get('/admin/payments/methods', requireLogin, async (req, res) => {
+app.get('/admin/payments/methods', requireAuth, async (req, res) => {
   const methods = await pool.query('SELECT * FROM payment_methods');
   res.send(`<!DOCTYPE html><html><head><title>Payment Methods</title>
   <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}input,textarea,button{width:100%;padding:10px;margin:8px 0}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:10px;border-bottom:1px solid #ddd}</style>
@@ -344,7 +340,7 @@ app.get('/admin/payments/methods', requireLogin, async (req, res) => {
   </table></body></html>`);
 });
 
-app.post('/admin/payments/methods', requireLogin, async (req, res) => {
+app.post('/admin/payments/methods', requireAuth, async (req, res) => {
   const { type, name, number, account_name, instructions } = req.body;
   await pool.query('INSERT INTO payment_methods (type, name, number, account_name, instructions) VALUES ($1,$2,$3,$4,$5)', [type, name, number, account_name, instructions]);
   res.redirect('/admin/payments/methods');
