@@ -119,16 +119,24 @@ const requireRole = (roles) => (req, res, next) => {
 
 // ========== SMS HELPER - FREE METHOD ==========
 async function sendSMS(phone, message) {
-  // FREE: Uses Africa's Talking Sandbox or logs to console
-  // For production: sign up at africastalking.com for free 10 SMS
-  console.log(`SMS to ${phone}: ${message}`);
-  // Uncomment below when you have API key:
-  // const response = await fetch('https://api.africastalking.com/version1/messaging', {
-  // method: 'POST',
-  // headers: {'apiKey': process.env.AT_API_KEY, 'Content-Type': 'application/x-www-form-urlencoded'},
-  // body: `username=${process.env.AT_USERNAME}&to=${phone}&message=${encodeURIComponent(message)}`
-  // });
-  return true;
+  // For production: uncomment below when you have API key:
+  try {
+    const response = await fetch('https://api.africastalking.com/version1/messaging', {
+      method: 'POST',
+      headers: {
+        'apiKey': process.env.AT_API_KEY, 
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
+      },
+      body: `username=${process.env.AT_USERNAME}&to=${phone}&message=${encodeURIComponent(message)}`
+    });
+    const data = await response.json();
+    console.log('SMS API Response:', data);
+    return data.SMSMessageData.Recipients[0].status === 'Success';
+  } catch (err) {
+    console.log(`SMS Failed, logged only: ${phone}: ${message}`);
+    return false;
+  }
 }
 
 // ========== PUBLIC ROUTES ==========
