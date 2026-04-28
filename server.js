@@ -20,13 +20,22 @@ app.use(session({
   cookie: { maxAge: 24 * 60 * 60 * 1000 }
 }));
 
-// Initialize DB
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admins (
       id SERIAL PRIMARY KEY,
       username VARCHAR(50) UNIQUE NOT NULL,
-      password VARCHAR(255) NOT NULL
+      password VARCHAR(255) NOT NULL,
+      role VARCHAR(20) DEFAULT 'bursar',
+      full_name VARCHAR(100)
+    );
+    CREATE TABLE IF NOT EXISTS user_permissions (
+      username VARCHAR(50) PRIMARY KEY REFERENCES admins(username) ON DELETE CASCADE,
+      can_manage_users BOOLEAN DEFAULT false,
+      can_manage_terms BOOLEAN DEFAULT true,
+      can_view_reports BOOLEAN DEFAULT true,
+      can_record_payments BOOLEAN DEFAULT true,
+      can_manage_students BOOLEAN DEFAULT true
     );
     CREATE TABLE IF NOT EXISTS students (
       id SERIAL PRIMARY KEY,
@@ -54,12 +63,6 @@ async function initDB() {
       instructions TEXT
     );
   `);
-
-  const admin = await pool.query('SELECT * FROM admins WHERE username = $1', ['bursar']);
-  if (admin.rows.length === 0) {
-    const hash = await bcrypt.hash('bursar123', 10);
-    await pool.query('INSERT INTO admins (username, password) VALUES ($1, $2)', ['bursar', hash]);
-  }
   console.log('✅ Database ready');
 }
 initDB();
@@ -72,17 +75,6 @@ const requireLogin = (req, res, next) => {
 // HEALTH
 app.get('/health', (req, res) => res.json({ status: 'API is running' }));
 
-// LOGIN
-app.get('/admin/login', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Login</title>
-  <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:20px}input,button{width:100%;padding:10px;margin:8px 0}</style>
-  </head><body><h2>Bursar Login</h2>
-  <form method="POST" action="/admin/login">
-    <input name="username" placeholder="Username" required>
-    <input type="password" name="password" placeholder="Password" required>
-    <button type="submit">Login</button>
-  </form></body></html>`);
-});
 app.get('/admin/login', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Login</title>
   <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}button{background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer;font-size:16px}</style>
@@ -99,7 +91,11 @@ app.post('/admin/login', async (req, res) => {
   const { username, password } = req.body;
   const result = await pool.query('SELECT * FROM admins WHERE username = $1', [username]);
   if (result.rows.length && await bcrypt.compare(password, result.rows[0].password)) {
-    req.session.adminId = result.rows[0].id;
+    req.session.user = {
+      id: result.rows[0].id,
+      username: result.rows[0].username,
+      role: result.rows[0].role || 'bursar'
+    };
     res.redirect('/admin');
   } else {
     res.send('Invalid login. <a href="/admin/login">Try again</a>');
