@@ -445,4 +445,21 @@ app.post('/admin/change-password', requireAuth, async (req, res) => {
     res.status(500).send('Server error');
   }
 });
+app.get('/admin/change-password', requireAuth, (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Change Password</title>
+  <style>
+    body{font-family:Arial;max-width:400px;margin:50px auto;padding:20px;background:#f4f6f9}
+    .card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
+    input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}
+    button{background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer;font-size:16px}
+  </style>
+  </head><body><div class="card"><h2>Change Password</h2>
+  <form method="POST" action="/admin/change-password">
+    <input type="password" name="oldPassword" placeholder="Current Password" required>
+    <input type="password" name="newPassword" placeholder="New Password" required>
+    <button type="submit">Change Password</button>
+  </form>
+  <a href="/admin" style="display:block;text-align:center;margin-top:15px">Back to Dashboard</a>
+  </div></body></html>`);
+});
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
