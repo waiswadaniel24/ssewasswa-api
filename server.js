@@ -30,31 +30,41 @@ async function initDB() {
     );
     CREATE TABLE IF NOT EXISTS students (
       id SERIAL PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      class VARCHAR(50) NOT NULL,
-      term VARCHAR(20) NOT NULL,
-      year INTEGER NOT NULL,
-      total_fees INTEGER NOT NULL,
-      balance INTEGER NOT NULL
+      name VARCHAR(100) NOT NULL
     );
     CREATE TABLE IF NOT EXISTS payments (
       id SERIAL PRIMARY KEY,
       student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
       amount INTEGER NOT NULL,
-      payment_date DATE DEFAULT CURRENT_DATE,
-      method VARCHAR(50),
-      reference VARCHAR(100)
+      payment_date DATE DEFAULT CURRENT_DATE
     );
     CREATE TABLE IF NOT EXISTS payment_methods (
       id SERIAL PRIMARY KEY,
       type VARCHAR(50) NOT NULL,
-      name VARCHAR(100) NOT NULL,
-      number VARCHAR(50),
-      account_name VARCHAR(100),
-      instructions TEXT
+      name VARCHAR(100) NOT NULL
     );
   `);
 
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS class VARCHAR(50) DEFAULT 'P.6'`);
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS term VARCHAR(20) DEFAULT 'term1'`);
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS year INTEGER DEFAULT 2025`);
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS total_fees INTEGER DEFAULT 0`);
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS balance INTEGER DEFAULT 0`);
+  
+  await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS method VARCHAR(50)`);
+  await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference VARCHAR(100)`);
+  
+  await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS number VARCHAR(50)`);
+  await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS account_name VARCHAR(100)`);
+  await pool.query(`ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS instructions TEXT`);
+
+  const admin = await pool.query('SELECT * FROM admins WHERE username = $1', ['bursar']);
+  if (admin.rows.length === 0) {
+    const hash = await bcrypt.hash('bursar123', 10);
+    await pool.query('INSERT INTO admins (username, password) VALUES ($1, $2)', ['bursar', hash]);
+  }
+  console.log('✅ Database ready');
+}
   const admin = await pool.query('SELECT * FROM admins WHERE username = $1', ['bursar']);
   if (admin.rows.length === 0) {
     const hash = await bcrypt.hash('bursar123', 10);
