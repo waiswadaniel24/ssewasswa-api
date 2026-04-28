@@ -121,19 +121,35 @@ app.get('/admin/login', (req, res) => {
   <p style="font-size:12px;color:#666;margin-top:20px">Default: admin/bursar123</p>
   </div></body></html>`);
 });
-
-app.post('/admin/login', async (req, res) => {
+const requireAuth = (req, res, next) => {
+  if (!req.session.user) return res.status(401).send('Not logged in');
+  next();
+};
+app.post('/admin/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
-  const result = await pool.query('SELECT * FROM admins WHERE username = $1', [username]);
-  if (result.rows.length && await bcrypt.compare(password, result.rows[0].password)) {
-    req.session.user = {
-      id: result.rows[0].id,
-      username: result.rows[0].username,
-      role: result.rows[0].role || 'bursar'
-    };
-    res.redirect('/admin');
-  } else {
-    res.send('Invalid login. <a href="/admin/login">Try again</a>');
+
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+
+    if (result.rows.length === 0) {
+      await logAction(username, 'LOGIN_FAIL', { reason: 'User not found' });
+      return res.status(401).send('Invalid credentials');
+    }
+
+    const user = result.rows[0];
+    const match = await bcrypt.compare(password, user.password);
+
+    if (!match) {
+      await logAction(username, 'LOGIN_FAIL', { reason: 'Wrong password' });
+      return res.status(401).send('Invalid credentials');
+    }
+
+    req.session.user = { id: user.id, username: user.username, role: user.role };
+    await logAction(username, 'LOGIN_SUCCESS', {});
+    res.send('Logged in'); // This line is key - no redirect
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server error');
   }
 });
 
