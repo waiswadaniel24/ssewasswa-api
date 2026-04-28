@@ -273,10 +273,33 @@ app.post('/admin/students/add', requireLogin, async (req, res) => {
 });
 
 app.get('/admin/students', requireLogin, async (req, res) => {
-  const students = await pool.query('SELECT * FROM students ORDER BY class, name');
+  const search = req.query.search || '';
+  let query = 'SELECT * FROM students';
+  let params = [];
+  
+  if (search) {
+    query += ' WHERE LOWER(name) LIKE $1 OR LOWER(class) LIKE $1';
+    params.push(`%${search.toLowerCase()}%`);
+  }
+  
+  query += ' ORDER BY class, name';
+  const students = await pool.query(query, params);
+  
   res.send(`<!DOCTYPE html><html><head><title>Students</title>
-  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px}</style>
-  </head><body><h2>All Students</h2><a href="/admin" class="btn">Dashboard</a> <a href="/admin/students/add" class="btn">Add Student</a><table>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;margin:5px}.search-box{display:flex;gap:10px;margin:20px 0}input[type="text"]{flex:1;padding:10px;border:1px solid #ddd;border-radius:4px}</style>
+  </head><body><h2>All Students</h2>
+  <a href="/admin" class="btn">Dashboard</a> 
+  <a href="/admin/students/add" class="btn">Add Student</a>
+  
+  <form method="GET" action="/admin/students" class="search-box">
+    <input type="text" name="search" placeholder="Search by name or class..." value="${search}">
+    <button type="submit" class="btn">Search</button>
+    ${search ? '<a href="/admin/students" class="btn" style="background:#95a5a6">Clear</a>' : ''}
+  </form>
+  
+  ${search ? `<p>Found ${students.rows.length} results for "${search}"</p>` : ''}
+  
+  <table>
     <tr><th>Name</th><th>Class</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th><th></th></tr>
     ${students.rows.map(s => `
       <tr><td>${s.name}</td><td>${s.class}</td><td>${s.term}</td><td>${s.year}</td>
