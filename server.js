@@ -623,4 +623,71 @@ app.post('/admin/permissions/update', requireAuth, requirePermission('can_manage
   await logAction(req.session.user.username, 'PERMISSION_CHANGED', { targetUser: username, permission, value });
   res.json({ success: true });
 });
+// GET /admin/class/:className - View students by class
+app.get('/admin/class/:className', requireLogin, async (req, res) => {
+  const className = req.params.className;
+  const user = req.session.user;
+  
+  // Restrict: class teachers can only see their assigned class
+  if (user.role.startsWith('class_teacher') && user.assigned_class !== className) {
+    return res.status(403).send('Access denied: You can only view your assigned class');
+  }
+  
+  // Check permission
+  if (!user.permissions?.view_students && user.role !== 'admin') {
+    return res.status(403).send('Access denied');
+  }
+  
+  try {
+    const students = await pool.query(
+      'SELECT * FROM students WHERE class = $1 ORDER BY name',
+      [className]
+    );
+    res.render('class-view', { students: students.rows, className, user });
+  } catch (err) {
+    res.status(500).send('Error loading class');
+  }
+});
+
+// Update user creation to assign class + set password
+app.post('/admin/users/add', requireLogin, async (req, res) => {
+  if (!req.session.user.permissions?.manage_users) return res.status(403).send('Access denied');
+
+  const { username, password, role, assigned_class } = req.body;
+  const permissions = req.body.permissions || {};
+  const hash = await bcrypt.hash(password, 10);
+
+  try {
+    await pool.query(
+      'INSERT INTO users (username, password, role, assigned_class, permissions) VALUES ($1, $2, $3, $4, $5)',
+      [username, hash, role, assigned_class || null, JSON.stringify(permissions)]
+    );
+    await logAction(req.session.user.id, 'USER_CREATED', { username, role, assigned_class });
+    await sendSecurityAlert('USER_CREATED', { username, role, assigned_class });
+    res.redirect('/admin/users');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// New route: View students by class
+app.get('/admin/class/:className', requireLogin, async (req, res) => {
+  const className = req.params.className;
+  const user = req.session.user;
+
+  // Class teachers can only see their class
+  if (user.role === 'class_teacher' && user.assigned_class!== className) {
+    return res.status(403).send('You can only view your assigned class: ' + user.assigned_class);
+  }
+
+  const students = await pool.query('SELECT * FROM students WHERE class = $1 ORDER BY name', [className]);
+  res.send(`
+    <h1>${className} Students</h1>
+    <table border="1">
+      <tr><th>Name</th><th>Balance</th></tr>
+      ${students.rows.map(s => `<tr><td>${s.name}</td><td>${s.balance}</td></tr>`).join('')}
+    </table>
+    <a href="/admin">Back</a>
+  `);
+});
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
