@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h2>Login</h2>
+<form id="loginForm">
+  <input name="username" placeholder="Username">
+  <input name="password" type="password" placeholder="Password">
+  <button>Login</button>
+</form>
+
+<h2>Change Password</h2>
+<form id="pwForm">
+  <input name="oldPassword" type="password" placeholder="Old Password">
+  <input name="newPassword" type="password" placeholder="New Password">
+  <button>Change</button>
+</form>
+
+<script>
+loginForm.onsubmit = async e => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target));
+  const res = await fetch('/admin/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  });
+  alert(await res.text());
+};
+
+pwForm.onsubmit = async e => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target));
+  const res = await fetch('/admin/change-password', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  });
+  alert(await res.text());
+};
+</script>
+</body>
+</html>
