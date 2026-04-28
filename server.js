@@ -6,12 +6,18 @@ const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+app.use(express.urlencoded({ extended: true }));
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production'? { rejectUnauthorized: false } : false
-});
+// Paste it HERE - before any routes
+function requireLogin(req, res, next) {
+  if (!req.session.user) {
+    return res.redirect('/admin/login');
+  }
+  next();
+}
+
+// ... rest of your routes below ...
+app.get('/admin/class/:className', requireLogin, async (req, res) => {
 
 // Email alerts - DB controlled
 let transporter = null;
