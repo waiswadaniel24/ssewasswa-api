@@ -394,11 +394,7 @@ app.get('/reset-admin', async (req, res) => {
 // TEMP ROUTE - DELETE AFTER USE
 app.get('/create-bursar', async (req, res) => {
   const hash = await bcrypt.hash('bursar123', 10);
-  await pool.query(`
-    INSERT INTO admins (username, password, role, full_name) 
-    VALUES ('bursar', $1, 'bursar', 'School Bursar') 
-    ON CONFLICT (username) DO NOTHING
-  `, );
-  res.send('Bursar created. Username: bursar | Password: bursar123');
+  await pool.query(`INSERT INTO admins (username, password, role, full_name) VALUES ('bursar', $1, 'bursar', 'School Bursar') ON CONFLICT DO NOTHING`, );
+  res.send('Bursar created: bursar / bursar123');
 });
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
