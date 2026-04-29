@@ -711,6 +711,99 @@ app.post('/admin/tasks/assign', requireLogin, requireRole(['admin']), async (req
     res.redirect('/admin/tasks');
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
+// CREATE USER - PROFESSIONAL FORM
+app.get('/admin/users/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  const subjects = await pool.query('SELECT DISTINCT name FROM subjects WHERE active = true ORDER BY name');
+  res.send(`<!DOCTYPE html><html><head><title>Create User</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}.section{border:1px solid #ddd;padding:15px;border-radius:8px;margin:15px 0}.checkbox-group{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.checkbox-group label{display:flex;align-items:center;gap:5px;font-size:14px}</style>
+  </head><body><div class="card"><h2>Create New Staff Member</h2>
+  <form method="POST" action="/admin/users/add">
+    <div class="section"><h3>Basic Information</h3>
+      <input name="username" placeholder="Username for login" required>
+      <input type="password" name="password" placeholder="Password" required>
+      <input name="full_name" placeholder="Full Name" required>
+      <input name="phone" placeholder="Phone Number">
+      <input type="email" name="email" placeholder="Email">
+    </div>
+    <div class="section"><h3>Employment Details</h3>
+      <select name="department" required>
+        <option value="">Select Department</option>
+        ${DEPARTMENTS.map(d => `<option value="${d}">${d}</option>`).join('')}
+      </select>
+      <input name="position" placeholder="Position e.g Senior Teacher, Cook" required>
+      <input name="monthly_salary" type="number" placeholder="Monthly Salary UGX" required>
+      <input name="bank_account" placeholder="Bank Account Number">
+      <input name="hire_date" type="date">
+    </div>
+    <div class="section"><h3>Role & Access</h3>
+      <select name="role" required>
+        <option value="class_teacher">Class Teacher</option>
+        <option value="subject_teacher">Subject Teacher</option>
+        <option value="bursar">Bursar</option>
+        <option value="admin">Admin</option>
+        <option value="support_staff">Support Staff</option>
+      </select>
+    </div>
+    <div class="section"><h3>Class Teacher Assignment</h3>
+      <select name="assigned_class">
+        <option value="">None - Not a Class Teacher</option>
+        ${ALL_CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+    <button type="submit">Create Staff Member</button>
+  </form><a href="/admin/staff">Back</a></div></body></html>`);
+});
+
+app.post('/admin/users/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { username, password, full_name, phone, email, department, position, monthly_salary, bank_account, hire_date, role, assigned_class } = req.body;
+    const hash = await bcrypt.hash(password, 10);
+
+    await pool.query('INSERT INTO admins (username, password, role, full_name, assigned_class, phone, email, department) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [username, hash, role, full_name, assigned_class || null, phone, email, department]);
+
+    await pool.query('INSERT INTO staff (username, full_name, position, department, phone, email, hire_date, monthly_salary, bank_account) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+      [username, full_name, position, department, phone, email, hire_date, monthly_salary, bank_account]);
+
+    if (assigned_class) {
+      await pool.query('INSERT INTO staff_assignments (username, assignment_type, assignment_value, department) VALUES ($1, $2, $3, $4)',
+        [username, 'class_teacher', assigned_class, department]);
+    }
+
+    await logAction(req.session.user.username, 'STAFF_CREATED', { username, full_name, position });
+    res.send(`Staff ${full_name} created successfully. <a href="/admin/staff">View All Staff</a>`);
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+// ONLINE CLASSES
+app.get('/admin/online-classes', requireLogin, requireTask('online_classes'), async (req, res) => {
+  const classes = await pool.query('SELECT * FROM online_classes ORDER BY scheduled_at DESC');
+  res.send(`<!DOCTYPE html><html><head><title>Online Classes</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}.btn{background:#9b59b6;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}</style>
+  </head><body><h1>💻 Online Classes</h1><a href="/admin/academic" class="btn">← Academic</a> <a href="/admin/online-classes/add" class="btn">+ Schedule Class</a><br><br>
+  <table><tr><th>Class</th><th>Subject</th><th>Topic</th><th>Scheduled</th><th>Link</th></tr>
+  ${classes.rows.map(c => `<tr><td>${c.class}</td><td>${c.subject}</td><td>${c.topic}</td><td>${new Date(c.scheduled_at).toLocaleString()}</td><td><a href="${c.meeting_link}" target="_blank">Join</a></td></tr>`).join('')}
+  </table></body></html>`);
+});
+
+app.get('/admin/online-classes/add', requireLogin, requireTask('online_classes'), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Schedule Class</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
+  </head><body><h2>Schedule Online Class</h2><form method="POST" action="/admin/online-classes/add">
+    <select name="class" required><option value="">Select Class</option>${ALL_CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+    <input name="subject" placeholder="Subject" required>
+    <input name="topic" placeholder="Topic" required>
+    <input name="meeting_link" placeholder="Zoom/Google Meet Link" required>
+    <input name="scheduled_at" type="datetime-local" required>
+    <button type="submit">Schedule</button>
+  </form><a href="/admin/online-classes">Back</a></body></html>`);
+});
+
+app.post('/admin/online-classes/add', requireLogin, requireTask('online_classes'), async (req, res) => {
+  const { class: className, subject, topic, meeting_link, scheduled_at } = req.body;
+  await pool.query('INSERT INTO online_classes (class, subject, topic, meeting_link, scheduled_at, created_by) VALUES ($1, $2, $3, $4, $5, $6)', [className, subject, topic, meeting_link, scheduled_at, req.session.user.username]);
+  res.redirect('/admin/online-classes');
+});
 // ACADEMIC PORTAL
 app.get('/admin/academic', requireLogin, requireTask('academic_portal'), (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Academic Portal</title>
