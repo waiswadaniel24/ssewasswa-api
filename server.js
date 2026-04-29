@@ -540,7 +540,7 @@ app.post('/admin/marksheets/:className/upload', requireLogin, requireTask('marks
       }
     }
 
-    await logAction(recorded_by, 'MARKS_UPLOADED', { class: className, term, year, marks_updated: updatedCount });
+        await logAction(recorded_by, 'MARKS_UPLOADED', { class: className, term, year, marks_updated: updatedCount });
     res.send(`✅ Successfully uploaded and updated ${updatedCount} marks for ${className} ${term} ${year}. <a href="/admin/marksheets/${className}?term=${term}&year=${year}">Back to Marksheet</a>`);
   } catch (err) {
     console.error(err);
