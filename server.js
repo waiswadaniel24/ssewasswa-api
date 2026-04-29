@@ -429,105 +429,41 @@ app.get('/admin/financial', requireLogin, requireTask('financial_portal'), async
   </body></html>`);
 });
 // MARKSHEET WITH OFFLINE DOWNLOAD/UPLOAD
-app.get('/admin/marksheets/:className', requireLogin, requireTask('marksheets'), async (req, res) => {
-  const className = req.params.className;
-  const { term = 'Term 1', year = 2026 } = req.query;
-  const user = req.session.user;
-  if (user.role === 'class_teacher' && user.assigned_class!== className) return res.status(403).send('Access denied');
+app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'class_teacher']), async (req, res) => {
+  try {
+    const { className } = req.params;
+    const subjects = await pool.query('SELECT * FROM subjects WHERE class = $1 AND active = true ORDER BY name', [className]);
+    const students = await pool.query('SELECT * FROM students WHERE class = $1 ORDER BY name', [className]);
 
-  const students = await pool.query('SELECT * FROM students WHERE class = $1 ORDER BY name', [className]);
-  const subjects = await pool.query('SELECT * FROM subjects WHERE class = $1 AND active = true ORDER BY id', [className]);
-  const marks = await pool.query(`SELECT student_id, subject_id, marks FROM exam_results WHERE term = $1 AND year = $2 AND student_id IN (SELECT id FROM students WHERE class = $3)`, [term, year, className]);
-  const marksMap = {};
-  marks.rows.forEach(m => { marksMap[`${m.student_id}-${m.subject_id}`] = m.marks; });
-  const isNursery = NURSERY_CLASSES.includes(className);
+    if (subjects.rows.length === 0) return res.send(`No subjects found for ${className}. <a href="/admin/subjects">Add subjects</a>`);
+    if (students.rows.length === 0) return res.send(`No students found for ${className}. <a href="/admin/students/add">Add students</a>`);
 
-  function getGradeJS(avg, isNursery) {
-    if (isNursery) {
-      if (avg >= 80) return 'E.E'; if (avg >= 60) return 'M.E'; if (avg >= 40) return 'A.E'; return 'B.E';
-    }
-    if (avg >= 80) return 'A'; if (avg >= 70) return 'B'; if (avg >= 60) return 'C'; if (avg >= 50) return 'D'; if (avg >= 40) return 'E'; return 'F';
-  }
-
-  res.send(`<!DOCTYPE html><html><head><title>${className} Marksheet</title>
-  <style>body{font-family:Arial;margin:20px;background:#f4f6f9}.header{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.controls{background:white;padding:15px;border-radius:8px;margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;font-size:14px}.btn-green{background:#27ae60}.btn-orange{background:#e67e22}table{background:white;border-collapse:collapse;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.1)}th{background:#34495e;color:white;padding:10px;text-align:center;font-size:12px}td{padding:6px;border:1px solid #ddd;text-align:center}.name-col{text-align:left;font-weight:bold;position:sticky;left:0;background:#f8f9fa;min-width:140px}input.mark-input{width:45px;padding:3px;text-align:center;border:1px solid #ddd;border-radius:3px;font-size:13px}.total-col{background:#e8f5e8;font-weight:bold}.avg-col{background:#e3f2fd;font-weight:bold}.grade-col{background:#fff3e0;font-weight:bold}</style>
-  </head><body>
-    <div class="header"><h1>${className} Marksheet - ${term} ${year} ${isNursery? '(Nursery)' : ''}</h1>
-      <div class="controls">
-        <form method="GET" style="display:flex;gap:10px;align-items:center">
-          <select name="term" onchange="this.form.submit()">
-            <option value="Term 1" ${term==='Term 1'?'selected':''}>Term 1</option>
-            <option value="Term 2" ${term==='Term 2'?'selected':''}>Term 2</option>
-            <option value="Term 3" ${term==='Term 3'?'selected':''}>Term 3</option>
-          </select>
-          <input type="number" name="year" value="${year}" onchange="this.form.submit()" style="width:70px">
-        </form>
-        <button onclick="saveAllMarks()" class="btn btn-green">💾 Save All</button>
-        <a href="/admin/marksheets/${className}/download-template?term=${term}&year=${year}" class="btn btn-orange">📥 Download Excel Template</a>
+    res.send(`<!DOCTYPE html><html><head><title>Marksheets - ${className}</title>
+    <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:8px;border:1px solid #ddd;text-align:center}th{background:#34495e;color:white}.student-name{text-align:left;font-weight:bold}input{width:60px;padding:4px;text-align:center}</style>
+    </head><body>
+      <div class="card"><h1>📝 Marksheets - ${className}</h1>
+        <a href="/admin" class="btn">← Dashboard</a>
+        <a href="/admin/marksheets/${className}/download-template" class="btn btn-green">📥 Download Excel Template</a>
       </div>
-    <form id="marksForm">
-    <input type="hidden" name="term" value="${term}"><input type="hidden" name="year" value="${year}"><input type="hidden" name="class" value="${className}">
-    <table>
-      <thead><tr>
-        <th class="name-col">Student</th>
-        ${subjects.rows.map(s => `<th>${s.name}<br><small>/${s.max_marks}</small></th>`).join('')}
-        <th class="total-col">Total</th><th class="avg-col">Avg</th><th class="grade-col">Grade</th>
-      </tr></thead>
-      <tbody>
-        ${students.rows.map(stu => {
-          let total = 0, count = 0;
-          const subjectCells = subjects.rows.map(sub => {
-            const mark = marksMap[`${stu.id}-${sub.id}`] || '';
-            if (mark!== '') { total += Number(mark); count++; }
-            return `<td><input type="number" class="mark-input" name="marks[${stu.id}][${sub.id}]" value="${mark}" min="0" max="${sub.max_marks}" onchange="calculateRow(this)"></td>`;
-          }).join('');
-          const avg = count? (total/count).toFixed(1) : '0';
-          const grade = getGradeJS(count? total/count : 0, isNursery);
-          return `<tr>
-            <td class="name-col">${stu.name}</td>
-            ${subjectCells}
-            <td class="total-col" id="total-${stu.id}">${total}</td>
-            <td class="avg-col" id="avg-${stu.id}">${avg}</td>
-            <td class="grade-col" id="grade-${stu.id}">${grade}</td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-    </form>
-    <script>
-      function getGrade(avg, isNursery) {
-        if (isNursery) {
-          if (avg >= 80) return 'E.E'; if (avg >= 60) return 'M.E'; if (avg >= 40) return 'A.E'; return 'B.E';
-        }
-        if (avg >= 80) return 'A'; if (avg >= 70) return 'B'; if (avg >= 60) return 'C'; if (avg >= 50) return 'D'; if (avg >= 40) return 'E'; return 'F';
-      }
-      function calculateRow(input) {
-        const row = input.closest('tr');
-        const inputs = row.querySelectorAll('.mark-input');
-        let total = 0, count = 0;
-        inputs.forEach(inp => { if (inp.value!== '') { total += Number(inp.value); count++; } });
-        const studentId = row.querySelector('.mark-input').name.match(/marks\\[(\\d+)\\]/)[1];
-        const avg = count? (total / count).toFixed(1) : 0;
-        document.getElementById('total-' + studentId).textContent = total;
-        document.getElementById('avg-' + studentId).textContent = avg;
-        document.getElementById('grade-' + studentId).textContent = getGrade(avg, ${isNursery});
-      }
-      async function saveAllMarks() {
-        const form = document.getElementById('marksForm');
-        const formData = new FormData(form);
-        const btn = event.target;
-        btn.textContent = 'Saving...'; btn.disabled = true;
-        try {
-          const res = await fetch('/admin/marksheets/save', { method: 'POST', body: new URLSearchParams(formData) });
-          const result = await res.json();
-          alert(result.success? '✅ Saved!' : '❌ Error: ' + result.error);
-        } catch (err) { alert('❌ Save failed: ' + err.message); }
-        btn.textContent = '💾 Save All'; btn.disabled = false;
-      }
-    </script>
-  </body></html>`);
+      <div class="card">
+        <h3>Enter Marks Online - ${students.rows.length} students, ${subjects.rows.length} subjects</h3>
+        <form method="POST" action="/admin/marksheets/${className}/save-online">
+          <table>
+            <tr><th class="student-name">Student Name</th>${subjects.rows.map(s => `<th>${s.name}<br><small>/${s.max_marks}</small></th>`).join('')}</tr>
+            ${students.rows.map(st => `<tr>
+              <td class="student-name">${st.name}</td>
+              ${subjects.rows.map(sub => `<td><input type="number" name="marks_${st.id}_${sub.id}" min="0" max="${sub.max_marks}" step="0.5"></td>`).join('')}
+            </tr>`).join('')}
+          </table>
+          <br><button type="submit" class="btn btn-green">Save All Marks</button>
+        </form>
+      </div>
+    </body></html>`);
+  } catch (err) {
+    console.error('Marksheets error:', err);
+    res.status(500).send('Error: ' + err.message + '<br><a href="/admin">Back</a>');
+  }
 });
-
 // DOWNLOAD EXCEL TEMPLATE
 app.get('/admin/marksheets/:className/download-template', requireLogin, requireTask('marksheets'), async (req, res) => {
   const { className } = req.params;
