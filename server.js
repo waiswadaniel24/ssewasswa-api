@@ -42,13 +42,17 @@ function requireRole(roles) {
   };
 }
 
-async function requireTask(taskName) {
+function requireTask(taskName) {
   return async (req, res, next) => {
     const user = req.session.user;
     if (user.role === 'admin') return next();
-    const result = await pool.query('SELECT * FROM staff_tasks WHERE username = $1 AND task_name = $2 AND active = true', [user.username, taskName]);
-    if (result.rows.length > 0) return next();
-    res.status(403).send(`Access denied: You need to be tasked for "${taskName}" by admin`);
+    try {
+      const result = await pool.query('SELECT * FROM staff_tasks WHERE username = $1 AND task_name = $2 AND active = true', [user.username, taskName]);
+      if (result.rows.length > 0) return next();
+      res.status(403).send(`Access denied: You need to be tasked for "${taskName}" by admin`);
+    } catch (err) {
+      res.status(500).send('Task check failed');
+    }
   };
 }
 
