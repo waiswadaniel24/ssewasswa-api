@@ -498,9 +498,7 @@ app.post('/admin/marksheets/:className/upload', requireLogin, requireTask('marks
     await workbook.xlsx.readFile(req.file.path);
     const sheet = workbook.worksheets[0];
 
-    const headerRow = sheet.getRow(1).values.slice(1); // skip empty first element
-    const subjectHeaders = headerRow.slice(2); // skip student_id, student_name
-
+    const headerRow = sheet.getRow(1).values.slice(1);
     const subjects = await pool.query('SELECT id, name FROM subjects WHERE class = $1 AND active = true ORDER BY id', [className]);
     const subjectMap = {};
     subjects.rows.forEach(s => { subjectMap[s.name] = s.id; });
@@ -513,10 +511,8 @@ app.post('/admin/marksheets/:className/upload', requireLogin, requireTask('marks
       const studentId = row.getCell(1).value;
       if (!studentId) continue;
 
-      // Delete existing marks for this student/term/year
       await pool.query('DELETE FROM exam_results WHERE student_id = $1 AND term = $2 AND year = $3', [studentId, term, year]);
 
-      // Insert new marks from each subject column
       for (let colIdx = 3; colIdx <= headerRow.length; colIdx++) {
         const mark = row.getCell(colIdx).value;
         if (mark!== null && mark!== '' &&!isNaN(mark)) {
@@ -532,22 +528,12 @@ app.post('/admin/marksheets/:className/upload', requireLogin, requireTask('marks
     }
 
     await logAction(recorded_by, 'MARKS_UPLOADED', { class: className, term, year, marks_updated: updatedCount });
-    res.send(`✅ Successfully uploaded and updated ${updatedCount} marks for ${className} ${term} ${year}. <a href            await pool.query('INSERT INTO exam_results (student_id, subject_id, marks, term, year, recorded_by) VALUES ($1, $2, $3, $4, $5, $6)',
-              [studentId, subjectId, mark, term, year, recorded_by]);
-            updatedCount++;
-          }
-        }
-      }
-    }
-
-            await logAction(recorded_by, 'MARKS_UPLOADED', { class: className, term, year, marks_updated: updatedCount });
     res.send(`✅ Successfully uploaded and updated ${updatedCount} marks for ${className} ${term} ${year}. <a href="/admin/marksheets/${className}?term=${term}&year=${year}">Back to Marksheet</a>`);
   } catch (err) {
     console.error(err);
     res.status(500).send('Upload failed: ' + err.message);
   }
 });
-
 // SAVE MARKS FROM ONLINE SPREADSHEET
 app.post('/admin/marksheets/save', requireLogin, requireTask('marksheets'), async (req, res) => {
   try {
