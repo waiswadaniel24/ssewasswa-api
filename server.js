@@ -387,7 +387,79 @@ app.get('/admin/payments/add', requireLogin, async (req, res) => {
     <button type="submit">Save Payment</button>
   </form><a href="/admin">Back</a></body></html>`);
 });
+// ADD STUDENT - GET
+app.get('/admin/students/add', requireLogin, (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Student</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
+  </head><body><h2>Add Student</h2><form method="POST" action="/admin/students/add">
+    <input name="name" placeholder="Student Name" required>
+    <select name="class" required>
+      <option value="">Select Class</option>
+      <option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option>
+      <option value="P4">P4</option><option value="P5">P5</option><option value="P6">P6</option><option value="P7">P7</option>
+    </select>
+    <input name="term" placeholder="Term e.g Term 1" required>
+    <input name="year" type="number" placeholder="Year e.g 2026" required>
+    <input name="total_fees" type="number" placeholder="Total Fees UGX" required>
+    <button type="submit">Save Student</button>
+  </form><a href="/admin">Back</a></body></html>`);
+});
 
+// ADD STUDENT - POST
+app.post('/admin/students/add', requireLogin, async (req, res) => {
+  try {
+    const { name, class: className, term, year, total_fees } = req.body;
+    await pool.query(
+      'INSERT INTO students (name, class, term, year, total_fees, balance) VALUES ($1, $2, $3, $4, $5, $5)',
+      [name, className, term, year, total_fees]
+    );
+    await logAction(req.session.user.username, 'STUDENT_CREATED', { name, class: className });
+    res.redirect('/admin/class/' + className);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// ALL STUDENTS VIEW
+app.get('/admin/students', requireLogin, async (req, res) => {
+  const students = await pool.query('SELECT * FROM students ORDER BY class, name');
+  res.send(`<!DOCTYPE html><html><head><title>All Students</title>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}</style>
+  </head><body><h1>All Students</h1>
+  <a href="/admin/students/add" style="background:#27ae60;color:white;padding:10px 15px;text-decoration:none;border-radius:4px">+ Add Student</a>
+  <br><br>
+  <table><tr><th>Name</th><th>Class</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th></tr>
+  ${students.rows.map(s => `<tr><td>${s.name}</td><td>${s.class}</td><td>${s.term}</td><td>${s.year}</td><td>UGX ${Number(s.total_fees).toLocaleString()}</td><td>UGX ${Number(s.balance).toLocaleString()}</td></tr>`).join('')}
+  </table><br><a href="/admin">Back to Dashboard</a></body></html>`);
+});
+
+// STUDENT DETAIL VIEW - KEEP THIS LAST
+app.get('/admin/students/:id', requireLogin, async (req, res) => {
+  try {
+    const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
+    if (student.rows.length === 0) return res.status(404).send('Student not found');
+
+    const s = student.rows[0];
+    const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.id]);
+
+    res.send(`<!DOCTYPE html><html><head><title>${s.name}</title>
+    <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}</style>
+    </head><body>
+      <h1>${s.name} - ${s.class}</h1>
+      <p><strong>Term:</strong> ${s.term} ${s.year}</p>
+      <p><strong>Total Fees:</strong> UGX ${Number(s.total_fees).toLocaleString()}</p>
+      <p><strong>Balance:</strong> UGX ${Number(s.balance).toLocaleString()}</p>
+      <h3>Payment History</h3>
+      <table>
+        <tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr>
+        ${payments.rows.map(p => `<tr><td>${p.payment_date}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method}</td><td>${p.reference || '-'}</td></tr>`).join('')}
+      </table>
+      <br><a href="/admin/class/${s.class}">Back to ${s.class}</a>
+    </body></html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
 // PAYMENT POST - SAVE PAYMENT
 app.post('/admin/payments/add', requireLogin, async (req, res) => {
   try {
@@ -497,51 +569,7 @@ app.get('/admin/my-class', requireLogin, async (req, res) => {
 
   res.redirect(`/admin/class/${user.assigned_class}`);
 });
-// ADD STUDENT - GET
-app.get('/admin/students/add', requireLogin, (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Add Student</title>
-  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}</style>
-  </head><body><h2>Add Student</h2><form method="POST" action="/admin/students/add">
-    <input name="name" placeholder="Student Name" required>
-    <select name="class" required>
-      <option value="">Select Class</option>
-      <option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option>
-      <option value="P4">P4</option><option value="P5">P5</option><option value="P6">P6</option><option value="P7">P7</option>
-    </select>
-    <input name="term" placeholder="Term e.g Term 1" required>
-    <input name="year" type="number" placeholder="Year e.g 2026" required>
-    <input name="total_fees" type="number" placeholder="Total Fees UGX" required>
-    <button type="submit">Save Student</button>
-  </form><a href="/admin">Back</a></body></html>`);
-});
 
-// ADD STUDENT - POST
-app.post('/admin/students/add', requireLogin, async (req, res) => {
-  try {
-    const { name, class: className, term, year, total_fees } = req.body;
-    await pool.query(
-      'INSERT INTO students (name, class, term, year, total_fees, balance) VALUES ($1, $2, $3, $4, $5, $5)',
-      [name, className, term, year, total_fees]
-    );
-    await logAction(req.session.user.username, 'STUDENT_CREATED', { name, class: className });
-    res.redirect('/admin/class/' + className);
-  } catch (err) {
-    res.status(500).send('Error: ' + err.message);
-  }
-});
-
-// ALL STUDENTS VIEW - missing route for your "All Students" button
-app.get('/admin/students', requireLogin, async (req, res) => {
-  const students = await pool.query('SELECT * FROM students ORDER BY class, name');
-  res.send(`<!DOCTYPE html><html><head><title>All Students</title>
-  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}</style>
-  </head><body><h1>All Students</h1>
-  <a href="/admin/students/add" style="background:#27ae60;color:white;padding:10px 15px;text-decoration:none;border-radius:4px">+ Add Student</a>
-  <br><br>
-  <table><tr><th>Name</th><th>Class</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th></tr>
-  ${students.rows.map(s => `<tr><td>${s.name}</td><td>${s.class}</td><td>${s.term}</td><td>${s.year}</td><td>UGX ${Number(s.total_fees).toLocaleString()}</td><td>UGX ${Number(s.balance).toLocaleString()}</td></tr>`).join('')}
-  </table><br><a href="/admin">Back to Dashboard</a></body></html>`);
-});
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
