@@ -826,12 +826,16 @@ app.get('/admin/assets', requireLogin, requireTask('assets'), async (req, res) =
             </tr>
           `).join('')}
         </table>
-      `).join('')}
-    </div>
-  </body></html>`);
+          `).join('')}
+    `);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Error: ' + err.message);
+  }
 });
 
-app.get('/admin/assets/add', requireLogin, requireRole(['admin']), async (req, res) => {
+// PAY STAFF SALARY
+app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
   const staff = await pool.query('SELECT username, full_name FROM staff WHERE active = true ORDER BY full_name');
   res.send(`<!DOCTYPE html><html><head><title>Add Asset</title>
   <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
@@ -963,45 +967,220 @@ app.post('/admin/fields/add', requireLogin, requireRole(['admin']), async (req, 
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
-// STAFF PAYROLL
-app.get('/admin/staff/payroll', requireLogin, requireTask('staff_management'), async (req, res) => {
-  const { month = new Date().toLocaleString('default', { month: 'long' }), year = new Date().getFullYear() } = req.query;
-  const staff = await pool.query('SELECT * FROM staff WHERE active = true ORDER BY full_name');
-  const payments = await pool.query('SELECT staff_id FROM salary_payments WHERE month = $1 AND year = $2', [month, year]);
-  const paidIds = payments.rows.map(p => p.staff_id);
+// STAFF PAYROLL - FIXED
+app.get("/admin/staff/payroll", requireLogin, requireRole(["admin"]), async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    const currentMonth = month || new Date().toLocaleString("default", { month: "long" });
+    const currentYear = year || new Date().getFullYear();
+    const staff = await pool.query("SELECT * FROM staff WHERE active = true ORDER BY department, full_name");
+    const paid = await pool.query("SELECT staff_id FROM salary_payments WHERE month = $1 AND year = $2", [currentMonth, currentYear]);
+    const paidIds = paid.rows.map(p => p.staff_id);
+    res.json({ staff: staff.rows, paid: paidIds, month: currentMonth, year: currentYear });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error: " + err.message);
+  }
+});
 
-  res.send(`<!DOCTYPE html><html><head><title>Staff Payroll</title>
-  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}.paid{background:#d4edda}.unpaid{background:#f8d7da}</style>
+// PAY STAFF SALARY
+app.get("/admin/staff/pay/:id", requireLogin, requireRole(["admin"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { month, year } = req.query;
+    const staff = await pool.query("SELECT * FROM staff WHERE id = $1", [id]);
+    if (staff.rows.length === 0) return res.status(404).send("Staff not found");
+    const s = staff.rows[0];
+    const html = "<!DOCTYPE html><html><head><title>Pay Salary</title><style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style></head><body><div class=\"card\"><h2>Pay Salary - " + s.full_name + "</h2><p><strong>Position:</strong> " + s.position + "</p><p><strong>Month:</strong> " + month + " " + year + "</p><p><strong>Amount:</strong> UGX " + Number(s.monthly_salary).toLocaleString() + "</p><form method=\"POST\" action=\"/admin/staff/pay/" + id + "\"><input type=\"hidden\" name=\"month\" value=\"" + month + "\"><input type=\"hidden\" name=\"year\" value=\"" + year + "\"><input type=\"hidden\" name=\"amount\" value=\"" + s.monthly_salary + "\"><select name=\"method\" required><option value=\"Bank Transfer\">Bank Transfer</option><option value=\"Cash\">Cash</option><option value=\"Mobile Money\">Mobile Money</option><option value=\"Cheque\">Cheque</option></select><input name=\"reference\" placeholder=\"Transaction Reference / Cheque No\"><button type=\"submit\">Confirm Payment</button></form><a href=\"/admin/staff/payroll\">Cancel</a></div></body></html>";
+    res.send(html);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+// PAY STAFF SALARY
+app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  const staff = await pool.query('SELECT username, full_name FROM staff WHERE active = true ORDER BY full_name');
+  res.send(`<!DOCTYPE html><html><head><title>Add Asset</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Add School Asset</h2>
+  <form method="POST" action="/admin/assets/add">
+    <input name="asset_name" placeholder="Asset Name e.g 50 Desks" required>
+    <select name="category" required>
+      <option value="">Select Category</option>
+      <option value="Furniture">Furniture</option>
+      <option value="Electronics">Electronics</option>
+      <option value="Stationery">Stationery</option>
+      <option value="Sports Equipment">Sports Equipment</option>
+      <option value="Laboratory">Laboratory</option>
+      <option value="Kitchen">Kitchen</option>
+      <option value="Vehicles">Vehicles</option>
+      <option value="Other">Other</option>
+    </select>
+    <input name="quantity" type="number" placeholder="Quantity" required>
+    <input name="unit_cost" type="number" placeholder="Unit Cost UGX" required>
+    <input name="location" placeholder="Location e.g Store Room, P2 Classroom">
+    <select name="condition">
+      <option value="Good">Good</option>
+      <option value="Needs Repair">Needs Repair</option>
+      <option value="Damaged">Damaged</option>
+    </select>
+    <input name="purchased_date" type="date" placeholder="Purchase Date">
+    <input name="supplier" placeholder="Supplier Name">
+    <select name="managed_by">
+      <option value="">Select Staff In Charge</option>
+      ${staff.rows.map(s => `<option value="${s.username}">${s.full_name}</option>`).join('')}
+    </select>
+    <button type="submit">Save Asset</button>
+  </form><a href="/admin/assets">Back</a></div></body></html>`);
+});
+
+app.post('/admin/assets/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { asset_name, category, quantity, unit_cost, location, condition, purchased_date, supplier, managed_by } = req.body;
+    const total_value = Number(quantity) * Number(unit_cost);
+    await pool.query('INSERT INTO school_assets (asset_name, category, quantity, unit_cost, total_value, location, condition, purchased_date, supplier, managed_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+      [asset_name, category, quantity, unit_cost, total_value, location, condition, purchased_date, supplier, managed_by]);
+    await logAction(req.session.user.username, 'ASSET_ADDED', { asset_name, category, total_value });
+    res.redirect('/admin/assets');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+// SUBJECTS MANAGEMENT
+app.get('/admin/subjects', requireLogin, requireRole(['admin']), async (req, res) => {
+  const subjects = await pool.query('SELECT * FROM subjects ORDER BY department, class, name');
+  res.send(`<!DOCTYPE html><html><head><title>Manage Subjects</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
   </head><body>
-    <div class="card"><h1>💰 Staff Payroll - ${month} ${year}</h1><a href="/admin/staff" class="btn">← Staff List</a>
-      <form method="GET" style="display:inline-block;margin-left:20px">
-        <select name="month">${['January','February','March','April','May','June','July','August','September','October','November','December'].map(m => `<option value="${m}" ${m===month?'selected':''}>${m}</option>`).join('')}</select>
-        <input type="number" name="year" value="${year}" style="width:80px">
-        <button type="submit" class="btn">Load</button>
-      </form>
-    </div>
+    <div class="card"><h1>📚 Manage Subjects</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/subjects/add" class="btn btn-green">+ Add Subject</a></div>
     <div class="card">
-      <table><tr><th>Staff Name</th><th>Position</th><th>Department</th><th>Salary</th><th>Status</th><th>Action</th></tr>
-      ${staff.rows.map(s => `
-        <tr class="${paidIds.includes(s.id)? 'paid' : 'unpaid'}">
-          <td>${s.full_name}</td>
-          <td>${s.position}</td>
-          <td>${s.department}</td>
-          <td>UGX ${Number          <td>UGX ${Number(s.monthly_salary).toLocaleString()}</td>
-          <td>${paidIds.includes(s.id)? '✅ Paid' : '❌ Pending'}</td>
-          <td>
-            ${paidIds.includes(s.id)?
-              '<span style="color:green">Paid</span>' :
-              `<a href="/admin/staff/pay/${s.id}?month=${month}&year=${year}" class="btn btn-green" style="padding:5px 10px;font-size:12px">Pay Now</a>`
-            }
-          </td>
-        </tr>
-      `).join('')}
+      <table><tr><th>Subject</th><th>Class</th><th>Department</th><th>Max Marks</th><th>Status</th></tr>
+      ${subjects.rows.map(s => `<tr><td>${s.name}</td><td>${s.class}</td><td>${s.department}</td><td>${s.max_marks}</td><td>${s.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
       </table>
     </div>
   </body></html>`);
 });
 
+app.get('/admin/subjects/add', requireLogin, requireRole(['admin']), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Subject</title>
+  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Add New Subject</h2>
+  <form method="POST" action="/admin/subjects/add">
+    <input name="name" placeholder="Subject Name e.g Computer Studies" required>
+    <select name="class" required>
+      <option value="">Select Class</option>
+      ${ALL_CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+    </select>
+    <select name="department" required>
+      <option value="Primary">Primary</option>
+      <option value="Nursery">Nursery</option>
+    </select>
+    <input name="max_marks" type="number" value="100" placeholder="Max Marks" required>
+    <button type="submit">Add Subject</button>
+  </form><a href="/admin/subjects">Back</a></div></body></html>`);
+});
+
+app.post('/admin/subjects/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { name, class: className, department, max_marks } = req.body;
+    await pool.query('INSERT INTO subjects (name, class, department, max_marks) VALUES ($1, $2, $3, $4)', [name, className, department, max_marks]);
+    res.redirect('/admin/subjects');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+// DYNAMIC STUDENT FIELDS
+app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) => {
+  const fields = await pool.query('SELECT * FROM student_field_definitions ORDER BY field_name');
+  res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
+  </head><body>
+    <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
+    <div class="card"><p>Admin can add custom fields to student records like 'Blood Group', 'Allergies', 'Bus Route', etc. These appear on student add/edit forms.</p>
+      <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Status</th></tr>
+      ${fields.rows.map(f => `<tr><td>${f.field_name}</td><td>${f.field_type}</td><td>${f.required? 'Yes' : 'No'}</td><td>${f.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Field</title>
+  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Add Custom Student Field</h2>
+  <form method="POST" action="/admin/fields/add">
+    <input name="field_name" placeholder="Field Name e.g Blood Group" required>
+    <select name="field_type" required>
+      <option value="text">Text</option>
+      <option value="number">Number</option>
+      <option value="date">Date</option>
+      <option value="select">Dropdown Select</option>
+    </select>
+    <textarea name="field_options" placeholder="For Dropdown: Enter options separated by comma e.g A,B,AB,O"></textarea>
+    <label><input type="checkbox" name="required" value="true"> Required Field</label>
+    <button type="submit">Add Field</button>
+  </form><a href="/admin/fields">Back</a></div></body></html>`);
+});
+
+app.post('/admin/fields/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { field_name, field_type, field_options, required } = req.body;
+    const options = field_options? JSON.stringify(field_options.split(',').map(o => o.trim())) : null;
+    await pool.query('INSERT INTO student_field_definitions (field_name, field_type, field_options, required) VALUES ($1, $2, $3, $4)',
+      [field_name, field_type, options, required === 'true']);
+    res.redirect('/admin/fields');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+// STAFF PAYROLL - FIXED
+app.get("/admin/staff/payroll", requireLogin, requireRole(["admin"]), async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    const currentMonth = month || new Date().toLocaleString("default", { month: "long" });
+    const currentYear = year || new Date().getFullYear();
+    const staff = await pool.query("SELECT * FROM staff WHERE active = true ORDER BY department, full_name");
+    const paid = await pool.query("SELECT staff_id FROM salary_payments WHERE month = $1 AND year = $2", [currentMonth, currentYear]);
+    const paidIds = paid.rows.map(p => p.staff_id);
+    res.json({ staff: staff.rows, paid: paidIds, month: currentMonth, year: currentYear });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// PAY STAFF SALARY
+app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { month, year } = req.query;
+    const staff = await pool.query('SELECT * FROM staff WHERE id = $1', [id]);
+    if (staff.rows.length === 0) return res.status(404).send('Staff not found');
+    const s = staff.rows[0];
+    res.send(`<!DOCTYPE html><html><head><title>Pay Salary</title><style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style></head><body><div class="card"><h2>Pay Salary - ${s.full_name}</h2><p><strong>Position:</strong> ${s.position}</p><p><strong>Month:</strong> ${month} ${year}</p><p><strong>Amount:</strong> UGX ${Number(s.monthly_salary).toLocaleString()}</p><form method="POST" action="/admin/staff/pay/${id}"><input type="hidden" name="month" value="${month}"><input type="hidden" name="year" value="${year}"><input type="hidden" name="amount" value="${s.monthly_salary}"><select name="method" required><option value="Bank Transfer">Bank Transfer</option><option value="Cash">Cash</option><option value="Mobile Money">Mobile Money</option><option value="Cheque">Cheque</option></select><input name="reference" placeholder="Transaction Reference / Cheque No"><button type="submit">Confirm Payment</button></form><a href="/admin/staff/payroll">Cancel</a></div></body></html>`);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// ADD ASSET FORM - MAKE SURE THIS IS BELOW
+app.get('/admin/assets/add', requireLogin, requireRole(['admin']), async (req, res) => {
+// PAY STAFF SALARY
+app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { month, year } = req.query;
+    const staff = await pool.query('SELECT * FROM staff WHERE id = $1', [id]);
+    if (staff.rows.length === 0) return res.status(404).send('Staff not found');
+    const s = staff.rows[0];
+    res.send(`<!DOCTYPE html><html><head><title>Pay Salary</title><style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style></head><body><div class="card"><h2>Pay Salary - ${s.full_name}</h2><p><strong>Position:</strong> ${s.position}</p><p><strong>Month:</strong> ${month} ${year}</p><p><strong>Amount:</strong> UGX ${Number(s.monthly_salary).toLocaleString()}</p><form method="POST" action="/admin/staff/pay/${id}"><input type="hidden" name="month" value="${month}"><input type="hidden" name="year" value="${year}"><input type="hidden" name="amount" value="${s.monthly_salary}"><select name="method" required><option value="Bank Transfer">Bank Transfer</option><option value="Cash">Cash</option><option value="Mobile Money">Mobile Money</option><option value="Cheque">Cheque</option></select><input name="reference" placeholder="Transaction Reference / Cheque No"><button type="submit">Confirm Payment</button></form><a href="/admin/staff/payroll">Cancel</a></div></body></html>`);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// ASSETS LIST
+app.get('/admin/assets', requireLogin, requireRole(['admin']), async (req, res) => {
 // PAY STAFF SALARY
 app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
   const { id } = req.params;
@@ -1010,27 +1189,8 @@ app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req
   if (staff.rows.length === 0) return res.status(404).send('Staff not found');
   const s = staff.rows[0];
 
-  res.send(`<!DOCTYPE html><html><head><title>Pay Salary</title>
-  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
-  </head><body><div class="card"><h2>Pay Salary - ${s.full_name}</h2>
-  <p><strong>Position:</strong> ${s.position}</p>
-  <p><strong>Month:</strong> ${month} ${year}</p>
-  <p><strong>Amount:</strong> UGX ${Number(s.monthly_salary).toLocaleString()}</p>
-  <form method="POST" action="/admin/staff/pay/${id}">
-    <input type="hidden" name="month" value="${month}">
-    <input type="hidden" name="year" value="${year}">
-    <input type="hidden" name="amount" value="${s.monthly_salary}">
-    <select name="method" required>
-      <option value="Bank Transfer">Bank Transfer</option>
-      <option value="Cash">Cash</option>
-      <option value="Mobile Money">Mobile Money</option>
-      <option value="Cheque">Cheque</option>
-    </select>
-    <input name="reference" placeholder="Transaction Reference / Cheque No">
-    <button type="submit">Confirm Payment</button>
-  </form><a href="/admin/staff/payroll">Cancel</a></div></body></html>`);
+  res.send(`<!DOCTYPE html><html><head><title>Pay Salary</title><style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style></head><body><div class="card"><h2>Pay Salary - ${s.full_name}</h2><p><strong>Position:</strong> ${s.position}</p><p><strong>Month:</strong> ${month} ${year}</p><p><strong>Amount:</strong> UGX ${Number(s.monthly_salary).toLocaleString()}</p><form method="POST" action="/admin/staff/pay/${id}"><input type="hidden" name="month" value="${month}"><input type="hidden" name="year" value="${year}"><input type="hidden" name="amount" value="${s.monthly_salary}"><select name="method" required><option value="Bank Transfer">Bank Transfer</option><option value="Cash">Cash</option><option value="Mobile Money">Mobile Money</option><option value="Cheque">Cheque</option></select><input name="reference" placeholder="Transaction Reference / Cheque No"><button type="submit">Confirm Payment</button></form><a href="/admin/staff/payroll">Cancel</a></div></body></html>`);
 });
-
 app.post('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
@@ -1577,3 +1737,4 @@ app.post('/admin/fields/add', requireLogin, requireRole(['admin']), async (req, 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
