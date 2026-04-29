@@ -247,7 +247,7 @@ app.get('/admin/class/:className', requireLogin, async (req, res) => {
   const className = req.params.className;
   const user = req.session.user;
 
-  if (user.role === 'class_teacher' && user.assigned_class !== className) {
+  if (user.role === 'class_teacher' && user.assigned_class!== className) {
     return res.status(403).send('Access denied: You can only view your assigned class: ' + user.assigned_class);
   }
 
@@ -256,7 +256,7 @@ app.get('/admin/class/:className', requireLogin, async (req, res) => {
       'SELECT * FROM students WHERE class = $1 ORDER BY name',
       [className]
     );
-    
+
     const totalStudents = students.rows.length;
     const totalBalance = students.rows.reduce((sum, s) => sum + Number(s.balance), 0);
     const totalFees = students.rows.reduce((sum, s) => sum + Number(s.total_fees), 0);
@@ -265,26 +265,26 @@ app.get('/admin/class/:className', requireLogin, async (req, res) => {
     <html><head><title>${className} - Class View</title>
     <style>
       body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}
-      .header{background:white;padding:20px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
-      .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:20px 0}
-      .stat-card{background:#3498db;color:white;padding:20px;border-radius:8px}
-      .stat-card h3{margin:0 0 10px 0;font-size:14px;opacity:0.9}
-      .stat-card .num{font-size:28px;font-weight:bold}
-      .controls{background:white;padding:15px;border-radius:8px;margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap}
-      .controls input{flex:1;padding:10px;border:1px solid #ddd;border-radius:4px;min-width:200px}
-      .btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;font-size:14px}
-      .btn-green{background:#27ae60}
-      .btn-red{background:#e74c3c}
+     .header{background:white;padding:20px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+     .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:20px 0}
+     .stat-card{background:#3498db;color:white;padding:20px;border-radius:8px}
+     .stat-card h3{margin:0 0 10px 0;font-size:14px;opacity:0.9}
+     .stat-card.num{font-size:28px;font-weight:bold}
+     .controls{background:white;padding:15px;border-radius:8px;margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap}
+     .controls input{flex:1;padding:10px;border:1px solid #ddd;border-radius:4px;min-width:200px}
+     .btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;font-size:14px}
+     .btn-green{background:#27ae60}
+     .btn-red{background:#e74c3c}
       table{width:100%;background:white;border-collapse:collapse;border-radius:8px;overflow:hidden;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
       th{background:#34495e;color:white;padding:12px;text-align:left}
       td{padding:12px;border-bottom:1px solid #eee}
       tr:hover{background:#f8f9fa}
-      .balance-zero{color:#27ae60;font-weight:bold}
-      .balance-owe{color:#e74c3c;font-weight:bold}
+     .balance-zero{color:#27ae60;font-weight:bold}
+     .balance-owe{color:#e74c3c;font-weight:bold}
       @media print{
-        .no-print{display:none}
+       .no-print{display:none}
         body{background:white}
-        .header{box-shadow:none}
+       .header{box-shadow:none}
       }
     </style>
     </head><body>
@@ -336,7 +336,7 @@ app.get('/admin/class/:className', requireLogin, async (req, res) => {
               <td>${s.term}</td>
               <td>${s.year}</td>
               <td>UGX ${Number(s.total_fees).toLocaleString()}</td>
-              <td class="${s.balance == 0 ? 'balance-zero' : 'balance-owe'}">
+              <td class="${s.balance == 0? 'balance-zero' : 'balance-owe'}">
                 UGX ${Number(s.balance).toLocaleString()}
               </td>
               <td class="no-print">
@@ -354,12 +354,12 @@ app.get('/admin/class/:className', requireLogin, async (req, res) => {
           const filter = input.value.toLowerCase();
           const table = document.getElementById('studentsTable');
           const tr = table.getElementsByTagName('tr');
-          
+
           for (let i = 1; i < tr.length; i++) {
             const td = tr[i].getElementsByTagName('td')[0];
             if (td) {
               const txtValue = td.textContent || td.innerText;
-              tr[i].style.display = txtValue.toLowerCase().indexOf(filter) > -1 ? '' : 'none';
+              tr[i].style.display = txtValue.toLowerCase().indexOf(filter) > -1? '' : 'none';
             }
           }
         }
@@ -370,7 +370,7 @@ app.get('/admin/class/:className', requireLogin, async (req, res) => {
   }
 });
 
-// PAYMENTS ADD - WITH PRE-SELECT
+// PAYMENTS ADD - GET WITH PRE-SELECT
 app.get('/admin/payments/add', requireLogin, async (req, res) => {
   const preselectedId = req.query.student_id || '';
   const students = await pool.query('SELECT id, name, class, balance FROM students WHERE balance > 0 ORDER BY name');
@@ -379,13 +379,63 @@ app.get('/admin/payments/add', requireLogin, async (req, res) => {
   </head><body><h2>Record Payment</h2><form method="POST" action="/admin/payments/add">
     <select name="student_id" required>
       <option value="">Select Student</option>
-      ${students.rows.map(s => `<option value="${s.id}" ${s.id == preselectedId ? 'selected' : ''}>${s.name} - ${s.class} - Bal: UGX ${Number(s.balance).toLocaleString()}</option>`).join('')}
+      ${students.rows.map(s => `<option value="${s.id}" ${s.id == preselectedId? 'selected' : ''}>${s.name} - ${s.class} - Bal: UGX ${Number(s.balance).toLocaleString()}</option>`).join('')}
     </select>
     <input name="amount" type="number" placeholder="Amount UGX" required>
     <input name="method" placeholder="Payment Method e.g MTN" required>
     <input name="reference" placeholder="Reference/TxID">
     <button type="submit">Save Payment</button>
   </form><a href="/admin">Back</a></body></html>`);
+});
+
+// PAYMENT POST - SAVE PAYMENT
+app.post('/admin/payments/add', requireLogin, async (req, res) => {
+  try {
+    const { student_id, amount, method, reference } = req.body;
+
+    await pool.query(
+      'INSERT INTO payments (student_id, amount, method, reference) VALUES ($1, $2, $3, $4)',
+      [student_id, amount, method, reference]
+    );
+
+    await pool.query(
+      'UPDATE students SET balance = balance - $1 WHERE id = $2',
+      [amount, student_id]
+    );
+
+    await logAction(req.session.user.username, 'PAYMENT_RECORDED', { student_id, amount, method });
+    res.redirect('/admin/payments/add?success=1');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// STUDENT DETAIL VIEW
+app.get('/admin/students/:id', requireLogin, async (req, res) => {
+  try {
+    const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
+    if (student.rows.length === 0) return res.status(404).send('Student not found');
+
+    const s = student.rows[0];
+    const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.id]);
+
+    res.send(`<!DOCTYPE html><html><head><title>${s.name}</title>
+    <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}</style>
+    </head><body>
+      <h1>${s.name} - ${s.class}</h1>
+      <p><strong>Term:</strong> ${s.term} ${s.year}</p>
+      <p><strong>Total Fees:</strong> UGX ${Number(s.total_fees).toLocaleString()}</p>
+      <p><strong>Balance:</strong> UGX ${Number(s.balance).toLocaleString()}</p>
+      <h3>Payment History</h3>
+      <table>
+        <tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr>
+        ${payments.rows.map(p => `<tr><td>${p.payment_date}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method}</td><td>${p.reference || '-'}</td></tr>`).join('')}
+      </table>
+      <br><a href="/admin/class/${s.class}">Back to ${s.class}</a>
+    </body></html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
 });
 
 // CREATE USER - GET
@@ -417,4 +467,37 @@ app.get('/admin/users/add', requireLogin, (req, res) => {
     </select>
     <button type="submit">Create User</button>
   </form><a href="/admin">Back</a></div></body></html>`);
+});
+
+// CREATE USER - POST
+app.post('/admin/users/add', requireLogin, async (req, res) => {
+  try {
+    const { username, password, role, assigned_class } = req.body;
+    const hash = await bcrypt.hash(password, 10);
+
+    await pool.query(
+      'INSERT INTO admins (username, password, role, assigned_class) VALUES ($1, $2, $3, $4)',
+      [username, hash, role, assigned_class || null]
+    );
+
+    await logAction(req.session.user.username, 'USER_CREATED', { newUser: username, role, assigned_class });
+    res.send(`User ${username} created. <a href="/admin">Dashboard</a>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Class Teacher Dashboard
+app.get('/admin/my-class', requireLogin, async (req, res) => {
+  const user = req.session.user;
+
+  if (user.role!== 'class_teacher' ||!user.assigned_class) {
+    return res.redirect('/admin');
+  }
+
+  res.redirect(`/admin/class/${user.assigned_class}`);
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
