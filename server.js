@@ -219,9 +219,6 @@ async function initDB() {
 
 initDB();
 loadEmailSettings();
-
-app.get('/health', (req, res) => res.json({ status: 'API is running' }));
-// LOGIN - Show form
 app.get('/admin/login', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Login</title>
   <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}button{background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer}</style>
@@ -839,14 +836,6 @@ app.get('/admin/assets', requireLogin, requireTask('assets'), async (req, res) =
 app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
   const staff = await pool.query('SELECT username, full_name FROM staff WHERE active = true ORDER BY full_name');
   res.send(`<!DOCTYPE html><html><head><title>Add Asset</title>
-  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
-  </head><body><div class="card"><h2>Add School Asset</h2>
-  <form method="POST" action="/admin/assets/add">
-    <input name="asset_name" placeholder="Asset Name e.g 50 Desks" required>
-    <select name="category" required>
-      <option value="">Select Category</option>
-      <option value="Furniture">Furniture</option>
-      <option value="Electronics">Electronics</option>
       <option value="Stationery">Stationery</option>
       <option value="Sports Equipment">Sports Equipment</option>
       <option value="Laboratory">Laboratory</option>
@@ -1030,14 +1019,7 @@ app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req
 });
 app.post('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
   try {
-    const { month, year, amount, method, reference } = req.body;
-      [id, amount, month, year, method, reference, req.session.user.username]);
-    await logAction(req.session.user.username, 'SALARY_PAID', { staff_id: id, amount, month, year });
-    res.redirect(`/admin/staff/payroll?month=${month}&year=${year}`);
-  } catch (err) { res.status(500).send('Error: ' + err.message); }
-});
-
-// FINANCIAL PORTAL
+ 
 app.get('/admin/financial', requireLogin, requireTask('financial_portal'), async (req, res) => {
   const assetValue = await pool.query('SELECT SUM(total_value) as total FROM school_assets');
   const payroll = await pool.query('SELECT SUM(monthly_salary) as total FROM staff WHERE active = true');
@@ -1046,15 +1028,6 @@ app.get('/admin/financial', requireLogin, requireTask('financial_portal'), async
   <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd}th{background:#34495e;color:white}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0}.stat{background:#ecf0f1;padding:15px;border-radius:4px;text-align:center}</style>
   </head><body><h1>💰 Financial Portal</h1><a href="/admin" class="btn">← Dashboard</a><br><br>
   <div class="stats">
-    <div class="stat"><strong>Total Assets Value</strong><br>UGX ${Number(assetValue.rows[0].total || 0).toLocaleString()}</div>
-    <div class="stat"><strong>Monthly Payroll</strong><br>UGX ${Number(payroll.rows[0].total || 0).toLocaleString()}</div>
-    <div class="stat"><strong>Fees Outstanding</strong><br>UGX ${Number(classes.rows.reduce((sum,c) => sum + Number(c.balance), 0)).toLocaleString()}</div>
-  </div>
-  <table><tr><th>Class</th><th>Students</th><th>Total Fees</th><th>Outstanding</th><th>Collected</th><th>Actions</th></tr>
-  </table>
-  <br><a href="/admin/assets" class="btn" style="background:#8e44ad">📦 View All Assets</a>
-  <a href="/admin/staff/payroll" class="btn" style="background:#16a085">💰 Staff Payroll</a>
-  </body></html>`);
 });
 
 // ACADEMIC PORTAL
