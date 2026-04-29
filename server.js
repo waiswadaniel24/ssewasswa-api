@@ -428,7 +428,289 @@ app.get('/admin/financial', requireLogin, requireTask('financial_portal'), async
   </div>
   </body></html>`);
 });
+// MARKSHEET WITH OFFLINE DOWNLOAD/UPLOAD
+app.get('/admin/marksheets/:className', requireLogin, requireTask('marksheets'), async (req, res) => {
+  const className = req.params.className;
+  const { term = 'Term 1', year = 2026 } = req.query;
+  const user = req.session.user;
+  if (user.role === 'class_teacher' && user.assigned_class!== className) return res.status(403).send('Access denied');
 
+  const students = await pool.query('SELECT * FROM students WHERE class = $1 ORDER BY name', [className]);
+  const subjects = await pool.query('SELECT * FROM subjects WHERE class = $1 AND active = true ORDER BY id', [className]);
+  const marks = await pool.query(`SELECT student_id, subject_id, marks FROM exam_results WHERE term = $1 AND year = $2 AND student_id IN (SELECT id FROM students WHERE class = $3)`, [term, year, className]);
+  const marksMap = {};
+  marks.rows.forEach(m => { marksMap[`${m.student_id}-${m.subject_id}`] = m.marks; });
+  const isNursery = NURSERY_CLASSES.includes(className);
+
+  function getGradeJS(avg, isNursery) {
+    if (isNursery) {
+      if (avg >= 80) return 'E.E'; if (avg >= 60) return 'M.E'; if (avg >= 40) return 'A.E'; return 'B.E';
+    }
+    if (avg >= 80) return 'A'; if (avg >= 70) return 'B'; if (avg >= 60) return 'C'; if (avg >= 50) return 'D'; if (avg >= 40) return 'E'; return 'F';
+  }
+
+  res.send(`<!DOCTYPE html><html><head><title>${className} Marksheet</title>
+  <style>body{font-family:Arial;margin:20px;background:#f4f6f9}.header{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.controls{background:white;padding:15px;border-radius:8px;margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;font-size:14px}.btn-green{background:#27ae60}.btn-orange{background:#e67e22}table{background:white;border-collapse:collapse;width:100%;border-radius:8px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.1)}th{background:#34495e;color:white;padding:10px;text-align:center;font-size:12px}td{padding:6px;border:1px solid #ddd;text-align:center}.name-col{text-align:left;font-weight:bold;position:sticky;left:0;background:#f8f9fa;min-width:140px}input.mark-input{width:45px;padding:3px;text-align:center;border:1px solid #ddd;border-radius:3px;font-size:13px}.total-col{background:#e8f5e8;font-weight:bold}.avg-col{background:#e3f2fd;font-weight:bold}.grade-col{background:#fff3e0;font-weight:bold}</style>
+  </head><body>
+    <div class="header"><h1>${className} Marksheet - ${term} ${year} ${isNursery? '(Nursery)' : ''}</h1>
+      <div class="controls">
+        <form method="GET" style="display:flex;gap:10px;align-items:center">
+          <select name="term" onchange="this.form.submit()">
+            <option value="Term 1" ${term==='Term 1'?'selected':''}>Term 1</option>
+            <option value="Term 2" ${term==='Term 2'?'selected':''}>Term 2</option>
+            <option value="Term 3" ${term==='Term 3'?'selected':''}>Term 3</option>
+          </select>
+          <input type="number" name="year" value="${year}" onchange="this.form.submit()" style="width:70px">
+        </form>
+        <button onclick="saveAllMarks()" class="btn btn-green">💾 Save All</button>
+        <a href="/admin/marksheets/${className}/download-template?term=${term}&year=${year}" class="btn btn-orange">📥 Download Excel Template</a>
+      </div>
+    <form id="marksForm">
+    <input type="hidden" name="term" value="${term}"><input type="hidden" name="year" value="${year}"><input type="hidden" name="class" value="${className}">
+    <table>
+      <thead><tr>
+        <th class="name-col">Student</th>
+        ${subjects.rows.map(s => `<th>${s.name}<br><small>/${s.max_marks}</small></th>`).join('')}
+        <th class="total-col">Total</th><th class="avg-col">Avg</th><th class="grade-col">Grade</th>
+      </tr></thead>
+      <tbody>
+        ${students.rows.map(stu => {
+          let total = 0, count = 0;
+          const subjectCells = subjects.rows.map(sub => {
+            const mark = marksMap[`${stu.id}-${sub.id}`] || '';
+            if (mark!== '') { total += Number(mark); count++; }
+            return `<td><input type="number" class="mark-input" name="marks[${stu.id}][${sub.id}]" value="${mark}" min="0" max="${sub.max_marks}" onchange="calculateRow(this)"></td>`;
+          }).join('');
+          const avg = count? (total/count).toFixed(1) : '0';
+          const grade = getGradeJS(count? total/count : 0, isNursery);
+          return `<tr>
+            <td class="name-col">${stu.name}</td>
+            ${subjectCells}
+            <td class="total-col" id="total-${stu.id}">${total}</td>
+            <td class="avg-col" id="avg-${stu.id}">${avg}</td>
+            <td class="grade-col" id="grade-${stu.id}">${grade}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </form>
+    <script>
+      function getGrade(avg, isNursery) {
+        if (isNursery) {
+          if (avg >= 80) return 'E.E'; if (avg >= 60) return 'M.E'; if (avg >= 40) return 'A.E'; return 'B.E';
+        }
+        if (avg >= 80) return 'A'; if (avg >= 70) return 'B'; if (avg >= 60) return 'C'; if (avg >= 50) return 'D'; if (avg >= 40) return 'E'; return 'F';
+      }
+      function calculateRow(input) {
+        const row = input.closest('tr');
+        const inputs = row.querySelectorAll('.mark-input');
+        let total = 0, count = 0;
+        inputs.forEach(inp => { if (inp.value!== '') { total += Number(inp.value); count++; } });
+        const studentId = row.querySelector('.mark-input').name.match(/marks\\[(\\d+)\\]/)[1];
+        const avg = count? (total / count).toFixed(1) : 0;
+        document.getElementById('total-' + studentId).textContent = total;
+        document.getElementById('avg-' + studentId).textContent = avg;
+        document.getElementById('grade-' + studentId).textContent = getGrade(avg, ${isNursery});
+      }
+      async function saveAllMarks() {
+        const form = document.getElementById('marksForm');
+        const formData = new FormData(form);
+        const btn = event.target;
+        btn.textContent = 'Saving...'; btn.disabled = true;
+        try {
+          const res = await fetch('/admin/marksheets/save', { method: 'POST', body: new URLSearchParams(formData) });
+          const result = await res.json();
+          alert(result.success? '✅ Saved!' : '❌ Error: ' + result.error);
+        } catch (err) { alert('❌ Save failed: ' + err.message); }
+        btn.textContent = '💾 Save All'; btn.disabled = false;
+      }
+    </script>
+  </body></html>`);
+});
+
+// DOWNLOAD EXCEL TEMPLATE
+app.get('/admin/marksheets/:className/download-template', requireLogin, requireTask('marksheets'), async (req, res) => {
+  const { className } = req.params;
+  const { term = 'Term 1', year = 2026 } = req.query;
+  const students = await pool.query('SELECT id, name FROM students WHERE class = $1 ORDER BY name', [className]);
+  const subjects = await pool.query('SELECT id, name, max_marks FROM subjects WHERE class = $1 AND active = true ORDER BY id', [className]);
+  const marks = await pool.query(`SELECT student_id, subject_id, marks FROM exam_results WHERE term = $1 AND year = $2 AND student_id IN (SELECT id FROM students WHERE class = $3)`, [term, year, className]);
+  const marksMap = {};
+  marks.rows.forEach(m => { marksMap[`${m.student_id}-${m.subject_id}`] = m.marks; });
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet(`${className} ${term} ${year}`);
+  const headers = ['student_id', 'student_name',...subjects.rows.map(s => `${s.name} (/${s.max_marks})`)];
+  sheet.addRow(headers);
+  sheet.getRow(1).font = { bold: true };
+
+  students.rows.forEach(stu => {
+    const row = [stu.id, stu.name];
+    subjects.rows.forEach(sub => {
+      row.push(marksMap[`${stu.id}-${sub.id}`] || '');
+    });
+    sheet.addRow(row);
+  });
+
+  sheet.views = [{ state: 'frozen', xSplit: 2, ySplit: 1 }];
+  sheet.columns.forEach(col => { col.width = 15; });
+  sheet.getColumn(1).width = 10;
+  sheet.getColumn(2).width = 25;
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename=${className}_${term}_${year}_Marksheet.xlsx`);
+  await workbook.xlsx.write(res);
+  res.end();
+});
+
+// SAVE MARKS FROM WEB FORM
+app.post('/admin/marksheets/save', requireLogin, requireTask('marksheets'), async (req, res) => {
+  try {
+    const { term, year, marks } = req.body;
+    const recorded_by = req.session.user.username;
+    const studentIds = Object.keys(marks || {});
+    if (studentIds.length > 0) {
+      await pool.query('DELETE FROM exam_results WHERE student_id = ANY($1) AND term = $2 AND year = $3', [studentIds, term, year]);
+      for (const studentId of studentIds) {
+        for (const subjectId in marks[studentId]) {
+          const mark = marks[studentId][subjectId];
+          if (mark!== '' && mark!== null) {
+            await pool.query('INSERT INTO exam_results (student_id, subject_id, marks, term, year, recorded_by) VALUES ($1, $2, $3, $4, $5, $6)', [studentId, subjectId, mark, term, year, recorded_by]);
+          }
+        }
+      }
+    }
+    await logAction(recorded_by, 'MARKS_SAVED', { term, year, students: studentIds.length });
+    res.json({ success: true });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// SUBJECTS MANAGEMENT
+app.get('/admin/subjects', requireLogin, requireRole(['admin']), async (req, res) => {
+  const subjects = await pool.query('SELECT * FROM subjects ORDER BY department, class, name');
+  res.send(`<!DOCTYPE html><html><head><title>Manage Subjects</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
+  </head><body>
+    <div class="card"><h1>📚 Manage Subjects</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/subjects/add" class="btn btn-green">+ Add Subject</a></div>
+    <div class="card">
+      <table><tr><th>Subject</th><th>Class</th><th>Department</th><th>Max Marks</th><th>Status</th></tr>
+      ${subjects.rows.map(s => `<tr><td>${s.name}</td><td>${s.class}</td><td>${s.department}</td><td>${s.max_marks}</td><td>${s.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.get('/admin/subjects/add', requireLogin, requireRole(['admin']), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Subject</title>
+  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Add New Subject</h2>
+  <form method="POST" action="/admin/subjects/add">
+    <input name="name" placeholder="Subject Name e.g Computer Studies" required>
+    <select name="class" required>
+      <option value="">Select Class</option>
+      ${ALL_CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+    </select>
+    <select name="department" required>
+      <option value="Primary">Primary</option>
+      <option value="Nursery">Nursery</option>
+    </select>
+    <input name="max_marks" type="number" value="100" placeholder="Max Marks" required>
+    <button type="submit">Add Subject</button>
+  </form><a href="/admin/subjects">Back</a></div></body></html>`);
+});
+
+app.post('/admin/subjects/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { name, class: className, department, max_marks } = req.body;
+    await pool.query('INSERT INTO subjects (name, class, department, max_marks) VALUES ($1, $2, $3, $4)', [name, className, department, max_marks]);
+    res.redirect('/admin/subjects');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+// DYNAMIC STUDENT FIELDS
+app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) => {
+  const fields = await pool.query('SELECT * FROM student_field_definitions ORDER BY field_name');
+  res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
+  </head><body>
+    <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
+    <div class="card"><p>Add custom fields to student records like 'Blood Group', 'Allergies', 'Bus Route', etc.</p>
+      <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Status</th></tr>
+      ${fields.rows.map(f => `<tr><td>${f.field_name}</td><td>${f.field_type}</td><td>${f.required? 'Yes' : 'No'}</td><td>${f.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Field</title>
+  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Add Custom Student Field</h2>
+  <form method="POST" action="/admin/fields/add">
+    <input name="field_name" placeholder="Field Name e.g Blood Group" required>
+    <select name="field_type" required>
+      <option value="text">Text</option>
+      <option value="number">Number</option>
+      <option value="date">Date</option>
+      <option value="select">Dropdown Select</option>
+    </select>
+    <textarea name="field_options" placeholder="For Dropdown: Enter options separated by comma e.g A,B,AB,O"></textarea>
+    <label><input type="checkbox" name="required" value="true"> Required Field</label>
+    <button type="submit">Add Field</button>
+  </form><a href="/admin/fields">Back</a></div></body></html>`);
+});
+
+app.post('/admin/fields/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { field_name, field_type, field_options, required } = req.body;
+    const options = field_options? JSON.stringify(field_options.split(',').map(o => o.trim())) : null;
+    await pool.query('INSERT INTO student_field_definitions (field_name, field_type, field_options, required) VALUES ($1, $2, $3, $4)',
+      [field_name, field_type, options, required === 'true']);
+    res.redirect('/admin/fields');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+// TASKS
+app.get('/admin/tasks', requireLogin, requireRole(['admin']), async (req, res) => {
+  const tasks = await pool.query(`SELECT st.*, a.full_name FROM staff_tasks st JOIN admins a ON st.username = a.username WHERE st.active = true ORDER BY a.full_name`);
+  const users = await pool.query('SELECT username, full_name FROM admins WHERE role!= \'admin\' ORDER BY full_name');
+  res.send(`<!DOCTYPE html><html><head><title>Assign Tasks</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}input,select,button{padding:8px;margin:4px}</style>
+  </head><body>
+    <div class="card"><h1>Assign Portal Tasks</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    <div class="card"><h3>Assign New Task</h3>
+      <form method="POST" action="/admin/tasks/assign">
+        <select name="username" required><option value="">Select Staff</option>${users.rows.map(u => `<option value="${u.username}">${u.full_name}</option>`).join('')}</select>
+        <select name="task_name" required>
+          <option value="">Select Task</option>
+          <option value="financial_portal">Financial Portal</option>
+          <option value="academic_portal">Academic Portal</option>
+          <option value="marksheets">Marksheets</option>
+          <option value="donors_portal">Donors Portal</option>
+          <option value="staff_management">Staff Management</option>
+          <option value="assets">Assets/Stores</option>
+        </select>
+        <button type="submit" class="btn-green">Assign</button>
+      </form>
+    </div>
+    <div class="card"><h3>Current Assignments</h3>
+      <table><tr><th>Staff</th><th>Task</th><th>Assigned By</th><th>Date</th></tr>
+      ${tasks.rows.map(t => `<tr><td>${t.full_name}</td><td>${t.task_name}</td><td>${t.assigned_by}</td><td>${new Date(t.assigned_at).toLocaleDateString()}</td></tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.post('/admin/tasks/assign', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { username, task_name } = req.body;
+    await pool.query('INSERT INTO staff_tasks (username, task_name, assigned_by) VALUES ($1, $2, $3)', [username, task_name, req.session.user.username]);
+    await logAction(req.session.user.username, 'TASK_ASSIGNED', { username, task_name });
+    res.redirect('/admin/tasks');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
 // ACADEMIC PORTAL
 app.get('/admin/academic', requireLogin, requireTask('academic_portal'), (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Academic Portal</title>
