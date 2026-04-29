@@ -1061,6 +1061,60 @@ app.post('/admin/students/edit/:id', requireLogin, requireRole(['admin', 'bursar
     res.redirect('/admin/students');
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
+app.get('/admin/marksheets/:className', requireLogin, requireTask('marksheets'), async (req, res) => {
+  try {
+    const { className } = req.params;
+    const subjects = await pool.query('SELECT * FROM subjects WHERE class = $1 AND active = true ORDER BY name', [className]);
+    const students = await pool.query('SELECT * FROM students WHERE class = $1 ORDER BY name', [className]);
+
+    res.send(`<!DOCTYPE html><html><head><title>Marksheets - ${className}</title>
+    <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:8px;border:1px solid #ddd;text-align:center}th{background:#34495e;color:white}.student-name{text-align:left;font-weight:bold}input{width:60px;padding:4px;text-align:center}</style>
+    </head><body>
+      <div class="card"><h1>📝 Marksheets - ${className}</h1>
+        <a href="/admin" class="btn">← Dashboard</a>
+        <a href="/admin/marksheets/${className}/download-template" class="btn btn-green">📥 Download Excel Template</a>
+      </div>
+      <div class="card">
+        <form method="POST" action="/admin/marksheets/${className}/save" enctype="multipart/form-data">
+          <p><strong>Option 1:</strong> Upload filled Excel: <input type="file" name="excel" accept=".xlsx"><button type="submit" class="btn">Upload Marks</button></p>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Enter Marks Online</h3>
+        <form method="POST" action="/admin/marksheets/${className}/save-online">
+          <table>
+            <tr><th class="student-name">Student Name</th>${subjects.rows.map(s => `<th>${s.name}<br><small>/${s.max_marks}</small></th>`).join('')}</tr>
+            ${students.rows.map(st => `<tr>
+              <td class="student-name">${st.name}</td>
+              ${subjects.rows.map(sub => `<td><input type="number" name="marks_${st.id}_${sub.id}" min="0" max="${sub.max_marks}" step="0.5"></td>`).join('')}
+            </tr>`).join('')}
+          </table>
+          <br><button type="submit" class="btn btn-green">Save All Marks</button>
+        </form>
+      </div>
+    </body></html>`);
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+app.post('/admin/marksheets/:className/save-online', requireLogin, requireTask('marksheets'), async (req, res) => {
+  try {
+    const { className } = req.params;
+    const marks = req.body;
+
+    for (const key in marks) {
+      if (key.startsWith('marks_') && marks[key]!== '') {
+        const [, student_id, subject_id] = key.split('_');
+        await pool.query(`INSERT INTO exam_results (student_id, subject_id, marks, term, year, recorded_by)
+          VALUES ($1, $2, $3, 'Term 1', 2026, $4)
+          ON CONFLICT (student_id, subject_id, term, year)
+          DO UPDATE SET marks = $3, recorded_by = $4, recorded_at = CURRENT_TIMESTAMP`,
+          [student_id, subject_id, marks[key], req.session.user.username]);
+      }
+    }
+    await logAction(req.session.user.username, 'MARKS_ENTERED', { class: className });
+    res.send(`Marks saved for ${className}. <a href="/admin/marksheets/${className}">Back</a>`);
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
