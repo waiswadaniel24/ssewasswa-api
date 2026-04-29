@@ -883,6 +883,148 @@ app.get('/admin/academic', requireLogin, requireTask('academic_portal'), (req, r
   <a href="/admin/subjects" class="btn">📝 Manage Subjects</a>
   </body></html>`);
 });
+// STAFF ASSIGNMENTS VIEW
+app.get('/admin/assignments', requireLogin, requireRole(['admin']), async (req, res) => {
+  const assignments = await pool.query(`
+    SELECT sa.*, s.full_name, s.position 
+    FROM staff_assignments sa 
+    JOIN staff s ON sa.username = s.username 
+    WHERE sa.active = true 
+    ORDER BY sa.assignment_type, sa.assignment_value`);
+  
+  res.send(`<!DOCTYPE html><html><head><title>Staff Assignments</title>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}.btn-red{background:#e74c3c}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.actions{display:flex;gap:5px}</style>
+  </head><body>
+    <div class="card"><h1>📋 Staff Assignments</h1>
+      <a href="/admin" class="btn">← Dashboard</a> 
+      <a href="/admin/assignments/add" class="btn btn-green">+ New Assignment</a>
+    </div>
+    <div class="card">
+      <table><tr><th>Staff Member</th><th>Position</th><th>Assignment Type</th><th>Assignment</th><th>Department</th><th>Actions</th></tr>
+      ${assignments.rows.map(a => `<tr>
+        <td><strong>${a.full_name}</strong><br><small>${a.username}</small></td>
+        <td>${a.position}</td>
+        <td>${a.assignment_type}</td>
+        <td>${a.assignment_value}</td>
+        <td>${a.department}</td>
+        <td class="actions">
+          <form method="POST" action="/admin/assignments/delete/${a.id}" style="display:inline" onsubmit="return confirm('Remove assignment?')">
+            <button type="submit" class="btn btn-red">Remove</button>
+          </form>
+        </td>
+      </tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.get('/admin/assignments/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  const staff = await pool.query('SELECT username, full_name, department FROM staff WHERE active = true ORDER BY full_name');
+  res.send(`<!DOCTYPE html><html><head><title>Add Assignment</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>New Staff Assignment</h2>
+  <form method="POST" action="/admin/assignments/add">
+    <select name="username" required>
+      <option value="">Select Staff Member</option>
+      ${staff.rows.map(s => `<option value="${s.username}">${s.full_name} - ${s.department}</option>`).join('')}
+    </select>
+    <select name="assignment_type" required>
+      <option value="class_teacher">Class Teacher</option>
+      <option value="subject_teacher">Subject Teacher</option>
+      <option value="department_head">Department Head</option>
+      <option value="duty">Duty Assignment</option>
+    </select>
+    <input name="assignment_value" placeholder="e.g P4, Mathematics, or Morning Duty" required>
+    <select name="department" required>
+      <option value="">Select Department</option>
+      ${DEPARTMENTS.map(d => `<option value="${d}">${d}</option>`).join('')}
+    </select>
+    <button type="submit">Add Assignment</button>
+  </form><a href="/admin/assignments">Back</a></div></body></html>`);
+});
+
+app.post('/admin/assignments/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  const { username, assignment_type, assignment_value, department } = req.body;
+  await pool.query('INSERT INTO staff_assignments (username, assignment_type, assignment_value, department) VALUES ($1, $2, $3, $4)',
+    [username, assignment_type, assignment_value, department]);
+  await logAction(req.session.user.username, 'ASSIGNMENT_CREATED', { username, assignment_type, assignment_value });
+  res.redirect('/admin/assignments');
+});
+
+app.post('/admin/assignments/delete/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  await pool.query('UPDATE staff_assignments SET active = false WHERE id = $1', [req.params.id]);
+  res.redirect('/admin/assignments');
+});
+
+// STUDENTS MANAGEMENT
+app.get('/admin/students', requireLogin, requireTask('students'), async (req, res) => {
+  const { class: filterClass } = req.query;
+  let query = 'SELECT * FROM students';
+  const params = [];
+  if (filterClass) { query += ' WHERE class = $1'; params.push(filterClass); }
+  query += ' ORDER BY class, name';
+  
+  const students = await pool.query(query, params);
+  const classes = await pool.query('SELECT DISTINCT class FROM students ORDER BY class');
+  
+  res.send(`<!DOCTYPE html><html><head><title>Students</title>
+  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.filter{margin-bottom:15px}.balance-zero{color:#27ae60;font-weight:bold}.balance-owe{color:#e74c3c;font-weight:bold}</style>
+  </head><body>
+    <div class="card"><h1>👨‍🎓 Students Management</h1>
+      <a href="/admin" class="btn">← Dashboard</a> 
+      <a href="/admin/students/add" class="btn btn-green">+ Add Student</a>
+    </div>
+    <div class="card">
+      <div class="filter">
+        <form method="GET"><select name="class" onchange="this.form.submit()">
+          <option value="">All Classes</option>
+          ${classes.rows.map(c => `<option value="${c.class}" ${filterClass===c.class?'selected':''}>${c.class}</option>`).join('')}
+        </select></form>
+      </div>
+      <table><tr><th>Name</th><th>Class</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th><th>Actions</th></tr>
+      ${students.rows.map(s => `<tr>
+        <td><strong>${s.name}</strong></td>
+        <td>${s.class}</td>
+        <td>${s.term}</td>
+        <td>${s.year}</td>
+        <td>UGX ${Number(s.total_fees).toLocaleString()}</td>
+        <td class="${s.balance == 0? 'balance-zero' : 'balance-owe'}">UGX ${Number(s.balance).toLocaleString()}</td>
+        <td><a href="/admin/students/edit/${s.id}" class="btn">Edit</a></td>
+      </tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.get('/admin/students/add', requireLogin, requireRole(['admin', 'bursar']), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Student</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Add New Student</h2>
+  <form method="POST" action="/admin/students/add">
+    <input name="name" placeholder="Student Full Name" required>
+    <select name="class" required>
+      <option value="">Select Class</option>
+      ${ALL_CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
+    </select>
+    <select name="term" required>
+      <option value="Term 1">Term 1</option>
+      <option value="Term 2">Term 2</option>
+      <option value="Term 3">Term 3</option>
+    </select>
+    <input name="year" type="number" value="2026" required>
+    <input name="total_fees" type="number" placeholder="Total Fees UGX" required>
+    <input name="balance" type="number" placeholder="Current Balance UGX" required>
+    <button type="submit">Add Student</button>
+  </form><a href="/admin/students">Back</a></div></body></html>`);
+});
+
+app.post('/admin/students/add', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
+  const { name, class: className, term, year, total_fees, balance } = req.body;
+  await pool.query('INSERT INTO students (name, class, term, year, total_fees, balance) VALUES ($1, $2, $3, $4, $5, $6)',
+    [name, className, term, year, total_fees, balance]);
+  await logAction(req.session.user.username, 'STUDENT_ADDED', { name, className });
+  res.redirect('/admin/students');
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
