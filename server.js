@@ -978,3 +978,5 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   setTimeout(() => initDB().catch(e => console.log('DB init:', e.message)), 2000);
 });
+/ /   f o r c e   r e b u i l d  
+ 
