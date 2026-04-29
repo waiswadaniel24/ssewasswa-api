@@ -589,89 +589,136 @@ app.post('/admin/marksheets/save', requireLogin, requireTask('marksheets'), asyn
 
 // SUBJECTS MANAGEMENT
 app.get('/admin/subjects', requireLogin, requireRole(['admin']), async (req, res) => {
-  const subjects = await pool.query('SELECT * FROM subjects ORDER BY department, class, name');
+  const { class: filterClass } = req.query;
+  let query = 'SELECT * FROM subjects WHERE active = true';
+  const params = [];
+  if (filterClass) { query += ' AND class = $1'; params.push(filterClass); }
+  query += ' ORDER BY class, name';
+
+  const subjects = await pool.query(query, params);
+  const grouped = {};
+  subjects.rows.forEach(s => {
+    if (!grouped[s.class]) grouped[s.class] = [];
+    grouped[s.class].push(s);
+  });
+
   res.send(`<!DOCTYPE html><html><head><title>Manage Subjects</title>
-  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px}.btn-green{background:#27ae60}.btn-red{background:#e74c3c}table{width:100%;border-collapse:collapse;margin-bottom:20px}th,td{padding:8px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}h3{background:#ecf0f1;padding:10px;margin:0}.filter{margin-bottom:15px}.actions{display:flex;gap:5px}</style>
   </head><body>
     <div class="card"><h1>📚 Manage Subjects</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/subjects/add" class="btn btn-green">+ Add Subject</a></div>
     <div class="card">
-      <table><tr><th>Subject</th><th>Class</th><th>Department</th><th>Max Marks</th><th>Status</th></tr>
-      ${subjects.rows.map(s => `<tr><td>${s.name}</td><td>${s.class}</td><td>${s.department}</td><td>${s.max_marks}</td><td>${s.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
-      </table>
+      <div class="filter">
+        <form method="GET"><select name="class" onchange="this.form.submit()">
+          <option value="">All Classes</option>
+          ${ALL_CLASSES.map(c => `<option value="${c}" ${filterClass===c?'selected':''}>${c}</option>`).join('')}
+        </select></form>
+      </div>
+      ${Object.keys(grouped).map(className => `
+        <h3>${className}</h3>
+        <table><tr><th>Subject</th><th>Department</th><th>Max Marks</th><th>Actions</th></tr>
+        ${grouped[className].map(s => `<tr>
+          <td>${s.name}</td><td>${s.department}</td><td>${s.max_marks}</td>
+          <td class="actions">
+            <a href="/admin/subjects/edit/${s.id}" class="btn">Edit</a>
+            <form method="POST" action="/admin/subjects/delete/${s.id}" style="display:inline" onsubmit="return confirm('Delete ${s.name}?')">
+              <button type="submit" class="btn btn-red">Delete</button>
+            </form>
+          </td>
+        </tr>`).join('')}
+        </table>
+      `).join('')}
     </div>
   </body></html>`);
 });
 
-app.get('/admin/subjects/add', requireLogin, requireRole(['admin']), (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Add Subject</title>
+app.post('/admin/subjects/delete/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  await pool.query('UPDATE subjects SET active = false WHERE id = $1', [req.params.id]);
+  res.redirect('/admin/subjects');
+});
+
+app.get('/admin/subjects/edit/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  const subject = await pool.query('SELECT * FROM subjects WHERE id = $1', [req.params.id]);
+  const s = subject.rows[0];
+  res.send(`<!DOCTYPE html><html><head><title>Edit Subject</title>
   <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
-  </head><body><div class="card"><h2>Add New Subject</h2>
-  <form method="POST" action="/admin/subjects/add">
-    <input name="name" placeholder="Subject Name e.g Computer Studies" required>
-    <select name="class" required>
-      <option value="">Select Class</option>
-      ${ALL_CLASSES.map(c => `<option value="${c}">${c}</option>`).join('')}
-    </select>
+  </head><body><div class="card"><h2>Edit Subject</h2>
+  <form method="POST" action="/admin/subjects/edit/${s.id}">
+    <input name="name" value="${s.name}" required>
+    <select name="class" required>${ALL_CLASSES.map(c => `<option value="${c}" ${s.class===c?'selected':''}>${c}</option>`).join('')}</select>
     <select name="department" required>
-      <option value="Primary">Primary</option>
-      <option value="Nursery">Nursery</option>
+      <option value="Primary" ${s.department==='Primary'?'selected':''}>Primary</option>
+      <option value="Nursery" ${s.department==='Nursery'?'selected':''}>Nursery</option>
     </select>
-    <input name="max_marks" type="number" value="100" placeholder="Max Marks" required>
-    <button type="submit">Add Subject</button>
+    <input name="max_marks" type="number" value="${s.max_marks}" required>
+    <button type="submit">Update Subject</button>
   </form><a href="/admin/subjects">Back</a></div></body></html>`);
 });
 
-app.post('/admin/subjects/add', requireLogin, requireRole(['admin']), async (req, res) => {
-  try {
-    const { name, class: className, department, max_marks } = req.body;
-    await pool.query('INSERT INTO subjects (name, class, department, max_marks) VALUES ($1, $2, $3, $4)', [name, className, department, max_marks]);
-    res.redirect('/admin/subjects');
-  } catch (err) { res.status(500).send('Error: ' + err.message); }
+app.post('/admin/subjects/edit/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  const { name, class: className, department, max_marks } = req.body;
+  await pool.query('UPDATE subjects SET name=$1, class=$2, department=$3, max_marks=$4 WHERE id=$5',
+    [name, className, department, max_marks, req.params.id]);
+  res.redirect('/admin/subjects');
 });
 
 // DYNAMIC STUDENT FIELDS
 app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) => {
-  const fields = await pool.query('SELECT * FROM student_field_definitions ORDER BY field_name');
+  const fields = await pool.query('SELECT * FROM student_field_definitions WHERE active = true ORDER BY field_name');
   res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
-  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px;border:none;cursor:pointer}.btn-green{background:#27ae60}.btn-red{background:#e74c3c}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.actions{display:flex;gap:5px}</style>
   </head><body>
     <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
-    <div class="card"><p>Add custom fields to student records like 'Blood Group', 'Allergies', 'Bus Route', etc.</p>
-      <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Status</th></tr>
-      ${fields.rows.map(f => `<tr><td>${f.field_name}</td><td>${f.field_type}</td><td>${f.required? 'Yes' : 'No'}</td><td>${f.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
+    <div class="card">
+      <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Options</th><th>Actions</th></tr>
+      ${fields.rows.map(f => `<tr>
+        <td>${f.field_name}</td>
+        <td>${f.field_type}</td>
+        <td>${f.required? 'Yes' : 'No'}</td>
+        <td>${f.field_options? JSON.parse(f.field_options).join(', ') : '-'}</td>
+        <td class="actions">
+          <a href="/admin/fields/edit/${f.id}" class="btn">Edit</a>
+          <form method="POST" action="/admin/fields/delete/${f.id}" style="display:inline" onsubmit="return confirm('Delete this field?')">
+            <button type="submit" class="btn btn-red">Delete</button>
+          </form>
+        </td>
+      </tr>`).join('')}
       </table>
     </div>
   </body></html>`);
 });
 
-app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Add Field</title>
+app.post('/admin/fields/delete/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  await pool.query('UPDATE student_field_definitions SET active = false WHERE id = $1', [req.params.id]);
+  res.redirect('/admin/fields');
+});
+
+app.get('/admin/fields/edit/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  const field = await pool.query('SELECT * FROM student_field_definitions WHERE id = $1', [req.params.id]);
+  const f = field.rows[0];
+  res.send(`<!DOCTYPE html><html><head><title>Edit Field</title>
   <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
-  </head><body><div class="card"><h2>Add Custom Student Field</h2>
-  <form method="POST" action="/admin/fields/add">
-    <input name="field_name" placeholder="Field Name e.g Blood Group" required>
+  </head><body><div class="card"><h2>Edit Field: ${f.field_name}</h2>
+  <form method="POST" action="/admin/fields/edit/${f.id}">
+    <input name="field_name" value="${f.field_name}" required>
     <select name="field_type" required>
-      <option value="text">Text</option>
-      <option value="number">Number</option>
-      <option value="date">Date</option>
-      <option value="select">Dropdown Select</option>
+      <option value="text" ${f.field_type==='text'?'selected':''}>Text</option>
+      <option value="number" ${f.field_type==='number'?'selected':''}>Number</option>
+      <option value="date" ${f.field_type==='date'?'selected':''}>Date</option>
+      <option value="select" ${f.field_type==='select'?'selected':''}>Dropdown</option>
     </select>
-    <textarea name="field_options" placeholder="For Dropdown: Enter options separated by comma e.g A,B,AB,O"></textarea>
-    <label><input type="checkbox" name="required" value="true"> Required Field</label>
-    <button type="submit">Add Field</button>
+    <textarea name="field_options" placeholder="For Dropdown: comma separated">${f.field_options? JSON.parse(f.field_options).join(', ') : ''}</textarea>
+    <label><input type="checkbox" name="required" value="true" ${f.required?'checked':''}> Required Field</label>
+    <button type="submit">Update Field</button>
   </form><a href="/admin/fields">Back</a></div></body></html>`);
 });
 
-app.post('/admin/fields/add', requireLogin, requireRole(['admin']), async (req, res) => {
-  try {
-    const { field_name, field_type, field_options, required } = req.body;
-    const options = field_options? JSON.stringify(field_options.split(',').map(o => o.trim())) : null;
-    await pool.query('INSERT INTO student_field_definitions (field_name, field_type, field_options, required) VALUES ($1, $2, $3, $4)',
-      [field_name, field_type, options, required === 'true']);
-    res.redirect('/admin/fields');
-  } catch (err) { res.status(500).send('Error: ' + err.message); }
+app.post('/admin/fields/edit/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  const { field_name, field_type, field_options, required } = req.body;
+  const options = field_options? JSON.stringify(field_options.split(',').map(o => o.trim())) : null;
+  await pool.query('UPDATE student_field_definitions SET field_name=$1, field_type=$2, field_options=$3, required=$4 WHERE id=$5',
+    [field_name, field_type, options, required === 'true', req.params.id]);
+  res.redirect('/admin/fields');
 });
-
 // TASKS
 app.get('/admin/tasks', requireLogin, requireRole(['admin']), async (req, res) => {
   const tasks = await pool.query(`SELECT st.*, a.full_name FROM staff_tasks st JOIN admins a ON st.username = a.username WHERE st.active = true ORDER BY a.full_name`);
@@ -712,25 +759,31 @@ app.post('/admin/tasks/assign', requireLogin, requireRole(['admin']), async (req
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 // CREATE USER - PROFESSIONAL FORM
-app.get('/admin/users/add', requireLogin, requireRole(['admin']), async (req, res) => {
-  const subjects = await pool.query('SELECT DISTINCT name FROM subjects WHERE active = true ORDER BY name');
+app.get('/admin/users/add', requireLogin, requireRole(['admin']), (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Create User</title>
-  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}.section{border:1px solid #ddd;padding:15px;border-radius:8px;margin:15px 0}.checkbox-group{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.checkbox-group label{display:flex;align-items:center;gap:5px;font-size:14px}</style>
+  <style>body{font-family:Arial;max-width:900px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}.section{border:1px solid #ddd;padding:15px;border-radius:8px;margin:15px 0}.phone-row{display:flex;gap:10px;margin:5px 0}.phone-row input{margin:0}.btn-small{padding:6px 12px;width:auto;font-size:13px}.btn-red{background:#e74c3c}</style>
   </head><body><div class="card"><h2>Create New Staff Member</h2>
   <form method="POST" action="/admin/users/add">
     <div class="section"><h3>Basic Information</h3>
       <input name="username" placeholder="Username for login" required>
       <input type="password" name="password" placeholder="Password" required>
       <input name="full_name" placeholder="Full Name" required>
-      <input name="phone" placeholder="Phone Number">
+      <div id="phoneContainer">
+        <label>Phone Numbers:</label>
+        <div class="phone-row"><input name="phone[]" placeholder="Phone Number" required><button type="button" class="btn-small" onclick="addPhone()">+ Add</button></div>
+      </div>
       <input type="email" name="email" placeholder="Email">
+      <div id="emergencyContainer">
+        <label>Emergency Contacts:</label>
+        <div class="phone-row"><input name="emergency_contact[]" placeholder="Emergency Contact"><button type="button" class="btn-small" onclick="addEmergency()">+ Add</button></div>
+      </div>
     </div>
     <div class="section"><h3>Employment Details</h3>
       <select name="department" required>
         <option value="">Select Department</option>
         ${DEPARTMENTS.map(d => `<option value="${d}">${d}</option>`).join('')}
       </select>
-      <input name="position" placeholder="Position e.g Senior Teacher, Cook" required>
+      <input name="position" placeholder="Position e.g Senior Teacher" required>
       <input name="monthly_salary" type="number" placeholder="Monthly Salary UGX" required>
       <input name="bank_account" placeholder="Bank Account Number">
       <input name="hire_date" type="date">
@@ -751,30 +804,47 @@ app.get('/admin/users/add', requireLogin, requireRole(['admin']), async (req, re
       </select>
     </div>
     <button type="submit">Create Staff Member</button>
-  </form><a href="/admin/staff">Back</a></div></body></html>`);
+  </form><a href="/admin/staff">Back</a></div>
+  <script>
+    function addPhone() {
+      const div = document.createElement('div');
+      div.className = 'phone-row';
+      div.innerHTML = '<input name="phone[]" placeholder="Phone Number"><button type="button" class="btn-small btn-red" onclick="this.parentElement.remove()">Remove</button>';
+      document.getElementById('phoneContainer').appendChild(div);
+    }
+    function addEmergency() {
+      const div = document.createElement('div');
+      div.className = 'phone-row';
+      div.innerHTML = '<input name="emergency_contact[]" placeholder="Emergency Contact"><button type="button" class="btn-small btn-red" onclick="this.parentElement.remove()">Remove</button>';
+      document.getElementById('emergencyContainer').appendChild(div);
+    }
+  </script></body></html>`);
 });
 
 app.post('/admin/users/add', requireLogin, requireRole(['admin']), async (req, res) => {
   try {
-    const { username, password, full_name, phone, email, department, position, monthly_salary, bank_account, hire_date, role, assigned_class } = req.body;
+    const { username, password, full_name, phone, email, emergency_contact, department, position, monthly_salary, bank_account, hire_date, role, assigned_class } = req.body;
     const hash = await bcrypt.hash(password, 10);
 
-    await pool.query('INSERT INTO admins (username, password, role, full_name, assigned_class, phone, email, department) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-      [username, hash, role, full_name, assigned_class || null, phone, email, department]);
+    // Convert phone arrays - filter empty
+    const phones = Array.isArray(phone)? phone.filter(p => p.trim()) : [phone].filter(p => p);
+    const emergencyContacts = Array.isArray(emergency_contact)? emergency_contact.filter(p => p.trim()) : [emergency_contact].filter(p => p);
 
-    await pool.query('INSERT INTO staff (username, full_name, position, department, phone, email, hire_date, monthly_salary, bank_account) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-      [username, full_name, position, department, phone, email, hire_date, monthly_salary, bank_account]);
+    await pool.query('INSERT INTO admins (username, password, role, full_name, assigned_class, phone, email, department) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [username, hash, role, full_name, assigned_class || null, phones, email, department]);
+
+    await pool.query('INSERT INTO staff (username, full_name, position, department, phone, email, hire_date, monthly_salary, bank_account, emergency_contact) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+      [username, full_name, position, department, phones, email, hire_date, monthly_salary, bank_account, emergencyContacts]);
 
     if (assigned_class) {
       await pool.query('INSERT INTO staff_assignments (username, assignment_type, assignment_value, department) VALUES ($1, $2, $3, $4)',
         [username, 'class_teacher', assigned_class, department]);
     }
 
-    await logAction(req.session.user.username, 'STAFF_CREATED', { username, full_name, position });
+    await logAction(req.session.user.username, 'STAFF_CREATED', { username, full_name });
     res.send(`Staff ${full_name} created successfully. <a href="/admin/staff">View All Staff</a>`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
-
 // ONLINE CLASSES
 app.get('/admin/online-classes', requireLogin, requireTask('online_classes'), async (req, res) => {
   const classes = await pool.query('SELECT * FROM online_classes ORDER BY scheduled_at DESC');
