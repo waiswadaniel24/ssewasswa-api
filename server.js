@@ -336,7 +336,108 @@ app.get('/admin', requireLogin, async (req, res) => {
 });
 
 // [ADD YOUR OTHER ROUTES HERE - MARKSHEETS, STAFF, ASSETS, ETC - BUT ONLY ONE COPY EACH]
+// CLASS VIEW
+app.get('/admin/class/:className', requireLogin, async (req, res) => {
+  const className = req.params.className;
+  const user = req.session.user;
+  if (user.role === 'class_teacher' && user.assigned_class !== className) return res.status(403).send('Access denied');
+  try {
+    const students = await pool.query('SELECT * FROM students WHERE class = $1 ORDER BY name', [className]);
+    const totalStudents = students.rows.length;
+    const totalBalance = students.rows.reduce((sum, s) => sum + Number(s.balance), 0);
+    const totalFees = students.rows.reduce((sum, s) => sum + Number(s.total_fees), 0);
+    res.send(`<!DOCTYPE html><html><head><title>${className} - Class View</title>
+    <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.header{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:20px 0}.stat-card{background:#3498db;color:white;padding:20px;border-radius:8px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}table{width:100%;background:white;border-collapse:collapse;border-radius:8px;overflow:hidden}th{background:#34495e;color:white;padding:12px;text-align:left}td{padding:12px;border-bottom:1px solid #eee}.balance-zero{color:#27ae60;font-weight:bold}.balance-owe{color:#e74c3c;font-weight:bold}</style>
+    </head><body>
+      <div class="header"><h1>${className} - Class Management</h1><p>Teacher: ${user.username}</p>
+        <a href="/admin" class="btn">← Dashboard</a>
+        <a href="/admin/marksheets/${className}" class="btn" style="background:#9b59b6">📊 Marksheet</a>
+      </div>
+      <div class="stats"><div class="stat-card"><h3>Total Students</h3><div style="font-size:28px;font-weight:bold">${totalStudents}</div></div><div class="stat-card" style="background:#e67e22"><h3>Total Fees</h3><div style="font-size:28px;font-weight:bold">UGX ${totalFees.toLocaleString()}</div></div><div class="stat-card" style="background:#e74c3c"><h3>Outstanding</h3><div style="font-size:28px;font-weight:bold">UGX ${totalBalance.toLocaleString()}</div></div></div>
+      <table><thead><tr><th>Name</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th></tr></thead><tbody>
+        ${students.rows.map(s => `<tr><td><strong>${s.name}</strong></td><td>${s.term}</td><td>${s.year}</td><td>UGX ${Number(s.total_fees).toLocaleString()}</td><td class="${s.balance == 0? 'balance-zero' : 'balance-owe'}">UGX ${Number(s.balance).toLocaleString()}</td></tr>`).join('')}
+      </tbody></table>
+    </body></html>`);
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
 
+// DONORS PORTAL
+app.get('/admin/donors', requireLogin, requireTask('donors_portal'), async (req, res) => {
+  const donors = await pool.query(`SELECT d.*, COALESCE(SUM(don.amount), 0) as total_donated
+    FROM donors d LEFT JOIN donations don ON d.id = don.donor_id
+    GROUP BY d.id ORDER BY d.name`);
+  res.send(`<!DOCTYPE html><html><head><title>Donors Portal</title>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd}th{background:#e67e22;color:white}.btn{background:#e67e22;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}</style>
+  </head><body><h1>🤝 Donors Portal</h1><a href="/admin" class="btn">← Dashboard</a><br><br>
+  <table><tr><th>Donor</th><th>Organization</th><th>Contact</th><th>Total Donated</th></tr>
+  ${donors.rows.map(d => `<tr><td>${d.name}</td><td>${d.organization || '-'}</td><td>${d.phone || d.email || '-'}</td><td>UGX ${Number(d.total_donated).toLocaleString()}</td></tr>`).join('')}
+  </table></body></html>`);
+});
+
+// MARKSHEETS LANDING
+app.get('/admin/marksheets', requireLogin, requireTask('marksheets'), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Marksheets</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:12px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}.nursery{background:#f39c12}</style>
+  </head><body>
+    <div class="card"><h1>📊 Class Marksheets</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    <div class="card">
+      <h3>Nursery Section</h3>
+      ${NURSERY_CLASSES.map(c => `<a href="/admin/marksheets/${c}" class="btn nursery">${c} Marksheet</a>`).join('')}
+      <h3>Primary Section</h3>
+      ${PRIMARY_CLASSES.map(c => `<a href="/admin/marksheets/${c}" class="btn">${c} Marksheet</a>`).join('')}
+    </div>
+  </body></html>`);
+});
+
+// STAFF MANAGEMENT
+app.get('/admin/staff', requireLogin, requireTask('staff_management'), async (req, res) => {
+  const staff = await pool.query(`SELECT * FROM staff WHERE active = true ORDER BY department, full_name`);
+  res.send(`<!DOCTYPE html><html><head><title>Staff Management</title>
+  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}</style>
+  </head><body>
+    <div class="card"><h1>👥 Staff Management</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    <div class="card"><table><tr><th>Name</th><th>Position</th><th>Department</th><th>Salary</th><th>Contact</th></tr>
+      ${staff.rows.map(s => `<tr><td><strong>${s.full_name}</strong><br><small>${s.username}</small></td><td>${s.position}</td><td>${s.department}</td><td>UGX ${Number(s.monthly_salary).toLocaleString()}</td><td>${s.phone}<br>${s.email}</td></tr>`).join('')}
+    </table></div>
+  </body></html>`);
+});
+
+// ASSETS
+app.get('/admin/assets', requireLogin, requireTask('assets'), async (req, res) => {
+  const assets = await pool.query('SELECT * FROM school_assets ORDER BY category, asset_name');
+  res.send(`<!DOCTYPE html><html><head><title>School Assets</title>
+  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
+  </head><body>
+    <div class="card"><h1>📦 School Assets & Stores</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    <div class="card"><table><tr><th>Asset Name</th><th>Category</th><th>Qty</th><th>Unit Cost</th><th>Total Value</th><th>Location</th></tr>
+      ${assets.rows.map(a => `<tr><td>${a.asset_name}</td><td>${a.category}</td><td>${a.quantity}</td><td>UGX ${Number(a.unit_cost).toLocaleString()}</td><td>UGX ${Number(a.total_value).toLocaleString()}</td><td>${a.location}</td></tr>`).join('')}
+    </table></div>
+  </body></html>`);
+});
+
+// FINANCIAL PORTAL
+app.get('/admin/financial', requireLogin, requireTask('financial_portal'), async (req, res) => {
+  const assetValue = await pool.query('SELECT SUM(total_value) as total FROM school_assets');
+  const payroll = await pool.query('SELECT SUM(monthly_salary) as total FROM staff WHERE active = true');
+  res.send(`<!DOCTYPE html><html><head><title>Financial Portal</title>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0}.stat{background:#ecf0f1;padding:15px;border-radius:4px;text-align:center}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}</style>
+  </head><body><h1>💰 Financial Portal</h1><a href="/admin" class="btn">← Dashboard</a><br><br>
+  <div class="stats">
+    <div class="stat"><h3>Assets Value</h3><div style="font-size:24px">UGX ${Number(assetValue.rows[0].total || 0).toLocaleString()}</div></div>
+    <div class="stat"><h3>Monthly Payroll</h3><div style="font-size:24px">UGX ${Number(payroll.rows[0].total || 0).toLocaleString()}</div></div>
+  </div>
+  </body></html>`);
+});
+
+// ACADEMIC PORTAL
+app.get('/admin/academic', requireLogin, requireTask('academic_portal'), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Academic Portal</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}.btn{background:#9b59b6;color:white;padding:12px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:10px}</style>
+  </head><body><h1>📚 Academic Portal</h1><a href="/admin">← Dashboard</a><br><br>
+  <a href="/admin/marksheets" class="btn">📊 Marksheets</a>
+  <a href="/admin/subjects" class="btn">📝 Manage Subjects</a>
+  </body></html>`);
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
