@@ -51,6 +51,7 @@ function requireTask(taskName) {
       if (result.rows.length > 0) return next();
       res.status(403).send(`Access denied: You need to be tasked for "${taskName}" by admin`);
     } catch (err) {
+      console.error('Task check error:', err);
       res.status(500).send('Task check failed');
     }
   };
@@ -376,39 +377,85 @@ app.post('/admin/donations/add', requireLogin, requireTask('donors_portal'), asy
   res.redirect('/admin/donors');
 });
 
-// TASK ASSIGNMENT
+// TASK ASSIGNMENT - ADMIN ONLY - MULTI-SELECT VERSION
 app.get('/admin/tasks', requireLogin, requireRole(['admin']), async (req, res) => {
   const users = await pool.query("SELECT username, role, assigned_class FROM admins WHERE role!= 'admin'");
-  const tasks = await pool.query('SELECT * FROM staff_tasks WHERE active = true ORDER BY username');
+  const tasks = await pool.query('SELECT * FROM staff_tasks WHERE active = true ORDER BY username, task_name');
+
+  // Group tasks by username for display
+  const userTasks = {};
+  tasks.rows.forEach(t => {
+    if (!userTasks[t.username]) userTasks[t.username] = [];
+    userTasks[t.username].push(t.task_name);
+  });
+
   res.send(`<!DOCTYPE html><html><head><title>Assign Tasks</title>
-  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}select,button{padding:8px;margin:5px}</style>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}select,button{padding:8px;margin:5px}.task-list{display:flex;flex-wrap:wrap;gap:5px}.task-badge{background:#3498db;color:white;padding:4px 8px;border-radius:12px;font-size:12px}.checkbox-group{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:10px 0}.checkbox-group label{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #ddd;border-radius:4px;cursor:pointer}.checkbox-group input{width:auto;margin:0}</style>
   </head><body><h1>📋 Assign Staff Tasks</h1><a href="/admin">← Dashboard</a><br><br>
-  <form method="POST" action="/admin/tasks/assign">
-    <select name="username" required><option value="">Select Staff</option>${users.rows.map(u => `<option value="${u.username}">${u.username} - ${u.role} ${u.assigned_class || ''}</option>`).join('')}</select>
-    <select name="task_name" required>
-      <option value="">Select Task</option>
-      <option value="financial_portal">Financial Portal Access</option>
-      <option value="academic_portal">Academic Portal Access</option>
-      <option value="exams">Exams Management</option>
-      <option value="online_classes">Online Classes</option>
-      <option value="donors_portal">Donors Portal Access</option>
-    </select>
-    <button type="submit">Assign Task</button>
-  </form><br>
-  <h3>Active Tasks</h3><table><tr><th>Staff</th><th>Task</th><th>Assigned By</th><th>Action</th></tr>
-  ${tasks.rows.map(t => `<tr><td>${t.username}</td><td>${t.task_name}</td><td>${t.assigned_by}</td><td><a href="/admin/tasks/revoke/${t.id}">Revoke</a></td></tr>`).join('')}
-  </table></body></html>`);
+
+  <div style="background:white;padding:20px;border-radius:8px;margin-bottom:20px">
+    <h3>Assign Multiple Tasks</h3>
+    <form method="POST" action="/admin/tasks/assign">
+      <label><strong>Select Staff:</strong></label>
+      <select name="username" required style="width:100%;padding:10px;margin:10px 0">
+        <option value="">Select Staff</option>
+        ${users.rows.map(u => `<option value="${u.username}">${u.username} - ${u.role} ${u.assigned_class || ''}</option>`).join('')}
+      </select>
+
+      <label><strong>Select Tasks to Assign:</strong></label>
+      <div class="checkbox-group">
+        <label><input type="checkbox" name="tasks" value="financial_portal"> 💰 Financial Portal</label>
+        <label><input type="checkbox" name="tasks" value="academic_portal"> 📚 Academic Portal</label>
+        <label><input type="checkbox" name="tasks" value="exams"> 📝 Exams Management</label>
+        <label><input type="checkbox" name="tasks" value="online_classes"> 💻 Online Classes</label>
+        <label><input type="checkbox" name="tasks" value="donors_portal"> 🤝 Donors Portal</label>
+      </div>
+      <button type="submit" style="background:#27ae60;color:white;padding:12px 20px;border:none;border-radius:4px;cursor:pointer;width:100%">Assign Selected Tasks</button>
+    </form>
+  </div>
+
+  <h3>Current Active Tasks</h3>
+  <table>
+    <tr><th>Staff</th><th>Assigned Tasks</th><th>Actions</th></tr>
+    ${Object.keys(userTasks).map(username => `
+      <tr>
+        <td><strong>${username}</strong></td>
+        <td><div class="task-list">${userTasks[username].map(task => `<span class="task-badge">${task.replace('_', ' ')}</span>`).join('')}</div></td>
+        <td><a href="/admin/tasks/revoke-all/${username}" style="color:#e74c3c">Revoke All</a></td>
+      </tr>
+    `).join('')}
+    ${Object.keys(userTasks).length === 0? '<tr><td colspan="3">No tasks assigned yet</td></tr>' : ''}
+  </table>
+  </body></html>`);
 });
 
 app.post('/admin/tasks/assign', requireLogin, requireRole(['admin']), async (req, res) => {
-  const { username, task_name } = req.body;
-  await pool.query('INSERT INTO staff_tasks (username, task_name, assigned_by) VALUES ($1, $2, $3)', [username, task_name, req.session.user.username]);
-  await logAction(req.session.user.username, 'TASK_ASSIGNED', { username, task_name });
-  res.redirect('/admin/tasks');
+  try {
+    const { username, tasks } = req.body;
+    // Handle both single checkbox and multiple checkboxes
+    const taskArray = Array.isArray(tasks)? tasks : [tasks];
+
+    // Insert all selected tasks
+    for (const task_name of taskArray) {
+      if (task_name) {
+        // Check if already assigned to avoid duplicates
+        const exists = await pool.query('SELECT id FROM staff_tasks WHERE username = $1 AND task_name = $2 AND active = true', [username, task_name]);
+        if (exists.rows.length === 0) {
+          await pool.query('INSERT INTO staff_tasks (username, task_name, assigned_by) VALUES ($1, $2, $3)', [username, task_name, req.session.user.username]);
+          await logAction(req.session.user.username, 'TASK_ASSIGNED', { username, task_name });
+        }
+      }
+    }
+    res.redirect('/admin/tasks');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
 });
 
-app.get('/admin/tasks/revoke/:id', requireLogin, requireRole(['admin']), async (req, res) => {
-  await pool.query('UPDATE staff_tasks SET active = false WHERE id = $1', [req.params.id]);
+// REVOKE ALL TASKS FOR A USER
+app.get('/admin/tasks/revoke-all/:username', requireLogin, requireRole(['admin']), async (req, res) => {
+  await pool.query('UPDATE staff_tasks SET active = false WHERE username = $1', [req.params.username]);
+  await logAction(req.session.user.username, 'ALL_TASKS_REVOKED', { username: req.params.username });
   res.redirect('/admin/tasks');
 });
 
