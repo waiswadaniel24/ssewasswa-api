@@ -1025,6 +1025,42 @@ app.post('/admin/students/add', requireLogin, requireRole(['admin', 'bursar']), 
   await logAction(req.session.user.username, 'STUDENT_ADDED', { name, className });
   res.redirect('/admin/students');
 });
+app.get('/admin/students/edit/:id', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
+  try {
+    const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
+    if (student.rows.length === 0) return res.status(404).send('Student not found');
+    const s = student.rows[0];
+    
+    res.send(`<!DOCTYPE html><html><head><title>Edit Student</title>
+    <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+    </head><body><div class="card"><h2>Edit Student: ${s.name}</h2>
+    <form method="POST" action="/admin/students/edit/${s.id}">
+      <input name="name" value="${s.name}" required>
+      <select name="class" required>
+        ${ALL_CLASSES.map(c => `<option value="${c}" ${s.class===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <select name="term" required>
+        <option value="Term 1" ${s.term==='Term 1'?'selected':''}>Term 1</option>
+        <option value="Term 2" ${s.term==='Term 2'?'selected':''}>Term 2</option>
+        <option value="Term 3" ${s.term==='Term 3'?'selected':''}>Term 3</option>
+      </select>
+      <input name="year" type="number" value="${s.year}" required>
+      <input name="total_fees" type="number" value="${s.total_fees}" required>
+      <input name="balance" type="number" value="${s.balance}" required>
+      <button type="submit">Update Student</button>
+    </form><a href="/admin/students">Back</a></div></body></html>`);
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+app.post('/admin/students/edit/:id', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
+  try {
+    const { name, class: className, term, year, total_fees, balance } = req.body;
+    await pool.query('UPDATE students SET name=$1, class=$2, term=$3, year=$4, total_fees=$5, balance=$6 WHERE id=$7',
+      [name, className, term, year, total_fees, balance, req.params.id]);
+    await logAction(req.session.user.username, 'STUDENT_UPDATED', { id: req.params.id, name });
+    res.redirect('/admin/students');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
