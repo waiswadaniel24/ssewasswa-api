@@ -105,12 +105,28 @@ async function initDB() {
       id SERIAL PRIMARY KEY, username VARCHAR(50), action VARCHAR(100), details TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS settings (key VARCHAR(50) PRIMARY KEY, value TEXT);
-    CREATE TABLE IF NOT EXISTS session (
-      sid VARCHAR NOT NULL COLLATE "default", sess JSON NOT NULL, expire TIMESTAMP(6) NOT NULL
-    ) WITH (OIDS=FALSE);
-    ALTER TABLE session ADD CONSTRAINT session_pkey PRIMARY KEY (sid) NOT DEFERRABLE INITIALLY IMMEDIATE;
-    CREATE INDEX IF NOT EXISTS IDX_session_expire ON session (expire);
 
+    -- SESSION TABLE - FIXED VERSION
+    CREATE TABLE IF NOT EXISTS session (
+      sid VARCHAR NOT NULL COLLATE "default",
+      sess JSON NOT NULL,
+      expire TIMESTAMP(6) NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS IDX_session_expire ON session (expire);
+  `);
+
+  // Add primary key only if it doesn't exist - prevents crash on redeploy
+  const pkCheck = await pool.query(`
+    SELECT constraint_name 
+    FROM information_schema.table_constraints 
+    WHERE table_name = 'session' AND constraint_type = 'PRIMARY KEY'
+  `);
+  if (pkCheck.rows.length === 0) {
+    await pool.query('ALTER TABLE session ADD CONSTRAINT session_pkey PRIMARY KEY (sid)');
+    console.log('✅ Session primary key created');
+  }
+
+  await pool.query(`
     -- PORTALS & TASKS
     CREATE TABLE IF NOT EXISTS staff_tasks (
       id SERIAL PRIMARY KEY, username VARCHAR(50) REFERENCES admins(username) ON DELETE CASCADE,
@@ -126,7 +142,7 @@ async function initDB() {
       meeting_link TEXT, scheduled_at TIMESTAMP, created_by VARCHAR(50)
     );
 
-    -- DONORS PORTAL TABLES - from our 20/10 layout
+    -- DONORS PORTAL TABLES
     CREATE TABLE IF NOT EXISTS donors (
       id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(100),
       phone VARCHAR(50), organization VARCHAR(100), address TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -139,7 +155,7 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS donor_students (
       id SERIAL PRIMARY KEY, donor_id INTEGER REFERENCES donors(id) ON DELETE CASCADE,
       student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
-      amount_pledged INTEGER, sponsorship_type VARCHAR(50) -- 'full', 'partial', 'termly'
+      amount_pledged INTEGER, sponsorship_type VARCHAR(50)
     );
   `);
   console.log('✅ Database ready');
