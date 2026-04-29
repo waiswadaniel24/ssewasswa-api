@@ -11,7 +11,6 @@ const multer = require('multer');
 const upload = multer({ dest: '/tmp/' });
 
 const app = express();
-app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 const pool = new Pool({
@@ -75,7 +74,7 @@ async function loadEmailSettings() {
     ADMIN_EMAIL = settings.admin_email || '';
     if (settings.alert_email_user && settings.alert_email_pass) {
       transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: settings.alert_email_user, pass: settings.alert_email_pass } });
-      console.log('âœ… Email alerts enabled');
+      console.log('✅ Email alerts enabled');
     }
   } catch (err) { console.error('Failed to load email settings:', err); }
 }
@@ -215,14 +214,13 @@ async function initDB() {
       }
     }
   }
-  console.log('âœ… Database ready with Nursery + Primary + Assets');
+  console.log('✅ Database ready with Nursery + Primary + Assets');
 }
 
 initDB();
 loadEmailSettings();
 
 app.get('/health', (req, res) => res.json({ status: 'API is running' }));
-
 // LOGIN - Show form
 app.get('/admin/login', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Login</title>
@@ -282,25 +280,25 @@ app.get('/admin', requireLogin, async (req, res) => {
         </div>
       </div>
       <div class="card">
-        <h3 class="section-title">ðŸ“š Academic Portals</h3>
+        <h3 class="section-title">📚 Academic Portals</h3>
         <a href="/admin/academic" class="btn portal">Academic Portal</a>
         <a href="/admin/marksheets" class="btn portal">Marksheets</a>
         <a href="/admin/subjects" class="btn portal">Manage Subjects</a>
         <a href="/admin/online-classes" class="btn portal">Online Classes</a>
 
-        <h3 class="section-title">ðŸ’° Financial Portals</h3>
+        <h3 class="section-title">💰 Financial Portals</h3>
         <a href="/admin/financial" class="btn portal">Financial Portal</a>
         <a href="/admin/donors" class="btn donor">Donors Portal</a>
         <a href="/admin/staff/payroll" class="btn staff">Staff Payroll</a>
         <a href="/admin/assets" class="btn asset">School Assets/Stores</a>
 
-        <h3 class="section-title">ðŸ‘¥ Staff Management</h3>
+        <h3 class="section-title">👥 Staff Management</h3>
         <a href="/admin/staff" class="btn staff">All Staff</a>
         <a href="/admin/assignments" class="btn staff">Staff Assignments</a>
         <a href="/admin/tasks" class="btn portal">Assign Portal Tasks</a>
         <a href="/admin/users/add" class="btn">Create User</a>
 
-        <h3 class="section-title">âš™ï¸ System</h3>
+        <h3 class="section-title">⚙️ System</h3>
         <a href="/admin/fields" class="btn portal">Custom Student Fields</a>
         <a href="/admin/students" class="btn">All Students</a>
       </div>
@@ -313,17 +311,17 @@ app.get('/admin', requireLogin, async (req, res) => {
   }
 
   let portalButtons = '';
-  if (userTasks.includes('financial_portal')) portalButtons += '<a href="/admin/financial" class="btn portal">ðŸ’° Financial Portal</a>';
-  if (userTasks.includes('academic_portal')) portalButtons += '<a href="/admin/academic" class="btn portal">ðŸ“š Academic Portal</a>';
-  if (userTasks.includes('marksheets')) portalButtons += '<a href="/admin/marksheets" class="btn portal">ðŸ“Š Marksheets</a>';
-  if (userTasks.includes('donors_portal')) portalButtons += '<a href="/admin/donors" class="btn donor">ðŸ¤ Donors Portal</a>';
-  if (userTasks.includes('staff_management')) portalButtons += '<a href="/admin/staff" class="btn staff">ðŸ‘¥ Staff</a>';
-  if (userTasks.includes('assets')) portalButtons += '<a href="/admin/assets" class="btn asset">ðŸ“¦ Assets</a>';
+  if (userTasks.includes('financial_portal')) portalButtons += '<a href="/admin/financial" class="btn portal">💰 Financial Portal</a>';
+  if (userTasks.includes('academic_portal')) portalButtons += '<a href="/admin/academic" class="btn portal">📚 Academic Portal</a>';
+  if (userTasks.includes('marksheets')) portalButtons += '<a href="/admin/marksheets" class="btn portal">📊 Marksheets</a>';
+  if (userTasks.includes('donors_portal')) portalButtons += '<a href="/admin/donors" class="btn donor">🤝 Donors Portal</a>';
+  if (userTasks.includes('staff_management')) portalButtons += '<a href="/admin/staff" class="btn staff">👥 Staff</a>';
+  if (userTasks.includes('assets')) portalButtons += '<a href="/admin/assets" class="btn asset">📦 Assets</a>';
 
   res.send(`<!DOCTYPE html><html><head><title>Dashboard</title>
   <style>body{font-family:Arial;max-width:900px;margin:50px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);margin-bottom:20px}.btn{background:#3498db;color:white;padding:12px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:8px 8px 0 0}.portal{background:#9b59b6}.donor{background:#e67e22}.staff{background:#16a085}.asset{background:#8e44ad}</style>
   </head><body><div class="card"><h1>Welcome ${user.username}</h1><p>Role: ${user.role} | Class: ${user.assigned_class || 'None'}</p>
-    ${user.assigned_class? `<a href="/admin/class/${user.assigned_class}" class="btn">View ${user.assigned_class}</a> <a href="/admin/marksheets/${user.assigned_class}" class="btn" style="background:#27ae60">ðŸ“Š Marksheet</a>` : ''}
+    ${user.assigned_class? `<a href="/admin/class/${user.assigned_class}" class="btn">View ${user.assigned_class}</a> <a href="/admin/marksheets/${user.assigned_class}" class="btn" style="background:#27ae60">📊 Marksheet</a>` : ''}
   </div>
   ${portalButtons? `<div class="card"><h3>Assigned Portals</h3>${portalButtons}</div>` : '<div class="card"><p>No special portals assigned.</p></div>'}
   <div class="card"><a href="/admin/logout" class="btn" style="background:#e74c3c">Logout</a></div></body></html>`);
@@ -370,11 +368,11 @@ app.get('/admin/marksheets/:className', requireLogin, requireTask('marksheets'),
           </select>
           <input type="number" name="year" value="${year}" onchange="this.form.submit()" style="width:70px">
         </form>
-        <button onclick="saveAllMarks()" class="btn btn-green">ðŸ’¾ Save All</button>
-        <a href="/admin/marksheets/${className}/download-template?term=${term}&year=${year}" class="btn btn-orange">ðŸ“¥ Download Excel Template (Offline)</a>
-        <button onclick="document.getElementById('uploadForm').style.display='block'" class="btn" style="background:#9b59b6">ðŸ“¤ Upload Filled Excel</button>
-        <button onclick="window.print()" class="btn">ðŸ–¨ï¸ Print</button>
-        <a href="/admin/reports/${className}?term=${term}&year=${year}" class="btn" style="background:#16a085">ðŸ“‹ Reports</a>
+        <button onclick="saveAllMarks()" class="btn btn-green">💾 Save All</button>
+        <a href="/admin/marksheets/${className}/download-template?term=${term}&year=${year}" class="btn btn-orange">📥 Download Excel Template (Offline)</a>
+        <button onclick="document.getElementById('uploadForm').style.display='block'" class="btn" style="background:#9b59b6">📤 Upload Filled Excel</button>
+        <button onclick="window.print()" class="btn">🖨️ Print</button>
+        <a href="/admin/reports/${className}?term=${term}&year=${year}" class="btn" style="background:#16a085">📋 Reports</a>
       </div>
       <div id="uploadForm" style="display:none;background:#fff3e0;padding:15px;border-radius:8px;margin-top:10px">
         <h4>Upload Completed Marksheet Excel</h4>
@@ -441,9 +439,9 @@ app.get('/admin/marksheets/:className', requireLogin, requireTask('marksheets'),
         try {
           const res = await fetch('/admin/marksheets/save', { method: 'POST', body: new URLSearchParams(formData) });
           const result = await res.json();
-          alert(result.success? 'âœ… Saved!' : 'âŒ Error: ' + result.error);
-        } catch (err) { alert('âŒ Save failed: ' + err.message); }
-        btn.textContent = 'ðŸ’¾ Save All'; btn.disabled = false;
+          alert(result.success? '✅ Saved!' : '❌ Error: ' + result.error);
+        } catch (err) { alert('❌ Save failed: ' + err.message); }
+        btn.textContent = '💾 Save All'; btn.disabled = false;
       }
     </script>
   </body></html>`);
@@ -529,7 +527,7 @@ app.post('/admin/marksheets/:className/upload', requireLogin, requireTask('marks
     }
 
     await logAction(recorded_by, 'MARKS_UPLOADED', { class: className, term, year, marks_updated: updatedCount });
-    res.send(`âœ… Successfully uploaded and updated ${updatedCount} marks for ${className} ${term} ${year}. <a href="/admin/marksheets/${className}?term=${term}&year=${year}">Back to Marksheet</a>`);
+    res.send(`✅ Successfully uploaded and updated ${updatedCount} marks for ${className} ${term} ${year}. <a href="/admin/marksheets/${className}?term=${term}&year=${year}">Back to Marksheet</a>`);
   } catch (err) {
     console.error(err);
     res.status(500).send('Upload failed: ' + err.message);
@@ -621,8 +619,8 @@ app.get('/admin/reports/:className', requireLogin, requireTask('marksheets'), as
   </head><body>
     <div class="no-print" style="padding:20px;background:#f4f6f9">
       <h2>${className} Report Cards - ${term} ${year}</h2>
-      <button onclick="window.print()" class="btn">ðŸ–¨ï¸ Print All Reports</button>
-      <a href="/admin/marksheets/${className}" class="btn">â† Back to Marksheet</a>
+      <button onclick="window.print()" class="btn">🖨️ Print All Reports</button>
+      <a href="/admin/marksheets/${className}" class="btn">← Back to Marksheet</a>
     </div>
     ${reportsHTML}
   </body></html>`);
@@ -636,7 +634,7 @@ app.get('/admin/staff', requireLogin, requireTask('staff_management'), async (re
   res.send(`<!DOCTYPE html><html><head><title>Staff Management</title>
   <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.badge{background:#3498db;color:white;padding:3px 8px;border-radius:12px;font-size:11px;margin:2px;display:inline-block}</style>
   </head><body>
-    <div class="card"><h1>ðŸ‘¥ Staff Management</h1><a href="/admin" class="btn">â† Dashboard</a> <a href="/admin/staff/add" class="btn btn-green">+ Add Staff</a> <a href="/admin/assignments" class="btn">ðŸ“‹ Assignments</a> <a href="/admin/staff/payroll" class="btn">ðŸ’° Payroll</a></div>
+    <div class="card"><h1>👥 Staff Management</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/staff/add" class="btn btn-green">+ Add Staff</a> <a href="/admin/assignments" class="btn">📋 Assignments</a> <a href="/admin/staff/payroll" class="btn">💰 Payroll</a></div>
     <div class="card"><h3>All Staff Members</h3>
       <table><tr><th>Name</th><th>Position</th><th>Department</th><th>Salary</th><th>Contact</th><th>Assignments</th><th>Actions</th></tr>
       ${staff.rows.map(s => {
@@ -784,7 +782,7 @@ app.get('/admin/assignments', requireLogin, requireRole(['admin']), async (req, 
   res.send(`<!DOCTYPE html><html><head><title>Staff Assignments</title>
   <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.staff-block{border:1px solid #ddd;padding:15px;margin:10px 0;border-radius:8px}.badge{background:#3498db;color:white;padding:4px 10px;border-radius:12px;font-size:12px;margin:3px;display:inline-block}.badge-class{background:#27ae60}.badge-subject{background:#e67e22}.badge-duty{background:#9b59b6}</style>
   </head><body>
-    <div class="card"><h1>ðŸ“‹ Staff Assignments</h1><a href="/admin/staff" class="btn">â† Staff List</a> <a href="/admin/assignments/add" class="btn" style="background:#27ae60">+ New Assignment</a></div>
+    <div class="card"><h1>📋 Staff Assignments</h1><a href="/admin/staff" class="btn">← Staff List</a> <a href="/admin/assignments/add" class="btn" style="background:#27ae60">+ New Assignment</a></div>
     <div class="card">
       ${Object.keys(grouped).map(name => `
         <div class="staff-block">
@@ -810,7 +808,7 @@ app.get('/admin/assets', requireLogin, requireTask('assets'), async (req, res) =
     res.send(`<!DOCTYPE html><html><head><title>School Assets</title>
     <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.category-header{background:#ecf0f1;font-weight:bold;padding:10px}</style>
     </head><body>
-      <div class="card"><h1>ðŸ“¦ School Assets & Stores</h1><a href="/admin" class="btn">â† Dashboard</a> <a href="/admin/assets/add" class="btn btn-green">+ Add Asset</a></div>
+      <div class="card"><h1>📦 School Assets & Stores</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/assets/add" class="btn btn-green">+ Add Asset</a></div>
       <div class="card">
         ${categories.map(cat => `
           <div class="category-header">${cat}</div>
@@ -891,7 +889,7 @@ app.get('/admin/subjects', requireLogin, requireRole(['admin']), async (req, res
   res.send(`<!DOCTYPE html><html><head><title>Manage Subjects</title>
   <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
   </head><body>
-    <div class="card"><h1>ðŸ“š Manage Subjects</h1><a href="/admin" class="btn">â† Dashboard</a> <a href="/admin/subjects/add" class="btn btn-green">+ Add Subject</a></div>
+    <div class="card"><h1>📚 Manage Subjects</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/subjects/add" class="btn btn-green">+ Add Subject</a></div>
     <div class="card">
       <table><tr><th>Subject</th><th>Class</th><th>Department</th><th>Max Marks</th><th>Status</th></tr>
       ${subjects.rows.map(s => `<tr><td>${s.name}</td><td>${s.class}</td><td>${s.department}</td><td>${s.max_marks}</td><td>${s.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
@@ -901,7 +899,6 @@ app.get('/admin/subjects', requireLogin, requireRole(['admin']), async (req, res
 });
 
 app.get('/admin/subjects/add', requireLogin, requireRole(['admin']), (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Add Subject</title>
   <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body><div class="card"><h2>Add New Subject</h2>
   <form method="POST" action="/admin/subjects/add">
@@ -933,7 +930,7 @@ app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) 
   res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
   <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
   </head><body>
-    <div class="card"><h1>âš™ï¸ Custom Student Fields</h1><a href="/admin" class="btn">â† Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
+    <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
     <div class="card"><p>Admin can add custom fields to student records like 'Blood Group', 'Allergies', 'Bus Route', etc. These appear on student add/edit forms.</p>
       <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Status</th></tr>
       ${fields.rows.map(f => `<tr><td>${f.field_name}</td><td>${f.field_type}</td><td>${f.required? 'Yes' : 'No'}</td><td>${f.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
@@ -943,8 +940,6 @@ app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) 
 });
 
 app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Add Field</title>
-  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body><div class="card"><h2>Add Custom Student Field</h2>
   <form method="POST" action="/admin/fields/add">
     <input name="field_name" placeholder="Field Name e.g Blood Group" required>
@@ -1020,19 +1015,6 @@ app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req
 // ADD ASSET FORM - MAKE SURE THIS IS BELOW
 app.get('/admin/assets/add', requireLogin, requireRole(['admin']), async (req, res) => {
 // PAY STAFF SALARY
-app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { month, year } = req.query;
-    const staff = await pool.query('SELECT * FROM staff WHERE id = $1', [id]);
-    if (staff.rows.length === 0) return res.status(404).send('Staff not found');
-    const s = staff.rows[0];
-    res.send(`<!DOCTYPE html><html><head><title>Pay Salary</title><style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style></head><body><div class="card"><h2>Pay Salary - ${s.full_name}</h2><p><strong>Position:</strong> ${s.position}</p><p><strong>Month:</strong> ${month} ${year}</p><p><strong>Amount:</strong> UGX ${Number(s.monthly_salary).toLocaleString()}</p><form method="POST" action="/admin/staff/pay/${id}"><input type="hidden" name="month" value="${month}"><input type="hidden" name="year" value="${year}"><input type="hidden" name="amount" value="${s.monthly_salary}"><select name="method" required><option value="Bank Transfer">Bank Transfer</option><option value="Cash">Cash</option><option value="Mobile Money">Mobile Money</option><option value="Cheque">Cheque</option></select><input name="reference" placeholder="Transaction Reference / Cheque No"><button type="submit">Confirm Payment</button></form><a href="/admin/staff/payroll">Cancel</a></div></body></html>`);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Error: ' + err.message);
-  }
-});
 
 // ASSETS LIST
 app.get('/admin/assets', requireLogin, requireRole(['admin']), async (req, res) => {
@@ -1048,9 +1030,7 @@ app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req
 });
 app.post('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (req, res) => {
   try {
-    const { id } = req.params;
     const { month, year, amount, method, reference } = req.body;
-    await pool.query('INSERT INTO salary_payments (staff_id, amount, month, year, method, reference, paid_by) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       [id, amount, month, year, method, reference, req.session.user.username]);
     await logAction(req.session.user.username, 'SALARY_PAID', { staff_id: id, amount, month, year });
     res.redirect(`/admin/staff/payroll?month=${month}&year=${year}`);
@@ -1059,23 +1039,21 @@ app.post('/admin/staff/pay/:id', requireLogin, requireRole(['admin']), async (re
 
 // FINANCIAL PORTAL
 app.get('/admin/financial', requireLogin, requireTask('financial_portal'), async (req, res) => {
-  const classes = await pool.query(`SELECT class, COUNT(*) as count, SUM(total_fees) as fees, SUM(balance) as balance FROM students GROUP BY class ORDER BY class`);
   const assetValue = await pool.query('SELECT SUM(total_value) as total FROM school_assets');
   const payroll = await pool.query('SELECT SUM(monthly_salary) as total FROM staff WHERE active = true');
 
   res.send(`<!DOCTYPE html><html><head><title>Financial Portal</title>
   <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd}th{background:#34495e;color:white}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0}.stat{background:#ecf0f1;padding:15px;border-radius:4px;text-align:center}</style>
-  </head><body><h1>ðŸ’° Financial Portal</h1><a href="/admin" class="btn">â† Dashboard</a><br><br>
+  </head><body><h1>💰 Financial Portal</h1><a href="/admin" class="btn">← Dashboard</a><br><br>
   <div class="stats">
     <div class="stat"><strong>Total Assets Value</strong><br>UGX ${Number(assetValue.rows[0].total || 0).toLocaleString()}</div>
     <div class="stat"><strong>Monthly Payroll</strong><br>UGX ${Number(payroll.rows[0].total || 0).toLocaleString()}</div>
     <div class="stat"><strong>Fees Outstanding</strong><br>UGX ${Number(classes.rows.reduce((sum,c) => sum + Number(c.balance), 0)).toLocaleString()}</div>
   </div>
   <table><tr><th>Class</th><th>Students</th><th>Total Fees</th><th>Outstanding</th><th>Collected</th><th>Actions</th></tr>
-  ${classes.rows.map(c => `<tr><td>${c.class}</td><td>${c.count}</td><td>UGX ${Number(c.fees).toLocaleString()}</td><td>UGX ${Number(c.balance).toLocaleString()}</td><td>UGX ${(Number(c.fees)-Number(c.balance)).toLocaleString()}</td><td><a href="/admin/class/${c.class}/export" class="btn">Export Excel</a></td></tr>`).join('')}
   </table>
-  <br><a href="/admin/assets" class="btn" style="background:#8e44ad">ðŸ“¦ View All Assets</a>
-  <a href="/admin/staff/payroll" class="btn" style="background:#16a085">ðŸ’° Staff Payroll</a>
+  <br><a href="/admin/assets" class="btn" style="background:#8e44ad">📦 View All Assets</a>
+  <a href="/admin/staff/payroll" class="btn" style="background:#16a085">💰 Staff Payroll</a>
   </body></html>`);
 });
 
@@ -1083,10 +1061,10 @@ app.get('/admin/financial', requireLogin, requireTask('financial_portal'), async
 app.get('/admin/academic', requireLogin, requireTask('academic_portal'), (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Academic Portal</title>
   <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}.btn{background:#9b59b6;color:white;padding:12px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:10px}</style>
-  </head><body><h1>ðŸ“š Academic Portal</h1><a href="/admin">â† Dashboard</a><br><br>
-  <a href="/admin/marksheets" class="btn">ðŸ“Š Marksheets</a>
-  <a href="/admin/subjects" class="btn">ðŸ“ Manage Subjects</a>
-  <a href="/admin/online-classes" class="btn">ðŸ’» Online Classes</a>
+  </head><body><h1>📚 Academic Portal</h1><a href="/admin">← Dashboard</a><br><br>
+  <a href="/admin/marksheets" class="btn">📊 Marksheets</a>
+  <a href="/admin/subjects" class="btn">📝 Manage Subjects</a>
+  <a href="/admin/online-classes" class="btn">💻 Online Classes</a>
   </body></html>`);
 });
 
@@ -1095,7 +1073,7 @@ app.get('/admin/marksheets', requireLogin, requireTask('marksheets'), (req, res)
   res.send(`<!DOCTYPE html><html><head><title>Marksheets</title>
   <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:12px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}.nursery{background:#f39c12}</style>
   </head><body>
-    <div class="card"><h1>ðŸ“Š Class Marksheets</h1><a href="/admin" class="btn">â† Dashboard</a></div>
+    <div class="card"><h1>📊 Class Marksheets</h1><a href="/admin" class="btn">← Dashboard</a></div>
     <div class="card">
       <h3>Nursery Section</h3>
       ${NURSERY_CLASSES.map(c => `<a href="/admin/marksheets/${c}" class="btn nursery">${c} Marksheet</a>`).join('')}
@@ -1110,7 +1088,7 @@ app.get('/admin/exams', requireLogin, requireTask('exams'), async (req, res) => 
   const results = await pool.query(`SELECT e.*, s.name, s.class, sub.name as subject_name FROM exam_results e JOIN students s ON e.student_id = s.id JOIN subjects sub ON e.subject_id = sub.id ORDER BY e.recorded_at DESC LIMIT 50`);
   res.send(`<!DOCTYPE html><html><head><title>Exams Portal</title>
   <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}.btn{background:#9b59b6;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}</style>
-  </head><body><h1>ðŸ“ Recent Exam Entries</h1><a href="/admin/academic" class="btn">â† Academic</a> <a href="/admin/exams/add" class="btn">+ Record Single Mark</a> <a href="/admin/marksheets" class="btn">ðŸ“Š Use Marksheet Instead</a><br><br>
+  </head><body><h1>📝 Recent Exam Entries</h1><a href="/admin/academic" class="btn">← Academic</a> <a href="/admin/exams/add" class="btn">+ Record Single Mark</a> <a href="/admin/marksheets" class="btn">📊 Use Marksheet Instead</a><br><br>
   <table><tr><th>Student</th><th>Class</th><th>Subject</th><th>Marks</th><th>Term</th><th>Year</th><th>Recorded By</th></tr>
   ${results.rows.map(r => `<tr><td>${r.name}</td><td>${r.class}</td><td>${r.subject_name}</td><td>${r.marks}</td><td>${r.term}</td><td>${r.year}</td><td>${r.recorded_by}</td></tr>`).join('')}
   </table></body></html>`);
@@ -1143,7 +1121,7 @@ app.get('/admin/online-classes', requireLogin, requireTask('online_classes'), as
   const classes = await pool.query('SELECT * FROM online_classes ORDER BY scheduled_at DESC');
   res.send(`<!DOCTYPE html><html><head><title>Online Classes</title>
   <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}.btn{background:#9b59b6;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}</style>
-  </head><body><h1>ðŸ’» Online Classes</h1><a href="/admin/academic" class="btn">â† Academic</a> <a href="/admin/online-classes/add" class="btn">+ Schedule Class</a><br><br>
+  </head><body><h1>💻 Online Classes</h1><a href="/admin/academic" class="btn">← Academic</a> <a href="/admin/online-classes/add" class="btn">+ Schedule Class</a><br><br>
   <table><tr><th>Class</th><th>Subject</th><th>Topic</th><th>Scheduled</th><th>Link</th></tr>
   ${classes.rows.map(c => `<tr><td>${c.class}</td><td>${c.subject}</td><td>${c.topic}</td><td>${new Date(c.scheduled_at).toLocaleString()}</td><td><a href="${c.meeting_link}" target="_blank">Join</a></td></tr>`).join('')}
   </table></body></html>`);
@@ -1177,7 +1155,7 @@ app.get('/admin/donors', requireLogin, requireTask('donors_portal'), async (req,
     GROUP BY d.id ORDER BY d.name`);
   res.send(`<!DOCTYPE html><html><head><title>Donors Portal</title>
   <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd}th{background:#e67e22;color:white}.btn{background:#e67e22;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}</style>
-  </head><body><h1>ðŸ¤ Donors Portal</h1><a href="/admin" class="btn">â† Dashboard</a> <a href="/admin/donors/add" class="btn">+ Add Donor</a> <a href="/admin/donations/add" class="btn">+ Record Donation</a><br><br>
+  </head><body><h1>🤝 Donors Portal</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/donors/add" class="btn">+ Add Donor</a> <a href="/admin/donations/add" class="btn">+ Record Donation</a><br><br>
   <table><tr><th>Donor</th><th>Organization</th><th>Contact</th><th>Students Sponsored</th><th>Total Donated</th></tr>
   ${donors.rows.map(d => `<tr><td>${d.name}</td><td>${d.organization || '-'}</td><td>${d.phone || d.email || '-'}</td><td>${d.sponsored_students}</td><td>UGX ${Number(d.total_donated).toLocaleString()}</td></tr>`).join('')}
   </table></body></html>`);
@@ -1238,13 +1216,13 @@ app.get('/admin/class/:className', requireLogin, async (req, res) => {
     <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.header{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:20px 0}.stat-card{background:#3498db;color:white;padding:20px;border-radius:8px}.stat-card h3{margin:0 0 10px 0;font-size:14px;opacity:0.9}.stat-card.num{font-size:28px;font-weight:bold}.controls{background:white;padding:15px;border-radius:8px;margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap}.controls input{flex:1;padding:10px;border:1px solid #ddd;border-radius:4px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}.btn-green{background:#27ae60}table{width:100%;background:white;border-collapse:collapse;border-radius:8px;overflow:hidden}th{background:#34495e;color:white;padding:12px;text-align:left}td{padding:12px;border-bottom:1px solid #eee}.balance-zero{color:#27ae60;font-weight:bold}.balance-owe{color:#e74c3c;font-weight:bold}@media print{.no-print{display:none}}</style>
     </head><body>
       <div class="header no-print"><h1>${className} - Class Management</h1><p>Teacher: ${user.username}</p>
-        <a href="/admin" class="btn">â† Dashboard</a>
-        <button onclick="window.print()" class="btn btn-green">ðŸ–¨ï¸ Print</button>
-        <a href="/admin/class/${className}/export" class="btn btn-green">ðŸ“Š Export Excel</a>
-        <a href="/admin/marksheets/${className}" class="btn" style="background:#9b59b6">ðŸ“Š Marksheet</a>
+        <a href="/admin" class="btn">← Dashboard</a>
+        <button onclick="window.print()" class="btn btn-green">🖨️ Print</button>
+        <a href="/admin/class/${className}/export" class="btn btn-green">📊 Export Excel</a>
+        <a href="/admin/marksheets/${className}" class="btn" style="background:#9b59b6">📊 Marksheet</a>
       </div>
       <div class="stats"><div class="stat-card"><h3>Total Students</h3><div class="num">${totalStudents}</div></div><div class="stat-card" style="background:#e67e22"><h3>Total Fees</h3><div class="num">UGX ${totalFees.toLocaleString()}</div></div><div class="stat-card" style="background:#e74c3c"><h3>Outstanding</h3><div class="num">UGX ${totalBalance.toLocaleString()}</div></div><div class="stat-card" style="background:#27ae60"><h3>Collected</h3><div class="num">UGX ${(totalFees-totalBalance).toLocaleString()}</div></div></div>
-      <div class="controls no-print"><input type="text" id="searchBox" placeholder="ðŸ” Search student name..." onkeyup="filterTable()"></div>
+      <div class="controls no-print"><input type="text" id="searchBox" placeholder="🔍 Search student name..." onkeyup="filterTable()"></div>
       <table id="studentsTable"><thead><tr><th>Name</th><th>Term</th><th>Year</th><th>Total Fees</th><th>Balance</th><th class="no-print">Actions</th></tr></thead><tbody>
         ${students.rows.map(s => `<tr><td><strong>${s.name}</strong></td><td>${s.term}</td><td>${s.year}</td><td>UGX ${Number(s.total_fees).toLocaleString()}</td><td class="${s.balance == 0? 'balance-zero' : 'balance-owe'}">UGX ${Number(s.balance).toLocaleString()}</td><td class="no-print"><a href="/admin/payments/add?student_id=${s.id}" class="btn" style="padding:6px 12px;font-size:12px">+ Payment</a> <a href="/admin/students/${s.id}" class="btn" style="padding:6px 12px;font-size:12px;background:#95a5a6">View</a></td></tr>`).join('')}
       </tbody></table>
@@ -1281,7 +1259,7 @@ app.get('/admin/payments/add', requireLogin, async (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Record Payment</title>
   <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}input,select,button{width:100%;padding:10px;margin:8px 0}.success{background:#27ae60;color:white;padding:10px;border-radius:4px;margin-bottom:15px}</style>
   </head><body><h2>Record Payment</h2>
-  ${success? '<div class="success">âœ… Payment recorded successfully!</div>' : ''}
+  ${success? '<div class="success">✅ Payment recorded successfully!</div>' : ''}
   <form method="POST" action="/admin/payments/add">
     <select name="student_id" required><option value="">Select Student</option>${students.rows.map(s => `<option value="${s.id}" ${s.id == preselectedId? 'selected' : ''}>${s.name} - ${s.class} - Bal: UGX ${Number(s.balance).toLocaleString()}</option>`).join('')}</select>
     <input name="amount" type="number" placeholder="Amount UGX" required>
@@ -1416,7 +1394,7 @@ app.get('/admin/assignments', requireLogin, requireRole(['admin']), async (req, 
   res.send(`<!DOCTYPE html><html><head><title>Staff Assignments</title>
   <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.staff-block{border:1px solid #ddd;padding:15px;margin:10px 0;border-radius:8px}.badge{background:#3498db;color:white;padding:4px 10px;border-radius:12px;font-size:12px;margin:3px;display:inline-block}.badge-class{background:#27ae60}.badge-subject{background:#e67e22}.badge-duty{background:#9b59b6}</style>
   </head><body>
-    <div class="card"><h1>ðŸ“‹ Staff Assignments</h1><a href="/admin/staff" class="btn">â† Staff List</a> <a href="/admin/assignments/add" class="btn" style="background:#27ae60">+ New Assignment</a></div>
+    <div class="card"><h1>📋 Staff Assignments</h1><a href="/admin/staff" class="btn">← Staff List</a> <a href="/admin/assignments/add" class="btn" style="background:#27ae60">+ New Assignment</a></div>
     <div class="card">
       ${Object.keys(grouped).map(name => `
         <div class="staff-block">
@@ -1508,7 +1486,7 @@ app.get('/admin/subjects', requireLogin, requireRole(['admin']), async (req, res
   res.send(`<!DOCTYPE html><html><head><title>Manage Subjects</title>
   <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
   </head><body>
-    <div class="card"><h1>ðŸ“š Manage Subjects</h1><a href="/admin" class="btn">â† Dashboard</a> <a href="/admin/subjects/add" class="btn btn-green">+ Add Subject</a></div>
+    <div class="card"><h1>📚 Manage Subjects</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/subjects/add" class="btn btn-green">+ Add Subject</a></div>
     <div class="card">
       <table><tr><th>Subject</th><th>Class</th><th>Department</th><th>Max Marks</th><th>Status</th></tr>
       ${subjects.rows.map(s => `<tr><td>${s.name}</td><td>${s.class}</td><td>${s.department}</td><td>${s.max_marks}</td><td>${s.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
@@ -1521,7 +1499,6 @@ app.get('/admin/subjects/add', requireLogin, requireRole(['admin']), (req, res) 
   res.send(`<!DOCTYPE html><html><head><title>Add Subject</title>
   <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body><div class="card"><h2>Add New Subject</h2>
-  <form method="POST" action="/admin/subjects/add">
     <input name="name" placeholder="Subject Name e.g Computer Studies" required>
     <select name="class" required>
       <option value="">Select Class</option>
@@ -1550,13 +1527,12 @@ app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) 
   res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
   <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
   </head><body>
-    <div class="card"><h1>âš™ï¸ Custom Student Fields</h1><a href="/admin" class="btn">â† Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
+    <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
     <div class="card"><p>Admin can add custom fields to student records like 'Blood Group', 'Allergies', 'Bus Route', etc. These appear on student add/edit forms.</p>
       <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Status</th></tr>
       ${fields.rows.map(f => `<tr><td>${f.field_name}</td><td>${f.field_type}</td><td>${f.required? 'Yes' : 'No'}</td><td>${f.active? 'Active' : 'Inactive'}</td></tr>`).join('')}
       </table>
     </div>
-  </body></html>`);
 });
 
 app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) => {
@@ -1566,7 +1542,6 @@ app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) =>
   <form method="POST" action="/admin/fields/add">
     <input name="field_name" placeholder="Field Name e.g Blood Group" required>
     <select name="field_type" required>
-      <option value="text">Text</option>
       <option value="number">Number</option>
       <option value="date">Date</option>
       <option value="select">Dropdown Select</option>
