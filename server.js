@@ -1106,11 +1106,11 @@ app.get('/create-superadmin-ssewasswa2026', async (req, res) => {
   try {
     const hash = await bcrypt.hash('Admin@2026', 10);
     await pool.query(`
-      INSERT INTO users (username, password_hash, role, school_id, full_name)
-      VALUES ('superadmin', $1, 'admin', 1, 'God Mode Admin')
-      ON CONFLICT (username) DO UPDATE SET password_hash = $1
+      INSERT INTO users (username, password, role)
+      VALUES ('superadmin', $1, 'admin')
+      ON CONFLICT (username) DO UPDATE SET password = $1, role = 'admin'
     `, [hash]);
-    res.send('<h1>✅ Superadmin Created</h1><p>Username: superadmin<br>Password: Admin@2026</p><p>DELETE THIS ROUTE NOW</p>');
+    res.send('<h1>✅ Superadmin Created</h1><p>Username: superadmin<br>Password: Admin@2026</p>');
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
   }
