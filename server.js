@@ -1139,7 +1139,3 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   setTimeout(() => initDB().catch(e => console.log('DB init:', e.message)), 2000);
 });
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  setTimeout(() => initDB().catch(e => console.log('DB init:', e.message)), 2000);
-});
