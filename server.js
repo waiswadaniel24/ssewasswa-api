@@ -14,6 +14,20 @@ const crypto = require('crypto');
 
 const upload = multer({ dest: '/tmp/' });
 const app = express();
+app.use(express.urlencoded({ extended: true })); // For form data
+app.use(express.json()); // For JSON
+
+// Session setup - add after const app = express();
+app.use(session({
+  store: new pgSession({
+    pool: pool,
+    tableName: 'session'
+  }),
+  secret: process.env.SESSION_SECRET || 'change-this-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } // 30 days
+}));
 const PORT = process.env.PORT || 3000;
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
