@@ -262,7 +262,80 @@ app.post('/newsletter/subscribe', async (req, res) => {
   await logAction('PUBLIC', 'NEWSLETTER_SUBSCRIBE', { email });
   res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px;text-align:center"><h2>Subscribed!</h2><p>Check ${email} for confirmation.</p><a href="/" style="background:#3498db;color:white;padding:10px 20px;text-decoration:none;border-radius:4px">Back Home</a></div>`);
 });
+// === DONATE PAGE ===
+app.get('/donate', async (req, res) => {
+  const fund = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
+  const donors = await pool.query('SELECT COUNT(*) as count FROM donors');
+  await pool.query('INSERT INTO page_views (page, ip_address) VALUES ($1, $2)', ['/donate', req.ip]).catch(() => {});
+  
+  res.send(`<!DOCTYPE html><html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Donate - SSE Wasswa Foundation</title>
+  <meta name="description" content="Support SSE Wasswa Impact Fund. 100% transparent donations for boreholes, scholarships, health camps in Uganda.">
+  <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#667eea">
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1814429636128167" crossorigin="anonymous"></script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-DPSJBBVEE2"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-DPSJBBVEE2');</script>
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.hero{background:linear-gradient(135deg,#27ae60 0%,#2ecc71 100%);color:white;padding:60px 20px;text-align:center}.container{max-width:800px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}.btn{background:#27ae60;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;display:inline-block;margin:10px;font-size:18px}.nav{background:#2c3e50;padding:15px;text-align:center;position:sticky;top:0;z-index:100}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}.whatsapp{position:fixed;bottom:20px;right:20px;background:#25D366;color:white;width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;text-decoration:none;box-shadow:0 4px 8px rgba(0,0,0,0.3);z-index:1000}</style>
+  </head><body>
+    ${publicNav}
+    <div class="hero"><h1>Impact Fund</h1><p>Current Balance: UGX ${Number(fund.rows[0]?.balance || 0).toLocaleString()}</p><p>${donors.rows[0].count}+ Donors Supporting Education</p></div>
+    <div class="container">
+      <div class="card"><h2>💚 Donate via Mobile Money</h2><p>1. Send to: <strong>256789739737</strong></p><p>2. Names: SSE WASSWA FOUNDATION</p><p>3. WhatsApp us receipt for confirmation</p><a href="https://wa.me/256789739737?text=I%20want%20to%20donate%20to%20Impact%20Fund" class="btn">Donate via WhatsApp</a></div>
+      <div class="card"><h2>📊 100% Transparency</h2><p>1% of every school fee goes to this fund. All projects tracked publicly. Boreholes, scholarships, health camps.</p></div>
+    </div>
+    <a href="https://wa.me/256789739737?text=Hello%20SSE%20Wasswa" class="whatsapp" target="_blank">💬</a>
+  </body></html>`);
+});
 
+// === CERTIFICATES PAGE ===
+app.get('/certificates', async (req, res) => {
+  await pool.query('INSERT INTO page_views (page, ip_address) VALUES ($1, $2)', ['/certificates', req.ip]).catch(() => {});
+  
+  res.send(`<!DOCTYPE html><html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Certificate Verification - SSE Wasswa Foundation</title>
+  <meta name="description" content="Verify SSE Wasswa Foundation certificates online. Enter certificate ID for instant verification.">
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1814429636128167" crossorigin="anonymous"></script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-DPSJBBVEE2"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-DPSJBBVEE2');</script>
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.hero{background:linear-gradient(135deg,#3498db 0%,#2980b9 100%);color:white;padding:60px 20px;text-align:center}.container{max-width:600px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}.btn{background:#3498db;color:white;padding:15px 30px;border:none;border-radius:5px;font-size:18px;width:100%;cursor:pointer}.nav{background:#2c3e50;padding:15px;text-align:center}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}</style>
+  </head><body>
+    ${publicNav}
+    <div class="hero"><h1>Certificate Verification</h1><p>Verify authenticity of SSE Wasswa certificates</p></div>
+    <div class="container">
+      <div class="card">
+        <form method="POST" action="/certificates/verify">
+          <input name="cert_id" type="text" placeholder="Enter Certificate ID" required style="width:100%;padding:15px;border:1px solid #ddd;border-radius:4px;margin-bottom:15px;font-size:16px">
+          <button type="submit" class="btn">Verify Certificate</button>
+        </form>
+      </div>
+    </div>
+  </body></html>`);
+});
+
+// === ABOUT PAGE ===
+app.get('/about', async (req, res) => {
+  await pool.query('INSERT INTO page_views (page, ip_address) VALUES ($1, $2)', ['/about', req.ip]).catch(() => {});
+  
+  res.send(`<!DOCTYPE html><html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>About Us - SSE Wasswa Foundation</title>
+  <meta name="description" content="SSE Wasswa Foundation: Quality Nursery to University education in Kampala. Technology, community impact, experienced teachers.">
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1814429636128167" crossorigin="anonymous"></script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-DPSJBBVEE2"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-DPSJBBVEE2');</script>
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.hero{background:linear-gradient(135deg,#9b59b6 0%,#8e44ad 100%);color:white;padding:60px 20px;text-align:center}.container{max-width:800px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}.nav{background:#2c3e50;padding:15px;text-align:center}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}</style>
+  </head><body>
+    ${publicNav}
+    <div class="hero"><h1>About SSE Wasswa Foundation</h1><p>Empowering Education Through Technology & Community</p></div>
+    <div class="container">
+      <div class="card"><h2>🎓 Our Mission</h2><p>Providing quality education from Nursery to University level with modern technology, digital results, and community impact through our Impact Fund.</p></div>
+      <div class="card"><h2>📍 Location</h2><p>Kampala, Uganda. Serving 500+ students with experienced teachers and modern facilities.</p></div>
+      <div class="card"><h2>💚 Impact Fund</h2><p>1% of every fee payment funds community projects: boreholes, scholarships, health camps. 100% transparent.</p></div>
+    </div>
+  </body></html>`);
+});
 app.get('/sitemap.xml', (req, res) => {
   res.setHeader('Content-Type', 'application/xml');
   res.send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
