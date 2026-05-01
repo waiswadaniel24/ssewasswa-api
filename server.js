@@ -1220,6 +1220,16 @@ app.get('/create-god-mode-temp', async (req, res) => {
     res.status(500).send('Error: ' + err.message);
   }
 });
+// TEMP PASSWORD RESET - DELETE AFTER USE
+app.get('/reset-pass-temp', async (req, res) => {
+  try {
+    const hash = await bcrypt.hash('TempPass2026!', 10);
+    await pool.query('UPDATE users SET password = $1 WHERE username = $2', [hash, 'superadmin']);
+    res.send('Password reset to TempPass2026!. DELETE THIS ROUTE NOW.');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
