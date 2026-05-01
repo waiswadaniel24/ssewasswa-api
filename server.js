@@ -1226,6 +1226,20 @@ app.post('/login', async (req, res) => {
     res.status(500).send('Server error: ' + err.message);
   }
 });
+// TEMP - DELETE AFTER USE
+app.get('/create-god-mode-temp', async (req, res) => {
+  try {
+    const password = 'TempPass2026!'; // CHANGE THIS NOW
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query(
+      'INSERT INTO users (username, password, role) VALUES ($1, $2, $3)',
+      ['superadmin', hash, 'admin']
+    );
+    res.send(`superadmin created. Password: ${password}. DELETE THIS ROUTE NOW.`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
