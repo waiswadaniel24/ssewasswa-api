@@ -222,9 +222,9 @@ app.get('/', async (req, res) => {
   res.send(`<!DOCTYPE html><html lang="en"><head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SSE Wasswa Foundation - Quality Education Kampala</title>
-  <meta name="google-site-verification" content="PASTE_YOUR_CODE_HERE" />
-  <meta name="description" content="SSE Wasswa Foundation: Nursery to University education in Kampala. Digital results, mobile payments, Impact Fund community projects. Enroll today.">
-  <meta name="keywords" content="schools kampala, nursery kampala, secondary school uganda, past papers uganda, UNEB papers">
+<meta name="google-site-verification" content="YOUR_SEARCH_CONSOLE_CODE" />
+<meta name="google-adsense-account" content="ca-pub-1814429636128167">
+<meta name="description" content="SSE Wasswa Foundation: Nursery to University education in Kampala. Digital results, mobile payments, Impact Fund community projects. Enroll today.">
   <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#667eea">
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1814429636128167" crossorigin="anonymous"></script>
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-DPSJBBVEE2"></script>
