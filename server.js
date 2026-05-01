@@ -1125,11 +1125,6 @@ app.get('/change-god-pass', async (req, res) => {
   await pool.query(`UPDATE users SET password = $1 WHERE username = 'superadmin'`, );
   res.send('Password changed. Delete this route.');
 });
-
-// This should be the LAST lines in server.js
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
