@@ -128,6 +128,12 @@ async function initDB() {
         phone TEXT, email VARCHAR(100), hire_date DATE,
         monthly_salary INTEGER, bank_account VARCHAR(100), emergency_contact TEXT, active BOOLEAN DEFAULT true
       );
+      await pool.query(`ALTER TABLE exam_results ADD COLUMN IF NOT EXISTS subject_id INTEGER REFERENCES subjects(id) ON DELETE CASCADE`);
+await pool.query(`DO $$ BEGIN 
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_results_student_id_subject_id_term_year_key') THEN
+    ALTER TABLE exam_results ADD CONSTRAINT exam_results_student_id_subject_id_term_year_key UNIQUE(student_id, subject_id, term, year);
+  END IF;
+END $$;`);
       CREATE TABLE IF NOT EXISTS salary_payments (
         id SERIAL PRIMARY KEY, staff_id INTEGER REFERENCES staff(id) ON DELETE CASCADE,
         amount INTEGER NOT NULL, month VARCHAR(20), year INTEGER,
