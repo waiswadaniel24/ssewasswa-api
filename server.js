@@ -880,6 +880,128 @@ app.post('/admin/mobile-money/withdraw', requireLogin, requireRole(['admin']), a
     res.send(`${provider} API withdrawal initiated. <a href="/admin/mobile-money">Back</a>`);
   }
 });
+// === PAST PAPERS SHOP ===
+app.get('/papers', async (req, res) => {
+  const papers = await pool.query('SELECT * FROM past_papers WHERE active = true ORDER BY class, subject, year DESC');
+  res.send(`<!DOCTYPE html><html><head><title>Past Papers</title>
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.container{max-width:1200px;margin:40px auto;padding:0 20px}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.nav{background:#2c3e50;padding:15px;text-align:center}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}.btn{background:#27ae60;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.paper{border:1px solid #ddd;padding:15px;border-radius:4px}input{width:100%;padding:10px;margin:5px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}</style>
+  </head><body>
+    <div class="nav"><a href="/">Home</a><a href="/donate">Donate</a><a href="/papers">Past Papers</a><a href="/about">About</a><a href="/parent/login">Parent Portal</a></div>
+    <div class="container">
+      <div class="card"><h1>📄 Past Papers Shop</h1><p>Download UNEB & Internal past papers. Instant PDF after payment.</p></div>
+      <div class="grid">
+        ${papers.rows.map(p => `<div class="paper"><h3>${p.subject} - ${p.class}</h3><p>Year: ${p.year} | ${p.type}</p><p><strong>UGX ${Number(p.price).toLocaleString()}</strong></p><form method="POST" action="/papers/buy/${p.id}"><input name="phone" placeholder="MTN/Airtel: 0772123456" required><button type="submit" class="btn">Buy & Download</button></form></div>`).join('')}
+      </div>
+    </div>
+  </body></html>`);
+});
+
+app.post('/papers/buy/:id', async (req, res) => {
+  const { phone } = req.body;
+  const paper = await pool.query('SELECT * FROM past_papers WHERE id = $1', [req.params.id]);
+  if (!paper.rows[0]) return res.status(404).send('Paper not found');
+  const p = paper.rows[0];
+
+  // Log sale as pending_manual
+  await pool.query('INSERT INTO momo_transactions (transaction_id, amount, phone, status, type, provider) VALUES ($1, $2, $3, $4, $5, $6)',
+    ['PAPER' + Date.now(), p.price, phone, 'pending_manual', 'paper_sale', 'MANUAL']);
+
+  await sendSMS(phone, `SSE Wasswa: To download ${p.subject} ${p.year}, pay UGX ${Number(p.price).toLocaleString()} to 077XXXXXXX. Send receipt to activate download.`);
+
+  res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px;text-align:center"><h2>Order Received</h2><p><strong>${p.subject} - ${p.class} ${p.year}</strong></p><p>Amount: UGX ${Number(p.price).toLocaleString()}</p><p>Pay to 077XXXXXXX and send receipt via WhatsApp to get download link.</p><p>We sent instructions to ${phone}</p><a href="/papers" style="background:#3498db;color:white;padding:10px 20px;text-decoration:none;border-radius:4px">Back to Papers</a></div>`);
+});
+
+// === ADMIN: MANAGE PAPERS ===
+app.get('/admin/papers', requireLogin, requireRole(['admin']), async (req, res) => {
+  const papers = await pool.query('SELECT * FROM past_papers ORDER BY created_at DESC');
+  const sales = await pool.query('SELECT COUNT(*) as count, COALESCE(SUM(amount),0) as total FROM momo_transactions WHERE type = $1', ['paper_sale']);
+  res.send(`<!DOCTYPE html><html><head><title>Manage Papers</title>
+  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#16a085;color:white}input,select{width:100%;padding:10px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.stat{background:#ecf0f1;padding:20px;border-radius:4px;text-align:center;font-size:24px}</style>
+  </head><body>
+    <div class="card"><h1>📄 Past Papers Management</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    <div class="card"><div class="stat"><strong>Total Sales</strong><br>${sales.rows[0].count} papers | UGX ${Number(sales.rows[0].total).toLocaleString()}</div></div>
+    <div class="card"><h3>Upload New Paper</h3><form method="POST" action="/admin/papers/add" enctype="multipart/form-data">
+      <select name="class" required><option value="">Class</option><option>P.7</option><option>S.4</option><option>S.6</option></select>
+      <input name="subject" placeholder="Subject: Mathematics" required>
+      <input name="year" type="number" placeholder="Year: 2023" required>
+      <select name="type" required><option value="">Type</option><option>UNEB</option><option>Mock</option><option>Internal</option></select>
+      <input name="price" type="number" placeholder="Price UGX: 5000" required>
+      <input name="file_url" placeholder="PDF URL or /uploads/paper.pdf" required>
+      <button type="submit" class="btn" style="background:#27ae60;width:100%">Add Paper</button>
+    </form></div>
+    <div class="card"><h3>All Papers</h3><table><tr><th>Class</th><th>Subject</th><th>Year</th><th>Type</th><th>Price</th><th>Status</th><th>Action</th></tr>
+      ${papers.rows.map(p => `<tr><td>${p.class}</td><td>${p.subject}</td><td>${p.year}</td><td>${p.type}</td><td>${Number(p.price).toLocaleString()}</td><td>${p.active? 'Active' : 'Hidden'}</td><td><a href="/admin/papers/toggle/${p.id}" class="btn">${p.active? 'Hide' : 'Show'}</a></td></tr>`).join('')}
+    </table></div>
+  </body></html>`);
+});
+
+app.post('/admin/papers/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  const { class: cls, subject, year, type, price, file_url } = req.body;
+  await pool.query('INSERT INTO past_papers (class, subject, year, type, price, file_url, active) VALUES ($1, $2, $3, $4, $5, $6, true)', [cls, subject, year, type, price, file_url]);
+  await logAction(req.session.username, 'PAPER_ADD', { subject, year, price });
+  res.redirect('/admin/papers');
+});
+
+app.get('/admin/papers/toggle/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  await pool.query('UPDATE past_papers SET active = NOT active WHERE id = $1', [req.params.id]);
+  res.redirect('/admin/papers');
+});
+
+// === CERTIFICATE/TRANSCRIPT REQUESTS ===
+app.get('/certificates', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Certificates</title>
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.container{max-width:700px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px}.nav{background:#2c3e50;padding:15px;text-align:center}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}.btn{background:#27ae60;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;border:none;cursor:pointer;width:100%;font-size:18px}input,select,textarea{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}</style>
+  </head><body>
+    <div class="nav"><a href="/">Home</a><a href="/donate">Donate</a><a href="/papers">Past Papers</a><a href="/certificates">Certificates</a><a href="/parent/login">Parent Portal</a></div>
+    <div class="container"><div class="card"><h1>🎓 Request Certificate/Transcript</h1><p>Official transcripts, recommendation letters, certificates. UGX 20,000 per copy.</p>
+      <form method="POST" action="/certificates/request">
+        <input name="student_name" placeholder="Student Full Name" required>
+        <input name="admission_no" placeholder="Admission Number" required>
+        <select name="doc_type" required><option value="">Document Type</option><option>Academic Transcript</option><option>Certificate of Completion</option><option>Recommendation Letter</option><option>Transfer Letter</option></select>
+        <input name="phone" placeholder="Phone: 0772123456" required>
+        <textarea name="notes" placeholder="Special instructions" rows="3"></textarea>
+        <button type="submit" class="btn">Request - UGX 20,000</button>
+      </form>
+    </div></div>
+  </body></html>`);
+});
+
+app.post('/certificates/request', async (req, res) => {
+  const { student_name, admission_no, doc_type, phone, notes } = req.body;
+  const amount = 20000;
+  await pool.query('INSERT INTO momo_transactions (transaction_id, amount, phone, status, type, provider) VALUES ($1, $2, $3, $4, $5, $6)',
+    ['CERT' + Date.now(), amount, phone, 'pending_manual', 'certificate', 'MANUAL']);
+  await sendSMS(phone, `SSE Wasswa: Certificate request for ${student_name} received. Pay UGX ${amount} to 077XXXXXXX. Processing starts after payment.`);
+  if (process.env.ADMIN_PHONE) await sendSMS(process.env.ADMIN_PHONE, `New cert request: ${student_name}, ${doc_type}. Phone: ${phone}`);
+  res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px;text-align:center"><h2>Request Logged</h2><p>Pay UGX ${amount} to 077XXXXXXX</p><p>Send receipt to activate processing for ${student_name}</p><a href="/" style="background:#3498db;color:white;padding:10px 20px;text-decoration:none;border-radius:4px">Back Home</a></div>`);
+});
+
+// Update dashboard to show new modules
+app.get('/admin', requireLogin, (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Admin Dashboard</title><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#667eea">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:20px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;padding:20px;max-width:1400px;margin:0 auto}.card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);text-decoration:none;color:#333;transition:transform 0.2s}.card:hover{transform:translateY(-5px)}.card h3{margin:0 0 10px;color:#667eea}.logout{position:absolute;top:20px;right:20px;color:white;text-decoration:none}</style>
+  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js')}</script>
+  </head><body>
+    <div class="header"><h1>SSE Wasswa ERP</h1><p>Welcome, ${req.session.fullname}</p><a href="/logout" class="logout">Logout</a></div>
+    <div class="grid">
+      <a href="/admin/students" class="card"><h3>👥 Students</h3><p>Manage student records</p></a>
+      <a href="/admin/payments" class="card"><h3>💰 Payments</h3><p>Fee collection & Impact Fund</p></a>
+      <a href="/admin/mobile-money" class="card"><h3>📱 Mobile Money</h3><p>MTN/Airtel/M-Pesa</p></a>
+      <a href="/admin/papers" class="card"><h3>📄 Past Papers</h3><p>Sell papers - NEW INCOME</p></a>
+      <a href="/admin/attendance" class="card"><h3>📅 Attendance</h3><p>Daily registers</p></a>
+      <a href="/admin/library" class="card"><h3>📖 Library</h3><p>Book management</p></a>
+      <a href="/admin/donors" class="card"><h3>🎁 Donors</h3><p>Donation tracking</p></a>
+      <a href="/admin/assets" class="card"><h3>🏢 Assets</h3><p>School property</p></a>
+      <a href="/admin/staff" class="card"><h3>👥 Staff & Payroll</h3><p>HR & salaries</p></a>
+      <a href="/admin/users" class="card"><h3>👤 Users</h3><p>System access</p></a>
+      <a href="/admin/tasks" class="card"><h3>✅ Tasks</h3><p>Assignments</p></a>
+      <a href="/admin/logs" class="card"><h3>📋 Audit Logs</h3><p>System activity</p></a>
+    </div>
+  </body></html>`);
+});
+
+// Update public nav to include papers
+// Find all instances of <div class="nav"> and add <a href="/papers">Past Papers</a><a href="/certificates">Certificates</a>
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', db: 'connected', time: new Date().toISOString() });
 });
