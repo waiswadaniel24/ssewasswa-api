@@ -1150,10 +1150,15 @@ app.get('/parent/report/:student_id', requireParentLogin, async (req, res) => {
 });
 
 // AUTO-WITHDRAW - Fridays 5pm EAT
-cron.schedule('0 17 * 5', async () => {
-  const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
-  if (balance.rows[0]?.balance > 10000) {
-    console.log(`Auto-withdraw UGX ${balance.rows[0].balance} triggered for Friday 5pm`);
+cron.schedule('0 17 * * 5', async () => {
+  try {
+    const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
+    if (balance.rows[0]?.balance > 10000) {
+      console.log(`Auto-withdraw UGX ${balance.rows[0].balance} triggered for Friday 5pm`);
+      // Add your MTN MoMo API call here later
+    }
+  } catch (err) {
+    console.error('Auto-withdraw error:', err.message);
   }
 }, { timezone: "Africa/Kampala" });
 
