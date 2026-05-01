@@ -62,7 +62,10 @@ async function initDB() {
       const hash = await bcrypt.hash('admin123', 10);
       await client.query('INSERT INTO users (username, password_hash, role, fullname) VALUES ($1, $2, $3, $4)', ['admin', hash, 'admin', 'System Admin']);
     }
-
+    async function getWhatsApp() {
+  const result = await pool.query('SELECT whatsapp_number FROM settings WHERE id = 1').catch(() => {});
+  return result?.rows[0]?.whatsapp_number || '256789739737';
+}
     const subjects = [['Mathematics', 'P.1'], ['English', 'P.1'], ['Science', 'P.1'], ['Social Studies', 'P.1'], ['Mathematics', 'S.1'], ['English', 'S.1'], ['Physics', 'S.1'], ['Chemistry', 'S.1'], ['Biology', 'S.1'], ['Mathematics', 'University'], ['Computer Science', 'University'], ['Economics', 'University']];
     for (let [name, cls] of subjects) {
       await client.query('INSERT INTO subjects (name, class) VALUES ($1::varchar, $2::varchar) ON CONFLICT DO NOTHING', [name, cls]);
@@ -214,10 +217,18 @@ app.get('/parent/report/:studentId/:term', async (req, res) => {
 
 // === PUBLIC WEBSITE WITH ADSENSE ===
 app.get('/', async (req, res) => {
+  const s = await getSettings();
   const fund = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
   const donors = await pool.query('SELECT COUNT(*) as count FROM donors');
   const papers = await pool.query('SELECT COUNT(*) as count FROM past_papers WHERE active = true');
   await pool.query('INSERT INTO page_views (page, ip_address) VALUES ($1, $2)', ['/', req.ip]).catch(() => {});
+
+  res.send(`<!DOCTYPE html><html lang="en"><head>
+  <title>${s.site_name} - Quality Education ${s.location}</title>
+ ...rest same...
+  <div class="hero"><h1>${s.hero_title}</h1><p>${s.hero_subtitle}</p>...
+ ...use ${s.whatsapp_number} for WhatsApp link...
+  <a href="https://wa.me/${s.whatsapp_number}?text=Hello%20SSE%20Wasswa" class="whatsapp" target="_blank">💬</a>
 
   res.send(`<!DOCTYPE html><html lang="en"><head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -451,24 +462,76 @@ app.post('/certificates/request', async (req, res) => {
 });
 
 // === ADMIN DASHBOARD ===
-// === ADMIN SETTINGS ===
+// === ADMIN SETTINGS - EDIT EVERYTHING ===
 app.get('/admin/settings', requireAdmin, async (req, res) => {
-  const settings = await pool.query('SELECT * FROM settings WHERE id = 1');
-  const whatsapp = settings.rows[0]?.whatsapp_number || '256789739737';
+  await pool.query(`CREATE TABLE IF NOT EXISTS settings (
+    id INT PRIMARY KEY DEFAULT 1,
+    site_name TEXT DEFAULT 'SSE Wasswa Foundation',
+    hero_title TEXT DEFAULT 'SSE Wasswa Foundation',
+    hero_subtitle TEXT DEFAULT 'Empowering Education Through Technology & Community',
+    whatsapp_number TEXT DEFAULT '256789739737',
+    contact_email TEXT DEFAULT 'info@ssewasswa.org',
+    momo_number TEXT DEFAULT '256789739737',
+    momo_names TEXT DEFAULT 'SSE WASSWA FOUNDATION',
+    paper_price INT DEFAULT 5000,
+    location TEXT DEFAULT 'Kampala, Uganda'
+  )`);
 
-  res.send(`<!DOCTYPE html><html><head><title>Settings</title>
-  <style>body{font-family:Arial;padding:20px}.card{background:white;padding:20px;border-radius:8px;max-width:500px;margin:0 auto}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:4px}.btn{background:#27ae60;color:white;padding:12px 20px;border:none;border-radius:4px;width:100%}</style>
+  await pool.query(`INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+  const s = await pool.query('SELECT * FROM settings WHERE id = 1');
+  const data = s.rows[0];
+
+  res.send(`<!DOCTYPE html><html><head><title>Site Settings</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;padding:20px;background:#f4f6f9}h2{color:#2c3e50}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px;max-width:600px;margin:20px auto}label{font-weight:bold;display:block;margin-top:15px}input,textarea{width:100%;padding:12px;margin:5px 0;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}textarea{height:80px}.btn{background:#27ae60;color:white;padding:15px;border:none;border-radius:4px;width:100%;font-size:16px;margin-top:20px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;margin-right:20px;text-decoration:none}</style>
   </head><body>
+    <div class="nav"><a href="/admin">← Dashboard</a></div>
     <div class="card">
-      <h2>Site Settings</h2>
+      <h2>⚙️ Edit Site Content</h2>
+      ${req.query.updated? '<p style="color:green">✓ Settings updated successfully</p>' : ''}
       <form method="POST" action="/admin/settings/update">
+        <label>Site Name</label>
+        <input name="site_name" value="${data.site_name}" required>
+
+        <label>Hero Title - Homepage</label>
+        <input name="hero_title" value="${data.hero_title}" required>
+
+        <label>Hero Subtitle</label>
+        <textarea name="hero_subtitle">${data.hero_subtitle}</textarea>
+
         <label>WhatsApp Number (256...)</label>
-        <input name="whatsapp" value="${whatsapp}" placeholder="256789739737" required>
-        <button type="submit" class="btn">Update Settings</button>
+        <input name="whatsapp_number" value="${data.whatsapp_number}" required>
+
+        <label>MoMo Number</label>
+        <input name="momo_number" value="${data.momo_number}" required>
+
+        <label>MoMo Names</label>
+        <input name="momo_names" value="${data.momo_names}" required>
+
+        <label>Default Paper Price UGX</label>
+        <input name="paper_price" type="number" value="${data.paper_price}" required>
+
+        <label>Contact Email</label>
+        <input name="contact_email" type="email" value="${data.contact_email}" required>
+
+        <label>Location</label>
+        <input name="location" value="${data.location}" required>
+
+        <button type="submit" class="btn">Save All Settings</button>
       </form>
-      <br><a href="/admin">Back to Dashboard</a>
     </div>
   </body></html>`);
+});
+
+app.post('/admin/settings/update', requireAdmin, async (req, res) => {
+  const { site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location } = req.body;
+  await pool.query(`UPDATE settings SET
+    site_name=$1, hero_title=$2, hero_subtitle=$3, whatsapp_number=$4,
+    momo_number=$5, momo_names=$6, paper_price=$7, contact_email=$8, location=$9
+    WHERE id=1`,
+    [site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location]
+  );
+  res.redirect('/admin/settings?updated=1');
 });
 
 app.post('/admin/settings/update', requireAdmin, async (req, res) => {
