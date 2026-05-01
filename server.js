@@ -1101,6 +1101,20 @@ cron.schedule('0 17 * * 5', async () => {
 
 // Feature flags - already set by migration SQL
 // ==================== END 100/50 ====================
+// TEMP CREATE SUPERADMIN - DELETE AFTER USE
+app.get('/create-superadmin-ssewasswa2026', async (req, res) => {
+  try {
+    const hash = await bcrypt.hash('Admin@2026', 10);
+    await pool.query(`
+      INSERT INTO users (username, password_hash, role, school_id, full_name)
+      VALUES ('superadmin', $1, 'admin', 1, 'God Mode Admin')
+      ON CONFLICT (username) DO UPDATE SET password_hash = $1
+    `, [hash]);
+    res.send('<h1>✅ Superadmin Created</h1><p>Username: superadmin<br>Password: Admin@2026</p><p>DELETE THIS ROUTE NOW</p>');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
