@@ -1201,6 +1201,31 @@ app.post('/login', async (req, res) => {
 app.get('/admin/branding', requireLogin, requireRole(['admin']), (req, res) => {
   res.send('<h1>Branding Console</h1><p>100/50 Upgrade Active</p><p>Brand Name, Color, Logo fields go here</p>');
 });
+app.post('/login', async (req, res) => {
+  try {
+    console.log('Login attempt:', req.body.username);
+    const { username, password } = req.body;
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', );
+    if (result.rows.length === 0) {
+      return res.status(401).send('Invalid credentials');
+    }
+    const user = result.rows[0];
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.status(401).send('Invalid credentials');
+    }
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.role = user.role;
+    if (user.role === 'admin' && user.username === 'superadmin') {
+      return res.redirect('/admin/branding');
+    }
+    res.send('Login successful');
+  } catch (err) {
+    console.error('LOGIN CRASH:', err.message);
+    res.status(500).send('Server error: ' + err.message);
+  }
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
