@@ -1162,13 +1162,17 @@ app.get('/login', (req, res) => {
   `);
 });
 
-// Process Login - POST
+// Process Login - POST - ONLY ONE COPY
 app.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    const result = await pool.query('SELECT * FROM users WHERE username = $1', );
+    console.log('Login attempt:', username);
+
+    // FIXED: Added [username] here
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
 
     if (result.rows.length === 0) {
+      console.log('No user found');
       return res.status(401).send('Invalid credentials');
     }
 
@@ -1176,13 +1180,15 @@ app.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
 
     if (!match) {
+      console.log('Password mismatch');
       return res.status(401).send('Invalid credentials');
     }
 
-    // Set session - matches requireLogin middleware
+    // Set session
     req.session.userId = user.id;
     req.session.username = user.username;
     req.session.role = user.role;
+    console.log('Session set for:', user.username);
 
     // Redirect God Mode to branding
     if (user.role === 'admin' && user.username === 'superadmin') {
@@ -1190,41 +1196,15 @@ app.post('/login', async (req, res) => {
     }
 
     res.send('Login successful');
-
-  } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).send('Server error');
-  }
-});
-
-// Branding Console Route - Add this too
-app.get('/admin/branding', requireLogin, requireRole(['admin']), (req, res) => {
-  res.send('<h1>Branding Console</h1><p>100/50 Upgrade Active</p><p>Brand Name, Color, Logo fields go here</p>');
-});
-app.post('/login', async (req, res) => {
-  try {
-    console.log('Login attempt:', req.body.username);
-    const { username, password } = req.body;
-    const result = await pool.query('SELECT * FROM users WHERE username = $1', );
-    if (result.rows.length === 0) {
-      return res.status(401).send('Invalid credentials');
-    }
-    const user = result.rows[0];
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      return res.status(401).send('Invalid credentials');
-    }
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.role = user.role;
-    if (user.role === 'admin' && user.username === 'superadmin') {
-      return res.redirect('/admin/branding');
-    }
-    res.send('Login successful');
   } catch (err) {
     console.error('LOGIN CRASH:', err.message);
     res.status(500).send('Server error: ' + err.message);
   }
+});
+
+// Branding Console Route
+app.get('/admin/branding', requireLogin, requireRole(['admin']), (req, res) => {
+  res.send('<h1>Branding Console</h1><p>100/50 Upgrade Active</p><p>Brand Name, Color, Logo fields go here</p>');
 });
 // TEMP - DELETE AFTER USE
 app.get('/create-god-mode-temp', async (req, res) => {
