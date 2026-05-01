@@ -217,29 +217,22 @@ app.get('/parent/report/:studentId/:term', async (req, res) => {
 
 // === PUBLIC WEBSITE WITH ADSENSE ===
 app.get('/', async (req, res) => {
-  const s = await getSettings();
   const fund = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
   const donors = await pool.query('SELECT COUNT(*) as count FROM donors');
   const papers = await pool.query('SELECT COUNT(*) as count FROM past_papers WHERE active = true');
   await pool.query('INSERT INTO page_views (page, ip_address) VALUES ($1, $2)', ['/', req.ip]).catch(() => {});
 
   res.send(`<!DOCTYPE html><html lang="en"><head>
-  <title>${s.site_name} - Quality Education ${s.location}</title>
- ...rest same...
-  <div class="hero"><h1>${s.hero_title}</h1><p>${s.hero_subtitle}</p>...
- ...use ${s.whatsapp_number} for WhatsApp link...
-  <a href="https://wa.me/${s.whatsapp_number}?text=Hello%20SSE%20Wasswa" class="whatsapp" target="_blank">💬</a>
-
-  res.send(`<!DOCTYPE html><html lang="en"><head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SSE Wasswa Foundation - Quality Education Kampala</title>
-<meta name="google-site-verification" content="YOUR_SEARCH_CONSOLE_CODE" />
-<meta name="google-adsense-account" content="ca-pub-1814429636128167">
-<meta name="description" content="SSE Wasswa Foundation: Nursery to University education in Kampala. Digital results, mobile payments, Impact Fund community projects. Enroll today.">
+  <meta name="google-site-verification" content="PASTE_YOUR_CODE_HERE" />
+  <meta name="google-adsense-account" content="ca-pub-1814429636128167">
+  <meta name="description" content="SSE Wasswa Foundation: Nursery to University education in Kampala. Digital results, mobile payments, Impact Fund community projects. Enroll today.">
+  <meta name="keywords" content="schools kampala, nursery kampala, secondary school uganda, past papers uganda, UNEB papers">
   <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#667eea">
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1814429636128167" crossorigin="anonymous"></script>
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-DPSJBBVEE2"></script>
-  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-DPSJBBVEE2');</script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag("js",new Date());gtag("config","G-DPSJBBVEE2");</script>
   <style>body{font-family:Arial;margin:0;background:#f4f6f9}.hero{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:80px 20px;text-align:center}.hero h1{font-size:48px;margin:0}.hero p{font-size:20px}.container{max-width:1200px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}.btn{background:#27ae60;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;display:inline-block;margin:10px;font-size:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}.nav{background:#2c3e50;padding:15px;text-align:center;position:sticky;top:0;z-index:100}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}.stats{display:flex;justify-content:space-around;text-align:center;background:#ecf0f1;padding:30px;border-radius:8px;margin:20px 0}.stats div h3{font-size:36px;margin:0;color:#667eea}.ad-container{margin:20px 0;text-align:center}.whatsapp{position:fixed;bottom:20px;right:20px;background:#25D366;color:white;width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;text-decoration:none;box-shadow:0 4px 8px rgba(0,0,0,0.3);z-index:1000}</style>
   </head><body>
     ${publicNav}
