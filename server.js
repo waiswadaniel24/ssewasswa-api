@@ -1134,7 +1134,12 @@ cron.schedule('0 17 * * 5', async () => {
     console.error('Auto-withdraw error:', err.message);
   }
 }, { timezone: "Africa/Kampala" });
-
+// Keep Render awake - pings self every 14 mins
+if (process.env.NODE_ENV === 'production') {
+  setInterval(() => {
+    fetch('https://ssewasswa-api.onrender.com/health').catch(() => {});
+  }, 14 * 60 * 1000);
+}
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   setTimeout(() => initDB().catch(e => console.log('DB init:', e.message)), 2000);
