@@ -226,7 +226,35 @@ async function initDB() {
     console.error('DB init error:', err.message);
   }
 }
+function requireRole(roles) {
+  return (req, res, next) => {
+    if (!req.session.role || !roles.includes(req.session.role)) {
+      return res.status(403).send('Forbidden');
+    }
+    next();
+  };
+}
+function requireLogin(req, res, next) {
+  if (!req.session.userId) {
+    return res.redirect('/login');
+  }
+  next();
+}
+req.session.userId = user.id;
+req.session.username = user.username;
+req.session.role = user.role;
 
+req.session.save((err) => {
+  if (err) {
+    console.error('Session save error:', err);
+    return res.status(500).send('Session error');
+  }
+  
+  if (user.role === 'admin' && user.username === 'superadmin') {
+    return res.redirect('/admin/branding');
+  }
+  res.send('Login successful');
+});
 // ROUTES - NO DUPLICATES
 
 app.get('/health', (req, res) => {
