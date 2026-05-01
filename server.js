@@ -1020,7 +1020,22 @@ if (process.env.NODE_ENV === 'production') {
     fetch('https://ssewasswa-api.onrender.com/health').catch(() => {});
   }, 14 * 60 * 1000);
 }
+// Add to server.js before app.listen()
+app.get('/sitemap.xml', (req, res) => {
+  res.header('Content-Type', 'application/xml');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+  <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://ssewasswa-api.onrender.com/</loc></url>
+    <url><loc>https://ssewasswa-api.onrender.com/papers</loc></url>
+    <url><loc>https://ssewasswa-api.onrender.com/about</loc></url>
+    <url><loc>https://ssewasswa-api.onrender.com/donate</loc></url>
+  </urlset>`);
+});
 
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain');
+  res.send(`User-agent: *\nAllow: /\nSitemap: https://ssewasswa-api.onrender.com/sitemap.xml`);
+});
 initDB().then(() => {
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }).catch(err => {
