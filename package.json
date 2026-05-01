@@ -1,7 +1,7 @@
 {
   "name": "ssewasswa-api",
   "version": "1.0.0",
-  "description": "SSE Wasswa School ERP",
+  "description": "SSE Wasswa Foundation ERP - Full 100/50 Marketing Outfit",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
