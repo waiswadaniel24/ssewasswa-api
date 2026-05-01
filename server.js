@@ -325,6 +325,13 @@ app.get('/admin', requireLogin, async (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Admin Dashboard</title>
     <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 16px;text-decoration:none;border-radius:4px;display:inline-block;margin:4px 4px 0 0;font-size:14px}.portal{background:#9b59b6}.donor{background:#e67e22}.staff{background:#16a085}.asset{background:#8e44ad}.library{background:#34495e}.attendance{background:#e74c3c}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.stat{background:#ecf0f1;padding:12px;border-radius:4px;text-align:center}.section-title{margin:15px 0 10px 0;color:#34495e;border-bottom:2px solid #3498db;padding-bottom:5px}.school-type-stats{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}.type-badge{background:#34495e;color:white;padding:6px 12px;border-radius:20px;font-size:12px}</style>
     </head><body>
+    <link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#667eea">
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js');
+  }
+</script>
       <div class="card"><h1>Admin Dashboard - Multi-Institution ERP</h1><p>Logged in as: ${user.username} (${user.role})</p></div>
       <div class="card"><h3>School Overview</h3>
         <div class="school-type-stats">
@@ -359,6 +366,7 @@ app.get('/admin', requireLogin, async (req, res) => {
         <a href="/admin/users/add" class="btn">Create User</a>
         <h3 class="section-title">⚙️ System</h3>
         <a href="/admin/fields" class="btn portal">Custom Student Fields</a>
+        <a href="/admin/mobile-money" class="btn">📱 Mobile Money</a>
         ${user.username === 'superadmin'? '<a href="/admin/branding" class="btn" style="background:#e74c3c">Branding Console</a>' : ''}
         <h3 class="section-title">👨‍👩‍👧 Parents</h3>
         <a href="/parent/login" class="btn" style="background:#16a085">Parent Portal</a>
@@ -596,6 +604,13 @@ app.get('/parent/login', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Parent Login</title><meta name="viewport" content="width=device-width, initial-scale=1">
   <style>body{font-family:Arial;background:#f0f2f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.login-box{background:white;padding:40px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);width:100%;max-width:400px}h2{text-align:center;color:#1a73e8;margin-bottom:30px}input{width:100%;padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:4px;cursor:pointer;font-size:16px}button:hover{background:#1557b0}.error{color:#d93025;text-align:center;margin-top:10px}</style>
   </head><body><div class="login-box"><h2>Parent Portal Login</h2>
+  <link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#667eea">
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js');
+  }
+</script>
   <form method="POST" action="/parent/login">
     <input type="text" name="parent_phone" placeholder="Your Phone Number" required>
     <input type="text" name="student_name" placeholder="Student's Full Name" required>
@@ -1140,6 +1155,132 @@ if (process.env.NODE_ENV === 'production') {
     fetch('https://ssewasswa-api.onrender.com/health').catch(() => {});
   }, 14 * 60 * 1000);
 }
+// M-PESA + AIRTEL MONEY + MTN MOMO - All Mobile Money
+app.get('/admin/mobile-money', requireLogin, requireRole(['admin']), async (req, res) => {
+  const transactions = await pool.query('SELECT * FROM momo_transactions ORDER BY created_at DESC LIMIT 100');
+  const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
+  res.send(`<!DOCTYPE html><html><head><title>Mobile Money</title>
+  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#16a085;color:white}.stat{background:#ecf0f1;padding:20px;border-radius:4px;text-align:center;font-size:24px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}select,input{padding:10px;margin:5px;width:100%;box-sizing:border-box}</style>
+  </head><body>
+    <div class="card"><h1>📱 Mobile Money - Impact Fund</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    <div class="card"><div class="stat"><strong>Impact Fund Balance</strong><br>UGX ${Number(balance.rows[0]?.balance || 0).toLocaleString()}</div></div>
+    <div class="card"><h3>Withdraw Funds</h3>
+      <form method="POST" action="/admin/mobile-money/withdraw">
+        <select name="provider" required><option value="">Select Provider</option><option value="MTN">MTN MoMo</option><option value="AIRTEL">Airtel Money</option><option value="MPESA">M-Pesa</option></select>
+        <input name="amount" type="number" placeholder="Amount to withdraw" max="${balance.rows[0]?.balance || 0}" required>
+        <input name="phone" placeholder="Phone: 0772123456" required>
+        <button type="submit" class="btn" style="background:#27ae60">Initiate Withdrawal</button>
+      </form>
+    </div>
+    <div class="card"><h3>Recent Transactions</h3><table><tr><th>Date</th><th>ID</th><th>Provider</th><th>Phone</th><th>Amount</th><th>Type</th><th>Status</th></tr>
+      ${transactions.rows.map(t => `<tr><td>${new Date(t.created_at).toLocaleString()}</td><td>${t.transaction_id}</td><td>${t.provider || 'MTN'}</td><td>${t.phone}</td><td>UGX ${Number(t.amount).toLocaleString()}</td><td>${t.type}</td><td>${t.status}</td></tr>`).join('')}
+    </table></div>
+  </body></html>`);
+});
+
+app.post('/admin/mobile-money/withdraw', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { amount, phone, provider } = req.body;
+    const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
+    if (Number(amount) > balance.rows[0].balance) return res.status(400).send('Insufficient balance');
+
+    const transaction_id = provider + Date.now();
+    await pool.query('INSERT INTO momo_transactions (transaction_id, amount, phone, status, type, provider) VALUES ($1, $2, $3, $4, $5, $6)',
+      [transaction_id, amount, phone, 'pending', 'withdrawal', provider]);
+    await pool.query('UPDATE admin_wallet SET balance = balance - $1 WHERE id = 1', [amount]);
+    await logAction(req.session.username, `${provider}_WITHDRAW`, { amount, phone, transaction_id });
+
+    // TODO: Integrate real M-Pesa/Airtel API here. For now it's logged as pending.
+    res.send(`${provider} withdrawal initiated: UGX ${Number(amount).toLocaleString()} to ${phone}. ID: ${transaction_id}. <a href="/admin/mobile-money">Back</a>`);
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+// Update momo_transactions table to add provider column
+// Run once in Render Shell: psql $DATABASE_URL -c "ALTER TABLE momo_transactions ADD COLUMN IF NOT EXISTS provider VARCHAR(20) DEFAULT 'MTN';"
+app.get('/parent/report/:studentId/:term', async (req, res) => {
+  if (!req.session.parentPhone || req.session.studentId!= req.params.studentId) return res.status(403).send('Access denied');
+
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.studentId]);
+  const s = student.rows[0];
+
+  const results = await pool.query(`SELECT er.marks, s.name as subject_name, s.max_marks
+    FROM exam_results er
+    JOIN subjects s ON er.subject_id = s.id
+    WHERE er.student_id = $1 AND er.term = $2 ORDER BY s.name`, [req.params.studentId, req.params.term]);
+
+  // Get class position
+  const position = await pool.query(`SELECT COUNT(*) + 1 as pos FROM (
+    SELECT student_id, AVG(marks) as avg_marks FROM exam_results er
+    JOIN subjects sub ON er.subject_id = sub.id
+    WHERE er.term = $1 AND sub.class = $2 AND er.year = $3
+    GROUP BY student_id HAVING AVG(marks) > (
+      SELECT AVG(marks) FROM exam_results er2
+      JOIN subjects sub2 ON er2.subject_id = sub2.id
+      WHERE er2.student_id = $4 AND er2.term = $1
+    )
+  ) as rankings`, [req.params.term, s.class, new Date().getFullYear(), req.params.studentId]);
+
+  const totalStudents = await pool.query('SELECT COUNT(*) as total FROM students WHERE class = $1', [s.class]);
+
+  const PDFDocument = require('pdfkit');
+  const doc = new PDFDocument({ margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=Report_${s.name}_${req.params.term}.pdf`);
+  doc.pipe(res);
+
+  // Header
+  doc.fontSize(20).text('MUHAMMAD VOCATIONAL SCHOOL', { align: 'center' });
+  doc.fontSize(14).text('STUDENT REPORT CARD', { align: 'center' });
+  doc.moveDown();
+
+  // Student info
+  doc.fontSize(12).text(`Name: ${s.name}`);
+  doc.text(`Class: ${s.class} (${s.school_type})`);
+  doc.text(`Term: ${req.params.term} ${new Date().getFullYear()}`);
+  doc.text(`Position: ${position.rows[0].pos} out of ${totalStudents.rows[0].total}`);
+  doc.moveDown();
+
+  // Results table
+  doc.text('SUBJECT RESULTS:', { underline: true });
+  doc.moveDown(0.5);
+  let total = 0, count = 0;
+  results.rows.forEach(r => {
+    const percentage = (r.marks / r.max_marks * 100).toFixed(1);
+    let grade = 'F9';
+    if (percentage >= 80) grade = 'D1';
+    else if (percentage >= 75) grade = 'D2';
+    else if (percentage >= 70) grade = 'C3';
+    else if (percentage >= 65) grade = 'C4';
+    else if (percentage >= 60) grade = 'C5';
+    else if (percentage >= 55) grade = 'C6';
+    else if (percentage >= 50) grade = 'P7';
+    else if (percentage >= 45) grade = 'P8';
+
+    doc.text(`${r.subject_name}: ${r.marks}/${r.max_marks} (${percentage}%) - Grade: ${grade}`);
+    total += Number(r.marks);
+    count++;
+  });
+
+  if (count > 0) {
+    const avg = (total/count).toFixed(2);
+    doc.moveDown();
+    doc.fontSize(14).text(`Average: ${avg}%`, { underline: true });
+
+    let division = 'Ungraded';
+    if (avg >= 75) division = 'Division 1';
+    else if (avg >= 65) division = 'Division 2';
+    else if (avg >= 50) division = 'Division 3';
+    else if (avg >= 30) division = 'Division 4';
+    else division = 'Division U';
+    doc.text(`Division: ${division}`);
+  }
+
+  doc.moveDown(2);
+  doc.text('Class Teacher: _________________', { align: 'left' });
+  doc.text('Head Teacher: _________________', { align: 'left' });
+  doc.text('Date: ' + new Date().toLocaleDateString(), { align: 'left' });
+
+  doc.end();
+});
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   setTimeout(() => initDB().catch(e => console.log('DB init:', e.message)), 2000);
