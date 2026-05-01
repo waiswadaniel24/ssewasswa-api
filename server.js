@@ -117,10 +117,8 @@ async function initDB() {
       );
       CREATE TABLE IF NOT EXISTS exam_results (
         id SERIAL PRIMARY KEY, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
-        subject_id INTEGER REFERENCES subjects(id) ON DELETE CASCADE,
         marks NUMERIC, term VARCHAR(20), year INTEGER, recorded_by VARCHAR(50),
-        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(student_id, subject_id, term, year)
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE IF NOT EXISTS staff (
         id SERIAL PRIMARY KEY, username VARCHAR(50) REFERENCES users(username) ON DELETE CASCADE,
@@ -128,12 +126,6 @@ async function initDB() {
         phone TEXT, email VARCHAR(100), hire_date DATE,
         monthly_salary INTEGER, bank_account VARCHAR(100), emergency_contact TEXT, active BOOLEAN DEFAULT true
       );
-      await pool.query(`ALTER TABLE exam_results ADD COLUMN IF NOT EXISTS subject_id INTEGER REFERENCES subjects(id) ON DELETE CASCADE`);
-await pool.query(`DO $$ BEGIN 
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_results_student_id_subject_id_term_year_key') THEN
-    ALTER TABLE exam_results ADD CONSTRAINT exam_results_student_id_subject_id_term_year_key UNIQUE(student_id, subject_id, term, year);
-  END IF;
-END $$;`);
       CREATE TABLE IF NOT EXISTS salary_payments (
         id SERIAL PRIMARY KEY, staff_id INTEGER REFERENCES staff(id) ON DELETE CASCADE,
         amount INTEGER NOT NULL, month VARCHAR(20), year INTEGER,
@@ -173,18 +165,26 @@ END $$;`);
       );
     `);
 
+    // FIX 1: Add subject_id to exam_results if missing
+    await pool.query(`ALTER TABLE exam_results ADD COLUMN IF NOT EXISTS subject_id INTEGER REFERENCES subjects(id) ON DELETE CASCADE`);
+    await pool.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_results_student_id_subject_id_term_year_key') THEN
+        ALTER TABLE exam_results ADD CONSTRAINT exam_results_student_id_subject_id_term_year_key UNIQUE(student_id, subject_id, term, year);
+      END IF;
+    END $$;`);
+
     const subjCount = await pool.query('SELECT COUNT(*) FROM subjects');
     if (subjCount.rows[0].count == 0) {
       const nurserySubjects = ['Number Work', 'Language Development', 'Social Development', 'Health Habits', 'Creative Arts'];
       const primarySubjects = ['Mathematics', 'English', 'Science', 'Social Studies', 'R.E'];
       for (const cls of NURSERY_CLASSES) {
         for (const subj of nurserySubjects) {
-          await pool.query('INSERT INTO subjects (name, class, department) VALUES ($1, $2, $3)', [subj, cls, 'Nursery']);
+          await pool.query('INSERT INTO subjects (name, class, department) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [subj, cls, 'Nursery']);
         }
       }
       for (const cls of PRIMARY_CLASSES) {
         for (const subj of primarySubjects) {
-          await pool.query('INSERT INTO subjects (name, class, department) VALUES ($1, $2, $3)', [subj, cls, 'Primary']);
+          await pool.query('INSERT INTO subjects (name, class, department) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [subj, cls, 'Primary']);
         }
       }
     }
@@ -261,6 +261,7 @@ app.get('/admin', requireLogin, async (req, res) => {
           <div class="stat"><strong>Monthly Payroll</strong><br>UGX ${Number(s.total_payroll || 0).toLocaleString()}</div>
           <div class="stat"><strong>Impact Fund</strong><br>UGX ${Number(i.total || 0).toLocaleString()}</div>
         </div>
+      </div>
       <div class="card">
         <h3 class="section-title">📚 Academic Portals</h3>
         <a href="/admin/marksheets" class="btn portal">Marksheets</a>
@@ -277,31 +278,11 @@ app.get('/admin', requireLogin, async (req, res) => {
         <h3 class="section-title">⚙️ System</h3>
         <a href="/admin/fields" class="btn portal">Custom Student Fields</a>
         ${user.username === 'superadmin'? '<a href="/admin/branding" class="btn" style="background:#e74c3c">Branding Console</a>' : ''}
+        <h3 class="section-title">👨‍👩‍👧 Parents</h3>
+        <a href="/parent/login" class="btn" style="background:#16a085">Parent Portal</a>
       </div>
       <div class="card"><a href="/admin/logout" class="btn" style="background:#e74c3c">Logout</a></div>
     </body></html>`);
-});
-
-app.get('/admin/branding', requireLogin, requireRole(['admin']), async (req, res) => {
-  if (req.session.username!== 'superadmin') return res.status(403).send('God Mode only');
-  const config = await pool.query('SELECT * FROM branding_config WHERE school_id = 1');
-  const brand = config.rows[0] || {};
-  res.send(`<!DOCTYPE html><html><head><title>Branding Console</title>
-  <style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
-  </head><body><div class="card"><h1>Branding Console</h1><p>100/50 Upgrade Active</p>
-    <form method="POST" action="/admin/branding">
-      <label>Brand Name: <input name="brand_name" value="${brand.brand_name || 'Ssewasswa School'}"></label>
-      <label>Primary Color: <input name="primary_color" type="color" value="${brand.primary_color || '#667eea'}"></label>
-      <button>Save Brand</button>
-    </form><a href="/admin">← Dashboard</a></div></body></html>`);
-});
-
-app.post('/admin/branding', requireLogin, requireRole(['admin']), async (req, res) => {
-  if (req.session.username!== 'superadmin') return res.status(403).send('God Mode only');
-  const { brand_name, primary_color } = req.body;
-  await pool.query(`INSERT INTO branding_config (school_id, brand_name, primary_color) VALUES (1,$1,$2)
-    ON CONFLICT (school_id) DO UPDATE SET brand_name=$1, primary_color=$2`, [brand_name, primary_color]);
-  res.redirect('/admin/branding?success=1');
 });
 
 app.get('/admin/students', requireLogin, requireRole(['admin','bursar']), async (req, res) => {
@@ -481,7 +462,7 @@ app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'cla
           <br><button type="submit" class="btn btn-green">Save All Marks</button>
         </form>
       </div>
-         <div class="card">
+      <div class="card">
         <h3>Upload Excel</h3>
         <form method="POST" action="/admin/marksheets/${className}/upload" enctype="multipart/form-data">
           <input type="hidden" name="term" value="${term}">
@@ -493,16 +474,16 @@ app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'cla
     </body></html>`);
   } catch (err) {
     console.error('Marksheets error:', err);
-    res.status(500).send('Error: ' + err.message);
+       res.status(500).send('Error: ' + err.message);
   }
 });
 
 app.post('/admin/marksheets/:className/save-online', requireLogin, requireTask('marksheets'), async (req, res) => {
   try {
     const { className } = req.params;
-    const { term, year, ...marks } = req.body;
+    const { term, year,...marks } = req.body;
     for (const key in marks) {
-      if (key.startsWith('marks_') && marks[key] !== '') {
+      if (key.startsWith('marks_') && marks[key]!== '') {
         const [, student_id, subject_id] = key.split('_');
         await pool.query(`INSERT INTO exam_results (student_id, subject_id, marks, term, year, recorded_by)
           VALUES ($1, $2, $3, $4, $5, $6)
@@ -527,7 +508,7 @@ app.get('/admin/marksheets/:className/download-template', requireLogin, requireT
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(`${className} ${term} ${year}`);
-  const headers = ['student_id', 'student_name', ...subjects.rows.map(s => `${s.name} (/${s.max_marks})`)];
+  const headers = ['student_id', 'student_name',...subjects.rows.map(s => `${s.name} (/${s.max_marks})`)];
   sheet.addRow(headers);
   sheet.getRow(1).font = { bold: true };
 
@@ -559,7 +540,7 @@ app.post('/admin/marksheets/:className/upload', requireLogin, requireTask('marks
     const headers = sheet.getRow(1).values;
     const subjectCols = headers.slice(3).map(h => {
       const match = h.match(/(.+)\s\/(\d+)/);
-      return match ? { name: match[1].trim(), max: parseInt(match[2]) } : null;
+      return match? { name: match[1].trim(), max: parseInt(match[2]) } : null;
     }).filter(Boolean);
 
     const subjects = await pool.query('SELECT id, name FROM subjects WHERE class = $1', [req.params.className]);
@@ -572,7 +553,7 @@ app.post('/admin/marksheets/:className/upload', requireLogin, requireTask('marks
       for (let j = 0; j < subjectCols.length; j++) {
         const mark = row[j + 3];
         const subject_id = subjMap[subjectCols[j].name];
-        if (mark !== null && mark !== '' && subject_id) {
+        if (mark!== null && mark!== '' && subject_id) {
           await pool.query(`INSERT INTO exam_results (student_id, subject_id, marks, term, year, recorded_by)
             VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (student_id, subject_id, term, year)
@@ -725,6 +706,66 @@ app.post('/admin/staff/add', requireLogin, requireRole(['admin']), async (req, r
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
+app.get('/admin/staff/payroll', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
+  const { month = new Date().toLocaleString('default', { month: 'long' }), year = new Date().getFullYear() } = req.query;
+  const staff = await pool.query(`SELECT s.*, COALESCE(SUM(sp.amount), 0) as paid_this_month
+    FROM staff s LEFT JOIN salary_payments sp ON s.id = sp.staff_id AND sp.month = $1 AND sp.year = $2
+    WHERE s.active = true GROUP BY s.id ORDER BY s.department, s.full_name`, [month, year]);
+  res.send(`<!DOCTYPE html><html><head><title>Staff Payroll</title>
+  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}.paid{color:#27ae60;font-weight:bold}.unpaid{color:#e74c3c;font-weight:bold}</style>
+  </head><body>
+    <div class="card"><h1>💰 Staff Payroll - ${month} ${year}</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    <div class="card">
+      <form method="GET" style="margin-bottom:15px">
+        <select name="month">${['January','February','March','April','May','June','July','August','September','October','November','December'].map(m => `<option value="${m}" ${month===m?'selected':''}>${m}</option>`).join('')}</select>
+        <input name="year" type="number" value="${year}" style="width:100px">
+        <button type="submit" class="btn">Filter</button>
+      </form>
+      <table><tr><th>Name</th><th>Position</th><th>Department</th><th>Monthly Salary</th><th>Paid</th><th>Balance</th><th>Action</th></tr>
+      ${staff.rows.map(s => {
+        const balance = s.monthly_salary - s.paid_this_month;
+        return `<tr>
+          <td><strong>${s.full_name}</strong><br><small>${s.username}</small></td>
+          <td>${s.position}</td>
+          <td>${s.department}</td>
+          <td>UGX ${Number(s.monthly_salary).toLocaleString()}</td>
+          <td class="${s.paid_this_month >= s.monthly_salary? 'paid' : ''}">UGX ${Number(s.paid_this_month).toLocaleString()}</td>
+          <td class="${balance > 0? 'unpaid' : 'paid'}">UGX ${Number(balance).toLocaleString()}</td>
+          <td>${balance > 0? `<a href="/admin/staff/pay/${s.id}?month=${month}&year=${year}" class="btn">Pay Salary</a>` : 'Paid'}</td>
+        </tr>`;
+      }).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
+  const { month, year } = req.query;
+  const staff = await pool.query('SELECT * FROM staff WHERE id = $1', [req.params.id]);
+  const s = staff.rows[0];
+  const paid = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM salary_payments WHERE staff_id = $1 AND month = $2 AND year = $3', [s.id, month, year]);
+  const balance = s.monthly_salary - paid.rows[0].total;
+  res.send(`<!DOCTYPE html><html><head><title>Pay Salary</title>
+  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Pay ${s.full_name}</h2><p>Month: ${month} ${year}<br>Salary: UGX ${Number(s.monthly_salary).toLocaleString()}<br>Already Paid: UGX ${Number(paid.rows[0].total).toLocaleString()}<br>Balance: UGX ${Number(balance).toLocaleString()}</p>
+  <form method="POST" action="/admin/staff/pay/${s.id}">
+    <input type="hidden" name="month" value="${month}">
+    <input type="hidden" name="year" value="${year}">
+    <input name="amount" type="number" value="${balance}" max="${balance}" required>
+    <select name="method" required><option value="Cash">Cash</option><option value="Bank">Bank Transfer</option><option value="Mobile Money">Mobile Money</option></select>
+    <input name="reference" placeholder="Reference/Receipt No">
+    <button type="submit">Record Payment</button>
+  </form><a href="/admin/staff/payroll?month=${month}&year=${year}">Back</a></div></body></html>`);
+});
+
+app.post('/admin/staff/pay/:id', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
+  const { amount, method, reference, month, year } = req.body;
+  await pool.query('INSERT INTO salary_payments (staff_id, amount, month, year, method, reference, paid_by) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [req.params.id, amount, month, year, method, reference, req.session.username]);
+  await logAction(req.session.username, 'SALARY_PAID', { staff_id: req.params.id, amount, month, year });
+  res.redirect(`/admin/staff/payroll?month=${month}&year=${year}`);
+});
+
 app.get('/admin/donors', requireLogin, requireTask('donors_portal'), async (req, res) => {
   const donors = await pool.query(`SELECT d.*, COALESCE(SUM(don.amount), 0) as total_donated
     FROM donors d LEFT JOIN donations don ON d.id = don.donor_id
@@ -817,28 +858,31 @@ app.post('/admin/assets/add', requireLogin, requireRole(['admin']), async (req, 
   res.redirect('/admin/assets');
 });
 
+// FIX 2: Custom Fields - Fixed 502
 app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) => {
-  const fields = await pool.query('SELECT * FROM student_field_definitions WHERE active = true ORDER BY field_name');
-  res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
-  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px;border:none;cursor:pointer}.btn-green{background:#27ae60}.btn-red{background:#e74c3c}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.actions{display:flex;gap:5px}</style>
-  </head><body>
-    <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
-    <div class="card">
-      <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Options</th><th>Actions</th></tr>
-      ${fields.rows.map(f => `<tr>
-        <td>${f.field_name}</td>
-        <td>${f.field_type}</td>
-        <td>${f.required? 'Yes' : 'No'}</td>
-        <td>${f.field_options? JSON.parse(f.field_options).join(', ') : '-'}</td>
-        <td class="actions">
-          <form method="POST" action="/admin/fields/delete/${f.id}" style="display:inline" onsubmit="return confirm('Delete this field?')">
-            <button type="submit" class="btn btn-red">Delete</button>
-          </form>
-        </td>
-      </tr>`).join('')}
-      </table>
-    </div>
-  </body></html>`);
+  try {
+    const fields = await pool.query('SELECT * FROM student_field_definitions WHERE active = true ORDER BY field_name');
+    res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
+    <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px;border:none;cursor:pointer}.btn-green{background:#27ae60}.btn-red{background:#e74c3c}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.actions{display:flex;gap:5px}</style>
+    </head><body>
+      <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
+      <div class="card">
+        <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Options</th><th>Actions</th></tr>
+        ${fields.rows.map(f => `<tr>
+          <td>${f.field_name}</td>
+          <td>${f.field_type}</td>
+          <td>${f.required? 'Yes' : 'No'}</td>
+          <td>${f.field_options? JSON.parse(f.field_options).join(', ') : '-'}</td>
+          <td class="actions">
+            <form method="POST" action="/admin/fields/delete/${f.id}" style="display:inline" onsubmit="return confirm('Delete this field?')">
+              <button type="submit" class="btn btn-red">Delete</button>
+            </form>
+          </td>
+        </tr>`).join('')}
+        </table>
+      </div>
+    </body></html>`);
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
 app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) => {
@@ -860,11 +904,13 @@ app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) =>
 });
 
 app.post('/admin/fields/add', requireLogin, requireRole(['admin']), async (req, res) => {
-  const { field_name, field_type, field_options, required } = req.body;
-  const options = field_options? JSON.stringify(field_options.split(',').map(o => o.trim())) : null;
-  await pool.query('INSERT INTO student_field_definitions (field_name, field_type, field_options, required) VALUES ($1, $2, $3, $4)',
-    [field_name, field_type, options, required === 'true']);
-  res.redirect('/admin/fields');
+  try {
+    const { field_name, field_type, field_options, required } = req.body;
+    const options = field_options && field_options.trim()? JSON.stringify(field_options.split(',').map(o => o.trim())) : null;
+    await pool.query('INSERT INTO student_field_definitions (field_name, field_type, field_options, required) VALUES ($1, $2, $3, $4)',
+      [field_name, field_type, options, required === 'true']);
+    res.redirect('/admin/fields');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
 app.post('/admin/fields/delete/:id', requireLogin, requireRole(['admin']), async (req, res) => {
@@ -915,7 +961,7 @@ app.post('/admin/tasks/assign', requireLogin, requireRole(['admin']), async (req
 app.get('/admin/users/add', requireLogin, requireRole(['admin']), (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Create User</title>
   <style>body{font-family:Arial;max-width:900px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}.section{border:1px solid #ddd;padding:15px;border-radius:8px;margin:15px 0}</style>
-   </head><body><div class="card"><h2>Create New Staff Member</h2>
+  </head><body><div class="card"><h2>Create New Staff Member</h2>
   <form method="POST" action="/admin/users/add">
     <div class="section"><h3>Basic Information</h3>
       <input name="username" placeholder="Username for login" required>
@@ -969,72 +1015,145 @@ app.post('/admin/users/add', requireLogin, requireRole(['admin']), async (req, r
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
-app.get('/admin/staff/payroll', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
-  const { month = new Date().toLocaleString('default', { month: 'long' }), year = new Date().getFullYear() } = req.query;
-  const staff = await pool.query(`SELECT s.*, COALESCE(SUM(sp.amount), 0) as paid_this_month
-    FROM staff s LEFT JOIN salary_payments sp ON s.id = sp.staff_id AND sp.month = $1 AND sp.year = $2
-    WHERE s.active = true GROUP BY s.id ORDER BY s.department, s.full_name`, [month, year]);
-  res.send(`<!DOCTYPE html><html><head><title>Staff Payroll</title>
-  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}.paid{color:#27ae60;font-weight:bold}.unpaid{color:#e74c3c;font-weight:bold}</style>
+// PARENTS PORTAL
+app.get('/parent/login', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Parent Login</title><meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>body{font-family:system-ui;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{background:white;padding:2rem;border-radius:8px;box-shadow:0 4px 6px rgba(0,0,0,.1);width:100%;max-width:400px}h1{text-align:center;color:#1f2937;margin-bottom:1.5rem}input{width:100%;padding:.75rem;margin-bottom:1rem;border:1px solid #d1d5db;border-radius:4px;box-sizing:border-box}button{width:100%;padding:.75rem;background:#16a085;color:white;border:none;border-radius:4px;font-weight:600;cursor:pointer}button:hover{background:#138d75}</style>
+  </head><body><div class="box"><h1>Parent Portal</h1>
+    <form action="/parent/login" method="POST">
+      <input type="text" name="student_id" placeholder="Student ID" required>
+      <input type="text" name="parent_phone" placeholder="Parent Phone Number" required>
+      <button type="submit">View Child Records</button>
+    </form></div></body></html>`);
+});
+
+app.post('/parent/login', async (req, res) => {
+  try {
+    const { student_id, parent_phone } = req.body;
+    const student = await pool.query('SELECT * FROM students WHERE id = $1 AND parent_phone = $2', [student_id, parent_phone]);
+    if (student.rows.length === 0) return res.status(401).send('Invalid Student ID or Phone Number');
+    req.session.parentStudentId = student_id;
+    req.session.parentLoggedIn = true;
+    res.redirect('/parent/dashboard');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
+function requireParentLogin(req, res, next) {
+  if (!req.session.parentLoggedIn) return res.redirect('/parent/login');
+  next();
+}
+
+app.get('/parent/dashboard', requireParentLogin, async (req, res) => {
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.session.parentStudentId]);
+  const s = student.rows[0];
+  const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [s.id]);
+  const results = await pool.query(`SELECT er.marks, er.term, er.year, sub.name as subject_name, sub.max_marks
+    FROM exam_results er JOIN subjects sub ON er.subject_id = sub.id
+    WHERE er.student_id = $1 ORDER BY er.year DESC, er.term, sub.name`, [s.id]);
+
+  const totalPaid = payments.rows.reduce((sum, p) => sum + Number(p.amount), 0);
+
+  res.send(`<!DOCTYPE html><html><head><title>Parent Portal - ${s.name}</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}.btn{background:#16a085;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px}.stat{background:#ecf0f1;padding:15px;border-radius:4px;text-align:center}table{width:100%;border-collapse:collapse;margin-top:15px}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.balance-owe{color:#e74c3c;font-weight:bold}.balance-paid{color:#27ae60;font-weight:bold}</style>
   </head><body>
-    <div class="card"><h1>💰 Staff Payroll - ${month} ${year}</h1><a href="/admin" class="btn">← Dashboard</a></div>
-    <div class="card">
-      <form method="GET" style="margin-bottom:15px">
-        <select name="month">${['January','February','March','April','May','June','July','August','September','October','November','December'].map(m => `<option value="${m}" ${month===m?'selected':''}>${m}</option>`).join('')}</select>
-        <input name="year" type="number" value="${year}" style="width:100px">
-        <button type="submit" class="btn">Filter</button>
-      </form>
-      <table><tr><th>Name</th><th>Position</th><th>Department</th><th>Monthly Salary</th><th>Paid</th><th>Balance</th><th>Action</th></tr>
-      ${staff.rows.map(s => {
-        const balance = s.monthly_salary - s.paid_this_month;
-        return `<tr>
-          <td><strong>${s.full_name}</strong><br><small>${s.username}</small></td>
-          <td>${s.position}</td>
-          <td>${s.department}</td>
-          <td>UGX ${Number(s.monthly_salary).toLocaleString()}</td>
-          <td class="${s.paid_this_month >= s.monthly_salary? 'paid' : ''}">UGX ${Number(s.paid_this_month).toLocaleString()}</td>
-          <td class="${balance > 0? 'unpaid' : 'paid'}">UGX ${Number(balance).toLocaleString()}</td>
-          <td>${balance > 0? `<a href="/admin/staff/pay/${s.id}?month=${month}&year=${year}" class="btn">Pay Salary</a>` : 'Paid'}</td>
-        </tr>`;
-      }).join('')}
+    <div class="card"><h1>👨‍👩‍👧 Parent Portal</h1><h2>${s.name} - ${s.class}</h2><p>Term: ${s.term} ${s.year}</p></div>
+    <div class="card"><h3>Fee Summary</h3>
+      <div class="stats">
+        <div class="stat"><strong>Total Fees</strong><br>UGX ${Number(s.total_fees).toLocaleString()}</div>
+        <div class="stat"><strong>Total Paid</strong><br>UGX ${totalPaid.toLocaleString()}</div>
+        <div class="stat"><strong>Balance</strong><br><span class="${s.balance > 0? 'balance-owe' : 'balance-paid'}">UGX ${Number(s.balance).toLocaleString()}</span></div>
+      </div>
+      <a href="/parent/receipt/${s.id}" class="btn">📄 Download Fee Statement</a>
+    </div>
+    <div class="card"><h3>Payment History</h3>
+      <table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr>
+      ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method}</td><td>${p.reference || '-'}</td></tr>`).join('')}
       </table>
     </div>
+    <div class="card"><h3>Academic Results</h3>
+      <table><tr><th>Term</th><th>Year</th><th>Subject</th><th>Marks</th><th>Grade</th></tr>
+      ${results.rows.map(r => {
+        const pct = (r.marks / r.max_marks * 100).toFixed(1);
+        let grade = 'F9';
+        if (pct >= 80) grade = 'D1'; else if (pct >= 75) grade = 'D2'; else if (pct >= 70) grade = 'C3';
+        else if (pct >= 65) grade = 'C4'; else if (pct >= 60) grade = 'C5'; else if (pct >= 55) grade = 'C6';
+        else if (pct >= 50) grade = 'P7'; else if (pct >= 45) grade = 'P8';
+        return `<tr><td>${r.term}</td><td>${r.year}</td><td>${r.subject_name}</td><td>${r.marks}/${r.max_marks} (${pct}%)</td><td>${grade}</td></tr>`;
+      }).join('')}
+      </table>
+      <a href="/parent/report/${s.id}" class="btn">📊 Download Report Card</a>
+    </div>
+    <div class="card"><a href="/parent/logout" class="btn" style="background:#e74c3c">Logout</a></div>
   </body></html>`);
 });
 
-app.get('/admin/staff/pay/:id', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
-  const { month, year } = req.query;
-  const staff = await pool.query('SELECT * FROM staff WHERE id = $1', [req.params.id]);
-  const s = staff.rows[0];
-  const paid = await pool.query('SELECT COALESCE(SUM(amount), 0) as total FROM salary_payments WHERE staff_id = $1 AND month = $2 AND year = $3', [s.id, month, year]);
-  const balance = s.monthly_salary - paid.rows[0].total;
-  res.send(`<!DOCTYPE html><html><head><title>Pay Salary</title>
-  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px}.card{background:white;padding:30px;border-radius:8px}input,select,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
-  </head><body><div class="card"><h2>Pay ${s.full_name}</h2><p>Month: ${month} ${year}<br>Salary: UGX ${Number(s.monthly_salary).toLocaleString()}<br>Already Paid: UGX ${Number(paid.rows[0].total).toLocaleString()}<br>Balance: UGX ${Number(balance).toLocaleString()}</p>
-  <form method="POST" action="/admin/staff/pay/${s.id}">
-    <input type="hidden" name="month" value="${month}">
-    <input type="hidden" name="year" value="${year}">
-    <input name="amount" type="number" value="${balance}" max="${balance}" required>
-    <select name="method" required><option value="Cash">Cash</option><option value="Bank">Bank Transfer</option><option value="Mobile Money">Mobile Money</option></select>
-    <input name="reference" placeholder="Reference/Receipt No">
-    <button type="submit">Record Payment</button>
-  </form><a href="/admin/staff/payroll?month=${month}&year=${year}">Back</a></div></body></html>`);
+app.get('/parent/logout', (req, res) => {
+  req.session.parentLoggedIn = false;
+  req.session.parentStudentId = null;
+  res.redirect('/parent/login');
 });
 
-app.post('/admin/staff/pay/:id', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
-  const { amount, method, reference, month, year } = req.body;
-  await pool.query('INSERT INTO salary_payments (staff_id, amount, month, year, method, reference, paid_by) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-    [req.params.id, amount, month, year, method, reference, req.session.username]);
-  await logAction(req.session.username, 'SALARY_PAID', { staff_id: req.params.id, amount, month, year });
-  res.redirect(`/admin/staff/payroll?month=${month}&year=${year}`);
+app.get('/parent/receipt/:student_id', requireParentLogin, async (req, res) => {
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.student_id]);
+  const s = student.rows[0];
+  const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [s.id]);
+
+  res.send(`<!DOCTYPE html><html><head><title>Fee Statement</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}@media print{button{display:none}}.header{text-align:center;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{padding:8px;border:1px solid #000;text-align:left}th{background:#f0f0f0}.total{font-weight:bold;font-size:1.1em}</style>
+  </head><body>
+    <div class="header"><h1>Ssewasswa School</h1><h2>FEE STATEMENT</h2></div>
+    <p><strong>Student Name:</strong> ${s.name}<br><strong>Class:</strong> ${s.class}<br><strong>Term:</strong> ${s.term} ${s.year}<br><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+    <table><tr><th>Date</th><th>Description</th><th>Amount</th></tr>
+    <tr><td>-</td><td>Total Fees</td><td>UGX ${Number(s.total_fees).toLocaleString()}</td></tr>
+    ${payments.rows.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString()}</td><td>Payment - ${p.method} ${p.reference || ''}</td><td>- UGX ${Number(p.amount).toLocaleString()}</td></tr>`).join('')}
+    <tr class="total"><td colspan="2">BALANCE DUE</td><td>UGX ${Number(s.balance).toLocaleString()}</td></tr>
+    </table>
+    <p style="margin-top:40px"><strong>Bursar Signature:</strong> _________________</p>
+    <button onclick="window.print()" style="padding:10px 20px;background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer;margin-top:20px">Print Statement</button>
+  </body></html>`);
+});
+
+app.get('/parent/report/:student_id', requireParentLogin, async (req, res) => {
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.student_id]);
+  const s = student.rows[0];
+  const results = await pool.query(`SELECT er.marks, er.term, er.year, sub.name as subject_name, sub.max_marks
+    FROM exam_results er JOIN subjects sub ON er.subject_id = sub.id
+    WHERE er.student_id = $1 AND er.term = $2 AND er.year = $3 ORDER BY sub.name`, [s.id, s.term, s.year]);
+
+  let totalMarks = 0, totalMax = 0;
+  results.rows.forEach(r => { totalMarks += Number(r.marks); totalMax += Number(r.max_marks); });
+  const avg = totalMax > 0? (totalMarks / totalMax * 100).toFixed(1) : 0;
+
+  res.send(`<!DOCTYPE html><html><head><title>Report Card</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px}@media print{button{display:none}}.header{text-align:center;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{padding:8px;border:1px solid #000;text-align:center}th{background:#f0f0f0}.info{margin:15px 0}.summary{background:#f9f9f9;padding:15px;border-radius:4px;margin:20px 0}</style>
+  </head><body>
+    <div class="header"><h1>SSEWASSWA SCHOOL</h1><h2>TERMINAL REPORT CARD</h2></div>
+    <div class="info"><strong>Name:</strong> ${s.name} &nbsp;&nbsp; <strong>Class:</strong> ${s.class}<br><strong>Term:</strong> ${s.term} ${s.year} &nbsp;&nbsp; <strong>Average:</strong> ${avg}%</div>
+    <table><tr><th>Subject</th><th>Marks</th><th>Grade</th><th>Remarks</th></tr>
+    ${results.rows.map(r => {
+      const pct = (r.marks / r.max_marks * 100);
+      let grade = 'F9', remark = 'Fail';
+      if (pct >= 80) { grade = 'D1'; remark = 'Excellent'; }
+      else if (pct >= 75) { grade = 'D2'; remark = 'Very Good'; }
+      else if (pct >= 70) { grade = 'C3'; remark = 'Good'; }
+      else if (pct >= 65) { grade = 'C4'; remark = 'Credit'; }
+      else if (pct >= 60) { grade = 'C5'; remark = 'Credit'; }
+      else if (pct >= 55) { grade = 'C6'; remark = 'Credit'; }
+      else if (pct >= 50) { grade = 'P7'; remark = 'Pass'; }
+      else if (pct >= 45) { grade = 'P8'; remark = 'Pass'; }
+      return `<tr><td>${r.subject_name}</td><td>${r.marks}/${r.max_marks}</td><td>${grade}</td><td>${remark}</td></tr>`;
+    }).join('')}
+    </table>
+    <div class="summary"><strong>Class Teacher's Comment:</strong> _____________________________<br><br><strong>Head Teacher's Comment:</strong> _____________________________<br><br><strong>Next Term Begins:</strong> _______________</div>
+    <button onclick="window.print()" style="padding:10px 20px;background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer;margin-top:20px">Print Report Card</button>
+  </body></html>`);
 });
 
 // AUTO-WITHDRAW - Fridays 5pm EAT
-cron.schedule('0 17 * * 5', async () => {
+cron.schedule('0 17 * 5', async () => {
   const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
   if (balance.rows[0]?.balance > 10000) {
     console.log(`Auto-withdraw UGX ${balance.rows[0].balance} triggered for Friday 5pm`);
-    // Add your MTN MoMo API call here later
   }
 }, { timezone: "Africa/Kampala" });
 
