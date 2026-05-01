@@ -1258,17 +1258,11 @@ app.get('/reset-pass-temp', async (req, res) => {
     res.status(500).send('Error: ' + err.message);
   }
 });
-// TEMP RESET - UPDATES EXISTING USER
+// TEMP RESET - CLEAN VERSION
 app.get('/fix-pass-now', async (req, res) => {
   try {
     const hash = await bcrypt.hash('TempPass2026!', 10);
-    const result = await pool.query(
-      'UPDATE users SET password = $1, role = $2 WHERE username = $3 RETURNING *', 
-      [hash, 'admin', 'superadmin']
-    );
-    if (result.rowCount === 0) {
-      return res.send('No superadmin found to update');
-    }
+    await pool.query('UPDATE users SET password = $1 WHERE username = $2', [hash, 'superadmin']);
     res.send('Password updated to TempPass2026!. Login now. DELETE THIS ROUTE.');
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
