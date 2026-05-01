@@ -5,7 +5,6 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
-const nodemailer = require('nodemailer');
 const ExcelJS = require('exceljs');
 const multer = require('multer');
 const cron = require('node-cron');
@@ -34,7 +33,6 @@ app.use(session({
   cookie: { maxAge: 24 * 60 * 60 * 1000, secure: process.env.NODE_ENV === 'production', httpOnly: true }
 }));
 
-// MIDDLEWARE
 function requireLogin(req, res, next) {
   if (!req.session.userId) return res.redirect('/login');
   next();
@@ -64,16 +62,14 @@ function requireTask(taskName) {
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: 'Too many login attempts.' });
 
-// CONSTANTS
 const ALL_CLASSES = ['Baby Class', 'Middle Class', 'Top Class', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
 const NURSERY_CLASSES = ['Baby Class', 'Middle Class', 'Top Class'];
 const PRIMARY_CLASSES = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
 const DEPARTMENTS = ['Nursery', 'Primary', 'Administration', 'Support Staff'];
 
-// IMPACT FUND SPLIT
 const creditAdmin = async (amount, type, description, reference_id = null, school_id = 1) => {
-  const platformFee = Math.ceil(amount * 0.015); // 1.5%
-  const impactFund = Math.ceil(platformFee * 0.1); // 10% of fee to Impact Fund
+  const platformFee = Math.ceil(amount * 0.015);
+  const impactFund = Math.ceil(platformFee * 0.1);
   const netFee = platformFee - impactFund;
   await pool.query('INSERT INTO admin_transactions (type, amount, description, reference_id) VALUES ($1,$2,$3,$4)', [type, netFee, description, reference_id]);
   await pool.query('INSERT INTO impact_fund_transactions (amount, school_id, description) VALUES ($1,$2,$3)', [impactFund, school_id, `10% of fee from ${description}`]);
@@ -86,7 +82,6 @@ async function logAction(username, action, details = {}) {
   } catch (err) { console.error('Audit log failed:', err); }
 }
 
-// DATABASE INIT
 async function initDB() {
   try {
     await pool.query(`
@@ -195,7 +190,6 @@ async function initDB() {
   }
 }
 
-// ROUTES
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', db: 'connected', time: new Date() });
 });
@@ -239,7 +233,6 @@ app.get('/admin/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
 });
 
-// DASHBOARD
 app.get('/admin', requireLogin, async (req, res) => {
   const user = req.session;
   const totals = await pool.query(`SELECT COUNT(*) as total_students, SUM(total_fees) as total_fees, SUM(balance) as total_outstanding FROM students`);
@@ -262,7 +255,6 @@ app.get('/admin', requireLogin, async (req, res) => {
           <div class="stat"><strong>Monthly Payroll</strong><br>UGX ${Number(s.total_payroll || 0).toLocaleString()}</div>
           <div class="stat"><strong>Impact Fund</strong><br>UGX ${Number(i.total || 0).toLocaleString()}</div>
         </div>
-      </div>
       <div class="card">
         <h3 class="section-title">📚 Academic Portals</h3>
         <a href="/admin/marksheets" class="btn portal">Marksheets</a>
@@ -284,7 +276,6 @@ app.get('/admin', requireLogin, async (req, res) => {
     </body></html>`);
 });
 
-// BRANDING
 app.get('/admin/branding', requireLogin, requireRole(['admin']), async (req, res) => {
   if (req.session.username!== 'superadmin') return res.status(403).send('God Mode only');
   const config = await pool.query('SELECT * FROM branding_config WHERE school_id = 1');
@@ -307,7 +298,6 @@ app.post('/admin/branding', requireLogin, requireRole(['admin']), async (req, re
   res.redirect('/admin/branding?success=1');
 });
 
-// MODULE 1: STUDENTS + FEES
 app.get('/admin/students', requireLogin, requireRole(['admin','bursar']), async (req, res) => {
   const { class: filterClass } = req.query;
   let query = 'SELECT * FROM students';
@@ -315,7 +305,6 @@ app.get('/admin/students', requireLogin, requireRole(['admin','bursar']), async 
   if (filterClass) { query += ' WHERE class = $1'; params.push(filterClass); }
   query += ' ORDER BY class, name';
   const students = await pool.query(query, params);
-  const classes = await pool.query('SELECT DISTINCT class FROM students ORDER BY class');
   res.send(`<!DOCTYPE html><html><head><title>Students</title>
   <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.filter{margin-bottom:15px}.balance-zero{color:#27ae60;font-weight:bold}.balance-owe{color:#e74c3c;font-weight:bold}</style>
   </head><body>
@@ -437,7 +426,6 @@ app.post('/admin/students/edit/:id', requireLogin, requireRole(['admin', 'bursar
   res.redirect('/admin/students');
 });
 
-// MODULE 2: MARKSHEETS
 app.get('/admin/marksheets', requireLogin, requireTask('marksheets'), (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Marksheets</title>
   <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:12px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}.nursery{background:#f39c12}</style>
@@ -458,7 +446,7 @@ app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'cla
     const { term = 'Term 1', year = 2026 } = req.query;
     const subjects = await pool.query('SELECT * FROM subjects WHERE class = $1 AND active = true ORDER BY name', [className]);
     const students = await pool.query('SELECT * FROM students WHERE class = $1 ORDER BY name', [className]);
-    const marks = await pool.query(`SELECT student_id, subject_id, marks FROM exam_results WHERE term = $1 AND year = $2 AND student_id IN (SELECT id FROM students WHERE class = $3)`, [term][year][className]);
+    const marks = await pool.query(`SELECT student_id, subject_id, marks FROM exam_results WHERE term = $1 AND year = $2 AND student_id IN (SELECT id FROM students WHERE class = $3)`, [term, year, className]);
     const marksMap = {};
     marks.rows.forEach(m => { marksMap[`${m.student_id}-${m.subject_id}`] = m.marks; });
 
@@ -487,7 +475,7 @@ app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'cla
           <br><button type="submit" class="btn btn-green">Save All Marks</button>
         </form>
       </div>
-      <div class="card">
+         <div class="card">
         <h3>Upload Excel</h3>
         <form method="POST" action="/admin/marksheets/${className}/upload" enctype="multipart/form-data">
           <input type="hidden" name="term" value="${term}">
@@ -502,12 +490,13 @@ app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'cla
     res.status(500).send('Error: ' + err.message);
   }
 });
+
 app.post('/admin/marksheets/:className/save-online', requireLogin, requireTask('marksheets'), async (req, res) => {
   try {
     const { className } = req.params;
     const { term, year, ...marks } = req.body;
     for (const key in marks) {
-      if (key.startsWith('marks_') && marks[key]!== '') {
+      if (key.startsWith('marks_') && marks[key] !== '') {
         const [, student_id, subject_id] = key.split('_');
         await pool.query(`INSERT INTO exam_results (student_id, subject_id, marks, term, year, recorded_by)
           VALUES ($1, $2, $3, $4, $5, $6)
@@ -532,7 +521,7 @@ app.get('/admin/marksheets/:className/download-template', requireLogin, requireT
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(`${className} ${term} ${year}`);
-  const headers = ['student_id', 'student_name',...subjects.rows.map(s => `${s.name} (/${s.max_marks})`)];
+  const headers = ['student_id', 'student_name', ...subjects.rows.map(s => `${s.name} (/${s.max_marks})`)];
   sheet.addRow(headers);
   sheet.getRow(1).font = { bold: true };
 
@@ -590,7 +579,6 @@ app.post('/admin/marksheets/:className/upload', requireLogin, requireTask('marks
   } catch (err) { res.status(500).send('Upload error: ' + err.message); }
 });
 
-// MODULE 3: SUBJECTS
 app.get('/admin/subjects', requireLogin, requireRole(['admin']), async (req, res) => {
   const { class: filterClass } = req.query;
   let query = 'SELECT * FROM subjects WHERE active = true';
@@ -680,7 +668,6 @@ app.post('/admin/subjects/delete/:id', requireLogin, requireRole(['admin']), asy
   res.redirect('/admin/subjects');
 });
 
-// MODULE 4: STAFF
 app.get('/admin/staff', requireLogin, requireTask('staff_management'), async (req, res) => {
   const staff = await pool.query(`SELECT * FROM staff WHERE active = true ORDER BY department, full_name`);
   res.send(`<!DOCTYPE html><html><head><title>Staff Management</title>
@@ -732,7 +719,6 @@ app.post('/admin/staff/add', requireLogin, requireRole(['admin']), async (req, r
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
-// MODULE 5: DONORS
 app.get('/admin/donors', requireLogin, requireTask('donors_portal'), async (req, res) => {
   const donors = await pool.query(`SELECT d.*, COALESCE(SUM(don.amount), 0) as total_donated
     FROM donors d LEFT JOIN donations don ON d.id = don.donor_id
@@ -788,21 +774,142 @@ app.post('/admin/donors/donate/:id', requireLogin, requireRole(['admin', 'bursar
   res.redirect('/admin/donors');
 });
 
-// MODULE 6: ASSETS
 app.get('/admin/assets', requireLogin, requireTask('assets'), async (req, res) => {
   const assets = await pool.query('SELECT * FROM school_assets ORDER BY category, asset_name');
   res.send(`<!DOCTYPE html><html><head><title>School Assets</title>
   <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
   </head><body>
     <div class="card"><h1>📦 School Assets & Stores</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/assets/add" class="btn">+ Add Asset</a></div>
-    <div class="card"><table><tr><th>Asset Name</th><th>Category</th><th>Qty</th><th>Unit Cost</th><th>Total Value</th><th>Location</th></tr>  } catch (err) { res.status(500).send('Error: ' + err.message); }
+    <div class="card"><table><tr><th>Asset Name</th><th>Category</th><th>Qty</th><th>Unit Cost</th><th>Total Value</th><th>Location</th></tr>
+      ${assets.rows.map(a => `<tr><td>${a.asset_name}</td><td>${a.category}</td><td>${a.quantity}</td><td>UGX ${Number(a.unit_cost).toLocaleString()}</td><td>UGX ${Number(a.total_value).toLocaleString()}</td><td>${a.location}</td></tr>`).join('')}
+    </table></div>
+  </body></html>`);
 });
 
-// CREATE USER - PROFESSIONAL FORM
+app.get('/admin/assets/add', requireLogin, requireRole(['admin']), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Asset</title>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}.card{background:white;padding:30px;border-radius:8px}input,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Add Asset</h2>
+  <form method="POST" action="/admin/assets/add">
+    <input name="asset_name" placeholder="Asset Name" required>
+    <input name="category" placeholder="Category e.g Furniture, Books">
+    <input name="quantity" type="number" placeholder="Quantity" required>
+    <input name="unit_cost" type="number" placeholder="Unit Cost UGX" required>
+    <input name="location" placeholder="Location e.g Store Room A">
+    <input name="condition" placeholder="Condition e.g New, Good">
+    <input name="supplier" placeholder="Supplier">
+    <button type="submit">Add Asset</button>
+  </form><a href="/admin/assets">Back</a></div></body></html>`);
+});
+
+app.post('/admin/assets/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  const { asset_name, category, quantity, unit_cost, location, condition, supplier } = req.body;
+  const total_value = quantity * unit_cost;
+  await pool.query('INSERT INTO school_assets (asset_name, category, quantity, unit_cost, total_value, location, condition, supplier, managed_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+    [asset_name, category, quantity, unit_cost, total_value, location, condition, supplier, req.session.username]);
+  await logAction(req.session.username, 'ASSET_ADDED', { asset_name, total_value });
+  res.redirect('/admin/assets');
+});
+
+app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) => {
+  const fields = await pool.query('SELECT * FROM student_field_definitions WHERE active = true ORDER BY field_name');
+  res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px;border:none;cursor:pointer}.btn-green{background:#27ae60}.btn-red{background:#e74c3c}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.actions{display:flex;gap:5px}</style>
+  </head><body>
+    <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
+    <div class="card">
+      <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Options</th><th>Actions</th></tr>
+      ${fields.rows.map(f => `<tr>
+        <td>${f.field_name}</td>
+        <td>${f.field_type}</td>
+        <td>${f.required? 'Yes' : 'No'}</td>
+        <td>${f.field_options? JSON.parse(f.field_options).join(', ') : '-'}</td>
+        <td class="actions">
+          <form method="POST" action="/admin/fields/delete/${f.id}" style="display:inline" onsubmit="return confirm('Delete this field?')">
+            <button type="submit" class="btn btn-red">Delete</button>
+          </form>
+        </td>
+      </tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Add Field</title>
+  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h2>Add Custom Field</h2>
+  <form method="POST" action="/admin/fields/add">
+    <input name="field_name" placeholder="Field Name e.g Blood Group" required>
+    <select name="field_type" required>
+      <option value="text">Text</option>
+      <option value="number">Number</option>
+      <option value="date">Date</option>
+      <option value="select">Dropdown</option>
+    </select>
+    <textarea name="field_options" placeholder="For Dropdown: comma separated e.g A+,B+,O+"></textarea>
+    <label><input type="checkbox" name="required" value="true"> Required Field</label>
+    <button type="submit">Add Field</button>
+  </form><a href="/admin/fields">Back</a></div></body></html>`);
+});
+
+app.post('/admin/fields/add', requireLogin, requireRole(['admin']), async (req, res) => {
+  const { field_name, field_type, field_options, required } = req.body;
+  const options = field_options? JSON.stringify(field_options.split(',').map(o => o.trim())) : null;
+  await pool.query('INSERT INTO student_field_definitions (field_name, field_type, field_options, required) VALUES ($1, $2, $3, $4)',
+    [field_name, field_type, options, required === 'true']);
+  res.redirect('/admin/fields');
+});
+
+app.post('/admin/fields/delete/:id', requireLogin, requireRole(['admin']), async (req, res) => {
+  await pool.query('UPDATE student_field_definitions SET active = false WHERE id = $1', [req.params.id]);
+  res.redirect('/admin/fields');
+});
+
+app.get('/admin/tasks', requireLogin, requireRole(['admin']), async (req, res) => {
+  const tasks = await pool.query(`SELECT st.*, u.full_name FROM staff_tasks st JOIN users u ON st.username = u.username WHERE st.active = true ORDER BY u.full_name`);
+  const users = await pool.query('SELECT username, full_name FROM users WHERE role!= \'admin\' ORDER BY full_name');
+  res.send(`<!DOCTYPE html><html><head><title>Assign Tasks</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}.btn-green{background:#27ae60}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}input,select,button{padding:8px;margin:4px}</style>
+  </head><body>
+    <div class="card"><h1>Assign Portal Tasks</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    <div class="card"><h3>Assign New Task</h3>
+      <form method="POST" action="/admin/tasks/assign">
+        <select name="username" required><option value="">Select Staff</option>${users.rows.map(u => `<option value="${u.username}">${u.full_name}</option>`).join('')}</select>
+        <select name="task_name" required>
+          <option value="">Select Task</option>
+          <option value="financial_portal">Financial Portal</option>
+          <option value="academic_portal">Academic Portal</option>
+          <option value="marksheets">Marksheets</option>
+          <option value="donors_portal">Donors Portal</option>
+          <option value="staff_management">Staff Management</option>
+          <option value="assets">Assets/Stores</option>
+          <option value="students">Students</option>
+        </select>
+        <button type="submit" class="btn-green">Assign</button>
+      </form>
+    </div>
+    <div class="card"><h3>Current Assignments</h3>
+      <table><tr><th>Staff</th><th>Task</th><th>Assigned By</th><th>Date</th></tr>
+      ${tasks.rows.map(t => `<tr><td>${t.full_name}</td><td>${t.task_name}</td><td>${t.assigned_by}</td><td>${new Date(t.assigned_at).toLocaleDateString()}</td></tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+});
+
+app.post('/admin/tasks/assign', requireLogin, requireRole(['admin']), async (req, res) => {
+  try {
+    const { username, task_name } = req.body;
+    await pool.query('INSERT INTO staff_tasks (username, task_name, assigned_by) VALUES ($1, $2, $3)', [username, task_name, req.session.username]);
+    await logAction(req.session.username, 'TASK_ASSIGNED', { username, task_name });
+    res.redirect('/admin/tasks');
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
+});
+
 app.get('/admin/users/add', requireLogin, requireRole(['admin']), (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Create User</title>
   <style>body{font-family:Arial;max-width:900px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}.section{border:1px solid #ddd;padding:15px;border-radius:8px;margin:15px 0}</style>
-  </head><body><div class="card"><h2>Create New Staff Member</h2>
+   </head><body><div class="card"><h2>Create New Staff Member</h2>
   <form method="POST" action="/admin/users/add">
     <div class="section"><h3>Basic Information</h3>
       <input name="username" placeholder="Username for login" required>
@@ -856,7 +963,6 @@ app.post('/admin/users/add', requireLogin, requireRole(['admin']), async (req, r
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
-// STAFF PAYROLL
 app.get('/admin/staff/payroll', requireLogin, requireRole(['admin', 'bursar']), async (req, res) => {
   const { month = new Date().toLocaleString('default', { month: 'long' }), year = new Date().getFullYear() } = req.query;
   const staff = await pool.query(`SELECT s.*, COALESCE(SUM(sp.amount), 0) as paid_this_month
