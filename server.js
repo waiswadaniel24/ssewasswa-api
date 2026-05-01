@@ -14,21 +14,9 @@ const crypto = require('crypto');
 
 const upload = multer({ dest: '/tmp/' });
 const app = express();
-app.use(express.urlencoded({ extended: true })); // For form data
-app.use(express.json()); // For JSON
-
-// Session setup - add after const app = express();
-app.use(session({
-  store: new pgSession({
-    pool: pool,
-    tableName: 'session'
-  }),
-  secret: process.env.SESSION_SECRET || 'change-this-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } // 30 days
-}));
 const PORT = process.env.PORT || 3000;
+
+// 1. DATABASE POOL - CREATE FIRST
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
@@ -36,28 +24,33 @@ const pool = new Pool({
   idleTimeoutMillis: 30000
 });
 
+// 2. MIDDLEWARE
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static('public'));
 
+// 3. SESSION - ONLY ONCE, AFTER POOL EXISTS
 app.use(session({
-  store: new pgSession({ pool: pool, tableName: 'session' }),
+  store: new pgSession({ 
+    pool: pool, 
+    tableName: 'session' 
+  }),
   secret: process.env.SESSION_SECRET || 'fallback-secret-change-me',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 24 * 60 * 60 * 1000 }
+  cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
 }));
 
 // MIDDLEWARE
 function requireLogin(req, res, next) {
-  if (!req.session.user) return res.redirect('/admin/login');
+  if (!req.session.userId) return res.redirect('/login'); // Changed to userId
   next();
 }
 
 function requireRole(roles) {
   return (req, res, next) => {
-    if (!roles.includes(req.session.user.role)) {
+    if (!roles.includes(req.session.role)) {
       return res.status(403).send('Access denied: Insufficient role');
     }
     next();
@@ -66,10 +59,10 @@ function requireRole(roles) {
 
 function requireTask(taskName) {
   return async (req, res, next) => {
-    const user = req.session.user;
-    if (user.role === 'admin') return next();
+    const userRole = req.session.role;
+    if (userRole === 'admin') return next();
     try {
-      const result = await pool.query('SELECT * FROM staff_tasks WHERE username = $1 AND task_name = $2 AND active = true', [user.username, taskName]);
+      const result = await pool.query('SELECT * FROM staff_tasks WHERE username = $1 AND task_name = $2 AND active = true', [req.session.username, taskName]);
       if (result.rows.length > 0) return next();
       res.status(403).send(`Access denied: You need to be tasked for "${taskName}" by admin`);
     } catch (err) {
@@ -78,7 +71,6 @@ function requireTask(taskName) {
     }
   };
 }
-
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: 'Too many login attempts.' });
 
 let transporter = null, ADMIN_EMAIL = '';
