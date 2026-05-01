@@ -223,6 +223,7 @@ app.get('/admin', requireLogin, async (req, res) => {
       <a href="/admin/tasks" class="btn">✅ Task Assignment</a>
       <a href="/admin/logs" class="btn">📋 Audit Logs</a>
     </div></div>
+    <a href="/admin/marketing" class="card"><h3>📊 Marketing</h3><p>Ads, Analytics, Leads</p></a>
   </body></html>`);
 });
 
