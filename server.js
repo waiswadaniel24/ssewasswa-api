@@ -858,7 +858,7 @@ app.post('/admin/assets/add', requireLogin, requireRole(['admin']), async (req, 
   res.redirect('/admin/assets');
 });
 
-// FIX 2: Custom Fields - Fixed 502
+// MODULE 7: CUSTOM FIELDS - FIXED
 app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) => {
   try {
     const fields = await pool.query('SELECT * FROM student_field_definitions WHERE active = true ORDER BY field_name');
@@ -917,7 +917,6 @@ app.post('/admin/fields/delete/:id', requireLogin, requireRole(['admin']), async
   await pool.query('UPDATE student_field_definitions SET active = false WHERE id = $1', [req.params.id]);
   res.redirect('/admin/fields');
 });
-
 app.get('/admin/tasks', requireLogin, requireRole(['admin']), async (req, res) => {
   const tasks = await pool.query(`SELECT st.*, u.full_name FROM staff_tasks st JOIN users u ON st.username = u.username WHERE st.active = true ORDER BY u.full_name`);
   const users = await pool.query('SELECT username, full_name FROM users WHERE role!= \'admin\' ORDER BY full_name');
@@ -1014,7 +1013,27 @@ app.post('/admin/users/add', requireLogin, requireRole(['admin']), async (req, r
     res.send(`Staff ${full_name} created successfully. <a href="/admin/staff">View All Staff</a>`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
+app.get('/admin/branding', requireLogin, requireRole(['admin']), async (req, res) => {
+  if (req.session.username!== 'superadmin') return res.status(403).send('God Mode only');
+  const config = await pool.query('SELECT * FROM branding_config WHERE school_id = 1');
+  const brand = config.rows[0] || {};
+  res.send(`<!DOCTYPE html><html><head><title>Branding Console</title>
+  <style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:20px}.card{background:white;padding:30px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}input,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><div class="card"><h1>Branding Console</h1><p>100/50 Upgrade Active</p>
+    <form method="POST" action="/admin/branding">
+      <label>Brand Name: <input name="brand_name" value="${brand.brand_name || 'Ssewasswa School'}"></label>
+      <label>Primary Color: <input name="primary_color" type="color" value="${brand.primary_color || '#667eea'}"></label>
+      <button>Save Brand</button>
+    </form><a href="/admin">← Dashboard</a></div></body></html>`);
+});
 
+app.post('/admin/branding', requireLogin, requireRole(['admin']), async (req, res) => {
+  if (req.session.username!== 'superadmin') return res.status(403).send('God Mode only');
+  const { brand_name, primary_color } = req.body;
+  await pool.query(`INSERT INTO branding_config (school_id, brand_name, primary_color) VALUES (1,$1,$2)
+    ON CONFLICT (school_id) DO UPDATE SET brand_name=$1, primary_color=$2`, [brand_name, primary_color]);
+  res.redirect('/admin/branding?success=1');
+});
 // PARENTS PORTAL
 app.get('/parent/login', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Parent Login</title><meta name="viewport" content="width=device-width, initial-scale=1">
