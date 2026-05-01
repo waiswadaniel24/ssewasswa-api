@@ -323,22 +323,6 @@ app.post('/admin/users/add', requireLogin, requireRole(['admin']), async (req, r
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
-// TEMP ROUTE - CREATE SUPERADMIN - DELETE AFTER USE
-app.get('/create-god-mode-temp', async (req, res) => {
-  try {
-    const password = 'TempPass2026!';
-    const hash = await bcrypt.hash(password, 10);
-    await pool.query(
-      `INSERT INTO users (username, password, role, full_name) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (username) DO UPDATE SET password = $2, role = $3`,
-      ['superadmin', hash, 'admin', 'Super Admin']
-    );
-    res.send(`superadmin created/updated. Password: ${password}. DELETE THIS ROUTE NOW.`);
-  } catch (err) {
-    res.status(500).send('Error: ' + err.message);
-  }
-});
-
 // Auto-Withdraw ON - Fridays 5pm EAT
 cron.schedule('0 17 * * 5', async () => {
   const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
