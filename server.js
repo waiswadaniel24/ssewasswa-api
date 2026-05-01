@@ -23,7 +23,6 @@ const pool = new Pool({
   idleTimeoutMillis: 30000
 });
 
-// SMS Setup - Add AT_API_KEY and AT_USERNAME to Render env vars
 const at = process.env.AT_API_KEY? AfricasTalking({
   apiKey: process.env.AT_API_KEY,
   username: process.env.AT_USERNAME || 'sandbox'
@@ -73,7 +72,6 @@ function requireTask(taskName) {
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: 'Too many login attempts.' });
 
-// MULTI-INSTITUTION CONFIG
 const SCHOOL_TYPES = ['Nursery', 'Primary', 'Secondary', 'Tertiary', 'Vocational', 'Other'];
 const ALL_CLASSES = {
   'Nursery': ['Baby Class', 'Middle Class', 'Top Class'],
@@ -86,7 +84,6 @@ const ALL_CLASSES = {
 const DEPARTMENTS = ['Nursery', 'Primary', 'Secondary', 'Tertiary', 'Vocational', 'Administration', 'Support Staff', 'Other'];
 const TERMS = ['Term 1', 'Term 2', 'Term 3', 'Semester 1', 'Semester 2'];
 
-// SMS HELPER
 const sendSMS = async (to, message) => {
   if (!sms) return console.log('SMS disabled - no API key');
   try {
@@ -209,8 +206,6 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS impact_fund_transactions (
         id SERIAL PRIMARY KEY, amount INTEGER, school_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-
-      -- NEW MODULES
       CREATE TABLE IF NOT EXISTS attendance (
         id SERIAL PRIMARY KEY, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
         date DATE NOT NULL, status VARCHAR(20) NOT NULL, term VARCHAR(20), year INTEGER,
@@ -232,7 +227,6 @@ async function initDB() {
       );
     `);
 
-    // SEED SUBJECTS FOR ALL SCHOOL TYPES
     const subjCount = await pool.query('SELECT COUNT(*) FROM subjects');
     if (subjCount.rows[0].count == 0) {
       const nurserySubjects = ['Number Work', 'Language Development', 'Social Development', 'Health Habits', 'Creative Arts'];
@@ -279,7 +273,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', db: 'connected', time: new Date() });
 });
 
-// LOGIN & ADMIN - Keep all existing routes from previous version
 app.get('/login', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Staff Login</title><meta name="viewport" content="width=device-width, initial-scale=1">
     <style>body{font-family:system-ui;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{background:white;padding:2rem;border-radius:8px;box-shadow:0 4px 6px rgba(0,0,0,.1);width:100%;max-width:400px}h1{text-align:center;color:#1f2937;margin-bottom:1.5rem}input{width:100%;padding:.75rem;margin-bottom:1rem;border:1px solid #d1d5db;border-radius:4px;box-sizing:border-box}button{width:100%;padding:.75rem;background:#2563eb;color:white;border:none;border-radius:4px;font-weight:600;cursor:pointer}button:hover{background:#1d4ed8}</style>
@@ -319,7 +312,6 @@ app.get('/admin/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
 });
 
-// UPDATE ADMIN DASHBOARD WITH NEW MODULES
 app.get('/admin', requireLogin, async (req, res) => {
   const user = req.session;
   const totals = await pool.query(`SELECT COUNT(*) as total_students, SUM(total_fees) as total_fees, SUM(balance) as total_outstanding FROM students`);
@@ -430,7 +422,7 @@ app.get('/admin/attendance', requireLogin, requireTask('attendance'), async (req
     students = result.rows;
   }
   res.send(`<!DOCTYPE html><html><head><title>Attendance Register</title>
-  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}select,input,button{padding:8px;margin:4px}.present{background:#27ae60;color:white}.absent{background:#e74c3c;color:white}.late{background:#f39c12;color:white}</style>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#34495e;color:white}select,input,button{padding:8px;margin:4px}</style>
   </head><body>
     <div class="card"><h1>📋 Attendance Register</h1><a href="/admin" class="btn">← Dashboard</a></div>
     <div class="card">
@@ -467,7 +459,7 @@ app.post('/admin/attendance/save', requireLogin, requireTask('attendance'), asyn
   const { date, class: className,...statuses } = req.body;
   const students = await pool.query('SELECT id FROM students WHERE class = $1', [className]);
   const year = new Date(date).getFullYear();
-  const term = 'Term 1'; // You can make this dynamic
+  const term = 'Term 1';
 
   for (const s of students.rows) {
     const status = statuses[`status_${s.id}`];
@@ -511,7 +503,7 @@ app.get('/admin/library/add-book', requireLogin, requireRole(['admin']), (req, r
 
 app.post('/admin/library/add-book', requireLogin, requireRole(['admin']), async (req, res) => {
   const { title, author, isbn, category, quantity } = req.body;
-  await pool.query('INSERT INTO library_books (title, author, isbn, category, quantity, available) VALUES ($1, $2, $3, $4, $5, $5)',
+    await pool.query('INSERT INTO library_books (title, author, isbn, category, quantity, available) VALUES ($1, $2, $3, $4, $5, $5)',
     [title, author, isbn, category, quantity]);
   res.redirect('/admin/library');
 });
@@ -520,7 +512,7 @@ app.get('/admin/library/loan/:book_id', requireLogin, requireRole(['admin', 'lib
   const book = await pool.query('SELECT * FROM library_books WHERE id = $1', [req.params.book_id]);
   const students = await pool.query('SELECT id, name, class FROM students ORDER BY name');
   res.send(`<!DOCTYPE html><html><head><title>Issue Book</title>
-    <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}.card{background:white;padding:30px;border-radius:8px}select,input,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px}.card{background:white;padding:30px;border-radius:8px}select,input,button{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body><div class="card"><h2>Issue Book: ${book.rows[0].title}</h2>
   <form method="POST" action="/admin/library/loan/${req.params.book_id}">
     <select name="student_id" required><option value="">Select Student</option>${students.rows.map(s => `<option value="${s.id}">${s.name} - ${s.class}</option>`).join('')}</select>
@@ -589,7 +581,6 @@ app.post('/admin/momo/withdraw', requireLogin, requireRole(['admin']), async (re
     const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
     if (Number(amount) > balance.rows[0].balance) return res.status(400).send('Insufficient balance');
 
-    // MTN MoMo API call would go here - for now we simulate
     const transaction_id = 'MOMO' + Date.now();
     await pool.query('INSERT INTO momo_transactions (transaction_id, amount, phone, status, type) VALUES ($1, $2, $3, $4, $5)',
       [transaction_id, amount, phone, 'pending', 'withdrawal']);
@@ -600,10 +591,133 @@ app.post('/admin/momo/withdraw', requireLogin, requireRole(['admin']), async (re
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
-// Keep all previous routes: students, marksheets, subjects, staff, payroll, donors, assets, tasks, fields, branding, parent portal
-// [PASTE ALL YOUR EXISTING ROUTES FROM PREVIOUS VERSIONS HERE - students, marksheets, subjects, staff, payroll, donors, assets, tasks, fields, branding, parent portal]
+// PARENT PORTAL
+app.get('/parent/login', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Parent Login</title><meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>body{font-family:Arial;background:#f0f2f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.login-box{background:white;padding:40px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);width:100%;max-width:400px}h2{text-align:center;color:#1a73e8;margin-bottom:30px}input{width:100%;padding:12px;margin:8px 0;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}button{width:100%;padding:12px;background:#1a73e8;color:white;border:none;border-radius:4px;cursor:pointer;font-size:16px}button:hover{background:#1557b0}.error{color:#d93025;text-align:center;margin-top:10px}</style>
+  </head><body><div class="login-box"><h2>Parent Portal Login</h2>
+  <form method="POST" action="/parent/login">
+    <input type="text" name="parent_phone" placeholder="Your Phone Number" required>
+    <input type="text" name="student_name" placeholder="Student's Full Name" required>
+    <button type="submit">Login</button>
+  </form></div></body></html>`);
+});
 
-// AUTO-WITHDRAW - Fridays 5pm EAT - WITH SMS NOTIFICATION
+app.post('/parent/login', async (req, res) => {
+  try {
+    const { parent_phone, student_name } = req.body;
+    const result = await pool.query('SELECT * FROM students WHERE parent_phone = $1 AND LOWER(name) = LOWER($2)', [parent_phone, student_name]);
+    if (result.rows.length === 0) return res.status(401).send('Student not found. Check phone number and student name.');
+    req.session.parentPhone = parent_phone;
+    req.session.studentId = result.rows[0].id;
+    res.redirect('/parent/dashboard');
+  } catch (err) { res.status(500).send('Login error: ' + err.message); }
+});
+
+app.get('/parent/dashboard', async (req, res) => {
+  if (!req.session.parentPhone) return res.redirect('/parent/login');
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.session.studentId]);
+  const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.session.studentId]);
+  const s = student.rows[0];
+  res.send(`<!DOCTYPE html><html><head><title>Parent Dashboard</title>
+  <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f0f2f5}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#1a73e8;color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd;text-align:left}th{background:#f8f9fa}</style>
+  </head><body>
+    <div class="card"><h1>Welcome, ${s.parent_name}</h1><p>Student: ${s.name} - ${s.class} (${s.school_type})</p><a href="/parent/logout" class="btn" style="background:#d93025">Logout</a></div>
+    <div class="card"><h3>Fee Status</h3><p><strong>Total Fees:</strong> UGX ${Number(s.total_fees).toLocaleString()}</p><p><strong>Balance:</strong> UGX ${Number(s.balance).toLocaleString()}</p><p><strong>Status:</strong> ${s.balance > 0? 'Outstanding' : 'Cleared'}</p></div>
+    <div class="card"><h3>Payment History</h3><a href="/parent/receipt/${s.id}" class="btn">Download Receipt</a><table style="margin-top:15px"><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th></tr>${payments.rows.map(p => `<tr><td>${p.payment_date}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method}</td><td>${p.reference}</td></tr>`).join('')}</table></div>
+    <div class="card"><h3>Report Cards</h3><a href="/parent/report/${s.id}/Term 1" class="btn">Term 1</a> <a href="/parent/report/${s.id}/Term 2" class="btn">Term 2</a> <a href="/parent/report/${s.id}/Term 3" class="btn">Term 3</a></div>
+  </body></html>`);
+});
+
+app.get('/parent/logout', (req, res) => {
+  req.session.destroy(() => res.redirect('/parent/login'));
+});
+
+app.get('/parent/receipt/:studentId', async (req, res) => {
+  if (!req.session.parentPhone || req.session.studentId!= req.params.studentId) return res.status(403).send('Access denied');
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.studentId]);
+  const payments = await pool.query('SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC', [req.params.studentId]);
+  const s = student.rows[0];
+  const PDFDocument = require('pdfkit');
+  const doc = new PDFDocument();
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=Receipt_${s.name}.pdf`);
+  doc.pipe(res);
+  doc.fontSize(20).text('PAYMENT RECEIPT', { align: 'center' });
+  doc.moveDown();
+  doc.fontSize(12).text(`Student: ${s.name}`);
+  doc.text(`Class: ${s.class} (${s.school_type})`);
+  doc.text(`Parent: ${s.parent_name}`);
+  doc.text(`Total Fees: UGX ${Number(s.total_fees).toLocaleString()}`);
+  doc.text(`Balance: UGX ${Number(s.balance).toLocaleString()}`);
+  doc.moveDown();
+  doc.text('PAYMENT HISTORY:', { underline: true });
+  payments.rows.forEach(p => {
+    doc.text(`${p.payment_date} - UGX ${Number(p.amount).toLocaleString()} via ${p.method} (${p.reference})`);
+  });
+  doc.end();
+});
+
+app.get('/parent/report/:studentId/:term', async (req, res) => {
+  if (!req.session.parentPhone || req.session.studentId!= req.params.studentId) return res.status(403).send('Access denied');
+  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.studentId]);
+  const results = await pool.query(`SELECT er.marks, s.name as subject_name, s.max_marks
+    FROM exam_results er
+    JOIN subjects s ON er.subject_id = s.id
+    WHERE er.student_id = $1 AND er.term = $2 ORDER BY s.name`, [req.params.studentId, req.params.term]);
+  const s = student.rows[0];
+  const PDFDocument = require('pdfkit');
+  const doc = new PDFDocument();
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=Report_${s.name}_${req.params.term}.pdf`);
+  doc.pipe(res);
+  doc.fontSize(20).text('STUDENT REPORT CARD', { align: 'center' });
+  doc.moveDown();
+  doc.fontSize(12).text(`Name: ${s.name}`);
+  doc.text(`Class: ${s.class} (${s.school_type})`);
+  doc.text(`Term: ${req.params.term} ${new Date().getFullYear()}`);
+  doc.moveDown();
+  doc.text('RESULTS:', { underline: true });
+  let total = 0, count = 0;
+  results.rows.forEach(r => {
+    doc.text(`${r.subject_name}: ${r.marks}/${r.max_marks}`);
+    total += Number(r.marks);
+    count++;
+  });
+  if (count > 0) {
+    doc.moveDown();
+    doc.text(`Average: ${(total/count).toFixed(2)}%`);
+  }
+  doc.end();
+});
+
+// STUDENTS & FEES - Add your existing students routes here
+app.get('/admin/students', requireLogin, async (req, res) => {
+  const students = await pool.query('SELECT * FROM students ORDER BY class, name');
+  res.send(`<!DOCTYPE html><html><head><title>Students</title>
+  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:8px;border:1px solid #ddd}th{background:#34495e;color:white}</style>
+  </head><body><div class="card"><h1>Students & Fees</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/students/bulk-upload" class="btn" style="background:#16a085">Bulk Import</a></div>
+  <div class="card"><table><tr><th>Name</th><th>Class</th><th>Type</th><th>Total Fees</th><th>Balance</th><th>Parent</th><th>Phone</th></tr>
+  ${students.rows.map(s => `<tr><td>${s.name}</td><td>${s.class}</td><td>${s.school_type}</td><td>${Number(s.total_fees).toLocaleString()}</td><td>${Number(s.balance).toLocaleString()}</td><td>${s.parent_name}</td><td>${s.parent_phone}</td></tr>`).join('')}
+  </table></div></body></html>`);
+});
+
+// MARKSHEETS
+app.get('/admin/marksheets', requireLogin, requireTask('marksheets'), async (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Marksheets Portal</title>
+  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}.primary{background:#3498db}.secondary{background:#9b59b6}.tertiary{background:#e67e22}.vocational{background:#16a085}.nursery{background:#e74c3c}</style>
+  </head><body>
+    <div class="card"><h1>📝 Marksheets Portal</h1><a href="/admin" class="btn">← Dashboard</a></div>
+    ${Object.keys(ALL_CLASSES).map(type => `
+      <div class="card"><h3>${type} Section</h3>
+      ${ALL_CLASSES[type].map(c => `<a href="/admin/marksheets/${c}?type=${type}" class="btn ${type.toLowerCase()}">${c} Marksheet</a>`).join('')}
+    </div>`).join('')}
+  </body></html>`);
+});
+
+// Add all other routes: marksheets/:className, save-online, download-template, upload, subjects, staff, payroll, donors, assets, tasks, fields, branding
+// [PASTE YOUR EXISTING ROUTES FOR THESE MODULES HERE - they weren't affected by the 503]
+
 cron.schedule('0 17 * * 5', async () => {
   try {
     const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
@@ -619,14 +733,6 @@ cron.schedule('0 17 * * 5', async () => {
   }
 }, { timezone: "Africa/Kampala" });
 
-// AUTO-NOTIFY PARENTS ON PAYMENT - Add this to existing payment route
-// Find your app.post('/admin/students/pay/:id') and add this after creditAdmin:
-// const student = await pool.query('SELECT parent_phone, name FROM students WHERE id = $1', [studentId]);
-// if (student.rows[0]?.parent_phone) {
-// await sendSMS(student.rows[0].parent_phone, `Payment received for ${student.rows[0].name}. Amount: UGX ${Number(amount).toLocaleString()}. Thank you!`);
-// }
-
-// START SERVER
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   setTimeout(() => initDB().catch(e => console.log('DB init:', e.message)), 2000);
