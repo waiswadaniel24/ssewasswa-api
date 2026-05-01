@@ -1131,21 +1131,21 @@ app.get('/change-god-pass', async (req, res) => {
   await pool.query(`UPDATE users SET password = $1 WHERE username = 'superadmin'`, );
   res.send('Password changed. Delete this route.');
 });
-// Staff Login Page
+// Staff Login Page - GET
 app.get('/login', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Staff Login - Ssewasswa Fees</title>
+      <title>Staff Login</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
-        body { font-family: system-ui; background: #f3f4f6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-        .box { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
-        h1 { text-align: center; color: #1f2937; margin-bottom: 1.5rem; }
-        input { width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box; }
-        button { width: 100%; padding: 0.75rem; background: #2563eb; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; }
-        button:hover { background: #1d4ed8; }
+        body{font-family:system-ui;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+       .box{background:white;padding:2rem;border-radius:8px;box-shadow:0 4px 6px rgba(0,0,0,.1);width:100%;max-width:400px}
+        h1{text-align:center;color:#1f2937;margin-bottom:1.5rem}
+        input{width:100%;padding:.75rem;margin-bottom:1rem;border:1px solid #d1d5db;border-radius:4px;box-sizing:border-box}
+        button{width:100%;padding:.75rem;background:#2563eb;color:white;border:none;border-radius:4px;font-weight:600;cursor:pointer}
+        button:hover{background:#1d4ed8}
       </style>
     </head>
     <body>
@@ -1160,6 +1160,46 @@ app.get('/login', (req, res) => {
     </body>
     </html>
   `);
+});
+
+// Process Login - POST
+app.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', );
+
+    if (result.rows.length === 0) {
+      return res.status(401).send('Invalid credentials');
+    }
+
+    const user = result.rows[0];
+    const match = await bcrypt.compare(password, user.password);
+
+    if (!match) {
+      return res.status(401).send('Invalid credentials');
+    }
+
+    // Set session - matches requireLogin middleware
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.role = user.role;
+
+    // Redirect God Mode to branding
+    if (user.role === 'admin' && user.username === 'superadmin') {
+      return res.redirect('/admin/branding');
+    }
+
+    res.send('Login successful');
+
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
+// Branding Console Route - Add this too
+app.get('/admin/branding', requireLogin, requireRole(['admin']), (req, res) => {
+  res.send('<h1>Branding Console</h1><p>100/50 Upgrade Active</p><p>Brand Name, Color, Logo fields go here</p>');
 });
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
