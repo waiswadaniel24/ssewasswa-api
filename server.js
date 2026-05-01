@@ -42,7 +42,8 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS past_papers (id SERIAL PRIMARY KEY,class VARCHAR(20),subject VARCHAR(100),year INTEGER,type VARCHAR(50),price DECIMAL(10,2),file_url TEXT,active BOOLEAN DEFAULT true,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     ALTER TABLE momo_transactions ADD COLUMN IF NOT EXISTS provider VARCHAR(20) DEFAULT 'MTN';
     `);
-
+    CREATE TABLE IF NOT EXISTS page_views (id SERIAL PRIMARY KEY,page VARCHAR(255),ip_address VARCHAR(45),created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS newsletter_subscribers (id SERIAL PRIMARY KEY,email VARCHAR(255) UNIQUE,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
   const adminExists = await pool.query('SELECT * FROM users WHERE role = $1', ['admin']);
   if (adminExists.rows.length === 0) {
     const hash = await bcrypt.hash('admin123', 10);
