@@ -458,7 +458,7 @@ app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'cla
     const { term = 'Term 1', year = 2026 } = req.query;
     const subjects = await pool.query('SELECT * FROM subjects WHERE class = $1 AND active = true ORDER BY name', [className]);
     const students = await pool.query('SELECT * FROM students WHERE class = $1 ORDER BY name', [className]);
-    const marks = await pool.query(`SELECT student_id, subject_id, marks FROM exam_results WHERE term = $1 AND year = $2 AND student_id IN (SELECT id FROM students WHERE class = $3)`, [term, year, className]);
+    const marks = await pool.query(`SELECT student_id, subject_id, marks FROM exam_results WHERE term = $1 AND year = $2 AND student_id IN (SELECT id FROM students WHERE class = $3)`, [term][year][className]);
     const marksMap = {};
     marks.rows.forEach(m => { marksMap[`${m.student_id}-${m.subject_id}`] = m.marks; });
 
@@ -479,7 +479,7 @@ app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'cla
           <input type="hidden" name="year" value="${year}">
           <table>
             <tr><th class="student-name">Student Name</th>${subjects.rows.map(s => `<th>${s.name}<br><small>/${s.max_marks}</small></th>`).join('')}</tr>
-            ${students.rows.map            ${students.rows.map(st => `<tr>
+            ${students.rows.map(st => `<tr>
               <td class="student-name">${st.name}</td>
               ${subjects.rows.map(sub => `<td><input type="number" name="marks_${st.id}_${sub.id}" value="${marksMap[`${st.id}-${sub.id}`] || ''}" min="0" max="${sub.max_marks}" step="0.5"></td>`).join('')}
             </tr>`).join('')}
@@ -497,12 +497,11 @@ app.get('/admin/marksheets/:className', requireLogin, requireRole(['admin', 'cla
         </form>
       </div>
     </body></html>`);
-  } catch (err) { 
+  } catch (err) {
     console.error('Marksheets error:', err);
-    res.status(500).send('Error: ' + err.message); 
+    res.status(500).send('Error: ' + err.message);
   }
 });
-
 app.post('/admin/marksheets/:className/save-online', requireLogin, requireTask('marksheets'), async (req, res) => {
   try {
     const { className } = req.params;
