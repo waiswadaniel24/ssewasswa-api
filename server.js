@@ -27,7 +27,7 @@ async function initDB() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE, password_hash VARCHAR(255), role VARCHAR(20), fullname VARCHAR(100), created_at TIMESTAMP DEFAULT NOW());
       CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, name VARCHAR(100), class VARCHAR(50), school_type VARCHAR(20), parent_phone VARCHAR(20), balance DECIMAL(10,2) DEFAULT 0, gender VARCHAR(10), dob DATE, admission_no VARCHAR(50), address TEXT, created_at TIMESTAMP DEFAULT NOW());
@@ -51,21 +51,23 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(50) PRIMARY KEY, value TEXT);
     `);
 
-    // FIX: Add missing column if table exists from old deploy
+    // Fix: Add missing columns if tables exist from old deploys
     await client.query('ALTER TABLE admin_wallet ADD COLUMN IF NOT EXISTS balance DECIMAL(10,2) DEFAULT 0').catch(() => {});
-    
+    await client.query('ALTER TABLE subjects ADD COLUMN IF NOT EXISTS max_marks INT DEFAULT 100').catch(() => {});
+
     await client.query('INSERT INTO admin_wallet (id, balance) VALUES (1, 0) ON CONFLICT (id) DO NOTHING');
     await client.query("INSERT INTO app_settings (key, value) VALUES ('momo_mode', 'manual') ON CONFLICT (key) DO NOTHING");
 
-    const adminExists = await client.query('SELECT * FROM users WHERE role = $1', ['admin']);
+    const adminExists = await client.query('SELECT 1 FROM users WHERE role = $1 LIMIT 1', ['admin']);
     if (adminExists.rows.length === 0) {
       const hash = await bcrypt.hash('admin123', 10);
       await client.query('INSERT INTO users (username, password_hash, role, fullname) VALUES ($1, $2, $3, $4)', ['admin', hash, 'admin', 'System Admin']);
     }
 
+    // FIX: Explicit type casting for subjects insert
     const subjects = [['Mathematics', 'P.1'], ['English', 'P.1'], ['Science', 'P.1'], ['Social Studies', 'P.1'], ['Mathematics', 'S.1'], ['English', 'S.1'], ['Physics', 'S.1'], ['Chemistry', 'S.1'], ['Biology', 'S.1'], ['Mathematics', 'University'], ['Computer Science', 'University'], ['Economics', 'University']];
-    for (let [name, cls] of subjects) {
-      await client.query('INSERT INTO subjects (name, class) SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM subjects WHERE name = $1 AND class = $2)', [name, cls]);
+    for (let [name][cls] of subjects) {
+      await client.query('INSERT INTO subjects (name, class) VALUES ($1::varchar, $2::varchar) ON CONFLICT DO NOTHING', [name][cls]);
     }
 
     await client.query('COMMIT');
