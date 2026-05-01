@@ -222,6 +222,7 @@ app.get('/', async (req, res) => {
   res.send(`<!DOCTYPE html><html lang="en"><head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SSE Wasswa Foundation - Quality Education Kampala</title>
+  <meta name="google-site-verification" content="PASTE_YOUR_CODE_HERE" />
   <meta name="description" content="SSE Wasswa Foundation: Nursery to University education in Kampala. Digital results, mobile payments, Impact Fund community projects. Enroll today.">
   <meta name="keywords" content="schools kampala, nursery kampala, secondary school uganda, past papers uganda, UNEB papers">
   <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#667eea">
@@ -252,7 +253,6 @@ app.get('/', async (req, res) => {
           <button type="submit" class="btn" style="margin:0">Subscribe</button>
         </form>
       </div>
-    </div>
     <a href="https://wa.me/256789739737?text=Hello%20SSE%20Wasswa" class="whatsapp" target="_blank">💬</a>
   </body></html>`);
 });
