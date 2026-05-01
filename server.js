@@ -1051,38 +1051,6 @@ app.post('/admin/marksheets/:className/save-online', requireLogin, requireTask('
     res.send(`Marks saved for ${className}. <a href="/admin/marksheets/${className}">Back</a>`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
-// TEMP MIGRATION ROUTE - DELETE AFTER USE
-app.get('/run-100over50-migration-ssewasswa2026', async (req, res) => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS branding_config (
-        id SERIAL PRIMARY KEY,
-        school_id INT REFERENCES schools(id),
-        brand_name TEXT,
-        primary_color TEXT DEFAULT '#667eea',
-        logo_url TEXT
-      );
-    `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS impact_fund_transactions (
-        id SERIAL PRIMARY KEY,
-        amount INT NOT NULL,
-        school_id INT REFERENCES schools(id),
-        description TEXT,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-    await pool.query(`INSERT INTO admin_wallet (id, total_earned, balance) VALUES (1, 0, 0) ON CONFLICT DO NOTHING;`);
-    await pool.query(`
-      UPDATE schools SET features = features || '{"impact_fund": true, "auto_withdraw": true}'::jsonb 
-      WHERE school_name = 'Ssewasswa Junior School'
-    `);
-    res.send('<h1>✅ 100/50 Migration Complete</h1><p>Now DELETE this route from server.js</p>');
-  } catch (err) {
-    res.status(500).send('Error: ' + err.message);
-  }
-});
-// END TEMP ROUTE
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
