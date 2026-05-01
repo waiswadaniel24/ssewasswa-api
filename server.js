@@ -225,9 +225,9 @@ app.get('/', async (req, res) => {
   <meta name="description" content="SSE Wasswa Foundation: Nursery to University education in Kampala. Digital results, mobile payments, Impact Fund community projects. Enroll today.">
   <meta name="keywords" content="schools kampala, nursery kampala, secondary school uganda, past papers uganda, UNEB papers">
   <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#667eea">
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX" crossorigin="anonymous"></script>
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
-  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-XXXXXXXXXX');</script>
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1814429636128167" crossorigin="anonymous"></script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-DPSJBBVEE2"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-DPSJBBVEE2');</script>
   <style>body{font-family:Arial;margin:0;background:#f4f6f9}.hero{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:80px 20px;text-align:center}.hero h1{font-size:48px;margin:0}.hero p{font-size:20px}.container{max-width:1200px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}.btn{background:#27ae60;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;display:inline-block;margin:10px;font-size:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}.nav{background:#2c3e50;padding:15px;text-align:center;position:sticky;top:0;z-index:100}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}.stats{display:flex;justify-content:space-around;text-align:center;background:#ecf0f1;padding:30px;border-radius:8px;margin:20px 0}.stats div h3{font-size:36px;margin:0;color:#667eea}.ad-container{margin:20px 0;text-align:center}.whatsapp{position:fixed;bottom:20px;right:20px;background:#25D366;color:white;width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;text-decoration:none;box-shadow:0 4px 8px rgba(0,0,0,0.3);z-index:1000}</style>
   </head><body>
     ${publicNav}
@@ -239,13 +239,13 @@ app.get('/', async (req, res) => {
         <div><h3>${donors.rows[0].count}+</h3><p>Donors</p></div>
         <div><h3>${papers.rows[0].count}+</h3><p>Past Papers</p></div>
       </div>
-      <div class="ad-container"><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-XXXXXXXXXXXXXXXX" data-ad-slot="1234567890" data-ad-format="auto" data-full-width-responsive="true"></ins><script>(adsbygoogle = window.adsbygoogle || []).push({});</script></div>
+      <div class="ad-container"><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-1814429636128167" data-ad-slot="1234567890" data-ad-format="auto" data-full-width-responsive="true"></ins><script>(adsbygoogle = window.adsbygoogle || []).push({});</script></div>
       <div class="grid">
         <div class="card"><h2>🎓 Our Schools</h2><p>Nursery, Primary, Secondary & University programs. Modern facilities, digital learning, experienced teachers.</p><a href="/about" class="btn">Learn More</a></div>
         <div class="card"><h2>💚 Impact Fund</h2><p>1% of every fee payment goes to community projects. Boreholes, scholarships, health camps. 100% transparent.</p><a href="/donate" class="btn">Support Us</a></div>
         <div class="card"><h2>📄 Past Papers Shop</h2><p>UNEB & Mock papers P.7, S.4, S.6. Instant download after payment. Revise smart.</p><a href="/papers" class="btn">Browse Papers</a></div>
       </div>
-      <div class="ad-container"><ins class="adsbygoogle" style="display:block;text-align:center" data-ad-layout="in-article" data-ad-format="fluid" data-ad-client="ca-pub-XXXXXXXXXXXXXXXX" data-ad-slot="0987654321"></ins><script>(adsbygoogle = window.adsbygoogle || []).push({});</script></div>
+      <div class="ad-container"><ins class="adsbygoogle" style="display:block;text-align:center" data-ad-layout="in-article" data-ad-format="fluid" data-ad-client="ca-pub-1814429636128167" data-ad-slot="0987654321"></ins><script>(adsbygoogle = window.adsbygoogle || []).push({});</script></div>
       <div class="card"><h2>📧 Join Our Newsletter</h2><p>Get exam tips, scholarship alerts, school updates.</p>
         <form method="POST" action="/newsletter/subscribe" style="display:flex;gap:10px">
           <input name="email" type="email" placeholder="your@email.com" required style="flex:1;padding:12px;border:1px solid #ddd;border-radius:4px">
@@ -253,10 +253,9 @@ app.get('/', async (req, res) => {
         </form>
       </div>
     </div>
-    <a href="https://wa.me/25677XXXXXXX?text=Hello%20SSE%20Wasswa" class="whatsapp" target="_blank">💬</a>
+    <a href="https://wa.me/256789739737?text=Hello%20SSE%20Wasswa" class="whatsapp" target="_blank">💬</a>
   </body></html>`);
 });
-
 app.post('/newsletter/subscribe', async (req, res) => {
   const { email } = req.body;
   await pool.query('INSERT INTO newsletter_subscribers (email) VALUES ($1) ON CONFLICT (email) DO NOTHING', [email]);
