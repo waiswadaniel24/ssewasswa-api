@@ -318,11 +318,11 @@ app.get('/papers', async (req, res) => {
     <div class="container">
       <div class="card"><h1>📄 Past Papers Shop</h1><p>Download UNEB & Internal past papers. Instant PDF after payment.</p></div>
       <div class="grid">
-        ${papers.rows.map(p => `<div class="paper"><h3>${p.subject} - ${p.class}</h3><p>Year: ${p.year} | ${p.type}</p><p><strong>UGX ${Number(p.price).toLocaleString()}</strong></p><form method="POST" action="/papers/buy/${p.id}"><input name="phone" placeholder="MTN/Airtel: 0772123456" required><button type="submit" class="btn">Buy & Download</button></form></      </div>
+        ${papers.rows.map(p => `<div class="paper"><h3>${p.subject} - ${p.class}</h3><p>Year: ${p.year} | ${p.type}</p><p><strong>UGX ${Number(p.price).toLocaleString()}</strong></p><form method="POST" action="/papers/buy/${p.id}"><input name="phone" placeholder="MTN/Airtel: 0772123456" required><button type="submit" class="btn">Buy & Download</button></form></div>`).join('')}
+      </div>
     </div>
   </body></html>`);
 });
-
 app.post('/papers/buy/:id', async (req, res) => {
   const { phone } = req.body;
   const paper = await pool.query('SELECT * FROM past_papers WHERE id = $1', [req.params.id]);
