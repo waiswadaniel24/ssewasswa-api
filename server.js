@@ -42,6 +42,43 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS past_papers (id SERIAL PRIMARY KEY,class VARCHAR(20),subject VARCHAR(100),year INTEGER,type VARCHAR(50),price DECIMAL(10,2),file_url TEXT,active BOOLEAN DEFAULT true,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     ALTER TABLE momo_transactions ADD COLUMN IF NOT EXISTS provider VARCHAR(20) DEFAULT 'MTN';
     `);
+  CREATE TABLE IF NOT EXISTS donors (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(200),
+  amount DECIMAL(10,2),
+  date DATE DEFAULT CURRENT_DATE,
+  purpose VARCHAR(255)
+);
+
+CREATE TABLE IF NOT EXISTS assets (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(200),
+  category VARCHAR(100),
+  value DECIMAL(12,2),
+  location VARCHAR(200),
+  condition VARCHAR(50),
+  purchase_date DATE DEFAULT CURRENT_DATE
+);
+
+CREATE TABLE IF NOT EXISTS staff (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(200),
+  position VARCHAR(100),
+  salary DECIMAL(10,2),
+  phone VARCHAR(20),
+  email VARCHAR(200)
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id SERIAL PRIMARY KEY,
+  title VARCHAR(255),
+  description TEXT,
+  assigned_to VARCHAR(100),
+  assigned_by VARCHAR(100),
+  due_date DATE,
+  status VARCHAR(20) DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
     CREATE TABLE IF NOT EXISTS page_views (id SERIAL PRIMARY KEY,page VARCHAR(255),ip_address VARCHAR(45),created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS newsletter_subscribers (id SERIAL PRIMARY KEY,email VARCHAR(255) UNIQUE,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
   const adminExists = await pool.query('SELECT * FROM users WHERE role = $1', ['admin']);
