@@ -19,72 +19,194 @@ app.use(bodyParser.json());
 app.use(session({ secret: process.env.SESSION_SECRET || 'ssewasswa-secret', resave: false, saveUninitialized: false, cookie: { maxAge: 24 * 60 * 60 * 1000 } }));
 app.use('/uploads', express.static('uploads'));
 
-// === DB INIT ===
-async function initDB() {
+// === DB INIT ===async function initDB() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE, password VARCHAR(255), role VARCHAR(20), full_name VARCHAR(100), created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, name VARCHAR(100), class VARCHAR(50), school_type VARCHAR(20), parent_phone VARCHAR(20), balance DECIMAL(10,2) DEFAULT 0, gender VARCHAR(10), dob DATE, admission_no VARCHAR(50), address TEXT, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS subjects (id SERIAL PRIMARY KEY, name VARCHAR(100), class VARCHAR(50), max_marks INT DEFAULT 100, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS exam_results (id SERIAL PRIMARY KEY, student_id INT REFERENCES students(id), subject_id INT REFERENCES subjects(id), marks DECIMAL(5,2), term VARCHAR(20), year INT, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, student_id INT REFERENCES students(id), amount DECIMAL(10,2), method VARCHAR(50), term VARCHAR(20), receipt_no VARCHAR(50), created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS attendance (id SERIAL PRIMARY KEY, student_id INT REFERENCES students(id), date DATE, status VARCHAR(10), created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS library_books (id SERIAL PRIMARY KEY, title VARCHAR(200), author VARCHAR(100), isbn VARCHAR(50), available BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS library_loans (id SERIAL PRIMARY KEY, book_id INT REFERENCES library_books(id), student_id INT REFERENCES students(id), borrowed_date DATE, returned_date DATE, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS donors (id SERIAL PRIMARY KEY, name VARCHAR(100), amount DECIMAL(10,2), purpose TEXT, date DATE, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS assets (id SERIAL PRIMARY KEY, name VARCHAR(100), value DECIMAL(10,2), location VARCHAR(100), condition VARCHAR(50), created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS staff (id SERIAL PRIMARY KEY, name VARCHAR(100), role VARCHAR(50), salary DECIMAL(10,2), phone VARCHAR(20), created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS payroll (id SERIAL PRIMARY KEY, staff_id INT REFERENCES staff(id), amount DECIMAL(10,2), month VARCHAR(20), year INT, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS tasks (id SERIAL PRIMARY KEY, user_id INT REFERENCES users(id), task TEXT, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS audit_logs (id SERIAL PRIMARY KEY, username VARCHAR(50), action VARCHAR(100), details JSONB, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS admin_wallet (id INT PRIMARY KEY DEFAULT 1, balance DECIMAL(10,2) DEFAULT 0);
-    CREATE TABLE IF NOT EXISTS momo_transactions (id SERIAL PRIMARY KEY, transaction_id VARCHAR(100), amount DECIMAL(10,2), phone VARCHAR(20), status VARCHAR(20), type VARCHAR(20), provider VARCHAR(20) DEFAULT 'MTN', created_at TIMESTAMP DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY, 
+      username VARCHAR(50) UNIQUE, 
+      password_hash VARCHAR(255), 
+      role VARCHAR(20), 
+      fullname VARCHAR(100), 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS students (
+      id SERIAL PRIMARY KEY, 
+      name VARCHAR(100), 
+      class VARCHAR(50), 
+      school_type VARCHAR(20), 
+      parent_phone VARCHAR(20), 
+      balance DECIMAL(10,2) DEFAULT 0, 
+      gender VARCHAR(10), 
+      dob DATE, 
+      admission_no VARCHAR(50), 
+      address TEXT, 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS subjects (
+      id SERIAL PRIMARY KEY, 
+      name VARCHAR(100), 
+      class VARCHAR(50), 
+      max_marks INT DEFAULT 100, 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS exam_results (
+      id SERIAL PRIMARY KEY, 
+      student_id INT REFERENCES students(id), 
+      subject_id INT REFERENCES subjects(id), 
+      marks DECIMAL(5,2), 
+      term VARCHAR(20), 
+      year INT, 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS payments (
+      id SERIAL PRIMARY KEY, 
+      student_id INT REFERENCES students(id), 
+      amount DECIMAL(10,2), 
+      method VARCHAR(50), 
+      term VARCHAR(20), 
+      receipt_no VARCHAR(50), 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS attendance (
+      id SERIAL PRIMARY KEY, 
+      student_id INT REFERENCES students(id), 
+      date DATE, 
+      status VARCHAR(10), 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS library_books (
+      id SERIAL PRIMARY KEY, 
+      title VARCHAR(200), 
+      author VARCHAR(100), 
+      isbn VARCHAR(50), 
+      available BOOLEAN DEFAULT true, 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS library_loans (
+      id SERIAL PRIMARY KEY, 
+      book_id INT REFERENCES library_books(id), 
+      student_id INT REFERENCES students(id), 
+      borrowed_date DATE, 
+      returned_date DATE, 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS donors (
+      id SERIAL PRIMARY KEY, 
+      name VARCHAR(200), 
+      amount DECIMAL(10,2), 
+      date DATE DEFAULT CURRENT_DATE, 
+      purpose VARCHAR(255)
+    );
+    
+    CREATE TABLE IF NOT EXISTS assets (
+      id SERIAL PRIMARY KEY, 
+      name VARCHAR(200), 
+      category VARCHAR(100), 
+      value DECIMAL(12,2), 
+      location VARCHAR(200), 
+      condition VARCHAR(50), 
+      purchase_date DATE DEFAULT CURRENT_DATE
+    );
+    
+    CREATE TABLE IF NOT EXISTS staff (
+      id SERIAL PRIMARY KEY, 
+      name VARCHAR(200), 
+      position VARCHAR(100), 
+      salary DECIMAL(10,2), 
+      phone VARCHAR(20), 
+      email VARCHAR(200), 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS payroll (
+      id SERIAL PRIMARY KEY, 
+      staff_id INT REFERENCES staff(id), 
+      amount DECIMAL(10,2), 
+      month VARCHAR(20), 
+      year INT, 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY, 
+      title VARCHAR(255), 
+      description TEXT, 
+      assigned_to VARCHAR(100), 
+      assigned_by VARCHAR(100), 
+      due_date DATE, 
+      status VARCHAR(20) DEFAULT 'pending', 
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id SERIAL PRIMARY KEY, 
+      username VARCHAR(50), 
+      action VARCHAR(100), 
+      details JSONB, 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS admin_wallet (
+      id INT PRIMARY KEY DEFAULT 1, 
+      balance DECIMAL(10,2) DEFAULT 0
+    );
+    
+    CREATE TABLE IF NOT EXISTS momo_transactions (
+      id SERIAL PRIMARY KEY, 
+      transaction_id VARCHAR(100), 
+      amount DECIMAL(10,2), 
+      phone VARCHAR(20), 
+      status VARCHAR(20), 
+      type VARCHAR(20), 
+      provider VARCHAR(20) DEFAULT 'MTN', 
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS past_papers (
+      id SERIAL PRIMARY KEY,
+      class VARCHAR(20),
+      subject VARCHAR(100),
+      year INTEGER,
+      type VARCHAR(50),
+      price DECIMAL(10,2),
+      file_url TEXT,
+      active BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE IF NOT EXISTS page_views (
+      id SERIAL PRIMARY KEY,
+      page VARCHAR(255),
+      ip_address VARCHAR(45),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+      id SERIAL PRIMARY KEY,
+      email VARCHAR(255) UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key VARCHAR(50) PRIMARY KEY,
+      value TEXT
+    );
+    
     INSERT INTO admin_wallet (id, balance) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
-    CREATE TABLE IF NOT EXISTS past_papers (id SERIAL PRIMARY KEY,class VARCHAR(20),subject VARCHAR(100),year INTEGER,type VARCHAR(50),price DECIMAL(10,2),file_url TEXT,active BOOLEAN DEFAULT true,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-    ALTER TABLE momo_transactions ADD COLUMN IF NOT EXISTS provider VARCHAR(20) DEFAULT 'MTN';
-    `);
-  CREATE TABLE IF NOT EXISTS donors (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(200),
-  amount DECIMAL(10,2),
-  date DATE DEFAULT CURRENT_DATE,
-  purpose VARCHAR(255)
-);
+  `);
 
-CREATE TABLE IF NOT EXISTS assets (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(200),
-  category VARCHAR(100),
-  value DECIMAL(12,2),
-  location VARCHAR(200),
-  condition VARCHAR(50),
-  purchase_date DATE DEFAULT CURRENT_DATE
-);
-
-CREATE TABLE IF NOT EXISTS staff (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(200),
-  position VARCHAR(100),
-  salary DECIMAL(10,2),
-  phone VARCHAR(20),
-  email VARCHAR(200)
-);
-
-CREATE TABLE IF NOT EXISTS tasks (
-  id SERIAL PRIMARY KEY,
-  title VARCHAR(255),
-  description TEXT,
-  assigned_to VARCHAR(100),
-  assigned_by VARCHAR(100),
-  due_date DATE,
-  status VARCHAR(20) DEFAULT 'pending',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-    CREATE TABLE IF NOT EXISTS page_views (id SERIAL PRIMARY KEY,page VARCHAR(255),ip_address VARCHAR(45),created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-    CREATE TABLE IF NOT EXISTS newsletter_subscribers (id SERIAL PRIMARY KEY,email VARCHAR(255) UNIQUE,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
   const adminExists = await pool.query('SELECT * FROM users WHERE role = $1', ['admin']);
   if (adminExists.rows.length === 0) {
     const hash = await bcrypt.hash('admin123', 10);
-    await pool.query('INSERT INTO users (username, password, role, full_name) VALUES ($1, $2, $3, $4)', ['admin', hash, 'admin', 'System Admin']);
+    await pool.query('INSERT INTO users (username, password_hash, role, fullname) VALUES ($1, $2, $3, $4)', ['admin', hash, 'admin', 'System Admin']);
   }
 
   const subjects = [
@@ -95,7 +217,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   for (let [name, cls] of subjects) {
     await pool.query('INSERT INTO subjects (name, class) SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM subjects WHERE name = $1 AND class = $2)', [name, cls]);
   }
-}
+}}
 
 // === MIDDLEWARE ===
 function requireLogin(req, res, next) {
