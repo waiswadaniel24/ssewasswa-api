@@ -1115,6 +1115,21 @@ app.get('/create-superadmin-ssewasswa2026', async (req, res) => {
     res.status(500).send('Error: ' + err.message);
   }
 });
+// ==================== 100/50 UPGRADE FEATURES ====================
+// ... all the branding + impact fund code we added ...
+// ==================== END 100/50 ====================
+
+// TEMP CHANGE PASSWORD - DELETE AFTER USE
+app.get('/change-god-pass', async (req, res) => {
+  const hash = await bcrypt.hash('YourNewStrongPass2026!', 10);
+  await pool.query(`UPDATE users SET password = $1 WHERE username = 'superadmin'`, );
+  res.send('Password changed. Delete this route.');
+});
+
+// This should be the LAST lines in server.js
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
