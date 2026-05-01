@@ -858,59 +858,41 @@ app.post('/admin/assets/add', requireLogin, requireRole(['admin']), async (req, 
   res.redirect('/admin/assets');
 });
 
-// MODULE 7: CUSTOM FIELDS - FIXED
+// CUSTOM FIELDS - CLEAN VERSION
 app.get('/admin/fields', requireLogin, requireRole(['admin']), async (req, res) => {
   try {
     const fields = await pool.query('SELECT * FROM student_field_definitions WHERE active = true ORDER BY field_name');
-    res.send(`<!DOCTYPE html><html><head><title>Custom Student Fields</title>
-    <style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px;border:none;cursor:pointer}.btn-green{background:#27ae60}.btn-red{background:#e74c3c}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}.actions{display:flex;gap:5px}</style>
-    </head><body>
-      <div class="card"><h1>⚙️ Custom Student Fields</h1><a href="/admin" class="btn">← Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">+ Add Field</a></div>
-      <div class="card">
-        <table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Options</th><th>Actions</th></tr>
-        ${fields.rows.map(f => `<tr>
-          <td>${f.field_name}</td>
-          <td>${f.field_type}</td>
-          <td>${f.required? 'Yes' : 'No'}</td>
-          <td>${f.field_options? JSON.parse(f.field_options).join(', ') : '-'}</td>
-          <td class="actions">
-            <form method="POST" action="/admin/fields/delete/${f.id}" style="display:inline" onsubmit="return confirm('Delete this field?')">
-              <button type="submit" class="btn btn-red">Delete</button>
-            </form>
-          </td>
-        </tr>`).join('')}
-        </table>
-      </div>
-    </body></html>`);
-  } catch (err) { res.status(500).send('Error: ' + err.message); }
+    res.send('<!DOCTYPE html><html><head><title>Custom Student Fields</title><style>body{font-family:Arial;max-width:1000px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:13px;border:none;cursor:pointer}.btn-green{background:#27ae60}.btn-red{background:#e74c3c}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:#34495e;color:white}</style></head><body><div class="card"><h1>Custom Student Fields</h1><a href="/admin" class="btn">Back to Dashboard</a> <a href="/admin/fields/add" class="btn btn-green">Add Field</a></div><div class="card"><table><tr><th>Field Name</th><th>Type</th><th>Required</th><th>Options</th><th>Actions</th></tr>' + 
+    fields.rows.map(f => {
+      let opts = '-';
+      if (f.field_options) {
+        try { opts = JSON.parse(f.field_options).join(', '); } catch(e) { opts = f.field_options; }
+      }
+      return '<tr><td>' + f.field_name + '</td><td>' + f.field_type + '</td><td>' + (f.required? 'Yes' : 'No') + '</td><td>' + opts + '</td><td><form method="POST" action="/admin/fields/delete/' + f.id + '" style="display:inline" onsubmit="return confirm(\'Delete this field?\')"><button type="submit" class="btn btn-red">Delete</button></form></td></tr>';
+    }).join('') + 
+    '</table></div></body></html>');
+  } catch (err) { 
+    res.status(500).send('Error: ' + err.message); 
+  }
 });
 
 app.get('/admin/fields/add', requireLogin, requireRole(['admin']), (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Add Field</title>
-  <style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
-  </head><body><div class="card"><h2>Add Custom Field</h2>
-  <form method="POST" action="/admin/fields/add">
-    <input name="field_name" placeholder="Field Name e.g Blood Group" required>
-    <select name="field_type" required>
-      <option value="text">Text</option>
-      <option value="number">Number</option>
-      <option value="date">Date</option>
-      <option value="select">Dropdown</option>
-    </select>
-    <textarea name="field_options" placeholder="For Dropdown: comma separated e.g A+,B+,O+"></textarea>
-    <label><input type="checkbox" name="required" value="true"> Required Field</label>
-    <button type="submit">Add Field</button>
-  </form><a href="/admin/fields">Back</a></div></body></html>`);
+  res.send('<!DOCTYPE html><html><head><title>Add Field</title><style>body{font-family:Arial;max-width:500px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}input,select,button,textarea{width:100%;padding:10px;margin:8px 0;box-sizing:border-box}button{background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style></head><body><div class="card"><h2>Add Custom Field</h2><form method="POST" action="/admin/fields/add"><input name="field_name" placeholder="Field Name e.g Blood Group" required><select name="field_type" required><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="select">Dropdown</option></select><textarea name="field_options" placeholder="For Dropdown: comma separated e.g A+,B+,O+"></textarea><label><input type="checkbox" name="required" value="true"> Required Field</label><button type="submit">Add Field</button></form><a href="/admin/fields">Back</a></div></body></html>');
 });
 
 app.post('/admin/fields/add', requireLogin, requireRole(['admin']), async (req, res) => {
   try {
     const { field_name, field_type, field_options, required } = req.body;
-    const options = field_options && field_options.trim()? JSON.stringify(field_options.split(',').map(o => o.trim())) : null;
+    let options = null;
+    if (field_options && field_options.trim()) {
+      options = JSON.stringify(field_options.split(',').map(o => o.trim()));
+    }
     await pool.query('INSERT INTO student_field_definitions (field_name, field_type, field_options, required) VALUES ($1, $2, $3, $4)',
       [field_name, field_type, options, required === 'true']);
     res.redirect('/admin/fields');
-  } catch (err) { res.status(500).send('Error: ' + err.message); }
+  } catch (err) { 
+    res.status(500).send('Error: ' + err.message); 
+  }
 });
 
 app.post('/admin/fields/delete/:id', requireLogin, requireRole(['admin']), async (req, res) => {
