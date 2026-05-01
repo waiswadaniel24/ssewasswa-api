@@ -1051,6 +1051,54 @@ app.post('/admin/marksheets/:className/save-online', requireLogin, requireTask('
     res.send(`Marks saved for ${className}. <a href="/admin/marksheets/${className}">Back</a>`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
+// ==================== 100/50 UPGRADE FEATURES ====================
+
+// Branding Console - God Mode only
+app.get('/admin/branding', requireLogin, requireRole(['admin']), async (req, res) => {
+  if (req.session.user.username!== 'superadmin') return res.status(403).send('God Mode only');
+  const config = await pool.query('SELECT * FROM branding_config WHERE school_id = $1', [req.school.id]);
+  const brand = config.rows[0] || {};
+  res.send(`<!DOCTYPE html><h1>Branding Console</h1>
+    <form method="POST" action="/admin/branding">
+      <label>Brand Name: <input name="brand_name" value="${brand.brand_name || req.school.school_name}"></label><br>
+      <label>Primary Color: <input name="primary_color" value="${brand.primary_color || '#667eea'}"></label><br>
+      <button>Save Brand</button>
+    </form>`);
+});
+
+app.post('/admin/branding', requireLogin, requireRole(['admin']), async (req, res) => {
+  if (req.session.user.username!== 'superadmin') return res.status(403).send('God Mode only');
+  const { brand_name, primary_color } = req.body;
+  await pool.query(`INSERT INTO branding_config (school_id, brand_name, primary_color) VALUES ($1,$2,$3)
+    ON CONFLICT (school_id) DO UPDATE SET brand_name=$2, primary_color=$3`,
+    [req.school.id, brand_name, primary_color]);
+  res.redirect('/admin/branding?success=1');
+});
+
+// Impact Fund Split - 1.5% on every payment
+const creditAdmin = async (amount, type, description, reference_id = null, school_id = null) => {
+  const platformFee = Math.ceil(amount * 0.015); // 1.5%
+  const impactFund = Math.ceil(platformFee * 0.1); // 10% of fee to Impact Fund
+  const netFee = platformFee - impactFund;
+
+  await pool.query('INSERT INTO admin_transactions (type, amount, description, reference_id) VALUES ($1,$2,$3,$4)',
+    [type, netFee, description, reference_id]);
+  await pool.query('INSERT INTO impact_fund_transactions (amount, school_id, description) VALUES ($1,$2,$3)',
+    [impactFund, school_id, `10% of fee from ${description}`]);
+  await pool.query('UPDATE admin_wallet SET total_earned = total_earned + $1, balance = balance + $1 WHERE id = 1', [netFee]);
+};
+
+// Auto-Withdraw ON - Fridays 5pm EAT
+cron.schedule('0 17 * * 5', async () => {
+  const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
+  if (balance.rows[0]?.balance > 10000) {
+    console.log(`Auto-withdraw UGX ${balance.rows[0].balance} triggered for Friday 5pm`);
+    // Add your MTN MoMo API call here later
+  }
+}, { timezone: "Africa/Kampala" });
+
+// Feature flags - already set by migration SQL
+// ==================== END 100/50 ====================
 // START SERVER - MUST BE LAST
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
