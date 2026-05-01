@@ -757,16 +757,6 @@ app.get('/admin/logs', requireLogin, requireRole(['admin']), async (req, res) =>
     </table></div>
   </body></html>`);
 });
-
-// === ONE-TIME MIGRATION ROUTE - DELETE AFTER USE ===
-app.get('/admin/migrate-mobile-money', requireLogin, requireRole(['admin']), async (req, res) => {
-  try {
-    await pool.query(`ALTER TABLE momo_transactions ADD COLUMN IF NOT EXISTS provider VARCHAR(20) DEFAULT 'MTN'`);
-    res.send('Migration complete: provider column added to momo_transactions. <br><br>IMPORTANT: Delete this route from server.js now for security. <a href="/admin">Back to Dashboard</a>');
-  } catch (err) {
-    res.status(500).send('Migration error: ' + err.message);
-  }
-});
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', db: 'connected', time: new Date().toISOString() });
 });
