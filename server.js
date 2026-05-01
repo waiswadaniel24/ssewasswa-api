@@ -330,12 +330,6 @@ cron.schedule('0 17 * * 5', async () => {
     console.log(`Auto-withdraw UGX ${balance.rows[0].balance} triggered for Friday 5pm`);
   }
 }, { timezone: "Africa/Kampala" });
-// TEMP - DELETE AFTER ONE USE
-app.get('/set-pass-now', async (req, res) => {
-  const hash = await bcrypt.hash('Ssewasswa2026!Secure', 10);
-  await pool.query(`UPDATE users SET password = $1, role = 'admin' WHERE username = 'superadmin'`, );
-  res.send('Password reset to: Ssewasswa2026!Secure. Role set to admin. DELETE THIS ROUTE NOW.');
-});
 // START SERVER
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
