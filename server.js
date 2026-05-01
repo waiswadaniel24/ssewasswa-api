@@ -1472,7 +1472,9 @@ if (process.env.NODE_ENV === 'production') {
   }, 14 * 60 * 1000);
 }
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  setTimeout(() => initDB().catch(e => console.log('DB init:', e.message)), 2000);
+initDB().then(() => {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}).catch(err => {
+  console.error('Database init failed:', err);
+  process.exit(1);
 });
