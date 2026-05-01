@@ -757,6 +757,129 @@ app.get('/admin/logs', requireLogin, requireRole(['admin']), async (req, res) =>
     </table></div>
   </body></html>`);
 });
+// === PUBLIC WEBSITE ===
+app.get('/', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>SSE Wasswa Foundation</title><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#667eea">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.hero{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:80px 20px;text-align:center}.hero h1{font-size:48px;margin:0}.hero p{font-size:20px}.container{max-width:1200px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}.btn{background:#27ae60;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;display:inline-block;margin:10px;font-size:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}.nav{background:#2c3e50;padding:15px;text-align:center}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}</style>
+  </head><body>
+    <div class="nav"><a href="/">Home</a><a href="/donate">Donate</a><a href="/about">About</a><a href="/parent/login">Parent Portal</a><a href="/login">Staff Login</a></div>
+    <div class="hero"><h1>SSE Wasswa Foundation</h1><p>Empowering Education Through Technology & Community</p><a href="/donate" class="btn">Donate Now</a><a href="/parent/login" class="btn" style="background:#3498db">Parent Portal</a></div>
+    <div class="container">
+      <div class="grid">
+        <div class="card"><h2>🎓 Our Schools</h2><p>Nursery, Primary, Secondary & University programs serving 500+ students across Kampala.</p></div>
+        <div class="card"><h2>💚 Impact Fund</h2><p>1% of every fee payment goes to community projects. 100% transparent tracking.</p><a href="/donate" class="btn">Support Us</a></div>
+        <div class="card"><h2>📱 Digital First</h2><p>Real-time results, mobile payments, SMS alerts. Parents stay connected 24/7.</p></div>
+      </div>
+    </div>
+  </body></html>`);
+});
+
+app.get('/about', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>About Us</title>
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.container{max-width:900px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px}.nav{background:#2c3e50;padding:15px;text-align:center}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}.btn{background:#3498db;color:white;padding:10px 20px;text-decoration:none;border-radius:4px}</style>
+  </head><body>
+    <div class="nav"><a href="/">Home</a><a href="/donate">Donate</a><a href="/about">About</a><a href="/parent/login">Parent Portal</a></div>
+    <div class="container"><div class="card"><h1>About SSE Wasswa Foundation</h1><p>Founded to bridge the digital divide in Ugandan education.</p><h3>Our Mission</h3><p>Provide quality education with modern technology, transparent finance, and community impact.</p><h3>Impact Fund</h3><p>Every school fee contributes 1% to our Impact Fund, supporting local community projects. Track every shilling.</p><a href="/donate" class="btn">Support Our Mission</a></div></div>
+  </body></html>`);
+});
+
+app.get('/donate', async (req, res) => {
+  const fund = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
+  const recent = await pool.query('SELECT * FROM donors ORDER BY date DESC LIMIT 10');
+  res.send(`<!DOCTYPE html><html><head><title>Donate</title>
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.container{max-width:900px;margin:40px auto;padding:0 20px}.card{background:white;padding:30px;border-radius:8px;margin-bottom:20px}.nav{background:#2c3e50;padding:15px;text-align:center}.nav a{color:white;margin:0 15px;text-decoration:none;font-weight:bold}.stat{background:#27ae60;color:white;padding:30px;border-radius:8px;text-align:center;font-size:32px;margin-bottom:20px}input,textarea{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.btn{background:#27ae60;color:white;padding:15px 30px;text-decoration:none;border-radius:5px;border:none;cursor:pointer;width:100%;font-size:18px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:#16a085;color:white}</style>
+  </head><body>
+    <div class="nav"><a href="/">Home</a><a href="/donate">Donate</a><a href="/about">About</a><a href="/parent/login">Parent Portal</a></div>
+    <div class="container">
+      <div class="stat"><strong>Impact Fund Total</strong><br>UGX ${Number(fund.rows[0]?.balance || 0).toLocaleString()}</div>
+      <div class="card"><h1>💚 Donate to SSE Wasswa</h1><p>Your donation directly supports students, infrastructure, and community projects. 100% transparent.</p>
+        <form method="POST" action="/donate/submit">
+          <input name="name" placeholder="Your Name" required>
+          <input name="amount" type="number" placeholder="Amount (UGX)" required>
+          <textarea name="purpose" placeholder="Purpose (optional)" rows="3"></textarea>
+          <input name="phone" placeholder="Phone for receipt: 0772123456" required>
+          <button type="submit" class="btn">Donate via Mobile Money</button>
+        </form>
+        <p><small>After submitting, our team will contact you with payment instructions. For instant donation, visit our office.</small></p>
+      </div>
+      <div class="card"><h3>Recent Donors - Thank You!</h3><table><tr><th>Date</th><th>Donor</th><th>Amount</th><th>Purpose</th></tr>
+        ${recent.rows.map(d => `<tr><td>${new Date(d.date).toLocaleDateString()}</td><td>${d.name}</td><td>UGX ${Number(d.amount).toLocaleString()}</td><td>${d.purpose || 'General Fund'}</td></tr>`).join('')}
+      </table></div>
+    </div>
+  </body></html>`);
+});
+
+app.post('/donate/submit', async (req, res) => {
+  const { name, amount, purpose, phone } = req.body;
+  await pool.query('INSERT INTO donors (name, amount, date, purpose) VALUES ($1, $2, CURRENT_DATE, $3)', [name, amount, purpose]);
+  await pool.query('UPDATE admin_wallet SET balance = balance + $1 WHERE id = 1', [amount]);
+  await pool.query('INSERT INTO momo_transactions (transaction_id, amount, phone, status, type, provider) VALUES ($1, $2, $3, $4, $5, $6)', ['DONATION' + Date.now(), amount, phone, 'pending', 'donation', 'MANUAL']);
+  await sendSMS(phone, `Thank you ${name}! Donation of UGX ${Number(amount).toLocaleString()} received. Our team will contact you. SSE Wasswa Foundation.`);
+  if (process.env.ADMIN_PHONE) await sendSMS(process.env.ADMIN_PHONE, `New donation: UGX ${amount} from ${name}, Phone: ${phone}. Purpose: ${purpose || 'General'}`);
+  res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px;text-align:center"><h1>Thank You, ${name}!</h1><p>Your donation of UGX ${Number(amount).toLocaleString()} is recorded.</p><p>Our team will contact you at ${phone} with payment instructions.</p><a href="/" style="background:#3498db;color:white;padding:10px 20px;text-decoration:none;border-radius:4px">Back to Home</a></div>`);
+});
+
+// === MANUAL MOBILE MONEY SETTINGS ===
+app.get('/admin/mobile-money/settings', requireLogin, requireRole(['admin']), async (req, res) => {
+  const settings = await pool.query(`SELECT * FROM app_settings WHERE key LIKE 'momo_%'`);
+  const s = {};
+  settings.rows.forEach(row => s[row.key] = row.value);
+  res.send(`<!DOCTYPE html><html><head><title>MoMo Settings</title>
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:#3498db;color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}label{display:block;margin:15px 0;font-weight:bold}input[type="checkbox"]{width:20px;height:20px}select,input{width:100%;padding:10px;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}</style>
+  </head><body>
+    <div class="card"><h1>⚙️ Mobile Money Settings</h1><a href="/admin/mobile-money" class="btn">← Back to MoMo</a></div>
+    <div class="card"><form method="POST" action="/admin/mobile-money/settings">
+      <label><input type="checkbox" name="momo_mtn_enabled" ${s.momo_mtn_enabled === 'true'? 'checked' : ''}> Enable MTN MoMo</label>
+      <label><input type="checkbox" name="momo_airtel_enabled" ${s.momo_airtel_enabled === 'true'? 'checked' : ''}> Enable Airtel Money</label>
+      <label><input type="checkbox" name="momo_mpesa_enabled" ${s.momo_mpesa_enabled === 'true'? 'checked' : ''}> Enable M-Pesa</label>
+      <label>Mode: <select name="momo_mode"><option value="manual" ${s.momo_mode === 'manual'? 'selected' : ''}>Manual - Admin confirms payments</option><option value="auto" ${s.momo_mode === 'auto'? 'selected' : ''}>Auto - Live API</option></select></label>
+      <button type="submit" class="btn" style="background:#27ae60;width:100%">Save Settings</button>
+    </form></div>
+    <div class="card"><p><strong>Manual Mode:</strong> Withdrawals are logged as 'pending'. You process them manually via *165# or app, then mark complete in transactions.</p></div>
+  </body></html>`);
+});
+
+app.post('/admin/mobile-money/withdraw', requireLogin, requireRole(['admin']), async (req, res) => {
+  const { amount, phone, provider } = req.body;
+  const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
+  if (Number(amount) > balance.rows[0].balance) return res.status(400).send('Insufficient balance');
+
+  const settings = await pool.query(`SELECT value FROM app_settings WHERE key = 'momo_mode'`);
+  const mode = settings.rows[0]?.value || 'manual';
+
+  const transaction_id = provider + Date.now();
+  const status = mode === 'manual'? 'pending_manual' : 'pending';
+  await pool.query('INSERT INTO momo_transactions (transaction_id, amount, phone, status, type, provider) VALUES ($1, $2, $3, $4, $5, $6)', [transaction_id, amount, phone, status, 'withdrawal', provider]);
+  await pool.query('UPDATE admin_wallet SET balance = balance - $1 WHERE id = 1', [amount]);
+  await logAction(req.session.username, `${provider}_WITHDRAW`, { amount, phone, mode });
+
+  if (mode === 'manual') {
+    res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px"><h2>Manual Withdrawal Logged</h2><p><strong>Provider:</strong> ${provider}</p><p><strong>Amount:</strong> UGX ${Number(amount).toLocaleString()}</p><p><strong>Phone:</strong> ${phone}</p><p><strong>ID:</strong> ${transaction_id}</p><p>Now process this manually via *165# or ${provider} app, then mark as complete in transactions.</p><a href="/admin/mobile-money" style="background:#3498db;color:white;padding:10px 20px;text-decoration:none;border-radius:4px">Back</a></div>`);
+  } else {
+    res.send(`${provider} API withdrawal initiated. <a href="/admin/mobile-money">Back</a>`);
+  }
+});
+// Update withdrawal to check mode
+app.post('/admin/mobile-money/withdraw', requireLogin, requireRole(['admin']), async (req, res) => {
+  const { amount, phone, provider } = req.body;
+  const balance = await pool.query('SELECT balance FROM admin_wallet WHERE id = 1');
+  if (Number(amount) > balance.rows[0].balance) return res.status(400).send('Insufficient balance');
+
+  const settings = await pool.query(`SELECT value FROM app_settings WHERE key = 'momo_mode'`);
+  const mode = settings.rows[0]?.value || 'manual';
+
+  const transaction_id = provider + Date.now();
+  const status = mode === 'manual'? 'pending_manual' : 'pending';
+  await pool.query('INSERT INTO momo_transactions (transaction_id, amount, phone, status, type, provider) VALUES ($1, $2, $3, $4, $5, $6)', [transaction_id, amount, phone, status, 'withdrawal', provider]);
+  await pool.query('UPDATE admin_wallet SET balance = balance - $1 WHERE id = 1', [amount]);
+  await logAction(req.session.username, `${provider}_WITHDRAW`, { amount, phone, mode });
+
+  if (mode === 'manual') {
+    res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px"><h2>Manual Withdrawal Logged</h2><p><strong>Provider:</strong> ${provider}</p><p><strong>Amount:</strong> UGX ${Number(amount).toLocaleString()}</p><p><strong>Phone:</strong> ${phone}</p><p><strong>ID:</strong> ${transaction_id}</p><p>Now process this manually via *165# or ${provider} app, then mark as complete in transactions.</p><a href="/admin/mobile-money" style="background:#3498db;color:white;padding:10px 20px;text-decoration:none;border-radius:4px">Back</a></div>`);
+  } else {
+    res.send(`${provider} API withdrawal initiated. <a href="/admin/mobile-money">Back</a>`);
+  }
+});
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', db: 'connected', time: new Date().toISOString() });
 });
