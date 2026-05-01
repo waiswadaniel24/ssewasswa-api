@@ -451,6 +451,32 @@ app.post('/certificates/request', async (req, res) => {
 });
 
 // === ADMIN DASHBOARD ===
+// === ADMIN SETTINGS ===
+app.get('/admin/settings', requireAdmin, async (req, res) => {
+  const settings = await pool.query('SELECT * FROM settings WHERE id = 1');
+  const whatsapp = settings.rows[0]?.whatsapp_number || '256789739737';
+
+  res.send(`<!DOCTYPE html><html><head><title>Settings</title>
+  <style>body{font-family:Arial;padding:20px}.card{background:white;padding:20px;border-radius:8px;max-width:500px;margin:0 auto}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:4px}.btn{background:#27ae60;color:white;padding:12px 20px;border:none;border-radius:4px;width:100%}</style>
+  </head><body>
+    <div class="card">
+      <h2>Site Settings</h2>
+      <form method="POST" action="/admin/settings/update">
+        <label>WhatsApp Number (256...)</label>
+        <input name="whatsapp" value="${whatsapp}" placeholder="256789739737" required>
+        <button type="submit" class="btn">Update Settings</button>
+      </form>
+      <br><a href="/admin">Back to Dashboard</a>
+    </div>
+  </body></html>`);
+});
+
+app.post('/admin/settings/update', requireAdmin, async (req, res) => {
+  const { whatsapp } = req.body;
+  await pool.query(`CREATE TABLE IF NOT EXISTS settings (id INT PRIMARY KEY, whatsapp_number TEXT)`);
+  await pool.query(`INSERT INTO settings (id, whatsapp_number) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET whatsapp_number = $1`, [whatsapp]);
+  res.redirect('/admin/settings?updated=1');
+});
 app.get('/admin', requireLogin, (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Admin Dashboard</title><link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#667eea">
   <style>body{font-family:Arial;margin:0;background:#f4f6f9}.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:20px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;padding:20px;max-width:1400px;margin:0 auto}.card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);text-decoration:none;color:#333;transition:transform 0.2s}.card:hover{transform:translateY(-5px)}.card h3{margin:0 0 10px;color:#667eea}.logout{position:absolute;top:20px;right:20px;color:white;text-decoration:none}</style>
