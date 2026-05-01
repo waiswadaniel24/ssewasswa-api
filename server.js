@@ -39,8 +39,9 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS admin_wallet (id INT PRIMARY KEY DEFAULT 1, balance DECIMAL(10,2) DEFAULT 0);
     CREATE TABLE IF NOT EXISTS momo_transactions (id SERIAL PRIMARY KEY, transaction_id VARCHAR(100), amount DECIMAL(10,2), phone VARCHAR(20), status VARCHAR(20), type VARCHAR(20), provider VARCHAR(20) DEFAULT 'MTN', created_at TIMESTAMP DEFAULT NOW());
     INSERT INTO admin_wallet (id, balance) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+    CREATE TABLE IF NOT EXISTS past_papers (id SERIAL PRIMARY KEY,class VARCHAR(20),subject VARCHAR(100),year INTEGER,type VARCHAR(50),price DECIMAL(10,2),file_url TEXT,active BOOLEAN DEFAULT true,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     ALTER TABLE momo_transactions ADD COLUMN IF NOT EXISTS provider VARCHAR(20) DEFAULT 'MTN';
-  `);
+    `);
 
   const adminExists = await pool.query('SELECT * FROM users WHERE role = $1', ['admin']);
   if (adminExists.rows.length === 0) {
