@@ -51,7 +51,9 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(50) PRIMARY KEY, value TEXT);
     `);
 
-    // Safe insert - runs after tables exist
+    // FIX: Add missing column if table exists from old deploy
+    await client.query('ALTER TABLE admin_wallet ADD COLUMN IF NOT EXISTS balance DECIMAL(10,2) DEFAULT 0').catch(() => {});
+    
     await client.query('INSERT INTO admin_wallet (id, balance) VALUES (1, 0) ON CONFLICT (id) DO NOTHING');
     await client.query("INSERT INTO app_settings (key, value) VALUES ('momo_mode', 'manual') ON CONFLICT (key) DO NOTHING");
 
@@ -76,7 +78,6 @@ async function initDB() {
     client.release();
   }
 }
-
 // === MIDDLEWARE ===
 function requireLogin(req, res, next) {
   if (!req.session.userId) return res.redirect('/login');
