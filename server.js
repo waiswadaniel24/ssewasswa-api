@@ -844,8 +844,6 @@ initDB().then(() => {
   process.exit(1);
 });
 
-### **How to use:**
-
 1. **You (Super Admin):** Login → `/super-admin` → See all schools, grant free access, suspend
 2. **Edit everything:** `/admin/settings` → Change WhatsApp `0789736737`, site name, colors, prices
 3. **Schools:** Google login → 14-day trial → `/app` dashboard → Manage everything themselves
@@ -1098,6 +1096,7 @@ if (process.env.NODE_ENV === 'production') {
     fetch('https://ssewasswa-api.onrender.com/health').catch(() => {});
   }, 14 * 60 * 1000);
 }
+// End of file - no text below this
 // === SCHOOL PROFILE & STAFF MANAGEMENT ===
 
 // School creates their own profile after Google login
