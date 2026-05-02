@@ -844,13 +844,6 @@ initDB().then(() => {
   process.exit(1);
 });
 
-1. **You (Super Admin):** Login → `/super-admin` → See all schools, grant free access, suspend
-2. **Edit everything:** `/admin/settings` → Change WhatsApp `0789736737`, site name, colors, prices
-3. **Schools:** Google login → 14-day trial → `/app` dashboard → Manage everything themselves
-4. **Payments:** PayPal for subscriptions, MoMo for school fees, SMS auto-sent
-5. **Privacy:** Each school's data 100% isolated. Can't see each other.
-6. **Earnings:** Marketplace 5% commission, Surveys 10% tax, Entertainment ads, all go to your wallet
-
 **Deploy now. Schools can sign up today with zero setup from you.**// === STUDENTS CRUD ===
 app.get('/app/students', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
   const students = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY class, name', [req.tenantId]);
