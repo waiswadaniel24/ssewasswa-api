@@ -244,6 +244,13 @@ async function getSettings(tenantId) {
   const result = await pool.query('SELECT * FROM settings WHERE tenant_id = $1', [tenantId]);
   return result.rows[0] || { whatsapp_number: '0789736737', site_name: 'School ERP', primary_color: '#667eea', hero_title: 'School Management', hero_subtitle: 'Manage everything', allow_marketplace: true, allow_surveys: true };
 }
+return { 
+  // ... existing fields ...
+  paypal_client_id: null, 
+  paypal_client_secret: null,
+  site_name: 'SSE Wasswa ERP', 
+  // ... rest
+};
 
 async function logAction(tenantId, username, action, details) {
   await pool.query('INSERT INTO audit_logs (tenant_id, username, action, details) VALUES ($1, $2, $3, $4)', [tenantId, username, action, details]).catch(() => {});
@@ -786,6 +793,12 @@ app.get('/admin/settings', requireLogin, requireTenant, async (req, res) => {
         <input name="primary_color" value="${s.primary_color}" required>
         <label><input type="checkbox" name="allow_marketplace" ${s.allow_marketplace? 'checked' : ''}> Allow Marketplace</label>
         <label><input type="checkbox" name="allow_surveys" ${s.allow_surveys? 'checked' : ''}> Allow Surveys</label>
+        <h3>PayPal Integration</h3>
+<label>PayPal Client ID</label>
+<input name="paypal_client_id" value="${s.paypal_client_id || ''}" placeholder="Paste from PayPal Developer Dashboard">
+<label>PayPal Client Secret</label>
+<input name="paypal_client_secret" value="${s.paypal_client_secret || ''}" placeholder="Leave blank to disable PayPal">
+<p style="font-size:12px;color:#7f8c8d">Get keys: <a href="https://developer.paypal.com" target="_blank">developer.paypal.com</a> → Apps & Credentials</p>
         <button type="submit" class="btn">Save All Settings</button>
       </form>
     </div>
