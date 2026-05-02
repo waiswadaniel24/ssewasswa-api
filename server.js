@@ -4,8 +4,6 @@ const bcrypt = require('bcryptjs');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const multer = require('multer');
-const XLSX = require('xlsx');
-const PDFDocument = require('pdfkit');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const passport = require('passport');
@@ -42,6 +40,45 @@ const pool = new Pool({
 let paypalEnabled = false;
 let paypal = null;
 let googleEnabled = false;
+
+async function getSettings(tenantId) {
+  try {
+    const s = await pool.query('SELECT * FROM settings WHERE tenant_id = $1', [tenantId]);
+    return s.rows[0] || {
+      site_name: 'SSE Wasswa ERP',
+      hero_title: 'School Management Made Simple',
+      hero_subtitle: 'Manage students, fees, attendance, marketplace & surveys in one place',
+      whatsapp_number: '+256789231081',
+      momo_number: '0705373465',
+      momo_names: 'WASSWA',
+      paper_price: 150,
+      contact_email: 'admin@ssewasswa.com',
+      location: 'Kampala, Uganda',
+      primary_color: '#3498db',
+      allow_marketplace: true,
+      allow_surveys: true,
+      paypal_client_id: null,
+      paypal_client_secret: null
+    };
+  } catch {
+    return {
+      site_name: 'SSE Wasswa ERP',
+      hero_title: 'School Management Made Simple',
+      hero_subtitle: 'Manage students, fees, attendance, marketplace & surveys in one place',
+      whatsapp_number: '+256789231081',
+      momo_number: '0705373465',
+      momo_names: 'WASSWA',
+      paper_price: 150,
+      contact_email: 'admin@ssewasswa.com',
+      location: 'Kampala, Uganda',
+      primary_color: '#3498db',
+      allow_marketplace: true,
+      allow_surveys: true,
+      paypal_client_id: null,
+      paypal_client_secret: null
+    };
+  }
+}
 
 async function initPayPal() {
   const s = await getSettings(1);
@@ -97,123 +134,45 @@ passport.deserializeUser(async (id, done) => {
 });
 
 async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS tenants (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      subdomain TEXT UNIQUE NOT NULL,
-      plan TEXT DEFAULT 'free',
-      plan_expires DATE,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id),
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      role TEXT DEFAULT 'staff',
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS students (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id),
-      name TEXT NOT NULL,
-      class TEXT,
-      dob DATE,
-      guardian_name TEXT,
-      guardian_phone TEXT,
-      balance NUMERIC DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS fees (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id),
-      student_id INTEGER REFERENCES students(id),
-      amount NUMERIC NOT NULL,
-      term TEXT,
-      year INTEGER,
-      paid NUMERIC DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS attendance (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id),
-      student_id INTEGER REFERENCES students(id),
-      date DATE NOT NULL,
-      status TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE (tenant_id, student_id, date)
-    );
-    CREATE TABLE IF NOT EXISTS grades (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id),
-      student_id INTEGER REFERENCES students(id),
-      subject TEXT NOT NULL,
-      score NUMERIC,
-      term TEXT,
-      year INTEGER,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS market_items (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id),
-      title TEXT NOT NULL,
-      description TEXT,
-      price NUMERIC NOT NULL,
-      seller_email TEXT,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS wallets (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id) UNIQUE,
-      balance NUMERIC DEFAULT 0,
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS surveys (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id),
-      creator_email TEXT,
-      title TEXT NOT NULL,
-      questions JSONB,
-      reward_per_user NUMERIC DEFAULT 0,
-      total_budget NUMERIC DEFAULT 0,
-      max_responses INTEGER DEFAULT 100,
-      active BOOLEAN DEFAULT true,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS survey_responses (
-      id SERIAL PRIMARY KEY,
-      survey_id INTEGER REFERENCES surveys(id),
-      user_email TEXT,
-      answers JSONB,
-      reward_paid NUMERIC DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS settings (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id) UNIQUE,
-      site_name TEXT DEFAULT 'SSE Wasswa ERP',
-      hero_title TEXT DEFAULT 'School Management Made Simple',
-      hero_subtitle TEXT DEFAULT 'Manage students, fees, attendance, marketplace & surveys in one place',
-      whatsapp_number TEXT DEFAULT '+256789231081',
-      momo_number TEXT DEFAULT '0705373465',
-      momo_names TEXT DEFAULT 'WASSWA',
-      paper_price NUMERIC DEFAULT 150,
-      contact_email TEXT DEFAULT 'admin@ssewasswa.com',
-      location TEXT DEFAULT 'Kampala, Uganda',
-      primary_color TEXT DEFAULT '#3498db',
-      allow_marketplace BOOLEAN DEFAULT true,
-      allow_surveys BOOLEAN DEFAULT true,
-      paypal_client_id TEXT,
-      paypal_client_secret TEXT
-    );
-  `);
+  await pool.query(`CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, created_at TIMESTAMP DEFAULT NOW())`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'staff', created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, name TEXT NOT NULL, class TEXT, dob DATE, guardian_name TEXT, guardian_phone TEXT, balance NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, student_id INTEGER, amount NUMERIC NOT NULL, term TEXT, year INTEGER, paid NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE fees ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS attendance (id SERIAL PRIMARY KEY, student_id INTEGER, date DATE NOT NULL, status TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE attendance ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS attendance_unique ON attendance (tenant_id, student_id, date)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS grades (id SERIAL PRIMARY KEY, student_id INTEGER, subject TEXT NOT NULL, score NUMERIC, term TEXT, year INTEGER, created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE grades ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS market_items (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT, price NUMERIC NOT NULL, seller_email TEXT, created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE market_items ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS wallets (id SERIAL PRIMARY KEY, balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS wallets_tenant_unique ON wallets (tenant_id)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS surveys (id SERIAL PRIMARY KEY, creator_email TEXT, title TEXT NOT NULL, questions JSONB, reward_per_user NUMERIC DEFAULT 0, total_budget NUMERIC DEFAULT 0, max_responses INTEGER DEFAULT 100, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE surveys ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS survey_responses (id SERIAL PRIMARY KEY, survey_id INTEGER, user_email TEXT, answers JSONB, reward_paid NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, site_name TEXT DEFAULT 'SSE Wasswa ERP', hero_title TEXT DEFAULT 'School Management Made Simple', hero_subtitle TEXT DEFAULT 'Manage students, fees, attendance, marketplace & surveys in one place', whatsapp_number TEXT DEFAULT '+256789231081', momo_number TEXT DEFAULT '0705373465', momo_names TEXT DEFAULT 'WASSWA', paper_price NUMERIC DEFAULT 150, contact_email TEXT DEFAULT 'admin@ssewasswa.com', location TEXT DEFAULT 'Kampala, Uganda', primary_color TEXT DEFAULT '#3498db', allow_marketplace BOOLEAN DEFAULT true, allow_surveys BOOLEAN DEFAULT true, paypal_client_id TEXT, paypal_client_secret TEXT)`);
+  await pool.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS settings_tenant_unique ON settings (tenant_id)`);
 
   await pool.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) ON CONFLICT (subdomain) DO NOTHING`, ['SSE Wasswa', 'main', 'enterprise']);
   const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
   const tenantId = t.rows[0].id;
 
-  await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO NOTHING`, [tenantId, 'admin@ssewasswa.com', await bcrypt.hash('admin123', 10), 'super_admin']);
+  await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO UPDATE SET tenant_id = $1`, [tenantId, 'admin@ssewasswa.com', await bcrypt.hash('admin123', 10), 'super_admin']);
   await pool.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 0]);
   await pool.query(`INSERT INTO settings (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId]);
 }
@@ -234,26 +193,6 @@ async function requireTenant(req, res, next) {
   req.tenantId = t.rows[0].id;
   req.tenant = t.rows[0];
   next();
-}
-
-async function getSettings(tenantId) {
-  const s = await pool.query('SELECT * FROM settings WHERE tenant_id = $1', [tenantId]);
-  return s.rows[0] || {
-    site_name: 'SSE Wasswa ERP',
-    hero_title: 'School Management Made Simple',
-    hero_subtitle: 'Manage students, fees, attendance, marketplace & surveys in one place',
-    whatsapp_number: '+256789231081',
-    momo_number: '0705373465',
-    momo_names: 'WASSWA',
-    paper_price: 150,
-    contact_email: 'admin@ssewasswa.com',
-    location: 'Kampala, Uganda',
-    primary_color: '#3498db',
-    allow_marketplace: true,
-    allow_surveys: true,
-    paypal_client_id: null,
-    paypal_client_secret: null
-  };
 }
 
 app.get('/health', (req, res) => res.send('OK'));
@@ -343,8 +282,7 @@ app.get('/app', requireLogin, requireTenant, async (req, res) => {
   <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:${s.primary_color};color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1200px;margin:20px auto;padding:20px}.card{background:white;padding:20px;border-radius:8px;margin:10px;display:inline-block;min-width:200px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}.btn{background:${s.primary_color};color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}</style>
   </head><body>
   <nav><strong>${req.tenant.name}</strong>
-  <a href="/app">Dashboard</a><a href="/students">Students</a><a href="/fees">Fees</a><a href="/attendance">Attendance</a><a href="/grades">Grades</a>
-  <a href="/market">Market</a><a href="/surveys">Surveys</a><a href="/upgrade">Upgrade</a><a href="/admin/settings">Settings</a><a href="/logout">Logout</a>
+  <a href="/app">Dashboard</a><a href="/students">Students</a><a href="/upgrade">Upgrade</a><a href="/admin/settings">Settings</a><a href="/logout">Logout</a>
   </nav>
   <div class="container">
   <h1>Dashboard</h1>
@@ -487,11 +425,11 @@ app.post('/admin/settings', requireLogin, requireTenant, async (req, res) => {
   const allow_marketplace = req.body.allow_marketplace === 'on';
   const allow_surveys = req.body.allow_surveys === 'on';
 
-  await pool.query(`INSERT INTO settings (tenant_id, site_name, hero_title, hero_subtitle, whatsapp_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id, paypal_client_secret)
+  await pool.query(`INSERT INTO settings (tenant_id, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id, paypal_client_secret)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     ON CONFLICT (tenant_id) DO UPDATE SET
     site_name=$2, hero_title=$3, hero_subtitle=$4, whatsapp_number=$5, momo_number=$6, momo_names=$7, paper_price=$8, contact_email=$9, location=$10, primary_color=$11, allow_marketplace=$12, allow_surveys=$13, paypal_client_id=$14, paypal_client_secret=$15`,
-    [req.tenantId, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id || null, paypal_client_secret || null]);
+    [req.tenantId, site_name, hero_title, hero_subtitle, whatsapp_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id || null, paypal_client_secret || null]);
 
   await initPayPal();
   res.redirect('/admin/settings?saved=1');
