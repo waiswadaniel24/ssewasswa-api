@@ -1,67 +1,66 @@
-require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const multer = require('multer');
-const xlsx = require('xlsx');
+const XLSX = require('xlsx');
 const PDFDocument = require('pdfkit');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const paypal = require('paypal-rest-sdk');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 const upload = multer({ dest: 'uploads/' });
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-const PORT = process.env.PORT || 10000;
 
-// === PAYPAL CONFIG ===
-paypal.configure({
-  mode: 'live',
-  client_id: process.env.PAYPAL_CLIENT_ID,
-  client_secret: process.env.PAYPAL_CLIENT_SECRET
-});
-
-// === SECURITY FIREWALL + SEX ABUSE FILTER ===
-const bannedWords = ['porn', 'xxx', 'sex', 'nude', 'escort', 'adult', 'rape', 'molest'];
-function contentFilter(req, res, next) {
-  const check = JSON.stringify(req.body).toLowerCase();
-  if (bannedWords.some(w => check.includes(w))) {
-    return res.status(403).send('Content violates policy. Sexual/abuse content blocked.');
-  }
-  next();
-}
-
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://pagead2.googlesyndication.com", "https://www.paypal.com"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      frameSrc: ["https://www.paypal.com", "https://www.youtube.com"]
-    }
-  }
-}));
-
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
-app.use(limiter);
-app.use(contentFilter);
-
-app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
-app.use(bodyParser.json({ limit: '10mb' }));
+app.use(helmet());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+app.use(express.static('public'));
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'ssewasswa-2026-secure',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 24 * 60 * 60 * 1000, httpOnly: true, secure: process.env.NODE_ENV === 'production' }
+  cookie: { maxAge: 24 * 60 * 60 * 1000 }
 }));
+
 app.use(passport.initialize());
 app.use(passport.session());
-app.use('/uploads', express.static('uploads'));
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100
+});
+app.use(limiter);
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production'? { rejectUnauthorized: false } : false
+});
+
+// === PAYPAL - OPTIONAL ===
+let paypalEnabled = false;
+let paypal = null;
+
+async function initPayPal() {
+  const s = await getSettings(1);
+  if (s.paypal_client_id && s.paypal_client_secret) {
+    paypal = require('paypal-rest-sdk');
+    paypal.configure({
+      mode: 'live',
+      client_id: s.paypal_client_id,
+      client_secret: s.paypal_client_secret
+    });
+    paypalEnabled = true;
+    console.log('✅ PayPal enabled');
+  } else {
+    console.log('⚠️ PayPal disabled - add keys in /admin/settings to enable');
+  }
+}
 
 // === GOOGLE OAUTH ===
 passport.use(new GoogleStrategy({
@@ -70,1017 +69,645 @@ passport.use(new GoogleStrategy({
   callbackURL: "/auth/google/callback"
 }, async (accessToken, refreshToken, profile, done) => {
   try {
-    let tenant = await pool.query('SELECT * FROM tenants WHERE google_id = $1', [profile.id]);
-    if (tenant.rows.length === 0) {
-      const trialEnd = new Date();
-      trialEnd.setDate(trialEnd.getDate() + 14);
-      const result = await pool.query(
-        'INSERT INTO tenants (google_id, email, name, trial_ends, plan, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-        [profile.id, profile.emails[0].value, profile.displayName, trialEnd, 'trial', 'active']
-      );
-      tenant = result;
-      await pool.query('INSERT INTO settings (tenant_id) VALUES ($1) ON CONFLICT DO NOTHING', [result.rows[0].id]);
-      await pool.query('INSERT INTO wallets (tenant_id, balance) VALUES ($1, 0) ON CONFLICT DO NOTHING', [result.rows[0].id]);
+    const email = profile.emails[0].value;
+    let user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (user.rows.length === 0) {
+      const tenantName = profile.displayName + ' School';
+      const sub = tenantName.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
+      await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3)', [tenantName, sub, 'free']);
+      const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', [sub]);
+      const hash = await bcrypt.hash(Math.random().toString(36), 10);
+      await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [t.rows[0].id, email, hash, 'admin']);
+      user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     }
-    return done(null, tenant.rows[0]);
-  } catch (err) { return done(err, null); }
+    return done(null, user.rows[0]);
+  } catch (err) {
+    return done(err);
+  }
 }));
 
 passport.serializeUser((user, done) => done(null, user.id));
 passport.deserializeUser(async (id, done) => {
-  const result = await pool.query('SELECT * FROM tenants WHERE id = $1', [id]);
-  done(null, result.rows[0]);
+  const user = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+  done(null, user.rows[0]);
 });
 
-// === DATABASE ===
+// === DB INIT ===
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS tenants (
       id SERIAL PRIMARY KEY,
-      google_id VARCHAR(100) UNIQUE,
-      email VARCHAR(255) UNIQUE,
-      name VARCHAR(200),
-      school_name VARCHAR(200),
-      plan VARCHAR(20) DEFAULT 'trial',
-      trial_ends TIMESTAMP,
-      is_active BOOLEAN DEFAULT true,
-      free_access BOOLEAN DEFAULT false,
-      status VARCHAR(20) DEFAULT 'active',
+      name TEXT NOT NULL,
+      subdomain TEXT UNIQUE NOT NULL,
+      plan TEXT DEFAULT 'free',
+      plan_expires DATE,
       created_at TIMESTAMP DEFAULT NOW()
     );
-
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
-      tenant_id INT REFERENCES tenants(id) ON DELETE CASCADE,
-      username VARCHAR(50),
-      password_hash VARCHAR(255),
-      role VARCHAR(20),
-      fullname VARCHAR(100),
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(tenant_id, username)
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      tenant_id INT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
-      site_name TEXT DEFAULT 'My School ERP',
-      hero_title TEXT DEFAULT 'School Management System',
-      hero_subtitle TEXT DEFAULT 'Manage students, fees, results & more',
-      whatsapp_number TEXT DEFAULT '0789736737',
-      contact_email TEXT DEFAULT 'info@school.com',
-      momo_number TEXT DEFAULT '0789736737',
-      momo_names TEXT DEFAULT 'SCHOOL NAME',
-      paper_price INT DEFAULT 5000,
-      location TEXT DEFAULT 'Kampala, Uganda',
-      primary_color TEXT DEFAULT '#667eea',
-      logo_url TEXT,
-      allow_marketplace BOOLEAN DEFAULT true,
-      allow_surveys BOOLEAN DEFAULT true
-    );
-
-    CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id) ON DELETE CASCADE, name VARCHAR(100), class VARCHAR(50), school_type VARCHAR(20), parent_phone VARCHAR(20), balance DECIMAL(10,2) DEFAULT 0, gender VARCHAR(10), dob DATE, admission_no VARCHAR(50), address TEXT, created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS subjects (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id), name VARCHAR(100), class VARCHAR(50), max_marks INT DEFAULT 100);
-    CREATE TABLE IF NOT EXISTS exam_results (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id), student_id INT, subject_id INT, marks DECIMAL(5,2), term VARCHAR(20), year INT);
-    CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id), student_id INT, amount DECIMAL(10,2), method VARCHAR(50), term VARCHAR(20), receipt_no VARCHAR(50), created_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS staff (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id), name VARCHAR(200), position VARCHAR(100), salary DECIMAL(10,2), phone VARCHAR(20), email VARCHAR(200), bank_account VARCHAR(50));
-    CREATE TABLE IF NOT EXISTS payroll (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id), staff_id INT, amount DECIMAL(10,2), month VARCHAR(20), year INT, status VARCHAR(20) DEFAULT 'pending', paid_at TIMESTAMP);
-    CREATE TABLE IF NOT EXISTS wallets (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id) UNIQUE, balance DECIMAL(10,2) DEFAULT 0);
-    CREATE TABLE IF NOT EXISTS transactions (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id), transaction_id VARCHAR(100), amount DECIMAL(10,2), phone VARCHAR(20), status VARCHAR(20), type VARCHAR(50), provider VARCHAR(20), metadata JSONB);
-    CREATE TABLE IF NOT EXISTS subscriptions (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id), plan VARCHAR(20), amount DECIMAL(10,2), starts_at TIMESTAMP, ends_at TIMESTAMP, status VARCHAR(20), paypal_id VARCHAR(100));
-
-    CREATE TABLE IF NOT EXISTS entertainment (
-      id SERIAL PRIMARY KEY,
-      tenant_id INT REFERENCES tenants(id),
-      user_email VARCHAR(255),
-      type VARCHAR(20),
-      title VARCHAR(200),
-      description TEXT,
-      url TEXT,
-      price DECIMAL(10,2) DEFAULT 0,
-      status VARCHAR(20) DEFAULT 'active',
-      views INT DEFAULT 0,
+      tenant_id INTEGER REFERENCES tenants(id),
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT DEFAULT 'staff',
       created_at TIMESTAMP DEFAULT NOW()
     );
-
-    CREATE TABLE IF NOT EXISTS marketplace (
+    CREATE TABLE IF NOT EXISTS students (
       id SERIAL PRIMARY KEY,
-      tenant_id INT REFERENCES tenants(id),
-      seller_email VARCHAR(255),
-      product_name VARCHAR(200),
-      description TEXT,
-      price DECIMAL(10,2),
-      category VARCHAR(50),
-      image_url TEXT,
-      contact VARCHAR(20),
-      status VARCHAR(20) DEFAULT 'active',
+      tenant_id INTEGER REFERENCES tenants(id),
+      name TEXT NOT NULL,
+      class TEXT,
+      dob DATE,
+      guardian_name TEXT,
+      guardian_phone TEXT,
+      balance NUMERIC DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW()
     );
-
+    CREATE TABLE IF NOT EXISTS fees (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id),
+      student_id INTEGER REFERENCES students(id),
+      amount NUMERIC NOT NULL,
+      term TEXT,
+      year INTEGER,
+      paid NUMERIC DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS attendance (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id),
+      student_id INTEGER REFERENCES students(id),
+      date DATE NOT NULL,
+      status TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS grades (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id),
+      student_id INTEGER REFERENCES students(id),
+      subject TEXT NOT NULL,
+      score NUMERIC,
+      term TEXT,
+      year INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS market_items (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id),
+      title TEXT NOT NULL,
+      description TEXT,
+      price NUMERIC NOT NULL,
+      seller_email TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS wallets (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) UNIQUE,
+      balance NUMERIC DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS surveys (
       id SERIAL PRIMARY KEY,
-      tenant_id INT REFERENCES tenants(id),
-      creator_email VARCHAR(255),
-      title VARCHAR(200),
+      tenant_id INTEGER REFERENCES tenants(id),
+      creator_email TEXT,
+      title TEXT NOT NULL,
       questions JSONB,
-      reward_per_user DECIMAL(10,2),
-      total_budget DECIMAL(10,2),
-      max_responses INT,
-      responses_count INT DEFAULT 0,
-      status VARCHAR(20) DEFAULT 'active',
+      reward_per_user NUMERIC DEFAULT 0,
+      total_budget NUMERIC DEFAULT 0,
+      max_responses INTEGER DEFAULT 100,
+      active BOOLEAN DEFAULT true,
       created_at TIMESTAMP DEFAULT NOW()
     );
-
     CREATE TABLE IF NOT EXISTS survey_responses (
       id SERIAL PRIMARY KEY,
-      survey_id INT REFERENCES surveys(id),
-      user_email VARCHAR(255),
+      survey_id INTEGER REFERENCES surveys(id),
+      user_email TEXT,
       answers JSONB,
-      earned DECIMAL(10,2),
+      reward_paid NUMERIC DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW()
     );
-
-    CREATE TABLE IF NOT EXISTS audit_logs (id SERIAL PRIMARY KEY, tenant_id INT REFERENCES tenants(id), username VARCHAR(50), action VARCHAR(100), details JSONB, created_at TIMESTAMP DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS settings (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) UNIQUE,
+      site_name TEXT DEFAULT 'SSE Wasswa ERP',
+      hero_title TEXT DEFAULT 'School Management Made Simple',
+      hero_subtitle TEXT DEFAULT 'Manage students, fees, attendance, marketplace & surveys in one place',
+      whatsapp_number TEXT DEFAULT '+256789231081',
+      momo_number TEXT DEFAULT '0705373465',
+      momo_names TEXT DEFAULT 'WASSWA',
+      paper_price NUMERIC DEFAULT 150,
+      contact_email TEXT DEFAULT 'admin@ssewasswa.com',
+      location TEXT DEFAULT 'Kampala, Uganda',
+      primary_color TEXT DEFAULT '#3498db',
+      allow_marketplace BOOLEAN DEFAULT true,
+      allow_surveys BOOLEAN DEFAULT true,
+      paypal_client_id TEXT,
+      paypal_client_secret TEXT
+    );
   `);
 
-  // Super admin
-  await pool.query(`INSERT INTO tenants (id, email, name, plan, free_access, status) VALUES (1, 'admin@ssewasswa.com', 'SSE Wasswa Admin', 'enterprise', true, 'active') ON CONFLICT (id) DO NOTHING`);
-  await pool.query(`INSERT INTO settings (tenant_id, site_name, whatsapp_number) VALUES (1, 'SSE Wasswa ERP', '0789736737') ON CONFLICT (tenant_id) DO NOTHING`);
-  await pool.query(`INSERT INTO wallets (tenant_id, balance) VALUES (1, 0) ON CONFLICT (tenant_id) DO NOTHING`);
-
-  const adminExists = await pool.query('SELECT 1 FROM users WHERE username = $1 AND tenant_id = 1', ['admin']);
-  if (adminExists.rows.length === 0) {
+  const superAdmin = await pool.query('SELECT * FROM users WHERE email = $1', ['admin@ssewasswa.com']);
+  if (superAdmin.rows.length === 0) {
+    await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3)', ['SSE Wasswa', 'main', 'enterprise']);
+    const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
     const hash = await bcrypt.hash('admin123', 10);
-    await pool.query('INSERT INTO users (tenant_id, username, password_hash, role, fullname) VALUES (1, $1, $2, $3, $4)', ['admin', hash, 'admin', 'System Admin']);
+    await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [t.rows[0].id, 'admin@ssewasswa.com', hash, 'super_admin']);
+    await pool.query('INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2)', [t.rows[0].id, 0]);
+    await pool.query('INSERT INTO settings (tenant_id) VALUES ($1)', [t.rows[0].id]);
   }
-  console.log('Database ready - Multi-tenant SaaS');
 }
 
 // === MIDDLEWARE ===
 function requireLogin(req, res, next) {
-  if (!req.session.userId &&!req.user) return res.redirect('/login');
-  next();
+  if (req.session.user) return next();
+  res.redirect('/login');
 }
 
-function requireTenant(req, res, next) {
-  if (!req.user &&!req.session.tenantId) return res.redirect('/login');
-  req.tenantId = req.user?.id || req.session.tenantId || 1;
-  next();
-}
-
-function requireActivePlan(req, res, next) {
-  if (!req.user) return next();
-  if (req.user.free_access || req.user.id === 1) return next();
-  const now = new Date();
-  if (req.user.plan === 'trial' && new Date(req.user.trial_ends) > now) return next();
-  if (req.user.plan!== 'trial' && req.user.status === 'active') return next();
-  return res.redirect('/upgrade');
-}
-
-function requireSuperAdmin(req, res, next) {
-  if (!req.user || req.user.id!== 1) return res.status(403).send('Super Admin Only');
+async function requireTenant(req, res, next) {
+  const sub = req.headers.host.split('.')[0];
+  if (sub === 'localhost' || sub === 'ssewasswa-api') {
+    req.tenantId = 1;
+    return next();
+  }
+  const t = await pool.query('SELECT * FROM tenants WHERE subdomain = $1', [sub]);
+  if (t.rows.length === 0) return res.status(404).send('School not found');
+  req.tenantId = t.rows[0].id;
+  req.tenant = t.rows[0];
   next();
 }
 
 async function getSettings(tenantId) {
-  const result = await pool.query('SELECT * FROM settings WHERE tenant_id = $1', [tenantId]);
-  return result.rows[0] || { whatsapp_number: '0789736737', site_name: 'School ERP', primary_color: '#667eea', hero_title: 'School Management', hero_subtitle: 'Manage everything', allow_marketplace: true, allow_surveys: true };
-}
-return { 
-  // ... existing fields ...
-  paypal_client_id: null, 
-  paypal_client_secret: null,
-  site_name: 'SSE Wasswa ERP', 
-  // ... rest
-};
-
-async function logAction(tenantId, username, action, details) {
-  await pool.query('INSERT INTO audit_logs (tenant_id, username, action, details) VALUES ($1, $2, $3, $4)', [tenantId, username, action, details]).catch(() => {});
-}
-
-async function sendSMS(phone, message) {
-  if (!process.env.AT_API_KEY) return console.log('SMS:', message);
-  try {
-    await fetch('https://api.africastalking.com/version1/messaging', {
-      method: 'POST',
-      headers: { 'apiKey': process.env.AT_API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ username: process.env.AT_USERNAME, to: phone, message })
-    });
-  } catch (e) { console.log('SMS Error:', e.message); }
+  const s = await pool.query('SELECT * FROM settings WHERE tenant_id = $1', [tenantId]);
+  return s.rows[0] || {
+    site_name: 'SSE Wasswa ERP',
+    hero_title: 'School Management Made Simple',
+    hero_subtitle: 'Manage students, fees, attendance, marketplace & surveys in one place',
+    whatsapp_number: '+256789231081',
+    momo_number: '0705373465',
+    momo_names: 'WASSWA',
+    paper_price: 150,
+    contact_email: 'admin@ssewasswa.com',
+    location: 'Kampala, Uganda',
+    primary_color: '#3498db',
+    allow_marketplace: true,
+    allow_surveys: true,
+    paypal_client_id: null,
+    paypal_client_secret: null
+  };
 }
 
-// === PUBLIC SITE ===
+// === ROUTES ===
+
+// Health check
+app.get('/health', (req, res) => res.send('OK'));
+
+// Landing page
 app.get('/', async (req, res) => {
   const s = await getSettings(1);
-  const schools = await pool.query('SELECT COUNT(*) as count FROM tenants WHERE plan!= $1 AND status = $2', ['trial', 'active']);
-  res.send(`<!DOCTYPE html><html lang="en"><head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${s.site_name} - School Management for Africa</title>
-  <meta name="description" content="Complete school management. Students, fees, payroll, marketplace, surveys. 14-day free trial.">
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1814429636128167" crossorigin="anonymous"></script>
-  <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;line-height:1.6;color:#2c3e50}
-  .nav{background:#fff;padding:15px 20px;box-shadow:0 2px 10px rgba(0,0,0,0.1);position:sticky;top:0;z-index:1000;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}
-  .nav a{color:#2c3e50;text-decoration:none;margin:0 10px;font-weight:500}
-  .nav.btn{background:${s.primary_color};color:#fff;padding:10px 20px;border-radius:6px}
-  .hero{background:linear-gradient(135deg,${s.primary_color} 0%,#764ba2 100%);color:#fff;padding:100px 20px;text-align:center}
-  .hero h1{font-size:52px;margin-bottom:20px;font-weight:700}
-  .hero p{font-size:22px;margin-bottom:30px;opacity:0.95}
-  .hero.btn{background:#fff;color:${s.primary_color};padding:16px 40px;font-size:18px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;margin:10px}
-  .container{max-width:1200px;margin:0 auto;padding:60px 20px}
-  .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:30px;margin:40px 0}
-  .feature{background:#fff;padding:30px;border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,0.07);text-align:center}
-  .feature h3{color:${s.primary_color};margin-bottom:15px;font-size:24px}
-  .stats{background:#f8f9fa;padding:60px 20px;text-align:center}
-  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:40px;max-width:1000px;margin:0 auto}
-  .stat h3{font-size:48px;color:${s.primary_color};margin-bottom:10px}
-  .whatsapp{position:fixed;bottom:20px;right:20px;background:#25D366;color:#fff;width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;text-decoration:none;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:1000}
-    footer{background:#2c3e50;color:#fff;padding:40px 20px;text-align:center}
-   .ad-slot{margin:40px 0;text-align:center;min-height:100px;background:#f0f0f0;display:flex;align-items:center;justify-content:center}
-    @media(max-width:768px){.hero h1{font-size:36px}.nav{flex-direction:column}}
-  </style>
+  res.send(`<!DOCTYPE html><html><head><title>${s.site_name}</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}.hero{background:${s.primary_color};color:white;padding:80px 20px;text-align:center}.btn{background:white;color:${s.primary_color};padding:12px 30px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;margin:10px}.container{max-width:1000px;margin:40px auto;padding:20px}.card{background:white;padding:30px;border-radius:8px;margin:20px 0;box-shadow:0 2px 8px rgba(0,0,0,0.1)}</style>
   </head><body>
-    <nav class="nav">
-      <div><strong>${s.site_name}</strong></div>
-      <div>
-        <a href="#features">Features</a>
-        <a href="/entertainment">Entertainment</a>
-        <a href="/marketplace">Marketplace</a>
-        <a href="/login">Login</a>
-        <a href="/auth/google" class="btn">Start Free Trial</a>
-      </div>
-    </nav>
-    <div class="hero">
-      <h1>${s.hero_title}</h1>
-      <p>${s.hero_subtitle}</p>
-      <a href="/auth/google" class="btn">Start 14-Day Free Trial</a>
-      <a href="/entertainment" class="btn" style="background:transparent;border:2px solid #fff;color:#fff">Entertainment Hub</a>
-    </div>
-    <div class="stats">
-      <div class="stats-grid">
-        <div class="stat"><h3>${schools.rows[0].count}+</h3><p>Active Schools</p></div>
-        <div class="stat"><h3>10,000+</h3><p>Students Managed</p></div>
-        <div class="stat"><h3>99.9%</h3><p>Uptime</p></div>
-        <div class="stat"><h3>24/7</h3><p>Support</p></div>
-      </div>
-    <div class="container" id="features">
-      <h2 style="text-align:center;font-size:42px;margin-bottom:50px">Everything in One Platform</h2>
-      <div class="features">
-        <div class="feature"><h3>👨‍🎓 Student Management</h3><p>Admissions, profiles, attendance, documents. Bulk Excel import.</p></div>
-        <div class="feature"><h3>💰 Fee Collection</h3><p>Mobile Money, PayPal, receipts, auto SMS reminders.</p></div>
-        <div class="feature"><h3>💼 Staff Payroll</h3><p>Salaries, PayPal payouts, payslips, tax reports.</p></div>
-        <div class="feature"><h3>📝 Digital Results</h3><p>Marksheets, report cards PDF, parent portal.</p></div>
-        <div class="feature"><h3>🎬 Entertainment Hub</h3><p>Videos, ads, user content. Earn from views.</p></div>
-        <div class="feature"><h3>🛍️ Marketplace</h3><p>Sell clothes, books, goods. Commission-based.</p></div>
-        <div class="feature"><h3>📊 Paid Surveys</h3><p>Create surveys, users earn, you take 10% tax.</p></div>
-        <div class="feature"><h3>🔒 100% Private</h3><p>Each school's data isolated. Bank-grade security.</p></div>
-      </div>
-    </div>
-    <div class="ad-slot">
-      <ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-1814429636128167" data-ad-slot="1234567890" data-ad-format="auto"></ins>
-      <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
-    </div>
-    <div class="container" style="text-align:center">
-      <h2 style="font-size:42px;margin-bottom:50px">Pricing</h2>
-      <div class="features">
-        <div class="feature">
-          <h3>Free Trial</h3>
-          <p style="font-size:36px;color:${s.primary_color};margin:20px 0">UGX 0</p>
-          <p>14 Days<br>All Features<br>Up to 100 Students</p>
-          <a href="/auth/google" class="btn" style="background:${s.primary_color};color:#fff;padding:12px 30px;border-radius:6px;text-decoration:none;display:inline-block;margin-top:20px">Start Free</a>
-        </div>
-        <div class="feature" style="border:3px solid ${s.primary_color}">
-          <h3>Premium</h3>
-          <p style="font-size:36px;color:${s.primary_color};margin:20px 0">UGX 50,000</p>
-          <p>Per Month<br>Unlimited Everything<br>Priority Support</p>
-          <a href="/auth/google" class="btn" style="background:${s.primary_color};color:#fff;padding:12px 30px;border-radius:6px;text-decoration:none;display:inline-block;margin-top:20px">Upgrade</a>
-        </div>
-      </div>
-    </div>
-    <footer>
-      <p>&copy; 2026 ${s.site_name}. Built in Uganda, for Africa.</p>
-      <p>WhatsApp: ${s.whatsapp_number} | Email: ${s.contact_email}</p>
-    </footer>
-    <a href="https://wa.me/${s.whatsapp_number}?text=Hello" class="whatsapp" target="_blank">💬</a>
-  </body></html>`);
+  <div class="hero"><h1>${s.hero_title}</h1><p>${s.hero_subtitle}</p>
+  <a href="/login" class="btn">Login</a><a href="/signup" class="btn">Start Free Trial</a></div>
+  <div class="container">
+  <div class="card"><h2>For Schools</h2><p>Manage students, fees, attendance, grades, reports. UGX 50,000/month after 30-day free trial.</p></div>
+  <div class="card"><h2>Marketplace & Surveys</h2><p>Sell papers, uniforms. Run paid surveys. We take 10% admin fee.</p></div>
+  <div class="card"><h2>Contact</h2><p>Email: ${s.contact_email}<br>WhatsApp: ${s.whatsapp_number}<br>MoMo: ${s.momo_number} (${s.momo_names})<br>Location: ${s.location}</p></div>
+  </div></body></html>`);
 });
 
-// === AUTH ===
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => res.redirect('/app'));
-
-app.get('/login', async (req, res) => {
-  const s = await getSettings(1);
+// Auth
+app.get('/login', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Login</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;background:linear-gradient(135deg,${s.primary_color} 0%,#764ba2 100%);display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.login{background:white;padding:50px;border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,0.2);text-align:center;max-width:400px;width:90%}.btn{display:block;width:100%;padding:15px;margin:15px 0;border-radius:8px;text-decoration:none;font-weight:600}.google{background:#4285f4;color:white}.staff{background:#2c3e50;color:white}input{width:100%;padding:12px;margin:10px 0;border:1px solid #ddd;border-radius:6px;box-sizing:border-box}</style>
-  </head><body><div class="login">
-    <h2>Welcome to ${s.site_name}</h2>
-    <a href="/auth/google" class="btn google">🔐 Continue with Google</a>
-    <p style="margin:20px 0;color:#7f8c8d">— OR —</p>
-    <form method="POST" action="/login">
-      <input name="username" placeholder="Username" required>
-      <input name="password" type="password" placeholder="Password" required>
-      <button type="submit" class="btn staff">Staff Login</button>
-    </form>
-    <p style="margin-top:20px;font-size:14px">New school? <a href="/auth/google">Start 14-day free trial</a></p>
-  </div></body></html>`);
+  <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:30px;background:#f4f6f9}form{background:white;padding:30px;border-radius:8px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px}button{width:100%;padding:12px;background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><form method="POST" action="/login">
+  <h2>School Login</h2>
+  <input name="email" type="email" placeholder="Email" required>
+  <input name="password" type="password" placeholder="Password" required>
+  <button type="submit">Login</button>
+  <p style="text-align:center;margin-top:20px"><a href="/auth/google">Login with Google</a></p>
+  <p style="text-align:center"><a href="/signup">Create School Account</a></p>
+  </form></body></html>`);
 });
 
 app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  const user = await pool.query('SELECT u.*, t.id as tenant_id FROM users u JOIN tenants t ON u.tenant_id = t.id WHERE u.username = $1', [username]);
-  if (user.rows.length === 0) return res.send('Invalid credentials');
+  const { email, password } = req.body;
+  const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+  if (user.rows.length === 0) return res.send('Invalid login');
   const valid = await bcrypt.compare(password, user.rows[0].password_hash);
-  if (!valid) return res.send('Invalid credentials');
-  req.session.userId = user.rows[0].id;
-  req.session.username = user.rows[0].username;
-  req.session.role = user.rows[0].role;
-  req.session.tenantId = user.rows[0].tenant_id;
-  req.session.fullname = user.rows[0].fullname;
+  if (!valid) return res.send('Invalid login');
+  req.session.user = user.rows[0];
   res.redirect('/app');
 });
 
-app.get('/logout', (req, res) => {
-  req.logout(() => {
-    req.session.destroy();
-    res.redirect('/');
-  });
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => {
+  req.session.user = req.user;
+  res.redirect('/app');
 });
 
-// === UPGRADE WITH PAYPAL ===
-app.get('/upgrade', requireLogin, async (req, res) => {
-  const s = await getSettings(req.tenantId || 1);
-  res.send(`<!DOCTYPE html><html><head><title>Upgrade</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}.card{background:white;padding:50px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.1);text-align:center;max-width:500px}.btn{background:${s.primary_color};color:white;padding:15px 40px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;margin:10px;border:none;cursor:pointer}</style>
-  </head><body><div class="card">
-    <h1>⏰ Trial Expired</h1>
-    <p style="font-size:18px;margin:30px 0">Upgrade to continue using all features.</p>
-    <h2 style="color:${s.primary_color};font-size:48px;margin:20px 0">UGX 50,000/month</h2>
-    <p>✓ Unlimited students<br>✓ All features<br>✓ Priority support</p>
-    <form method="POST" action="/upgrade/paypal">
-      <button type="submit" class="btn">Pay with PayPal</button>
-    </form>
-    <a href="https://wa.me/${s.whatsapp_number}?text=I%20want%20to%20upgrade%20via%20MoMo" class="btn" style="background:#25D366">Pay via Mobile Money</a>
-    <p style="margin-top:30px;font-size:14px;color:#7f8c8d">Need free access? Contact: ${s.whatsapp_number}</p>
+app.get('/signup', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><title>Sign Up</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:30px;background:#f4f6f9}form{background:white;padding:30px;border-radius:8px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px}button{width:100%;padding:12px;background:#27ae60;color:white;border:none;border-radius:4px;cursor:pointer}</style>
+  </head><body><form method="POST" action="/signup">
+  <h2>Start 30-Day Free Trial</h2>
+  <input name="school_name" placeholder="School Name" required>
+  <input name="email" type="email" placeholder="Admin Email" required>
+  <input name="password" type="password" placeholder="Password" required>
+  <button type="submit">Create School</button>
+  </form></body></html>`);
+});
+
+app.post('/signup', async (req, res) => {
+  const { school_name, email, password } = req.body;
+  const sub = school_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
+  const expires = new Date();
+  expires.setDate(expires.getDate() + 30);
+  await pool.query('INSERT INTO tenants (name, subdomain, plan, plan_expires) VALUES ($1, $2, $3, $4)', [school_name, sub, 'free', expires]);
+  const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', [sub]);
+  const hash = await bcrypt.hash(password, 10);
+  await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [t.rows[0].id, email, hash, 'admin']);
+  await pool.query('INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2)', [t.rows[0].id, 0]);
+  await pool.query('INSERT INTO settings (tenant_id) VALUES ($1)', [t.rows[0].id]);
+  res.send(`School created! Login at: https://${sub}.onrender.com/login`);
+});
+
+app.get('/logout', (req, res) => {
+  req.session.destroy();
+  res.redirect('/login');
+});
+
+// Dashboard
+app.get('/app', requireLogin, requireTenant, async (req, res) => {
+  const s = await getSettings(req.tenantId);
+  const students = await pool.query('SELECT COUNT(*) FROM students WHERE tenant_id = $1', [req.tenantId]);
+  const fees = await pool.query('SELECT SUM(amount-paid) as due FROM fees WHERE tenant_id = $1', [req.tenantId]);
+  res.send(`<!DOCTYPE html><html><head><title>Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:${s.primary_color};color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1200px;margin:20px auto;padding:20px}.card{background:white;padding:20px;border-radius:8px;margin:10px;display:inline-block;min-width:200px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}.btn{background:${s.primary_color};color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}</style>
+  </head><body>
+  <nav><strong>${req.tenant.name}</strong>
+  <a href="/app">Dashboard</a><a href="/students">Students</a><a href="/fees">Fees</a><a href="/attendance">Attendance</a><a href="/grades">Grades</a>
+  <a href="/market">Market</a><a href="/surveys">Surveys</a><a href="/upgrade">Upgrade</a><a href="/admin/settings">Settings</a><a href="/logout">Logout</a>
+  </nav>
+  <div class="container">
+  <h1>Dashboard</h1>
+  <div class="card"><h3>Students</h3><p style="font-size:32px">${students.rows[0].count}</p></div>
+  <div class="card"><h3>Fees Due</h3><p style="font-size:32px">UGX ${fees.rows[0].due || 0}</p></div>
+  <div class="card"><h3>Plan</h3><p>${req.tenant.plan.toUpperCase()}</p><a href="/upgrade" class="btn">Upgrade</a></div>
   </div></body></html>`);
 });
 
-app.post('/upgrade/paypal', requireLogin, requireTenant, async (req, res) => {
-  const create_payment = {
-    intent: 'sale',
-    payer: { payment_method: 'paypal' },
-    redirect_urls: { return_url: 'https://ssewasswa-api.onrender.com/upgrade/success', cancel_url: 'https://ssewasswa-api.onrender.com/upgrade' },
+// Students CRUD
+app.get('/students', requireLogin, requireTenant, async (req, res) => {
+  const s = await getSettings(req.tenantId);
+  const students = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY name', [req.tenantId]);
+  res.send(`<!DOCTYPE html><html><head><title>Students</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:${s.primary_color};color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1200px;margin:20px auto;padding:20px}table{background:white;width:100%;border-collapse:collapse}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#f8f9fa}.btn{background:${s.primary_color};color:white;padding:8px 16px;text-decoration:none;border-radius:4px}form{background:white;padding:20px;border-radius:8px;margin-bottom:20px}input{padding:8px;margin:5px;border:1px solid #ddd;border-radius:4px}</style>
+  </head><body>
+  <nav><strong>${req.tenant.name}</strong><a href="/app">Dashboard</a><a href="/students">Students</a><a href="/logout">Logout</a></nav>
+  <div class="container">
+  <h1>Students</h1>
+  <form method="POST" action="/students/add">
+  <input name="name" placeholder="Full Name" required>
+  <input name="class" placeholder="Class" required>
+  <input name="dob" type="date" placeholder="DOB">
+  <input name="guardian_name" placeholder="Guardian Name">
+  <input name="guardian_phone" placeholder="Guardian Phone">
+  <button type="submit" class="btn">Add Student</button>
+  </form>
+  <table><tr><th>Name</th><th>Class</th><th>Guardian</th><th>Phone</th><th>Balance</th><th>Actions</th></tr>
+  ${students.rows.map(st => `<tr><td>${st.name}</td><td>${st.class}</td><td>${st.guardian_name || ''}</td><td>${st.guardian_phone || ''}</td><td>UGX ${st.balance}</td><td><a href="/students/delete/${st.id}" onclick="return confirm('Delete?')">Delete</a></td></tr>`).join('')}
+  </table></div></body></html>`);
+});
+
+app.post('/students/add', requireLogin, requireTenant, async (req, res) => {
+  const { name, class: cls, dob, guardian_name, guardian_phone } = req.body;
+  await pool.query('INSERT INTO students (tenant_id, name, class, dob, guardian_name, guardian_phone) VALUES ($1, $2, $3, $4, $5, $6)',
+    [req.tenantId, name, cls, dob || null, guardian_name, guardian_phone]);
+  res.redirect('/students');
+});
+
+app.get('/students/delete/:id', requireLogin, requireTenant, async (req, res) => {
+  await pool.query('DELETE FROM students WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
+  res.redirect('/students');
+});
+
+// Upgrade - PayPal Optional
+app.get('/upgrade', requireLogin, requireTenant, async (req, res) => {
+  const s = await getSettings(req.tenantId);
+  const main = await getSettings(1);
+
+  if (!paypalEnabled) {
+    return res.send(`<!DOCTYPE html><html><head><title>Upgrade Pending</title><meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:#f4f6f9}.card{background:white;padding:40px;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.1)}.btn{background:${s.primary_color};color:white;padding:12px 30px;text-decoration:none;border-radius:6px;display:inline-block;margin-top:20px}</style>
+    </head><body><div class="card">
+      <h1>⏳ Online Payments Pending</h1>
+      <p>PayPal integration is being configured by the admin.</p>
+      <p><strong>To upgrade now:</strong> Send UGX 50,000 to MoMo ${main.momo_number} (${main.momo_names})</p>
+      <p>Then WhatsApp receipt to <a href="https://wa.me/${main.whatsapp_number}">${main.whatsapp_number}</a></p>
+      <p>Your account will be upgraded within 1 hour.</p>
+      <a href="/app" class="btn">Back to Dashboard</a>
+    </div></body></html>`);
+  }
+
+  res.send(`<!DOCTYPE html><html><head><title>Upgrade</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:#f4f6f9}.card{background:white;padding:40px;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.1)}.btn{background:${s.primary_color};color:white;padding:12px 30px;text-decoration:none;border-radius:6px;display:inline-block;margin-top:20px}</style>
+  </head><body><div class="card">
+    <h1>Upgrade to Premium</h1><p>UGX 50,000/month = $13.50</p>
+    <p>Unlimited students, reports, marketplace, surveys</p>
+    <form action="/paypal/create" method="POST"><button type="submit" class="btn">Pay with PayPal</button></form>
+    <p style="margin-top:30px">Or pay via MoMo: ${main.momo_number} (${main.momo_names})<br>WhatsApp receipt to ${main.whatsapp_number}</p>
+  </div></body></html>`);
+});
+
+// PayPal routes - only if enabled
+app.post('/paypal/create', requireLogin, requireTenant, async (req, res) => {
+  if (!paypalEnabled) return res.status(503).send('PayPal not configured');
+  const create_payment_json = {
+    intent: "sale",
+    payer: { payment_method: "paypal" },
+    redirect_urls: {
+      return_url: `https://${req.headers.host}/paypal/success`,
+      cancel_url: `https://${req.headers.host}/paypal/cancel`
+    },
     transactions: [{
-      item_list: { items: [{ name: 'Premium Subscription', sku: 'premium', price: '13.50', currency: 'USD', quantity: 1 }] },
-      amount: { currency: 'USD', total: '13.50' },
-      description: 'SSE Wasswa ERP Premium - 1 Month'
+      item_list: { items: [{ name: "SSE Wasswa ERP Premium", sku: "001", price: "13.50", currency: "USD", quantity: 1 }] },
+      amount: { currency: "USD", total: "13.50" },
+      description: "SSE Wasswa ERP Premium Subscription"
     }]
   };
-
-  paypal.payment.create(create_payment, (error, payment) => {
-    if (error) return res.send('PayPal Error: ' + error.message);
-    res.redirect(payment.links.find(l => l.rel === 'approval_url').href);
+  paypal.payment.create(create_payment_json, (error, payment) => {
+    if (error) return res.send('PayPal error');
+    payment.links.forEach(link => {
+      if (link.rel === 'approval_url') res.redirect(link.href);
+    });
   });
 });
 
-app.get('/upgrade/success', requireLogin, requireTenant, async (req, res) => {
-  const { paymentId, PayerID } = req.query;
-  const execute_payment = { payer_id: PayerID };
-
-  paypal.payment.execute(paymentId, execute_payment, async (error, payment) => {
+app.get('/paypal/success', requireLogin, requireTenant, async (req, res) => {
+  if (!paypalEnabled) return res.status(503).send('PayPal not configured');
+  const { PayerID, paymentId } = req.query;
+  const execute_payment_json = {
+    payer_id: PayerID,
+    transactions: [{ amount: { currency: "USD", total: "13.50" } }]
+  };
+  paypal.payment.execute(paymentId, execute_payment_json, async (error, payment) => {
     if (error) return res.send('Payment failed');
-    const ends = new Date();
-    ends.setMonth(ends.getMonth() + 1);
-    await pool.query('UPDATE tenants SET plan = $1, status = $2 WHERE id = $3', ['premium', 'active', req.tenantId]);
-    await pool.query('INSERT INTO subscriptions (tenant_id, plan, amount, starts_at, ends_at, status, paypal_id) VALUES ($1, $2, $3, NOW(), $4, $5, $6)',
-      [req.tenantId, 'premium', 50000, ends, 'active', paymentId]);
-    res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px;text-align:center"><h1>✅ Payment Successful!</h1><p>Premium activated. Valid until ${ends.toLocaleDateString()}</p><a href="/app" style="background:#27ae60;color:white;padding:12px 30px;text-decoration:none;border-radius:6px;display:inline-block;margin-top:20px">Go to Dashboard</a></div>`);
+    const expires = new Date();
+    expires.setMonth(expires.getMonth() + 1);
+    await pool.query('UPDATE tenants SET plan = $1, plan_expires = $2 WHERE id = $3', ['premium', expires, req.tenantId]);
+    res.send('Payment successful! Your account is now Premium. <a href="/app">Go to Dashboard</a>');
   });
 });
 
-// === MAIN DASHBOARD ===
-app.get('/app', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const tenant = req.user || { id: req.session.tenantId, name: req.session.fullname };
-  const s = await getSettings(tenant.id);
-  const students = await pool.query('SELECT COUNT(*) as count FROM students WHERE tenant_id = $1', [tenant.id]);
-  const balance = await pool.query('SELECT COALESCE(SUM(balance),0) as total FROM students WHERE tenant_id = $1', [tenant.id]);
-  const isPremium = tenant.free_access || tenant.plan!== 'trial' || new Date(tenant.trial_ends) > new Date();
+app.get('/paypal/cancel', (req, res) => res.send('Payment cancelled. <a href="/upgrade">Try again</a>'));
 
-  res.send(`<!DOCTYPE html><html><head><title>Dashboard - ${s.site_name}</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;background:#f4f6f9}
-  .header{background:linear-gradient(135deg,${s.primary_color} 0%,#764ba2 100%);color:white;padding:20px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
-  .header h1{font-size:28px}
-  .logout{position:absolute;top:20px;right:20px;color:white;text-decoration:none;background:rgba(255,255,255,0.2);padding:8px 16px;border-radius:6px}
-  .container{max-width:1400px;margin:0 auto;padding:30px 20px}
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin-bottom:30px}
-  .stat{background:white;padding:25px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08)}
-  .stat h3{font-size:36px;color:${s.primary_color};margin-bottom:5px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
-  .card{background:white;padding:25px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);text-decoration:none;color:#2c3e50;transition:transform 0.2s;position:relative}
-  .card:hover{transform:translateY(-5px)}
-  .card.locked{opacity:0.5;pointer-events:none}
-  .card.locked::after{content:'🔒 Premium';position:absolute;top:15px;right:15px;background:#e74c3c;color:white;padding:5px 10px;border-radius:4px;font-size:12px}
-  .card h3{color:${s.primary_color};margin-bottom:10px;font-size:20px}
-  .badge{background:#27ae60;color:white;padding:4px 10px;border-radius:4px;font-size:12px;display:inline-block;margin-bottom:10px}
-  .trial-banner{background:#f39c12;color:white;padding:15px;text-align:center;font-weight:600}
-  </style>
-  </head><body>
-    ${!isPremium? `<div class="trial-banner">⏰ Free trial ends ${new Date(tenant.trial_ends).toLocaleDateString()} - <a href="/upgrade" style="color:white;text-decoration:underline">Upgrade Now</a></div>` : ''}
-    <div class="header">
-      <h1>${s.site_name}</h1>
-      <p>Welcome, ${tenant.name}</p>
-      <a href="/logout" class="logout">Logout</a>
-    </div>
-    <div class="container">
-      <div class="stats">
-        <div class="stat"><h3>${students.rows[0].count}</h3><p>Total Students</p></div>
-        <div class="stat"><h3>UGX ${Number(balance.rows[0].total).toLocaleString()}</h3><p>Outstanding Fees</p></div>
-        <div class="stat"><h3>${tenant.plan === 'trial'? '14-Day Trial' : 'Premium'}</h3><p>Current Plan</p></div>
-      </div>
-      <div class="grid">
-        <a href="/app/students" class="card"><span class="badge">Core</span><h3>👨‍🎓 Students</h3><p>Manage admissions, profiles, documents</p></a>
-        <a href="/app/payments" class="card"><span class="badge">Core</span><h3>💰 Payments</<p>Fee collection, receipts, balances</p></a>
-        <a href="/app/results" class="card ${isPremium? '' : 'locked'}"><span class="badge">Core</span><h3>📝 Results</h3><p>Marksheets, report cards PDF</p></a>
-        <a href="/app/attendance" class="card ${isPremium? '' : 'locked'}"><span class="badge">Core</span><h3>📅 Attendance</h3><p>Daily registers, reports</p></a>
-        <a href="/app/staff" class="card ${isPremium? '' : 'locked'}"><span class="badge">Premium</span><h3>💼 Staff Payroll</h3><p>Salaries, PayPal/MoMo payouts</p></a>
-        <a href="/app/library" class="card ${isPremium? '' : 'locked'}"><span class="badge">Premium</span><h3>📖 Library</h3><p>Book tracking, loans</p></a>
-        <a href="/app/papers" class="card ${isPremium? '' : 'locked'}"><span class="badge">Premium</span><h3>📄 Past Papers</h3><p>Sell UNEB papers</p></a>
-        <a href="/app/reports" class="card ${isPremium? '' : 'locked'}"><span class="badge">Premium</span><h3>📊 Reports</h3><p>Analytics, exports</p></a>
-        <a href="/entertainment" class="card"><span class="badge">Public</span><h3>🎬 Entertainment Hub</h3><p>Videos, ads, earn money</p></a>
-        <a href="/marketplace" class="card"><span class="badge">Public</span><h3>🛍️ Marketplace</h3><p>Sell products, clothes</p></a>
-        <a href="/surveys" class="card"><span class="badge">Public</span><h3>📋 Paid Surveys</h3><p>Create surveys, earn from responses</p></a>
-        <a href="/admin/settings" class="card"><span class="badge">Admin</span><h3>⚙️ Settings</h3><p>WhatsApp, colors, site info</p></a>
-      </div>
-    </div>
-  </body></html>`);
-});
-
-// === ENTERTAINMENT HUB ===
-app.get('/entertainment', async (req, res) => {
-  const videos = await pool.query('SELECT _ FROM entertainment WHERE type = $1 AND status = $2 ORDER BY created_at DESC LIMIT 20', ['video', 'active']);
-  const s = await getSettings(1);
-  res.send(`<!DOCTYPE html><html><head><title>Entertainment Hub</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1814429636128167" crossorigin="anonymous"></script>
-  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:${s.primary_color};color:white;padding:10px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}.video{background:#000;border-radius:8px;overflow:hidden}.video iframe{width:100%;height:200px;border:none}.ad-slot{margin:20px 0;text-align:center;min-height:100px;background:#f0f0f0;display:flex;align-items:center;justify-content:center}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none;margin-right:15px}</style>
-  </head><body>
-    <div class="nav"><a href="/">Home</a><a href="/marketplace">Marketplace</a><a href="/surveys">Surveys</a><a href="/login">Dashboard</a></div>
-    <div class="card"><h1>🎬 Entertainment Hub</h1><p>Watch videos, post ads, earn money. Upload your content!</p><a href="/entertainment/upload" class="btn">+ Upload Video/Ad</a></div>
-    <div class="ad-slot">
-      <ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-1814429636128167" data-ad-slot="1234567890" data-ad-format="auto"></ins>
-      <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
-    </div>
-    <div class="grid">
-      ${videos.rows.map(v => `
-        <div class="video">
-          <iframe src="${v.url}" allowfullscreen></iframe>
-          <div style="padding:15px">
-            <h3>${v.title}</h3>
-            <p style="color:#7f8c8d;font-size:14px">${v.description}</p>
-            <p style="font-size:12px;color:#95a5a6">${v.views} views ${v.price > 0? '• Sponsored' : ''}</p>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-    <div class="card" style="text-align:center">
-      <h3>Want to advertise?</h3>
-      <p>Upload your video ad for UGX 10,000. Earn from views!</p>
-      <a href="/entertainment/upload" class="btn">Post Your Ad</a>
-    </div>
-  </body></html>`);
-});
-
-app.get('/entertainment/upload', requireLogin, requireTenant, async (req, res) => {
+// Marketplace
+app.get('/market', requireLogin, requireTenant, async (req, res) => {
   const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Upload Video</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}.btn{background:${s.primary_color};color:white;padding:12px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;width:100%}input,textarea{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
-  </head><body>
-    <div class="nav"><a href="/entertainment">← Back</a></div>
-    <div class="card"><h1>Upload Video/Ad</h1>
-    <form method="POST" action="/entertainment/upload">
-      <input name="title" placeholder="Video Title" required>
-      <textarea name="description" placeholder="Description" rows="3"></textarea>
-      <input name="url" placeholder="YouTube Embed URL or Video Link" required>
-      <select name="type"><option value="video">Regular Video</option><option value="ad">Sponsored Ad (UGX 10,000)</option></select>
-      <button type="submit" class="btn">Upload</button>
-    </form>
-    <p style="font-size:14px;color:#7f8c8d;margin-top:20px">⚠️ No sexual/abuse content. All uploads reviewed. Violations = account ban.</p>
-    </div>
-  </body></html>`);
-});
-
-app.post('/entertainment/upload', requireLogin, requireTenant, async (req, res) => {
-  const { title, description, url, type } = req.body;
-  const price = type === 'ad' ? 10000 : 0;
-  await pool.query('INSERT INTO entertainment (tenant_id, user_email, type, title, description, url, price) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-    [req.tenantId, req.user.email, type, title, description, url, price]);
-  res.redirect('/entertainment');
-});
-
-// === MARKETPLACE ===
-app.get('/marketplace', async (req, res) => {
-  const products = await pool.query('SELECT _ FROM marketplace WHERE status = $1 ORDER BY created_at DESC LIMIT 50', ['active']);
-  const s = await getSettings(1);
+  if (!s.allow_marketplace) return res.send('Marketplace disabled by admin');
+  const items = await pool.query('SELECT * FROM market_items WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
   res.send(`<!DOCTYPE html><html><head><title>Marketplace</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background: ${s.primary_color};color:white;padding:10px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}.product{border:1px solid #ddd;border-radius:8px;overflow:hidden}.product img{width:100%;height:200px;object-fit:cover}.product div{padding:15px}.price{font-size:24px;color:${s.primary_color};font-weight:bold}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none;margin-right:15px}</style>
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:${s.primary_color};color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1200px;margin:20px auto;padding:20px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:20px}.card{background:white;padding:20px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}form{background:white;padding:20px;border-radius:8px;margin-bottom:20px}input,textarea{width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px}button{background:${s.primary_color};color:white;padding:10px 20px;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body>
-    <div class="nav"><a href="/">Home</a><a href="/entertainment">Entertainment</a><a href="/surveys">Surveys</a><a href="/login">Dashboard</a></div>
-    <div class="card"><h1>🛍️ Marketplace</h1><p>Buy & sell. Admin takes 5% commission.</p><a href="/marketplace/sell" class="btn">+ Sell Product</a></div>
-    <div class="grid">
-      ${products.rows.map(p => `
-        <div class="product">
-          <img src="${p.image_url || 'https://via.placeholder.com/300x200'}" alt="${p.product_name}">
-          <div>
-            <h3>${p.product_name}</h3>
-            <p style="color:#7f8c8d;font-size:14px">${p.description}</p>
-            <p class="price">UGX ${Number(p.price).toLocaleString()}</p>
-            <a href="https://wa.me/${p.contact}?text=I'm interested in ${p.product_name}" class="btn" style="background:#25D366">WhatsApp Seller</a>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  </body></html>`);
+  <nav><strong>${req.tenant.name}</strong><a href="/app">Dashboard</a><a href="/market">Market</a><a href="/logout">Logout</a></nav>
+  <div class="container"><h1>School Marketplace</h1>
+  <form method="POST" action="/market/add">
+  <h3>List New Item</h3>
+  <input name="title" placeholder="Item Title (e.g. Past Papers)" required>
+  <textarea name="description" placeholder="Description" required></textarea>
+  <input name="price" type="number" placeholder="Price (UGX)" required>
+  <button type="submit">List Item (10% admin fee applies)</button>
+  </form>
+  <div class="grid">${items.rows.map(i => `<div class="card"><h3>${i.title}</h3><p>${i.description}</p><p><strong>UGX ${i.price}</strong></p><p>Seller: ${i.seller_email}</p></div>`).join('')}</div>
+  </div></body></html>`);
 });
 
-app.get('/marketplace/sell', requireLogin, requireTenant, async (req, res) => {
+app.post('/market/add', requireLogin, requireTenant, async (req, res) => {
+  const { title, description, price } = req.body;
+  const adminFee = price * 0.1;
+  await pool.query('INSERT INTO market_items (tenant_id, title, description, price, seller_email) VALUES ($1, $2, $3, $4, $5)',
+    [req.tenantId, title, description, price, req.session.user.email]);
+  await pool.query('UPDATE wallets SET balance = balance + $1 WHERE tenant_id = 1', [adminFee]);
+  res.redirect('/market');
+});
+
+// Surveys
+app.get('/surveys', requireLogin, requireTenant, async (req, res) => {
   const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Sell Product</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}.btn{background:${s.primary_color};color:white;padding:12px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;width:100%}input,textarea,select{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
+  if (!s.allow_surveys) return res.send('Surveys disabled by admin');
+  const surveys = await pool.query('SELECT * FROM surveys WHERE tenant_id = $1 AND active = true ORDER BY created_at DESC', [req.tenantId]);
+  res.send(`<!DOCTYPE html><html><head><title>Surveys</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:${s.primary_color};color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1200px;margin:20px auto;padding:20px}.card{background:white;padding:20px;border-radius:8px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,0.1)}form{background:white;padding:20px;border-radius:8px;margin-bottom:20px}input,textarea{width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px}button{background:${s.primary_color};color:white;padding:10px 20px;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body>
-    <div class="nav"><a href="/marketplace">← Back</a></div>
-    <div class="card"><h1>Sell Your Product</h1>
-    <form method="POST" action="/marketplace/sell">
-      <input name="product_name" placeholder="Product Name" required>
-      <textarea name="description" placeholder="Description" rows="4" required></textarea>
-      <input name="price" type="number" placeholder="Price UGX" required>
-      <select name="category" required><option value="">Category</option><option>Clothes</option><option>Electronics</option><option>Books</option><option>Food</option><option>Services</option><option>Other</option></select>
-      <input name="image_url" placeholder="Image URL" required>
-      <input name="contact" placeholder="WhatsApp: 0789736737" required>
-      <button type="submit" class="btn">List Product</button>
-    </form>
-    <p style="font-size:14px;color:#7f8c8d;margin-top:20px">5% commission on sales. No adult/sexual content allowed.</p>
-    </div>
-  </body></html>`);
+  <nav><strong>${req.tenant.name}</strong><a href="/app">Dashboard</a><a href="/surveys">Surveys</a><a href="/logout">Logout</a></nav>
+  <div class="container"><h1>Paid Surveys</h1>
+  <form method="POST" action="/surveys/create">
+  <h3>Create Survey</h3>
+  <input name="title" placeholder="Survey Title" required>
+  <textarea name="questions" placeholder="Questions (one per line)" required></textarea>
+  <input name="reward_per_user" type="number" placeholder="Reward per response (UGX)" required>
+  <input name="max_responses" type="number" placeholder="Max responses" required>
+  <input name="total_budget" type="number" placeholder="Total Budget (UGX)" required>
+  <button type="submit">Create Survey (10% admin fee)</button>
+  </form>
+  ${surveys.rows.map(sv => `<div class="card"><h3>${sv.title}</h3><p>Reward: UGX ${sv.reward_per_user} per response</p><p>Budget: UGX ${sv.total_budget} | Max: ${sv.max_responses}</p></div>`).join('')}
+  </div></body></html>`);
 });
 
-app.post('/marketplace/sell', requireLogin, requireTenant, async (req, res) => {
-  const { product_name, description, price, category, image_url, contact } = req.body;
-  await pool.query('INSERT INTO marketplace (tenant_id, seller_email, product_name, description, price, category, image_url, contact) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-    [req.tenantId, req.user.email, product_name, description, price, category, image_url, contact]);
-  res.redirect('/marketplace');
-});
-
-// === SURVEYS ===
-app.get('/surveys', async (req, res) => {
-  const surveys = await pool.query('SELECT _ FROM surveys WHERE status = $1 AND responses_count < max_responses ORDER BY created_at DESC', ['active']);
-  const s = await getSettings(1);
-  res.send(`<!DOCTYPE html><html><head><title>Paid Surveys</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:${s.primary_color};color:white;padding:10px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}.survey{border:2px solid ${s.primary_color};padding:20px;border-radius:8px;margin:15px 0}.reward{background:#27ae60;color:white;padding:8px 16px;border-radius:4px;display:inline-block;font-weight:bold}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none;margin-right:15px}</style>
-  </head><body>
-    <div class="nav"><a href="/">Home</a><a href="/entertainment">Entertainment</a><a href="/marketplace">Marketplace</a><a href="/login">Dashboard</a></div>
-    <div class="card"><h1>📋 Paid Surveys</h1><p>Answer surveys, earn money. Create surveys to get data.</p><a href="/surveys/create" class="btn">+ Create Survey</a></div>
-    ${surveys.rows.map(sv => `
-      <div class="survey">
-        <h3>${sv.title}</h3>
-        <p><span class="reward">Earn UGX ${Number(sv.reward_per_user).toLocaleString()}</span> • ${sv.responses_count}/${sv.max_responses} responses</p>
-        <a href="/surveys/${sv.id}" class="btn">Take Survey</a>
-      </div>
-    `).join('')}
-  </body></html>`);
-});
-
-app.get('/surveys/create', requireLogin, requireTenant, async (req, res) => {
-  const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Create Survey</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}.btn{background:${s.primary_color};color:white;padding:12px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;width:100%}input,textarea{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
-  </head><body>
-    <div class="nav"><a href="/surveys">← Back</a></div>
-    <div class="card"><h1>Create Paid Survey</h1>
-    <form method="POST" action="/surveys/create">
-      <input name="title" placeholder="Survey Title" required>
-      <textarea name="questions" placeholder='Questions JSON: [{"q":"Your age?","type":"number"}]' rows="6" required></textarea>
-      <input name="reward_per_user" type="number" placeholder="Reward per response UGX" required>
-      <input name="max_responses" type="number" placeholder="Max responses" required>
-      <input name="total_budget" type="number" placeholder="Total Budget UGX" required>
-      <button type="submit" class="btn">Create Survey (10% admin fee)</button>
-    </form>
-    <p style="font-size:14px;color:#7f8c8d;margin-top:20px">Admin takes 10% tax. No sexual/abuse content.</p>
-    </div>
-  </body></html>`);
-});
-
-aapp.post('/surveys/create', requireLogin, requireTenant, async (req, res) => {
+app.post('/surveys/create', requireLogin, requireTenant, async (req, res) => {
   const { title, questions, reward_per_user, max_responses, total_budget } = req.body;
-  const adminFee = total_budget * 0.1; // Fixed: * not _
+  const adminFee = total_budget * 0.1;
   await pool.query('INSERT INTO surveys (tenant_id, creator_email, title, questions, reward_per_user, total_budget, max_responses) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-    [req.tenantId, req.user.email, title, questions, reward_per_user, total_budget, max_responses]);
+    [req.tenantId, req.session.user.email, title, questions, reward_per_user, total_budget, max_responses]);
   await pool.query('UPDATE wallets SET balance = balance + $1 WHERE tenant_id = 1', [adminFee]);
   res.redirect('/surveys');
 });
 
-app.get('/surveys/:id', requireLogin, async (req, res) => {
-  const survey = await pool.query('SELECT _ FROM surveys WHERE id = $1 AND status = $2', [req.params.id, 'active']);
-  if (survey.rows.length === 0) return res.status(404).send('Survey not found');
-  const sv = survey.rows[0];
-  const questions = JSON.parse(sv.questions);
-  const s = await getSettings(1);
-  res.send(`<!DOCTYPE html><html><head><title>${sv.title}</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}.btn{background:${s.primary_color};color:white;padding:12px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;width:100%}input,textarea{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.reward{background:#27ae60;color:white;padding:10px;border-radius:4px;text-align:center;font-weight:bold;margin-bottom:20px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
-  </head><body>
-    <div class="nav"><a href="/surveys">← Back</a></div>
-    <div class="card">
-      <div class="reward">Earn UGX ${Number(sv.reward_per_user).toLocaleString()} for completing</div>
-      <h1>${sv.title}</h1>
-      <form method="POST" action="/surveys/${sv.id}/submit">
-        ${questions.map((q, i) => `
-          <label>${q.q}</label>
-          <input name="answer_${i}" type="${q.type || 'text'}" required>
-        `).join('')}
-        <button type="submit" class="btn">Submit & Earn</button>
-      </form>
-    </div>
-  </body></html>`);
-});
-
-app.post('/surveys/:id/submit', requireLogin, async (req, res) => {
-  const survey = await pool.query('SELECT _ FROM surveys WHERE id = $1', [req.params.id]);
-  const sv = survey.rows[0];
-  if (sv.responses_count >= sv.max_responses) return res.send('Survey closed');
-  
-  const answers = {};
-  for (let key in req.body) {
-    if (key.startsWith('answer_')) answers[key] = req.body[key];
-  }
-  
-  await pool.query('INSERT INTO survey_responses (survey_id, user_email, answers, earned) VALUES ($1, $2, $3, $4)',
-    [req.params.id, req.user.email, JSON.stringify(answers), sv.reward_per_user]);
-  await pool.query('UPDATE surveys SET responses_count = responses_count + 1 WHERE id = $1', [req.params.id]);
-  await pool.query('UPDATE wallets SET balance = balance + $1 WHERE tenant_id = $2', [sv.reward_per_user, req.user.id]);
-  
-  res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px;text-align:center"><h1>✅ Thank You!</h1><p>You earned UGX ${Number(sv.reward_per_user).toLocaleString()}</p><a href="/surveys" style="background:#3498db;color:white;padding:12px 30px;text-decoration:none;border-radius:6px;display:inline-block;margin-top:20px">More Surveys</a></div>`);
-});
-
-// === SUPER ADMIN ===
-app.get('/super-admin', requireLogin, requireSuperAdmin, async (req, res) => {
-  const tenants = await pool.query(`SELECT t._, (SELECT COUNT(_) FROM students WHERE tenant_id = t.id) as student_count, (SELECT COUNT(_) FROM users WHERE tenant_id = t.id) as user_count FROM tenants t ORDER BY created_at DESC`);
-  const s = await getSettings(1);
-  res.send(`<!DOCTYPE html><html><head><title>Super Admin</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background: ${s.primary_color};color:white;padding:8px 12px;text-decoration:none;border-radius:4px;font-size:14px;margin:2px;border:none;cursor:pointer}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd;text-align:left}th{background:${s.primary_color};color:white}.badge{padding:4px 8px;border-radius:4px;font-size:12px}.trial{background:#f39c12;color:white}.premium{background:#27ae60;color:white}.free{background:#3498db;color:white}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
-  </head><body>
-   <a href="/app/staff/users" class="card"><span class="badge">Admin</span><h3>👥 Staff Accounts</h3><p>Create logins for teachers & staff</p></a>
-    <div class="nav"><a href="/app">← Back to App</a></div>
-    <div class="card"><h1>🏢 Super Admin - All Schools</h1></div>
-    <div class="card"><table><tr><th>School</th><th>Email</th><th>Plan</th><th>Trial Ends</th><th>Students</th><th>Users</th><th>Status</th><th>Actions</th></tr>
-      ${tenants.rows.map(t => `
-        <tr>
-          <td><strong>${t.school_name || t.name}</strong></td>
-          <td>${t.email}</td>
-          <td><span class="badge ${t.free_access? 'free' : t.plan === 'trial'? 'trial' : 'premium'}">${t.free_access? 'FREE' : t.plan.toUpperCase()}</span></td>
-          <td>${t.trial_ends? new Date(t.trial_ends).toLocaleDateString() : '-'}</td>
-          <td>${t.student_count}</td>
-          <td>${t.user_count}</td>
-          <td>${t.is_active? '✅ Active' : '❌ Suspended'}</td>
-          <td>
-            <form method="POST" action="/super-admin/toggle-free/${t.id}" style="display:inline"><button class="btn" style="background:${t.free_access? '#e74c3c' : '#27ae60'}">${t.free_access? 'Remove Free' : 'Grant Free'}</button></form>
-            <form method="POST" action="/super-admin/toggle-active/${t.id}" style="display:inline"><button class="btn" style="background:${t.is_active? '#e67e22' : '#95a5a6'}">${t.is_active? 'Suspend' : 'Activate'}</button></form>
-          </td>
-        </tr>
-      `).join('')}
-    </table></div>
-  </body></html>`);
-});
-
-app.post('/super-admin/toggle-free/:id', requireLogin, requireSuperAdmin, async (req, res) => {
-  await pool.query('UPDATE tenants SET free_access = NOT free_access WHERE id = $1', [req.params.id]);
-  res.redirect('/super-admin');
-});
-
-app.post('/super-admin/toggle-active/:id', requireLogin, requireSuperAdmin, async (req, res) => {
-  await pool.query('UPDATE tenants SET is_active = NOT is_active WHERE id = $1', [req.params.id]);
-  res.redirect('/super-admin');
-});
-
-// === ADMIN SETTINGS ===
+// Admin Settings
 app.get('/admin/settings', requireLogin, requireTenant, async (req, res) => {
+  if (req.session.user.role!== 'admin' && req.session.user.role!== 'super_admin') return res.status(403).send('Forbidden');
   const s = await getSettings(req.tenantId);
   res.send(`<!DOCTYPE html><html><head><title>Settings</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;padding:20px;background:#f4f6f9}h2{color:#2c3e50}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px;max-width:600px;margin:20px auto}label{font-weight:bold;display:block;margin-top:15px}input,textarea,select{width:100%;padding:12px;margin:5px 0;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}textarea{height:80px}.btn{background:#27ae60;color:white;padding:15px;border:none;border-radius:4px;width:100%;font-size:16px;margin-top:20px;cursor:pointer}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;margin-right:20px;text-decoration:none}</style>
-  </head><body>
-    <div class="nav"><a href="/app">← Dashboard</a></div>
-    <div class="card">
-      <h2>⚙️ Edit Site Settings</h2>
-      ${req.query.updated? '<p style="color:green">✓ Settings updated successfully</p>' : ''}
-      <form method="POST" action="/admin/settings/update">
-        <label>School/Site Name</label>
-        <input name="site_name" value="${s.site_name}" required>
-        <label>Hero Title - Homepage</label>
-        <input name="hero_title" value="${s.hero_title}" required>
-        <label>Hero Subtitle</label>
-        <textarea name="hero_subtitle">${s.hero_subtitle}</textarea>
-        <label>WhatsApp Number (256...)</label>
-        <input name="whatsapp_number" value="${s.whatsapp_number}" required>
-        <label>MoMo Number</label>
-        <input name="momo_number" value="${s.momo_number}" required>
-        <label>MoMo Names</label>
-        <input name="momo_names" value="${s.momo_names}" required>
-        <label>Default Paper Price UGX</label>
-        <input name="paper_price" type="number" value="${s.paper_price}" required>
-        <label>Contact Email</label>
-        <input name="contact_email" type="email" value="${s.contact_email}" required>
-        <label>Location</label>
-        <input name="location" value="${s.location}" required>
-        <label>Primary Color (hex)</label>
-        <input name="primary_color" value="${s.primary_color}" required>
-        <label><input type="checkbox" name="allow_marketplace" ${s.allow_marketplace? 'checked' : ''}> Allow Marketplace</label>
-        <label><input type="checkbox" name="allow_surveys" ${s.allow_surveys? 'checked' : ''}> Allow Surveys</label>
-        <h3>PayPal Integration</h3>
-<label>PayPal Client ID</label>
-<input name="paypal_client_id" value="${s.paypal_client_id || ''}" placeholder="Paste from PayPal Developer Dashboard">
-<label>PayPal Client Secret</label>
-<input name="paypal_client_secret" value="${s.paypal_client_secret || ''}" placeholder="Leave blank to disable PayPal">
-<p style="font-size:12px;color:#7f8c8d">Get keys: <a href="https://developer.paypal.com" target="_blank">developer.paypal.com</a> → Apps & Credentials</p>
-        <button type="submit" class="btn">Save All Settings</button>
-      </form>
-    </div>
-  </body></html>`);
+  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}form{background:white;padding:30px;border-radius:8px}input,textarea{width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px}button{background:#3498db;color:white;padding:12px 30px;border:none;border-radius:4px;cursor:pointer}label{display:block;margin-top:15px;font-weight:bold}h3{margin-top:30px;color:#2c3e50}</style>
+  </head><body><form method="POST" action="/admin/settings">
+  <h1>School Settings</h1>
+  <label>Site Name</label><input name="site_name" value="${s.site_name}">
+  <label>Hero Title</label><input name="hero_title" value="${s.hero_title}">
+  <label>Hero Subtitle</label><input name="hero_subtitle" value="${s.hero_subtitle}">
+  <label>WhatsApp Number</label><input name="whatsapp_number" value="${s.whatsapp_number}">
+  <label>MoMo Number</label><input name="momo_number" value="${s.momo_number}">
+  <label>MoMo Names</label><input name="momo_names" value="${s.momo_names}">
+  <label>Paper Price (UGX)</label><input name="paper_price" type="number" value="${s.paper_price}">
+  <label>Contact Email</label><input name="contact_email" value="${s.contact_email}">
+  <label>Location</label><input name="location" value="${s.location}">
+  <label>Primary Color</label><input name="primary_color" value="${s.primary_color}">
+  <label><input type="checkbox" name="allow_marketplace" ${s.allow_marketplace? 'checked' : ''}> Enable Marketplace</label>
+  <label><input type="checkbox" name="allow_surveys" ${s.allow_surveys? 'checked' : ''}> Enable Surveys</label>
+  <h3>PayPal Integration</h3>
+  <label>PayPal Client ID</label><input name="paypal_client_id" value="${s.paypal_client_id  <label>PayPal Client ID</label><input name="paypal_client_id" value="${s.paypal_client_id || ''}" placeholder="Paste from PayPal Developer Dashboard">
+  <label>PayPal Client Secret</label><input name="paypal_client_secret" value="${s.paypal_client_secret || ''}" placeholder="Leave blank to disable PayPal">
+  <p style="font-size:12px;color:#7f8c8d">Get keys: <a href="https://developer.paypal.com" target="_blank">developer.paypal.com</a> → Apps & Credentials</p>
+  <button type="submit">Save Settings</button>
+  </form></body></html>`);
 });
 
-app.post('/admin/settings/update', requireLogin, requireTenant, async (req, res) => {
-  const { site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys } = req.body;
-  await pool.query(`INSERT INTO settings (tenant_id, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+app.post('/admin/settings', requireLogin, requireTenant, async (req, res) => {
+  if (req.session.user.role !== 'admin' && req.session.user.role !== 'super_admin') return res.status(403).send('Forbidden');
+  const { site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, paypal_client_id, paypal_client_secret } = req.body;
+  const allow_marketplace = req.body.allow_marketplace === 'on';
+  const allow_surveys = req.body.allow_surveys === 'on';
+  
+  await pool.query(`INSERT INTO settings (tenant_id, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id, paypal_client_secret)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     ON CONFLICT (tenant_id) DO UPDATE SET
-    site_name=$2, hero_title=$3, hero_subtitle=$4, whatsapp_number=$5, momo_number=$6, momo_names=$7, paper_price=$8, contact_email=$9, location=$10, primary_color=$11, allow_marketplace=$12, allow_surveys=$13`,
-    [req.tenantId, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace === 'on', allow_surveys === 'on']
-  );
-  res.redirect('/admin/settings?updated=1');
+    site_name=$2, hero_title=$3, hero_subtitle=$4, whatsapp_number=$5, momo_number=$6, momo_names=$7, paper_price=$8, contact_email=$9, location=$10, primary_color=$11, allow_marketplace=$12, allow_surveys=$13, paypal_client_id=$14, paypal_client_secret=$15`,
+    [req.tenantId, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id || null, paypal_client_secret || null]);
+  
+  await initPayPal(); // Reload PayPal config
+  res.redirect('/admin/settings?saved=1');
 });
 
-// === SITEMAP & HEALTH ===
-app.get('/sitemap.xml', (req, res) => {
-  res.header('Content-Type', 'application/xml');
-  res.send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://ssewasswa-api.onrender.com/</loc></url><url><loc>https://ssewasswa-api.onrender.com/entertainment</loc></url><url><loc>https://ssewasswa-api.onrender.com/marketplace</loc></url><url><loc>https://ssewasswa-api.onrender.com/surveys</loc></url></urlset>`);
-});
-
-app.get('/robots.txt', (req, res) => {
-  res.type('text/plain');
-  res.send(`User-agent: _\nAllow: /\nSitemap: https://ssewasswa-api.onrender.com/sitemap.xml`);
-});
-
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
-app.get('/manifest.json', (req, res) => res.json({"name":"SSE Wasswa ERP","short_name":"SSE Wasswa","start_url":"/app","display":"standalone","background_color":"#667eea","theme_color":"#667eea"}));
-
-// === KEEP ALIVE ===
-if (process.env.NODE_ENV === 'production') {
-  setInterval(() => {
-    fetch('https://ssewasswa-api.onrender.com/health').catch(() => {});
-  }, 14 * 60 * 1000); // Fixed: * not _
-}
-
-initDB().then(() => {
-  app.listen(PORT, () => console.log(`🚀 SSE Wasswa ERP running on port ${PORT}`));
-}).catch(err => {
-  console.error('Database init failed:', err);
-  process.exit(1);
-});
-
-**Deploy now. Schools can sign up today with zero setup from you.**// === STUDENTS CRUD ===
-app.get('/app/students', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const students = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY class, name', [req.tenantId]);
+// Fees
+app.get('/fees', requireLogin, requireTenant, async (req, res) => {
   const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Students</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:${s.primary_color};color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px;border:none;cursor:pointer}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd;text-align:left}th{background:${s.primary_color};color:white}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
+  const fees = await pool.query('SELECT f.*, st.name as student_name FROM fees f JOIN students st ON f.student_id = st.id WHERE f.tenant_id = $1 ORDER BY f.created_at DESC', [req.tenantId]);
+  const students = await pool.query('SELECT id, name FROM students WHERE tenant_id = $1 ORDER BY name', [req.tenantId]);
+  res.send(`<!DOCTYPE html><html><head><title>Fees</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:${s.primary_color};color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1200px;margin:20px auto;padding:20px}table{background:white;width:100%;border-collapse:collapse}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#f8f9fa}form{background:white;padding:20px;border-radius:8px;margin-bottom:20px}input,select{padding:8px;margin:5px;border:1px solid #ddd;border-radius:4px}button{background:${s.primary_color};color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body>
-    <div class="nav"><a href="/app">← Dashboard</a></div>
-    <div class="card"><h1>👨‍🎓 Students</h1>
-      <a href="/app/students/add" class="btn" style="background:#27ae60">+ Add Student</a>
-      <a href="/app/students/bulk-upload" class="btn" style="background:#e67e22">📤 Bulk Upload</a>
-    </div>
-    <div class="card"><table><tr><th>Name</th><th>Class</th><th>Type</th><th>Parent Phone</th><th>Balance</th><th>Actions</th></tr>
-      ${students.rows.map(st => `<tr><td>${st.name}</td><td>${st.class}</td><td>${st.school_type}</td><td>${st.parent_phone || '-'}</td><td>UGX ${Number(st.balance).toLocaleString()}</td><td><a href="/app/payments/add?student_id=${st.id}" class="btn">Payment</a></td></tr>`).join('')}
-    </table></div>
-  </body></html>`);
+  <nav><strong>${req.tenant.name}</strong><a href="/app">Dashboard</a><a href="/fees">Fees</a><a href="/logout">Logout</a></nav>
+  <div class="container"><h1>Fee Management</h1>
+  <form method="POST" action="/fees/add">
+  <select name="student_id" required><option value="">Select Student</option>${students.rows.map(st => `<option value="${st.id}">${st.name}</option>`).join('')}</select>
+  <input name="amount" type="number" placeholder="Amount (UGX)" required>
+  <input name="term" placeholder="Term (e.g. Term 1)" required>
+  <input name="year" type="number" placeholder="Year" value="2026" required>
+  <button type="submit">Add Fee</button>
+  </form>
+  <table><tr><th>Student</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Term</th><th>Year</th></tr>
+  ${fees.rows.map(f => `<tr><td>${f.student_name}</td><td>UGX ${f.amount}</td><td>UGX ${f.paid}</td><td>UGX ${f.amount - f.paid}</td><td>${f.term}</td><td>${f.year}</td></tr>`).join('')}
+  </table></div></body></html>`);
 });
 
-app.get('/app/students/add', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
+app.post('/fees/add', requireLogin, requireTenant, async (req, res) => {
+  const { student_id, amount, term, year } = req.body;
+  await pool.query('INSERT INTO fees (tenant_id, student_id, amount, term, year) VALUES ($1, $2, $3, $4, $5)',
+    [req.tenantId, student_id, amount, term, year]);
+  await pool.query('UPDATE students SET balance = balance + $1 WHERE id = $2', [amount, student_id]);
+  res.redirect('/fees');
+});
+
+// Attendance
+app.get('/attendance', requireLogin, requireTenant, async (req, res) => {
   const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Add Student</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}.btn{background:${s.primary_color};color:white;padding:12px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;width:100%;font-size:16px}input,select{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
+  const today = new Date().toISOString().split('T')[0];
+  const students = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY name', [req.tenantId]);
+  const attendance = await pool.query('SELECT * FROM attendance WHERE tenant_id = $1 AND date = $2', [req.tenantId, today]);
+  const attMap = {};
+  attendance.rows.forEach(a => attMap[a.student_id] = a.status);
+  
+  res.send(`<!DOCTYPE html><html><head><title>Attendance</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:${s.primary_color};color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1200px;margin:20px auto;padding:20px}table{background:white;width:100%;border-collapse:collapse}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#f8f9fa}button{background:${s.primary_color};color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;margin:2px}</style>
   </head><body>
-    <div class="nav"><a href="/app/students">← Back</a></div>
-    <div class="card"><h1>Add Student</h1>
-    <form method="POST" action="/app/students/add">
-      <input name="name" placeholder="Full Name" required>
-      <input name="class" placeholder="Class (e.g. P.1, S.2)" required>
-      <select name="school_type" required><option value="">School Type</option><option>Nursery</option><option>Primary</option><option>Secondary</option><option>University</option></select>
-      <input name="parent_phone" placeholder="Parent Phone: 0789736737">
-      <input name="gender" placeholder="Gender">
-      <input name="dob" type="date" placeholder="Date of Birth">
-      <input name="admission_no" placeholder="Admission Number">
-      <input name="address" placeholder="Address">
-      <input name="balance" type="number" value="0" placeholder="Opening Balance">
-      <button type="submit" class="btn">Add Student</button>
-    </form></div>
-  </body></html>`);
-});
-
-app.post('/app/students/add', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const { name, class: cls, school_type, parent_phone, gender, dob, admission_no, address, balance } = req.body;
-  await pool.query('INSERT INTO students (tenant_id, name, class, school_type, parent_phone, gender, dob, admission_no, address, balance) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-    [req.tenantId, name, cls, school_type, parent_phone, gender, dob || null, admission_no, address, balance || 0]);
-  await logAction(req.tenantId, req.session.username || req.user.email, 'STUDENT_ADD', { name, class: cls });
-  res.redirect('/app/students');
-});
-
-app.get('/app/students/bulk-upload', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Bulk Upload</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px;margin-bottom:20px}.btn{background:${s.primary_color};color:white;padding:12px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}input{width:100%;padding:12px;margin:10px 0;box-sizing:border-box}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
-  </head><body>
-    <div class="nav"><a href="/app/students">← Back</a></div>
-    <div class="card"><h1>📤 Bulk Upload Students</h1>
-    <h3>Step 1: Download Template</h3><a href="/app/students/template" class="btn" style="background:#27ae60">Download Excel Template</a></div>
-    <div class="card"><h3>Step 2: Upload Filled Excel</h3><form method="POST" action="/app/students/bulk-upload" enctype="multipart/form-data">
-      <input type="file" name="file" accept=".xlsx,.xls" required>
-      <button type="submit" class="btn">Upload & Import</button>
-    </form><p style="font-size:14px;color:#7f8c8d;margin-top:15px">Required: name, class, school_type. Optional: parent_phone, gender, dob, admission_no, address, balance</p></div>
-  </body></html>`);
-});
-
-app.get('/app/students/template', requireLogin, requireTenant, (req, res) => {
-  const ws = xlsx.utils.aoa_to_sheet([['name', 'class', 'school_type', 'parent_phone', 'gender', 'dob', 'admission_no', 'address', 'balance'], ['John Doe', 'P.1', 'Primary', '0789736737', 'Male', '2015-01-15', 'ADM001', 'Kampala', '0']]);
-  const wb = xlsx.utils.book_new();
-  xlsx.utils.book_append_sheet(wb, ws, 'Students');
-  const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
-  res.setHeader('Content-Disposition', 'attachment; filename=students_template.xlsx');
-  res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.send(buf);
-});
-
-app.post('/app/students/bulk-upload', requireLogin, requireTenant, requireActivePlan, upload.single('file'), async (req, res) => {
-  try {
-    const wb = xlsx.readFile(req.file.path);
-    const data = xlsx.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-    let count = 0;
-    for (let row of data) {
-      if (row.name && row.class && row.school_type) {
-        await pool.query('INSERT INTO students (tenant_id, name, class, school_type, parent_phone, gender, dob, admission_no, address, balance) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-          [req.tenantId, row.name, row.class, row.school_type, row.parent_phone || null, row.gender || null, row.dob || null, row.admission_no || null, row.address || null, row.balance || 0]);
-        count++;
-      }
-    }
-    fs.unlinkSync(req.file.path);
-    await logAction(req.tenantId, req.session.username || req.user.email, 'STUDENT_BULK_IMPORT', { count });
-    res.send(`<div style="font-family:Arial;max-width:600px;margin:50px auto;padding:30px;background:white;border-radius:8px;text-align:center"><h2>✅ Success!</h2><p>Imported ${count} students.</p><a href="/app/students" style="background:#3498db;color:white;padding:10px 20px;text-decoration:none;border-radius:4px">View Students</a></div>`);
-  } catch (err) {
-    if (req.file) fs.unlinkSync(req.file.path);
-    res.status(500).send('Import error: ' + err.message);
+  <nav><strong>${req.tenant.name}</strong><a href="/app">Dashboard</a><a href="/attendance">Attendance</a><a href="/logout">Logout</a></nav>
+  <div class="container"><h1>Attendance - ${today}</h1>
+  <form method="POST" action="/attendance/save">
+  <table><tr><th>Student</th><th>Class</th><th>Status</th></tr>
+  ${students.rows.map(st => `<tr><td>${st.name}</td><td>${st.class}</td><td>
+    <input type="hidden" name="student_id[]" value="${st.id}">
+    <button type="button" onclick="setStatus(${st.id}, 'Present')" style="background:#27ae60">Present</button>
+    <button type="button" onclick="setStatus(${st.id}, 'Absent')" style="background:#e74c3c">Absent</button>
+    <button type="button" onclick="setStatus(${st.id}, 'Late')" style="background:#f39c12">Late</button>
+    <input type="hidden" name="status[]" id="status_${st.id}" value="${attMap[st.id] || 'Present'}">
+    <span id="label_${st.id}">${attMap[st.id] || 'Present'}</span>
+  </td></tr>`).join('')}
+  </table>
+  <button type="submit" style="margin-top:20px;padding:12px 30px">Save Attendance</button>
+  </form>
+  <script>
+  function setStatus(id, status) {
+    document.getElementById('status_' + id).value = status;
+    document.getElementById('label_' + id).innerText = status;
   }
+  </script>
+  </div></body></html>`);
 });
 
-// === PAYMENTS ===
-app.get('/app/payments', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const payments = await pool.query('SELECT p.*, s.name as student_name, s.class FROM payments p JOIN students s ON p.student_id = s.id WHERE p.tenant_id = $1 ORDER BY p.created_at DESC LIMIT 200', [req.tenantId]);
-  const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Payments</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:${s.primary_color};color:white;padding:10px 15px;text-decoration:none;border-radius:4px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd;text-align:left}th{background:${s.primary_color};color:white}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
-  </head><body>
-    <div class="nav"><a href="/app">← Dashboard</a></div>
-    <div class="card"><h1>💰 Payments</h1><a href="/app/payments/add" class="btn" style="background:#27ae60">+ Record Payment</a></div>
-    <div class="card"><table><tr><th>Date</th><th>Receipt</th><th>Student</th><th>Class</th><th>Amount</th><th>Method</th><th>Term</th></tr>
-      ${payments.rows.map(p => `<tr><td>${new Date(p.created_at).toLocaleDateString()}</td><td>${p.receipt_no}</td><td>${p.student_name}</td><td>${p.class}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${p.method}</td><td>${p.term}</td></tr>`).join('')}
-    </table></div>
-  </body></html>`);
-});
-
-app.get('/app/payments/add', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const students = await pool.query('SELECT id, name, class FROM students WHERE tenant_id = $1 ORDER BY class, name', [req.tenantId]);
-  const selected = req.query.student_id || '';
-  const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Record Payment</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:800px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:30px;border-radius:8px}.btn{background:${s.primary_color};color:white;padding:12px 20px;text-decoration:none;border-radius:4px;border:none;cursor:pointer;width:100%;font-size:16px}input,select{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
-  </head><body>
-    <div class="nav"><a href="/app/payments">← Back</a></div>
-    <div class="card"><h1>Record Payment</h1>
-    <form method="POST" action="/app/payments/add">
-      <select name="student_id" required><option value="">Select Student</option>${students.rows.map(st => `<option value="${st.id}" ${st.id == selected? 'selected' : ''}>${st.name} - ${st.class}</option>`).join('')}</select>
-      <input name="amount" type="number" step="0.01" placeholder="Amount (UGX)" required>
-      <select name="method" required><option value="">Payment Method</option><option>Cash</option><option>Bank</option><option>Mobile Money</option><option>PayPal</option><option>Cheque</option></select>
-      <select name="term" required><option value="">Term</option><option>Term 1</option><option>Term 2</option><option>Term 3</option></select>
-      <input name="receipt_no" placeholder="Receipt Number (optional)">
-      <button type="submit" class="btn">Save Payment</button>
-    </form></div>
-  </body></html>`);
-});
-
-app.post('/app/payments/add', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const { student_id, amount, method, term, receipt_no } = req.body;
-  const receipt = receipt_no || 'RCP' + Date.now();
-  await pool.query('INSERT INTO payments (tenant_id, student_id, amount, method, term, receipt_no) VALUES ($1, $2, $3, $4, $5, $6)', [req.tenantId, student_id, amount, method, term, receipt]);
-  await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2 AND tenant_id = $3', [amount, student_id, req.tenantId]);
-  const student = await pool.query('SELECT * FROM students WHERE id = $1 AND tenant_id = $2', [student_id, req.tenantId]);
-  const st = student.rows[0];
-  const s = await getSettings(req.tenantId);
-  if (st.parent_phone) {
-    await sendSMS(st.parent_phone, `Payment received: UGX ${Number(amount).toLocaleString()} for ${st.name}, ${term}. Receipt: ${receipt}. Balance: UGX ${Number(st.balance - amount).toLocaleString()}. Thank you - ${s.site_name}`);
+app.post('/attendance/save', requireLogin, requireTenant, async (req, res) => {
+  const { student_id, status } = req.body;
+  const today = new Date().toISOString().split('T')[0];
+  for (let i = 0; i < student_id.length; i++) {
+    await pool.query(`INSERT INTO attendance (tenant_id, student_id, date, status) VALUES ($1, $2, $3, $4)
+      ON CONFLICT (tenant_id, student_id, date) DO UPDATE SET status = $4`,
+      [req.tenantId, student_id[i], today, status[i]]);
   }
-  const impact = amount * 0.01;
-  await pool.query('UPDATE wallets SET balance = balance + $1 WHERE tenant_id = $2', [impact, req.tenantId]);
-  await pool.query('INSERT INTO transactions (tenant_id, transaction_id, amount, phone, status, type, provider) VALUES ($1, $2, $3, $4, $5, $6, $7)', [req.tenantId, 'IMPACT' + Date.now(), impact, st.parent_phone || 'N/A', 'completed', 'impact_fund', 'MTN']);
-  await logAction(req.tenantId, req.session.username || req.user.email, 'PAYMENT_RECORD', { student_id, amount, receipt });
-  res.redirect('/app/payments');
+  res.redirect('/attendance?saved=1');
 });
 
-// === RESULTS ===
-app.get('/app/results', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const classes = await pool.query('SELECT DISTINCT class, school_type FROM students WHERE tenant_id = $1 ORDER BY class', [req.tenantId]);
+// Grades
+app.get('/grades', requireLogin, requireTenant, async (req, res) => {
   const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Results</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:${s.primary_color};color:white;padding:10px 15px;text-decoration:none;border-radius:4px;display:inline-block;margin:5px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd;text-align:left}th{background:${s.primary_color};color:white}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
+  const students = await pool.query('SELECT id, name FROM students WHERE tenant_id = $1 ORDER BY name', [req.tenantId]);
+  const grades = await pool.query('SELECT g.*, st.name as student_name FROM grades g JOIN students st ON g.student_id = st.id WHERE g.tenant_id = $1 ORDER BY g.created_at DESC LIMIT 50', [req.tenantId]);
+  res.send(`<!DOCTYPE html><html><head><title>Grades</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:${s.primary_color};color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1200px;margin:20px auto;padding:20px}table{background:white;width:100%;border-collapse:collapse}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#f8f9fa}form{background:white;padding:20px;border-radius:8px;margin-bottom:20px}input,select{padding:8px;margin:5px;border:1px solid #ddd;border-radius:4px}button{background:${s.primary_color};color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body>
-    <div class="nav"><a href="/app">← Dashboard</a></div>
-    <div class="card"><h1>📝 Results & Marksheets</h1></div>
-    <div class="card"><h3>Select Class</h3><table><tr><th>Class</th><th>Type</th><th>Action</th></tr>
-      ${classes.rows.map(c => `<tr><td>${c.class}</td><td>${c.school_type}</td><td><a href="/app/results/${encodeURIComponent(c.class)}" class="btn">Enter Marks</a></td></tr>`).join('')}
-    </table></div>
-  </body></html>`);
+  <nav><strong>${req.tenant.name}</strong><a href="/app">Dashboard</a><a href="/grades">Grades</a><a href="/logout">Logout</a></nav>
+  <div class="container"><h1>Grades</h1>
+  <form method="POST" action="/grades/add">
+  <select name="student_id" required><option value="">Select Student</option>${students.rows.map(st => `<option value="${st.id}">${st.name}</option>`).join('')}</select>
+  <input name="subject" placeholder="Subject" required>
+  <input name="score" type="number" placeholder="Score" required>
+  <input name="term" placeholder="Term" required>
+  <input name="year" type="number" placeholder="Year" value="2026" required>
+  <button type="submit">Add Grade</button>
+  </form>
+  <table><tr><th>Student</th><th>Subject</th><th>Score</th><th>Term</th><th>Year</th></tr>
+  ${grades.rows.map(g => `<tr><td>${g.student_name}</td><td>${g.subject}</td><td>${g.score}</td><td>${g.term}</td><td>${g.year}</td></tr>`).join('')}
+  </table></div></body></html>`);
 });
 
-app.get('/app/results/:class', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const cls = req.params.class;
-  const students = await pool.query('SELECT * FROM students WHERE class = $1 AND tenant_id = $2 ORDER BY name', [cls, req.tenantId]);
-  const subjects = await pool.query('SELECT * FROM subjects WHERE class = $1 AND tenant_id = $2 ORDER BY name', [cls, req.tenantId]);
-  const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Marksheet - ${cls}</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1600px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px;overflow-x:auto}.btn{background:${s.primary_color};color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:8px;border:1px solid #ddd;text-align:center}th{background:${s.primary_color};color:white}input{width:60px;padding:5px;text-align:center}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
+app.post('/grades/add', requireLogin, requireTenant, async (req, res) => {
+  const { student_id, subject, score, term, year } = req.body;
+  await pool.query('INSERT INTO grades (tenant_id, student_id, subject, score, term, year) VALUES ($1, $2, $3, $4, $5, $6)',
+    [req.tenantId, student_id, subject, score, term, year]);
+  res.redirect('/grades');
+});
+
+// Super Admin
+app.get('/super-admin', requireLogin, async (req, res) => {
+  if (req.session.user.role !== 'super_admin') return res.status(403).send('Forbidden');
+  const tenants = await pool.query('SELECT t.*, COUNT(u.id) as users, COUNT(s.id) as students FROM tenants t LEFT JOIN users u ON t.id = u.tenant_id LEFT JOIN students s ON t.id = s.tenant_id GROUP BY t.id ORDER BY t.created_at DESC');
+  const wallet = await pool.query('SELECT balance FROM wallets WHERE tenant_id = 1');
+  res.send(`<!DOCTYPE html><html><head><title>Super Admin</title><meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>body{font-family:Arial;margin:0;background:#f4f6f9}nav{background:#2c3e50;color:white;padding:15px}nav a{color:white;margin:0 15px;text-decoration:none}.container{max-width:1400px;margin:20px auto;padding:20px}table{background:white;width:100%;border-collapse:collapse}th,td{padding:12px;text-align:left;border-bottom:1px solid #ddd}th{background:#f8f9fa}.card{background:white;padding:20px;border-radius:8px;margin:10px;display:inline-block;min-width:200px}form{display:inline}</style>
   </head><body>
-    <div class="nav"><a href="/app/results">← Back</a></div>
-    <div class="card"><h1>Marksheet: ${cls}</h1>
-    <form method="POST" action="/app/results/save">
-      <input type="hidden" name="class" value="${cls}">
-      <label>Term: <select name="term" required><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></label>
-      <table><tr><th>Student</th>${subjects.rows.map(sub => `<th>${sub.name}<br>(${sub.max_marks})</th>`).join('')}</tr>
-        ${students.rows.map(st => `<tr><td style="text-align:left">${st.name}</td>${subjects.rows.map(sub => `<td><input name="marks_${st.id}_${sub.id}" type="number" step="0.5" max="${sub.max_marks}"></td>`).join('')}</tr>`).join('')}
-      </table><br><button type="submit" class="btn" style="background:#27ae60">Save All Marks</button>
-    </form></div>
-  </body></html>`);
+  <nav><strong>SSE Wasswa Super Admin</strong><a href="/super-admin">Dashboard</a><a href="/logout">Logout</a></nav>
+  <div class="container">
+  <div class="card"><h3>Total Revenue</h3><p style="font-size:32px">UGX ${wallet.rows[0].balance}</p></div>
+  <div class="card"><h3>Total Schools</h3><p style="font-size:32px">${tenants.rows.length}</p></div>
+  <h1>All Schools</h1>
+  <table><tr><th>School</th><th>Subdomain</th><th>Plan</th><th>Expires</th><th>Users</th><th>Students</th><th>Actions</th></tr>
+  ${tenants.rows.map(t => `<tr><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.plan_expires || 'N/A'}</td><td>${t.users}</td><td>${t.students}</td><td>
+    <form method="POST" action="/super-admin/grant/${t.id}"><button>Grant 1 Year Free</button></form>
+    <form method="POST" action="/super-admin/suspend/${t.id}"><button>Suspend</button></form>
+  </td></tr>`).join('')}
+  </table></div></body></html>`);
 });
 
-app.post('/app/results/save', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const { term, class: cls } = req.body;
-  const year = new Date().getFullYear();
-  for (let key in req.body) {
-    if (key.startsWith('marks_') && req.body[key]) {
-      const [, student_id, subject_id] = key.split('_');
-      await pool.query('INSERT INTO exam_results (tenant_id, student_id, subject_id, marks, term, year) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING',
-        [req.tenantId, student_id, subject_id, req.body[key], term, year]);
-    }
-  }
-  await logAction(req.tenantId, req.session.username || req.user.email, 'MARKS_ENTRY', { class: cls, term });
-  res.redirect(`/app/results/${encodeURIComponent(cls)}`);
+app.post('/super-admin/grant/:id', requireLogin, async (req, res) => {
+  if (req.session.user.role !== 'super_admin') return res.status(403).send('Forbidden');
+  const expires = new Date();
+  expires.setFullYear(expires.getFullYear() + 1);
+  await pool.query('UPDATE tenants SET plan = $1, plan_expires = $2 WHERE id = $3', ['premium', expires, req.params.id]);
+  res.redirect('/super-admin');
 });
 
-// === STAFF & PAYROLL ===
-app.get('/app/staff', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const staff = await pool.query('SELECT * FROM staff WHERE tenant_id = $1 ORDER BY name', [req.tenantId]);
-  const payroll = await pool.query('SELECT COALESCE(SUM(salary),0) as total FROM staff WHERE tenant_id = $1', [req.tenantId]);
-  const s = await getSettings(req.tenantId);
-  res.send(`<!DOCTYPE html><html><head><title>Staff</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1400px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:${s.primary_color};color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}table{width:100%;border-collapse:collapse}th,td{padding:10px;border:1px solid #ddd}th{background:${s.primary_color};color:white}input{padding:10px;margin:5px;border:1px solid #ddd;border-radius:4px;width:100%;box-sizing:border-box}.stat{background:#e74c3c;color:white;padding:20px;border-radius:4px;text-align:center;font-size:24px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}</style>
-  </head><body>
-    <div class="nav"><a href="/app">← Dashboard</a></div>
-    <div class="card"><h1>💼 Staff & Payroll</h1></div>
-    <div class="card"><div class="stat"><strong>Monthly Payroll</strong><br>UGX ${Number(payroll.rows[0].total).toLocaleString()}</div></div>
-    <div class="card"><h3>Add Staff</h3><form method="POST" action="/app/staff/add">
-      <input name="name" placeholder="Full Name" required>
-      <input name="position" placeholder="Position: Teacher, Bursar, Cook" required>
-      <input name="salary" type="number" placeholder="Monthly Salary UGX" required>
-      <input name="phone" placeholder="Phone: 0789736737" required>
-      <input name="email" type="email" placeholder="Email">
-      <input name="bank_account" placeholder="Bank Account / MoMo">
-      <button type="submit" class="btn" style="background:#27ae60">Add Staff</button>
-    </form></div>
-    <div class="card"><table><tr><th>Name</th><th>Position</th><th>Salary</th><th>Phone</th><th>Pay</th></tr>
-      ${staff.rows.map(st => `<tr><td>${st.name}</td><td>${st.position}</td><td>UGX ${Number(st.salary).toLocaleString()}</td><td>${st.phone}</td><td><a href="/app/staff/pay/${st.id}" class="btn" style="background:#27ae60">Pay Now</a></td></tr>`).join('')}
-    </table></div>
-  </body></html>`);
-});
-
-app.post('/app/staff/add', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const { name, position, salary, phone, email, bank_account } = req.body;
-  await pool.query('INSERT INTO staff (tenant_id, name, position, salary, phone, email, bank_account) VALUES ($1, $2, $3, $4, $5, $6, $7)', [req.tenantId, name, position, salary, phone, email, bank_account]);
-  res.redirect('/app/staff');
-});
-
-app.get('/app/staff/pay/:id', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  const staff = await pool.query('SELECT * FROM staff WHERE id = $1 AND tenant_id = $2', [req.params.id, req.tenantId]);
-  const st = staff.rows[0];
-  const month = new Date().toLocaleString('default', { month: 'long' });
-  const year = new Date().getFullYear();
-  await pool.query('INSERT INTO payroll (tenant_id, staff_id, amount, month, year, status, paid_at) VALUES ($1, $2, $3, $4, $5, $6, NOW())',
-    [req.tenantId, st.id, st.salary, month, year, 'paid']);
-  await sendSMS(st.phone, `Salary paid: UGX ${Number(st.salary).toLocaleString()} for ${month} ${year}. Thank you - ${req.user.school_name || req.user.name}`);
-  res.redirect('/app/staff');
+app.post('/super-admin/suspend/:id', requireLogin, async (req, res) => {
+  if (req.session.user.role !== 'super_admin') return res.status(403).send('Forbidden');
+  await pool.query('UPDATE tenants SET plan = $1 WHERE id = $2', ['suspended', req.params.id]);
+  res.redirect('/super-admin');
 });
 
 // === KEEP ALIVE ===
@@ -1089,194 +716,10 @@ if (process.env.NODE_ENV === 'production') {
     fetch('https://ssewasswa-api.onrender.com/health').catch(() => {});
   }, 14 * 60 * 1000);
 }
-// End of file - no text below this
-// === SCHOOL PROFILE & STAFF MANAGEMENT ===
 
-// School creates their own profile after Google login
-app.get('/school/setup', requireLogin, requireTenant, async (req, res) => {
-  const s = await getSettings(req.tenantId);
-  const tenant = req.user;
-  if (tenant.profile_completed) return res.redirect('/app');
-  
-  res.send(`<!DOCTYPE html><html><head><title>Complete School Profile</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}.card{background:white;padding:40px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.1);max-width:600px;width:90%}.btn{background:${s.primary_color};color:white;padding:15px;border:none;border-radius:6px;width:100%;font-size:16px;cursor:pointer;margin-top:20px}input,textarea{width:100%;padding:12px;margin:10px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:6px}label{font-weight:600;display:block;margin-top:15px}.alert{background:#d1ecf1;border-left:4px solid #0c5460;padding:15px;margin-bottom:20px;border-radius:4px}</style>
-  </head><body><div class="card">
-    <h1>🏫 Welcome! Set Up Your School</h1>
-    <div class="alert">Complete this once. You'll be the School Admin with full control.</div>
-    <form method="POST" action="/school/setup" enctype="multipart/form-data">
-      <label>School Name *</label>
-      <input name="school_name" value="${tenant.school_name || tenant.name}" required>
-      
-      <label>School Motto</label>
-      <input name="motto" placeholder="e.g. Education for Excellence" value="${tenant.motto || ''}">
-      
-      <label>School Logo URL</label>
-      <input name="logo_url" placeholder="https://yourschool.com/logo.png" value="${tenant.logo_url || ''}">
-      
-      <label>Primary Color</label>
-      <input name="primary_color" type="color" value="${s.primary_color}">
-      
-      <label>WhatsApp Number *</label>
-      <input name="whatsapp_number" value="${s.whatsapp_number}" placeholder="0789736737" required>
-      
-      <label>School Email *</label>
-      <input name="contact_email" type="email" value="${s.contact_email}" required>
-      
-      <label>Location *</label>
-      <input name="location" value="${s.location}" required>
-      
-      <label>Mobile Money Number</label>
-      <input name="momo_number" value="${s.momo_number}" placeholder="0789736737">
-      
-      <label>MoMo Names</label>
-      <input name="momo_names" value="${s.momo_names}" placeholder="SCHOOL NAME">
-      
-      <button type="submit" class="btn">Complete Setup & Enter Dashboard</button>
-    </form>
-  </div></body></html>`);
-});
-
-app.post('/school/setup', requireLogin, requireTenant, async (req, res) => {
-  const { school_name, motto, logo_url, primary_color, whatsapp_number, contact_email, location, momo_number, momo_names } = req.body;
-  
-  // Update tenant profile
-  await pool.query(`UPDATE tenants SET school_name = $1, motto = $2, logo_url = $3, profile_completed = true WHERE id = $4`, 
-    [school_name, motto, logo_url, req.tenantId]);
-  
-  // Update settings
-  await pool.query(`UPDATE settings SET site_name = $1, whatsapp_number = $2, contact_email = $3, location = $4, primary_color = $5, momo_number = $6, momo_names = $7, hero_title = $8 WHERE tenant_id = $9`,
-    [school_name, whatsapp_number, contact_email, location, primary_color, momo_number, momo_names, school_name, req.tenantId]);
-  
-  // Make this user the school admin
-  await pool.query(`INSERT INTO users (tenant_id, username, password_hash, role, fullname) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id, username) DO UPDATE SET role = $4`,
-    [req.tenantId, req.user.email.split('@')[0], 'google_oauth', 'admin', req.user.name]);
-  
-  req.session.role = 'admin';
-  req.session.fullname = req.user.name;
-  res.redirect('/app');
-});
-
-// School Admin creates staff accounts with passwords
-app.get('/app/staff/users', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  if (req.session.role !== 'admin' && req.user?.id !== req.tenantId) return res.status(403).send('School Admin Only');
-  
-  const users = await pool.query('SELECT id, username, role, fullname, created_at FROM users WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
-  const s = await getSettings(req.tenantId);
-  
-  res.send(`<!DOCTYPE html><html><head><title>Staff Accounts</title><meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>body{font-family:Arial;max-width:1200px;margin:20px auto;padding:20px;background:#f4f6f9}.card{background:white;padding:20px;border-radius:8px;margin-bottom:20px}.btn{background:${s.primary_color};color:white;padding:10px 15px;text-decoration:none;border-radius:4px;border:none;cursor:pointer}table{width:100%;border-collapse:collapse}th,td{padding:12px;border:1px solid #ddd;text-align:left}th{background:${s.primary_color};color:white}input,select{width:100%;padding:10px;margin:8px 0;box-sizing:border-box;border:1px solid #ddd;border-radius:4px}.nav{background:#2c3e50;padding:15px;margin:-20px -20px 20px -20px}.nav a{color:white;text-decoration:none}.alert{background:#fff3cd;border-left:4px solid #ffc107;padding:15px;margin:15px 0;border-radius:4px}</style>
-  </head><body>
-    <div class="nav"><a href="/app">← Dashboard</a></div>
-    <div class="card"><h1>👥 Staff User Accounts</h1>
-      <div class="alert"><strong>School Admin:</strong> Create usernames & passwords for your teachers, bursar, librarian. They login at <code>/login</code> with these credentials. Works offline.</div>
-    </div>
-    <div class="card"><h3>Create New Staff Account</h3><form method="POST" action="/app/staff/users/create">
-      <input name="fullname" placeholder="Full Name: John Mukasa" required>
-      <input name="username" placeholder="Username: jmukasa" required>
-      <input name="password" type="text" placeholder="Password: teacher2026" required>
-      <select name="role" required>
-        <option value="">Select Role</option>
-        <option value="teacher">Teacher - Enter marks, attendance</option>
-        <option value="bursar">Bursar - Record payments, fees</option>
-        <option value="librarian">Librarian - Manage books</option>
-        <option value="admin">Co-Admin - Full access</option>
-      </select>
-      <button type="submit" class="btn" style="background:#27ae60;width:100%">Create Account</button>
-    </form></div>
-    <div class="card"><h3>Existing Accounts</h3><table><tr><th>Full Name</th><th>Username</th><th>Role</th><th>Created</th><th>Action</th></tr>
-      ${users.rows.map(u => `<tr><td>${u.fullname}</td><td><strong>${u.username}</strong></td><td>${u.role}</td><td>${new Date(u.created_at).toLocaleDateString()}</td><td>${u.role !== 'admin'? `<a href="/app/staff/users/delete/${u.id}" class="btn" style="background:#e74c3c;font-size:12px" onclick="return confirm('Delete?')">Delete</a>` : 'Protected'}</td></tr>`).join('')}
-    </table></div>
-    <div class="card"><h3>📱 Staff Login Instructions</h3>
-      <p><strong>Login URL:</strong> <code>${req.protocol}://${req.get('host')}/login</code></p>
-      <p><strong>Share with staff:</strong> Username + Password you created above</p>
-      <p><strong>Offline:</strong> Once logged in, app works without internet. Data syncs when online.</p>
-    </div>
-  </body></html>`);
-});
-
-app.post('/app/staff/users/create', requireLogin, requireTenant, requireActivePlan, async (req, res) => {
-  if (req.session.role !== 'admin' && req.user?.id !== req.tenantId) return res.status(403).send('Admin Only');
-  const { username, password, fullname, role } = req.body;
-  const hash = await bcrypt.hash(password, 10);
-  await pool.query('INSERT INTO users (tenant_id, username, password_hash, role, fullname) VALUES ($1, $2, $3, $4, $5)',
-    [req.tenantId, username, hash, role, fullname]);
-  await logAction(req.tenantId, req.session.username || req.user.email, 'STAFF_USER_CREATE', { username, role });
-  res.redirect('/app/staff/users');
-});
-
-app.get('/app/staff/users/delete/:id', requireLogin, requireTenant, async (req, res) => {
-  if (req.session.role !== 'admin' && req.user?.id !== req.tenantId) return res.status(403).send('Admin Only');
-  await pool.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2 AND role != $3', [req.params.id, req.tenantId, 'admin']);
-  res.redirect('/app/staff/users');
-});
-
-// === OFFLINE PWA SUPPORT ===
-app.get('/manifest.json', requireTenant, async (req, res) => {
-  const s = await getSettings(req.tenantId);
-  res.json({
-    "name": s.site_name,
-    "short_name": s.site_name.substring(0, 12),
-    "start_url": "/app",
-    "display": "standalone",
-    "background_color": s.primary_color,
-    "theme_color": s.primary_color,
-    "description": s.hero_subtitle,
-    "icons": [
-      {"src": s.logo_url || "/icon-192.png", "sizes": "192x192", "type": "image/png"},
-      {"src": s.logo_url || "/icon-512.png", "sizes": "512x512", "type": "image/png"}
-    ],
-    "offline_enabled": true
-  });
-});
-
-app.get('/sw.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.send(`
-    const CACHE_NAME = 'ssewasswa-erp-v1';
-    const urlsToCache = [
-      '/app', '/app/students', '/app/payments', '/app/results', '/app/attendance',
-      '/login', '/manifest.json'
-    ];
-    
-    self.addEventListener('install', e => {
-      e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache)));
-      self.skipWaiting();
-    });
-    
-    self.addEventListener('activate', e => {
-      e.waitUntil(clients.claim());
-    });
-    
-    self.addEventListener('fetch', e => {
-      e.respondWith(
-        caches.match(e.request).then(response => {
-          if (response) return response;
-          return fetch(e.request).then(response => {
-            if (!response || response.status !== 200) return response;
-            const responseToCache = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(e.request, responseToCache));
-            return response;
-          }).catch(() => caches.match('/app'));
-        })
-      );
-    });
-  `);
-});
-
-// === UPDATE DB SCHEMA ===
-async function updateDBSchema() {
-  await pool.query(`
-    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS school_name VARCHAR(200);
-    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS motto TEXT;
-    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url TEXT;
-    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS profile_completed BOOLEAN DEFAULT false;
-    ALTER TABLE settings ADD COLUMN IF NOT EXISTS logo_url TEXT;
-  `).catch(() => {});
-}
-
-// Call this in initDB()
-updateDBSchema();
+// Start server
 initDB().then(() => {
+  initPayPal();
   app.listen(PORT, () => console.log(`🚀 SSE Wasswa ERP running on port ${PORT}`));
 }).catch(err => {
   console.error('Database init failed:', err);
