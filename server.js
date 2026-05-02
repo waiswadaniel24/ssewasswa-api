@@ -662,9 +662,9 @@ app.get('/surveys/create', requireLogin, requireTenant, async (req, res) => {
   </body></html>`);
 });
 
-app.post('/surveys/create', requireLogin, requireTenant, async (req, res) => {
+aapp.post('/surveys/create', requireLogin, requireTenant, async (req, res) => {
   const { title, questions, reward_per_user, max_responses, total_budget } = req.body;
-  const adminFee = total_budget _ 0.1;
+  const adminFee = total_budget * 0.1; // Fixed: * not _
   await pool.query('INSERT INTO surveys (tenant_id, creator_email, title, questions, reward_per_user, total_budget, max_responses) VALUES ($1, $2, $3, $4, $5, $6, $7)',
     [req.tenantId, req.user.email, title, questions, reward_per_user, total_budget, max_responses]);
   await pool.query('UPDATE wallets SET balance = balance + $1 WHERE tenant_id = 1', [adminFee]);
