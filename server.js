@@ -76,6 +76,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
         const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', [sub]);
         const hash = await bcrypt.hash(Math.random().toString(36), 10);
         await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [t.rows[0].id, email, hash, 'admin']);
+        await pool.query('INSERT INTO settings (tenant_id) VALUES ($1) ON CONFLICT DO NOTHING', [t.rows[0].id]);
         user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
       }
       return done(null, user.rows[0]);
@@ -140,7 +141,8 @@ async function initDB() {
       student_id INTEGER REFERENCES students(id),
       date DATE NOT NULL,
       status TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE (tenant_id, student_id, date)
     );
     CREATE TABLE IF NOT EXISTS grades (
       id SERIAL PRIMARY KEY,
@@ -207,15 +209,13 @@ async function initDB() {
     );
   `);
 
-  const superAdmin = await pool.query('SELECT * FROM users WHERE email = $1', ['admin@ssewasswa.com']);
-  if (superAdmin.rows.length === 0) {
-    await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3)', ['SSE Wasswa', 'main', 'enterprise']);
-    const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
-    const hash = await bcrypt.hash('admin123', 10);
-    await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [t.rows[0].id, 'admin@ssewasswa.com', hash, 'super_admin']);
-    await pool.query('INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2)', [t.rows[0].id, 0]);
-    await pool.query('INSERT INTO settings (tenant_id) VALUES ($1)', [t.rows[0].id]);
-  }
+  await pool.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) ON CONFLICT (subdomain) DO NOTHING`, ['SSE Wasswa', 'main', 'enterprise']);
+  const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
+  const tenantId = t.rows[0].id;
+
+  await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO NOTHING`, [tenantId, 'admin@ssewasswa.com', await bcrypt.hash('admin123', 10), 'super_admin']);
+  await pool.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 0]);
+  await pool.query(`INSERT INTO settings (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId]);
 }
 
 function requireLogin(req, res, next) {
