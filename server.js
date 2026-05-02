@@ -834,7 +834,7 @@ app.get('/manifest.json', (req, res) => res.json({"name":"SSE Wasswa ERP","short
 if (process.env.NODE_ENV === 'production') {
   setInterval(() => {
     fetch('https://ssewasswa-api.onrender.com/health').catch(() => {});
-  }, 14 _ 60 _ 1000);
+  }, 14 * 60 * 1000); // Fixed: * not _
 }
 
 initDB().then(() => {
