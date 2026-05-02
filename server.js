@@ -136,7 +136,9 @@ passport.deserializeUser(async (id, done) => {
 async function initDB() {
   await pool.query(`CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, created_at TIMESTAMP DEFAULT NOW())`);
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'staff', created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'staff'`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id)`);
 
   await pool.query(`CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, name TEXT NOT NULL, class TEXT, dob DATE, guardian_name TEXT, guardian_phone TEXT, balance NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
@@ -172,7 +174,7 @@ async function initDB() {
   const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
   const tenantId = t.rows[0].id;
 
-  await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO UPDATE SET tenant_id = $1`, [tenantId, 'admin@ssewasswa.com', await bcrypt.hash('admin123', 10), 'super_admin']);
+  await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO UPDATE SET tenant_id = $1, password_hash = $3, role = $4`, [tenantId, 'admin@ssewasswa.com', await bcrypt.hash('admin123', 10), 'super_admin']);
   await pool.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 0]);
   await pool.query(`INSERT INTO settings (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId]);
 }
@@ -421,15 +423,15 @@ app.get('/admin/settings', requireLogin, requireTenant, async (req, res) => {
 
 app.post('/admin/settings', requireLogin, requireTenant, async (req, res) => {
   if (req.session.user.role!== 'admin' && req.session.user.role!== 'super_admin') return res.status(403).send('Forbidden');
-  const { site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, paypal_client_id, paypal_client_secret } = req.body;
+  const { site_name, hero_title, hero_subtitle, whatsapp_number, momo_names, paper_price, contact_email, location, primary_color, paypal_client_id, paypal_client_secret } = req.body;
   const allow_marketplace = req.body.allow_marketplace === 'on';
   const allow_surveys = req.body.allow_surveys === 'on';
 
-  await pool.query(`INSERT INTO settings (tenant_id, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id, paypal_client_secret)
+  await pool.query(`INSERT INTO settings (tenant_id, site_name, hero_title, hero_subtitle, whatsapp_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id, paypal_client_secret)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     ON CONFLICT (tenant_id) DO UPDATE SET
     site_name=$2, hero_title=$3, hero_subtitle=$4, whatsapp_number=$5, momo_number=$6, momo_names=$7, paper_price=$8, contact_email=$9, location=$10, primary_color=$11, allow_marketplace=$12, allow_surveys=$13, paypal_client_id=$14, paypal_client_secret=$15`,
-    [req.tenantId, site_name, hero_title, hero_subtitle, whatsapp_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id || null, paypal_client_secret || null]);
+    [req.tenantId, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id || null, paypal_client_secret || null]);
 
   await initPayPal();
   res.redirect('/admin/settings?saved=1');
