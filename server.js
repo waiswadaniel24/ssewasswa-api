@@ -9,7 +9,6 @@ const PDFDocument = require('pdfkit');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const passport = require('passport');
-const GoogleStrategy = require('passport-google-oauth20').Strategy;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,6 +41,7 @@ const pool = new Pool({
 
 let paypalEnabled = false;
 let paypal = null;
+let googleEnabled = false;
 
 async function initPayPal() {
   const s = await getSettings(1);
@@ -59,28 +59,35 @@ async function initPayPal() {
   }
 }
 
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: "/auth/google/callback"
-}, async (accessToken, refreshToken, profile, done) => {
-  try {
-    const email = profile.emails[0].value;
-    let user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (user.rows.length === 0) {
-      const tenantName = profile.displayName + ' School';
-      const sub = tenantName.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
-      await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3)', [tenantName, sub, 'free']);
-      const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', [sub]);
-      const hash = await bcrypt.hash(Math.random().toString(36), 10);
-      await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [t.rows[0].id, email, hash, 'admin']);
-      user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  const GoogleStrategy = require('passport-google-oauth20').Strategy;
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: "/auth/google/callback"
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      const email = profile.emails[0].value;
+      let user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+      if (user.rows.length === 0) {
+        const tenantName = profile.displayName + ' School';
+        const sub = tenantName.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
+        await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3)', [tenantName, sub, 'free']);
+        const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', [sub]);
+        const hash = await bcrypt.hash(Math.random().toString(36), 10);
+        await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [t.rows[0].id, email, hash, 'admin']);
+        user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+      }
+      return done(null, user.rows[0]);
+    } catch (err) {
+      return done(err);
     }
-    return done(null, user.rows[0]);
-  } catch (err) {
-    return done(err);
-  }
-}));
+  }));
+  googleEnabled = true;
+  console.log('✅ Google OAuth enabled');
+} else {
+  console.log('⚠️ Google OAuth disabled - add GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET env vars to enable');
+}
 
 passport.serializeUser((user, done) => done(null, user.id));
 passport.deserializeUser(async (id, done) => {
@@ -266,6 +273,7 @@ app.get('/', async (req, res) => {
 });
 
 app.get('/login', (req, res) => {
+  const googleBtn = googleEnabled? '<p style="text-align:center;margin-top:20px"><a href="/auth/google">Login with Google</a></p>' : '';
   res.send(`<!DOCTYPE html><html><head><title>Login</title><meta name="viewport" content="width=device-width,initial-scale=1">
   <style>body{font-family:Arial;max-width:400px;margin:100px auto;padding:30px;background:#f4f6f9}form{background:white;padding:30px;border-radius:8px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px}button{width:100%;padding:12px;background:#3498db;color:white;border:none;border-radius:4px;cursor:pointer}</style>
   </head><body><form method="POST" action="/login">
@@ -273,7 +281,7 @@ app.get('/login', (req, res) => {
   <input name="email" type="email" placeholder="Email" required>
   <input name="password" type="password" placeholder="Password" required>
   <button type="submit">Login</button>
-  <p style="text-align:center;margin-top:20px"><a href="/auth/google">Login with Google</a></p>
+  ${googleBtn}
   <p style="text-align:center"><a href="/signup">Create School Account</a></p>
   </form></body></html>`);
 });
@@ -288,11 +296,13 @@ app.post('/login', async (req, res) => {
   res.redirect('/app');
 });
 
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => {
-  req.session.user = req.user;
-  res.redirect('/app');
-});
+if (googleEnabled) {
+  app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+  app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => {
+    req.session.user = req.user;
+    res.redirect('/app');
+  });
+}
 
 app.get('/signup', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><title>Sign Up</title><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -477,11 +487,11 @@ app.post('/admin/settings', requireLogin, requireTenant, async (req, res) => {
   const allow_marketplace = req.body.allow_marketplace === 'on';
   const allow_surveys = req.body.allow_surveys === 'on';
 
-  await pool.query(`INSERT INTO settings (tenant_id, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id, paypal_client_secret)
+  await pool.query(`INSERT INTO settings (tenant_id, site_name, hero_title, hero_subtitle, whatsapp_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id, paypal_client_secret)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     ON CONFLICT (tenant_id) DO UPDATE SET
     site_name=$2, hero_title=$3, hero_subtitle=$4, whatsapp_number=$5, momo_number=$6, momo_names=$7, paper_price=$8, contact_email=$9, location=$10, primary_color=$11, allow_marketplace=$12, allow_surveys=$13, paypal_client_id=$14, paypal_client_secret=$15`,
-    [req.tenantId, site_name, hero_title, hero_subtitle, whatsapp_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id || null, paypal_client_secret || null]);
+    [req.tenantId, site_name, hero_title, hero_subtitle, whatsapp_number, momo_number, momo_names, paper_price, contact_email, location, primary_color, allow_marketplace, allow_surveys, paypal_client_id || null, paypal_client_secret || null]);
 
   await initPayPal();
   res.redirect('/admin/settings?saved=1');
