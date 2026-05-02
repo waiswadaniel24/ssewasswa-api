@@ -1,10 +1,11 @@
 {
-  "name": "ssewasswa-api",
+  "name": "sse-wasswa-erp",
   "version": "1.0.0",
-  "description": "SSE Wasswa Foundation ERP - Full 100/50 Marketing Outfit",
+  "description": "Multi-tenant School Management SaaS with PayPal, Google OAuth, Marketplace, Surveys",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -18,6 +19,22 @@
     "multer": "^1.4.5-lts.1",
     "xlsx": "^0.18.5",
     "pdfkit": "^0.14.0",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "paypal-rest-sdk": "^1.8.1",
     "dotenv": "^16.3.1"
-  }
+  },
+  "keywords": [
+    "school",
+    "erp",
+    "saas",
+    "uganda",
+    "education",
+    "paypal",
+    "multi-tenant"
+  ],
+  "author": "SSE Wasswa",
+  "license": "MIT"
 }
