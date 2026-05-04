@@ -179,7 +179,14 @@ async function initDB() {
     }
 
     await client.query('BEGIN');
-    console.log('Acquired DB init lock. Cleaning database...');
+    console.log('Acquired DB init lock. Checking initialization marker...');
+
+    const lockTableCheck = await client.query(`SELECT to_regclass('public.db_init_lock') AS lock_table`);
+    if (lockTableCheck.rows[0].lock_table) {
+      console.log('Found stale db_init_lock from previous init. Forcing full cleanup...');
+    } else {
+      console.log('No stale init marker found. Performing clean reset...');
+    }
 
     const tables = await client.query(`
       SELECT tablename FROM pg_tables WHERE schemaname = 'public'
@@ -190,6 +197,9 @@ async function initDB() {
       await client.query(`DROP TABLE IF EXISTS "${tableName}" CASCADE`);
     }
     console.log('Old tables dropped. Creating fresh schema...');
+
+    // Marker table used to detect partial previous runs on next boot.
+    await client.query(`CREATE TABLE db_init_lock (locked BOOLEAN DEFAULT true)`);
 
     await client.query(`CREATE TABLE tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, ranking_score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
     await client.query(`CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT, role TEXT DEFAULT 'staff', tenant_id INTEGER REFERENCES tenants(id), created_at TIMESTAMP DEFAULT NOW())`);
@@ -217,17 +227,48 @@ async function initDB() {
     await client.query(`CREATE UNIQUE INDEX attendance_unique ON attendance (tenant_id, student_id, date)`);
     await client.query(`CREATE UNIQUE INDEX wallets_tenant_unique ON wallets (tenant_id)`);
     await client.query(`CREATE UNIQUE INDEX settings_tenant_unique ON settings (tenant_id)`);
+    await client.query(`CREATE UNIQUE INDEX courses_tenant_title_unique ON courses (tenant_id, title)`);
 
     console.log('Indexes created. Seeding data...');
 
-    const tenant = await client.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
-    const tenantId = tenant.rows[0].id;
+    const tenant = await client.query(
+      `INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3)
+       ON CONFLICT (subdomain) DO NOTHING
+       RETURNING id`,
+      ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']
+    );
+    const tenantId = tenant.rows[0]?.id || (await client.query(`SELECT id FROM tenants WHERE subdomain = $1`, ['main'])).rows[0]?.id;
 
-    await client.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`, [tenantId, 'waiswadaniel24@gmail.com', await bcrypt.hash('admin123', 10), 'super_admin']);
-    await client.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2)`, [tenantId, 0]);
-    await client.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3)`, [tenantId, 'enterprise', true]);
-    await client.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology')`, [tenantId]);
-    await client.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'English for Beginners', 'Basic English lessons', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'language')`, [tenantId]);
+    await client.query(
+      `INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (email) DO NOTHING`,
+      [tenantId, 'waiswadaniel24@gmail.com', await bcrypt.hash('admin123', 10), 'super_admin']
+    );
+    await client.query(
+      `INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2)
+       ON CONFLICT (tenant_id) DO NOTHING`,
+      [tenantId, 0]
+    );
+    await client.query(
+      `INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3)
+       ON CONFLICT (tenant_id) DO NOTHING`,
+      [tenantId, 'enterprise', true]
+    );
+    await client.query(
+      `INSERT INTO courses (tenant_id, title, description, video_url, category)
+       VALUES ($1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology')
+       ON CONFLICT (tenant_id, title) DO NOTHING`,
+      [tenantId]
+    );
+    await client.query(
+      `INSERT INTO courses (tenant_id, title, description, video_url, category)
+       VALUES ($1, 'English for Beginners', 'Basic English lessons', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'language')
+       ON CONFLICT (tenant_id, title) DO NOTHING`,
+      [tenantId]
+    );
+
+    // Remove marker only after successful schema creation and seeding.
+    await client.query(`DROP TABLE IF EXISTS db_init_lock`);
 
     await client.query('COMMIT');
     console.log('Database initialization complete! ✅');
