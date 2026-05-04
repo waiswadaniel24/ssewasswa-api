@@ -1,5 +1,6 @@
 const express = require('express');
 const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session); // ADD THIS
 const bodyParser = require('body-parser');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -8,7 +9,6 @@ const { Pool } = require('pg');
 const http = require('http');
 const { Server } = require('socket.io');
 const axios = require('axios');
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -155,6 +155,12 @@ async function initDB() {
     await client.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`, [tenantId, 'waiswadaniel24@gmail.com', hashedPass, 'super_admin']);
     await client.query(`INSERT INTO settings (tenant_id, subscription_tier, verified, school_motto, about_text) VALUES ($1, $2, $3, $4, $5)`, [tenantId, 'enterprise', true, 'Excellence Through Education', 'SSEWASSWA FOUNDATION UGANDA empowers schools with digital tools.']);
     console.log('RESET COMPLETE: Only developer account exists. Password: admin123');
+    await client.query(`CREATE TABLE IF NOT EXISTS "session" (
+  "sid" varchar NOT NULL COLLATE "default",
+  "sess" json NOT NULL,
+  "expire" timestamp(6) NOT NULL
+)`);
+await client.query(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")`);
     await client.query('COMMIT');
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
