@@ -1,7 +1,7 @@
 {
   "name": "sse-wasswa-erp",
-  "version": "1.0.0",
-  "description": "Multi-tenant School Management SaaS with PayPal, Google OAuth, Marketplace, Surveys",
+  "version": "5.1.0",
+  "description": "Multi-tenant School Management SaaS - Free Launch Edition with News, Learn, Kids, Chat, Comments, Rankings",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -17,13 +17,13 @@
     "express-session": "^1.17.3",
     "body-parser": "^1.20.2",
     "multer": "^1.4.5-lts.1",
-    "xlsx": "^0.18.5",
-    "pdfkit": "^0.14.0",
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
-    "paypal-rest-sdk": "^1.8.1",
+    "rss-parser": "^3.13.0",
+    "socket.io": "^4.7.5",
+    "node-cron": "^3.0.3",
     "dotenv": "^16.3.1"
   },
   "keywords": [
@@ -32,9 +32,12 @@
     "saas",
     "uganda",
     "education",
-    "paypal",
-    "multi-tenant"
+    "multi-tenant",
+    "free",
+    "news",
+    "learning",
+    "chat"
   ],
-  "author": "SSE Wasswa",
+  "author": "SSEWASSWA Foundation",
   "license": "MIT"
 }
