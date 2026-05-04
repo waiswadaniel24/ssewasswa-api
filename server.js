@@ -24,10 +24,11 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.set('trust proxy', 1);
 app.use(session({
-  store: new pgSession({
-    pool: pool,
-    tableName: 'session'
-  }),
+ store: new pgSession({
+  pool: pool,
+  tableName: 'session',
+  createTableIfMissing: true
+}),
   secret: process.env.SESSION_SECRET || 'ssewasswa-secret-key-change-in-prod',
   resave: false,
   saveUninitialized: false,
@@ -478,10 +479,12 @@ app.get('/', (req, res) => {
   res.send('SSEWASSWA API is running.');
 });
 
-initDB().catch((err) => {
+initDB().then(() => {
+  console.log('Database ready');
+  server.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+  });
+}).catch((err) => {
   console.error('Init failed:', err);
-});
-
-server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  process.exit(1);
 });
