@@ -24,6 +24,10 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.set('trust proxy', 1);
 app.use(session({
+  store: new pgSession({
+    pool: pool, // your existing pg pool
+    tableName: 'session'
+  }),
   secret: process.env.SESSION_SECRET || 'ssewasswa-secret-key-change-in-prod',
   resave: false,
   saveUninitialized: false,
@@ -34,7 +38,6 @@ app.use(session({
     sameSite: 'lax'
   }
 }));
-
 // === MTN MOMO CONFIG - ADD YOUR KEYS TO RENDER ENV ===
 const MOMO_CONFIG = {
   subscriptionKey: process.env.MOMO_SUBSCRIPTION_KEY || 'demo',
