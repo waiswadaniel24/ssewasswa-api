@@ -165,75 +165,83 @@ async function updateRankings() {
 }
 cron.schedule('0 2 * * *', updateRankings);
 
-// === DATABASE INIT - LOCK TABLE VERSION ===
+// === DATABASE INIT - TRANSACTION + ADVISORY LOCK VERSION ===
 async function initDB() {
   console.log('Starting database initialization...');
+  const lockKey = 982451653; // Stable lock key to serialize DB init across processes
+  const client = await pool.connect();
 
-  // 1. CREATE LOCK TABLE FIRST - If it fails, another process is already running init
   try {
-    await pool.query(`CREATE TABLE db_init_lock (locked BOOLEAN DEFAULT true)`);
-    console.log('Acquired DB init lock. Cleaning database...');
-  } catch (e) {
-    if (e.code === '42P07') { // table already exists
+    const lockResult = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [lockKey]);
+    if (!lockResult.rows[0].locked) {
       console.log('Another process is initializing DB. Skipping...');
-      return; // Exit this process - let the other one finish
+      return;
     }
-  }
 
-  // 2. DROP ALL USER TABLES BUT KEEP PUBLIC SCHEMA - Avoids pg_namespace error
-  const tables = await pool.query(`
-    SELECT tablename FROM pg_tables WHERE schemaname = 'public'
-  `);
+    await client.query('BEGIN');
+    console.log('Acquired DB init lock. Cleaning database...');
 
-  for (const row of tables.rows) {
-    if (row.tablename!== 'db_init_lock') {
-      await pool.query(`DROP TABLE IF EXISTS ${row.tablename} CASCADE`);
+    const tables = await client.query(`
+      SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+    `);
+
+    for (const row of tables.rows) {
+      const tableName = row.tablename.replace(/"/g, '""');
+      await client.query(`DROP TABLE IF EXISTS "${tableName}" CASCADE`);
     }
+    console.log('Old tables dropped. Creating fresh schema...');
+
+    await client.query(`CREATE TABLE tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, ranking_score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT, role TEXT DEFAULT 'staff', tenant_id INTEGER REFERENCES tenants(id), created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), name TEXT NOT NULL, class TEXT, dob DATE, guardian_name TEXT, guardian_phone TEXT, balance NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE fees (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, amount NUMERIC NOT NULL, term TEXT, year INTEGER, paid NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, date DATE NOT NULL, status TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE grades (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, subject TEXT NOT NULL, score NUMERIC, term TEXT, year INTEGER, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE market_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, price NUMERIC NOT NULL, seller_email TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE surveys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), creator_email TEXT, title TEXT NOT NULL, questions JSONB, reward_per_user NUMERIC DEFAULT 0, total_budget NUMERIC DEFAULT 0, max_responses INTEGER DEFAULT 100, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), donor_name TEXT, donor_email TEXT, amount NUMERIC NOT NULL, message TEXT, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE donor_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, goal_amount NUMERIC NOT NULL, raised_amount NUMERIC DEFAULT 0, image_url TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE grants (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT, amount NUMERIC, deadline DATE, requirements TEXT, active BOOLEAN DEFAULT true, source_url TEXT, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE comments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), user_email TEXT, user_name TEXT, comment_text TEXT NOT NULL, topic TEXT DEFAULT 'general', parent_id INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE feedback_threads (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), user_email TEXT NOT NULL, user_name TEXT, subject TEXT NOT NULL, status TEXT DEFAULT 'open', created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE feedback_messages (id SERIAL PRIMARY KEY, thread_id INTEGER REFERENCES feedback_threads(id), sender_type TEXT NOT NULL, sender_email TEXT, message TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE news_cache (id SERIAL PRIMARY KEY, title TEXT, link TEXT UNIQUE, snippet TEXT, pub_date TIMESTAMP, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE chat_messages (id SERIAL PRIMARY KEY, room TEXT, user_name TEXT, message TEXT, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE courses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, video_url TEXT, category TEXT, level TEXT DEFAULT 'beginner', created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE revenue_log (id SERIAL PRIMARY KEY, type TEXT, gross_amount NUMERIC, commission NUMERIC, tenant_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), site_name TEXT DEFAULT 'SSEWASSWA FOUNDATION UGANDA', hero_title TEXT, hero_subtitle TEXT, whatsapp_number TEXT DEFAULT '0789736737', momo_number TEXT DEFAULT '0705373465', momo_names TEXT DEFAULT 'WASSWA', contact_email TEXT DEFAULT 'waiswadaniel24@gmail.com', location TEXT DEFAULT 'Kampala, Uganda', primary_color TEXT DEFAULT '#1e40af', org_type TEXT DEFAULT 'platform', verified BOOLEAN DEFAULT false, public_profile BOOLEAN DEFAULT true, subscription_tier TEXT DEFAULT 'free', developer_name TEXT DEFAULT 'SSEWASSWA Foundation', developer_bio TEXT DEFAULT 'Building digital infrastructure for African education', developer_whatsapp TEXT DEFAULT '0789736737', developer_email TEXT DEFAULT 'waiswadaniel24@gmail.com', feature_overrides JSONB DEFAULT '{}')`);
+
+    console.log('Tables created. Adding indexes...');
+
+    await client.query(`CREATE UNIQUE INDEX attendance_unique ON attendance (tenant_id, student_id, date)`);
+    await client.query(`CREATE UNIQUE INDEX wallets_tenant_unique ON wallets (tenant_id)`);
+    await client.query(`CREATE UNIQUE INDEX settings_tenant_unique ON settings (tenant_id)`);
+
+    console.log('Indexes created. Seeding data...');
+
+    const tenant = await client.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
+    const tenantId = tenant.rows[0].id;
+
+    await client.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`, [tenantId, 'waiswadaniel24@gmail.com', await bcrypt.hash('admin123', 10), 'super_admin']);
+    await client.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2)`, [tenantId, 0]);
+    await client.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3)`, [tenantId, 'enterprise', true]);
+    await client.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology')`, [tenantId]);
+    await client.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'English for Beginners', 'Basic English lessons', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'language')`, [tenantId]);
+
+    await client.query('COMMIT');
+    console.log('Database initialization complete! ✅');
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    throw err;
+  } finally {
+    try {
+      await client.query('SELECT pg_advisory_unlock($1)', [lockKey]);
+    } catch (_) {}
+    client.release();
   }
-  console.log('Old tables dropped. Creating fresh schema...');
-
-  // 3. CREATE ALL TABLES - Public schema already exists, no need to create
-  await pool.query(`CREATE TABLE tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, ranking_score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT, role TEXT DEFAULT 'staff', tenant_id INTEGER REFERENCES tenants(id), created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), name TEXT NOT NULL, class TEXT, dob DATE, guardian_name TEXT, guardian_phone TEXT, balance NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE fees (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, amount NUMERIC NOT NULL, term TEXT, year INTEGER, paid NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, date DATE NOT NULL, status TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE grades (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, subject TEXT NOT NULL, score NUMERIC, term TEXT, year INTEGER, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE market_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, price NUMERIC NOT NULL, seller_email TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE surveys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), creator_email TEXT, title TEXT NOT NULL, questions JSONB, reward_per_user NUMERIC DEFAULT 0, total_budget NUMERIC DEFAULT 0, max_responses INTEGER DEFAULT 100, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), donor_name TEXT, donor_email TEXT, amount NUMERIC NOT NULL, message TEXT, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE donor_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, goal_amount NUMERIC NOT NULL, raised_amount NUMERIC DEFAULT 0, image_url TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE grants (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT, amount NUMERIC, deadline DATE, requirements TEXT, active BOOLEAN DEFAULT true, source_url TEXT, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE comments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), user_email TEXT, user_name TEXT, comment_text TEXT NOT NULL, topic TEXT DEFAULT 'general', parent_id INTEGER, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE feedback_threads (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), user_email TEXT NOT NULL, user_name TEXT, subject TEXT NOT NULL, status TEXT DEFAULT 'open', created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE feedback_messages (id SERIAL PRIMARY KEY, thread_id INTEGER REFERENCES feedback_threads(id), sender_type TEXT NOT NULL, sender_email TEXT, message TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE news_cache (id SERIAL PRIMARY KEY, title TEXT, link TEXT UNIQUE, snippet TEXT, pub_date TIMESTAMP, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE chat_messages (id SERIAL PRIMARY KEY, room TEXT, user_name TEXT, message TEXT, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE courses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, video_url TEXT, category TEXT, level TEXT DEFAULT 'beginner', created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE revenue_log (id SERIAL PRIMARY KEY, type TEXT, gross_amount NUMERIC, commission NUMERIC, tenant_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), site_name TEXT DEFAULT 'SSEWASSWA FOUNDATION UGANDA', hero_title TEXT, hero_subtitle TEXT, whatsapp_number TEXT DEFAULT '0789736737', momo_number TEXT DEFAULT '0705373465', momo_names TEXT DEFAULT 'WASSWA', contact_email TEXT DEFAULT 'waiswadaniel24@gmail.com', location TEXT DEFAULT 'Kampala, Uganda', primary_color TEXT DEFAULT '#1e40af', org_type TEXT DEFAULT 'platform', verified BOOLEAN DEFAULT false, public_profile BOOLEAN DEFAULT true, subscription_tier TEXT DEFAULT 'free', developer_name TEXT DEFAULT 'SSEWASSWA Foundation', developer_bio TEXT DEFAULT 'Building digital infrastructure for African education', developer_whatsapp TEXT DEFAULT '0789736737', developer_email TEXT DEFAULT 'waiswadaniel24@gmail.com', feature_overrides JSONB DEFAULT '{}')`);
-
-  console.log('Tables created. Adding indexes...');
-
-  // 4. CREATE INDEXES
-  await pool.query(`CREATE UNIQUE INDEX attendance_unique ON attendance (tenant_id, student_id, date)`);
-  await pool.query(`CREATE UNIQUE INDEX wallets_tenant_unique ON wallets (tenant_id)`);
-  await pool.query(`CREATE UNIQUE INDEX settings_tenant_unique ON settings (tenant_id)`);
-
-  console.log('Indexes created. Seeding data...');
-
-  // 5. INSERT SEED DATA
-  const tenant = await pool.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
-  const tenantId = tenant.rows[0].id;
-
-  await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`, [tenantId, 'waiswadaniel24@gmail.com', await bcrypt.hash('admin123', 10), 'super_admin']);
-  await pool.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2)`, [tenantId, 0]);
-  await pool.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3)`, [tenantId, 'enterprise', true]);
-  await pool.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology')`, [tenantId]);
-  await pool.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'English for Beginners', 'Basic English lessons', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'language')`, [tenantId]);
-
-  console.log('Database initialization complete! ✅');
 }
 function requireLogin(req, res, next) {
   if (req.session.user) return next();
@@ -650,26 +658,6 @@ app.get('/super-admin/verify', requireLogin, requireSuperAdmin, async (req, res)
   </div></body></html>`);
 });
 
-// === SOCKET.IO CHAT - MOVED HERE FROM BEFORE ===
-io.on('connection', (socket) => {
-  socket.on('join_room', (room) => {
-    socket.join(room);
-    socket.to(room).emit('user_joined', { msg: 'A user joined' });
-  });
-  socket.on('send_message', async (data) => {
-    const { room, message, user_name } = data;
-    await pool.query('INSERT INTO chat_messages (room, user_name, message) VALUES ($1, $2, $3)', [room, user_name, message]);
-    io.to(room).emit('new_message', { user_name, message, time: new Date().toLocaleTimeString() });
-  });
-});
-
-// === START SERVER ===
-initDB().then(() => {
-  server.listen(PORT, () => console.log(`🚀 SSEWASSWA FOUNDATION v5.1 FREE LAUNCH running on port ${PORT}`));
-}).catch(err => {
-  console.error('Database init failed:', err);
-  process.exit(1);
-});
 // === HOMEPAGE ===
 app.get('/', async (req, res) => {
   const s = await getSettings(1);
@@ -1350,18 +1338,6 @@ app.get('/logout', (req, res) => {
   res.redirect('/');
 });
 
-// === SOCKET.IO CHAT ===
-io.on('connection', (socket) => {
-  socket.on('join_room', (room) => {
-    socket.join(room);
-    socket.to(room).emit('user_joined', { msg: 'A user joined' });
-  });
-  socket.on('send_message', async (data) => {
-    const { room, message, user_name } = data;
-    await pool.query('INSERT INTO chat_messages (room, user_name, message) VALUES ($1, $2, $3)', [room, user_name, message]);
-    io.to(room).emit('new_message', { user_name, message, time: new Date().toLocaleTimeString() });
-  });
-});
 // === SOCKET.IO CHAT ===
 io.on('connection', (socket) => {
   socket.on('join_room', (room) => {
