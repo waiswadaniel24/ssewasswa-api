@@ -122,7 +122,7 @@ async function hasFeature(tenantId, feature) {
   if (status === 'enabled') return true;
   const s = await pool.query('SELECT subscription_tier FROM settings WHERE tenant_id = $1', [tenantId]);
   const tier = s.rows[0]?.subscription_tier || 'free';
-  return TIERS[tier].features.includes(feature);
+  return TIERS.features.includes(feature);
 }
 
 function requireFeature(feature) {
@@ -165,17 +165,17 @@ async function updateRankings() {
 }
 cron.schedule('0 2 * * *', updateRankings);
 
+// === DATABASE INIT - FIXED ORDER ===
 async function initDB() {
+  // 1. CREATE TABLES FIRST
   await pool.query(`CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, ranking_score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT, role TEXT DEFAULT 'staff', tenant_id INTEGER REFERENCES tenants(id), created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), name TEXT NOT NULL, class TEXT, dob DATE, guardian_name TEXT, guardian_phone TEXT, balance NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, amount NUMERIC NOT NULL, term TEXT, year INTEGER, paid NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, date DATE NOT NULL, status TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS attendance_unique ON attendance (tenant_id, student_id, date)`);
   await pool.query(`CREATE TABLE IF NOT EXISTS grades (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), student_id INTEGER, subject TEXT NOT NULL, score NUMERIC, term TEXT, year INTEGER, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS market_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, price NUMERIC NOT NULL, seller_email TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())`);
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS wallets_tenant_unique ON wallets (tenant_id)`);
   await pool.query(`CREATE TABLE IF NOT EXISTS surveys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), creator_email TEXT, title TEXT NOT NULL, questions JSONB, reward_per_user NUMERIC DEFAULT 0, total_budget NUMERIC DEFAULT 0, max_responses INTEGER DEFAULT 100, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), donor_name TEXT, donor_email TEXT, amount NUMERIC NOT NULL, message TEXT, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS donor_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, goal_amount NUMERIC NOT NULL, raised_amount NUMERIC DEFAULT 0, image_url TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`);
@@ -188,14 +188,35 @@ async function initDB() {
   await pool.query(`CREATE TABLE IF NOT EXISTS courses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), title TEXT NOT NULL, description TEXT, video_url TEXT, category TEXT, level TEXT DEFAULT 'beginner', created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS revenue_log (id SERIAL PRIMARY KEY, type TEXT, gross_amount NUMERIC, commission NUMERIC, tenant_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), site_name TEXT DEFAULT 'SSEWASSWA FOUNDATION UGANDA', hero_title TEXT, hero_subtitle TEXT, whatsapp_number TEXT DEFAULT '0789736737', momo_number TEXT DEFAULT '0705373465', momo_names TEXT DEFAULT 'WASSWA', contact_email TEXT DEFAULT 'waiswadaniel24@gmail.com', location TEXT DEFAULT 'Kampala, Uganda', primary_color TEXT DEFAULT '#1e40af', org_type TEXT DEFAULT 'platform', verified BOOLEAN DEFAULT false, public_profile BOOLEAN DEFAULT true, subscription_tier TEXT DEFAULT 'free', developer_name TEXT DEFAULT 'SSEWASSWA Foundation', developer_bio TEXT DEFAULT 'Building digital infrastructure for African education', developer_whatsapp TEXT DEFAULT '0789736737', developer_email TEXT DEFAULT 'waiswadaniel24@gmail.com', feature_overrides JSONB DEFAULT '{}')`);
+
+  // 2. CREATE INDEXES AFTER TABLES
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS attendance_unique ON attendance (tenant_id, student_id, date)`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS wallets_tenant_unique ON wallets (tenant_id)`);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS settings_tenant_unique ON settings (tenant_id)`);
-  await pool.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) ON CONFLICT (subdomain) DO NOTHING`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
-  const t = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
-  const tenantId = t.rows[0].id;
-  await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO UPDATE SET tenant_id = $1, password_hash = $3, role = $4`, [tenantId, 'waiswadaniel24@gmail.com', await bcrypt.hash('admin123', 10), 'super_admin']);
+
+  // 3. INSERT SEED DATA - NOW SAFE BECAUSE CONSTRAINTS EXIST
+  const tenantCheck = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
+  let tenantId;
+  if (tenantCheck.rows.length === 0) {
+    const tenant = await pool.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
+    tenantId = tenant.rows[0].id;
+  } else {
+    tenantId = tenantCheck.rows[0].id;
+  }
+
+  const userCheck = await pool.query('SELECT id FROM users WHERE email = $1', ['waiswadaniel24@gmail.com']);
+  if (userCheck.rows.length === 0) {
+    await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`, [tenantId, 'waiswadaniel24@gmail.com', await bcrypt.hash('admin123', 10), 'super_admin']);
+  }
+
   await pool.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 0]);
   await pool.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 'enterprise', true]);
-  await pool.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES (1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology'), (1, 'English for Beginners', 'Basic English lessons', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'language') ON CONFLICT DO NOTHING`);
+
+  const courseCheck = await pool.query('SELECT id FROM courses WHERE title = $1', ['Introduction to Computers']);
+  if (courseCheck.rows.length === 0) {
+    await pool.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES (1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology')`);
+    await pool.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES (1, 'English for Beginners', 'Basic English lessons', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'language')`);
+  }
 }
 
 function requireLogin(req, res, next) {
@@ -225,6 +246,12 @@ function requireSuperAdmin(req, res, next) {
 
 app.get('/health', (req, res) => res.send('OK'));
 
+// === ALL YOUR ROUTES HERE ===
+// [Include all routes from previous messages: /, /news, /learn, /kids, /entertainment, /comments, /feedback, /chat, /ranking, /login, /create-site, /app, /app/students, /app/fees, /app/attendance, /super-admin, etc.]
+
+// For brevity, I'm including key routes. Copy all routes from previous messages after this line.
+
+// === HOMEPAGE ===
 app.get('/', async (req, res) => {
   const s = await getSettings(1);
   const topSchools = await pool.query(`SELECT t.name, t.subdomain, s.hero_subtitle, t.ranking_score FROM tenants t JOIN settings s ON t.id = s.tenant_id WHERE s.verified = true AND s.public_profile = true AND t.id!= 1 ORDER BY t.ranking_score DESC LIMIT 6`);
@@ -309,9 +336,23 @@ app.get('/news', async (req, res) => {
   </div></body></html>`);
 });
 
-// === CONTINUE WITH REST OF ROUTES... ===
-// [Learning, Kids, Entertainment, Comments, Feedback, Chat, Login, Create-Site, Dashboard, Students, Fees, Attendance, Super-Admin, etc. - All included in previous messages]
+// === ADD ALL OTHER ROUTES FROM PREVIOUS MESSAGES HERE ===
+// /learn, /kids, /entertainment, /ranking, /comments, /feedback, /chat, /login, /create-site, /app, /app/students, /app/fees, /app/attendance, /super-admin, etc.
 
+// === SOCKET.IO CHAT ===
+io.on('connection', (socket) => {
+  socket.on('join_room', (room) => {
+    socket.join(room);
+    socket.to(room).emit('user_joined', { msg: 'A user joined' });
+  });
+  socket.on('send_message', async (data) => {
+    const { room, message, user_name } = data;
+    await pool.query('INSERT INTO chat_messages (room, user_name, message) VALUES ($1, $2, $3)', [room, user_name, message]);
+    io.to(room).emit('new_message', { user_name, message, time: new Date().toLocaleTimeString() });
+  });
+});
+
+// === START SERVER ===
 initDB().then(() => {
   server.listen(PORT, () => console.log(`🚀 SSEWASSWA FOUNDATION v5.1 FREE LAUNCH running on port ${PORT}`));
 }).catch(err => {
