@@ -2,6 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const Parser = require('rss-parser');
 const { Pool } = require('pg');
 const http = require('http');
@@ -108,6 +109,7 @@ async function initDB() {
       'attendance',
       'fees',
       'students',
+      'password_resets',
       'users',
       'revenue_log',
       'settings',
@@ -143,6 +145,7 @@ async function initDB() {
     await client.query('CREATE TABLE chat_messages (id SERIAL PRIMARY KEY, room TEXT, user_name TEXT, message TEXT, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE courses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, video_url TEXT, category TEXT, level TEXT DEFAULT \'beginner\', created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, site_name TEXT DEFAULT \'SSEWASSWA FOUNDATION UGANDA\', primary_color TEXT DEFAULT \'#1e40af\', contact_email TEXT DEFAULT \'waiswadaniel24@gmail.com\', whatsapp_number TEXT DEFAULT \'0789736737\', created_at TIMESTAMP DEFAULT NOW())');
+    await client.query('CREATE TABLE password_resets (id SERIAL PRIMARY KEY, email TEXT NOT NULL, token TEXT UNIQUE NOT NULL, expires_at TIMESTAMP NOT NULL, used BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE revenue_log (id SERIAL PRIMARY KEY, type TEXT, gross_amount NUMERIC, commission NUMERIC, tenant_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())');
 
     await client.query('CREATE UNIQUE INDEX tenants_subdomain_unique ON tenants (subdomain)');
@@ -185,7 +188,7 @@ async function initDB() {
 }
 
 app.get('/login', (req, res) => {
-  res.send('<h1>Login</h1><form method="POST" action="/login"><input name="email" placeholder="Email" /><input name="password" placeholder="Password" type="password" /><button type="submit">Login</button></form>');
+  res.send('<h1>Login</h1><form method="POST" action="/login"><input name="email" placeholder="Email" /><input name="password" placeholder="Password" type="password" /><button type="submit">Login</button></form><p style="margin-top: 1rem;"><a href="/forgot-password">Forgot Password?</a></p>');
 });
 
 app.post('/login', async (req, res) => {
@@ -204,6 +207,50 @@ app.post('/login', async (req, res) => {
     console.error('Login error:', e);
     res.status(500).send(renderPage('Error', '<div class="card"><h1>Server Error</h1></div>', req));
   }
+});
+
+app.get('/forgot-password', (req, res) => {
+  const content = `<div class="card" style="max-width: 400px; margin: 2rem auto;"><h1>Reset Password</h1><form method="POST" action="/forgot-password"><input name="email" type="email" placeholder="Your Email" required><button class="btn" style="width: 100%;">Send Reset Link</button></form><p><a href="/login">Back to Login</a></p></div>`;
+  res.send(renderPage('Forgot Password', content, req));
+});
+
+app.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+  if (!user.rows[0]) {
+    return res.send(renderPage('Reset', '<div class="card"><h1>Check Your Email</h1><p>If account exists, reset link was sent.</p></div>', req));
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + 3600000);
+  await pool.query('INSERT INTO password_resets (email, token, expires_at) VALUES ($1, $2, $3)', [email, token, expires]);
+  const resetLink = `https://ssewasswa-api.onrender.com/reset-password/${token}`;
+  console.log('PASSWORD RESET LINK:', resetLink);
+  res.send(renderPage('Reset', '<div class="card"><h1>Reset Link Sent</h1><p>Check Render logs for your reset link. For demo: <a href="' + resetLink + '">' + resetLink + '</a></p></div>', req));
+});
+
+app.get('/reset-password/:token', async (req, res) => {
+  const { token } = req.params;
+  const reset = await pool.query('SELECT * FROM password_resets WHERE token = $1 AND expires_at > NOW() AND used = false', [token]);
+  if (!reset.rows[0]) {
+    return res.send(renderPage('Error', '<div class="card"><h1>Invalid Link</h1><p>Reset link expired or invalid.</p></div>', req));
+  }
+  const content = `<div class="card" style="max-width: 400px; margin: 2rem auto;"><h1>New Password</h1><form method="POST" action="/reset-password"><input type="hidden" name="token" value="${token}"><input name="password" type="password" placeholder="New Password" required><input name="confirm" type="password" placeholder="Confirm Password" required><button class="btn" style="width: 100%;">Reset Password</button></form></div>`;
+  res.send(renderPage('Reset Password', content, req));
+});
+
+app.post('/reset-password', async (req, res) => {
+  const { token, password, confirm } = req.body;
+  if (password!== confirm) {
+    return res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>Passwords do not match</p></div>', req));
+  }
+  const reset = await pool.query('SELECT * FROM password_resets WHERE token = $1 AND expires_at > NOW() AND used = false', [token]);
+  if (!reset.rows[0]) {
+    return res.send(renderPage('Error', '<div class="card"><h1>Invalid Link</h1></div>', req));
+  }
+  const hashedPass = await bcrypt.hash(password, 10);
+  await pool.query('UPDATE users SET password_hash = $1 WHERE email = $2', [hashedPass, reset.rows[0].email]);
+  await pool.query('UPDATE password_resets SET used = true WHERE token = $1', [token]);
+  res.send(renderPage('Success', '<div class="card"><h1>Password Reset!</h1><p>You can now login with your new password.</p><a href="/login" class="btn">Login</a></div>', req));
 });
 
 app.get('/logout', (req, res) => {
