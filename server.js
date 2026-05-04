@@ -165,21 +165,25 @@ async function updateRankings() {
 }
 cron.schedule('0 2 * * *', updateRankings);
 
-// === DATABASE INIT - FULL SCHEMA RESET ===
+// === DATABASE INIT - FIX SCHEMA ERROR ===
 async function initDB() {
   console.log('Starting database initialization...');
 
   try {
-    // 1. NUKE THE ENTIRE PUBLIC SCHEMA - Removes all tables, types, sequences
-    await pool.query('DROP SCHEMA public CASCADE');
-    await pool.query('CREATE SCHEMA public');
-    await pool.query('GRANT ALL ON SCHEMA public TO public');
-    console.log('Schema wiped. Creating fresh tables...');
+    // 1. DROP SCHEMA - Nuke everything including types
+    await pool.query('DROP SCHEMA IF EXISTS public CASCADE');
+    console.log('Old schema dropped.');
   } catch (e) {
-    console.log('Schema reset note:', e.message);
+    console.log('Schema drop note:', e.message);
   }
 
-  // 2. CREATE ALL TABLES - No IF NOT EXISTS needed now
+  // 2. RECREATE PUBLIC SCHEMA + SET SEARCH PATH - Critical fix
+  await pool.query('CREATE SCHEMA public');
+  await pool.query('GRANT ALL ON SCHEMA public TO public');
+  await pool.query('SET search_path TO public');
+  console.log('Schema created. Creating tables...');
+
+  // 3. CREATE ALL TABLES
   await pool.query(`CREATE TABLE tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, ranking_score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT, role TEXT DEFAULT 'staff', tenant_id INTEGER REFERENCES tenants(id), created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), name TEXT NOT NULL, class TEXT, dob DATE, guardian_name TEXT, guardian_phone TEXT, balance NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
@@ -203,14 +207,14 @@ async function initDB() {
 
   console.log('Tables created. Adding indexes...');
 
-  // 3. CREATE INDEXES
+  // 4. CREATE INDEXES
   await pool.query(`CREATE UNIQUE INDEX attendance_unique ON attendance (tenant_id, student_id, date)`);
   await pool.query(`CREATE UNIQUE INDEX wallets_tenant_unique ON wallets (tenant_id)`);
   await pool.query(`CREATE UNIQUE INDEX settings_tenant_unique ON settings (tenant_id)`);
 
   console.log('Indexes created. Seeding data...');
 
-  // 4. INSERT SEED DATA
+  // 5. INSERT SEED DATA
   const tenant = await pool.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
   const tenantId = tenant.rows[0].id;
 
@@ -222,7 +226,6 @@ async function initDB() {
 
   console.log('Database initialization complete! ✅');
 }
-
 function requireLogin(req, res, next) {
   if (req.session.user) return next();
   res.redirect('/login');
