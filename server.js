@@ -46,10 +46,11 @@ function requireFeature(feature) {
   };
 }
 
-function requireLogin(req, res, next) {
+const requireAuth = (req, res, next) => {
   if (!req.session.user) return res.redirect('/login');
+  if (req.session.tenant) req.tenant = req.session.tenant;
   return next();
-}
+};
 
 async function requireTenant(req, res, next) {
   try {
@@ -188,17 +189,20 @@ app.get('/login', (req, res) => {
 });
 
 app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
   try {
-    const { email, password } = req.body;
-    const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    const user = userResult.rows[0];
-    if (!user) return res.status(401).send('Invalid credentials');
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return res.status(401).send('Invalid credentials');
-    req.session.user = { id: user.id, email: user.email, role: user.role, tenant_id: user.tenant_id };
-    return res.redirect('/app');
-  } catch (err) {
-    return res.status(500).send('Login failed');
+    const user = await pool.query('SELECT u.*, t.subdomain FROM users u JOIN tenants t ON u.tenant_id = t.id WHERE u.email = $1', [email]);
+    if (!user.rows[0]) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>', req));
+
+    const valid = await bcrypt.compare(password, user.rows[0].password_hash);
+    if (!valid) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>', req));
+
+    req.session.user = user.rows[0];
+    req.session.tenant = { id: user.rows[0].tenant_id, subdomain: user.rows[0].subdomain };
+    res.redirect('/app');
+  } catch (e) {
+    console.error('Login error:', e);
+    res.status(500).send(renderPage('Error', '<div class="card"><h1>Server Error</h1></div>', req));
   }
 });
 
@@ -245,23 +249,23 @@ app.post('/create-site', async (req, res) => {
   }
 });
 
-app.get('/marketplace', requireLogin, requireTenant, async (req, res) => {
+app.get('/marketplace', requireAuth, requireTenant, async (req, res) => {
   const result = await pool.query('SELECT * FROM market_items WHERE tenant_id = $1 AND status = $2 ORDER BY created_at DESC', [req.tenantId, 'active']);
   res.json({ items: result.rows });
 });
 
-app.get('/marketplace/cart', requireLogin, async (req, res) => {
+app.get('/marketplace/cart', requireAuth, async (req, res) => {
   const result = await pool.query('SELECT c.*, m.title, m.price FROM cart_items c JOIN market_items m ON m.id = c.item_id WHERE c.user_email = $1 ORDER BY c.created_at DESC', [req.session.user.email]);
   res.json({ cart: result.rows });
 });
 
-app.post('/marketplace/cart', requireLogin, async (req, res) => {
+app.post('/marketplace/cart', requireAuth, async (req, res) => {
   const { item_id, quantity } = req.body;
   await pool.query('INSERT INTO cart_items (user_email, item_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (user_email, item_id) DO UPDATE SET quantity = EXCLUDED.quantity', [req.session.user.email, item_id, quantity || 1]);
   res.json({ success: true });
 });
 
-app.post('/marketplace/checkout', requireLogin, requireTenant, async (req, res) => {
+app.post('/marketplace/checkout', requireAuth, requireTenant, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -287,38 +291,38 @@ app.post('/marketplace/checkout', requireLogin, requireTenant, async (req, res) 
   }
 });
 
-app.get('/orders', requireLogin, async (req, res) => {
+app.get('/orders', requireAuth, async (req, res) => {
   const result = await pool.query('SELECT * FROM orders WHERE user_email = $1 ORDER BY created_at DESC', [req.session.user.email]);
   res.json({ orders: result.rows });
 });
 
-app.get('/app', requireLogin, requireTenant, async (req, res) => {
+app.get('/app', requireAuth, requireTenant, async (req, res) => {
   const students = await pool.query('SELECT COUNT(*)::int AS c FROM students WHERE tenant_id = $1', [req.tenantId]);
   const fees = await pool.query('SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM fees WHERE tenant_id = $1', [req.tenantId]);
   res.json({ tenant: req.tenant.name, stats: { students: students.rows[0].c, total_fees: fees.rows[0].total } });
 });
 
-app.get('/app/students', requireLogin, requireTenant, async (req, res) => {
+app.get('/app/students', requireAuth, requireTenant, async (req, res) => {
   const result = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
   res.json({ students: result.rows });
 });
 
-app.get('/app/fees', requireLogin, requireTenant, async (req, res) => {
+app.get('/app/fees', requireAuth, requireTenant, async (req, res) => {
   const result = await pool.query('SELECT * FROM fees WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
   res.json({ fees: result.rows });
 });
 
-app.get('/app/attendance', requireLogin, requireTenant, async (req, res) => {
+app.get('/app/attendance', requireAuth, requireTenant, async (req, res) => {
   const result = await pool.query('SELECT * FROM attendance WHERE tenant_id = $1 ORDER BY date DESC, created_at DESC', [req.tenantId]);
   res.json({ attendance: result.rows });
 });
 
-app.get('/app/grades', requireLogin, requireTenant, async (req, res) => {
+app.get('/app/grades', requireAuth, requireTenant, async (req, res) => {
   const result = await pool.query('SELECT * FROM grades WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
   res.json({ grades: result.rows });
 });
 
-app.get('/super-admin', requireLogin, requireSuperAdmin, async (req, res) => {
+app.get('/super-admin', requireAuth, requireSuperAdmin, async (req, res) => {
   const tenants = await pool.query('SELECT id, name, subdomain, plan, ranking_score, created_at FROM tenants ORDER BY created_at DESC');
   res.json({ super_admin: true, tenants: tenants.rows });
 });
