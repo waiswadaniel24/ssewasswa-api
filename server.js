@@ -431,7 +431,56 @@ io.on('connection', (socket) => {
 initDB().catch((err) => {
   console.error('Init failed:', err);
 });
+// === SUPER ADMIN SUB-PAGES ===
+app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const tenants = await pool.query('SELECT * FROM tenants ORDER BY id');
+  const rows = tenants.rows.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.score || 0}</td></tr>`).join('');
+  res.send(renderPage('All Schools', `
+    <div class="card"><h1>All Schools/Tenants</h1>
+    <table><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>Score</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+  `, req));
+});
 
+app.get('/super-admin/users', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const users = await pool.query('SELECT u.id, u.email, u.role, t.name as school FROM users u JOIN tenants t ON u.tenant_id = t.id ORDER BY u.id');
+  const rows = users.rows.map(u => `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.school}</td></tr>`).join('');
+  res.send(renderPage('All Users', `
+    <div class="card"><h1>All Platform Users</h1>
+    <table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>School</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+  `, req));
+});
+
+app.get('/super-admin/revenue', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const rev = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM revenue_log');
+  const orders = await pool.query('SELECT COUNT(*) as count FROM orders');
+  res.send(renderPage('Revenue', `
+    <div class="card"><h1>Platform Revenue</h1>
+    <p><strong>Total Commission Earned:</strong> UGX ${rev.rows[0].total}</p>
+    <p><strong>Total Orders:</strong> ${orders.rows[0].count}</p></div>
+  `, req));
+});
+
+app.get('/super-admin/comments', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const comments = await pool.query('SELECT * FROM comments ORDER BY id DESC LIMIT 50');
+  const rows = comments.rows.map(c => `<tr><td>${c.id}</td><td>${c.author_email}</td><td>${c.content}</td><td>${c.approved}</td></tr>`).join('');
+  res.send(renderPage('Comments', `
+    <div class="card"><h1>Moderate Comments</h1>
+    <table><thead><tr><th>ID</th><th>Author</th><th>Content</th><th>Approved</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+  `, req));
+});
+
+app.get('/super-admin/feedback', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const feedback = await pool.query('SELECT * FROM feedback_threads ORDER BY id DESC');
+  const rows = feedback.rows.map(f => `<tr><td>${f.id}</td><td>${f.user_email}</td><td>${f.subject}</td><td>${f.status}</td></tr>`).join('');
+  res.send(renderPage('Feedback', `
+    <div class="card"><h1>Feedback Threads</h1>
+    <table><thead><tr><th>ID</th><th>User</th><th>Subject</th><th>Status</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+  `, req));
+});
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
