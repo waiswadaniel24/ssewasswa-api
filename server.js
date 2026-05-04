@@ -29,6 +29,21 @@ app.use(session({
   }
 }));
 
+const FEATURES = {
+  news: true
+};
+
+function renderPage(title, content) {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font-family:system-ui;background:#f8fafc;color:#1e293b;margin:0;padding:24px}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:720px;margin:0 auto}.btn{background:#1e40af;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer}input{display:block;width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:8px 0 12px}</style></head><body>${content}</body></html>`;
+}
+
+function requireFeature(feature) {
+  return (req, res, next) => {
+    if (!FEATURES[feature]) return res.status(403).send('Feature not enabled');
+    return next();
+  };
+}
+
 function requireLogin(req, res, next) {
   if (!req.session.user) return res.redirect('/login');
   return next();
@@ -135,11 +150,18 @@ async function initDB() {
     await client.query('CREATE UNIQUE INDEX settings_tenant_unique ON settings (tenant_id)');
     await client.query('CREATE UNIQUE INDEX courses_tenant_title_unique ON courses (tenant_id, title)');
 
-    const adminHash = await bcrypt.hash('admin123', 10);
+    let adminHash;
+    try {
+      adminHash = await bcrypt.hash('admin123', 10);
+    } catch (hashErr) {
+      console.error('Admin hash generation failed:', hashErr);
+      throw hashErr;
+    }
     const tenantResult = await client.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) ON CONFLICT (subdomain) DO UPDATE SET name = EXCLUDED.name, plan = EXCLUDED.plan RETURNING id', ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
     const tenantId = tenantResult.rows[0].id;
 
     await client.query('INSERT INTO users (email, password_hash, role, tenant_id) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role, tenant_id = EXCLUDED.tenant_id', ['waiswadaniel24@gmail.com', adminHash, 'super_admin', tenantId]);
+    console.log('Admin user seeded: waiswadaniel24@gmail.com');
     await client.query('INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, user_email) DO NOTHING', [tenantId, 'waiswadaniel24@gmail.com', 0]);
     await client.query('INSERT INTO settings (tenant_id, site_name, primary_color, contact_email, whatsapp_number) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id) DO NOTHING', [tenantId, 'SSEWASSWA FOUNDATION UGANDA', '#1e40af', 'waiswadaniel24@gmail.com', '0789736737']);
     await client.query('INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id, title) DO NOTHING', [tenantId, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology']);
@@ -184,6 +206,29 @@ app.get('/logout', (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'ssewasswa-api', version: '5.1' });
+});
+
+app.get('/news', requireFeature('news'), requireTenant, async (req, res) => {
+  const items = await pool.query('SELECT title, link, snippet, pub_date FROM news_cache ORDER BY pub_date DESC NULLS LAST, created_at DESC LIMIT 20');
+  return res.json({ tenant: req.tenant?.subdomain || 'main', news: items.rows });
+});
+
+app.get('/create-site', (req, res) => {
+  res.send(renderPage('Create Site', '<div class="card"><h1>Create Free School Site</h1><form method="POST" action="/create-site"><input name="name" placeholder="School Name" required><input name="subdomain" placeholder="Subdomain" required><input name="admin_email" type="email" placeholder="Admin Email" required><input name="admin_password" type="password" placeholder="Password" required><button class="btn">Create</button></form></div>', req));
+});
+
+app.post('/create-site', async (req, res) => {
+  const { name, subdomain, admin_email, admin_password } = req.body;
+  try {
+    const tenant = await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id', [name, subdomain.toLowerCase(), 'free']);
+    const hashedPass = await bcrypt.hash(admin_password, 10);
+    await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [tenant.rows[0].id, admin_email, hashedPass, 'admin']);
+    await pool.query('INSERT INTO settings (tenant_id) VALUES ($1)', [tenant.rows[0].id]);
+    await pool.query('INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3)', [tenant.rows[0].id, admin_email, 0]);
+    res.send(renderPage('Success', '<div class="card"><h1>Site Created!</h1><p>Login: ' + admin_email + '</p></div>', req));
+  } catch (e) {
+    res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>Subdomain taken or DB error: ' + e.message + '</p></div>', req));
+  }
 });
 
 app.get('/marketplace', requireLogin, requireTenant, async (req, res) => {
