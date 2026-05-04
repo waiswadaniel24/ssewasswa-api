@@ -32,10 +32,11 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true,
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000,
-    sameSite: 'lax'
+  secure: false, // Change this from true to false
+  httpOnly: true,
+  maxAge: 24 * 60 * 60 * 1000,
+  sameSite: 'lax'
+}
   }
 }));
 // === MTN MOMO CONFIG - ADD YOUR KEYS TO RENDER ENV ===
