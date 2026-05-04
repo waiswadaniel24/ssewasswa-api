@@ -130,6 +130,13 @@ async function initDB() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await client.query(`CREATE TABLE IF NOT EXISTS "session" (
+  "sid" varchar NOT NULL,
+  "sess" json NOT NULL,
+  "expire" timestamp(6) NOT NULL,
+  PRIMARY KEY ("sid")
+)`);
+await client.query(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")`);
     const tables = ['payment_requests','parent_otps','parents','chat_messages','news_cache','feedback_messages','feedback_threads','comments','grants','donor_campaigns','donations','surveys','grades','attendance','fees','students','password_resets','users','revenue_log','settings','courses','order_items','orders','cart_items','market_items','wallets','tenants'];
     for (const table of tables) {
       await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
