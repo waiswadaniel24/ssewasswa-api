@@ -165,25 +165,34 @@ async function updateRankings() {
 }
 cron.schedule('0 2 * * *', updateRankings);
 
-// === DATABASE INIT - FIX SCHEMA ERROR ===
+// === DATABASE INIT - LOCK TABLE VERSION ===
 async function initDB() {
   console.log('Starting database initialization...');
 
+  // 1. CREATE LOCK TABLE FIRST - If it fails, another process is already running init
   try {
-    // 1. DROP SCHEMA - Nuke everything including types
-    await pool.query('DROP SCHEMA IF EXISTS public CASCADE');
-    console.log('Old schema dropped.');
+    await pool.query(`CREATE TABLE db_init_lock (locked BOOLEAN DEFAULT true)`);
+    console.log('Acquired DB init lock. Cleaning database...');
   } catch (e) {
-    console.log('Schema drop note:', e.message);
+    if (e.code === '42P07') { // table already exists
+      console.log('Another process is initializing DB. Skipping...');
+      return; // Exit this process - let the other one finish
+    }
   }
 
-  // 2. RECREATE PUBLIC SCHEMA + SET SEARCH PATH - Critical fix
-  await pool.query('CREATE SCHEMA public');
-  await pool.query('GRANT ALL ON SCHEMA public TO public');
-  await pool.query('SET search_path TO public');
-  console.log('Schema created. Creating tables...');
+  // 2. DROP ALL USER TABLES BUT KEEP PUBLIC SCHEMA - Avoids pg_namespace error
+  const tables = await pool.query(`
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+  `);
 
-  // 3. CREATE ALL TABLES
+  for (const row of tables.rows) {
+    if (row.tablename!== 'db_init_lock') {
+      await pool.query(`DROP TABLE IF EXISTS ${row.tablename} CASCADE`);
+    }
+  }
+  console.log('Old tables dropped. Creating fresh schema...');
+
+  // 3. CREATE ALL TABLES - Public schema already exists, no need to create
   await pool.query(`CREATE TABLE tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, ranking_score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT, role TEXT DEFAULT 'staff', tenant_id INTEGER REFERENCES tenants(id), created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), name TEXT NOT NULL, class TEXT, dob DATE, guardian_name TEXT, guardian_phone TEXT, balance NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
