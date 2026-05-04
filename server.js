@@ -73,6 +73,11 @@ function requireSuperAdmin(req, res, next) {
   return res.status(403).send('Forbidden');
 }
 
+const requireRole = (role) => (req, res, next) => {
+  if (!req.session.user || req.session.user.role !== role) return res.status(403).send('Forbidden');
+  return next();
+};
+
 async function initDB() {
   const client = await pool.connect();
   try {
@@ -144,7 +149,7 @@ async function initDB() {
     await client.query('CREATE TABLE news_cache (id SERIAL PRIMARY KEY, title TEXT, link TEXT UNIQUE, snippet TEXT, pub_date TIMESTAMP, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE chat_messages (id SERIAL PRIMARY KEY, room TEXT, user_name TEXT, message TEXT, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE courses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, video_url TEXT, category TEXT, level TEXT DEFAULT \'beginner\', created_at TIMESTAMP DEFAULT NOW())');
-    await client.query('CREATE TABLE settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, site_name TEXT DEFAULT \'SSEWASSWA FOUNDATION UGANDA\', primary_color TEXT DEFAULT \'#1e40af\', contact_email TEXT DEFAULT \'waiswadaniel24@gmail.com\', whatsapp_number TEXT DEFAULT \'0789736737\', created_at TIMESTAMP DEFAULT NOW())');
+    await client.query('CREATE TABLE settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, site_name TEXT DEFAULT \'SSEWASSWA FOUNDATION UGANDA\', primary_color TEXT DEFAULT \'#1e40af\', contact_email TEXT DEFAULT \'waiswadaniel24@gmail.com\', whatsapp_number TEXT DEFAULT \'0789736737\', subscription_tier TEXT DEFAULT \'free\', verified BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE password_resets (id SERIAL PRIMARY KEY, email TEXT NOT NULL, token TEXT UNIQUE NOT NULL, expires_at TIMESTAMP NOT NULL, used BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE revenue_log (id SERIAL PRIMARY KEY, type TEXT, gross_amount NUMERIC, commission NUMERIC, tenant_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())');
 
@@ -156,23 +161,30 @@ async function initDB() {
     await client.query('CREATE UNIQUE INDEX settings_tenant_unique ON settings (tenant_id)');
     await client.query('CREATE UNIQUE INDEX courses_tenant_title_unique ON courses (tenant_id, title)');
 
-    let adminHash;
-    try {
-      adminHash = await bcrypt.hash('admin123', 10);
-    } catch (hashErr) {
-      console.error('Admin hash generation failed:', hashErr);
-      throw hashErr;
-    }
-    const tenantResult = await client.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) ON CONFLICT (subdomain) DO UPDATE SET name = EXCLUDED.name, plan = EXCLUDED.plan RETURNING id', ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
-    const tenantId = tenantResult.rows[0].id;
+    console.log('Indexes created. Seeding DEVELOPER ONLY...');
 
-    await client.query('INSERT INTO users (email, password_hash, role, tenant_id) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role, tenant_id = EXCLUDED.tenant_id', ['waiswadaniel24@gmail.com', adminHash, 'super_admin', tenantId]);
-    console.log('Admin user seeded: waiswadaniel24@gmail.com');
-    await client.query('INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, user_email) DO NOTHING', [tenantId, 'waiswadaniel24@gmail.com', 0]);
-    await client.query('INSERT INTO settings (tenant_id, site_name, primary_color, contact_email, whatsapp_number) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id) DO NOTHING', [tenantId, 'SSEWASSWA FOUNDATION UGANDA', '#1e40af', 'waiswadaniel24@gmail.com', '0789736737']);
-    await client.query('INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id, title) DO NOTHING', [tenantId, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology']);
-    await client.query('INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id, title) DO NOTHING', [tenantId, 'English for Beginners', 'Basic English lessons', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'language']);
-    await client.query('INSERT INTO market_items (tenant_id, title, description, price, seller_email, status, stock, category) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING', [tenantId, 'School Uniform', 'Official school uniform', 50000, 'waiswadaniel24@gmail.com', 'active', 20, 'uniforms']);
+    const tenant = await client.query(
+      `INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+      ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']
+    );
+    const tenantId = tenant.rows[0].id;
+
+    const hashedPass = await bcrypt.hash('admin123', 10);
+    await client.query(
+      `INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash, role='super_admin'`,
+      [tenantId, 'waiswadaniel24@gmail.com', hashedPass, 'super_admin']
+    );
+
+    await client.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 'enterprise', true]);
+
+    await client.query(`INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, user_email) DO NOTHING`, [tenantId, 'waiswadaniel24@gmail.com', 0]);
+
+    await client.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology') ON CONFLICT DO NOTHING`, [tenantId]);
+
+    await client.query(`INSERT INTO market_items (tenant_id, title, description, price, seller_email, status, image_url, stock, category) VALUES ($1, 'School Uniform Set', 'Complete uniform for primary students', 50000, 'waiswadaniel24@gmail.com', 'approved', 'https://via.placeholder.com/300x300?text=Uniform', 100, 'uniform') ON CONFLICT DO NOTHING`, [tenantId]);
+    await client.query(`INSERT INTO market_items (tenant_id, title, description, price, seller_email, status, image_url, stock, category) VALUES ($1, 'Exercise Books Pack', '10 exercise books', 15000, 'waiswadaniel24@gmail.com', 'approved', 'https://via.placeholder.com/300x300?text=Books', 200, 'stationery') ON CONFLICT DO NOTHING`, [tenantId]);
+
+    console.log('RESET COMPLETE: Only developer account exists. Password: admin123');
 
     await client.query('DROP TABLE IF EXISTS db_init_lock');
     await client.query('COMMIT');
@@ -297,7 +309,7 @@ app.post('/create-site', async (req, res) => {
 });
 
 app.get('/marketplace', requireAuth, requireTenant, async (req, res) => {
-  const result = await pool.query('SELECT * FROM market_items WHERE tenant_id = $1 AND status = $2 ORDER BY created_at DESC', [req.tenantId, 'active']);
+  const result = await pool.query("SELECT * FROM market_items WHERE tenant_id = $1 AND status IN ('active', 'approved') ORDER BY created_at DESC", [req.tenantId]);
   res.json({ items: result.rows });
 });
 
@@ -371,7 +383,26 @@ app.get('/app/grades', requireAuth, requireTenant, async (req, res) => {
 
 app.get('/super-admin', requireAuth, requireSuperAdmin, async (req, res) => {
   const tenants = await pool.query('SELECT id, name, subdomain, plan, ranking_score, created_at FROM tenants ORDER BY created_at DESC');
-  res.json({ super_admin: true, tenants: tenants.rows });
+  const tenantRows = tenants.rows.map((t) => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.ranking_score}</td></tr>`).join('');
+  const content = `
+  <div class="card"><h1>Super Admin</h1></div>
+  <div class="card"><table width="100%"><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>Score</th></tr></thead><tbody>${tenantRows || '<tr><td colspan="5">No tenants</td></tr>'}</tbody></table></div>
+  <div class="card"><h3>⚠️ Nuclear Reset</h3><form method="POST" action="/super-admin/nuclear-reset" onsubmit="return confirm('This deletes ALL data. Continue?')"><input name="confirm" placeholder="Type: DELETE EVERYTHING" required><button class="btn" style="background:#dc2626;">WIPE ALL DATA</button></form></div>`;
+  res.send(renderPage('Super Admin', content, req));
+});
+
+app.post('/super-admin/nuclear-reset', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const { confirm } = req.body;
+  if (confirm !== 'DELETE EVERYTHING') {
+    return res.send(renderPage('Error', '<div class="card"><h1>Confirmation Required</h1><p>Type DELETE EVERYTHING to confirm</p></div>', req));
+  }
+  try {
+    await pool.query(`TRUNCATE TABLE surveys, grades, attendance, fees, students, cart_items, order_items, orders, market_items, wallets, donations, donor_campaigns, grants, comments, feedback_threads, feedback_messages, chat_messages, news_cache, courses, settings, revenue_log, password_resets, users, tenants RESTART IDENTITY CASCADE`);
+    await initDB();
+    res.send(renderPage('Reset', '<div class="card"><h1>Platform Reset Complete</h1><p>Only developer account remains. Password: admin123</p><a href="/login" class="btn">Login</a></div>', req));
+  } catch (e) {
+    res.send(renderPage('Error', '<div class="card"><h1>Reset Failed</h1><p>' + e.message + '</p></div>', req));
+  }
 });
 
 app.get('/', (req, res) => {
