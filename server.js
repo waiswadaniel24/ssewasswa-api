@@ -2,6 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcryptjs');
+const Parser = require('rss-parser');
 const { Pool } = require('pg');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -15,9 +16,10 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
+const parser = new Parser();
 
-app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
 app.use(session({
   secret: process.env.SESSION_SECRET || 'ssewasswa-secret',
   resave: false,
@@ -209,8 +211,16 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/news', requireFeature('news'), requireTenant, async (req, res) => {
-  const items = await pool.query('SELECT title, link, snippet, pub_date FROM news_cache ORDER BY pub_date DESC NULLS LAST, created_at DESC LIMIT 20');
-  return res.json({ tenant: req.tenant?.subdomain || 'main', news: items.rows });
+  try {
+    const feed = await parser.parseURL('https://feeds.bbci.co.uk/news/world/africa/rss.xml');
+    const items = feed.items.slice(0, 10);
+    if (items.length === 0) throw new Error('No news');
+    const content = '<div class="card"><h1>Education News Africa</h1></div>' + items.map(item => '<div class="card"><h3>' + item.title + '</h3><p>' + (item.contentSnippet || '') + '</p><small>' + new Date(item.pubDate).toLocaleDateString() + '</small><br><a href="' + item.link + '" target="_blank" class="btn">Read More</a></div>').join('');
+    res.send(renderPage('News', content, req));
+  } catch (e) {
+    console.error('News fetch error:', e.message);
+    res.send(renderPage('News', '<div class="card"><h1>News Temporarily Unavailable</h1><p>We cannot fetch news right now. Please try again later.</p></div>', req));
+  }
 });
 
 app.get('/create-site', (req, res) => {
@@ -219,15 +229,19 @@ app.get('/create-site', (req, res) => {
 
 app.post('/create-site', async (req, res) => {
   const { name, subdomain, admin_email, admin_password } = req.body;
+  if (!name ||!subdomain ||!admin_email ||!admin_password) {
+    return res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>All fields required</p><a href="/create-site">Try Again</a></div>', req));
+  }
   try {
-    const tenant = await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id', [name, subdomain.toLowerCase(), 'free']);
+    const tenant = await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id', [name.trim(), subdomain.toLowerCase().trim(), 'free']);
     const hashedPass = await bcrypt.hash(admin_password, 10);
     await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [tenant.rows[0].id, admin_email, hashedPass, 'admin']);
     await pool.query('INSERT INTO settings (tenant_id) VALUES ($1)', [tenant.rows[0].id]);
     await pool.query('INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3)', [tenant.rows[0].id, admin_email, 0]);
-    res.send(renderPage('Success', '<div class="card"><h1>Site Created!</h1><p>Login: ' + admin_email + '</p></div>', req));
+    res.send(renderPage('Success', '<div class="card"><h1>Site Created!</h1><p>School: ' + name + '</p><p>URL: http://' + subdomain + '.localhost:3000</p><p>Login: ' + admin_email + '</p></div>', req));
   } catch (e) {
-    res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>Subdomain taken or DB error: ' + e.message + '</p></div>', req));
+    let msg = e.code === '23505'? 'Subdomain already taken' : e.message;
+    res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>' + msg + '</p><a href="/create-site">Try Again</a></div>', req));
   }
 });
 
