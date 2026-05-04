@@ -165,9 +165,9 @@ async function updateRankings() {
 }
 cron.schedule('0 2 * * *', updateRankings);
 
-// === DATABASE INIT - FIXED ORDER ===
+// === DATABASE INIT - BULLETPROOF VERSION ===
 async function initDB() {
-  // 1. CREATE TABLES FIRST
+  // 1. CREATE ALL TABLES
   await pool.query(`CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, ranking_score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT, role TEXT DEFAULT 'staff', tenant_id INTEGER REFERENCES tenants(id), created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), name TEXT NOT NULL, class TEXT, dob DATE, guardian_name TEXT, guardian_phone TEXT, balance NUMERIC DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`);
@@ -189,31 +189,38 @@ async function initDB() {
   await pool.query(`CREATE TABLE IF NOT EXISTS revenue_log (id SERIAL PRIMARY KEY, type TEXT, gross_amount NUMERIC, commission NUMERIC, tenant_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), site_name TEXT DEFAULT 'SSEWASSWA FOUNDATION UGANDA', hero_title TEXT, hero_subtitle TEXT, whatsapp_number TEXT DEFAULT '0789736737', momo_number TEXT DEFAULT '0705373465', momo_names TEXT DEFAULT 'WASSWA', contact_email TEXT DEFAULT 'waiswadaniel24@gmail.com', location TEXT DEFAULT 'Kampala, Uganda', primary_color TEXT DEFAULT '#1e40af', org_type TEXT DEFAULT 'platform', verified BOOLEAN DEFAULT false, public_profile BOOLEAN DEFAULT true, subscription_tier TEXT DEFAULT 'free', developer_name TEXT DEFAULT 'SSEWASSWA Foundation', developer_bio TEXT DEFAULT 'Building digital infrastructure for African education', developer_whatsapp TEXT DEFAULT '0789736737', developer_email TEXT DEFAULT 'waiswadaniel24@gmail.com', feature_overrides JSONB DEFAULT '{}')`);
 
-  // 2. CREATE INDEXES AFTER TABLES
+  // 2. CREATE INDEXES - NO ERRORS HERE
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS attendance_unique ON attendance (tenant_id, student_id, date)`);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS wallets_tenant_unique ON wallets (tenant_id)`);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS settings_tenant_unique ON settings (tenant_id)`);
 
-  // 3. INSERT SEED DATA - NOW SAFE BECAUSE CONSTRAINTS EXIST
-  const tenantCheck = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
+  // 3. INSERT SEED DATA - USING WHERE NOT EXISTS TO AVOID CONFLICT ERRORS
+  const tenantExists = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
   let tenantId;
-  if (tenantCheck.rows.length === 0) {
-    const tenant = await pool.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
-    tenantId = tenant.rows[0].id;
+  if (tenantExists.rows.length === 0) {
+    const result = await pool.query(`INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']);
+    tenantId = result.rows[0].id;
   } else {
-    tenantId = tenantCheck.rows[0].id;
+    tenantId = tenantExists.rows[0].id;
   }
 
-  const userCheck = await pool.query('SELECT id FROM users WHERE email = $1', ['waiswadaniel24@gmail.com']);
-  if (userCheck.rows.length === 0) {
+  const userExists = await pool.query('SELECT id FROM users WHERE email = $1', ['waiswadaniel24@gmail.com']);
+  if (userExists.rows.length === 0) {
     await pool.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`, [tenantId, 'waiswadaniel24@gmail.com', await bcrypt.hash('admin123', 10), 'super_admin']);
   }
 
-  await pool.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 0]);
-  await pool.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 'enterprise', true]);
+  const walletExists = await pool.query('SELECT id FROM wallets WHERE tenant_id = $1', [tenantId]);
+  if (walletExists.rows.length === 0) {
+    await pool.query(`INSERT INTO wallets (tenant_id, balance) VALUES ($1, $2)`, [tenantId, 0]);
+  }
 
-  const courseCheck = await pool.query('SELECT id FROM courses WHERE title = $1', ['Introduction to Computers']);
-  if (courseCheck.rows.length === 0) {
+  const settingsExists = await pool.query('SELECT id FROM settings WHERE tenant_id = $1', [tenantId]);
+  if (settingsExists.rows.length === 0) {
+    await pool.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3)`, [tenantId, 'enterprise', true]);
+  }
+
+  const courseExists = await pool.query('SELECT id FROM courses WHERE title = $1', ['Introduction to Computers']);
+  if (courseExists.rows.length === 0) {
     await pool.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES (1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology')`);
     await pool.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES (1, 'English for Beginners', 'Basic English lessons', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'language')`);
   }
