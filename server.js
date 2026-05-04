@@ -351,7 +351,40 @@ app.post('/marketplace/checkout', requireAuth, requireTenant, async (req, res) =
     client.release();
   }
 });
+// === SUPER ADMIN ROUTES - ADD HERE ===
+app.get('/super-admin', requireAuth, requireRole('super_admin'), (req, res) => {
+  res.send(renderPage('Super Admin', `
+    <div class="card"><h1>Super Admin</h1>
+      <p><a href="/super-admin/tenants">All Schools</a> | 
+         <a href="/super-admin/users">All Users</a> | 
+         <a href="/super-admin/revenue">Revenue</a></p>
+      <div class="card" style="background:#fee"><h3>⚠️ Nuclear Reset</h3>
+        <form method="POST" action="/super-admin/reset">
+          <input name="confirm" placeholder="Type: DELETE EVERYTHING" required>
+          <button class="btn" style="background:red">WIPE ALL DATA</button>
+        </form>
+      </div>
+    </div>
+  `, req));
+});
 
+app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const { rows } = await pool.query('SELECT id, name, subdomain, plan, score FROM tenants ORDER BY id');
+  const table = rows.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.score||0}</td></tr>`).join('');
+  res.send(renderPage('All Schools', `<div class="card"><h1>All Schools</h1><table><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>Score</th></tr></thead><tbody>${table}</tbody></table></div>`, req));
+});
+
+app.get('/super-admin/users', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const { rows } = await pool.query('SELECT u.id, u.email, u.role, t.name as school FROM users u JOIN tenants t ON u.tenant_id = t.id');
+  const table = rows.map(u => `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.school}</td></tr>`).join('');
+  res.send(renderPage('All Users', `<div class="card"><h1>All Users</h1><table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>School</th></tr></thead><tbody>${table}</tbody></table></div>`, req));
+});
+
+app.get('/super-admin/revenue', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const rev = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM revenue_log');
+  res.send(renderPage('Revenue', `<div class="card"><h1>Revenue</h1><p><strong>Total:</strong> UGX ${rev.rows[0].total}</p></div>`, req));
+});
+// === END SUPER ADMIN ROUTES ===
 app.get('/orders', requireAuth, async (req, res) => {
   const result = await pool.query('SELECT * FROM orders WHERE user_email = $1 ORDER BY created_at DESC', [req.session.user.email]);
   res.json({ orders: result.rows });
