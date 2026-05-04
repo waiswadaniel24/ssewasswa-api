@@ -351,23 +351,35 @@ app.post('/marketplace/checkout', requireAuth, requireTenant, async (req, res) =
     client.release();
   }
 });
-// === SUPER ADMIN ROUTES - ADD HERE ===
-app.get('/super-admin', requireAuth, requireRole('super_admin'), (req, res) => {
-  res.send(renderPage('Super Admin', `
-    <div class="card"><h1>Super Admin</h1>
-      <p><a href="/super-admin/tenants">All Schools</a> | 
-         <a href="/super-admin/users">All Users</a> | 
-         <a href="/super-admin/revenue">Revenue</a></p>
-      <div class="card" style="background:#fee"><h3>⚠️ Nuclear Reset</h3>
-        <form method="POST" action="/super-admin/reset">
-          <input name="confirm" placeholder="Type: DELETE EVERYTHING" required>
-          <button class="btn" style="background:red">WIPE ALL DATA</button>
-        </form>
-      </div>
-    </div>
-  `, req));
+// === SUPER ADMIN ROUTES - SAFE VERSION ===
+app.get('/super-admin', (req, res) => {
+  if (!req.session?.user || req.session.user.role!== 'super_admin') return res.redirect('/login');
+  res.send(`
+    <h1>Super Admin</h1>
+    <p><a href="/super-admin/tenants">All Schools</a> |
+       <a href="/super-admin/users">All Users</a> |
+       <a href="/super-admin/revenue">Revenue</a></p>
+  `);
 });
 
+app.get('/super-admin/tenants', async (req, res) => {
+  if (!req.session?.user || req.session.user.role!== 'super_admin') return res.redirect('/login');
+  const { rows } = await pool.query('SELECT id, name, subdomain, plan FROM tenants');
+  res.json(rows);
+});
+
+app.get('/super-admin/users', async (req, res) => {
+  if (!req.session?.user || req.session.user.role!== 'super_admin') return res.redirect('/login');
+  const { rows } = await pool.query('SELECT id, email, role FROM users');
+  res.json(rows);
+});
+
+app.get('/super-admin/revenue', async (req, res) => {
+  if (!req.session?.user || req.session.user.role!== 'super_admin') return res.redirect('/login');
+  const { rows } = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM revenue_log');
+  res.json(rows[0]);
+});
+// === END ===
 app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
   const { rows } = await pool.query('SELECT id, name, subdomain, plan, score FROM tenants ORDER BY id');
   const table = rows.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.score||0}</td></tr>`).join('');
