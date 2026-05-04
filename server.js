@@ -1,6 +1,6 @@
 const express = require('express');
 const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session); // ADD THIS
+const pgSession = require('connect-pg-simple')(session);
 const bodyParser = require('body-parser');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -9,6 +9,7 @@ const { Pool } = require('pg');
 const http = require('http');
 const { Server } = require('socket.io');
 const axios = require('axios');
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -23,23 +24,8 @@ const parser = new Parser();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.set('trust proxy', 1);
-app.use(session({
- store: new pgSession({
-  pool: pool,
-  tableName: 'session',
-  createTableIfMissing: true
-}),
-  secret: process.env.SESSION_SECRET || 'ssewasswa-secret-key-change-in-prod',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: false,
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000,
-    sameSite: 'lax'
-  }
-}));
-// === MTN MOMO CONFIG - ADD YOUR KEYS TO RENDER ENV ===
+
+// === MTN MOMO CONFIG ===
 const MOMO_CONFIG = {
   subscriptionKey: process.env.MOMO_SUBSCRIPTION_KEY || 'demo',
   apiUser: process.env.MOMO_API_USER || 'demo',
@@ -48,7 +34,7 @@ const MOMO_CONFIG = {
   baseUrl: 'https://sandbox.momodeveloper.mtn.com'
 };
 
-// === SMS CONFIG - ADD AFRICASTALKING KEYS TO RENDER ENV ===
+// === SMS CONFIG ===
 const SMS_CONFIG = {
   apiKey: process.env.SMS_API_KEY || 'demo',
   username: process.env.SMS_USERNAME || 'sandbox',
@@ -70,16 +56,16 @@ function renderPage(title, content, user = null, isPublic = false) {
     </div>` : '';
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>
     body{font-family:system-ui;background:#f8fafc;color:#1e293b;margin:0;padding:24px}
- .card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:900px;margin:0 auto 16px}
- .btn{background:#1e40af;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px}
- .btn-green{background:#16a34a}.btn-red{background:#dc2626}.btn-orange{background:#ea580c}
+.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:900px;margin:0 auto 16px}
+.btn{background:#1e40af;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px}
+.btn-green{background:#16a34a}.btn-red{background:#dc2626}.btn-orange{background:#ea580c}
     input,select,textarea{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:8px 0 12px;box-sizing:border-box}
     table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:#f1f5f9}
- .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
- .stat-card{background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0}
- .stat-num{font-size:32px;font-weight:bold;color:#1e40af}
- .badge{padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600}
- .badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0}
+.stat-num{font-size:32px;font-weight:bold;color:#1e40af}
+.badge{padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600}
+.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}
   </style></head><body>${nav}${content}</body></html>`;
 }
 
@@ -109,7 +95,6 @@ const requireRole = (role) => (req, res, next) => {
   return next();
 };
 
-// === SMS FUNCTION ===
 async function sendSMS(phone, message) {
   if (SMS_CONFIG.apiKey === 'demo') {
     console.log(`SMS DEMO to ${phone}: ${message}`);
@@ -132,13 +117,7 @@ async function initDB() {
   try {
     await client.query('BEGIN');
 
-    // DROP ALL TABLES FIRST - but exclude session so we don't break login
-    const tables = ['payment_requests','parent_otps','parents','chat_messages','news_cache','feedback_messages','feedback_threads','comments','grants','donor_campaigns','donations','surveys','grades','attendance','fees','students','password_resets','users','revenue_log','settings','courses','order_items','orders','cart_items','market_items','wallets','tenants'];
-    for (const table of tables) {
-      await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
-    }
-
-    // CREATE SESSION TABLE FIRST - never drop this one
+    // Create session table FIRST - never drop it
     await client.query(`
       CREATE TABLE IF NOT EXISTS "session" (
         "sid" varchar NOT NULL,
@@ -150,6 +129,12 @@ async function initDB() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")
     `);
+
+    // Drop other tables
+    const tables = ['payment_requests','parent_otps','parents','chat_messages','news_cache','feedback_messages','feedback_threads','comments','grants','donor_campaigns','donations','surveys','grades','attendance','fees','students','password_resets','users','revenue_log','settings','courses','order_items','orders','cart_items','market_items','wallets','tenants'];
+    for (const table of tables) {
+      await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
+    }
 
     await client.query('CREATE TABLE tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT \'free\', plan_expires DATE, ranking_score INTEGER DEFAULT 0, momo_number TEXT, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT \'staff\', tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, created_at TIMESTAMP DEFAULT NOW())');
@@ -165,13 +150,26 @@ async function initDB() {
     await client.query('CREATE TABLE revenue_log (id SERIAL PRIMARY KEY, type TEXT, gross_amount NUMERIC, commission NUMERIC, tenant_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())');
 
-    console.log('Indexes created. Seeding DEVELOPER ONLY...');
-    const tenant = await pool.query(`INSERT INTO tenants (name, subdomain, plan, momo_number) VALUES ($1, $2, $3, $4) RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise', '0789736737']);
+    console.log('Tables created. Seeding DEVELOPER ONLY...');
+    const tenant = await pool.query(`
+      INSERT INTO tenants (name, subdomain, plan, momo_number)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (subdomain) DO UPDATE SET name = EXCLUDED.name
+      RETURNING id
+    `, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise', '0789736737']);
     const tenantId = tenant.rows[0].id;
     const hashedPass = await bcrypt.hash('admin123', 10);
-    await client.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`, [tenantId, 'waiswadaniel24@gmail.com', hashedPass, 'super_admin']);
-    await client.query(`INSERT INTO settings (tenant_id, subscription_tier, verified, school_motto, about_text) VALUES ($1, $2, $3, $4, $5)`, [tenantId, 'enterprise', true, 'Excellence Through Education', 'SSEWASSWA FOUNDATION UGANDA empowers schools with digital tools.']);
-    console.log('RESET COMPLETE: Only developer account exists. Password: admin123');
+    await pool.query(`
+      INSERT INTO users (tenant_id, email, password_hash, role)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (email) DO NOTHING
+    `, [tenantId, 'waiswadaniel24@gmail.com', hashedPass, 'super_admin']);
+    await pool.query(`
+      INSERT INTO settings (tenant_id, subscription_tier, verified, school_motto, about_text)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (tenant_id) DO NOTHING
+    `, [tenantId, 'enterprise', true, 'Excellence Through Education', 'SSEWASSWA FOUNDATION UGANDA empowers schools with digital tools.']);
+    console.log('RESET COMPLETE: Password: admin123');
 
     await client.query('COMMIT');
   } catch (err) {
@@ -181,216 +179,224 @@ async function initDB() {
     client.release();
   }
 }
-// === AUTH ===
-app.get('/login', (req, res) => {
-  res.send(renderPage('Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>School Admin Login</h1><form method="POST" action="/login"><input name="email" placeholder="Email" type="email" required /><input name="password" placeholder="Password" type="password" required /><button type="submit" class="btn" style="width:100%">Login</button></form><p style="margin-top:1rem;text-align:center"><a href="/parent/login">Parent Login</a> | <a href="/create-site">Create School</a></p></div>'));
-});
 
-app.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const user = await pool.query('SELECT u.*, t.subdomain, t.name as tenant_name FROM users u JOIN tenants t ON u.tenant_id = t.id WHERE u.email = $1', [email]);
-    if (!user.rows[0]) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>'));
-    const valid = await bcrypt.compare(password, user.rows[0].password_hash);
-    if (!valid) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>'));
-    req.session.user = user.rows[0];
-    req.session.tenant = { id: user.rows[0].tenant_id, subdomain: user.rows[0].subdomain, name: user.rows[0].tenant_name };
-    if (user.rows[0].role === 'super_admin') return res.redirect('/super-admin');
-    res.redirect('/app');
-  } catch (e) {
-    res.status(500).send(renderPage('Error', '<div class="card"><h1>Server Error</h1></div>'));
-  }
-});
+// START EVERYTHING AFTER DB IS READY
+initDB().then(() => {
+  // Setup session AFTER tables exist
+  app.use(session({
+    store: new pgSession({
+      pool: pool,
+      tableName: 'session',
+      createTableIfMissing: true
+    }),
+    secret: process.env.SESSION_SECRET || 'ssewasswa-secret-key-change-in-prod',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: false,
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000,
+      sameSite: 'lax'
+    }
+  }));
 
-app.get('/logout', (req, res) => {
-  req.session.destroy(() => res.redirect('/login'));
-});
+  // === ALL ROUTES BELOW ===
 
-// === PARENT PORTAL ===
-app.get('/parent/login', (req, res) => {
-  res.send(renderPage('Parent Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>Parent Login</h1><p>Enter your phone number to receive OTP</p><form method="POST" action="/parent/send-otp"><input name="phone" placeholder="07XXXXXXXX" required /><button type="submit" class="btn" style="width:100%">Send OTP</button></form><p style="margin-top:1rem;text-align:center"><a href="/login">School Admin Login</a></p></div>'));
-});
+  app.get('/login', (req, res) => {
+    res.send(renderPage('Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>School Admin Login</h1><form method="POST" action="/login"><input name="email" placeholder="Email" type="email" required /><input name="password" placeholder="Password" type="password" required /><button type="submit" class="btn" style="width:100%">Login</button></form><p style="margin-top:1rem;text-align:center"><a href="/parent/login">Parent Login</a> | <a href="/create-site">Create School</a></p></div>'));
+  });
 
-app.post('/parent/send-otp', async (req, res) => {
-  const { phone } = req.body;
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expires = new Date(Date.now() + 10 * 60 * 1000);
-  await pool.query('INSERT INTO parent_otps (phone, otp, expires_at) VALUES ($1, $2, $3)', [phone, otp, expires]);
-  await sendSMS(phone, `Your SSEWASSWA Parent Portal OTP is: ${otp}. Valid for 10 minutes.`);
-  res.send(renderPage('Verify OTP', `<div class="card" style="max-width:400px;margin:60px auto"><h1>Enter OTP</h1><p>OTP sent to ${phone}</p><form method="POST" action="/parent/verify-otp"><input type="hidden" name="phone" value="${phone}"><input name="otp" placeholder="6-digit OTP" required /><button type="submit" class="btn" style="width:100%">Verify</button></form></div>`));
-});
+  app.post('/login', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+      const user = await pool.query('SELECT u.*, t.subdomain, t.name as tenant_name FROM users u JOIN tenants t ON u.tenant_id = t.id WHERE u.email = $1', [email]);
+      if (!user.rows[0]) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>'));
+      const valid = await bcrypt.compare(password, user.rows[0].password_hash);
+      if (!valid) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>'));
+      req.session.user = user.rows[0];
+      req.session.tenant = { id: user.rows[0].tenant_id, subdomain: user.rows[0].subdomain, name: user.rows[0].tenant_name };
+      if (user.rows[0].role === 'super_admin') return res.redirect('/super-admin');
+      res.redirect('/app');
+    } catch (e) {
+      console.error('Login error:', e);
+      res.status(500).send(renderPage('Error', '<div class="card"><h1>Server Error</h1></div>'));
+    }
+  });
 
-app.post('/parent/verify-otp', async (req, res) => {
-  const { phone, otp } = req.body;
-  const result = await pool.query('SELECT * FROM parent_otps WHERE phone = $1 AND otp = $2 AND expires_at > NOW() AND used = false ORDER BY created_at DESC LIMIT 1', [phone, otp]);
-  if (!result.rows[0]) return res.send(renderPage('Error', '<div class="card"><h1>Invalid OTP</h1><a href="/parent/login">Try Again</a></div>'));
-  await pool.query('UPDATE parent_otps SET used = true WHERE id = $1', [result.rows[0].id]);
+  app.get('/logout', (req, res) => {
+    req.session.destroy(() => res.redirect('/login'));
+  });
 
-  let parent = await pool.query('SELECT * FROM parents WHERE phone = $1', [phone]);
-  if (!parent.rows[0]) {
-    const tenant = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
-    await pool.query('INSERT INTO parents (phone, verified, tenant_id) VALUES ($1, true, $2)', [phone, tenant.rows[0].id]);
-    parent = await pool.query('SELECT * FROM parents WHERE phone = $1', [phone]);
-  }
-  req.session.parent = parent.rows[0];
-  res.redirect('/parent/dashboard');
-});
+  app.get('/parent/login', (req, res) => {
+    res.send(renderPage('Parent Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>Parent Login</h1><p>Enter your phone number to receive OTP</p><form method="POST" action="/parent/send-otp"><input name="phone" placeholder="07XXXXXXXX" required /><button type="submit" class="btn" style="width:100%">Send OTP</button></form><p style="margin-top:1rem;text-align:center"><a href="/login">School Admin Login</a></p></div>'));
+  });
 
-app.get('/parent/dashboard', async (req, res) => {
-  if (!req.session.parent) return res.redirect('/parent/login');
-  const students = await pool.query('SELECT * FROM students WHERE parent_id = $1 OR guardian_phone = $2', [req.session.parent.id, req.session.parent.phone]);
-  const cards = students.rows.map(s => `<div class="card"><h3>${s.name}</h3><p><strong>Class:</strong> ${s.class||'-'}</p><p><strong>Balance:</strong> UGX ${s.balance}</p><a href="/parent/pay/${s.id}" class="btn btn-green">Pay Fees</a></div>`).join('');
-  res.send(renderPage('Parent Dashboard', `<div class="card"><h1>My Children</h1></div>${cards||'<div class="card"><p>No students linked to your phone yet. Contact school admin.</p></div>'}<div class="card"><a href="/parent/logout" class="btn">Logout</a></div>`));
-});
+  app.post('/parent/send-otp', async (req, res) => {
+    const { phone } = req.body;
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
+    await pool.query('INSERT INTO parent_otps (phone, otp, expires_at) VALUES ($1, $2, $3)', [phone, otp, expires]);
+    await sendSMS(phone, `Your SSEWASSWA Parent Portal OTP is: ${otp}. Valid for 10 minutes.`);
+    res.send(renderPage('Verify OTP', `<div class="card" style="max-width:400px;margin:60px auto"><h1>Enter OTP</h1><p>OTP sent to ${phone}</p><form method="POST" action="/parent/verify-otp"><input type="hidden" name="phone" value="${phone}"><input name="otp" placeholder="6-digit OTP" required /><button type="submit" class="btn" style="width:100%">Verify</button></form></div>`));
+  });
 
-app.get('/parent/pay/:student_id', async (req, res) => {
-  if (!req.session.parent) return res.redirect('/parent/login');
-  const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.student_id]);
-  if (!student.rows[0]) return res.status(404).send('Student not found');
-  res.send(renderPage('Pay Fees', `<div class="card" style="max-width:500px"><h1>Pay Fees for ${student.rows[0].name}</h1><p><strong>Current Balance:</strong> UGX ${student.rows[0].balance}</p><form method="POST" action="/parent/pay"><input type="hidden" name="student_id" value="${student.rows[0].id}"><input name="amount" type="number" placeholder="Amount to Pay" required><input name="phone" placeholder="MTN MoMo Number" value="${req.session.parent.phone}" required><button class="btn btn-green" style="width:100%">Pay with MTN MoMo</button></form></div>`));
-});
+  app.post('/parent/verify-otp', async (req, res) => {
+    const { phone, otp } = req.body;
+    const result = await pool.query('SELECT * FROM parent_otps WHERE phone = $1 AND otp = $2 AND expires_at > NOW() AND used = false ORDER BY created_at DESC LIMIT 1', [phone, otp]);
+    if (!result.rows[0]) return res.send(renderPage('Error', '<div class="card"><h1>Invalid OTP</h1><a href="/parent/login">Try Again</a></div>'));
+    await pool.query('UPDATE parent_otps SET used = true WHERE id = $1', [result.rows[0].id]);
 
-app.post('/parent/pay', async (req, res) => {
-  if (!req.session.parent) return res.redirect('/parent/login');
-  const { student_id, amount, phone } = req.body;
-  const reference = `FEE-${Date.now()}`;
-  const student = await pool.query('SELECT * FROM students WHERE id = $1', [student_id]);
+    let parent = await pool.query('SELECT * FROM parents WHERE phone = $1', [phone]);
+    if (!parent.rows[0]) {
+      const tenant = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
+      await pool.query('INSERT INTO parents (phone, verified, tenant_id) VALUES ($1, true, $2)', [phone, tenant.rows[0].id]);
+      parent = await pool.query('SELECT * FROM parents WHERE phone = $1', [phone]);
+    }
+    req.session.parent = parent.rows[0];
+    res.redirect('/parent/dashboard');
+  });
 
-  await pool.query('INSERT INTO payment_requests (tenant_id, student_id, amount, phone, reference) VALUES ($1, $2, $3, $4, $5)', [student.rows[0].tenant_id, student_id, amount, phone, reference]);
+  app.get('/parent/dashboard', async (req, res) => {
+    if (!req.session.parent) return res.redirect('/parent/login');
+    const students = await pool.query('SELECT * FROM students WHERE parent_id = $1 OR guardian_phone = $2', [req.session.parent.id, req.session.parent.phone]);
+    const cards = students.rows.map(s => `<div class="card"><h3>${s.name}</h3><p><strong>Class:</strong> ${s.class||'-'}</p><p><strong>Balance:</strong> UGX ${s.balance}</p><a href="/parent/pay/${s.id}" class="btn btn-green">Pay Fees</a></div>`).join('');
+    res.send(renderPage('Parent Dashboard', `<div class="card"><h1>My Children</h1></div>${cards||'<div class="card"><p>No students linked to your phone yet. Contact school admin.</p></div>'}<div class="card"><a href="/parent/logout" class="btn">Logout</a></div>`));
+  });
 
-  // DEMO MODE: Auto-approve payment
-  if (MOMO_CONFIG.apiKey === 'demo') {
-    await pool.query('UPDATE fees SET paid = paid + $1 WHERE student_id = $2', [amount, student_id]);
-    await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
-    await pool.query('UPDATE payment_requests SET status = $1 WHERE reference = $2', ['success', reference]);
-    await sendSMS(phone, `Payment of UGX ${amount} for ${student.rows[0].name} received. Thank you!`);
-    return res.send(renderPage('Success', `<div class="card"><h1>Payment Successful!</h1><p>UGX ${amount} paid for ${student.rows[0].name}</p><a href="/parent/dashboard" class="btn">Back to Dashboard</a></div>`));
-  }
+  app.get('/parent/pay/:student_id', async (req, res) => {
+    if (!req.session.parent) return res.redirect('/parent/login');
+    const student = await pool.query('SELECT * FROM students WHERE id = $1', [req.params.student_id]);
+    if (!student.rows[0]) return res.status(404).send('Student not found');
+    res.send(renderPage('Pay Fees', `<div class="card" style="max-width:500px"><h1>Pay Fees for ${student.rows[0].name}</h1><p><strong>Current Balance:</strong> UGX ${student.rows[0].balance}</p><form method="POST" action="/parent/pay"><input type="hidden" name="student_id" value="${student.rows[0].id}"><input name="amount" type="number" placeholder="Amount to Pay" required><input name="phone" placeholder="MTN MoMo Number" value="${req.session.parent.phone}" required><button class="btn btn-green" style="width:100%">Pay with MTN MoMo</button></form></div>`));
+  });
 
-  res.send(renderPage('Processing', `<div class="card"><h1>Payment Processing</h1><p>Check your phone for MTN MoMo prompt. Reference: ${reference}</p></div>`));
-});
+  app.post('/parent/pay', async (req, res) => {
+    if (!req.session.parent) return res.redirect('/parent/login');
+    const { student_id, amount, phone } = req.body;
+    const reference = `FEE-${Date.now()}`;
+    const student = await pool.query('SELECT * FROM students WHERE id = $1', [student_id]);
 
-app.get('/parent/logout', (req, res) => {
-  req.session.destroy(() => res.redirect('/parent/login'));
-});
+    await pool.query('INSERT INTO payment_requests (tenant_id, student_id, amount, phone, reference) VALUES ($1, $2, $3, $4, $5)', [student.rows[0].tenant_id, student_id, amount, phone, reference]);
 
-// === SUPER ADMIN ===
-app.get('/super-admin', requireAuth, requireRole('super_admin'), (req, res) => {
-  res.send(renderPage('Super Admin', `<div class="card"><h1>Super Admin Dashboard</h1><p><a href="/super-admin/tenants" class="btn">All Schools</a><a href="/super-admin/users" class="btn">All Users</a><a href="/super-admin/revenue" class="btn">Revenue</a><a href="/create-site" class="btn btn-green">Add School</a></p></div>`));
-});
+    if (MOMO_CONFIG.apiKey === 'demo') {
+      await pool.query('UPDATE fees SET paid = paid + $1 WHERE student_id = $2', [amount, student_id]);
+      await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
+      await pool.query('UPDATE payment_requests SET status = $1 WHERE reference = $2', ['success', reference]);
+      await sendSMS(phone, `Payment of UGX ${amount} for ${student.rows[0].name} received. Thank you!`);
+      return res.send(renderPage('Success', `<div class="card"><h1>Payment Successful!</h1><p>UGX ${amount} paid for ${student.rows[0].name}</p><a href="/parent/dashboard" class="btn">Back to Dashboard</a></div>`));
+    }
 
-app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const { rows } = await pool.query('SELECT id, name, subdomain, plan, momo_number FROM tenants ORDER BY id');
-  const table = rows.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.momo_number||'-'}</td></tr>`).join('');
-  res.send(renderPage('All Schools', `<div class="card"><h1>All Schools</h1><table><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>MoMo</th></tr></thead><tbody>${table}</tbody></table><p><a href="/super-admin" class="btn">Back</a></p></div>`));
-});
+    res.send(renderPage('Processing', `<div class="card"><h1>Payment Processing</h1><p>Check your phone for MTN MoMo prompt. Reference: ${reference}</p></div>`));
+  });
 
-app.get('/super-admin/users', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const { rows } = await pool.query('SELECT u.id, u.email, u.role, t.name as school FROM users u JOIN tenants t ON u.tenant_id = t.id ORDER BY u.id');
-  const table = rows.map(u => `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.school}</td></tr>`).join('');
-  res.send(renderPage('All Users', `<div class="card"><h1>All Users</h1><table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>School</th></tr></thead><tbody>${table}</tbody></table><p><a href="/super-admin" class="btn">Back</a></p></div>`));
-});
+  app.get('/parent/logout', (req, res) => {
+    req.session.destroy(() => res.redirect('/parent/login'));
+  });
 
-app.get('/super-admin/revenue', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const orders = await pool.query('SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as total FROM orders');
-  const payments = await pool.query('SELECT COUNT(*) as count, COALESCE(SUM(amount),0) as total FROM payment_requests WHERE status = $1', ['success']);
-  res.send(renderPage('Revenue', `<div class="card"><h1>Platform Revenue</h1><p><strong>Store Orders:</strong> ${orders.rows[0].count} | UGX ${orders.rows[0].total}</p><p><strong>Fee Payments:</strong> ${payments.rows[0].count} | UGX ${payments.rows[0].total}</p><p><a href="/super-admin" class="btn">Back</a></p></div>`));
-});
+  app.get('/super-admin', requireAuth, requireRole('super_admin'), (req, res) => {
+    res.send(renderPage('Super Admin', `<div class="card"><h1>Super Admin Dashboard</h1><p><a href="/super-admin/tenants" class="btn">All Schools</a><a href="/super-admin/users" class="btn">All Users</a><a href="/super-admin/revenue" class="btn">Revenue</a><a href="/create-site" class="btn btn-green">Add School</a></p></div>`));
+  });
 
-// === CREATE SITE ===
-app.get('/create-site', (req, res) => {
-  res.send(renderPage('Create Site', '<div class="card" style="max-width:500px;margin:40px auto"><h1>Create Free School Site</h1><form method="POST" action="/create-site"><input name="name" placeholder="School Name" required><input name="subdomain" placeholder="Subdomain (no spaces)" required><input name="admin_email" type="email" placeholder="Admin Email" required><input name="admin_password" type="password" placeholder="Password" required><input name="momo_number" placeholder="MTN MoMo Number for Fees"><button class="btn" style="width:100%">Create School</button></form></div>'));
-});
+  app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
+    const { rows } = await pool.query('SELECT id, name, subdomain, plan, momo_number FROM tenants ORDER BY id');
+    const table = rows.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.momo_number||'-'}</td></tr>`).join('');
+    res.send(renderPage('All Schools', `<div class="card"><h1>All Schools</h1><table><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>MoMo</th></tr></thead><tbody>${table}</tbody></table><p><a href="/super-admin" class="btn">Back</a></p></div>`));
+  });
 
-app.post('/create-site', async (req, res) => {
-  const { name, subdomain, admin_email, admin_password, momo_number } = req.body;
-  if (!name ||!subdomain ||!admin_email ||!admin_password) {
-    return res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>All fields required</p><a href="/create-site">Try Again</a></div>'));
-  }
-  try {
-    const tenant = await pool.query('INSERT INTO tenants (name, subdomain, plan, momo_number) VALUES ($1, $2, $3, $4) RETURNING id', [name.trim(), subdomain.toLowerCase().trim(), 'free', momo_number]);
-    const hashedPass = await bcrypt.hash(admin_password, 10);
-    await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [tenant.rows[0].id, admin_email, hashedPass, 'admin']);
-    await pool.query('INSERT INTO settings (tenant_id) VALUES ($1)', [tenant.rows[0].id]);
-    await pool.query('INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3)', [tenant.rows[0].id, admin_email, 0]);
-    res.send(renderPage('Success', `<div class="card"><h1>Site Created!</h1><p><strong>School:</strong> ${name}</p><p><strong>Public Page:</strong> <a href="/school/${subdomain}">/${subdomain}</a></p><p><strong>Admin Login:</strong> ${admin_email}</p><a href="/login" class="btn">Login Now</a></div>`));
-  } catch (e) {
-    let msg = e.code === '23505'? 'Subdomain already taken' : e.message;
-    res.send(renderPage('Error', `<div class="card"><h1>Error</h1><p>${msg}</p><a href="/create-site">Try Again</a></div>`));
-  }
-});
+  app.get('/super-admin/users', requireAuth, requireRole('super_admin'), async (req, res) => {
+    const { rows } = await pool.query('SELECT u.id, u.email, u.role, t.name as school FROM users u JOIN tenants t ON u.tenant_id = t.id ORDER BY u.id');
+    const table = rows.map(u => `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.school}</td></tr>`).join('');
+    res.send(renderPage('All Users', `<div class="card"><h1>All Users</h1><table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>School</th></tr></thead><tbody>${table}</tbody></table><p><a href="/super-admin" class="btn">Back</a></p></div>`));
+  });
 
-// === PUBLIC SCHOOL PAGE ===
-app.get('/school/:subdomain', async (req, res) => {
-  const tenant = await pool.query('SELECT t.*, s.school_motto, s.about_text FROM tenants t LEFT JOIN settings s ON t.id = s.tenant_id WHERE t.subdomain = $1', [req.params.subdomain]);
-  if (!tenant.rows[0]) return res.status(404).send('School not found');
-  const t = tenant.rows[0];
-  const students = await pool.query('SELECT COUNT(*) as count FROM students WHERE tenant_id = $1', [t.id]);
-  const content = `
-    <div class="card" style="text-align:center;background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:60px 20px">
-      <h1 style="font-size:48px;margin:0">${t.name}</h1>
-      <p style="font-size:20px;margin:16px 0">${t.school_motto || 'Excellence Through Education'}</p>
-    </div>
-    <div class="card">
-      <h2>About Us</h2>
-      <p>${t.about_text || 'Welcome to our school. We are committed to providing quality education.'}</p>
-      <p><strong>Students:</strong> ${students.rows[0].count}</p>
-      <p><strong>Contact:</strong> ${t.momo_number || 'Contact admin'}</p>
-    </div>
-    <div class="card"><a href="/parent/login" class="btn btn-green">Parent Portal</a><a href="/login" class="btn">Staff Login</a></div>`;
-  res.send(renderPage(t.name, content, null, true));
-});
+  app.get('/super-admin/revenue', requireAuth, requireRole('super_admin'), async (req, res) => {
+    const payments = await pool.query('SELECT COUNT(*) as count, COALESCE(SUM(amount),0) as total FROM payment_requests WHERE status = $1', ['success']);
+    res.send(renderPage('Revenue', `<div class="card"><h1>Platform Revenue</h1><p><strong>Fee Payments:</strong> ${payments.rows[0].count} | UGX ${payments.rows[0].total}</p><p><a href="/super-admin" class="btn">Back</a></p></div>`));
+  });
 
-// === SCHOOL ADMIN DASHBOARD ===
-app.get('/app', requireAuth, requireTenant, async (req, res) => {
-  const students = await pool.query('SELECT COUNT(*)::int AS c FROM students WHERE tenant_id = $1', [req.tenantId]);
-  const fees = await pool.query('SELECT COALESCE(SUM(paid), 0)::numeric AS total FROM fees WHERE tenant_id = $1', [req.tenantId]);
-  const attendance = await pool.query('SELECT COUNT(*)::int AS c FROM attendance WHERE tenant_id = $1 AND date = CURRENT_DATE', [req.tenantId]);
-  const content = `
-    <div class="stats">
-      <div class="stat-card"><div>Total Students</div><div class="stat-num">${students.rows[0].c}</div></div>
-      <div class="stat-card"><div>Fees Collected</div><div class="stat-num">UGX ${fees.rows[0].total}</div></div>
-      <div class="stat-card"><div>Present Today</div><div class="stat-num">${attendance.rows[0].c}</div></div>
-    </div>
-    <div class="card">
-      <h1>${req.tenant.name} Dashboard</h1>
-      <p><a href="/app/students/add" class="btn btn-green">Add Student</a>
-         <a href="/app/fees/add" class="btn">Record Payment</a>
-         <a href="/app/attendance/mark" class="btn">Mark Attendance</a>
-         <a href="/app/grades/add" class="btn">Add Grades</a></p>
-      <p><a href="/school/${req.tenant.subdomain}" class="btn" target="_blank">View Public Page</a></p>
-    </div>`;
-  res.send(renderPage('Dashboard', content, { tenant_name: req.tenant.name }));
-});
+  app.get('/create-site', (req, res) => {
+    res.send(renderPage('Create Site', '<div class="card" style="max-width:500px;margin:40px auto"><h1>Create Free School Site</h1><form method="POST" action="/create-site"><input name="name" placeholder="School Name" required><input name="subdomain" placeholder="Subdomain (no spaces)" required><input name="admin_email" type="email" placeholder="Admin Email" required><input name="admin_password" type="password" placeholder="Password" required><input name="momo_number" placeholder="MTN MoMo Number for Fees"><button class="btn" style="width:100%">Create School</button></form></div>'));
+  });
 
-// === STUDENTS ===
-app.get('/app/students', requireAuth, requireTenant, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
-  const table = rows.map(s => `<tr><td>${s.id}</td><td>${s.name}</td><td>${s.class||'-'}</td><td>${s.guardian_phone||'-'}</td><td>UGX ${s.balance}</td><td><a href="/app/fees/add?student_id=${s.id}" class="btn">Pay</a></td></tr>`).join('');
-  res.send(renderPage('Students', `<div class="card"><h1>Students</h1><a href="/app/students/add" class="btn btn-green">Add New Student</a><table style="margin-top:16px"><thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Guardian Phone</th><th>Balance</th><th>Action</th></tr></thead><tbody>${table||'<tr><td colspan="6">No students yet</td></tr>'}</tbody></table></div>`, { tenant_name: req.tenant.name }));
-});
+  app.post('/create-site', async (req, res) => {
+    const { name, subdomain, admin_email, admin_password, momo_number } = req.body;
+    if (!name ||!subdomain ||!admin_email ||!admin_password) {
+      return res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>All fields required</p><a href="/create-site">Try Again</a></div>'));
+    }
+    try {
+      const tenant = await pool.query('INSERT INTO tenants (name, subdomain, plan, momo_number) VALUES ($1, $2, $3, $4) RETURNING id', [name.trim(), subdomain.toLowerCase().trim(), 'free', momo_number]);
+      const hashedPass = await bcrypt.hash(admin_password, 10);
+      await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [tenant.rows[0].id, admin_email, hashedPass, 'admin']);
+      await pool.query('INSERT INTO settings (tenant_id) VALUES ($1)', [tenant.rows[0].id]);
+      await pool.query('INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3)', [tenant.rows[0].id, admin_email, 0]);
+      res.send(renderPage('Success', `<div class="card"><h1>Site Created!</h1><p><strong>School:</strong> ${name}</p><p><strong>Public Page:</strong> <a href="/school/${subdomain}">/${subdomain}</a></p><p><strong>Admin Login:</strong> ${admin_email}</p><a href="/login" class="btn">Login Now</a></div>`));
+    } catch (e) {
+      let msg = e.code === '23505'? 'Subdomain already taken' : e.message;
+      res.send(renderPage('Error', `<div class="card"><h1>Error</h1><p>${msg}</p><a href="/create-site">Try Again</a></div>`));
+    }
+  });
 
-app.get('/app/students/add', requireAuth, requireTenant, (req, res) => {
-  res.send(renderPage('Add Student', `<div class="card" style="max-width:500px"><h1>Add Student</h1><form method="POST" action="/app/students/add"><input name="name" placeholder="Full Name" required><input name="class" placeholder="Class (e.g. P.5)"><input name="guardian_name" placeholder="Guardian Name"><input name="guardian_phone" placeholder="Guardian Phone (07XX)"><button class="btn btn-green" style="width:100%">Save Student</button></form></div>`, { tenant_name: req.tenant.name }));
-});
+  app.get('/school/:subdomain', async (req, res) => {
+    const tenant = await pool.query('SELECT t.*, s.school_motto, s.about_text FROM tenants t LEFT JOIN settings s ON t.id = s.tenant_id WHERE t.subdomain = $1', [req.params.subdomain]);
+    if (!tenant.rows[0]) return res.status(404).send('School not found');
+    const t = tenant.rows[0];
+    const students = await pool.query('SELECT COUNT(*) as count FROM students WHERE tenant_id = $1', [t.id]);
+    const content = `
+      <div class="card" style="text-align:center;background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:60px 20px">
+        <h1 style="font-size:48px;margin:0">${t.name}</h1>
+        <p style="font-size:20px;margin:16px 0">${t.school_motto || 'Excellence Through Education'}</p>
+      </div>
+      <div class="card">
+        <h2>About Us</h2>
+        <p>${t.about_text || 'Welcome to our school. We are committed to providing quality education.'}</p>
+        <p><strong>Students:</strong> ${students.rows[0].count}</p>
+        <p><strong>Contact:</strong> ${t.momo_number || 'Contact admin'}</p>
+      </div>
+      <div class="card"><a href="/parent/login" class="btn btn-green">Parent Portal</a><a href="/login" class="btn">Staff Login</a></div>`;
+    res.send(renderPage(t.name, content, null, true));
+  });
 
-app.post('/app/students/add', requireAuth, requireTenant, async (req, res) => {
-  const { name, class: className, guardian_name, guardian_phone } = req.body;
-  await pool.query('INSERT INTO students (tenant_id, name, class, guardian_name, guardian_phone) VALUES ($1, $2, $3, $4, $5)', [req.tenantId, name, className, guardian_name, guardian_phone]);
-  if (guardian_phone) {
-    await sendSMS(guardian_phone, `Welcome to ${req.tenant.name}! ${name} has been registered. Use parent portal to track fees & grades.`);
-  }
-  res.redirect('/app/students');
-});
+  app.get('/app', requireAuth, requireTenant, async (req, res) => {
+    const students = await pool.query('SELECT COUNT(*)::int AS c FROM students WHERE tenant_id = $1', [req.tenantId]);
+    const fees = await pool.query('SELECT COALESCE(SUM(paid), 0)::numeric AS total FROM fees WHERE tenant_id = $1', [req.tenantId]);
+    const attendance = await pool.query('SELECT COUNT(*)::int AS c FROM attendance WHERE tenant_id = $1 AND date = CURRENT_DATE', [req.tenantId]);
+    const content = `
+      <div class="stats">
+        <div class="stat-card"><div>Total Students</div><div class="stat-num">${students.rows[0].c}</div></div>
+        <div class="stat-card"><div>Fees Collected</div><div class="stat-num">UGX ${fees.rows[0].total}</div></div>
+        <div class="stat-card"><div>Present Today</div><div class="stat-num">${attendance.rows[0].c}</div></div>
+      </div>
+      <div class="card">
+        <h1>${req.tenant.name} Dashboard</h1>
+        <p><a href="/app/students/add" class="btn btn-green">Add Student</a>
+           <a href="/app/fees/add" class="btn">Record Payment</a>
+           <a href="/app/attendance/mark" class="btn">Mark Attendance</a>
+           <a href="/app/grades/add" class="btn">Add Grades</a></p>
+        <p><a href="/school/${req.tenant.subdomain}" class="btn" target="_blank">View Public Page</a></p>
+      </div>`;
+    res.send(renderPage('Dashboard', content, { tenant_name: req.tenant.name }));
+  });
 
-// === FEES ===
-app.get('/app/fees', requireAuth, requireTenant, async (req, res) => {
-  const { rows } = await pool.query('SELECT f.*, s.name as student_name FROM fees f JOIN students s ON f.student_id = s.id WHERE f.tenant_id = $1 ORDER BY f.created_at DESC LIMIT 50', [req.tenantId]);
-  const table = rows.map(f => `<tr><td>${f.student_name}</td><td>UGX ${f.amount}</td><td>UGX ${f.paid}</td><td>${f.term||'-'}</td><td>${f.payment_method||'Cash'}</td></tr>`).join('');
-  res.send(renderPage('Fees', `<div class="card"><h1>Fee Records</h1><a href="/app/fees/add" class="btn btn-green">Record Payment</a><table style="margin-top:16px"><thead><tr><th>Student</th><th>Amount Due</th><th>Paid</th><th>Term</th><th>Method</th></tr></thead><tbody>${table||'<tr><td colspan="5">No fee records yet</td></tr>'}</tbody></table></div>`, { tenant_name: req.tenant.name }));
-});
+  app.get('/app/students', requireAuth, requireTenant, async (req, res) => {
+    const { rows } = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
+    const table = rows.map(s => `<tr><td>${s.id}</td><td>${s.name}</td><td>${s.class||'-'}</td><td>${s.guardian_phone||'-'}</td><td>UGX ${s.balance}</td><td><a href="/app/fees/add?student_id=${s.id}" class="btn">Pay</a></td></tr>`).join('');
+    res.send(renderPage('Students', `<div class="card"><h1>Students</h1><a href="/app/students/add" class="btn btn-green">Add New Student</a><table style="margin-top:16px"><thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Guardian Phone</th><th>Balance</th><th>Action</th></tr></thead><tbody>${table||'<tr><td colspan="6">No students yet</td></tr>'}</tbody></table></div>`, { tenant_name: req.tenant.name }));
+  });
 
-app.get('/app/fees/add', requireAuth, requireTenant, async (req, res) => {
+  app.get('/app/students/add', requireAuth, requireTenant, (req, res) => {
+    res.send(renderPage('Add Student', `<div class="card" style="max-width:500px"><h1>Add Student</h1><form method="POST" action="/app/students/add"><input name="name" placeholder="Full Name" required><input name="class" placeholder="Class (e.g. P.5)"><input name="guardian_name" placeholder="Guardian Name"><input name="guardian_phone" placeholder="Guardian Phone (07XX)"><button class="btn btn-green" style="width:100%">Save Student</button></form></div>`, { tenant_name: req.tenant.name }));
+  });
+
+  app.post('/app/students/add', requireAuth, requireTenant, async (req, res) => {
+    const { name, class: className, guardian_name, guardian_phone } = req.body;
+    await pool.query('INSERT INTO students (tenant_id, name, class, guardian_name, guardian_phone) VALUES ($1, $2, $3, $4, $5)', [req.tenantId, name, className, guardian_name, guardian_phone]);
+    if (guardian_phone) {
+      await sendSMS(guardian_phone, `Welcome to ${req.tenant.name}! ${name} has been registered. Use parent portal to track fees & grades.`);
+    }
+    res.redirect('/app/students');
+  });
+
+ app.get('/app/fees/add', requireAuth, requireTenant, async (req, res) => {
   const students = await pool.query('SELECT id, name FROM students WHERE tenant_id = $1 ORDER BY name', [req.tenantId]);
   const options = students.rows.map(s => `<option value="${s.id}" ${req.query.student_id==s.id?'selected':''}>${s.name}</option>`).join('');
   res.send(renderPage('Record Payment', `<div class="card" style="max-width:500px"><h1>Record Fee Payment</h1><form method="POST" action="/app/fees/add"><select name="student_id" required><option value="">Select Student</option>${options}</select><input name="amount" type="number" placeholder="Amount Due" required><input name="paid" type="number" placeholder="Amount Paid" required><input name="term" placeholder="Term (e.g. Term 1)"><input name="year" type="number" placeholder="Year" value="2026"><select name="payment_method"><option value="cash">Cash</option><option value="momo">MTN MoMo</option><option value="bank">Bank</option></select><input name="description" placeholder="Description"><button class="btn btn-green" style="width:100%">Save Payment</button></form></div>`, { tenant_name: req.tenant.name }));
@@ -408,7 +414,6 @@ app.post('/app/fees/add', requireAuth, requireTenant, async (req, res) => {
   res.redirect('/app/fees');
 });
 
-// === ATTENDANCE ===
 app.get('/app/attendance', requireAuth, requireTenant, async (req, res) => {
   const { rows } = await pool.query('SELECT a.*, s.name as student_name FROM attendance a JOIN students s ON a.student_id = s.id WHERE a.tenant_id = $1 AND a.date = CURRENT_DATE ORDER BY s.name', [req.tenantId]);
   const table = rows.map(a => `<tr><td>${a.student_name}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.date.toISOString().split('T')[0]}</td></tr>`).join('');
@@ -433,7 +438,6 @@ app.post('/app/attendance/mark', requireAuth, requireTenant, async (req, res) =>
   res.redirect('/app/attendance');
 });
 
-// === GRADES ===
 app.get('/app/grades', requireAuth, requireTenant, async (req, res) => {
   const { rows } = await pool.query('SELECT g.*, s.name as student_name FROM grades g JOIN students s ON g.student_id = s.id WHERE g.tenant_id = $1 ORDER BY g.created_at DESC LIMIT 50', [req.tenantId]);
   const table = rows.map(g => `<tr><td>${g.student_name}</td><td>${g.subject}</td><td>${g.score}</td><td>${g.term||'-'}</td><td>${g.year||'-'}</td></tr>`).join('');
@@ -457,7 +461,6 @@ app.post('/app/grades/add', requireAuth, requireTenant, async (req, res) => {
   res.redirect('/app/grades');
 });
 
-// === MOMO PAYMENT WEBHOOK ===
 app.post('/api/momo/webhook', async (req, res) => {
   const { reference, status, transactionId } = req.body;
   if (status === 'SUCCESSFUL') {
@@ -472,19 +475,18 @@ app.post('/api/momo/webhook', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'ssewasswa-api', version: '7.0' });
+  res.json({ ok: true, service: 'ssewasswa-api', version: '8.0' });
 });
 
 app.get('/', (req, res) => {
   res.send('SSEWASSWA API is running.');
 });
 
-initDB().then(() => {
-  console.log('Database ready');
   server.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });
+
 }).catch((err) => {
-  console.error('Init failed:', err);
+  console.error('FATAL: Database init failed:', err);
   process.exit(1);
 });
