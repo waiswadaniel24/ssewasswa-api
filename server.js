@@ -131,7 +131,14 @@ async function initDB() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-     // Create session table for connect-pg-simple
+
+    // DROP ALL TABLES FIRST - but exclude session so we don't break login
+    const tables = ['payment_requests','parent_otps','parents','chat_messages','news_cache','feedback_messages','feedback_threads','comments','grants','donor_campaigns','donations','surveys','grades','attendance','fees','students','password_resets','users','revenue_log','settings','courses','order_items','orders','cart_items','market_items','wallets','tenants'];
+    for (const table of tables) {
+      await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
+    }
+
+    // CREATE SESSION TABLE FIRST - never drop this one
     await client.query(`
       CREATE TABLE IF NOT EXISTS "session" (
         "sid" varchar NOT NULL,
@@ -143,11 +150,7 @@ async function initDB() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")
     `);
-await client.query(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")`);
-    const tables = ['payment_requests','parent_otps','parents','chat_messages','news_cache','feedback_messages','feedback_threads','comments','grants','donor_campaigns','donations','surveys','grades','attendance','fees','students','password_resets','users','revenue_log','settings','courses','order_items','orders','cart_items','market_items','wallets','tenants'];
-    for (const table of tables) {
-      await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
-    }
+
     await client.query('CREATE TABLE tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT \'free\', plan_expires DATE, ranking_score INTEGER DEFAULT 0, momo_number TEXT, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT \'staff\', tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE parents (id SERIAL PRIMARY KEY, phone TEXT UNIQUE NOT NULL, name TEXT, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, verified BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())');
@@ -169,12 +172,7 @@ await client.query(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session"
     await client.query(`INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`, [tenantId, 'waiswadaniel24@gmail.com', hashedPass, 'super_admin']);
     await client.query(`INSERT INTO settings (tenant_id, subscription_tier, verified, school_motto, about_text) VALUES ($1, $2, $3, $4, $5)`, [tenantId, 'enterprise', true, 'Excellence Through Education', 'SSEWASSWA FOUNDATION UGANDA empowers schools with digital tools.']);
     console.log('RESET COMPLETE: Only developer account exists. Password: admin123');
-   await client.query(`CREATE TABLE IF NOT EXISTS "session" (
-  "sid" varchar NOT NULL COLLATE "default",
-  "sess" json NOT NULL,
-  "expire" timestamp(6) NOT NULL
-)`);
-await client.query(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")`);
+
     await client.query('COMMIT');
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
@@ -183,7 +181,6 @@ await client.query(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session"
     client.release();
   }
 }
-
 // === AUTH ===
 app.get('/login', (req, res) => {
   res.send(renderPage('Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>School Admin Login</h1><form method="POST" action="/login"><input name="email" placeholder="Email" type="email" required /><input name="password" placeholder="Password" type="password" required /><button type="submit" class="btn" style="width:100%">Login</button></form><p style="margin-top:1rem;text-align:center"><a href="/parent/login">Parent Login</a> | <a href="/create-site">Create School</a></p></div>'));
