@@ -21,14 +21,16 @@ const parser = new Parser();
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
+app.set('trust proxy', 1);
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'ssewasswa-secret',
+  secret: process.env.SESSION_SECRET || 'ssewasswa-secret-key-change-in-prod',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24 * 7
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: 'lax'
   }
 }));
 
