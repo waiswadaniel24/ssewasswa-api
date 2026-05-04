@@ -25,7 +25,7 @@ app.use(bodyParser.json());
 app.set('trust proxy', 1);
 app.use(session({
   store: new pgSession({
-    pool: pool, // your existing pg pool
+    pool: pool,
     tableName: 'session'
   }),
   secret: process.env.SESSION_SECRET || 'ssewasswa-secret-key-change-in-prod',
