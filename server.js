@@ -266,7 +266,6 @@ app.post('/reset-password', async (req, res) => {
   await pool.query('UPDATE password_resets SET used = true WHERE token = $1', [token]);
   res.send(renderPage('Success', '<div class="card"><h1>Password Reset!</h1><p>You can now login with your new password.</p><a href="/login" class="btn">Login</a></div>', req));
 });
-
 app.get('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
 });
