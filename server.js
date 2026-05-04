@@ -374,10 +374,9 @@ app.get('/super-admin/users', async (req, res) => {
   res.json(rows);
 });
 
-app.get('/super-admin/revenue', async (req, res) => {
-  if (!req.session?.user || req.session.user.role!== 'super_admin') return res.redirect('/login');
-  const { rows } = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM revenue_log');
-  res.json(rows[0]);
+app.get('/super-admin/revenue', (req, res) => {
+  if (!req.session?.user || req.session.user.role !== 'super_admin') return res.redirect('/login');
+  res.json({ total: "0", note: "Revenue table not set up yet" });
 });
 // === END ===
 app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
@@ -401,7 +400,11 @@ app.get('/orders', requireAuth, async (req, res) => {
   const result = await pool.query('SELECT * FROM orders WHERE user_email = $1 ORDER BY created_at DESC', [req.session.user.email]);
   res.json({ orders: result.rows });
 });
-
+app.get('/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.redirect('/login');
+  });
+});
 app.get('/app', requireAuth, requireTenant, async (req, res) => {
   const students = await pool.query('SELECT COUNT(*)::int AS c FROM students WHERE tenant_id = $1', [req.tenantId]);
   const fees = await pool.query('SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM fees WHERE tenant_id = $1', [req.tenantId]);
