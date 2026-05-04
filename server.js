@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: process.env.NODE_ENV === 'production'? { rejectUnauthorized: false } : false
 });
 const parser = new Parser();
 
@@ -39,7 +39,7 @@ const FEATURES = {
 };
 
 function renderPage(title, content) {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font-family:system-ui;background:#f8fafc;color:#1e293b;margin:0;padding:24px}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:720px;margin:0 auto}.btn{background:#1e40af;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer}input{display:block;width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:8px 0 12px}</style></head><body>${content}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font-family:system-ui;background:#f8fafc;color:#1e293b;margin:0;padding:24px}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:720px;margin:0 auto 16px}.btn{background:#1e40af;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block}input{display:block;width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:8px 0 12px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid #e2e8f0}th{background:#f1f5f9}</style></head><body>${content}</body></html>`;
 }
 
 function requireFeature(feature) {
@@ -59,7 +59,7 @@ async function requireTenant(req, res, next) {
   try {
     const host = req.headers.host || '';
     const sub = host.split('.')[0];
-    const effectiveSub = sub === 'localhost' || host.includes('onrender') || sub === '127' ? 'main' : sub;
+    const effectiveSub = sub === 'localhost' || host.includes('onrender') || sub === '127'? 'main' : sub;
     const result = await pool.query('SELECT * FROM tenants WHERE subdomain = $1', [effectiveSub]);
     if (!result.rows[0]) return res.status(404).send('Tenant not found');
     req.tenant = result.rows[0];
@@ -70,13 +70,8 @@ async function requireTenant(req, res, next) {
   }
 }
 
-function requireSuperAdmin(req, res, next) {
-  if (req.session.user?.role === 'super_admin') return next();
-  return res.status(403).send('Forbidden');
-}
-
 const requireRole = (role) => (req, res, next) => {
-  if (!req.session.user || req.session.user.role !== role) return res.status(403).send('Forbidden');
+  if (!req.session.user || req.session.user.role!== role) return res.status(403).send('Forbidden');
   return next();
 };
 
@@ -85,46 +80,13 @@ async function initDB() {
   try {
     await client.query('BEGIN');
 
-    try {
-      await client.query('CREATE TABLE db_init_lock (locked BOOLEAN DEFAULT true)');
-    } catch (err) {
-      if (err.code === '42P07') {
-        await client.query('DROP TABLE IF EXISTS db_init_lock CASCADE');
-        await client.query('CREATE TABLE db_init_lock (locked BOOLEAN DEFAULT true)');
-      } else {
-        throw err;
-      }
-    }
-
-    const dropOrder = [
-      'db_init_lock',
-      'order_items',
-      'orders',
-      'cart_items',
-      'market_items',
-      'wallets',
-      'chat_messages',
-      'news_cache',
-      'feedback_messages',
-      'feedback_threads',
-      'comments',
-      'grants',
-      'donor_campaigns',
-      'donations',
-      'surveys',
-      'grades',
-      'attendance',
-      'fees',
-      'students',
-      'password_resets',
-      'users',
-      'revenue_log',
-      'settings',
-      'courses',
-      'tenants'
+    const tables = [
+      'chat_messages','news_cache','feedback_messages','feedback_threads','comments',
+      'grants','donor_campaigns','donations','surveys','grades','attendance','fees',
+      'students','password_resets','users','revenue_log','settings','courses',
+      'order_items','orders','cart_items','market_items','wallets','tenants','db_init_lock'
     ];
-
-    for (const table of dropOrder) {
+    for (const table of tables) {
       await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
     }
 
@@ -166,135 +128,102 @@ async function initDB() {
     console.log('Indexes created. Seeding DEVELOPER ONLY...');
 
     const tenant = await client.query(
-      `INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+      `INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id`,
       ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise']
     );
     const tenantId = tenant.rows[0].id;
 
     const hashedPass = await bcrypt.hash('admin123', 10);
     await client.query(
-      `INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash, role='super_admin'`,
+      `INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)`,
       [tenantId, 'waiswadaniel24@gmail.com', hashedPass, 'super_admin']
     );
 
-    await client.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, 'enterprise', true]);
-
-    await client.query(`INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, user_email) DO NOTHING`, [tenantId, 'waiswadaniel24@gmail.com', 0]);
-
-    await client.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology') ON CONFLICT DO NOTHING`, [tenantId]);
-
-    await client.query(`INSERT INTO market_items (tenant_id, title, description, price, seller_email, status, image_url, stock, category) VALUES ($1, 'School Uniform Set', 'Complete uniform for primary students', 50000, 'waiswadaniel24@gmail.com', 'approved', 'https://via.placeholder.com/300x300?text=Uniform', 100, 'uniform') ON CONFLICT DO NOTHING`, [tenantId]);
-    await client.query(`INSERT INTO market_items (tenant_id, title, description, price, seller_email, status, image_url, stock, category) VALUES ($1, 'Exercise Books Pack', '10 exercise books', 15000, 'waiswadaniel24@gmail.com', 'approved', 'https://via.placeholder.com/300x300?text=Books', 200, 'stationery') ON CONFLICT DO NOTHING`, [tenantId]);
+    await client.query(`INSERT INTO settings (tenant_id, subscription_tier, verified) VALUES ($1, $2, $3)`, [tenantId, 'enterprise', true]);
+    await client.query(`INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3)`, [tenantId, 'waiswadaniel24@gmail.com', 0]);
+    await client.query(`INSERT INTO courses (tenant_id, title, description, video_url, category) VALUES ($1, 'Introduction to Computers', 'Learn computer basics', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'technology')`, [tenantId]);
+    await client.query(`INSERT INTO market_items (tenant_id, title, description, price, seller_email, status, image_url, stock, category) VALUES ($1, 'School Uniform Set', 'Complete uniform for primary students', 50000, 'waiswadaniel24@gmail.com', 'approved', 'https://via.placeholder.com/300x300?text=Uniform', 100, 'uniform')`, [tenantId]);
+    await client.query(`INSERT INTO market_items (tenant_id, title, description, price, seller_email, status, image_url, stock, category) VALUES ($1, 'Exercise Books Pack', '10 exercise books', 15000, 'waiswadaniel24@gmail.com', 'approved', 'https://via.placeholder.com/300x300?text=Books', 200, 'stationery')`, [tenantId]);
 
     console.log('RESET COMPLETE: Only developer account exists. Password: admin123');
 
     await client.query('DROP TABLE IF EXISTS db_init_lock');
     await client.query('COMMIT');
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (_) {
-    }
+    try { await client.query('ROLLBACK'); } catch (_) {}
     throw err;
   } finally {
     client.release();
   }
 }
 
+// === AUTH ROUTES ===
 app.get('/login', (req, res) => {
-  res.send('<h1>Login</h1><form method="POST" action="/login"><input name="email" placeholder="Email" /><input name="password" placeholder="Password" type="password" /><button type="submit">Login</button></form><p style="margin-top: 1rem;"><a href="/forgot-password">Forgot Password?</a></p>');
+  res.send(renderPage('Login', '<div class="card"><h1>Login</h1><form method="POST" action="/login"><input name="email" placeholder="Email" /><input name="password" placeholder="Password" type="password" /><button type="submit" class="btn">Login</button></form><p style="margin-top:1rem;"><a href="/forgot-password">Forgot Password?</a></p></div>'));
 });
 
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
   try {
     const user = await pool.query('SELECT u.*, t.subdomain FROM users u JOIN tenants t ON u.tenant_id = t.id WHERE u.email = $1', [email]);
-    if (!user.rows[0]) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>', req));
+    if (!user.rows[0]) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>'));
 
     const valid = await bcrypt.compare(password, user.rows[0].password_hash);
-    if (!valid) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>', req));
+    if (!valid) return res.status(401).send(renderPage('Login', '<div class="card"><h1>Error</h1><p>Invalid credentials</p><a href="/login">Try Again</a></div>'));
 
     req.session.user = user.rows[0];
     req.session.tenant = { id: user.rows[0].tenant_id, subdomain: user.rows[0].subdomain };
+
+    if (user.rows[0].role === 'super_admin') return res.redirect('/super-admin');
     res.redirect('/app');
   } catch (e) {
     console.error('Login error:', e);
-    res.status(500).send(renderPage('Error', '<div class="card"><h1>Server Error</h1></div>', req));
+    res.status(500).send(renderPage('Error', '<div class="card"><h1>Server Error</h1></div>'));
   }
 });
 
-app.get('/forgot-password', (req, res) => {
-  const content = `<div class="card" style="max-width: 400px; margin: 2rem auto;"><h1>Reset Password</h1><form method="POST" action="/forgot-password"><input name="email" type="email" placeholder="Your Email" required><button class="btn" style="width: 100%;">Send Reset Link</button></form><p><a href="/login">Back to Login</a></p></div>`;
-  res.send(renderPage('Forgot Password', content, req));
-});
-
-app.post('/forgot-password', async (req, res) => {
-  const { email } = req.body;
-  const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-  if (!user.rows[0]) {
-    return res.send(renderPage('Reset', '<div class="card"><h1>Check Your Email</h1><p>If account exists, reset link was sent.</p></div>', req));
-  }
-  const token = crypto.randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + 3600000);
-  await pool.query('INSERT INTO password_resets (email, token, expires_at) VALUES ($1, $2, $3)', [email, token, expires]);
-  const resetLink = `https://ssewasswa-api.onrender.com/reset-password/${token}`;
-  console.log('PASSWORD RESET LINK:', resetLink);
-  res.send(renderPage('Reset', '<div class="card"><h1>Reset Link Sent</h1><p>Check Render logs for your reset link. For demo: <a href="' + resetLink + '">' + resetLink + '</a></p></div>', req));
-});
-
-app.get('/reset-password/:token', async (req, res) => {
-  const { token } = req.params;
-  const reset = await pool.query('SELECT * FROM password_resets WHERE token = $1 AND expires_at > NOW() AND used = false', [token]);
-  if (!reset.rows[0]) {
-    return res.send(renderPage('Error', '<div class="card"><h1>Invalid Link</h1><p>Reset link expired or invalid.</p></div>', req));
-  }
-  const content = `<div class="card" style="max-width: 400px; margin: 2rem auto;"><h1>New Password</h1><form method="POST" action="/reset-password"><input type="hidden" name="token" value="${token}"><input name="password" type="password" placeholder="New Password" required><input name="confirm" type="password" placeholder="Confirm Password" required><button class="btn" style="width: 100%;">Reset Password</button></form></div>`;
-  res.send(renderPage('Reset Password', content, req));
-});
-
-app.post('/reset-password', async (req, res) => {
-  const { token, password, confirm } = req.body;
-  if (password!== confirm) {
-    return res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>Passwords do not match</p></div>', req));
-  }
-  const reset = await pool.query('SELECT * FROM password_resets WHERE token = $1 AND expires_at > NOW() AND used = false', [token]);
-  if (!reset.rows[0]) {
-    return res.send(renderPage('Error', '<div class="card"><h1>Invalid Link</h1></div>', req));
-  }
-  const hashedPass = await bcrypt.hash(password, 10);
-  await pool.query('UPDATE users SET password_hash = $1 WHERE email = $2', [hashedPass, reset.rows[0].email]);
-  await pool.query('UPDATE password_resets SET used = true WHERE token = $1', [token]);
-  res.send(renderPage('Success', '<div class="card"><h1>Password Reset!</h1><p>You can now login with your new password.</p><a href="/login" class="btn">Login</a></div>', req));
-});
 app.get('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
 });
 
-app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'ssewasswa-api', version: '5.1' });
+// === SUPER ADMIN ROUTES - FIXED ===
+app.get('/super-admin', requireAuth, requireRole('super_admin'), (req, res) => {
+  res.send(renderPage('Super Admin', `
+    <div class="card"><h1>Super Admin Dashboard</h1>
+      <p><a href="/super-admin/tenants" class="btn">All Schools</a>
+         <a href="/super-admin/users" class="btn">All Users</a>
+         <a href="/super-admin/revenue" class="btn">Revenue</a>
+         <a href="/logout" class="btn" style="background:#64748b">Logout</a></p>
+    </div>
+  `));
 });
 
-app.get('/news', requireFeature('news'), requireTenant, async (req, res) => {
-  try {
-    const feed = await parser.parseURL('https://feeds.bbci.co.uk/news/world/africa/rss.xml');
-    const items = feed.items.slice(0, 10);
-    if (items.length === 0) throw new Error('No news');
-    const content = '<div class="card"><h1>Education News Africa</h1></div>' + items.map(item => '<div class="card"><h3>' + item.title + '</h3><p>' + (item.contentSnippet || '') + '</p><small>' + new Date(item.pubDate).toLocaleDateString() + '</small><br><a href="' + item.link + '" target="_blank" class="btn">Read More</a></div>').join('');
-    res.send(renderPage('News', content, req));
-  } catch (e) {
-    console.error('News fetch error:', e.message);
-    res.send(renderPage('News', '<div class="card"><h1>News Temporarily Unavailable</h1><p>We cannot fetch news right now. Please try again later.</p></div>', req));
-  }
+app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const { rows } = await pool.query('SELECT id, name, subdomain, plan, ranking_score FROM tenants ORDER BY id');
+  const table = rows.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.ranking_score||0}</td></tr>`).join('');
+  res.send(renderPage('All Schools', `<div class="card"><h1>All Schools</h1><table><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>Score</th></tr></thead><tbody>${table}</tbody></table><p><a href="/super-admin">Back</a></p></div>`));
 });
 
+app.get('/super-admin/users', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const { rows } = await pool.query('SELECT u.id, u.email, u.role, t.name as school FROM users u JOIN tenants t ON u.tenant_id = t.id ORDER BY u.id');
+  const table = rows.map(u => `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.school}</td></tr>`).join('');
+  res.send(renderPage('All Users', `<div class="card"><h1>All Users</h1><table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>School</th></tr></thead><tbody>${table}</tbody></table><p><a href="/super-admin">Back</a></p></div>`));
+});
+
+app.get('/super-admin/revenue', requireAuth, requireRole('super_admin'), async (req, res) => {
+  const orders = await pool.query('SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as total FROM orders');
+  res.send(renderPage('Revenue', `<div class="card"><h1>Platform Revenue</h1><p><strong>Total Orders:</strong> ${orders.rows[0].count}</p><p><strong>Total Sales:</strong> UGX ${orders.rows[0].total}</p><p><a href="/super-admin">Back</a></p></div>`));
+});
+
+// === SCHOOL CREATION ===
 app.get('/create-site', (req, res) => {
-  res.send(renderPage('Create Site', '<div class="card"><h1>Create Free School Site</h1><form method="POST" action="/create-site"><input name="name" placeholder="School Name" required><input name="subdomain" placeholder="Subdomain" required><input name="admin_email" type="email" placeholder="Admin Email" required><input name="admin_password" type="password" placeholder="Password" required><button class="btn">Create</button></form></div>', req));
+  res.send(renderPage('Create Site', '<div class="card"><h1>Create Free School Site</h1><form method="POST" action="/create-site"><input name="name" placeholder="School Name" required><input name="subdomain" placeholder="Subdomain" required><input name="admin_email" type="email" placeholder="Admin Email" required><input name="admin_password" type="password" placeholder="Password" required><button class="btn">Create</button></form></div>'));
 });
 
 app.post('/create-site', async (req, res) => {
   const { name, subdomain, admin_email, admin_password } = req.body;
   if (!name ||!subdomain ||!admin_email ||!admin_password) {
-    return res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>All fields required</p><a href="/create-site">Try Again</a></div>', req));
+    return res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>All fields required</p><a href="/create-site">Try Again</a></div>'));
   }
   try {
     const tenant = await pool.query('INSERT INTO tenants (name, subdomain, plan) VALUES ($1, $2, $3) RETURNING id', [name.trim(), subdomain.toLowerCase().trim(), 'free']);
@@ -302,156 +231,23 @@ app.post('/create-site', async (req, res) => {
     await pool.query('INSERT INTO users (tenant_id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [tenant.rows[0].id, admin_email, hashedPass, 'admin']);
     await pool.query('INSERT INTO settings (tenant_id) VALUES ($1)', [tenant.rows[0].id]);
     await pool.query('INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1, $2, $3)', [tenant.rows[0].id, admin_email, 0]);
-    res.send(renderPage('Success', '<div class="card"><h1>Site Created!</h1><p>School: ' + name + '</p><p>URL: http://' + subdomain + '.localhost:3000</p><p>Login: ' + admin_email + '</p></div>', req));
+    res.send(renderPage('Success', `<div class="card"><h1>Site Created!</h1><p>School: ${name}</p><p>URL: http://${subdomain}.ssewasswa-api.onrender.com</p><p>Login: ${admin_email}</p><a href="/login" class="btn">Login</a></div>`));
   } catch (e) {
     let msg = e.code === '23505'? 'Subdomain already taken' : e.message;
-    res.send(renderPage('Error', '<div class="card"><h1>Error</h1><p>' + msg + '</p><a href="/create-site">Try Again</a></div>', req));
+    res.send(renderPage('Error', `<div class="card"><h1>Error</h1><p>${msg}</p><a href="/create-site">Try Again</a></div>`));
   }
 });
 
-app.get('/marketplace', requireAuth, requireTenant, async (req, res) => {
-  const result = await pool.query("SELECT * FROM market_items WHERE tenant_id = $1 AND status IN ('active', 'approved') ORDER BY created_at DESC", [req.tenantId]);
-  res.json({ items: result.rows });
-});
-
-app.get('/marketplace/cart', requireAuth, async (req, res) => {
-  const result = await pool.query('SELECT c.*, m.title, m.price FROM cart_items c JOIN market_items m ON m.id = c.item_id WHERE c.user_email = $1 ORDER BY c.created_at DESC', [req.session.user.email]);
-  res.json({ cart: result.rows });
-});
-
-app.post('/marketplace/cart', requireAuth, async (req, res) => {
-  const { item_id, quantity } = req.body;
-  await pool.query('INSERT INTO cart_items (user_email, item_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (user_email, item_id) DO UPDATE SET quantity = EXCLUDED.quantity', [req.session.user.email, item_id, quantity || 1]);
-  res.json({ success: true });
-});
-
-app.post('/marketplace/checkout', requireAuth, requireTenant, async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const cart = await client.query('SELECT c.item_id, c.quantity, m.price FROM cart_items c JOIN market_items m ON m.id = c.item_id WHERE c.user_email = $1 FOR UPDATE', [req.session.user.email]);
-    if (cart.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Cart is empty' });
-    }
-    const total = cart.rows.reduce((sum, row) => sum + Number(row.price) * Number(row.quantity), 0);
-    const orderResult = await client.query('INSERT INTO orders (tenant_id, user_email, total_amount, status, payment_method, momo_number, delivery_address) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id', [req.tenantId, req.session.user.email, total, 'pending', req.body.payment_method || 'momo', req.body.momo_number || '', req.body.delivery_address || '']);
-    const orderId = orderResult.rows[0].id;
-    for (const row of cart.rows) {
-      await client.query('INSERT INTO order_items (order_id, item_id, quantity, price) VALUES ($1, $2, $3, $4)', [orderId, row.item_id, row.quantity, row.price]);
-    }
-    await client.query('DELETE FROM cart_items WHERE user_email = $1', [req.session.user.email]);
-    await client.query('COMMIT');
-    return res.json({ success: true, order_id: orderId, total_amount: total });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    return res.status(500).json({ error: 'Checkout failed' });
-  } finally {
-    client.release();
-  }
-});
-// === SUPER ADMIN ROUTES - SAFE VERSION ===
-app.get('/super-admin', (req, res) => {
-  if (!req.session?.user || req.session.user.role!== 'super_admin') return res.redirect('/login');
-  res.send(`
-    <h1>Super Admin</h1>
-    <p><a href="/super-admin/tenants">All Schools</a> |
-       <a href="/super-admin/users">All Users</a> |
-       <a href="/super-admin/revenue">Revenue</a></p>
-  `);
-});
-
-app.get('/super-admin/tenants', async (req, res) => {
-  if (!req.session?.user || req.session.user.role!== 'super_admin') return res.redirect('/login');
-  const { rows } = await pool.query('SELECT id, name, subdomain, plan FROM tenants');
-  res.json(rows);
-});
-
-app.get('/super-admin/users', async (req, res) => {
-  if (!req.session?.user || req.session.user.role!== 'super_admin') return res.redirect('/login');
-  const { rows } = await pool.query('SELECT id, email, role FROM users');
-  res.json(rows);
-});
-
-app.get('/super-admin/revenue', (req, res) => {
-  if (!req.session?.user || req.session.user.role !== 'super_admin') return res.redirect('/login');
-  res.json({ total: "0", note: "Revenue table not set up yet" });
-});
-// === END ===
-app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const { rows } = await pool.query('SELECT id, name, subdomain, plan, score FROM tenants ORDER BY id');
-  const table = rows.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.score||0}</td></tr>`).join('');
-  res.send(renderPage('All Schools', `<div class="card"><h1>All Schools</h1><table><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>Score</th></tr></thead><tbody>${table}</tbody></table></div>`, req));
-});
-
-app.get('/super-admin/users', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const { rows } = await pool.query('SELECT u.id, u.email, u.role, t.name as school FROM users u JOIN tenants t ON u.tenant_id = t.id');
-  const table = rows.map(u => `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.school}</td></tr>`).join('');
-  res.send(renderPage('All Users', `<div class="card"><h1>All Users</h1><table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>School</th></tr></thead><tbody>${table}</tbody></table></div>`, req));
-});
-
-app.get('/super-admin/revenue', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const rev = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM revenue_log');
-  res.send(renderPage('Revenue', `<div class="card"><h1>Revenue</h1><p><strong>Total:</strong> UGX ${rev.rows[0].total}</p></div>`, req));
-});
-// === END SUPER ADMIN ROUTES ===
-app.get('/orders', requireAuth, async (req, res) => {
-  const result = await pool.query('SELECT * FROM orders WHERE user_email = $1 ORDER BY created_at DESC', [req.session.user.email]);
-  res.json({ orders: result.rows });
-});
-app.get('/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.redirect('/login');
-  });
-});
+// === APP ROUTES ===
 app.get('/app', requireAuth, requireTenant, async (req, res) => {
   const students = await pool.query('SELECT COUNT(*)::int AS c FROM students WHERE tenant_id = $1', [req.tenantId]);
   const fees = await pool.query('SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM fees WHERE tenant_id = $1', [req.tenantId]);
   res.json({ tenant: req.tenant.name, stats: { students: students.rows[0].c, total_fees: fees.rows[0].total } });
 });
 
-app.get('/app/students', requireAuth, requireTenant, async (req, res) => {
-  const result = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
-  res.json({ students: result.rows });
-});
-
-app.get('/app/fees', requireAuth, requireTenant, async (req, res) => {
-  const result = await pool.query('SELECT * FROM fees WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
-  res.json({ fees: result.rows });
-});
-
-app.get('/app/attendance', requireAuth, requireTenant, async (req, res) => {
-  const result = await pool.query('SELECT * FROM attendance WHERE tenant_id = $1 ORDER BY date DESC, created_at DESC', [req.tenantId]);
-  res.json({ attendance: result.rows });
-});
-
-app.get('/app/grades', requireAuth, requireTenant, async (req, res) => {
-  const result = await pool.query('SELECT * FROM grades WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
-  res.json({ grades: result.rows });
-});
-
-app.get('/super-admin', requireAuth, requireSuperAdmin, async (req, res) => {
-  const tenants = await pool.query('SELECT id, name, subdomain, plan, ranking_score, created_at FROM tenants ORDER BY created_at DESC');
-  const tenantRows = tenants.rows.map((t) => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.ranking_score}</td></tr>`).join('');
-  const content = `
-  <div class="card"><h1>Super Admin</h1></div>
-  <div class="card"><table width="100%"><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>Score</th></tr></thead><tbody>${tenantRows || '<tr><td colspan="5">No tenants</td></tr>'}</tbody></table></div>
-  <div class="card"><h3>⚠️ Nuclear Reset</h3><form method="POST" action="/super-admin/nuclear-reset" onsubmit="return confirm('This deletes ALL data. Continue?')"><input name="confirm" placeholder="Type: DELETE EVERYTHING" required><button class="btn" style="background:#dc2626;">WIPE ALL DATA</button></form></div>`;
-  res.send(renderPage('Super Admin', content, req));
-});
-
-app.post('/super-admin/nuclear-reset', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const { confirm } = req.body;
-  if (confirm !== 'DELETE EVERYTHING') {
-    return res.send(renderPage('Error', '<div class="card"><h1>Confirmation Required</h1><p>Type DELETE EVERYTHING to confirm</p></div>', req));
-  }
-  try {
-    await pool.query(`TRUNCATE TABLE surveys, grades, attendance, fees, students, cart_items, order_items, orders, market_items, wallets, donations, donor_campaigns, grants, comments, feedback_threads, feedback_messages, chat_messages, news_cache, courses, settings, revenue_log, password_resets, users, tenants RESTART IDENTITY CASCADE`);
-    await initDB();
-    res.send(renderPage('Reset', '<div class="card"><h1>Platform Reset Complete</h1><p>Only developer account remains. Password: admin123</p><a href="/login" class="btn">Login</a></div>', req));
-  } catch (e) {
-    res.send(renderPage('Error', '<div class="card"><h1>Reset Failed</h1><p>' + e.message + '</p></div>', req));
-  }
+// === OTHER ROUTES ===
+app.get('/health', (req, res) => {
+  res.json({ ok: true, service: 'ssewasswa-api', version: '5.2' });
 });
 
 app.get('/', (req, res) => {
@@ -463,7 +259,6 @@ io.on('connection', (socket) => {
     socket.join(room);
     socket.to(room).emit('user_joined', { msg: 'A user joined' });
   });
-
   socket.on('send_message', async (data) => {
     try {
       const { room, message, user_name } = data;
@@ -478,56 +273,7 @@ io.on('connection', (socket) => {
 initDB().catch((err) => {
   console.error('Init failed:', err);
 });
-// === SUPER ADMIN SUB-PAGES ===
-app.get('/super-admin/tenants', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const tenants = await pool.query('SELECT * FROM tenants ORDER BY id');
-  const rows = tenants.rows.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${t.subdomain}</td><td>${t.plan}</td><td>${t.score || 0}</td></tr>`).join('');
-  res.send(renderPage('All Schools', `
-    <div class="card"><h1>All Schools/Tenants</h1>
-    <table><thead><tr><th>ID</th><th>Name</th><th>Subdomain</th><th>Plan</th><th>Score</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>
-  `, req));
-});
 
-app.get('/super-admin/users', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const users = await pool.query('SELECT u.id, u.email, u.role, t.name as school FROM users u JOIN tenants t ON u.tenant_id = t.id ORDER BY u.id');
-  const rows = users.rows.map(u => `<tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.school}</td></tr>`).join('');
-  res.send(renderPage('All Users', `
-    <div class="card"><h1>All Platform Users</h1>
-    <table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>School</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>
-  `, req));
-});
-
-app.get('/super-admin/revenue', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const rev = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM revenue_log');
-  const orders = await pool.query('SELECT COUNT(*) as count FROM orders');
-  res.send(renderPage('Revenue', `
-    <div class="card"><h1>Platform Revenue</h1>
-    <p><strong>Total Commission Earned:</strong> UGX ${rev.rows[0].total}</p>
-    <p><strong>Total Orders:</strong> ${orders.rows[0].count}</p></div>
-  `, req));
-});
-
-app.get('/super-admin/comments', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const comments = await pool.query('SELECT * FROM comments ORDER BY id DESC LIMIT 50');
-  const rows = comments.rows.map(c => `<tr><td>${c.id}</td><td>${c.author_email}</td><td>${c.content}</td><td>${c.approved}</td></tr>`).join('');
-  res.send(renderPage('Comments', `
-    <div class="card"><h1>Moderate Comments</h1>
-    <table><thead><tr><th>ID</th><th>Author</th><th>Content</th><th>Approved</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>
-  `, req));
-});
-
-app.get('/super-admin/feedback', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const feedback = await pool.query('SELECT * FROM feedback_threads ORDER BY id DESC');
-  const rows = feedback.rows.map(f => `<tr><td>${f.id}</td><td>${f.user_email}</td><td>${f.subject}</td><td>${f.status}</td></tr>`).join('');
-  res.send(renderPage('Feedback', `
-    <div class="card"><h1>Feedback Threads</h1>
-    <table><thead><tr><th>ID</th><th>User</th><th>Subject</th><th>Status</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>
-  `, req));
-});
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
