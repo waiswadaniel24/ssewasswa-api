@@ -294,7 +294,7 @@ app.post('/api/momo/webhook', checkDb, async (req, res) => {
         await pool.query('UPDATE payment_requests SET status=$1, momo_transaction_id=$2 WHERE reference=$3', ['success', transactionId, reference]);
         if (p.rows[0].student_id) await pool.query('UPDATE students SET balance = balance - $1 WHERE id=$2', [p.rows[0].amount, p.rows[0].student_id]);
         if (p.rows[0].user_id && reference.startsWith('PREM')) await pool.query("UPDATE users SET premium_until = NOW() + INTERVAL '1 month' WHERE email = $1", [p.rows[0].user_id]);
-        if (p.rows[0].store_order_id) await pool.query('UPDATE store_orders SET status=$1 WHERE reference=$2', ['paid', transactionId, reference]);
+        if (p.rows[0].store_order_id) await pool.query('UPDATE store_orders SET status=$1 WHERE reference=$2', ['paid', reference]);
       }
     }
     res.json({ ok: true });
@@ -332,7 +332,9 @@ async function initDB() {
     await client.query(`CREATE TABLE IF NOT EXISTS password_resets (id SERIAL PRIMARY KEY, email TEXT NOT NULL, token TEXT UNIQUE NOT NULL, expires_at TIMESTAMP NOT NULL, used BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`);
     await client.query(`CREATE TABLE IF NOT EXISTS wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL UNIQUE, balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())`);
     await client.query(`CREATE TABLE IF NOT EXISTS platform_wallet (id SERIAL PRIMARY KEY, balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())`);
-    await client.query(`INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1,$2,0) ON CONFLICT DO NOTHING`, [1, 'dummy', 0]);
+    
+    // FIX 1: Removed the extra '0' from the array parameter to match the 2 SQL placeholders
+    await client.query(`INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1,$2,0) ON CONFLICT DO NOTHING`, [1, 'dummy']);
     await client.query(`INSERT INTO platform_wallet (id, balance, updated_at) VALUES (1, 0, NOW()) ON CONFLICT DO NOTHING`);
     await client.query(`CREATE TABLE IF NOT EXISTS developer_revenue (id SERIAL PRIMARY KEY, amount NUMERIC NOT NULL, type TEXT NOT NULL, description TEXT, reference_id TEXT, created_at TIMESTAMP DEFAULT NOW())`);
 
