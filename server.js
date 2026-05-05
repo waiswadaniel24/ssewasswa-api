@@ -310,7 +310,17 @@ app.post('/bonus/withdraw', requireAuth, checkDb, async (req, res) => { try { co
 app.get('/bonus/affiliate', requireAuth, checkDb, async (req, res) => { const link = `https://${req.headers.host}/signup?ref=${req.session.user.email}`; res.send(renderPage('Affiliate 🔗', `<div class="card" style="max-width:600px;margin:40px auto"><h1>🔗 Earn 200 UGX Per Referral</h1><div style="background:#f8fafc;padding:16px;border-radius:12px;margin:20px 0"><input value="${link}" readonly style="margin:0" id="affLink"><button class="btn" onclick="navigator.clipboard.writeText('${link}');this.textContent='✅ Copied!'">Copy</button></div><div style="display:flex;gap:12px;margin-top:20px;flex-wrap:wrap"><a href="https://wa.me/?text=${encodeURIComponent('Join SSEWASSWA and earn rewards! ' + link)}" class="btn btn-green" target="_blank">WhatsApp</a><a href="https://t.me/share/url?url=${encodeURIComponent(link)}" class="btn" target="_blank">Telegram</a></div></div>`, { tenant_name: req.tenant.name }, false, req.lang)); });
 
 // === VIDEOS & NEWS & DOWNLOADS ===
-app.get('/videos', async (req, res) => { const l = req.query.lang || detectLang(req); const v = [{ id: 'dQw4w9WgXcQ', t: 'Math Basics', r: 50 }]; const w = req.session.user ? (await pool.query('SELECT video_id FROM bonus_earnings WHERE user_id=$1 AND type=\'video\'', [req.session.user.email])).rows.map(x => x.video_id) : []; res.send(renderPage('Videos 🎬', `<div class="hero" style="padding:30px"><h1>🎬 Watch & Earn</h1></div><div class="grid">${v.map(x=>`<div class="card" style="padding:0;overflow:hidden"><iframe width="100%" height="200" src="https://www.youtube.com/embed/${x.id}" frameborder="0" allowfullscreen></iframe><div style="padding:16px"><h4>${x.t}</h4>${req.session.user ? (w.includes(x.id)?'<p class="badge badge-green">✅ Claimed</p>':`<a href="/bonus/claim/video/${x.id}" class="btn btn-green">Claim +${x.r}</a>`):''}</div></div>`).join('')}</div>`, null, true, l)); });
+app.get('/videos', async (req, res) => { 
+  const l = req.query.lang || detectLang(req); 
+  const v = [{ id: 'dQw4w9WgXcQ', t: 'Math Basics', r: 50 }]; 
+  const w = req.session.user ? (await pool.query("SELECT video_id FROM bonus_earnings WHERE user_id=$1 AND type='video'", [req.session.user.email])).rows.map(x => x.video_id) : []; 
+  const videoCards = v.map(x => {
+    const isWatched = w.includes(x.id);
+    const actionHtml = req.session.user ? (isWatched ? '<p class="badge badge-green">✅ Claimed</p>' : '<a href="/bonus/claim/video/' + x.id + '" class="btn btn-green">Claim +' + x.r + '</a>') : '';
+    return '<div class="card" style="padding:0;overflow:hidden"><iframe width="100%" height="200" src="https://www.youtube.com/embed/' + x.id + '" frameborder="0" allowfullscreen></iframe><div style="padding:16px"><h4>' + x.t + '</h4>' + actionHtml + '</div></div>';
+  }).join('');
+  res.send(renderPage('Videos 🎬', '<div class="hero" style="padding:30px"><h1>🎬 Watch & Earn</h1></div><div class="grid">' + videoCards + '</div>', null, true, l)); 
+});
 app.get('/bonus/claim/video/:id', requireAuth, checkDb, async (req, res) => { if (!(await pool.query('SELECT id FROM bonus_earnings WHERE user_id=$1 AND type=\'video\' AND video_id=$2', [req.session.user.email, req.params.id])).rows[0]) await addBonus(req.session.user.email, req.tenantId, 50, 'video', 'Watched video', { video_id: req.params.id }); res.redirect('/videos'); });
 app.get('/news', async (req, res) => { const l = req.query.lang || detectLang(req); try { const f = await parser.parseURL('https://feeds.bbci.co.uk/news/world/africa/rss.xml'); const c = f.items.slice(0, 10).map(i => `<div class="card"><h4>${esc(i.title)}</h4><p style="color:#64748b;font-size:14px">${esc(i.contentSnippet?.substring(0, 120))}...</p><a href="/bonus/claim/news?url=${encodeURIComponent(i.link)}" class="btn btn-orange" target="_blank">Read +20</a></div>`).join(''); res.send(renderPage('News 📰', `<div class="hero" style="padding:30px"><h1>📰 News</h1></div><div class="grid">${c}</div>`, null, true, l)); } catch(e) { res.send(renderPage('News', '<div class="card"><h1>Unavailable</h1></div>', null, true, l)); } });
 app.get('/bonus/claim/news', requireAuth, checkDb, async (req, res) => { await addBonus(req.session.user.email, req.tenantId, 20, 'news', 'Read article'); res.redirect(req.query.url || '/news'); });
@@ -318,7 +328,11 @@ app.get('/downloads', async (req, res) => { const l = req.query.lang || detectLa
 app.get('/bonus/claim/download', requireAuth, checkDb, async (req, res) => { await addBonus(req.session.user.email, req.tenantId, 100, 'download', `Downloaded ${req.query.name}`); res.redirect(req.query.url); });
 
 // === GAMES & LEARNING ===
-app.get('/games', async (req, res) => { const l = req.query.lang || detectLang(req); res.send(renderPage('Games 🎮', `<div class="hero" style="padding:30px"><h1>🎮 Play & Earn</h1></div><div class="grid">${[{n:'Math Quiz',i:'🧮',r:'+30',id:'quiz'}].map(g=>`<div class="card" style="text-align:center"><div style="font-size:64px;margin-bottom:12px">${g.i}</div><h3>${g.n}</h3><div class="badge badge-gold">${g.r} UGX</div>${req.session.user?`<a href="/games/play/${g.id}" class="btn btn-green" style="margin-top:12px">Play</a>`:''}</div>`).join('')}</div>`, null, true, l); });
+app.get('/games', async (req, res) => { 
+  const l = req.query.lang || detectLang(req); 
+  const playBtn = req.session.user ? '<a href="/games/play/quiz" class="btn btn-green" style="margin-top:12px">Play</a>' : '';
+  res.send(renderPage('Games 🎮', '<div class="hero" style="padding:30px"><h1>🎮 Play & Earn</h1></div><div class="grid"><div class="card" style="text-align:center"><div style="font-size:64px;margin-bottom:12px">🧮</div><h3>Math Quiz</h3><div class="badge badge-gold">+30 UGX</div>' + playBtn + '</div></div>', null, true, l)); 
+});
 app.get('/games/play/:id', requireAuth, checkDb, async (req, res) => { res.send(renderPage('Playing', `<div class="card" style="max-width:600px;margin:40px auto"><h1>🧮 Math Quiz</h1><div id="quiz-area" style="text-align:center;margin:20px 0"><div style="font-size:36px" id="question"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px"><button class="btn" onclick="checkAnswer(this)" id="ans1"></button><button class="btn" onclick="checkAnswer(this)" id="ans2"></button><button class="btn" onclick="checkAnswer(this)" id="ans3"></button><button class="btn" onclick="checkAnswer(this)" id="ans4"></button></div></div><div id="result" style="display:none;text-align:center"><h2>🎉 Won!</h2><p class="badge badge-green" style="font-size:18px">+30 UGX</p><a href="/games" class="btn" style="margin-top:20px">Back</a></div></div><script>let q=[],idx=0;for(let i=0;i<5;i++){let a=Math.floor(Math.random()*20)+1,b=Math.floor(Math.random()*20)+1,o=['+','-','×'][Math.floor(Math.random()*3)],ans=o==='+'?a+b:o==='-'?a-b:a*b;q.push({q:a+' '+o+' '+b+' = ?',ans});}function showQ(){if(idx>=5){document.getElementById('quiz-area').style.display='none';document.getElementById('result').style.display='block';fetch('/bonus/claim/game/quiz').catch(()=>{});return;}let c=q[idx];document.getElementById('question').textContent=c.q;let opts=[c.ans];while(opts.length<4){let w=c.ans+Math.floor(Math.random()*20)-10;if(!opts.includes(w))opts.push(w);}opts.sort(()=>Math.random()-0.5);for(let i=1;i<=4;i++){document.getElementById('ans'+i).textContent=opts[i-1];document.getElementById('ans'+i).dataset.ans=opts[i-1];}}function checkAnswer(btn){idx++;showQ();}showQ();</script>`, { tenant_name: req.tenant.name }, false, req.lang)); });
 app.get('/bonus/claim/game/:id', requireAuth, checkDb, async (req, res) => { if (!(await pool.query("SELECT id FROM bonus_earnings WHERE user_id=$1 AND type='game' AND metadata->>'game_id'=$2 AND created_at > NOW() - INTERVAL '1 hour'", [req.session.user.email, req.params.id])).rows[0]) await addBonus(req.session.user.email, req.tenantId, 30, 'game', `Played ${req.params.id}`, { game_id: req.params.id }); res.json({ ok: true }); });
 app.get('/learning', async (req, res) => { const l = req.query.lang || detectLang(req); res.send(renderPage('Learning 📚', `<div class="hero" style="padding:30px"><h1>📚 Learn Anything</h1></div><div class="grid">${['Mathematics|🔢','Science|🔬','English|📖'].map(c=>{const[n,i]=c.split('|');return `<div class="card" style="text-align:center;cursor:pointer"><div style="font-size:48px;margin-bottom:12px">${i}</div><h3>${n}</h3></div>`;}).join('')}</div>`, null, true, l); });
@@ -430,9 +444,13 @@ app.get('/app/timetable', requireAuth, checkDb, async (req, res) => {
   const days = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
   const table = days.map(day => {
     const dayRows = rows.filter(r => r.day === day);
-    return `<tr><td><strong>${day}</strong></td>${[1,2,3,4,5,6,7,8].map(p => { const slot = dayRows.find(r => r.period === p); return `<td>${slot ? `${esc(slot.subject)}<br><small>${esc(slot.teacher)}</small>` : ''}</td>`; }).join('')}</tr>`;
+    const cells = [1,2,3,4,5,6,7,8].map(p => { 
+      const slot = dayRows.find(r => r.period === p); 
+      return '<td>' + (slot ? esc(slot.subject) + '<br><small>' + esc(slot.teacher) + '</small>' : '') + '</td>';
+    }).join('');
+    return '<tr><td><strong>' + day + '</strong></td>' + cells + '</tr>';
   }).join('');
-  res.send(renderPage('Timetable 📅', `<div class="card"><h1>School Timetable</h1><a href="/app/timetable/add" class="btn btn-green">Add Slot</a><table style="margin-top:16px;font-size:12px"><thead><tr><th>Day</th>${[1,2,3,4,5,6,7,8].map(p=>`<th>P${p}</th>`).join('')}</tr></thead><tbody>${table}</tbody></table></div>`, { tenant_name: req.tenant.name }, false, req.lang));
+  res.send(renderPage('Timetable 📅', '<div class="card"><h1>School Timetable</h1><a href="/app/timetable/add" class="btn btn-green">Add Slot</a><table style="margin-top:16px;font-size:12px"><thead><tr><th>Day</th><th>P1</th><th>P2</th><th>P3</th><th>P4</th><th>P5</th><th>P6</th><th>P7</th><th>P8</th></tr></thead><tbody>' + table + '</tbody></table></div>', { tenant_name: req.tenant.name }, false, req.lang));
 });
 app.get('/app/timetable/add', requireAuth, requireStaff, (req, res) => {
   res.send(renderPage('Add Slot', `<div class="card" style="max-width:500px"><h1>📅 Add Timetable Slot</h1><form method="POST" action="/app/timetable/add"><select name="day" required><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option></select><input name="period" type="number" min="1" max="8" placeholder="Period 1-8" required><input name="subject" placeholder="Subject" required><input name="class" placeholder="Class" required><input name="teacher" placeholder="Teacher" required><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }, false, req.lang));
@@ -458,7 +476,7 @@ app.get('/app/chatbot', requireAuth, (req, res) => {
   res.send(renderPage('AI Assistant 🤖', `
     <div class="card" style="max-width:700px;margin:0 auto">
       <h1>🤖 School AI Assistant</h1>
-      <p style="color:#64748b;margin-bottom:16px">Ask about balances, attendance, or fees (e.g. "What's John's balance?")</p>
+      <p style="color:#64748b;margin-bottom:16px">Ask about balances, attendance, or fees</p>
       <div class="chat" id="chat"><div class="msg msg-ai">Hello! How can I help you today?</div></div>
       <form onsubmit="sendMsg(event)" style="display:flex;gap:12px"><input id="msg" placeholder="Type a question..." required style="margin:0;flex:1"><button class="btn" type="submit">Send</button></form>
     </div>
@@ -466,9 +484,9 @@ app.get('/app/chatbot', requireAuth, (req, res) => {
       async function sendMsg(e){
         e.preventDefault();
         const m=document.getElementById('msg').value;
-        document.getElementById('chat').innerHTML+=\`<div class="msg msg-user">\${m}</div>\`;
+        document.getElementById('chat').innerHTML+='<div class="msg msg-user">'+m+'</div>';
         document.getElementById('msg').value='';
-        document.getElementById('chat').innerHTML+=\`<div class="msg msg-ai">Typing...</div>\`;
+        document.getElementById('chat').innerHTML+='<div class="msg msg-ai">Typing...</div>';
         const r=await fetch('/api/chatbot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:m})});
         const d=await r.json();
         document.getElementById('chat').lastChild.innerHTML=d.reply;
@@ -477,7 +495,6 @@ app.get('/app/chatbot', requireAuth, (req, res) => {
     </script>
   `, { tenant_name: req.tenant.name }, false, req.lang));
 });
-
 app.post('/api/chatbot', requireAuth, checkDb, async (req, res) => {
   const msg = req.body.message.toLowerCase();
   let reply = "I can help with balances, attendance, and fees. Try: 'John Doe balance'";
