@@ -41,7 +41,7 @@ function renderPage(title, content, user = null, isPublic = false) {
 }
 
 async function checkDb(req, res, next) {
-  if (!dbReady) return res.status(503).send(`<div style="text-align:center;padding:50px;font-family:sans-serif"><h1>⏳ Waking up database...</h1><p>Please wait and <a href="${req.url}">refresh</a>.</p></div>`);
+  if (!dbReady) return res.status(503).send(`<div style="text-align:center;padding:50px;font-family:sans-serif"><h1>⏳ Waking up database...</h1><p>Please wait 10-20 seconds and <a href="${req.url}">refresh</a>.</p></div>`);
   next();
 }
 
@@ -53,25 +53,26 @@ const requireAuth = (req, res, next) => {
 };
 
 const requireRole = (role) => (req, res, next) => {
-  if (!req.session.user || req.session.user.role !== role) return res.status(403).send('Forbidden');
+  if (!req.session.user || req.session.user.role !== role) return res.status(403).send(renderPage('Forbidden', '<div class="card"><h1>403 Forbidden</h1></div>', { tenant_name: req.tenant?.name }));
   next();
 };
 
 const requireStaff = (req, res, next) => {
-  if (!req.session.user || !['admin', 'super_admin', 'teacher'].includes(req.session.user.role)) return res.status(403).send('Forbidden');
+  if (!req.session.user || !['admin', 'super_admin', 'teacher'].includes(req.session.user.role)) return res.status(403).send(renderPage('Forbidden', '<div class="card"><h1>403 Forbidden</h1></div>', { tenant_name: req.tenant?.name }));
   next();
 };
 
 const requireAdmin = (req, res, next) => {
-  if (!req.session.user || !['admin', 'super_admin'].includes(req.session.user.role)) return res.status(403).send('Forbidden');
+  if (!req.session.user || !['admin', 'super_admin'].includes(req.session.user.role)) return res.status(403).send(renderPage('Forbidden', '<div class="card"><h1>403 Forbidden - Admins Only</h1></div>', { tenant_name: req.tenant?.name }));
   next();
 };
 
 async function sendSMS(phone, message) {
-  if (SMS_CONFIG.apiKey === 'demo') { console.log(`[SMS DEMO] ${phone}: ${message}`); return; }
+  if (SMS_CONFIG.apiKey === 'demo') { console.log(`[SMS DEMO] ${phone}: ${message}`); return { success: true }; }
   try {
     await axios.post('https://api.africastalking.com/version1/messaging', `username=${SMS_CONFIG.username}&to=${phone}&message=${encodeURIComponent(message)}&from=${SMS_CONFIG.senderId}`, { headers: { 'apiKey': SMS_CONFIG.apiKey, 'Content-Type': 'application/x-www-form-urlencoded' } });
-  } catch (e) { console.error('SMS Error:', e.message); }
+    return { success: true };
+  } catch (e) { console.error('SMS Error:', e.message); return { success: false }; }
 }
 
 async function sendBulkSMS(tenantId, message) {
@@ -111,14 +112,14 @@ app.post('/forgot-password', checkDb, async (req, res) => {
       await pool.query('INSERT INTO password_resets (email, token, expires_at) VALUES ($1, $2, NOW() + INTERVAL \'1 hour\')', [req.body.email, token]);
       console.log(`🔑 RESET LINK: https://${req.headers.host}/reset-password/${token}`);
     }
-    res.send(renderPage('Sent', '<div class="card" style="max-width:400px;margin:60px auto;text-align:center"><h1>Check Render Logs</h1><p>If valid, reset link was printed to logs.</p><a href="/login" class="btn">Login</a></div>'));
+    res.send(renderPage('Sent', '<div class="card" style="max-width:400px;margin:60px auto;text-align:center"><h1>Check Render Logs</h1><p>If email exists, reset link was printed to logs.</p><a href="/login" class="btn">Login</a></div>'));
   } catch (e) { res.status(500).send("Error"); }
 });
 
 app.get('/reset-password/:token', checkDb, async (req, res) => {
   const reset = await pool.query('SELECT * FROM password_resets WHERE token = $1 AND expires_at > NOW() AND used = false', [req.params.token]);
   if (!reset.rows[0]) return res.send(renderPage('Expired', '<div class="card"><h1>Invalid Link</h1></div>'));
-  res.send(renderPage('New Password', `<div class="card" style="max-width:400px;margin:60px auto"><form method="POST" action="/reset-password/${req.params.token}"><input name="password" type="password" required><button class="btn btn-green" style="width:100%">Reset</button></form></div>`));
+  res.send(renderPage('New Password', `<div class="card" style="max-width:400px;margin:60px auto"><form method="POST" action="/reset-password/${req.params.token}"><input name="password" type="password" placeholder="New Password" required><button class="btn btn-green" style="width:100%">Reset</button></form></div>`));
 });
 
 app.post('/reset-password/:token', checkDb, async (req, res) => {
@@ -132,9 +133,9 @@ app.post('/reset-password/:token', checkDb, async (req, res) => {
   } catch (e) { res.status(500).send("Error"); }
 });
 
-// --- PARENT ---
+// --- PARENT PORTAL ---
 app.get('/parent/login', (req, res) => {
-  res.send(renderPage('Parent Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>Parent Login</h1><form method="POST" action="/parent/send-otp"><input name="phone" placeholder="07XX" required /><button type="submit" class="btn" style="width:100%">Send OTP</button></form></div>'));
+  res.send(renderPage('Parent Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>Parent Login</h1><form method="POST" action="/parent/send-otp"><input name="phone" placeholder="07XXXXXXXX" required /><button type="submit" class="btn" style="width:100%">Send OTP</button></form></div>'));
 });
 
 app.post('/parent/send-otp', checkDb, async (req, res) => {
@@ -211,7 +212,7 @@ app.get('/super-admin/users', requireAuth, requireRole('super_admin'), checkDb, 
 
 // --- CREATE SITE ---
 app.get('/create-site', (req, res) => {
-  res.send(renderPage('Create', '<div class="card" style="max-width:500px;margin:40px auto"><h1>Create School</h1><form method="POST" action="/create-site"><input name="name" required><input name="subdomain" required><input name="admin_email" type="email" required><input name="admin_password" type="password" required><input name="momo_number"><button class="btn" style="width:100%">Create</button></form></div>'));
+  res.send(renderPage('Create', '<div class="card" style="max-width:500px;margin:40px auto"><h1>Create School</h1><form method="POST" action="/create-site"><input name="name" placeholder="School Name" required><input name="subdomain" placeholder="subdomain" required><input name="admin_email" type="email" placeholder="Admin Email" required><input name="admin_password" type="password" placeholder="Admin Password" required><input name="momo_number" placeholder="MoMo Number"><button class="btn" style="width:100%">Create</button></form></div>'));
 });
 
 app.post('/create-site', checkDb, async (req, res) => {
@@ -238,14 +239,14 @@ app.get('/app', requireAuth, checkDb, async (req, res) => {
     const students = await pool.query('SELECT COUNT(*)::int AS c FROM students WHERE tenant_id=$1', [req.tenantId]);
     const fees = await pool.query('SELECT COALESCE(SUM(paid),0)::numeric AS total FROM fees WHERE tenant_id=$1', [req.tenantId]);
     const att = await pool.query('SELECT COUNT(*)::int AS c FROM attendance WHERE tenant_id=$1 AND date=CURRENT_DATE AND status=\'present\'', [req.tenantId]);
-    res.send(renderPage('Dashboard', `<div class="stats"><div class="stat-card"><div>Students</div><div class="stat-num">${students.rows[0].c}</div></div><div class="stat-card"><div>Fees</div><div class="stat-num">UGX ${fees.rows[0].total}</div></div><div class="stat-card"><div>Present</div><div class="stat-num">${att.rows[0].c}</div></div></div><div class="card"><h1>${esc(req.tenant.name)}</h1><br><a href="/app/students/add" class="btn btn-green">Add Student</a> <a href="/app/fees/add" class="btn">Record Fee</a> <a href="/app/attendance/mark" class="btn">Attendance</a> <a href="/app/grades/add" class="btn">Grades</a> <a href="/app/users/add" class="btn btn-orange">Add Teacher</a></div>`, { tenant_name: req.tenant.name }));
+    res.send(renderPage('Dashboard', `<div class="stats"><div class="stat-card"><div>Students</div><div class="stat-num">${students.rows[0].c}</div></div><div class="stat-card"><div>Fees Collected</div><div class="stat-num">UGX ${fees.rows[0].total}</div></div><div class="stat-card"><div>Present Today</div><div class="stat-num">${att.rows[0].c}</div></div></div><div class="card"><h1>${esc(req.tenant.name)}</h1><br><a href="/app/students/add" class="btn btn-green">Add Student</a> <a href="/app/fees/add" class="btn">Record Fee</a> <a href="/app/attendance/mark" class="btn">Attendance</a> <a href="/app/grades/add" class="btn">Grades</a> <a href="/app/users/add" class="btn btn-orange">Add Teacher</a></div>`, { tenant_name: req.tenant.name }));
   } catch (e) { res.status(500).send("Error"); }
 });
 
 // --- SETTINGS ---
 app.get('/app/settings', requireAuth, requireAdmin, checkDb, async (req, res) => {
   const s = (await pool.query('SELECT * FROM settings WHERE tenant_id=$1', [req.tenantId])).rows[0];
-  res.send(renderPage('Settings', `<div class="card" style="max-width:500px"><h1>School Settings</h1><form method="POST" action="/app/settings"><input name="school_motto" value="${esc(s.school_motto)}" placeholder="Motto"><textarea name="about_text" rows="4">${esc(s.about_text)}</textarea><input name="contact_email" value="${esc(s.contact_email)}"><input name="whatsapp_number" value="${esc(s.whatsapp_number)}"><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }));
+  res.send(renderPage('Settings', `<div class="card" style="max-width:500px"><h1>School Settings</h1><form method="POST" action="/app/settings"><input name="school_motto" value="${esc(s.school_motto)}" placeholder="School Motto"><textarea name="about_text" rows="4" placeholder="About the school">${esc(s.about_text)}</textarea><input name="contact_email" value="${esc(s.contact_email)}" placeholder="Contact Email"><input name="whatsapp_number" value="${esc(s.whatsapp_number)}" placeholder="WhatsApp Number"><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }));
 });
 
 app.post('/app/settings', requireAuth, requireAdmin, checkDb, async (req, res) => {
@@ -268,13 +269,13 @@ app.get('/app/students/export', requireAuth, checkDb, async (req, res) => {
 });
 
 app.get('/app/students/add', requireAuth, requireStaff, (req, res) => {
-  res.send(renderPage('Add', `<div class="card" style="max-width:500px"><h1>Add Student</h1><form method="POST" action="/app/students/add"><input name="name" required><input name="class"><input name="guardian_name"><input name="guardian_phone"><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }));
+  res.send(renderPage('Add', `<div class="card" style="max-width:500px"><h1>Add Student</h1><form method="POST" action="/app/students/add"><input name="name" placeholder="Student Name" required><input name="class" placeholder="Class e.g. P.3"><input name="guardian_name" placeholder="Guardian Name"><input name="guardian_phone" placeholder="07XXXXXXXX"><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }));
 });
 
 app.post('/app/students/add', requireAuth, requireStaff, checkDb, async (req, res) => {
   try {
     await pool.query('INSERT INTO students (tenant_id, name, class, guardian_name, guardian_phone) VALUES ($1,$2,$3,$4,$5)', [req.tenantId, req.body.name, req.body.class, req.body.guardian_name, req.body.guardian_phone]);
-    if (req.body.guardian_phone) await sendSMS(req.body.guardian_phone, `${req.body.name} registered.`);
+    if (req.body.guardian_phone) await sendSMS(req.body.guardian_phone, `${req.body.name} registered at ${req.tenant.name}.`);
     res.redirect('/app/students');
   } catch (e) { res.status(500).send("Error"); }
 });
@@ -304,11 +305,11 @@ app.get('/app/students/report/:id', requireAuth, checkDb, async (req, res) => {
     const fees = await pool.query('SELECT * FROM fees WHERE student_id=$1 ORDER BY year DESC', [req.params.id]);
     const att = await pool.query('SELECT COUNT(*) FILTER (WHERE status=\'present\') as present, COUNT(*) as total FROM attendance WHERE student_id=$1', [req.params.id]);
     const attPercent = att.rows[0].total > 0 ? Math.round((att.rows[0].present / att.rows[0].total) * 100) : 0;
-    
+
     res.send(renderPage(`Report: ${s.name}`, `
       <div class="card" style="text-align:center"><h1>${esc(req.tenant.name)}</h1><h2>STUDENT REPORT CARD</h2><p><strong>Name:</strong> ${esc(s.name)} | <strong>Class:</strong> ${esc(s.class)} | <strong>Balance:</strong> UGX ${s.balance}</p><p><strong>Attendance:</strong> ${attPercent}% (${att.rows[0].present}/${att.rows[0].total} days)</p></div>
-      <div class="card"><h3>Academics</h3><table><thead><tr><th>Subject</th><th>Score</th><th>Term</th><th>Year</th></tr></thead><tbody>${grades.rows.map(g => `<tr><td>${esc(g.subject)}</td><td>${g.score}</td><td>${esc(g.term)}</td><td>${g.year}</td></tr>`).join('')||'<tr><td colspan="4">No grades</td></tr>'}</tbody></table></div>
-      <div class="card"><h3>Fees</h3><table><thead><tr><th>Term</th><th>Due</th><th>Paid</th><th>Balance</th></tr></thead><tbody>${fees.rows.map(f => `<tr><td>${esc(f.term)} ${f.year}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td></tr>`).join('')||'<tr><td colspan="4">No fees</td></tr>'}</tbody></table></div>
+      <div class="card"><h3>Academic Performance</h3><table><thead><tr><th>Subject</th><th>Score</th><th>Term</th><th>Year</th></tr></thead><tbody>${grades.rows.map(g => `<tr><td>${esc(g.subject)}</td><td>${g.score}</td><td>${esc(g.term)}</td><td>${g.year}</td></tr>`).join('')||'<tr><td colspan="4">No grades</td></tr>'}</tbody></table></div>
+      <div class="card"><h3>Fee Statement</h3><table><thead><tr><th>Term</th><th>Due</th><th>Paid</th><th>Balance</th></tr></thead><tbody>${fees.rows.map(f => `<tr><td>${esc(f.term)} ${f.year}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td></tr>`).join('')||'<tr><td colspan="4">No fees</td></tr>'}</tbody></table></div>
       <div class="card" style="text-align:center"><button onclick="window.print()" class="btn btn-green">Print Report Card</button></div>
     `, { tenant_name: req.tenant.name }));
   } catch (e) { res.status(500).send("Error"); }
@@ -322,7 +323,7 @@ app.get('/app/fees', requireAuth, checkDb, async (req, res) => {
 
 app.get('/app/fees/add', requireAuth, requireStaff, checkDb, async (req, res) => {
   const students = await pool.query('SELECT id, name FROM students WHERE tenant_id=$1', [req.tenantId]);
-  res.send(renderPage('Pay', `<div class="card" style="max-width:500px"><h1>Record Payment</h1><form method="POST" action="/app/fees/add"><select name="student_id" required><option value="">Select</option>${students.rows.map(s => `<option value="${s.id}" ${req.query.student_id==s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select><input name="amount" type="number" required><input name="paid" type="number" required><input name="term"><input name="year" type="number" value="${new Date().getFullYear()}"><select name="payment_method"><option>Cash</option><option>MoMo</option></select><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }));
+  res.send(renderPage('Pay', `<div class="card" style="max-width:500px"><h1>Record Payment</h1><form method="POST" action="/app/fees/add"><select name="student_id" required><option value="">Select Student</option>${students.rows.map(s => `<option value="${s.id}" ${req.query.student_id==s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select><input name="amount" type="number" placeholder="Amount Due" required><input name="paid" type="number" placeholder="Amount Paid" required><input name="term" placeholder="Term e.g. Term 1"><input name="year" type="number" value="${new Date().getFullYear()}"><select name="payment_method"><option>Cash</option><option>MoMo</option><option>Bank</option></select><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }));
 });
 
 app.post('/app/fees/add', requireAuth, requireStaff, checkDb, async (req, res) => {
@@ -342,7 +343,7 @@ app.get('/app/fees/defaulters', requireAuth, requireAdmin, checkDb, async (req, 
   res.send(renderPage('Defaulters', `<div class="card"><h1>Fee Defaulters</h1><p><strong>Total Outstanding:</strong> UGX ${total}</p><table style="margin-top:16px"><thead><tr><th>Name</th><th>Class</th><th>Guardian</th><th>Balance</th></tr></thead><tbody>${rows.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.guardian_phone)}</td><td class="badge-red">UGX ${s.balance}</td></tr>`).join('')||'<tr><td colspan="4">No defaulters! 🎉</td></tr>'}</tbody></table></div>`, { tenant_name: req.tenant.name }));
 });
 
-// --- ATTENDANCE (Fixed HTML bug here) ---
+// --- ATTENDANCE ---
 app.get('/app/attendance', requireAuth, checkDb, async (req, res) => {
   const { rows } = await pool.query('SELECT a.*, s.name FROM attendance a JOIN students s ON a.student_id=s.id WHERE a.tenant_id=$1 AND a.date=CURRENT_DATE', [req.tenantId]);
   const t = rows.map(a => `<tr><td>${esc(a.name)}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td></tr>`).join('');
@@ -383,7 +384,7 @@ app.get('/app/grades', requireAuth, checkDb, async (req, res) => {
 
 app.get('/app/grades/add', requireAuth, requireStaff, checkDb, async (req, res) => {
   const students = await pool.query('SELECT id, name FROM students WHERE tenant_id=$1', [req.tenantId]);
-  res.send(renderPage('Add', `<div class="card" style="max-width:500px"><h1>Add Grade</h1><form method="POST" action="/app/grades/add"><select name="student_id" required><option value="">Select</option>${students.rows.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><input name="subject" required><input name="score" type="number" required><input name="term"><input name="year" type="number" value="${new Date().getFullYear()}"><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }));
+  res.send(renderPage('Add', `<div class="card" style="max-width:500px"><h1>Add Grade</h1><form method="POST" action="/app/grades/add"><select name="student_id" required><option value="">Select Student</option>${students.rows.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><input name="subject" placeholder="Subject" required><input name="score" type="number" placeholder="Score" required><input name="term" placeholder="Term"><input name="year" type="number" value="${new Date().getFullYear()}"><button class="btn btn-green" style="width:100%">Save</button></form></div>`, { tenant_name: req.tenant.name }));
 });
 
 app.post('/app/grades/add', requireAuth, requireStaff, checkDb, async (req, res) => {
@@ -398,7 +399,7 @@ app.post('/app/grades/add', requireAuth, requireStaff, checkDb, async (req, res)
 // --- BULK SMS ---
 app.get('/app/sms/bulk', requireAuth, requireAdmin, checkDb, async (req, res) => {
   const count = (await pool.query('SELECT COUNT(DISTINCT guardian_phone) as c FROM students WHERE tenant_id=$1 AND guardian_phone IS NOT NULL', [req.tenantId])).rows[0].c;
-  res.send(renderPage('SMS', `<div class="card" style="max-width:600px"><h1>Bulk SMS</h1><p>Will send to ${count} guardians</p><form method="POST" action="/app/sms/bulk"><textarea name="message" rows="5" required></textarea><button class="btn btn-green" style="width:100%">Send to All</button></form></div>`, { tenant_name: req.tenant.name }));
+  res.send(renderPage('SMS', `<div class="card" style="max-width:600px"><h1>Bulk SMS</h1><p>Will send to ${count} guardians</p><form method="POST" action="/app/sms/bulk"><textarea name="message" rows="5" placeholder="Type your message..." required></textarea><button class="btn btn-green" style="width:100%">Send to All</button></form></div>`, { tenant_name: req.tenant.name }));
 });
 
 app.post('/app/sms/bulk', requireAuth, requireAdmin, checkDb, async (req, res) => {
@@ -408,7 +409,7 @@ app.post('/app/sms/bulk', requireAuth, requireAdmin, checkDb, async (req, res) =
 
 // --- TEACHER ACCOUNTS ---
 app.get('/app/users/add', requireAuth, requireAdmin, (req, res) => {
-  res.send(renderPage('Add User', `<div class="card" style="max-width:500px"><h1>Add Teacher/Admin</h1><form method="POST" action="/app/users/add"><input name="email" type="email" required><input name="password" type="password" required><select name="role"><option value="teacher">Teacher</option><option value="admin">Admin</option></select><button class="btn btn-green" style="width:100%">Create</button></form></div>`, { tenant_name: req.tenant.name }));
+  res.send(renderPage('Add User', `<div class="card" style="max-width:500px"><h1>Add Teacher/Admin</h1><form method="POST" action="/app/users/add"><input name="email" type="email" placeholder="Email" required><input name="password" type="password" placeholder="Password" required><select name="role"><option value="teacher">Teacher</option><option value="admin">Admin</option></select><button class="btn btn-green" style="width:100%">Create</button></form><p style="font-size:12px;color:#64748b">Teachers: attendance + grades only. Admins: full access.</p></div>`, { tenant_name: req.tenant.name }));
 });
 
 app.post('/app/users/add', requireAuth, requireAdmin, checkDb, async (req, res) => {
@@ -440,13 +441,18 @@ app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card" 
 // --- SERVER START & BACKGROUND DB INIT ---
 app.listen(PORT, () => {
   console.log(`🚀 SERVER LIVE ON PORT ${PORT}`);
-  
-  // CRITICAL: Session is initialized here so it doesn't block Render from opening the port
+
+  // CRITICAL: Session initialized here so pgSession doesn't block Render from opening the port
   app.use(session({
     store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
-    secret: process.env.SESSION_SECRET || 'ssewasswa-secret',
+    secret: process.env.SESSION_SECRET || 'ssewasswa-secret-change-in-prod',
     resave: false, saveUninitialized: false,
-    cookie: { secure: false, httpOnly: true, maxAge: 86400000, sameSite: 'lax' }
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+      maxAge: 86400000,
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    }
   }));
 
   if (process.env.DATABASE_URL) {
