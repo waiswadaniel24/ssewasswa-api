@@ -766,7 +766,9 @@ async function initDB() {
     await client.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT \'free\'');
     await client.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS momo_number TEXT');
     await client.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS signup_code TEXT');
-    await client.query('CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT \'staff\', tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, full_name TEXT, phone TEXT, approved BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())');
+   await client.query('CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT \'staff\', tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, full_name TEXT, phone TEXT, created_at TIMESTAMP DEFAULT NOW())');
+   await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT false');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_until TIMESTAMP');
     await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_until TIMESTAMP');
     await client.query('CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS site_name TEXT DEFAULT \'SSEWASSWA\'');
@@ -801,7 +803,10 @@ async function initDB() {
     await client.query('CREATE TABLE IF NOT EXISTS withdrawals (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, amount NUMERIC NOT NULL, phone TEXT, fee NUMERIC DEFAULT 0, net_amount NUMERIC DEFAULT 0, status TEXT DEFAULT \'pending\', created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE IF NOT EXISTS viral_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER, type TEXT NOT NULL, reward_amount NUMERIC NOT NULL, target_action TEXT NOT NULL, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE IF NOT EXISTS viral_shares (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, platform TEXT NOT NULL, link_shared TEXT NOT NULL, clicks INTEGER DEFAULT 0, conversions INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())');
-    await client.query('INSERT INTO platform_wallet (id,balance) VALUES (1,0) ON CONFLICT DO NOTHING');
+   await client.query('CREATE TABLE IF NOT EXISTS platform_wallet (id SERIAL PRIMARY KEY, balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())');
+await client.query('ALTER TABLE platform_wallet ADD COLUMN IF NOT EXISTS developer_momo TEXT DEFAULT \'0789736737\'');
+await client.query('CREATE TABLE IF NOT EXISTS session (sid VARCHAR(255) NOT NULL, sess JSON NOT NULL, expire TIMESTAMP(6) NOT NULL, PRIMARY KEY (sid))');
+await client.query('CREATE INDEX IF NOT EXISTS IDX_session_expire ON session (expire)');
     const tenant = await client.query('INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (subdomain) DO NOTHING RETURNING id', ['SSEWASSWA FOUNDATION UGANDA','main','enterprise','0789736737','SSEWASSWA2024']);
     if (tenant.rows.length > 0) {
       const tid = tenant.rows[0].id;
