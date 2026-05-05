@@ -24,20 +24,14 @@ const SMS_CONFIG = { apiKey: process.env.SMS_API_KEY || 'demo', username: proces
 const MOMO_CONFIG = { apiKey: process.env.MOMO_API_KEY || 'demo' };
 const WHATSAPP_CONFIG = { token: process.env.WHATSAPP_TOKEN || 'demo', phoneId: process.env.WHATSAPP_PHONE_ID || 'demo' };
 
-// ============================================
-// DATABASE CONFIGURATION - FIXED
-// ============================================
 if (!process.env.DATABASE_URL) {
-  console.error('❌ FATAL: DATABASE_URL environment variable is NOT set!');
-  console.error('Please add DATABASE_URL in Render > Environment');
+  console.error('WARNING: DATABASE_URL environment variable is NOT set!');
 }
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' 
-    ? { rejectUnauthorized: false } 
-    : false,
-  connectionTimeoutMillis: 60000,  // 60 seconds
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 60000,
   query_timeout: 60000,
   statement_timeout: 60000,
   max: 5,
@@ -45,29 +39,15 @@ const pool = new Pool({
   allowExitOnIdle: true
 });
 
-// Log pool errors
 pool.on('error', (err) => {
-  console.error('❌ Pool error:', err.message);
+  console.error('Pool error:', err.message);
 });
 
-// Test pool connectivity
-pool.on('connect', () => {
-  console.log('✅ Pool: New client connected');
-});
-
-pool.on('remove', () => {
-  console.log('🔄 Pool: Client removed');
-});
-
-// ============================================
-// MIDDLEWARE
-// ============================================
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.set('trust proxy', 1);
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Session middleware - only initialize if DB is ready
 let sessionMiddleware = null;
 function setupSession() {
   sessionMiddleware = session({
@@ -75,12 +55,7 @@ function setupSession() {
     secret: process.env.SESSION_SECRET || 'ssewasswa-' + crypto.randomBytes(32).toString('hex'),
     resave: false,
     saveUninitialized: false,
-    cookie: { 
-      secure: process.env.NODE_ENV === 'production', 
-      httpOnly: true, 
-      maxAge: 86400000, 
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' 
-    }
+    cookie: { secure: process.env.NODE_ENV === 'production', httpOnly: true, maxAge: 86400000, sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' }
   });
   app.use(sessionMiddleware);
 }
@@ -91,14 +66,9 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY || 'SUbOaqB2BVzpHaHQW-rqd3N0_2m2Uy8a8gX5LqJ5oUY'
 );
 
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
 function esc(s) { if (!s) return ''; return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function isValidPhone(p) { return /^(\+?256|0)[7]\d{8}$/.test((p || '').replace(/\s/g, '')); }
 function ah(fn) { return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next); }
-
-// Sleep helper for retries
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function renderPage(title, content, user, isPublic, lang) {
@@ -112,78 +82,19 @@ function renderPage(title, content, user, isPublic, lang) {
   return '<!doctype html><html lang="'+lang+'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+'</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b;min-height:100vh}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-orange{background:linear-gradient(135deg,#ea580c,#f97316)}.btn-purple{background:linear-gradient(135deg,#7c3aed,#8b5cf6)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b);color:#1e293b}input,select,textarea{width:100%;padding:12px 16px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0 12px;font-size:16px}input:focus{outline:none;border-color:#3b82f6}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:14px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}tr:hover{background:#f8fafc}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:24px;border-radius:16px;border:1px solid #e2e8f0;text-align:center}.stat-num{font-size:36px;font-weight:bold;color:#1e40af}.badge{padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.hero{background:linear-gradient(135deg,#1e40af,#3b82f6,#60a5fa);color:white;padding:60px 20px;text-align:center;border-radius:20px;margin-bottom:30px}.hero h1{font-size:48px;margin-bottom:16px}.card-img{width:100%;height:200px;object-fit:cover;border-radius:12px 12px 0 0}@media print{.btn,nav{display:none!important}body{padding:0;background:white}}@media(max-width:768px){.hero h1{font-size:32px}.stats{grid-template-columns:repeat(2,1fr)}}</style></head><body>'+nav+'<main class="container">'+content+'</main><footer style="text-align:center;padding:30px;font-size:12px;color:#64748b;background:white;border-top:1px solid #e2e8f0"><p>&copy; '+new Date().getFullYear()+' SSEWASSWA Platform</p></footer></body></html>';
 }
 
-async function checkDb(req, res, next) { 
-  if (!dbReady) return res.status(503).send('<div style="text-align:center;padding:100px"><h1>Starting...</h1><p><a href="'+req.url+'">Refresh</a></p></div>'); 
-  next(); 
-}
+async function checkDb(req, res, next) { if (!dbReady) return res.status(503).send('<div style="text-align:center;padding:100px"><h1>Starting...</h1><p><a href="'+req.url+'">Refresh</a></p></div>'); next(); }
+const requireAuth = (req, res, next) => { if (!req.session || !req.session.user) return res.redirect('/login'); req.tenant = req.session.tenant; req.tenantId = req.session.tenant ? req.session.tenant.id : null; req.lang = req.query.lang || 'en'; next(); };
+const requireRole = (role) => (req, res, next) => { if (!req.session || !req.session.user || req.session.user.role !== role) return res.status(403).send('403'); next(); };
+const requireStaff = (req, res, next) => { if (!req.session || !req.session.user || !['admin','super_admin','teacher'].includes(req.session.user.role)) return res.status(403).send('403'); next(); };
+const requireAdmin = (req, res, next) => { if (!req.session || !req.session.user || !['admin','super_admin'].includes(req.session.user.role)) return res.status(403).send('403'); next(); };
 
-const requireAuth = (req, res, next) => { 
-  if (!req.session || !req.session.user) return res.redirect('/login'); 
-  req.tenant = req.session.tenant; 
-  req.tenantId = req.session.tenant ? req.session.tenant.id : null; 
-  req.lang = req.query.lang || 'en'; 
-  next(); 
-};
+async function sendSMS(phone, msg) { if (SMS_CONFIG.apiKey === 'demo') { console.log('[SMS]', phone, msg); return; } try { await axios.post('https://api.africastalking.com/version1/messaging', 'username='+SMS_CONFIG.username+'&to='+phone+'&message='+encodeURIComponent(msg)+'&from='+SMS_CONFIG.senderId, { headers: { 'apiKey': SMS_CONFIG.apiKey, 'Content-Type': 'application/x-www-form-urlencoded' } }); } catch(e) { console.error('SMS Error:', e.message); } }
+async function sendWhatsApp(phone, msg) { if (WHATSAPP_CONFIG.token === 'demo') { console.log('[WA]', phone, msg); return; } try { await axios.post('https://graph.facebook.com/v18.0/'+WHATSAPP_CONFIG.phoneId+'/messages', { messaging_product: 'whatsapp', to: phone, text: { body: msg } }, { headers: { 'Authorization': 'Bearer '+WHATSAPP_CONFIG.token } }); } catch(e) { console.error('WA Error:', e.message); } }
+async function addBonus(userId, tenantId, amount, type, desc, meta) { meta = meta || {}; try { await pool.query('INSERT INTO bonus_earnings (user_id,tenant_id,amount,type,description,metadata) VALUES ($1,$2,$3,$4,$5,$6)', [userId,tenantId,amount,type,desc,JSON.stringify(meta)]); await pool.query('UPDATE wallets SET balance=balance+$1,updated_at=NOW() WHERE user_email=$2', [amount,userId]); } catch(e) { console.error('Bonus error:', e.message); } }
+async function addDevCommission(amount, type, desc, ref) { try { await pool.query('INSERT INTO developer_revenue (amount,type,description,reference_id) VALUES ($1,$2,$3,$4)', [amount,type,desc,ref]); await pool.query('UPDATE platform_wallet SET balance=balance+$1,updated_at=NOW() WHERE id=1', [amount]); } catch(e) { console.error('Comm error:', e.message); } }
+async function sendPushToUser(email, title, body) { try { const subs = await pool.query('SELECT endpoint,keys FROM push_subscriptions WHERE user_email=$1', [email]); for (const sub of subs.rows) { try { await webpush.sendNotification({endpoint:sub.endpoint,keys:sub.keys}, JSON.stringify({title,body})); } catch(e) {} } } catch(e) {} }
 
-const requireRole = (role) => (req, res, next) => { 
-  if (!req.session || !req.session.user || req.session.user.role !== role) return res.status(403).send('403'); 
-  next(); 
-};
-
-const requireStaff = (req, res, next) => { 
-  if (!req.session || !req.session.user || !['admin','super_admin','teacher'].includes(req.session.user.role)) return res.status(403).send('403'); 
-  next(); 
-};
-
-const requireAdmin = (req, res, next) => { 
-  if (!req.session || !req.session.user || !['admin','super_admin'].includes(req.session.user.role)) return res.status(403).send('403'); 
-  next(); 
-};
-
-async function sendSMS(phone, msg) { 
-  if (SMS_CONFIG.apiKey === 'demo') { console.log('[SMS]', phone, msg); return; } 
-  try { 
-    await axios.post('https://api.africastalking.com/version1/messaging', 'username='+SMS_CONFIG.username+'&to='+phone+'&message='+encodeURIComponent(msg)+'&from='+SMS_CONFIG.senderId, { headers: { 'apiKey': SMS_CONFIG.apiKey, 'Content-Type': 'application/x-www-form-urlencoded' } }); 
-  } catch(e) { console.error('SMS Error:', e.message); } 
-}
-
-async function sendWhatsApp(phone, msg) { 
-  if (WHATSAPP_CONFIG.token === 'demo') { console.log('[WA]', phone, msg); return; } 
-  try { 
-    await axios.post('https://graph.facebook.com/v18.0/'+WHATSAPP_CONFIG.phoneId+'/messages', { messaging_product: 'whatsapp', to: phone, text: { body: msg } }, { headers: { 'Authorization': 'Bearer '+WHATSAPP_CONFIG.token } }); 
-  } catch(e) { console.error('WA Error:', e.message); } 
-}
-
-async function addBonus(userId, tenantId, amount, type, desc, meta) { 
-  meta = meta || {}; 
-  try { 
-    await pool.query('INSERT INTO bonus_earnings (user_id,tenant_id,amount,type,description,metadata) VALUES ($1,$2,$3,$4,$5,$6)', [userId,tenantId,amount,type,desc,JSON.stringify(meta)]); 
-    await pool.query('UPDATE wallets SET balance=balance+$1,updated_at=NOW() WHERE user_email=$2', [amount,userId]); 
-  } catch(e) { console.error('Bonus error:', e.message); } 
-}
-
-async function addDevCommission(amount, type, desc, ref) { 
-  try { 
-    await pool.query('INSERT INTO developer_revenue (amount,type,description,reference_id) VALUES ($1,$2,$3,$4)', [amount,type,desc,ref]); 
-    await pool.query('UPDATE platform_wallet SET balance=balance+$1,updated_at=NOW() WHERE id=1', [amount]); 
-  } catch(e) { console.error('Comm error:', e.message); } 
-}
-
-async function sendPushToUser(email, title, body) { 
-  try { 
-    const subs = await pool.query('SELECT endpoint,keys FROM push_subscriptions WHERE user_email=$1', [email]); 
-    for (const sub of subs.rows) { 
-      try { await webpush.sendNotification({endpoint:sub.endpoint,keys:sub.keys}, JSON.stringify({title,body})); } catch(e) {} 
-    } 
-  } catch(e) {} 
-}
-
-// ============================================
-// ROUTES
-// ============================================
-app.get('/api/vapid-public-key', (req, res) => { 
-  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAK1sTsE0ip-4_QtQvxZBG0GZsFhJ8jmJ4MhQxKqYdJm5gA' }); 
-});
+app.get('/api/vapid-public-key', (req, res) => { res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAK1sTsE0ip-4_QtQvxZBG0GZsFhJ8jmJ4MhQxKqYdJm5gA' }); });
 
 app.post('/api/subscribe', requireAuth, checkDb, ah(async (req, res) => {
   if (!req.body || !req.body.endpoint) return res.status(400).json({error:'Missing'});
@@ -205,7 +116,7 @@ app.post('/api/check-teacher-milestone', requireAuth, checkDb, ah(async (req, re
   const paid = (await pool.query("SELECT id FROM bonus_earnings WHERE user_id=$1 AND type='teacher_milestone'", [req.session.user.email])).rows[0];
   if (cnt >= 10 && !paid) {
     await addBonus(req.session.user.email, req.tenantId, 5000, 'teacher_milestone', 'Added 10+ students');
-    await sendPushToUser(req.session.user.email, '🎉 Bonus!', 'UGX 5,000 earned!');
+    await sendPushToUser(req.session.user.email, 'Bonus!', 'UGX 5,000 earned!');
     const ref = (await pool.query('SELECT referrer_email FROM referral_stats WHERE referred_email=$1', [req.session.user.email])).rows[0];
     if (ref && ref.referrer_email) await addBonus(ref.referrer_email, req.tenantId, 2000, 'referral_bonus', 'Referral hit 10 students');
     return res.json({bonus:5000});
@@ -219,7 +130,7 @@ app.get('/', ah(async (req, res) => {
     const f = await parser.parseURL('https://feeds.bbci.co.uk/news/world/africa/rss.xml');
     news = f.items.slice(0,4).map(i => '<div class="card"><h4>'+esc(i.title)+'</h4><a href="/bonus/claim/news?url='+encodeURIComponent(i.link)+'" class="btn btn-orange" style="font-size:12px" target="_blank">Read +20</a></div>').join('');
   } catch(e) {}
-  res.send(renderPage('SSEWASSWA', '<div class="hero"><h1>Learn - Shop - Play - Earn</h1><div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap"><a href="/signup" class="btn btn-green" style="font-size:18px;padding:16px 32px">Get Started</a><a href="/demo" class="btn btn-gold" style="font-size:18px;padding:16px 32px">📞 Book Demo</a></div></div><div class="stats"><div class="stat-card"><div class="stat-num">50K+</div><div>Users</div></div><div class="stat-card"><div class="stat-num">500+</div><div>Schools</div></div><div class="stat-card"><div class="stat-num">10M+</div><div>Rewards</div></div></div><div class="grid"><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/learning\'"><div style="font-size:48px">📚</div><h3>Learning</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/store\'"><div style="font-size:48px">🛒</div><h3>Store</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/marketplace\'"><div style="font-size:48px">🏪</div><h3>Marketplace</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/videos\'"><div style="font-size:48px">🎬</div><h3>Videos</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/games\'"><div style="font-size:48px">🎮</div><h3>Games</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/learning/live\'"><div style="font-size:48px">🎥</div><h3>Live Classes</h3></div></div><div class="card"><h2>Latest News</h2><div class="grid">'+news+'</div></div>', null, true));
+  res.send(renderPage('SSEWASSWA', '<div class="hero"><h1>Learn - Shop - Play - Earn</h1><div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap"><a href="/signup" class="btn btn-green" style="font-size:18px;padding:16px 32px">Get Started</a><a href="/demo" class="btn btn-gold" style="font-size:18px;padding:16px 32px">Book Demo</a></div></div><div class="stats"><div class="stat-card"><div class="stat-num">50K+</div><div>Users</div></div><div class="stat-card"><div class="stat-num">500+</div><div>Schools</div></div><div class="stat-card"><div class="stat-num">10M+</div><div>Rewards</div></div></div><div class="grid"><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/learning\'"><div style="font-size:48px">📚</div><h3>Learning</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/store\'"><div style="font-size:48px">🛒</div><h3>Store</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/marketplace\'"><div style="font-size:48px">🏪</div><h3>Marketplace</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/videos\'"><div style="font-size:48px">🎬</div><h3>Videos</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/games\'"><div style="font-size:48px">🎮</div><h3>Games</h3></div><div class="card" style="text-align:center;cursor:pointer" onclick="location.href=\'/learning/live\'"><div style="font-size:48px">🎥</div><h3>Live Classes</h3></div></div><div class="card"><h2>Latest News</h2><div class="grid">'+news+'</div></div>', null, true));
 }));
 
 app.get('/login', (req, res) => {
@@ -241,7 +152,7 @@ app.get('/logout', (req, res) => { req.session.destroy(() => res.redirect('/logi
 app.get('/signup', (req, res) => {
   const ref = req.query.ref;
   res.send(renderPage('Signup', '<div class="card" style="max-width:500px;margin:40px auto"><div style="text-align:center;margin-bottom:24px"><h1>Join SSEWASSWA</h1><p class="badge badge-green">+100 UGX Bonus!</p></div><form method="POST" action="/signup">'+(ref?'<input type="hidden" name="ref" value="'+esc(ref)+'">':'')+'<input name="full_name" placeholder="Full Name" required><input name="email" type="email" placeholder="Email" required><input name="phone" placeholder="Phone (07XX)" required><input name="password" type="password" placeholder="Password" required minlength="6"><select name="role"><option value="student">Student</option><option value="parent">Parent</option><option value="teacher">Teacher (need code)</option></select><input name="school_code" placeholder="School Code (teachers only)"><button type="submit" class="btn btn-green" style="width:100%;font-size:18px;padding:16px">Create Account</button></form></div>', null, true));
-});
+}));
 
 app.post('/signup', checkDb, ah(async (req, res) => {
   try {
@@ -369,7 +280,7 @@ app.post('/bonus/withdraw', requireAuth, checkDb, ah(async (req, res) => {
 app.get('/bonus/affiliate', requireAuth, checkDb, (req, res) => {
   const link = 'https://'+req.headers.host+'/signup?ref='+encodeURIComponent(req.session.user.email);
   res.send(renderPage('Affiliate', '<div class="card" style="max-width:600px;margin:40px auto"><h1>Earn 200 UGX Per Referral</h1><div style="background:#f8fafc;padding:16px;border-radius:12px;margin:20px 0"><input value="'+esc(link)+'" readonly style="margin:0" id="affLink"><button class="btn" style="margin-top:8px" onclick="navigator.clipboard.writeText(document.getElementById(\'affLink\').value)">Copy</button></div></div>', {tenant_name:req.tenant.name}, false, req.lang));
-});
+}));
 
 app.get('/videos', (req, res) => {
   res.send(renderPage('Videos', '<div class="hero" style="padding:30px"><h1>Watch & Earn</h1></div><div class="grid"><div class="card" style="padding:0;overflow:hidden"><iframe width="100%" height="200" src="https://www.youtube.com/embed/dQw4w9WgXcQ" frameborder="0" allowfullscreen></iframe><div style="padding:16px"><h4>Math Basics</h4><a href="/bonus/claim/video/dQw4w9WgXcQ" class="btn btn-green">Claim +50</a></div></div></div>', null, true));
@@ -404,10 +315,11 @@ app.get('/bonus/claim/download', requireAuth, checkDb, ah(async (req, res) => {
 
 app.get('/games', (req, res) => {
   res.send(renderPage('Games', '<div class="hero" style="padding:30px"><h1>Games</h1></div><div class="grid"><div class="card" style="text-align:center"><div style="font-size:64px">🧮</div><h3>Math Quiz</h3><div class="badge badge-gold">+30 UGX</div>'+(req.session.user?'<a href="/games/play/quiz" class="btn btn-green" style="margin-top:12px">Play</a>':'')+'</div></div>', null, true));
-});
+}));
 
 app.get('/games/play/:id', requireAuth, checkDb, (req, res) => {
-  res.send(renderPage('Quiz', '<div class="card" style="max-width:600px;margin:40px auto"><h1>Math Quiz</h1><div id="qa" style="text-align:center;margin:20px 0"><div style="font-size:36px" id="q"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px"><button class="btn" onclick="ck(this)" id="a1"></button><button class="btn" onclick="ck(this)" id="a2"></button><button class="btn" onclick="ck(this)" id="a3"></button><button class="btn" onclick="ck(this)" id="a4"></button></div></div><div id="r" style="display:none;text-align:center"><h2>Done!</h2><p class="badge badge-green" style="font-size:18px">+30 UGX</p><a href="/games" class="btn" style="margin-top:20px">Back</a></div></div><script>let qs=[],i=0;for(let j=0;j<5;j++){let a=Math.floor(Math.random()*20)+1,b=Math.floor(Math.random()*20)+1,o=["+","-","×"][Math.floor(Math.random()*3)],ans=o==="+"?a+b:o==="-"?a-b:a*b;qs.push({q:a+" "+o+" "+b+" = ?",ans});}function sq(){if(i>=5){document.getElementById("qa").style.display="none";document.getElementById("r").style.display="block";fetch("/bonus/claim/game/quiz").catch(()=>{});return;}let c=qs[i];document.getElementById("q").textContent=c.q;let opts=[c.ans];while(opts.length<4){let w=c.ans+Math.floor(Math.random()*20)-10;if(!opts.includes(w))opts.push(w);}opts.sort(()=>Math.random()-0.5);for(let j=1;j<=4;j++){document.getElementById("a"+j).textContent=opts[j-1];document.getElementById("a"+j).dataset.a=opts[j-1];}}function ck(b){i++;sq();}sq();</script>', {tenant_name:req.tenant.name}, false, req.lang));
+  const quizScript = 'let qs=[],i=0;for(let j=0;j<5;j++){let a=Math.floor(Math.random()*20)+1,b=Math.floor(Math.random()*20)+1,o=["+","-","x"][Math.floor(Math.random()*3)],ans=o==="+"?a+b:o==="-"?a-b:a*b;qs.push({q:a+" "+o+" "+b+" = ?",ans});}function sq(){if(i>=5){document.getElementById("qa").style.display="none";document.getElementById("r").style.display="block";fetch("/bonus/claim/game/quiz").catch(function(){});return;}let c=qs[i];document.getElementById("q").textContent=c.q;let opts=[c.ans];while(opts.length<4){let w=c.ans+Math.floor(Math.random()*20)-10;if(!opts.includes(w))opts.push(w);}opts.sort(function(){return Math.random()-0.5;});for(let j=1;j<=4;j++){document.getElementById("a"+j).textContent=opts[j-1];document.getElementById("a"+j).dataset.a=opts[j-1];}}function ck(b){i++;sq();}sq();';
+  res.send(renderPage('Quiz', '<div class="card" style="max-width:600px;margin:40px auto"><h1>Math Quiz</h1><div id="qa" style="text-align:center;margin:20px 0"><div style="font-size:36px" id="q"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px"><button class="btn" onclick="ck(this)" id="a1"></button><button class="btn" onclick="ck(this)" id="a2"></button><button class="btn" onclick="ck(this)" id="a3"></button><button class="btn" onclick="ck(this)" id="a4"></button></div></div><div id="r" style="display:none;text-align:center"><h2>Done!</h2><p class="badge badge-green" style="font-size:18px">+30 UGX</p><a href="/games" class="btn" style="margin-top:20px">Back</a></div></div><script>'+quizScript+'</script>', {tenant_name:req.tenant.name}, false, req.lang));
 });
 
 app.get('/bonus/claim/game/:id', requireAuth, checkDb, ah(async (req, res) => {
@@ -565,7 +477,7 @@ app.get('/app/students', requireAuth, checkDb, ah(async (req, res) => {
 
 app.get('/app/students/add', requireAuth, requireStaff, (req, res) => {
   res.send(renderPage('Add', '<div class="card" style="max-width:500px"><h1>Add Student</h1><form method="POST" action="/app/students/add"><input name="name" required><input name="class"><input name="guardian_name"><input name="guardian_phone"><button class="btn btn-green" style="width:100%">Save</button></form></div>', {tenant_name:req.tenant.name}, false, req.lang));
-}));
+});
 
 app.post('/app/students/add', requireAuth, requireStaff, checkDb, ah(async (req, res) => {
   await pool.query('INSERT INTO students (tenant_id,name,class,guardian_name,guardian_phone) VALUES ($1,$2,$3,$4,$5)', [req.tenantId,req.body.name,req.body.class,req.body.guardian_name,req.body.guardian_phone]);
@@ -625,12 +537,12 @@ app.get('/app/students/export', requireAuth, checkDb, ah(async (req, res) => {
 
 app.get('/learning/live', requireAuth, checkDb, ah(async (req, res) => {
   const c = await pool.query("SELECT l.*,u.full_name as teacher_name,(SELECT COUNT(*) FROM class_payments WHERE class_id=l.id AND status='success') as students FROM live_classes l JOIN users u ON l.teacher_email=u.email WHERE l.tenant_id=$1 AND l.status='scheduled' AND l.scheduled_at>NOW() ORDER BY l.scheduled_at", [req.tenantId]);
-  res.send(renderPage('Live Classes', '<div class="hero" style="padding:30px"><h1>Live Classes</h1>'+(['teacher','admin','super_admin'].includes(req.session.user.role)?'<a href="/learning/live/create" class="btn btn-green" style="margin-top:12px">Create</a>':'')+'</div><div class="grid">'+(c.rows.map(cl => '<div class="card"><div class="badge badge-blue" style="margin-bottom:8px">'+new Date(cl.scheduled_at).toLocaleDateString()+'</div><h3>'+esc(cl.title)+'</h3><p>'+esc(cl.subject)+' - '+esc(cl.class)+'</p><p>👨‍🏫 '+esc(cl.teacher_name)+' | 👥 '+cl.students+'</p><div class="stat-num" style="font-size:20px;margin:12px 0">UGX '+cl.price+'</div><a href="/learning/live/join/'+cl.id+'" class="btn btn-green" style="width:100%">Join</a></div>').join('')||'<div class="card"><p>No classes</p></div>')+'</div>', {tenant_name:req.tenant.name}, false, req.lang));
+  res.send(renderPage('Live Classes', '<div class="hero" style="padding:30px"><h1>Live Classes</h1>'+(['teacher','admin','super_admin'].includes(req.session.user.role)?'<a href="/learning/live/create" class="btn btn-green" style="margin-top:12px">Create</a>':'')+'</div><div class="grid">'+(c.rows.map(cl => '<div class="card"><div class="badge badge-blue" style="margin-bottom:8px">'+new Date(cl.scheduled_at).toLocaleDateString()+'</div><h3>'+esc(cl.title)+'</h3><p>'+esc(cl.subject)+' - '+esc(cl.class)+'</p><p>Teacher: '+esc(cl.teacher_name)+' | Students: '+cl.students+'</p><div class="stat-num" style="font-size:20px;margin:12px 0">UGX '+cl.price+'</div><a href="/learning/live/join/'+cl.id+'" class="btn btn-green" style="width:100%">Join</a></div>').join('')||'<div class="card"><p>No classes</p></div>')+'</div>', {tenant_name:req.tenant.name}, false, req.lang));
 }));
 
 app.get('/learning/live/create', requireAuth, requireStaff, (req, res) => {
   res.send(renderPage('Create Class', '<div class="card" style="max-width:600px"><h1>Create Live Class</h1><p style="color:#64748b">You earn 80%</p><form method="POST" action="/learning/live/create"><input name="title" placeholder="Title" required><input name="subject" placeholder="Subject" required><input name="class" placeholder="Class" required><input name="price" type="number" value="1000" min="500" required><input name="scheduled_at" type="datetime-local" required><button class="btn btn-green" style="width:100%">Create</button></form></div>', {tenant_name:req.tenant.name}, false, req.lang));
-});
+}));
 
 app.post('/learning/live/create', requireAuth, requireStaff, checkDb, ah(async (req, res) => {
   const room = 'ssewasswa-'+uuidv4().substring(0,8);
@@ -643,7 +555,7 @@ app.get('/learning/live/join/:id', requireAuth, checkDb, ah(async (req, res) => 
   if (!cl) return res.status(404).send('Not found');
   const paid = await pool.query("SELECT id FROM class_payments WHERE class_id=$1 AND student_email=$2 AND status='success'", [cl.id,req.session.user.email]);
   if (!paid.rows[0]&&cl.teacher_email!==req.session.user.email&&cl.price>0) {
-    return res.send(renderPage('Pay', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h1>'+esc(cl.title)+'</h1><div class="stat-num" style="margin:20px 0">UGX '+cl.price+'</div><form method="POST" action="/learning/live/pay/'+cl.id+'"><input name="phone" placeholder="MoMo" required><button class="btn btn-green" style="width:100%">Pay & Join</button></form></div>', {tenant_name:req.tenant.name}, false, req.lang));
+    return res.send(renderPage('Pay', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h1>'+esc(cl.title)+'</h1><div class="stat-num" style="margin:20px 0">UGX '+cl.price+'</div><form method="POST" action="/learning/live/pay/'+cl.id+'"><input name="phone" placeholder="MoMo" required><button class="btn btn-green" style="width:100%">Pay and Join</button></form></div>', {tenant_name:req.tenant.name}, false, req.lang));
   }
   res.send(renderPage(cl.title, '<div class="card" style="padding:0;overflow:hidden"><div style="background:#1e293b;color:white;padding:16px"><h2>'+esc(cl.title)+'</h2></div><iframe src="https://meet.jit.si/'+cl.jitsi_room+'" style="width:100%;height:600px;border:0" allow="camera;microphone;fullscreen"></iframe></div>', {tenant_name:req.tenant.name}, false, req.lang));
 }));
@@ -667,8 +579,20 @@ app.get('/app/analytics', requireAuth, requireAdmin, checkDb, ah(async (req, res
   const fd = await pool.query("SELECT DATE_TRUNC('month',created_at) as month,SUM(paid) as total FROM fees WHERE tenant_id=$1 AND created_at>NOW()-INTERVAL '6 months' GROUP BY month ORDER BY month", [req.tenantId]);
   const ad = await pool.query("SELECT s.class,COUNT(*) FILTER (WHERE status='present') as present,COUNT(*) as total FROM attendance a JOIN students s ON a.student_id=s.id WHERE a.tenant_id=$1 AND a.date>NOW()-INTERVAL '30 days' GROUP BY s.class", [req.tenantId]);
   const top = await pool.query("SELECT s.name,s.class,AVG(g.score) as avg FROM students s JOIN grades g ON s.id=g.student_id WHERE s.tenant_id=$1 GROUP BY s.id,s.name,s.class HAVING COUNT(g.id)>0 ORDER BY avg DESC LIMIT 10", [req.tenantId]);
-  const ar = ad.rows.map(r=>{const p=r.total>0?Math.round((r.present/r.total)*100):0;return '<tr><td>'+esc(r.class||'N/A')+'</td><td>'+r.present+'/'+r.total+'</td><td style="width:40%"><div style="background:#e2e8f0;border-radius:20px;height:24px"><div style="background:'+(p>75?'#16a34a':p>50?'#f59e0b':'#dc2626')+';width:'+p+'%;height:100%;border-radius:20px"></div></div></td></tr>';}).join('');
-  res.send(renderPage('Analytics', '<div class="hero" style="padding:30px"><h1>Analytics</h1></div><div class="grid"><div class="card"><h3>Fees (6mo)</h3><canvas id="fc"></canvas></div><div class="card"><h3>Attendance</h3><table><thead><tr><th>Class</th><th>Rate</th></tr></thead><tbody>'+ar+'</tbody></table></div></div><div class="card"><h3>Top Students</h3><table><thead><tr><th>#</th><th>Name</th><th>Class</th><th>Avg</th></tr></thead><tbody>'+top.rows.map((r,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.class)+'</td><td class="badge badge-gold">'+Math.round(r.avg)+'</td></tr>').join('')+'</tbody></table></div><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><script>new Chart(document.getElementById("fc"),{type:"line",data:{labels:'+JSON.stringify(fd.rows.map(r=>new Date(r.month).toLocaleDateString('en-US',{month:'short'})))+',datasets:[{label:"UGX",data:'+JSON.stringify(fd.rows.map(r=>r.total))+',borderColor:"#3b82f6",tension:0.4}]})</script>', {tenant_name:req.tenant.name}, false, req.lang));
+  const ar = ad.rows.map(r => {
+    const p = r.total > 0 ? Math.round((r.present/r.total)*100) : 0;
+    const color = p > 75 ? '#16a34a' : p > 50 ? '#f59e0b' : '#dc2626';
+    return '<tr><td>'+esc(r.class||'N/A')+'</td><td>'+r.present+'/'+r.total+'</td><td style="width:40%"><div style="background:#e2e8f0;border-radius:20px;height:24px"><div style="background:'+color+';width:'+p+'%;height:100%;border-radius:20px"></div></div></td></tr>';
+  }).join('');
+  
+  const monthLabels = JSON.stringify(fd.rows.map(r => new Date(r.month).toLocaleDateString('en-US', {month:'short'})));
+  const monthData = JSON.stringify(fd.rows.map(r => r.total));
+  
+  const topRows = top.rows.map((r, i) => '<tr><td>'+(i+1)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.class)+'</td><td class="badge badge-gold">'+Math.round(r.avg)+'</td></tr>').join('');
+  
+  const chartHtml = '<div class="card"><h3>Fees (6mo)</h3><canvas id="fc"></canvas></div><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><script>new Chart(document.getElementById("fc"),{type:"line",data:{labels:'+monthLabels+',datasets:[{label:"UGX",data:'+monthData+',borderColor:"#3b82f6",tension:0.4}]}});</script>';
+  
+  res.send(renderPage('Analytics', '<div class="hero" style="padding:30px"><h1>Analytics</h1></div><div class="grid">'+chartHtml+'<div class="card"><h3>Attendance</h3><table><thead><tr><th>Class</th><th>Rate</th></tr></thead><tbody>'+ar+'</tbody></table></div></div><div class="card"><h3>Top Students</h3><table><thead><tr><th>#</th><th>Name</th><th>Class</th><th>Avg</th></tr></thead><tbody>'+topRows+'</tbody></table></div>', {tenant_name:req.tenant.name}, false, req.lang));
 }));
 
 app.post('/webhook/whatsapp', checkDb, ah(async (req, res) => {
@@ -677,8 +601,8 @@ app.post('/webhook/whatsapp', checkDb, ah(async (req, res) => {
   const from = msg.from;
   const text = msg.text?msg.text.body.toLowerCase():'';
   let reply = "SSEWASSWA Bot\nBALANCE [name]\nATTENDANCE [name]\nHELP";
-  if (text.includes('balance')){const m=text.match(/balance\s+(.+)/);if(m){const s=await pool.query("SELECT name,balance FROM students WHERE LOWER(name) LIKE $1 LIMIT 1",['%'+m[1].trim()+'%']);if(s.rows[0])reply="💰 "+s.rows[0].name+"\nBalance: UGX "+s.rows[0].balance;else reply="❌ Not found";}}
-  else if(text.includes('attendance')){const m=text.match(/attendance\s+(.+)/);if(m){const s=await pool.query("SELECT id,name FROM students WHERE LOWER(name) LIKE $1 LIMIT 1",['%'+m[1].trim()+'%']);if(s.rows[0]){const a=await pool.query("SELECT COUNT(*) FILTER (WHERE status='present') as p,COUNT(*) as t FROM attendance WHERE student_id=$1 AND date>NOW()-INTERVAL '30 days'",[s.rows[0].id]);reply="✅ "+s.rows[0].name+"\n"+Math.round((a.rows[0].p/a.rows[0].t)*100)+"%";}}}
+  if (text.includes('balance')){const m=text.match(/balance\s+(.+)/);if(m){const s=await pool.query("SELECT name,balance FROM students WHERE LOWER(name) LIKE $1 LIMIT 1",['%'+m[1].trim()+'%']);if(s.rows[0])reply="Balance: UGX "+s.rows[0].balance;else reply="Not found";}}
+  else if(text.includes('attendance')){const m=text.match(/attendance\s+(.+)/);if(m){const s=await pool.query("SELECT id,name FROM students WHERE LOWER(name) LIKE $1 LIMIT 1",['%'+m[1].trim()+'%']);if(s.rows[0]){const a=await pool.query("SELECT COUNT(*) FILTER (WHERE status='present') as p,COUNT(*) as t FROM attendance WHERE student_id=$1 AND date>NOW()-INTERVAL '30 days'",[s.rows[0].id]);reply="Attendance: "+Math.round((a.rows[0].p/a.rows[0].t)*100)+"%";}}}
   else if(text==='help')reply="Commands:\nBALANCE John\nATTENDANCE Mary\nHELP";
   await sendWhatsApp(from,reply);
   res.sendStatus(200);
@@ -699,7 +623,7 @@ app.get('/api/cron/daily', ah(async (req, res) => {
 }));
 
 app.get('/demo', (req, res) => {
-  res.send(renderPage('Book Demo', '<div class="hero" style="padding:40px 20px"><h1>📞 Free Demo</h1><p>5 min setup.</p></div><div class="card" style="max-width:600px;margin:0 auto"><form method="POST" action="/demo"><input name="school_name" placeholder="School Name" required><input name="headteacher_name" placeholder="Headteacher" required><input name="phone" placeholder="WhatsApp 07XX" required><input name="students" type="number" placeholder="Students" required><button class="btn btn-green" style="width:100%;font-size:18px">Book Demo</button></form></div>', null, true));
+  res.send(renderPage('Book Demo', '<div class="hero" style="padding:40px 20px"><h1>Free Demo</h1><p>5 min setup.</p></div><div class="card" style="max-width:600px;margin:0 auto"><form method="POST" action="/demo"><input name="school_name" placeholder="School Name" required><input name="headteacher_name" placeholder="Headteacher" required><input name="phone" placeholder="WhatsApp 07XX" required><input name="students" type="number" placeholder="Students" required><button class="btn btn-green" style="width:100%;font-size:18px">Book Demo</button></form></div>', null, true));
 });
 
 app.post('/demo', checkDb, ah(async (req, res) => {
@@ -708,8 +632,8 @@ app.post('/demo', checkDb, ah(async (req, res) => {
   try {
     const t = await pool.query('INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) RETURNING id', [req.body.school_name.trim(),sub,'free',req.body.phone,code]);
     await pool.query('INSERT INTO settings (tenant_id,signup_code) VALUES ($1,$2)', [t.rows[0].id,code]);
-    await sendWhatsApp(req.body.phone, '✅ '+req.body.school_name+' is LIVE!\nTeacher Code: *'+code+'*\nLink: https://'+req.headers.host+'/school/'+sub);
-    await sendWhatsApp('0789736737', '🔥 NEW: '+req.body.school_name+'\nStudents: '+req.body.students+'\nCode: '+code);
+    await sendWhatsApp(req.body.phone, 'School LIVE! Teacher Code: '+code);
+    await sendWhatsApp('0789736737', 'NEW: '+req.body.school_name+' Students: '+req.body.students);
     res.send(renderPage('Success', '<div class="card" style="text-align:center"><div style="font-size:60px">🎉</div><h1>'+esc(req.body.school_name)+' is Live!</h1><p>Code: <strong class="badge badge-gold" style="font-size:24px">'+code+'</strong></p><a href="/demo" class="btn btn-green" style="margin-top:20px">Add Another</a></div>', null, true));
   } catch(e) { if(e.code==='23505') return res.send(renderPage('Error', '<div class="card"><h1>Name taken</h1></div>', null, true)); throw e; }
 }));
@@ -721,7 +645,7 @@ app.get('/super-admin', requireAuth, requireRole('super_admin'), checkDb, ah(asy
   const sc=(await pool.query('SELECT COUNT(*) as c FROM tenants')).rows[0].c;
   const u=(await pool.query('SELECT COUNT(*) as c FROM users')).rows[0].c;
   const w=(await pool.query('SELECT balance FROM platform_wallet WHERE id=1')).rows[0].balance;
-  res.send(renderPage('Super Admin', '<div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:30px"><h1>👑 Platform Control</h1></div><div class="stats"><div class="stat-card"><div class="stat-num">UGX '+r30.toLocaleString()+'</div><div>30 Days</div></div><div class="stat-card"><div class="stat-num">UGX '+rt.toLocaleString()+'</div><div>Total</div></div><div class="stat-card"><div class="stat-num">UGX '+w.toLocaleString()+'</div><div>Wallet</div></div><div class="stat-card"><div class="stat-num">'+p.c+'</div><div>Pending ('+Number(p.t).toLocaleString()+')</div></div><div class="stat-card"><div class="stat-num">'+sc+'</div><div>Schools</div></div><div class="stat-card"><div class="stat-num">'+u+'</div><div>Users</div></div></div><div class="grid"><div class="card"><h3>Actions</h3><div style="display:flex;flex-direction:column;gap:8px;margin-top:12px"><a href="/demo" class="btn btn-green">Create School</a><a href="/super-admin/broadcast" class="btn btn-purple">Broadcast</a><a href="/super-admin/payout-developer" class="btn btn-red">Payout</a></div></div><div class="card"><h3>Auto-Payout</h3><p>Wallet ≥ UGX 50,000 → Auto-pays 95% daily</p><p>Cron: GET /api/cron/daily?secret=ssewasswa-cron-2024</p></div></div>', {tenant_name:req.tenant.name}));
+  res.send(renderPage('Super Admin', '<div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:30px"><h1>Platform Control</h1></div><div class="stats"><div class="stat-card"><div class="stat-num">UGX '+r30.toLocaleString()+'</div><div>30 Days</div></div><div class="stat-card"><div class="stat-num">UGX '+rt.toLocaleString()+'</div><div>Total</div></div><div class="stat-card"><div class="stat-num">UGX '+w.toLocaleString()+'</div><div>Wallet</div></div><div class="stat-card"><div class="stat-num">'+p.c+'</div><div>Pending</div></div><div class="stat-card"><div class="stat-num">'+sc+'</div><div>Schools</div></div><div class="stat-card"><div class="stat-num">'+u+'</div><div>Users</div></div></div><div class="grid"><div class="card"><h3>Actions</h3><div style="display:flex;flex-direction:column;gap:8px;margin-top:12px"><a href="/demo" class="btn btn-green">Create School</a><a href="/super-admin/broadcast" class="btn btn-purple">Broadcast</a><a href="/super-admin/payout-developer" class="btn btn-red">Payout</a></div></div><div class="card"><h3>Auto-Payout</h3><p>Wallet >= 50,000 UGX auto-pays 95% daily</p></div></div>', {tenant_name:req.tenant.name}));
 }));
 
 app.get('/super-admin/payout-developer', requireAuth, requireRole('super_admin'), checkDb, ah(async (req, res) => {
@@ -733,7 +657,7 @@ app.get('/super-admin/payout-developer', requireAuth, requireRole('super_admin')
 }));
 
 app.get('/super-admin/broadcast', requireAuth, requireRole('super_admin'), (req, res) => {
-  res.send(renderPage('Broadcast', '<div class="card" style="max-width:600px"><h1>📢 Broadcast</h1><form method="POST" action="/super-admin/broadcast"><select name="target"><option value="all">All</option><option value="teachers">Teachers</option><option value="admins">Admins</option></select><textarea name="message" placeholder="Message" rows="4" required></textarea><button class="btn btn-green" style="width:100%">Send</button></form></div>', {tenant_name:req.tenant.name}));
+  res.send(renderPage('Broadcast', '<div class="card" style="max-width:600px"><h1>Broadcast</h1><form method="POST" action="/super-admin/broadcast"><select name="target"><option value="all">All</option><option value="teachers">Teachers</option><option value="admins">Admins</option></select><textarea name="message" placeholder="Message" rows="4" required></textarea><button class="btn btn-green" style="width:100%">Send</button></form></div>', {tenant_name:req.tenant.name}));
 });
 
 app.post('/super-admin/broadcast', requireAuth, requireRole('super_admin'), checkDb, ah(async (req, res) => {
@@ -743,7 +667,7 @@ app.post('/super-admin/broadcast', requireAuth, requireRole('super_admin'), chec
   const {rows}=await pool.query(q);
   let sent=0;
   for(const r of rows){await sendWhatsApp(r.phone,req.body.message);await new Promise(res=>setTimeout(res,1000));sent++;}
-  res.send(renderPage('Sent', '<div class="card"><h1>✅ Sent to '+sent+'</h1><a href="/super-admin" class="btn">Back</a></div>', {tenant_name:req.tenant.name}));
+  res.send(renderPage('Sent', '<div class="card"><h1>Sent to '+sent+'</h1><a href="/super-admin" class="btn">Back</a></div>', {tenant_name:req.tenant.name}));
 }));
 
 app.get('/school/:sub', checkDb, ah(async (req, res) => {
@@ -763,18 +687,18 @@ app.get('/debug-login', checkDb, ah(async (req, res) => {
   let output = '<div class="card" style="max-width:600px;margin:40px auto"><h1>Login Diagnostics</h1>';
   try {
     const result = await pool.query('SELECT 1 as ok');
-    output += '<p class="badge badge-green">Database connected ✅</p>';
+    output += '<p class="badge badge-green">Database connected</p>';
   } catch(e) {
     output += '<p class="badge badge-red">Database error: ' + esc(e.message) + '</p>';
   }
   try {
     const user = await pool.query('SELECT email, password_hash, role, approved FROM users WHERE email=$1', [email]);
-    output += '<p>User exists: ' + (user.rows.length > 0 ? 'YES ✅' : 'NO ❌') + '</p>';
+    output += '<p>User exists: ' + (user.rows.length > 0 ? 'YES' : 'NO') + '</p>';
     if (user.rows.length > 0) {
       output += '<p>Role: ' + user.rows[0].role + '</p>';
       output += '<p>Approved: ' + user.rows[0].approved + '</p>';
       const match = await bcrypt.compare('admin123', user.rows[0].password_hash);
-      output += '<p>Password "admin123" matches: ' + (match ? 'YES ✅' : 'NO ❌') + '</p>';
+      output += '<p>Password matches: ' + (match ? 'YES' : 'NO') + '</p>';
     }
   } catch(e) {
     output += '<p class="badge badge-red">Error: ' + esc(e.message) + '</p>';
@@ -788,7 +712,7 @@ app.post('/create-site', checkDb, ah(async (req, res) => {
     await pool.query('INSERT INTO users (tenant_id,email,password_hash,role,approved,full_name) VALUES ($1,$2,$3,$4,$5,$6)',[t.rows[0].id,req.body.admin_email,await bcrypt.hash(req.body.admin_password,10),'admin',true,req.body.name+' Admin']);
     await pool.query('INSERT INTO settings (tenant_id,signup_code) VALUES ($1,$2)',[t.rows[0].id,req.body.signup_code.toUpperCase()]);
     await pool.query('INSERT INTO wallets (tenant_id,user_email,balance) VALUES ($1,$2,0)',[t.rows[0].id,req.body.admin_email]);
-    res.send(renderPage('Success','<div class="card" style="text-align:center"><h1>✅ Created!</h1><p>Code: '+esc(req.body.signup_code.toUpperCase())+'</p><a href="/login" class="btn">Login</a></div>',null,true));
+    res.send(renderPage('Success','<div class="card" style="text-align:center"><h1>Created!</h1><p>Code: '+esc(req.body.signup_code.toUpperCase())+'</p><a href="/login" class="btn">Login</a></div>',null,true));
   } catch(e) { if(e.code==='23505') return res.send(renderPage('Error','<div class="card"><h1>Taken</h1></div>',null,true)); throw e; }
 }));
 
@@ -812,42 +736,34 @@ app.post('/api/momo/webhook', ah(async (req, res) => {
 app.use((req, res) => { res.status(404).send(renderPage('404', '<div class="card" style="text-align:center"><div style="font-size:64px;margin-bottom:16px">🔍</div><h1>404 Not Found</h1><a href="/" class="btn">Go Home</a></div>', null, true)); });
 app.use((err, req, res, next) => { console.error('Error:', err.message); res.status(500).send(renderPage('Error', '<div class="card"><h1>Error</h1><p>Please try again.</p></div>', null, true)); });
 
-// ============================================
-// DATABASE INITIALIZATION - FULLY FIXED
-// ============================================
 async function initDB() {
   const MAX_RETRIES = 5;
-  const RETRY_DELAY_MS = 5000; // 5 seconds between retries
+  const RETRY_DELAY_MS = 5000;
   
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     let client = null;
     
     try {
-      console.log(`🔄 Connecting to database (attempt ${attempt}/${MAX_RETRIES})...`);
+      console.log('Connecting to database (attempt ' + attempt + '/' + MAX_RETRIES + ')...');
       
-      // Check if DATABASE_URL exists
       if (!process.env.DATABASE_URL) {
-        console.error('❌ DATABASE_URL is not set!');
+        console.error('DATABASE_URL is not set!');
         return false;
       }
       
-      // Mask the URL for logging (hide password)
       const maskedUrl = process.env.DATABASE_URL.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
-      console.log('📡 URL:', maskedUrl);
+      console.log('URL:', maskedUrl);
       
-      // Try to connect
       client = await pool.connect();
       
       if (!client) {
         throw new Error('pool.connect() returned null');
       }
       
-      console.log('✅ Connected! Creating tables...');
+      console.log('Connected! Creating tables...');
       
-      // Start transaction
       await client.query('BEGIN');
       
-      // Create all tables
       await client.query('CREATE TABLE IF NOT EXISTS "session" ("sid" varchar NOT NULL, "sess" json NOT NULL, "expire" timestamp(6) NOT NULL, PRIMARY KEY ("sid"))');
       await client.query('CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")');
       await client.query('CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT NOW())');
@@ -890,10 +806,8 @@ async function initDB() {
       await client.query('CREATE TABLE IF NOT EXISTS viral_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER, type TEXT NOT NULL, reward_amount NUMERIC NOT NULL, target_action TEXT NOT NULL, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())');
       await client.query('CREATE TABLE IF NOT EXISTS viral_shares (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, platform TEXT NOT NULL, link_shared TEXT NOT NULL, clicks INTEGER DEFAULT 0, conversions INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())');
       
-      // Insert default platform wallet
       await client.query('INSERT INTO platform_wallet (id,balance) VALUES (1,0) ON CONFLICT DO NOTHING');
       
-      // Create default tenant
       const tenant = await client.query('INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (subdomain) DO NOTHING RETURNING id', ['SSEWASSWA FOUNDATION UGANDA','main','enterprise','0789736737','SSEWASSWA2024']);
       
       if (tenant.rows.length > 0) {
@@ -902,46 +816,31 @@ async function initDB() {
         await client.query('INSERT INTO users (tenant_id,email,password_hash,role,approved,full_name,phone) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [tid,'waiswadaniel24@gmail.com',hash,'super_admin',true,'Daniel Waiswa','0789736737']);
         await client.query('INSERT INTO settings (tenant_id,subscription_tier,verified,school_motto,about_text,signup_code) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [tid,'enterprise',true,'Excellence in Education','Digital tools for schools.','SSEWASSWA2024']);
         await client.query('INSERT INTO wallets (tenant_id,user_email,balance) VALUES ($1,$2,0) ON CONFLICT DO NOTHING', [tid,'waiswadaniel24@gmail.com',0]);
-        console.log('✅ Default tenant created');
+        console.log('Default tenant created');
       }
       
-      // Commit transaction
       await client.query('COMMIT');
-      
-      console.log('✅ All tables created successfully!');
+      console.log('All tables created successfully!');
       return true;
       
     } catch (err) {
-      console.error(`❌ Attempt ${attempt} failed:`, err.message);
+      console.error('Attempt ' + attempt + ' failed:', err.message);
       
-      // Rollback if we started a transaction
       if (client) {
-        try {
-          await client.query('ROLLBACK');
-        } catch(rollbackErr) {
-          console.error('Rollback error:', rollbackErr.message);
-        }
+        try { await client.query('ROLLBACK'); } catch(rollbackErr) {}
       }
       
-      // If this is the last attempt, give up
       if (attempt === MAX_RETRIES) {
-        console.error('❌ All database connection attempts failed');
-        console.error('💡 Make sure DATABASE_URL is set correctly in Render Environment');
+        console.error('All database connection attempts failed');
         return false;
       }
       
-      // Wait before retrying
-      console.log(`⏳ Waiting ${RETRY_DELAY_MS/1000} seconds before retry...`);
+      console.log('Waiting ' + RETRY_DELAY_MS/1000 + ' seconds before retry...');
       await sleep(RETRY_DELAY_MS);
       
     } finally {
-      // Always release the client if we got one
       if (client) {
-        try {
-          client.release();
-        } catch(e) {
-          // Ignore release errors
-        }
+        try { client.release(); } catch(e) {}
       }
     }
   }
@@ -949,9 +848,6 @@ async function initDB() {
   return false;
 }
 
-// ============================================
-// START SERVER - FIXED
-// ============================================
 async function start() {
   console.log('='.repeat(50));
   console.log('Starting SSEWASSWA Platform...');
@@ -962,54 +858,32 @@ async function start() {
   console.log('DATABASE_URL set:', !!process.env.DATABASE_URL);
   
   if (process.env.DATABASE_URL) {
-    console.log('\n📋 Initializing database...');
+    console.log('Initializing database...');
     dbReady = await initDB();
     
     if (dbReady) {
-      console.log('\n✅ Database ready!');
-      // Setup session middleware after DB is ready
+      console.log('Database ready!');
       setupSession();
-      console.log('✅ Session middleware configured');
+      console.log('Session middleware configured');
     } else {
-      console.error('\n❌ Database initialization failed!');
-      console.error('💡 Please check:');
-      console.error('   1. DATABASE_URL is set in Render > Environment');
-      console.error('   2. Database is provisioned and accessible');
-      console.error('   3. SSL settings are correct');
+      console.error('Database initialization failed!');
       process.exit(1);
     }
   } else {
-    console.warn('\n⚠️  WARNING: DATABASE_URL not set - running without database');
-    setupSession(); // Still setup session (will use memory store fallback)
+    console.warn('WARNING: DATABASE_URL not set - running without database');
+    setupSession();
   }
   
   app.listen(PORT, () => {
-    console.log('\n' + '='.repeat(50));
-    console.log('🚀 SERVER LIVE ON PORT ' + PORT);
-    console.log('📊 Database: ' + (dbReady ? '✅ READY' : '❌ NOT READY'));
-    console.log('='.repeat(50) + '\n');
+    console.log('='.repeat(50));
+    console.log('SERVER LIVE ON PORT ' + PORT);
+    console.log('Database: ' + (dbReady ? 'READY' : 'NOT READY'));
+    console.log('='.repeat(50));
   });
 }
 
-// Handle graceful shutdown
-process.on('SIGTERM', async () => { 
-  console.log('\n🛑 SIGTERM received, shutting down...'); 
-  try { await pool.end(); } catch(e) {} 
-  process.exit(0); 
-});
+process.on('SIGTERM', async () => { console.log('Shutting down...'); try { await pool.end(); } catch(e) {} process.exit(0); });
+process.on('SIGINT', async () => { console.log('Shutting down...'); try { await pool.end(); } catch(e) {} process.exit(0); });
+process.on('unhandledRejection', (reason, promise) => { console.error('Unhandled Rejection:', reason); });
 
-process.on('SIGINT', async () => { 
-  console.log('\n🛑 SIGINT received, shutting down...'); 
-  try { await pool.end(); } catch(e) {} 
-  process.exit(0); 
-});
-
-process.on('unhandledRejection', (reason, promise) => { 
-  console.error('❌ Unhandled Rejection:', reason); 
-});
-
-// Start the application
-start().catch(err => { 
-  console.error('❌ Startup failed:', err); 
-  process.exit(1); 
-});
+start().catch(err => { console.error('Startup failed:', err); process.exit(1); });
