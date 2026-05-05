@@ -34,7 +34,7 @@ const SMS_CONFIG = { apiKey: process.env.SMS_API_KEY || 'demo', username: proces
 const MOMO_CONFIG = { apiKey: process.env.MOMO_API_KEY || 'demo', baseUrl: 'https://sandbox.momodeveloper.mtn.com' };
 
 function renderPage(title, content, user = null, isPublic = false) {
-  const nav = user && !isPublic ? `<div style="background:#1e40af;color:white;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;margin:-24px -24px 24px;flex-wrap:wrap"><div><strong>${esc(user.tenant_name || 'SSEWASSWA')}</strong></div><div style="display:flex;gap:12px;flex-wrap:wrap"><a href="/app" style="color:white;text-decoration:none">Dashboard</a><a href="/app/students" style="color:white;text-decoration:none">Students</a><a href="/app/fees" style="color:white;text-decoration:none">Fees</a><a href="/app/attendance" style="color:white;text-decoration:none">Attendance</a><a href="/app/grades" style="color:white;text-decoration:none">Grades</a><a href="/logout" style="color:white;text-decoration:none">Logout</a></div></div>` : '';
+  const nav = user && !isPublic ? `<div style="background:#1e40af;color:white;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;margin:-24px -24px 24px;flex-wrap:wrap"><div><strong>${esc(user.tenant_name || 'SSEWASSWA')}</strong></div><div style="display:flex;gap:12px;flex-wrap:wrap"><a href="/app" style="color:white;text-decoration:none">Dashboard</a><a href="/app/students" style="color:white;text-decoration:none">Students</a><a href="/app/fees" style="color:white;text-decoration:none">Fees</a><a href="/app/attendance" style="color:white;text-decoration:none">Attendance</a><a href="/app/grades" style="color:white;text-decoration:none">Grades</a><a href="/app/settings" style="color:white;text-decoration:none">Settings</a><a href="/logout" style="color:white;text-decoration:none">Logout</a></div></div>` : '';
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>body{font-family:system-ui;background:#f8fafc;color:#1e293b;margin:0;padding:24px}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:900px;margin:0 auto 16px}.btn{background:#1e40af;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px}.btn-green{background:#16a34a}input,select,textarea{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:8px 0 12px;box-sizing:border-box}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:#f1f5f9}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0}.stat-num{font-size:32px;font-weight:bold;color:#1e40af}.badge{padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}</style></head><body>${nav}${content}</body></html>`;
 }
 
@@ -196,10 +196,24 @@ app.get('/app', requireAuth, checkDb, async (req, res) => {
     res.send(renderPage('Dashboard', `<div class="stats"><div class="stat-card"><div>Students</div><div class="stat-num">${students.rows[0].c}</div></div><div class="stat-card"><div>Fees</div><div class="stat-num">UGX ${fees.rows[0].total}</div></div><div class="stat-card"><div>Present</div><div class="stat-num">${att.rows[0].c}</div></div></div><div class="card"><h1>${esc(req.tenant.name)}</h1><br><a href="/app/students/add" class="btn btn-green">Add Student</a> <a href="/app/fees/add" class="btn">Record Fee</a> <a href="/app/attendance/mark" class="btn">Attendance</a> <a href="/app/grades/add" class="btn">Grades</a></div>`, { tenant_name: req.tenant.name }));
   } catch (e) { res.status(500).send("Error"); }
 });
+// --- SCHOOL SETTINGS ---
+app.get('/app/settings', requireAuth, checkDb, async (req, res) => {
+  try {
+    const settings = (await pool.query('SELECT * FROM settings WHERE tenant_id=$1', [req.tenantId])).rows[0];
+    res.send(renderPage('School Settings', `<div class="card" style="max-width:500px"><h1>School Settings</h1><form method="POST" action="/app/settings"><input name="school_motto" value="${esc(settings.school_motto)}" placeholder="School Motto"><textarea name="about_text" placeholder="About School" rows="4">${esc(settings.about_text)}</textarea><input name="contact_email" value="${esc(settings.contact_email)}" placeholder="Contact Email"><input name="whatsapp_number" value="${esc(settings.whatsapp_number)}" placeholder="WhatsApp Number"><button class="btn btn-green" style="width:100%">Save Settings</button></form></div>`, { tenant_name: req.tenant.name }));
+  } catch (e) { res.status(500).send("Error"); }
+});
 
+app.post('/app/settings', requireAuth, checkDb, async (req, res) => {
+  try {
+    const { school_motto, about_text, contact_email, whatsapp_number } = req.body;
+    await pool.query('UPDATE settings SET school_motto=$1, about_text=$2, contact_email=$3, whatsapp_number=$4 WHERE tenant_id=$5', [school_motto, about_text, contact_email, whatsapp_number, req.tenantId]);
+    res.redirect('/app/settings');
+  } catch (e) { res.status(500).send("Error saving settings"); }
+});
 app.get('/app/students', requireAuth, checkDb, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM students WHERE tenant_id=$1 ORDER BY id DESC', [req.tenantId]);
-  const t = rows.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.guardian_phone)}</td><td>UGX ${s.balance}</td><td><a href="/app/fees/add?student_id=${s.id}" class="btn">Pay</a></td></tr>`).join('');
+  const t = rows.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.guardian_phone)}</td><td>UGX ${s.balance}</td><td><a href="/app/fees/add?student_id=${s.id}" class="btn">Pay</a> <a href="/app/students/edit/${s.id}" class="btn btn-orange">Edit</a> <a href="/app/students/delete/${s.id}" class="btn btn-red" onclick="return confirm('Delete this student and all their records?')">Del</a></td></tr>`).join('');
   res.send(renderPage('Students', `<div class="card"><h1>Students</h1><a href="/app/students/add" class="btn btn-green">Add</a><table style="margin-top:16px"><thead><tr><th>Name</th><th>Class</th><th>Phone</th><th>Balance</th><th>Action</th></tr></thead><tbody>${t||'<tr><td colspan="5">No students</td></tr>'}</tbody></table></div>`, { tenant_name: req.tenant.name }));
 });
 
@@ -215,7 +229,31 @@ app.post('/app/students/add', requireAuth, checkDb, async (req, res) => {
     res.redirect('/app/students');
   } catch (e) { res.status(500).send("Error"); }
 });
+// --- EDIT STUDENT ---
+app.get('/app/students/edit/:id', requireAuth, checkDb, async (req, res) => {
+  try {
+    const s = (await pool.query('SELECT * FROM students WHERE id=$1 AND tenant_id=$2', [req.params.id, req.tenantId])).rows[0];
+    if (!s) return res.status(404).send('Not found');
+    res.send(renderPage('Edit Student', `<div class="card" style="max-width:500px"><h1>Edit ${esc(s.name)}</h1><form method="POST" action="/app/students/edit/${s.id}"><input name="name" value="${esc(s.name)}" required><input name="class" value="${esc(s.class)}"><input name="guardian_name" value="${esc(s.guardian_name)}"><input name="guardian_phone" value="${esc(s.guardian_phone)}"><button class="btn btn-green" style="width:100%">Update Student</button></form></div>`, { tenant_name: req.tenant.name }));
+  } catch (e) { res.status(500).send("Error"); }
+});
 
+app.post('/app/students/edit/:id', requireAuth, checkDb, async (req, res) => {
+  try {
+    const { name, class: c, guardian_name, guardian_phone } = req.body;
+    await pool.query('UPDATE students SET name=$1, class=$2, guardian_name=$3, guardian_phone=$4 WHERE id=$5 AND tenant_id=$6', [name, c, guardian_name, guardian_phone, req.params.id, req.tenantId]);
+    res.redirect('/app/students');
+  } catch (e) { res.status(500).send("Error"); }
+});
+
+// --- DELETE STUDENT ---
+app.get('/app/students/delete/:id', requireAuth, checkDb, async (req, res) => {
+  try {
+    // Cascade will automatically delete their fees, grades, and attendance
+    await pool.query('DELETE FROM students WHERE id=$1 AND tenant_id=$2', [req.params.id, req.tenantId]);
+    res.redirect('/app/students');
+  } catch (e) { res.status(500).send("Error deleting student"); }
+});
 app.get('/app/fees', requireAuth, checkDb, async (req, res) => {
   const { rows } = await pool.query('SELECT f.*, s.name as sn FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 ORDER BY f.id DESC LIMIT 50', [req.tenantId]);
   const t = rows.map(f => `<tr><td>${esc(f.sn)}</td><td>${f.amount}</td><td>${f.paid}</td><td>${esc(f.term)}</td><td>${esc(f.payment_method)}</td></tr>`).join('');
