@@ -655,7 +655,60 @@ app.get('/sitemap.xml', checkDb, ah(async (req, res) => {
   const s=await pool.query("SELECT subdomain FROM tenants WHERE plan!='suspended'");
   res.header('Content-Type','application/xml').send('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://'+req.headers.host+'/</loc></url>'+s.rows.map(x=>'<url><loc>https://'+req.headers.host+'/school/'+x.subdomain+'</loc></url>').join('')+'</urlset>');
 }));
-
+app.get('/debug-login', checkDb, ah(async (req, res) => {
+  const email = 'waiswadaniel24@gmail.com';
+  let output = '<div class="card" style="max-width:600px;margin:40px auto"><h1>Login Diagnostics</h1>';
+  
+  // Check DB connection
+  output += '<h3>1. DB Connection</h3>';
+  try {
+    const result = await pool.query('SELECT 1 as ok');
+    output += '<p class="badge badge-green">Database connected ✅</p>';
+  } catch(e) {
+    output += '<p class="badge badge-red">Database error: ' + esc(e.message) + '</p>';
+  }
+  
+  // Check if user exists
+  output += '<h3>2. User Check</h3>';
+  try {
+    const user = await pool.query('SELECT email, password_hash, role, approved FROM users WHERE email=$1', [email]);
+    output += '<p>User exists: ' + (user.rows.length > 0 ? 'YES ✅' : 'NO ❌') + '</p>';
+    if (user.rows.length > 0) {
+      output += '<p>Role: ' + user.rows[0].role + '</p>';
+      output += '<p>Approved: ' + user.rows[0].approved + '</p>';
+      output += '<p>Hash length: ' + (user.rows[0].password_hash ? user.rows[0].password_hash.length : 'NULL') + '</p>';
+      
+      // Test password
+      const match = await bcrypt.compare('admin123', user.rows[0].password_hash);
+      output += '<p>Password "admin123" matches: ' + (match ? 'YES ✅' : 'NO ❌') + '</p>';
+    }
+  } catch(e) {
+    output += '<p class="badge badge-red">Error: ' + esc(e.message) + '</p>';
+  }
+  
+  // Check session store
+  output += '<h3>3. Session Store</h3>';
+  try {
+    const sessCount = await pool.query('SELECT COUNT(*) as c FROM session');
+    output += '<p>Sessions in DB: ' + sessCount.rows[0].c + '</p>';
+  } catch(e) {
+    output += '<p class="badge badge-red">Error: ' + esc(e.message) + '</p>';
+  }
+  
+  // Check wallets
+  output += '<h3>4. Wallet Check</h3>';
+  try {
+    const wallet = await pool.query('SELECT * FROM wallets WHERE user_email=$1', [email]);
+    output += '<p>Wallet exists: ' + (wallet.rows.length > 0 ? 'YES ✅' : 'NO ❌') + '</p>';
+    if (wallet.rows[0]) {
+      output += '<p>Balance: ' + wallet.rows[0].balance + '</p>';
+    }
+  } catch(e) {
+    output += '<p class="badge badge-red">Error: ' + esc(e.message) + '</p>';
+  }
+  
+  res.send(renderPage('Debug', output, null, true));
+}));
 app.post('/create-site', checkDb, ah(async (req, res) => {
   try {
     const t=await pool.query('INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) RETURNING id',[req.body.name.trim(),req.body.subdomain.toLowerCase().trim(),'free',req.body.momo_number,req.body.signup_code.toUpperCase()]);
