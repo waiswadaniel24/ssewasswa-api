@@ -1,6 +1,8 @@
 const express = require('express');
 const session = require('express-session');
+const path = require('path'); // <--- ADD THIS LINE
 const pgSession = require('connect-pg-simple')(session);
+// ... rest of your requires
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { Pool } = require('pg');
