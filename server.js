@@ -782,12 +782,31 @@ app.use((err, req, res, next) => {
   res.status(500).send(renderPage('Error', '<div class="card"><h1>Error</h1><p>Please try again.</p></div>', null, true));
 });
 
-app.listen(PORT, () => {
-  console.log('SERVER LIVE ON PORT ' + PORT);
+async function start() {
+  console.log('Starting SSEWASSWA...');
+  
+  // Initialize database FIRST before accepting requests
   if (process.env.DATABASE_URL) {
-    console.log('Starting database setup...');
-    initDB().catch(e => console.error('DB init error:', e.message));
+    console.log('Initializing database...');
+    await initDB();
+    if (!dbReady) {
+      console.error('Database failed to initialize!');
+      process.exit(1);
+    }
   }
+  
+  // NOW start the server
+  app.listen(PORT, () => {
+    console.log('='.repeat(50));
+    console.log('SERVER LIVE ON PORT ' + PORT);
+    console.log('Database: ' + (dbReady ? 'READY' : 'NOT READY'));
+    console.log('='.repeat(50));
+  });
+}
+
+start().catch(err => {
+  console.error('Startup failed:', err.message);
+  process.exit(1);
 });
 
 async function initDB() {
