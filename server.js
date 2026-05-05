@@ -766,15 +766,8 @@ async function initDB() {
   while (retries > 0) {
     try {
       console.log('Connecting to database (attempt ' + (4 - retries) + ')...');
-      client = await pool.connect({
-        connectionTimeoutMillis: 60000,
-        query_timeout: 30000,
-        statement_timeout: 30000,
-        max: 5,
-        idleTimeoutMillis: 60000,
-        allowExitOnIdle: true
-      });
-      if (!client) throw new Error('DB connection failed');
+      client = await pool.connect();
+      if (!client) throw new Error('pool.connect returned null');
       console.log('DB connected, creating tables...');
       await client.query('BEGIN');
 
