@@ -71,15 +71,16 @@ function isValidPhone(p) { return /^(\+?256|0)[7]\d{8}$/.test((p || '').replace(
 function ah(fn) { return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next); }
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+// USING BACKTICKS TO AVOID QUOTE NESTING ISSUES
 function renderPage(title, content, user, isPublic, lang) {
   user = user || null; isPublic = isPublic || false; lang = lang || 'en';
   let nav = '';
   if (user && !isPublic) {
-    nav = '<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;margin:0 0 24px 0;flex-wrap:wrap"><div style="font-weight:700;font-size:18px">' + esc(user.tenant_name || 'SSEWASSWA') + '</div><div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px"><a href="/" style="color:white;text-decoration:none">🏠</a><a href="/app" style="color:white;text-decoration:none">📊</a><a href="/app/students" style="color:white;text-decoration:none">🎓</a><a href="/app/fees" style="color:white;text-decoration:none">💰</a><a href="/app/attendance" style="color:white;text-decoration:none">✅</a><a href="/app/grades" style="color:white;text-decoration:none">📝</a><a href="/app/analytics" style="color:white;text-decoration:none">📈</a><a href="/learning" style="color:white;text-decoration:none">📚</a><a href="/learning/live" style="color:white;text-decoration:none">🎥</a><a href="/store" style="color:white;text-decoration:none">🛒</a><a href="/marketplace" style="color:white;text-decoration:none">🏪</a><a href="/videos" style="color:white;text-decoration:none">🎬</a><a href="/games" style="color:white;text-decoration:none">🎮</a><a href="/news" style="color:white;text-decoration:none">📰</a><a href="/bonus" style="color:white;text-decoration:none">🎁</a><a href="/app/referrals" style="color:white;text-decoration:none">💰</a><a href="/premium" style="color:white;text-decoration:none">⭐</a><a href="/app/settings" style="color:white;text-decoration:none">⚙️</a><a href="/logout" style="color:white;text-decoration:none">🚪</a></div></div>';
+    nav = `<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;margin:0 0 24px 0;flex-wrap:wrap"><div style="font-weight:700;font-size:18px">${esc(user.tenant_name || 'SSEWASSWA')}</div><div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px"><a href="/" style="color:white;text-decoration:none">🏠</a><a href="/app" style="color:white;text-decoration:none">📊</a><a href="/app/students" style="color:white;text-decoration:none">🎓</a><a href="/app/fees" style="color:white;text-decoration:none">💰</a><a href="/app/attendance" style="color:white;text-decoration:none">✅</a><a href="/app/grades" style="color:white;text-decoration:none">📝</a><a href="/app/analytics" style="color:white;text-decoration:none">📈</a><a href="/learning" style="color:white;text-decoration:none">📚</a><a href="/learning/live" style="color:white;text-decoration:none">🎥</a><a href="/store" style="color:white;text-decoration:none">🛒</a><a href="/marketplace" style="color:white;text-decoration:none">🏪</a><a href="/videos" style="color:white;text-decoration:none">🎬</a><a href="/games" style="color:white;text-decoration:none">🎮</a><a href="/news" style="color:white;text-decoration:none">📰</a><a href="/bonus" style="color:white;text-decoration:none">🎁</a><a href="/app/referrals" style="color:white;text-decoration:none">💰</a><a href="/premium" style="color:white;text-decoration:none">⭐</a><a href="/app/settings" style="color:white;text-decoration:none">⚙️</a><a href="/logout" style="color:white;text-decoration:none">🚪</a></div></div>`;
   } else if (isPublic) {
-    nav = '<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;margin:0 0 24px 0;flex-wrap:wrap"><div style="font-weight:700;font-size:18px">SSEWASSWA</div><div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px"><a href="/" style="color:white;text-decoration:none">🏠</a><a href="/learning" style="color:white;text-decoration:none">📚</a><a href="/store" style="color:white;text-decoration:none">🛒</a><a href="/marketplace" style="color:white;text-decoration:none">🏪</a><a href="/videos" style="color:white;text-decoration:none">🎬</a><a href="/games" style="color:white;text-decoration:none">🎮</a><a href="/news" style="color:white;text-decoration:none">📰</a><a href="/premium" style="color:white;text-decoration:none">⭐</a><a href="/login" style="color:white;text-decoration:none">👤</a><a href="/demo" style="color:white;text-decoration:none">📞</a></div></div>';
+    nav = `<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;margin:0 0 24px 0;flex-wrap:wrap"><div style="font-weight:700;font-size:18px">SSEWASSWA</div><div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px"><a href="/" style="color:white;text-decoration:none">🏠</a><a href="/learning" style="color:white;text-decoration:none">📚</a><a href="/store" style="color:white;text-decoration:none">🛒</a><a href="/marketplace" style="color:white;text-decoration:none">🏪</a><a href="/videos" style="color:white;text-decoration:none">🎬</a><a href="/games" style="color:white;text-decoration:none">🎮</a><a href="/news" style="color:white;text-decoration:none">📰</a><a href="/premium" style="color:white;text-decoration:none">⭐</a><a href="/login" style="color:white;text-decoration:none">👤</a><a href="/demo" style="color:white;text-decoration:none">📞</a></div></div>`;
   }
-  return '<!doctype html><html lang="'+lang+'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+'</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b;min-height:100vh}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-orange{background:linear-gradient(135deg,#ea580c,#f97316)}.btn-purple{background:linear-gradient(135deg,#7c3aed,#8b5cf6)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b);color:#1e293b}input,select,textarea{width:100%;padding:12px 16px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0 12px;font-size:16px}input:focus{outline:none;border-color:#3b82f6}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:14px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}tr:hover{background:#f8fafc}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:24px;border-radius:16px;border:1px solid #e2e8f0;text-align:center}.stat-num{font-size:36px;font-weight:bold;color:#1e40af}.badge{padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.hero{background:linear-gradient(135deg,#1e40af,#3b82f6,#60a5fa);color:white;padding:60px 20px;text-align:center;border-radius:20px;margin-bottom:30px}.hero h1{font-size:48px;margin-bottom:16px}.card-img{width:100%;height:200px;object-fit:cover;border-radius:12px 12px 0 0}@media print{.btn,nav{display:none!important}body{padding:0;background:white}}@media(max-width:768px){.hero h1{font-size:32px}.stats{grid-template-columns:repeat(2,1fr)}}</style></head><body>'+nav+'<main class="container">'+content+'</main><footer style="text-align:center;padding:30px;font-size:12px;color:#64748b;background:white;border-top:1px solid #e2e8f0"><p>&copy; '+new Date().getFullYear()+' SSEWASSWA Platform</p></footer></body></html>';
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b;min-height:100vh}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-orange{background:linear-gradient(135deg,#ea580c,#f97316)}.btn-purple{background:linear-gradient(135deg,#7c3aed,#8b5cf6)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b);color:#1e293b}input,select,textarea{width:100%;padding:12px 16px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0 12px;font-size:16px}input:focus{outline:none;border-color:#3b82f6}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:14px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}tr:hover{background:#f8fafc}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:24px;border-radius:16px;border:1px solid #e2e8f0;text-align:center}.stat-num{font-size:36px;font-weight:bold;color:#1e40af}.badge{padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.hero{background:linear-gradient(135deg,#1e40af,#3b82f6,#60a5fa);color:white;padding:60px 20px;text-align:center;border-radius:20px;margin-bottom:30px}.hero h1{font-size:48px;margin-bottom:16px}.card-img{width:100%;height:200px;object-fit:cover;border-radius:12px 12px 0 0}@media print{.btn,nav{display:none!important}body{padding:0;background:white}}@media(max-width:768px){.hero h1{font-size:32px}.stats{grid-template-columns:repeat(2,1fr)}}</style></head><body>${nav}<main class="container">${content}</main><footer style="text-align:center;padding:30px;font-size:12px;color:#64748b;background:white;border-top:1px solid #e2e8f0"><p>&copy; ${new Date().getFullYear()} SSEWASSWA Platform</p></footer></body></html>`;
 }
 
 async function checkDb(req, res, next) { if (!dbReady) return res.status(503).send('<div style="text-align:center;padding:100px"><h1>Starting...</h1><p><a href="'+req.url+'">Refresh</a></p></div>'); next(); }
@@ -103,7 +104,8 @@ app.post('/api/subscribe', requireAuth, checkDb, ah(async (req, res) => {
 }));
 
 app.get('/app/referrals', requireAuth, checkDb, ah(async (req, res) => {
-  const stats = await pool.query("SELECT r.referred_email,r.signup_date,u.full_name,u.role,t.name as school,COALESCE(SUM(b.amount),0) as earned FROM referral_stats r LEFT JOIN users u ON r.referred_email=u.email LEFT JOIN tenants t ON u.tenant_id=t.id LEFT JOIN bonus_earnings b ON b.description LIKE 'Referred '||r.referred_email||'%' AND b.user_id=$1 GROUP BY r.referred_email,r.signup_date,u.full_name,u.role,t.name ORDER BY r.signup_date DESC", [req.session.user.email]);
+  const query = "SELECT r.referred_email,r.signup_date,u.full_name,u.role,t.name as school,COALESCE(SUM(b.amount),0) as earned FROM referral_stats r LEFT JOIN users u ON r.referred_email=u.email LEFT JOIN tenants t ON u.tenant_id=t.id LEFT JOIN bonus_earnings b ON b.description LIKE 'Referred '||r.referred_email||'%' AND b.user_id=$1 GROUP BY r.referred_email,r.signup_date,u.full_name,u.role,t.name ORDER BY r.signup_date DESC";
+  const stats = await pool.query(query, [req.session.user.email]);
   const total = stats.rows.reduce((s,r) => s+parseFloat(r.earned||0), 0);
   const link = 'https://'+req.headers.host+'/signup?ref='+encodeURIComponent(req.session.user.email);
   const rows = stats.rows.map(r => '<tr><td>'+esc(r.full_name||r.referred_email)+'</td><td>'+esc(r.school||'-')+'</td><td>'+new Date(r.signup_date).toLocaleDateString()+'</td><td class="badge badge-green">+UGX '+r.earned+'</td></tr>').join('');
@@ -151,7 +153,8 @@ app.get('/logout', (req, res) => { req.session.destroy(() => res.redirect('/logi
 
 app.get('/signup', (req, res) => {
   const ref = req.query.ref;
-  res.send(renderPage('Signup', '<div class="card" style="max-width:500px;margin:40px auto"><div style="text-align:center;margin-bottom:24px"><h1>Join SSEWASSWA</h1><p class="badge badge-green">+100 UGX Bonus!</p></div><form method="POST" action="/signup">'+(ref?'<input type="hidden" name="ref" value="'+esc(ref)+'">':'')+'<input name="full_name" placeholder="Full Name" required><input name="email" type="email" placeholder="Email" required><input name="phone" placeholder="Phone (07XX)" required><input name="password" type="password" placeholder="Password" required minlength="6"><select name="role"><option value="student">Student</option><option value="parent">Parent</option><option value="teacher">Teacher (need code)</option></select><input name="school_code" placeholder="School Code (teachers only)"><button type="submit" class="btn btn-green" style="width:100%;font-size:18px;padding:16px">Create Account</button></form></div>', null, true));
+  const hiddenField = ref ? '<input type="hidden" name="ref" value="'+esc(ref)+'">' : '';
+  res.send(renderPage('Signup', '<div class="card" style="max-width:500px;margin:40px auto"><div style="text-align:center;margin-bottom:24px"><h1>Join SSEWASSWA</h1><p class="badge badge-green">+100 UGX Bonus!</p></div><form method="POST" action="/signup">'+hiddenField+'<input name="full_name" placeholder="Full Name" required><input name="email" type="email" placeholder="Email" required><input name="phone" placeholder="Phone (07XX)" required><input name="password" type="password" placeholder="Password" required minlength="6"><select name="role"><option value="student">Student</option><option value="parent">Parent</option><option value="teacher">Teacher (need code)</option></select><input name="school_code" placeholder="School Code (teachers only)"><button type="submit" class="btn btn-green" style="width:100%;font-size:18px;padding:16px">Create Account</button></form></div>', null, true));
 }));
 
 app.post('/signup', checkDb, ah(async (req, res) => {
@@ -283,7 +286,7 @@ app.get('/bonus/affiliate', requireAuth, checkDb, (req, res) => {
 }));
 
 app.get('/videos', (req, res) => {
-  res.send(renderPage('Videos', '<div class="hero" style="padding:30px"><h1>Watch & Earn</h1></div><div class="grid"><div class="card" style="padding:0;overflow:hidden"><iframe width="100%" height="200" src="https://www.youtube.com/embed/dQw4w9WgXcQ" frameborder="0" allowfullscreen></iframe><div style="padding:16px"><h4>Math Basics</h4><a href="/bonus/claim/video/dQw4w9WgXcQ" class="btn btn-green">Claim +50</a></div></div></div>', null, true));
+  res.send(renderPage('Videos', '<div class="hero" style="padding:30px"><h1>Watch and Earn</h1></div><div class="grid"><div class="card" style="padding:0;overflow:hidden"><iframe width="100%" height="200" src="https://www.youtube.com/embed/dQw4w9WgXcQ" frameborder="0" allowfullscreen></iframe><div style="padding:16px"><h4>Math Basics</h4><a href="/bonus/claim/video/dQw4w9WgXcQ" class="btn btn-green">Claim +50</a></div></div></div>', null, true));
 });
 
 app.get('/bonus/claim/video/:id', requireAuth, checkDb, ah(async (req, res) => {
@@ -318,9 +321,9 @@ app.get('/games', (req, res) => {
 }));
 
 app.get('/games/play/:id', requireAuth, checkDb, (req, res) => {
-  const quizScript = 'let qs=[],i=0;for(let j=0;j<5;j++){let a=Math.floor(Math.random()*20)+1,b=Math.floor(Math.random()*20)+1,o=["+","-","x"][Math.floor(Math.random()*3)],ans=o==="+"?a+b:o==="-"?a-b:a*b;qs.push({q:a+" "+o+" "+b+" = ?",ans});}function sq(){if(i>=5){document.getElementById("qa").style.display="none";document.getElementById("r").style.display="block";fetch("/bonus/claim/game/quiz").catch(function(){});return;}let c=qs[i];document.getElementById("q").textContent=c.q;let opts=[c.ans];while(opts.length<4){let w=c.ans+Math.floor(Math.random()*20)-10;if(!opts.includes(w))opts.push(w);}opts.sort(function(){return Math.random()-0.5;});for(let j=1;j<=4;j++){document.getElementById("a"+j).textContent=opts[j-1];document.getElementById("a"+j).dataset.a=opts[j-1];}}function ck(b){i++;sq();}sq();';
+  const quizScript = `let qs=[],i=0;for(let j=0;j<5;j++){let a=Math.floor(Math.random()*20)+1,b=Math.floor(Math.random()*20)+1,o=["+","-","x"][Math.floor(Math.random()*3)],ans=o==="+"?a+b:o==="-"?a-b:a*b;qs.push({q:a+" "+o+" "+b+" = ?",ans});}function sq(){if(i>=5){document.getElementById("qa").style.display="none";document.getElementById("r").style.display="block";fetch("/bonus/claim/game/quiz").catch(function(){});return;}let c=qs[i];document.getElementById("q").textContent=c.q;let opts=[c.ans];while(opts.length<4){let w=c.ans+Math.floor(Math.random()*20)-10;if(!opts.includes(w))opts.push(w);}opts.sort(function(){return Math.random()-0.5;});for(let j=1;j<=4;j++){document.getElementById("a"+j).textContent=opts[j-1];document.getElementById("a"+j).dataset.a=opts[j-1];}}function ck(b){i++;sq();}sq();`;
   res.send(renderPage('Quiz', '<div class="card" style="max-width:600px;margin:40px auto"><h1>Math Quiz</h1><div id="qa" style="text-align:center;margin:20px 0"><div style="font-size:36px" id="q"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px"><button class="btn" onclick="ck(this)" id="a1"></button><button class="btn" onclick="ck(this)" id="a2"></button><button class="btn" onclick="ck(this)" id="a3"></button><button class="btn" onclick="ck(this)" id="a4"></button></div></div><div id="r" style="display:none;text-align:center"><h2>Done!</h2><p class="badge badge-green" style="font-size:18px">+30 UGX</p><a href="/games" class="btn" style="margin-top:20px">Back</a></div></div><script>'+quizScript+'</script>', {tenant_name:req.tenant.name}, false, req.lang));
-});
+}));
 
 app.get('/bonus/claim/game/:id', requireAuth, checkDb, ah(async (req, res) => {
   if (!(await pool.query("SELECT id FROM bonus_earnings WHERE user_id=$1 AND type='game' AND metadata->>'game_id'=$2 AND created_at>NOW()-INTERVAL '1 hour'", [req.session.user.email,req.params.id])).rows[0]) await addBonus(req.session.user.email,req.tenantId,30,'game','Played '+req.params.id,{game_id:req.params.id});
@@ -332,8 +335,9 @@ app.get('/learning', (req, res) => {
 });
 
 app.get('/premium', (req, res) => {
-  res.send(renderPage('Premium', '<div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:40px 20px"><h1>Go Premium</h1><div class="stat-num" style="font-size:48px;color:white;-webkit-text-fill-color:white">15,000 UGX/mo</div></div><div class="card" style="text-align:center;margin-top:20px">'+(req.session.user?'<form method="POST" action="/premium/subscribe" style="max-width:400px;margin:0 auto"><input name="phone" placeholder="MoMo" required><button class="btn btn-gold" style="width:100%;font-size:18px;padding:16px">Subscribe</button></form>':'<a href="/login" class="btn btn-gold" style="font-size:18px;padding:16px 32px">Login</a>')+'</div>', null, true));
-});
+  const formHtml = req.session.user ? '<form method="POST" action="/premium/subscribe" style="max-width:400px;margin:0 auto"><input name="phone" placeholder="MoMo" required><button class="btn btn-gold" style="width:100%;font-size:18px;padding:16px">Subscribe</button></form>' : '<a href="/login" class="btn btn-gold" style="font-size:18px;padding:16px 32px">Login</a>';
+  res.send(renderPage('Premium', '<div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:40px 20px"><h1>Go Premium</h1><div class="stat-num" style="font-size:48px;color:white;-webkit-text-fill-color:white">15,000 UGX/mo</div></div><div class="card" style="text-align:center;margin-top:20px">'+formHtml+'</div>', null, true));
+}));
 
 app.post('/premium/subscribe', requireAuth, checkDb, ah(async (req, res) => {
   const ref = 'PREM-'+Date.now();
@@ -365,7 +369,7 @@ app.post('/store/buy/:id', checkDb, ah(async (req, res) => {
 app.get('/marketplace', ah(async (req, res) => {
   const {rows} = await pool.query('SELECT p.*,t.name as school_name FROM marketplace_products p JOIN tenants t ON p.tenant_id=t.id WHERE p.approved=true ORDER BY p.id DESC LIMIT 20');
   const c = rows.map(p => '<div class="card" style="padding:0;overflow:hidden"><img src="'+esc(p.image_url||'https://via.placeholder.com/200')+'" class="card-img"><div style="padding:16px"><span class="badge badge-blue">By '+esc(p.school_name)+'</span><h4>'+esc(p.name)+'</h4><div class="stat-num" style="font-size:24px;margin:12px 0">UGX '+p.price+'</div><a href="/marketplace/buy/'+p.id+'" class="btn btn-green" style="width:100%">Buy</a></div></div>').join('');
-  res.send(renderPage('Marketplace', '<div class="hero" style="padding:30px"><h1>Marketplace</h1>'+(req.session.user&&(req.session.user.role==='admin'||req.session.user.role==='super_admin')?'<a href="/marketplace/sell" class="btn btn-purple" style="margin-top:12px">Sell</a>':'')+'</div><div class="grid">'+(c||'<div class="card"><p>No products</p></div>')+'</div>', null, true));
+  res.send(renderPage('Marketplace', '<div class="hero" style="padding:30px"><h1>Marketplace</h1></div><div class="grid">'+(c||'<div class="card"><p>No products</p></div>')+'</div>', null, true));
 }));
 
 app.get('/marketplace/sell', requireAuth, requireAdmin, (req, res) => {
@@ -481,10 +485,7 @@ app.get('/app/students/add', requireAuth, requireStaff, (req, res) => {
 
 app.post('/app/students/add', requireAuth, requireStaff, checkDb, ah(async (req, res) => {
   await pool.query('INSERT INTO students (tenant_id,name,class,guardian_name,guardian_phone) VALUES ($1,$2,$3,$4,$5)', [req.tenantId,req.body.name,req.body.class,req.body.guardian_name,req.body.guardian_phone]);
-  if (req.body.guardian_phone) await sendSMS(req.body.guardian_phone, req.body.name+' registered. Track: https://'+req.headers.host+'/parent/login');
-  if (req.session.user.role==='teacher') {
-    try { const cnt = (await pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [req.tenantId])).rows[0].count; const paid = (await pool.query("SELECT id FROM bonus_earnings WHERE user_id=$1 AND type='teacher_milestone'", [req.session.user.email])).rows[0]; if (cnt>=10&&!paid) await addBonus(req.session.user.email,req.tenantId,5000,'teacher_milestone','Added 10+ students'); } catch(e){}
-  }
+  if (req.body.guardian_phone) await sendSMS(req.body.guardian_phone, req.body.name+' registered');
   res.redirect('/app/students');
 }));
 
@@ -537,7 +538,7 @@ app.get('/app/students/export', requireAuth, checkDb, ah(async (req, res) => {
 
 app.get('/learning/live', requireAuth, checkDb, ah(async (req, res) => {
   const c = await pool.query("SELECT l.*,u.full_name as teacher_name,(SELECT COUNT(*) FROM class_payments WHERE class_id=l.id AND status='success') as students FROM live_classes l JOIN users u ON l.teacher_email=u.email WHERE l.tenant_id=$1 AND l.status='scheduled' AND l.scheduled_at>NOW() ORDER BY l.scheduled_at", [req.tenantId]);
-  res.send(renderPage('Live Classes', '<div class="hero" style="padding:30px"><h1>Live Classes</h1>'+(['teacher','admin','super_admin'].includes(req.session.user.role)?'<a href="/learning/live/create" class="btn btn-green" style="margin-top:12px">Create</a>':'')+'</div><div class="grid">'+(c.rows.map(cl => '<div class="card"><div class="badge badge-blue" style="margin-bottom:8px">'+new Date(cl.scheduled_at).toLocaleDateString()+'</div><h3>'+esc(cl.title)+'</h3><p>'+esc(cl.subject)+' - '+esc(cl.class)+'</p><p>Teacher: '+esc(cl.teacher_name)+' | Students: '+cl.students+'</p><div class="stat-num" style="font-size:20px;margin:12px 0">UGX '+cl.price+'</div><a href="/learning/live/join/'+cl.id+'" class="btn btn-green" style="width:100%">Join</a></div>').join('')||'<div class="card"><p>No classes</p></div>')+'</div>', {tenant_name:req.tenant.name}, false, req.lang));
+  res.send(renderPage('Live Classes', '<div class="hero" style="padding:30px"><h1>Live Classes</h1></div><div class="grid">'+(c.rows.map(cl => '<div class="card"><div class="badge badge-blue" style="margin-bottom:8px">'+new Date(cl.scheduled_at).toLocaleDateString()+'</div><h3>'+esc(cl.title)+'</h3><p>'+esc(cl.subject)+' - '+esc(cl.class)+'</p><p>Teacher: '+esc(cl.teacher_name)+' | Students: '+cl.students+'</p><div class="stat-num" style="font-size:20px;margin:12px 0">UGX '+cl.price+'</div><a href="/learning/live/join/'+cl.id+'" class="btn btn-green" style="width:100%">Join</a></div>').join('')||'<div class="card"><p>No classes</p></div>')+'</div>', {tenant_name:req.tenant.name}, false, req.lang));
 }));
 
 app.get('/learning/live/create', requireAuth, requireStaff, (req, res) => {
@@ -584,14 +585,10 @@ app.get('/app/analytics', requireAuth, requireAdmin, checkDb, ah(async (req, res
     const color = p > 75 ? '#16a34a' : p > 50 ? '#f59e0b' : '#dc2626';
     return '<tr><td>'+esc(r.class||'N/A')+'</td><td>'+r.present+'/'+r.total+'</td><td style="width:40%"><div style="background:#e2e8f0;border-radius:20px;height:24px"><div style="background:'+color+';width:'+p+'%;height:100%;border-radius:20px"></div></div></td></tr>';
   }).join('');
-  
   const monthLabels = JSON.stringify(fd.rows.map(r => new Date(r.month).toLocaleDateString('en-US', {month:'short'})));
   const monthData = JSON.stringify(fd.rows.map(r => r.total));
-  
   const topRows = top.rows.map((r, i) => '<tr><td>'+(i+1)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.class)+'</td><td class="badge badge-gold">'+Math.round(r.avg)+'</td></tr>').join('');
-  
   const chartHtml = '<div class="card"><h3>Fees (6mo)</h3><canvas id="fc"></canvas></div><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><script>new Chart(document.getElementById("fc"),{type:"line",data:{labels:'+monthLabels+',datasets:[{label:"UGX",data:'+monthData+',borderColor:"#3b82f6",tension:0.4}]}});</script>';
-  
   res.send(renderPage('Analytics', '<div class="hero" style="padding:30px"><h1>Analytics</h1></div><div class="grid">'+chartHtml+'<div class="card"><h3>Attendance</h3><table><thead><tr><th>Class</th><th>Rate</th></tr></thead><tbody>'+ar+'</tbody></table></div></div><div class="card"><h3>Top Students</h3><table><thead><tr><th>#</th><th>Name</th><th>Class</th><th>Avg</th></tr></thead><tbody>'+topRows+'</tbody></table></div>', {tenant_name:req.tenant.name}, false, req.lang));
 }));
 
@@ -633,7 +630,6 @@ app.post('/demo', checkDb, ah(async (req, res) => {
     const t = await pool.query('INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) RETURNING id', [req.body.school_name.trim(),sub,'free',req.body.phone,code]);
     await pool.query('INSERT INTO settings (tenant_id,signup_code) VALUES ($1,$2)', [t.rows[0].id,code]);
     await sendWhatsApp(req.body.phone, 'School LIVE! Teacher Code: '+code);
-    await sendWhatsApp('0789736737', 'NEW: '+req.body.school_name+' Students: '+req.body.students);
     res.send(renderPage('Success', '<div class="card" style="text-align:center"><div style="font-size:60px">🎉</div><h1>'+esc(req.body.school_name)+' is Live!</h1><p>Code: <strong class="badge badge-gold" style="font-size:24px">'+code+'</strong></p><a href="/demo" class="btn btn-green" style="margin-top:20px">Add Another</a></div>', null, true));
   } catch(e) { if(e.code==='23505') return res.send(renderPage('Error', '<div class="card"><h1>Name taken</h1></div>', null, true)); throw e; }
 }));
@@ -739,31 +735,17 @@ app.use((err, req, res, next) => { console.error('Error:', err.message); res.sta
 async function initDB() {
   const MAX_RETRIES = 5;
   const RETRY_DELAY_MS = 5000;
-  
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     let client = null;
-    
     try {
       console.log('Connecting to database (attempt ' + attempt + '/' + MAX_RETRIES + ')...');
-      
-      if (!process.env.DATABASE_URL) {
-        console.error('DATABASE_URL is not set!');
-        return false;
-      }
-      
+      if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is not set!'); return false; }
       const maskedUrl = process.env.DATABASE_URL.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
       console.log('URL:', maskedUrl);
-      
       client = await pool.connect();
-      
-      if (!client) {
-        throw new Error('pool.connect() returned null');
-      }
-      
+      if (!client) { throw new Error('pool.connect() returned null'); }
       console.log('Connected! Creating tables...');
-      
       await client.query('BEGIN');
-      
       await client.query('CREATE TABLE IF NOT EXISTS "session" ("sid" varchar NOT NULL, "sess" json NOT NULL, "expire" timestamp(6) NOT NULL, PRIMARY KEY ("sid"))');
       await client.query('CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")');
       await client.query('CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT NOW())');
@@ -805,11 +787,8 @@ async function initDB() {
       await client.query('CREATE TABLE IF NOT EXISTS withdrawals (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, amount NUMERIC NOT NULL, phone TEXT, fee NUMERIC DEFAULT 0, net_amount NUMERIC DEFAULT 0, status TEXT DEFAULT \'pending\', created_at TIMESTAMP DEFAULT NOW())');
       await client.query('CREATE TABLE IF NOT EXISTS viral_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER, type TEXT NOT NULL, reward_amount NUMERIC NOT NULL, target_action TEXT NOT NULL, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())');
       await client.query('CREATE TABLE IF NOT EXISTS viral_shares (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, platform TEXT NOT NULL, link_shared TEXT NOT NULL, clicks INTEGER DEFAULT 0, conversions INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())');
-      
       await client.query('INSERT INTO platform_wallet (id,balance) VALUES (1,0) ON CONFLICT DO NOTHING');
-      
       const tenant = await client.query('INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (subdomain) DO NOTHING RETURNING id', ['SSEWASSWA FOUNDATION UGANDA','main','enterprise','0789736737','SSEWASSWA2024']);
-      
       if (tenant.rows.length > 0) {
         const tid = tenant.rows[0].id;
         const hash = await bcrypt.hash('admin123', 10);
@@ -818,33 +797,19 @@ async function initDB() {
         await client.query('INSERT INTO wallets (tenant_id,user_email,balance) VALUES ($1,$2,0) ON CONFLICT DO NOTHING', [tid,'waiswadaniel24@gmail.com',0]);
         console.log('Default tenant created');
       }
-      
       await client.query('COMMIT');
       console.log('All tables created successfully!');
       return true;
-      
     } catch (err) {
       console.error('Attempt ' + attempt + ' failed:', err.message);
-      
-      if (client) {
-        try { await client.query('ROLLBACK'); } catch(rollbackErr) {}
-      }
-      
-      if (attempt === MAX_RETRIES) {
-        console.error('All database connection attempts failed');
-        return false;
-      }
-      
+      if (client) { try { await client.query('ROLLBACK'); } catch(rollbackErr) {} }
+      if (attempt === MAX_RETRIES) { console.error('All database connection attempts failed'); return false; }
       console.log('Waiting ' + RETRY_DELAY_MS/1000 + ' seconds before retry...');
       await sleep(RETRY_DELAY_MS);
-      
     } finally {
-      if (client) {
-        try { client.release(); } catch(e) {}
-      }
+      if (client) { try { client.release(); } catch(e) {} }
     }
   }
-  
   return false;
 }
 
@@ -856,11 +821,9 @@ async function start() {
   console.log('Environment:', process.env.NODE_ENV || 'development');
   console.log('PORT:', PORT);
   console.log('DATABASE_URL set:', !!process.env.DATABASE_URL);
-  
   if (process.env.DATABASE_URL) {
     console.log('Initializing database...');
     dbReady = await initDB();
-    
     if (dbReady) {
       console.log('Database ready!');
       setupSession();
@@ -873,7 +836,6 @@ async function start() {
     console.warn('WARNING: DATABASE_URL not set - running without database');
     setupSession();
   }
-  
   app.listen(PORT, () => {
     console.log('='.repeat(50));
     console.log('SERVER LIVE ON PORT ' + PORT);
