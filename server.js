@@ -29,9 +29,10 @@ if (!process.env.DATABASE_URL) console.warn('WARNING: DATABASE_URL missing.');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  connectionTimeoutMillis: 15000,
-  query_timeout: 10000,
-  max: 20
+ connectionTimeoutMillis: 30000,
+query_timeout: 30000,
+statement_timeout: 30000,
+max: 5
 });
 
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
@@ -757,7 +758,7 @@ async function start() {
 start().catch(err => { console.error('Startup failed:', err.message); process.exit(1); });
 
 async function initDB() {
-  const client = await pool.connect();
+ const client = await pool.connect({ connectionTimeoutMillis: 30000 });
   try {
     await client.query('BEGIN');
     await client.query('CREATE TABLE IF NOT EXISTS "session" ("sid" varchar NOT NULL, "sess" json NOT NULL, "expire" timestamp(6) NOT NULL, PRIMARY KEY ("sid"))');
