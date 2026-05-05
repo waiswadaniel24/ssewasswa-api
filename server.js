@@ -24,29 +24,66 @@ const SMS_CONFIG = { apiKey: process.env.SMS_API_KEY || 'demo', username: proces
 const MOMO_CONFIG = { apiKey: process.env.MOMO_API_KEY || 'demo' };
 const WHATSAPP_CONFIG = { token: process.env.WHATSAPP_TOKEN || 'demo', phoneId: process.env.WHATSAPP_PHONE_ID || 'demo' };
 
-if (!process.env.DATABASE_URL) console.warn('WARNING: DATABASE_URL missing.');
+// ============================================
+// DATABASE CONFIGURATION - FIXED
+// ============================================
+if (!process.env.DATABASE_URL) {
+  console.error('❌ FATAL: DATABASE_URL environment variable is NOT set!');
+  console.error('Please add DATABASE_URL in Render > Environment');
+}
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
- connectionTimeoutMillis: 30000,
-query_timeout: 30000,
-statement_timeout: 30000,
-max: 5
+  ssl: process.env.NODE_ENV === 'production' 
+    ? { rejectUnauthorized: false } 
+    : false,
+  connectionTimeoutMillis: 60000,  // 60 seconds
+  query_timeout: 60000,
+  statement_timeout: 60000,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  allowExitOnIdle: true
 });
 
+// Log pool errors
+pool.on('error', (err) => {
+  console.error('❌ Pool error:', err.message);
+});
+
+// Test pool connectivity
+pool.on('connect', () => {
+  console.log('✅ Pool: New client connected');
+});
+
+pool.on('remove', () => {
+  console.log('🔄 Pool: Client removed');
+});
+
+// ============================================
+// MIDDLEWARE
+// ============================================
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.set('trust proxy', 1);
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use(session({
-  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
-  secret: process.env.SESSION_SECRET || 'ssewasswa-' + crypto.randomBytes(32).toString('hex'),
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production', httpOnly: true, maxAge: 86400000, sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' }
-}));
+// Session middleware - only initialize if DB is ready
+let sessionMiddleware = null;
+function setupSession() {
+  sessionMiddleware = session({
+    store: new pgSession({ pool, tableName: 'session', createTableIfMissing: false }),
+    secret: process.env.SESSION_SECRET || 'ssewasswa-' + crypto.randomBytes(32).toString('hex'),
+    resave: false,
+    saveUninitialized: false,
+    cookie: { 
+      secure: process.env.NODE_ENV === 'production', 
+      httpOnly: true, 
+      maxAge: 86400000, 
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' 
+    }
+  });
+  app.use(sessionMiddleware);
+}
 
 webpush.setVapidDetails(
   'mailto:waiswadaniel24@gmail.com',
@@ -54,9 +91,15 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY || 'SUbOaqB2BVzpHaHQW-rqd3N0_2m2Uy8a8gX5LqJ5oUY'
 );
 
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
 function esc(s) { if (!s) return ''; return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function isValidPhone(p) { return /^(\+?256|0)[7]\d{8}$/.test((p || '').replace(/\s/g, '')); }
 function ah(fn) { return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next); }
+
+// Sleep helper for retries
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function renderPage(title, content, user, isPublic, lang) {
   user = user || null; isPublic = isPublic || false; lang = lang || 'en';
@@ -69,20 +112,78 @@ function renderPage(title, content, user, isPublic, lang) {
   return '<!doctype html><html lang="'+lang+'"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+'</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b;min-height:100vh}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-orange{background:linear-gradient(135deg,#ea580c,#f97316)}.btn-purple{background:linear-gradient(135deg,#7c3aed,#8b5cf6)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b);color:#1e293b}input,select,textarea{width:100%;padding:12px 16px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0 12px;font-size:16px}input:focus{outline:none;border-color:#3b82f6}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:14px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}tr:hover{background:#f8fafc}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:24px;border-radius:16px;border:1px solid #e2e8f0;text-align:center}.stat-num{font-size:36px;font-weight:bold;color:#1e40af}.badge{padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}.badge-blue{background:#dbeafe;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.hero{background:linear-gradient(135deg,#1e40af,#3b82f6,#60a5fa);color:white;padding:60px 20px;text-align:center;border-radius:20px;margin-bottom:30px}.hero h1{font-size:48px;margin-bottom:16px}.card-img{width:100%;height:200px;object-fit:cover;border-radius:12px 12px 0 0}@media print{.btn,nav{display:none!important}body{padding:0;background:white}}@media(max-width:768px){.hero h1{font-size:32px}.stats{grid-template-columns:repeat(2,1fr)}}</style></head><body>'+nav+'<main class="container">'+content+'</main><footer style="text-align:center;padding:30px;font-size:12px;color:#64748b;background:white;border-top:1px solid #e2e8f0"><p>&copy; '+new Date().getFullYear()+' SSEWASSWA Platform</p></footer></body></html>';
 }
 
-async function checkDb(req, res, next) { if (!dbReady) return res.status(503).send('<div style="text-align:center;padding:100px"><h1>Starting...</h1><p><a href="'+req.url+'">Refresh</a></p></div>'); next(); }
-const requireAuth = (req, res, next) => { if (!req.session || !req.session.user) return res.redirect('/login'); req.tenant = req.session.tenant; req.tenantId = req.session.tenant ? req.session.tenant.id : null; req.lang = req.query.lang || 'en'; next(); };
-const requireRole = (role) => (req, res, next) => { if (!req.session || !req.session.user || req.session.user.role !== role) return res.status(403).send('403'); next(); };
-const requireStaff = (req, res, next) => { if (!req.session || !req.session.user || !['admin','super_admin','teacher'].includes(req.session.user.role)) return res.status(403).send('403'); next(); };
-const requireAdmin = (req, res, next) => { if (!req.session || !req.session.user || !['admin','super_admin'].includes(req.session.user.role)) return res.status(403).send('403'); next(); };
+async function checkDb(req, res, next) { 
+  if (!dbReady) return res.status(503).send('<div style="text-align:center;padding:100px"><h1>Starting...</h1><p><a href="'+req.url+'">Refresh</a></p></div>'); 
+  next(); 
+}
 
-async function sendSMS(phone, msg) { if (SMS_CONFIG.apiKey === 'demo') { console.log('[SMS]', phone, msg); return; } try { await axios.post('https://api.africastalking.com/version1/messaging', 'username='+SMS_CONFIG.username+'&to='+phone+'&message='+encodeURIComponent(msg)+'&from='+SMS_CONFIG.senderId, { headers: { 'apiKey': SMS_CONFIG.apiKey, 'Content-Type': 'application/x-www-form-urlencoded' } }); } catch(e) { console.error('SMS Error:', e.message); } }
-async function sendWhatsApp(phone, msg) { if (WHATSAPP_CONFIG.token === 'demo') { console.log('[WA]', phone, msg); return; } try { await axios.post('https://graph.facebook.com/v18.0/'+WHATSAPP_CONFIG.phoneId+'/messages', { messaging_product: 'whatsapp', to: phone, text: { body: msg } }, { headers: { 'Authorization': 'Bearer '+WHATSAPP_CONFIG.token } }); } catch(e) { console.error('WA Error:', e.message); } }
+const requireAuth = (req, res, next) => { 
+  if (!req.session || !req.session.user) return res.redirect('/login'); 
+  req.tenant = req.session.tenant; 
+  req.tenantId = req.session.tenant ? req.session.tenant.id : null; 
+  req.lang = req.query.lang || 'en'; 
+  next(); 
+};
 
-async function addBonus(userId, tenantId, amount, type, desc, meta) { meta = meta || {}; try { await pool.query('INSERT INTO bonus_earnings (user_id,tenant_id,amount,type,description,metadata) VALUES ($1,$2,$3,$4,$5,$6)', [userId,tenantId,amount,type,desc,JSON.stringify(meta)]); await pool.query('UPDATE wallets SET balance=balance+$1,updated_at=NOW() WHERE user_email=$2', [amount,userId]); } catch(e) { console.error('Bonus error:', e.message); } }
-async function addDevCommission(amount, type, desc, ref) { try { await pool.query('INSERT INTO developer_revenue (amount,type,description,reference_id) VALUES ($1,$2,$3,$4)', [amount,type,desc,ref]); await pool.query('UPDATE platform_wallet SET balance=balance+$1,updated_at=NOW() WHERE id=1', [amount]); } catch(e) { console.error('Comm error:', e.message); } }
-async function sendPushToUser(email, title, body) { try { const subs = await pool.query('SELECT endpoint,keys FROM push_subscriptions WHERE user_email=$1', [email]); for (const sub of subs.rows) { try { await webpush.sendNotification({endpoint:sub.endpoint,keys:sub.keys}, JSON.stringify({title,body})); } catch(e) {} } } catch(e) {} }
+const requireRole = (role) => (req, res, next) => { 
+  if (!req.session || !req.session.user || req.session.user.role !== role) return res.status(403).send('403'); 
+  next(); 
+};
 
-app.get('/api/vapid-public-key', (req, res) => { res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAK1sTsE0ip-4_QtQvxZBG0GZsFhJ8jmJ4MhQxKqYdJm5gA' }); });
+const requireStaff = (req, res, next) => { 
+  if (!req.session || !req.session.user || !['admin','super_admin','teacher'].includes(req.session.user.role)) return res.status(403).send('403'); 
+  next(); 
+};
+
+const requireAdmin = (req, res, next) => { 
+  if (!req.session || !req.session.user || !['admin','super_admin'].includes(req.session.user.role)) return res.status(403).send('403'); 
+  next(); 
+};
+
+async function sendSMS(phone, msg) { 
+  if (SMS_CONFIG.apiKey === 'demo') { console.log('[SMS]', phone, msg); return; } 
+  try { 
+    await axios.post('https://api.africastalking.com/version1/messaging', 'username='+SMS_CONFIG.username+'&to='+phone+'&message='+encodeURIComponent(msg)+'&from='+SMS_CONFIG.senderId, { headers: { 'apiKey': SMS_CONFIG.apiKey, 'Content-Type': 'application/x-www-form-urlencoded' } }); 
+  } catch(e) { console.error('SMS Error:', e.message); } 
+}
+
+async function sendWhatsApp(phone, msg) { 
+  if (WHATSAPP_CONFIG.token === 'demo') { console.log('[WA]', phone, msg); return; } 
+  try { 
+    await axios.post('https://graph.facebook.com/v18.0/'+WHATSAPP_CONFIG.phoneId+'/messages', { messaging_product: 'whatsapp', to: phone, text: { body: msg } }, { headers: { 'Authorization': 'Bearer '+WHATSAPP_CONFIG.token } }); 
+  } catch(e) { console.error('WA Error:', e.message); } 
+}
+
+async function addBonus(userId, tenantId, amount, type, desc, meta) { 
+  meta = meta || {}; 
+  try { 
+    await pool.query('INSERT INTO bonus_earnings (user_id,tenant_id,amount,type,description,metadata) VALUES ($1,$2,$3,$4,$5,$6)', [userId,tenantId,amount,type,desc,JSON.stringify(meta)]); 
+    await pool.query('UPDATE wallets SET balance=balance+$1,updated_at=NOW() WHERE user_email=$2', [amount,userId]); 
+  } catch(e) { console.error('Bonus error:', e.message); } 
+}
+
+async function addDevCommission(amount, type, desc, ref) { 
+  try { 
+    await pool.query('INSERT INTO developer_revenue (amount,type,description,reference_id) VALUES ($1,$2,$3,$4)', [amount,type,desc,ref]); 
+    await pool.query('UPDATE platform_wallet SET balance=balance+$1,updated_at=NOW() WHERE id=1', [amount]); 
+  } catch(e) { console.error('Comm error:', e.message); } 
+}
+
+async function sendPushToUser(email, title, body) { 
+  try { 
+    const subs = await pool.query('SELECT endpoint,keys FROM push_subscriptions WHERE user_email=$1', [email]); 
+    for (const sub of subs.rows) { 
+      try { await webpush.sendNotification({endpoint:sub.endpoint,keys:sub.keys}, JSON.stringify({title,body})); } catch(e) {} 
+    } 
+  } catch(e) {} 
+}
+
+// ============================================
+// ROUTES
+// ============================================
+app.get('/api/vapid-public-key', (req, res) => { 
+  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAK1sTsE0ip-4_QtQvxZBG0GZsFhJ8jmJ4MhQxKqYdJm5gA' }); 
+});
 
 app.post('/api/subscribe', requireAuth, checkDb, ah(async (req, res) => {
   if (!req.body || !req.body.endpoint) return res.status(400).json({error:'Missing'});
@@ -464,7 +565,7 @@ app.get('/app/students', requireAuth, checkDb, ah(async (req, res) => {
 
 app.get('/app/students/add', requireAuth, requireStaff, (req, res) => {
   res.send(renderPage('Add', '<div class="card" style="max-width:500px"><h1>Add Student</h1><form method="POST" action="/app/students/add"><input name="name" required><input name="class"><input name="guardian_name"><input name="guardian_phone"><button class="btn btn-green" style="width:100%">Save</button></form></div>', {tenant_name:req.tenant.name}, false, req.lang));
-});
+}));
 
 app.post('/app/students/add', requireAuth, requireStaff, checkDb, ah(async (req, res) => {
   await pool.query('INSERT INTO students (tenant_id,name,class,guardian_name,guardian_phone) VALUES ($1,$2,$3,$4,$5)', [req.tenantId,req.body.name,req.body.class,req.body.guardian_name,req.body.guardian_phone]);
@@ -503,7 +604,7 @@ app.get('/app/students/report/:id', requireAuth, checkDb, ah(async (req, res) =>
 
 app.get('/app/students/bulk', requireAuth, requireAdmin, (req, res) => {
   res.send(renderPage('Bulk', '<div class="card" style="max-width:600px"><h1>Bulk Upload</h1><p style="color:#64748b;margin-bottom:16px">CSV: name,class,guardian_name,guardian_phone</p><form method="POST" action="/app/students/bulk" enctype="multipart/form-data"><input type="file" name="csv" accept=".csv" required style="padding:20px;border:2px dashed #cbd5e1;background:#f8fafc"><button class="btn btn-green" style="width:100%">Upload</button></form><a href="/app/students/template.csv" class="btn btn-orange">Template</a></div>', {tenant_name:req.tenant.name}, false, req.lang));
-});
+}));
 
 app.get('/app/students/template.csv', (req, res) => {
   res.header('Content-Type','text/csv').attachment('template.csv').send('name,class,guardian_name,guardian_phone\nJohn,P.4,Jane,0772123456\n');
@@ -656,60 +757,31 @@ app.get('/sitemap.xml', checkDb, ah(async (req, res) => {
   const s=await pool.query("SELECT subdomain FROM tenants WHERE plan!='suspended'");
   res.header('Content-Type','application/xml').send('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://'+req.headers.host+'/</loc></url>'+s.rows.map(x=>'<url><loc>https://'+req.headers.host+'/school/'+x.subdomain+'</loc></url>').join('')+'</urlset>');
 }));
+
 app.get('/debug-login', checkDb, ah(async (req, res) => {
   const email = 'waiswadaniel24@gmail.com';
   let output = '<div class="card" style="max-width:600px;margin:40px auto"><h1>Login Diagnostics</h1>';
-  
-  // Check DB connection
-  output += '<h3>1. DB Connection</h3>';
   try {
     const result = await pool.query('SELECT 1 as ok');
     output += '<p class="badge badge-green">Database connected ✅</p>';
   } catch(e) {
     output += '<p class="badge badge-red">Database error: ' + esc(e.message) + '</p>';
   }
-  
-  // Check if user exists
-  output += '<h3>2. User Check</h3>';
   try {
     const user = await pool.query('SELECT email, password_hash, role, approved FROM users WHERE email=$1', [email]);
     output += '<p>User exists: ' + (user.rows.length > 0 ? 'YES ✅' : 'NO ❌') + '</p>';
     if (user.rows.length > 0) {
       output += '<p>Role: ' + user.rows[0].role + '</p>';
       output += '<p>Approved: ' + user.rows[0].approved + '</p>';
-      output += '<p>Hash length: ' + (user.rows[0].password_hash ? user.rows[0].password_hash.length : 'NULL') + '</p>';
-      
-      // Test password
       const match = await bcrypt.compare('admin123', user.rows[0].password_hash);
       output += '<p>Password "admin123" matches: ' + (match ? 'YES ✅' : 'NO ❌') + '</p>';
     }
   } catch(e) {
     output += '<p class="badge badge-red">Error: ' + esc(e.message) + '</p>';
   }
-  
-  // Check session store
-  output += '<h3>3. Session Store</h3>';
-  try {
-    const sessCount = await pool.query('SELECT COUNT(*) as c FROM session');
-    output += '<p>Sessions in DB: ' + sessCount.rows[0].c + '</p>';
-  } catch(e) {
-    output += '<p class="badge badge-red">Error: ' + esc(e.message) + '</p>';
-  }
-  
-  // Check wallets
-  output += '<h3>4. Wallet Check</h3>';
-  try {
-    const wallet = await pool.query('SELECT * FROM wallets WHERE user_email=$1', [email]);
-    output += '<p>Wallet exists: ' + (wallet.rows.length > 0 ? 'YES ✅' : 'NO ❌') + '</p>';
-    if (wallet.rows[0]) {
-      output += '<p>Balance: ' + wallet.rows[0].balance + '</p>';
-    }
-  } catch(e) {
-    output += '<p class="badge badge-red">Error: ' + esc(e.message) + '</p>';
-  }
-  
   res.send(renderPage('Debug', output, null, true));
 }));
+
 app.post('/create-site', checkDb, ah(async (req, res) => {
   try {
     const t=await pool.query('INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) RETURNING id',[req.body.name.trim(),req.body.subdomain.toLowerCase().trim(),'free',req.body.momo_number,req.body.signup_code.toUpperCase()]);
@@ -740,42 +812,42 @@ app.post('/api/momo/webhook', ah(async (req, res) => {
 app.use((req, res) => { res.status(404).send(renderPage('404', '<div class="card" style="text-align:center"><div style="font-size:64px;margin-bottom:16px">🔍</div><h1>404 Not Found</h1><a href="/" class="btn">Go Home</a></div>', null, true)); });
 app.use((err, req, res, next) => { console.error('Error:', err.message); res.status(500).send(renderPage('Error', '<div class="card"><h1>Error</h1><p>Please try again.</p></div>', null, true)); });
 
-async function start() {
-  console.log('Starting SSEWASSWA...');
-  if (process.env.DATABASE_URL) {
-    console.log('Initializing database...');
-    await initDB();
-    if (!dbReady) { console.error('DB failed!'); process.exit(1); }
-  }
-  app.listen(PORT, () => {
-    console.log('='.repeat(50));
-    console.log('SERVER LIVE ON PORT ' + PORT);
-    console.log('Database: ' + (dbReady ? 'READY' : 'NOT READY'));
-    console.log('='.repeat(50));
-  });
-}
-
-start().catch(err => { console.error('Startup failed:', err.message); process.exit(1); });
-
+// ============================================
+// DATABASE INITIALIZATION - FULLY FIXED
+// ============================================
 async function initDB() {
-  let client = null;
-  let retries = 3;
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY_MS = 5000; // 5 seconds between retries
   
-  while (retries > 0) {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let client = null;
+    
     try {
-      console.log('Connecting to database (attempt ' + (4 - retries) + ')...');
-      client = await pool.connect({ 
-        connectionTimeoutMillis: 60000,
-        query_timeout: 30000,
-        statement_timeout: 30000,
-        max: 5,
-        idleTimeoutMillis: 60000,
-        allowExitOnIdle: true
-      });
-      if (!client) throw new Error('DB connection failed');
-      console.log('DB connected, creating tables...');
+      console.log(`🔄 Connecting to database (attempt ${attempt}/${MAX_RETRIES})...`);
+      
+      // Check if DATABASE_URL exists
+      if (!process.env.DATABASE_URL) {
+        console.error('❌ DATABASE_URL is not set!');
+        return false;
+      }
+      
+      // Mask the URL for logging (hide password)
+      const maskedUrl = process.env.DATABASE_URL.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
+      console.log('📡 URL:', maskedUrl);
+      
+      // Try to connect
+      client = await pool.connect();
+      
+      if (!client) {
+        throw new Error('pool.connect() returned null');
+      }
+      
+      console.log('✅ Connected! Creating tables...');
+      
+      // Start transaction
       await client.query('BEGIN');
       
+      // Create all tables
       await client.query('CREATE TABLE IF NOT EXISTS "session" ("sid" varchar NOT NULL, "sess" json NOT NULL, "expire" timestamp(6) NOT NULL, PRIMARY KEY ("sid"))');
       await client.query('CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")');
       await client.query('CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT NOW())');
@@ -817,29 +889,127 @@ async function initDB() {
       await client.query('CREATE TABLE IF NOT EXISTS withdrawals (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, amount NUMERIC NOT NULL, phone TEXT, fee NUMERIC DEFAULT 0, net_amount NUMERIC DEFAULT 0, status TEXT DEFAULT \'pending\', created_at TIMESTAMP DEFAULT NOW())');
       await client.query('CREATE TABLE IF NOT EXISTS viral_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER, type TEXT NOT NULL, reward_amount NUMERIC NOT NULL, target_action TEXT NOT NULL, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())');
       await client.query('CREATE TABLE IF NOT EXISTS viral_shares (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, platform TEXT NOT NULL, link_shared TEXT NOT NULL, clicks INTEGER DEFAULT 0, conversions INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())');
+      
+      // Insert default platform wallet
       await client.query('INSERT INTO platform_wallet (id,balance) VALUES (1,0) ON CONFLICT DO NOTHING');
+      
+      // Create default tenant
       const tenant = await client.query('INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (subdomain) DO NOTHING RETURNING id', ['SSEWASSWA FOUNDATION UGANDA','main','enterprise','0789736737','SSEWASSWA2024']);
+      
       if (tenant.rows.length > 0) {
         const tid = tenant.rows[0].id;
         const hash = await bcrypt.hash('admin123', 10);
         await client.query('INSERT INTO users (tenant_id,email,password_hash,role,approved,full_name,phone) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [tid,'waiswadaniel24@gmail.com',hash,'super_admin',true,'Daniel Waiswa','0789736737']);
         await client.query('INSERT INTO settings (tenant_id,subscription_tier,verified,school_motto,about_text,signup_code) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [tid,'enterprise',true,'Excellence in Education','Digital tools for schools.','SSEWASSWA2024']);
         await client.query('INSERT INTO wallets (tenant_id,user_email,balance) VALUES ($1,$2,0) ON CONFLICT DO NOTHING', [tid,'waiswadaniel24@gmail.com',0]);
+        console.log('✅ Default tenant created');
       }
+      
+      // Commit transaction
       await client.query('COMMIT');
-      dbReady = true;
-      console.log('Database ready!');
+      
+      console.log('✅ All tables created successfully!');
+      return true;
+      
     } catch (err) {
-      console.error('DB Error:', err.message);
-      dbReady = false;
+      console.error(`❌ Attempt ${attempt} failed:`, err.message);
+      
+      // Rollback if we started a transaction
+      if (client) {
+        try {
+          await client.query('ROLLBACK');
+        } catch(rollbackErr) {
+          console.error('Rollback error:', rollbackErr.message);
+        }
+      }
+      
+      // If this is the last attempt, give up
+      if (attempt === MAX_RETRIES) {
+        console.error('❌ All database connection attempts failed');
+        console.error('💡 Make sure DATABASE_URL is set correctly in Render Environment');
+        return false;
+      }
+      
+      // Wait before retrying
+      console.log(`⏳ Waiting ${RETRY_DELAY_MS/1000} seconds before retry...`);
+      await sleep(RETRY_DELAY_MS);
+      
+    } finally {
+      // Always release the client if we got one
+      if (client) {
+        try {
+          client.release();
+        } catch(e) {
+          // Ignore release errors
+        }
+      }
     }
-    if (client) { client.release(); }
-    retries--;
   }
+  
+  return false;
 }
 
-process.on('SIGTERM', async () => { console.log('Shutting down...'); try { await pool.end(); } catch(e) {} process.exit(0); });
-process.on('unhandledRejection', (reason) => { console.error('Unhandled:', reason); });
+// ============================================
+// START SERVER - FIXED
+// ============================================
+async function start() {
+  console.log('='.repeat(50));
+  console.log('Starting SSEWASSWA Platform...');
+  console.log('='.repeat(50));
+  console.log('Node version:', process.version);
+  console.log('Environment:', process.env.NODE_ENV || 'development');
+  console.log('PORT:', PORT);
+  console.log('DATABASE_URL set:', !!process.env.DATABASE_URL);
+  
+  if (process.env.DATABASE_URL) {
+    console.log('\n📋 Initializing database...');
+    dbReady = await initDB();
+    
+    if (dbReady) {
+      console.log('\n✅ Database ready!');
+      // Setup session middleware after DB is ready
+      setupSession();
+      console.log('✅ Session middleware configured');
+    } else {
+      console.error('\n❌ Database initialization failed!');
+      console.error('💡 Please check:');
+      console.error('   1. DATABASE_URL is set in Render > Environment');
+      console.error('   2. Database is provisioned and accessible');
+      console.error('   3. SSL settings are correct');
+      process.exit(1);
+    }
+  } else {
+    console.warn('\n⚠️  WARNING: DATABASE_URL not set - running without database');
+    setupSession(); // Still setup session (will use memory store fallback)
+  }
+  
+  app.listen(PORT, () => {
+    console.log('\n' + '='.repeat(50));
+    console.log('🚀 SERVER LIVE ON PORT ' + PORT);
+    console.log('📊 Database: ' + (dbReady ? '✅ READY' : '❌ NOT READY'));
+    console.log('='.repeat(50) + '\n');
+  });
+}
 
-process.on('SIGTERM', async () => { console.log('Shutting down...'); try { await pool.end(); } catch(e) {} process.exit(0); });
-process.on('unhandledRejection', (reason) => { console.error('Unhandled:', reason); });
+// Handle graceful shutdown
+process.on('SIGTERM', async () => { 
+  console.log('\n🛑 SIGTERM received, shutting down...'); 
+  try { await pool.end(); } catch(e) {} 
+  process.exit(0); 
+});
+
+process.on('SIGINT', async () => { 
+  console.log('\n🛑 SIGINT received, shutting down...'); 
+  try { await pool.end(); } catch(e) {} 
+  process.exit(0); 
+});
+
+process.on('unhandledRejection', (reason, promise) => { 
+  console.error('❌ Unhandled Rejection:', reason); 
+});
+
+// Start the application
+start().catch(err => { 
+  console.error('❌ Startup failed:', err); 
+  process.exit(1); 
+});
