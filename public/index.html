@@ -16,6 +16,14 @@
 </form>
 
 <script>
+// Register Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(reg => console.log('Service Worker registered'))
+    .catch(err => console.error('SW registration failed:', err));
+}
+
+// Login Form
 loginForm.onsubmit = async e => {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target));
@@ -26,11 +34,8 @@ loginForm.onsubmit = async e => {
   });
   alert(await res.text());
 };
-self.addEventListener('push', e => {
-  const data = e.data.json();
-  self.registration.showNotification(data.title, { body: data.body, icon: '/icon.png', data: data.data });
-});
-self.addEventListener('notificationclick', e => { e.notification.close(); clients.openWindow('/'); });
+
+// Change Password Form
 pwForm.onsubmit = async e => {
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target));
