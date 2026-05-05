@@ -10,9 +10,20 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// CRITICAL FIX: Check if database URL exists immediately
+if (!process.env.DATABASE_URL) {
+  console.error('❌ FATAL ERROR: DATABASE_URL environment variable is missing!');
+  console.error('Please add it in Render -> Environment -> Environment Variables.');
+  process.exit(1); // Kill the process so Render knows it failed
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  // FAIL FAST: Don't hang for 60 seconds if the DB is unreachable
+  connectionTimeoutMillis: 5000, 
+  idleTimeoutMillis: 30000,
+  max: 5 
 });
 
 const parser = new Parser();
@@ -73,29 +84,24 @@ function renderPage(title, content, user = null, isPublic = false) {
 // Middleware: Check if user is logged in
 const requireAuth = (req, res, next) => {
   if (!req.session.user) return res.redirect('/login');
-  // Attach tenant from session to avoid unnecessary DB queries
   req.tenant = req.session.tenant;
   req.tenantId = req.session.tenant.id;
   next();
 };
 
-// Middleware: Fetch tenant from DB (Used mainly for public routes or strict verification)
+// Middleware: Fetch tenant from DB
 async function requireTenant(req, res, next) {
   try {
-    // If already authenticated, use session data
     if (req.session && req.session.tenant) {
       req.tenant = req.session.tenant;
       req.tenantId = req.session.tenant.id;
       return next();
     }
-    
     const host = req.headers.host || '';
     const sub = host.split('.')[0];
     const effectiveSub = (sub === 'localhost' || host.includes('onrender') || sub === '127') ? 'main' : sub;
-    
     const result = await pool.query('SELECT * FROM tenants WHERE subdomain = $1', [effectiveSub]);
     if (!result.rows[0]) return res.status(404).send('School not found');
-    
     req.tenant = result.rows[0];
     req.tenantId = result.rows[0].id;
     return next();
@@ -212,7 +218,7 @@ async function initDB() {
     }
 
     await client.query('COMMIT');
-    console.log('Database setup complete.');
+    console.log('✅ Database setup complete.');
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw err;
@@ -220,7 +226,6 @@ async function initDB() {
     client.release();
   }
 }
-
 // --- ROUTES ---
 
 app.get('/login', (req, res) => {
