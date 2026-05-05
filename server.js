@@ -34,6 +34,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.set('trust proxy', 1);
 
+// Serve static files (sw.js, icon.png) from the public folder
+app.use(express.static(path.join(__dirname, 'public'))); 
+
 webpush.setVapidDetails(
   'mailto:waiswadaniel24@gmail.com',
   process.env.VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa40HI0DLLuxazjqAK1sTsE0ip-4_QtQvxZBG0GZsFhJ8jmJ4MhQxKqYdJm5gA',
