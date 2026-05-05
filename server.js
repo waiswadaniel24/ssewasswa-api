@@ -319,7 +319,12 @@ async function initDB() {
     await client.query('BEGIN');
     await client.query('CREATE TABLE IF NOT EXISTS "session" ("sid" varchar NOT NULL, "sess" json NOT NULL, "expire" timestamp(6) NOT NULL, PRIMARY KEY ("sid"))');
     await client.query('CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")');
+    
     await client.query(`CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT 'free', plan_expires DATE, ranking_score INTEGER DEFAULT 0, momo_number TEXT, signup_code TEXT, created_at TIMESTAMP DEFAULT NOW())`);
+    
+    // FIX: Force add momo_number if it was missing from an older deploy
+    await client.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS momo_number TEXT;`);
+    
     await client.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'staff', tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, full_name TEXT, phone TEXT, approved BOOLEAN DEFAULT false, premium_until TIMESTAMP, created_at TIMESTAMP DEFAULT NOW())`);
     await client.query(`CREATE TABLE IF NOT EXISTS parents (id SERIAL PRIMARY KEY, phone TEXT UNIQUE NOT NULL, name TEXT, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, verified BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`);
     await client.query(`CREATE TABLE IF NOT EXISTS parent_otps (id SERIAL PRIMARY KEY, phone TEXT NOT NULL, otp TEXT NOT NULL, expires_at TIMESTAMP NOT NULL, used BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`);
@@ -332,11 +337,20 @@ async function initDB() {
     await client.query(`CREATE TABLE IF NOT EXISTS password_resets (id SERIAL PRIMARY KEY, email TEXT NOT NULL, token TEXT UNIQUE NOT NULL, expires_at TIMESTAMP NOT NULL, used BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`);
     await client.query(`CREATE TABLE IF NOT EXISTS wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL UNIQUE, balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())`);
     await client.query(`CREATE TABLE IF NOT EXISTS platform_wallet (id SERIAL PRIMARY KEY, balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE IF NOT EXISTS developer_revenue (id SERIAL PRIMARY KEY, amount NUMERIC NOT NULL, type TEXT NOT NULL, description TEXT, reference_id TEXT, created_at TIMESTAMP DEFAULT NOW())`);
     
-    // FIX 1: Removed the extra '0' from the array parameter to match the 2 SQL placeholders
+    // ADDED: Missing tables that the app needs to function without crashing
+    await client.query(`CREATE TABLE IF NOT EXISTS bonus_earnings (id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, amount NUMERIC NOT NULL, type TEXT NOT NULL, description TEXT, metadata JSONB, video_id TEXT, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE IF NOT EXISTS referral_stats (id SERIAL PRIMARY KEY, referrer_email TEXT NOT NULL, referred_email TEXT NOT NULL, signup_date TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, endpoint TEXT NOT NULL, keys JSONB NOT NULL, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE IF NOT EXISTS store_orders (id SERIAL PRIMARY KEY, product_id INTEGER, product_name TEXT, amount NUMERIC NOT NULL, buyer_phone TEXT, buyer_name TEXT, reference TEXT UNIQUE, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE IF NOT EXISTS marketplace_products (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, price NUMERIC NOT NULL, image_url TEXT, description TEXT, approved BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE IF NOT EXISTS live_classes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, teacher_email TEXT NOT NULL, subject TEXT, class TEXT, title TEXT NOT NULL, jitsi_room TEXT UNIQUE NOT NULL, price NUMERIC DEFAULT 0, status TEXT DEFAULT 'scheduled', scheduled_at TIMESTAMP, created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE IF NOT EXISTS class_payments (id SERIAL PRIMARY KEY, class_id INTEGER REFERENCES live_classes(id) ON DELETE CASCADE, student_email TEXT NOT NULL, amount NUMERIC NOT NULL, phone TEXT, reference TEXT UNIQUE, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+    await client.query(`CREATE TABLE IF NOT EXISTS withdrawals (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, amount NUMERIC NOT NULL, phone TEXT, fee NUMERIC DEFAULT 0, net_amount NUMERIC DEFAULT 0, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+
     await client.query(`INSERT INTO wallets (tenant_id, user_email, balance) VALUES ($1,$2,0) ON CONFLICT DO NOTHING`, [1, 'dummy']);
     await client.query(`INSERT INTO platform_wallet (id, balance, updated_at) VALUES (1, 0, NOW()) ON CONFLICT DO NOTHING`);
-    await client.query(`CREATE TABLE IF NOT EXISTS developer_revenue (id SERIAL PRIMARY KEY, amount NUMERIC NOT NULL, type TEXT NOT NULL, description TEXT, reference_id TEXT, created_at TIMESTAMP DEFAULT NOW())`);
 
     const tenant = await client.query(`INSERT INTO tenants (name, subdomain, plan, momo_number, signup_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (subdomain) DO NOTHING RETURNING id`, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise', '0789736737', 'SSEWASSWA2024']);
     if (tenant.rows.length > 0) {
