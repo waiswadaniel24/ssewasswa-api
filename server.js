@@ -1,3 +1,5 @@
+Replace the entire contents of server.js with this code:
+
 const express = require('express');
 const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
@@ -22,12 +24,10 @@ const pool = new Pool({
 
 const parser = new Parser();
 
-// Basic middleware
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.set('trust proxy', 1);
 
-// Config
 const MOMO_CONFIG = {
   subscriptionKey: process.env.MOMO_SUBSCRIPTION_KEY || 'demo',
   apiUser: process.env.MOMO_API_USER || 'demo',
@@ -42,7 +42,6 @@ const SMS_CONFIG = {
   senderId: 'SSEWASSWA'
 };
 
-// Helper functions
 function renderPage(title, content, user = null, isPublic = false) {
   const nav = user &&!isPublic? `
     <div style="background:#1e40af;color:white;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;margin:-24px -24px 24px;flex-wrap:wrap">
@@ -58,16 +57,16 @@ function renderPage(title, content, user = null, isPublic = false) {
     </div>` : '';
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>
     body{font-family:system-ui;background:#f8fafc;color:#1e293b;margin:0;padding:24px}
-   .card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:900px;margin:0 auto 16px}
-   .btn{background:#1e40af;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px}
-   .btn-green{background:#16a34a}.btn-red{background:#dc2626}.btn-orange{background:#ea580c}
+  .card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:900px;margin:0 auto 16px}
+  .btn{background:#1e40af;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px}
+  .btn-green{background:#16a34a}.btn-red{background:#dc2626}.btn-orange{background:#ea580c}
     input,select,textarea{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:8px 0 12px;box-sizing:border-box}
     table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:#f1f5f9}
-   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
-   .stat-card{background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0}
-   .stat-num{font-size:32px;font-weight:bold;color:#1e40af}
-   .badge{padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600}
-   .badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
+  .stat-card{background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0}
+  .stat-num{font-size:32px;font-weight:bold;color:#1e40af}
+  .badge{padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600}
+  .badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}
   </style></head><body>${nav}${content}</body></html>`;
 }
 
@@ -90,7 +89,7 @@ async function requireTenant(req, res, next) {
   } catch (err) {
     return res.status(500).send('Tenant lookup failed');
   }
-}
+};
 
 const requireRole = (role) => (req, res, next) => {
   if (!req.session.user || req.session.user.role!== role) return res.status(403).send('Forbidden');
@@ -114,13 +113,11 @@ async function sendSMS(phone, message) {
   }
 }
 
-// Database setup
 async function initDB() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     console.log('Creating session table...');
-
     await client.query(`
       CREATE TABLE IF NOT EXISTS "session" (
         "sid" varchar NOT NULL,
@@ -130,13 +127,11 @@ async function initDB() {
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire")`);
-
     console.log('Dropping old tables...');
     const tables = ['payment_requests','parent_otps','parents','chat_messages','news_cache','feedback_messages','feedback_threads','comments','grants','donor_campaigns','donations','surveys','grades','attendance','fees','students','password_resets','users','revenue_log','settings','courses','order_items','orders','cart_items','market_items','wallets','tenants'];
     for (const table of tables) {
       await client.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
     }
-
     console.log('Creating tables...');
     await client.query('CREATE TABLE tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, plan TEXT DEFAULT \'free\', plan_expires DATE, ranking_score INTEGER DEFAULT 0, momo_number TEXT, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT \'staff\', tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, created_at TIMESTAMP DEFAULT NOW())');
@@ -151,7 +146,6 @@ async function initDB() {
     await client.query('CREATE TABLE password_resets (id SERIAL PRIMARY KEY, email TEXT NOT NULL, token TEXT UNIQUE NOT NULL, expires_at TIMESTAMP NOT NULL, used BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE revenue_log (id SERIAL PRIMARY KEY, type TEXT, gross_amount NUMERIC, commission NUMERIC, tenant_id INTEGER, description TEXT, created_at TIMESTAMP DEFAULT NOW())');
     await client.query('CREATE TABLE wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, balance NUMERIC DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW())');
-
     console.log('Seeding developer account...');
     const tenant = await pool.query(`
       INSERT INTO tenants (name, subdomain, plan, momo_number)
@@ -159,22 +153,18 @@ async function initDB() {
       ON CONFLICT (subdomain) DO UPDATE SET name = EXCLUDED.name
       RETURNING id
     `, ['SSEWASSWA FOUNDATION UGANDA', 'main', 'enterprise', '0789736737']);
-
     const tenantId = tenant.rows[0].id;
     const hashedPass = await bcrypt.hash('admin123', 10);
-
     await pool.query(`
       INSERT INTO users (tenant_id, email, password_hash, role)
       VALUES ($1, $2, $3, $4)
       ON CONFLICT (email) DO NOTHING
     `, [tenantId, 'waiswadaniel24@gmail.com', hashedPass, 'super_admin']);
-
     await pool.query(`
       INSERT INTO settings (tenant_id, subscription_tier, verified, school_motto, about_text)
       VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT (tenant_id) DO NOTHING
     `, [tenantId, 'enterprise', true, 'Excellence Through Education', 'SSEWASSWA FOUNDATION UGANDA empowers schools with digital tools.']);
-
     await client.query('COMMIT');
     console.log('Database setup complete. Password: admin123');
   } catch (err) {
@@ -185,10 +175,8 @@ async function initDB() {
   }
 }
 
-// START SERVER AFTER DB IS READY
 initDB().then(() => {
   console.log('Database ready - configuring session...');
-
   app.use(session({
     store: new pgSession({
       pool: pool,
@@ -206,7 +194,6 @@ initDB().then(() => {
     }
   }));
 
-  // === AUTH ROUTES ===
   app.get('/login', (req, res) => {
     res.send(renderPage('Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>School Admin Login</h1><form method="POST" action="/login"><input name="email" placeholder="Email" type="email" required /><input name="password" placeholder="Password" type="password" required /><button type="submit" class="btn" style="width:100%">Login</button></form><p style="margin-top:1rem;text-align:center"><a href="/parent/login">Parent Login</a> | <a href="/create-site">Create School</a></p></div>'));
   });
@@ -232,7 +219,6 @@ initDB().then(() => {
     req.session.destroy(() => res.redirect('/login'));
   });
 
-  // === PARENT PORTAL ===
   app.get('/parent/login', (req, res) => {
     res.send(renderPage('Parent Login', '<div class="card" style="max-width:400px;margin:60px auto"><h1>Parent Login</h1><p>Enter your phone number to receive OTP</p><form method="POST" action="/parent/send-otp"><input name="phone" placeholder="07XXXXXXXX" required /><button type="submit" class="btn" style="width:100%">Send OTP</button></form><p style="margin-top:1rem;text-align:center"><a href="/login">School Admin Login</a></p></div>'));
   });
@@ -251,7 +237,6 @@ initDB().then(() => {
     const result = await pool.query('SELECT * FROM parent_otps WHERE phone = $1 AND otp = $2 AND expires_at > NOW() AND used = false ORDER BY created_at DESC LIMIT 1', [phone, otp]);
     if (!result.rows[0]) return res.send(renderPage('Error', '<div class="card"><h1>Invalid OTP</h1><a href="/parent/login">Try Again</a></div>'));
     await pool.query('UPDATE parent_otps SET used = true WHERE id = $1', [result.rows[0].id]);
-
     let parent = await pool.query('SELECT * FROM parents WHERE phone = $1', [phone]);
     if (!parent.rows[0]) {
       const tenant = await pool.query('SELECT id FROM tenants WHERE subdomain = $1', ['main']);
@@ -282,7 +267,6 @@ initDB().then(() => {
     const reference = `FEE-${Date.now()}`;
     const student = await pool.query('SELECT * FROM students WHERE id = $1', [student_id]);
     await pool.query('INSERT INTO payment_requests (tenant_id, student_id, amount, phone, reference) VALUES ($1, $2, $3, $4, $5)', [student.rows[0].tenant_id, student_id, amount, phone, reference]);
-
     if (MOMO_CONFIG.apiKey === 'demo') {
       await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [amount, student_id]);
       await pool.query('UPDATE payment_requests SET status = $1 WHERE reference = $2', ['success', reference]);
@@ -296,7 +280,6 @@ initDB().then(() => {
     req.session.destroy(() => res.redirect('/parent/login'));
   });
 
-  // === SUPER ADMIN ===
   app.get('/super-admin', requireAuth, requireRole('super_admin'), (req, res) => {
     res.send(renderPage('Super Admin', `<div class="card"><h1>Super Admin Dashboard</h1><p><a href="/super-admin/tenants" class="btn">All Schools</a><a href="/super-admin/users" class="btn">All Users</a><a href="/create-site" class="btn btn-green">Add School</a></p></div>`));
   });
@@ -313,7 +296,6 @@ initDB().then(() => {
     res.send(renderPage('All Users', `<div class="card"><h1>All Users</h1><table><thead><tr><th>ID</th><th>Email</th><th>Role</th><th>School</th></tr></thead><tbody>${table}</tbody></table><p><a href="/super-admin" class="btn">Back</a></p></div>`));
   });
 
-  // === CREATE SITE ===
   app.get('/create-site', (req, res) => {
     res.send(renderPage('Create Site', '<div class="card" style="max-width:500px;margin:40px auto"><h1>Create Free School Site</h1><form method="POST" action="/create-site"><input name="name" placeholder="School Name" required><input name="subdomain" placeholder="Subdomain (no spaces)" required><input name="admin_email" type="email" placeholder="Admin Email" required><input name="admin_password" type="password" placeholder="Password" required><input name="momo_number" placeholder="MTN MoMo Number for Fees"><button class="btn" style="width:100%">Create School</button></form></div>'));
   });
@@ -336,7 +318,6 @@ initDB().then(() => {
     }
   });
 
-  // === PUBLIC SCHOOL PAGE ===
   app.get('/school/:subdomain', async (req, res) => {
     const tenant = await pool.query('SELECT t.*, s.school_motto, s.about_text FROM tenants t LEFT JOIN settings s ON t.id = s.tenant_id WHERE t.subdomain = $1', [req.params.subdomain]);
     if (!tenant.rows[0]) return res.status(404).send('School not found');
@@ -357,7 +338,6 @@ initDB().then(() => {
     res.send(renderPage(t.name, content, null, true));
   });
 
-  // === SCHOOL ADMIN DASHBOARD ===
   app.get('/app', requireAuth, requireTenant, async (req, res) => {
     const students = await pool.query('SELECT COUNT(*)::int AS c FROM students WHERE tenant_id = $1', [req.tenantId]);
     const fees = await pool.query('SELECT COALESCE(SUM(paid), 0)::numeric AS total FROM fees WHERE tenant_id = $1', [req.tenantId]);
@@ -379,7 +359,6 @@ initDB().then(() => {
     res.send(renderPage('Dashboard', content, { tenant_name: req.tenant.name }));
   });
 
-  // === STUDENTS ===
   app.get('/app/students', requireAuth, requireTenant, async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM students WHERE tenant_id = $1 ORDER BY created_at DESC', [req.tenantId]);
     const table = rows.map(s => `<tr><td>${s.id}</td><td>${s.name}</td><td>${s.class||'-'}</td><td>${s.guardian_phone||'-'}</td><td>UGX ${s.balance}</td><td><a href="/app/fees/add?student_id=${s.id}" class="btn">Pay</a></td></tr>`).join('');
@@ -399,7 +378,6 @@ initDB().then(() => {
     res.redirect('/app/students');
   });
 
-  // === FEES ===
   app.get('/app/fees', requireAuth, requireTenant, async (req, res) => {
     const { rows } = await pool.query('SELECT f.*, s.name as student_name FROM fees f JOIN students s ON f.student_id = s.id WHERE f.tenant_id = $1 ORDER BY f.created_at DESC LIMIT 50', [req.tenantId]);
     const table = rows.map(f => `<tr><td>${f.student_name}</td><td>UGX ${f.amount}</td><td>UGX ${f.paid}</td><td>${f.term||'-'}</td><td>${f.payment_method||'Cash'}</td></tr>`).join('');
@@ -412,18 +390,17 @@ initDB().then(() => {
     res.send(renderPage('Record Payment', `<div class="card" style="max-width:500px"><h1>Record Fee Payment</h1><form method="POST" action="/app/fees/add"><select name="student_id" required><option value="">Select Student</option>${options}</select><input name="amount" type="number" placeholder="Amount Due" required><input name="paid" type="number" placeholder="Amount Paid" required><input name="term" placeholder="Term (e.g. Term 1)"><input name="year" type="number" placeholder="Year" value="2026"><select name="payment_method"><option value="cash">Cash</option><option value="momo">MTN MoMo</option><option value="bank">Bank</option></select><input name="description" placeholder="Description"><button class="btn btn-green" style="width:100%">Save Payment</button></form></div>`, { tenant_name: req.tenant.name }));
   });
 
-app.post('/app/fees/add', requireAuth, requireTenant, async (req, res) => {
+  app.post('/app/fees/add', requireAuth, requireTenant, async (req, res) => {
     const { student_id, amount, paid, term, year, description, payment_method } = req.body;
     await pool.query('INSERT INTO fees (tenant_id, student_id, amount, paid, term, year, description, payment_method) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [req.tenantId, student_id, amount, paid, term, year, description, payment_method]);
     await pool.query('UPDATE students SET balance = balance - $1 WHERE id = $2', [paid, student_id]);
     const student = await pool.query('SELECT * FROM students WHERE id = $1', [student_id]);
-    if (student.rows[0].guardian_phone) {
+       if (student.rows[0].guardian_phone) {
       await sendSMS(student.rows[0].guardian_phone, `Payment of UGX ${paid} received for ${student.rows[0].name} at ${req.tenant.name}. Balance: UGX ${student.rows[0].balance - paid}`);
     }
     res.redirect('/app/fees');
   });
 
-  // === ATTENDANCE ===
   app.get('/app/attendance', requireAuth, requireTenant, async (req, res) => {
     const { rows } = await pool.query('SELECT a.*, s.name as student_name FROM attendance a JOIN students s ON a.student_id = s.id WHERE a.tenant_id = $1 AND a.date = CURRENT_DATE ORDER BY s.name', [req.tenantId]);
     const table = rows.map(a => `<tr><td>${a.student_name}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.date.toISOString().split('T')[0]}</td></tr>`).join('');
@@ -447,7 +424,6 @@ app.post('/app/fees/add', requireAuth, requireTenant, async (req, res) => {
     res.redirect('/app/attendance');
   });
 
-  // === GRADES ===
   app.get('/app/grades', requireAuth, requireTenant, async (req, res) => {
     const { rows } = await pool.query('SELECT g.*, s.name as student_name FROM grades g JOIN students s ON g.student_id = s.id WHERE g.tenant_id = $1 ORDER BY g.created_at DESC LIMIT 50', [req.tenantId]);
     const table = rows.map(g => `<tr><td>${g.student_name}</td><td>${g.subject}</td><td>${g.score}</td><td>${g.term||'-'}</td><td>${g.year||'-'}</td></tr>`).join('');
@@ -470,7 +446,6 @@ app.post('/app/fees/add', requireAuth, requireTenant, async (req, res) => {
     res.redirect('/app/grades');
   });
 
-  // === MOMO WEBHOOK ===
   app.post('/api/momo/webhook', async (req, res) => {
     const { reference, status, transactionId } = req.body;
     if (status === 'SUCCESSFUL') {
@@ -484,7 +459,6 @@ app.post('/app/fees/add', requireAuth, requireTenant, async (req, res) => {
     res.json({ ok: true });
   });
 
-  // === UTILS ===
   app.get('/health', (req, res) => {
     res.json({ ok: true, service: 'ssewasswa-api', version: '8.0' });
   });
