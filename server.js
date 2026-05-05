@@ -140,7 +140,28 @@ app.post('/reset-password/:token', checkDb, async (req, res) => { try { const r 
 app.get('/parent/login', (req, res) => res.send(renderPage('Parent', '<div class="card" style="max-width:450px;margin:40px auto"><h1>Parent Login</h1><form method="POST" action="/parent/send-otp"><input name="phone" placeholder="07XX" required /><button type="submit" class="btn" style="width:100%">Send OTP</button></form></div>', null, true)));
 app.post('/parent/send-otp', checkDb, async (req, res) => { try { const otp = Math.floor(100000 + Math.random() * 900000).toString(); await pool.query('INSERT INTO parent_otps (phone, otp, expires_at) VALUES ($1,$2,NOW() + INTERVAL \'10 minutes\')', [req.body.phone, otp]); await sendSMS(req.body.phone, 'SSEWASSWA OTP: ' + otp); res.send(renderPage('Verify', '<div class="card" style="max-width:450px;margin:40px auto"><form method="POST" action="/parent/verify-otp"><input type="hidden" name="phone" value="' + esc(req.body.phone) + '"><input name="otp" placeholder="6-digit OTP" required /><button type="submit" class="btn" style="width:100%">Verify</button></form></div>', null, true)); } catch(e){res.status(500).send("Error");} });
 app.post('/parent/verify-otp', checkDb, async (req, res) => { try { const r = await pool.query("SELECT * FROM parent_otps WHERE phone=$1 AND otp=$2 AND expires_at > NOW() AND used=false LIMIT 1", [req.body.phone, req.body.otp]); if (!r.rows[0]) return res.send(renderPage('Error', '<div class="card"><h1>Invalid OTP</h1></div>', null, true)); await pool.query('UPDATE parent_otps SET used=true WHERE id=$1', [r.rows[0].id]); let p = await pool.query('SELECT * FROM parents WHERE phone=$1', [req.body.phone]); if (!p.rows[0]) { const t = await pool.query('SELECT id FROM tenants WHERE subdomain=$1', ['main']); await pool.query('INSERT INTO parents (phone, verified, tenant_id) VALUES ($1,true,$2)', [req.body.phone, t.rows[0].id]); p = await pool.query('SELECT * FROM parents WHERE phone=$1', [req.body.phone]); } req.session.parent = p.rows[0]; res.redirect('/parent/dashboard'); } catch(e){res.status(500).send("Error");} });
-app.get('/parent/dashboard', checkDb, async (req, res) => { if (!req.session.parent) return res.redirect('/parent/login'); const s = await pool.query('SELECT * FROM students WHERE parent_id=$1 OR guardian_phone=$2', [req.session.parent.id, req.session.parent.phone]); const c = s.rows.map(x => '<div class="card"><h3>' + esc(x.name) + '</h3><p>Class: ' + esc(x.class) + '</p><p>Balance: <strong class="badge badge-red">UGX ' + x.balance + '</strong></p><div style="margin-top:12px"><a href="/parent/pay/' + x.id + '" class="btn btn-green">Pay Fees</a><a href="/app/students/report/' + x.id + '" class="btn" target="_blank">Report</a></div></div>').join(''); res.send(renderPage('My Children', '<div class="card"><h1>My Children</h1></div>' + (c || '<div class="card"><p>No students linked</p></div>')); });
+app.get('/parent/dashboard', checkDb, async (req, res) => {
+  if (!req.session.parent) return res.redirect('/parent/login');
+  
+  const s = await pool.query('SELECT * FROM students WHERE parent_id=$1 OR guardian_phone=$2', [req.session.parent.id, req.session.parent.phone]);
+  
+  const c = s.rows.map(x => `
+    <div class="card">
+      <h3>${esc(x.name)}</h3>
+      <p>Class: ${esc(x.class)}</p>
+      <p>Balance: <strong class="badge badge-red">UGX ${x.balance}</strong></p>
+      <div style="margin-top:12px">
+        <a href="/parent/pay/${x.id}" class="btn btn-green">Pay Fees</a>
+        <a href="/app/students/report/${x.id}" class="btn" target="_blank">Report</a>
+      </div>
+    </div>
+  `).join('');
+  
+  res.send(renderPage('My Children', `
+    <div class="card"><h1>My Children</h1></div>
+    ${c || '<div class="card"><p>No students linked</p></div>'}
+  `, null, true));
+});
 app.get('/parent/pay/:id', checkDb, async (req, res) => { if (!req.session.parent) return res.redirect('/parent/login'); const s = (await pool.query('SELECT * FROM students WHERE id=$1', [req.params.id])).rows[0]; if (!s) return res.status(404).send('Not found'); res.send(renderPage('Pay', '<div class="card" style="max-width:500px;margin:40px auto"><h1>Pay for ' + esc(s.name) + '</h1><p style="font-size:24px">Balance: <strong class="badge badge-red">UGX ' + s.balance + '</strong></p><form method="POST" action="/parent/pay"><input type="hidden" name="student_id" value="' + s.id + '"><input name="amount" type="number" required><input name="phone" value="' + esc(req.session.parent.phone) + '" required><button class="btn btn-green" style="width:100%;font-size:18px;padding:16px">Pay MoMo</button></form></div>', null, true)); });
 app.post('/parent/pay', checkDb, async (req, res) => { if (!req.session.parent) return res.redirect('/parent/login'); try { const ref = 'FEE-' + Date.now(); const s = (await pool.query('SELECT * FROM students WHERE id=$1', [req.body.student_id])).rows[0]; await pool.query('INSERT INTO payment_requests (tenant_id, student_id, amount, phone, reference) VALUES ($1,$2,$3,$4,$5)', [s.tenant_id, req.body.student_id, req.body.amount, req.body.phone, ref]); await addDevCommission(Math.round(req.body.amount * DEV_COMMISSION.fee_payment), 'fee_payment', 'Fee commission', ref); if (MOMO_CONFIG.apiKey === 'demo') { await pool.query('UPDATE students SET balance = balance - $1 WHERE id=$2', [req.body.amount, req.body.student_id]); await pool.query('UPDATE payment_requests SET status=$1 WHERE reference=$2', ['success', ref]); return res.send(renderPage('Success', '<div class="card" style="text-align:center"><h1>Payment Received!</h1><a href="/parent/dashboard" class="btn">Back</a></div>', null, true)); } res.send(renderPage('Processing', '<div class="card" style="text-align:center"><h1>Check Phone</h1></div>', null, true)); } catch(e){res.status(500).send("Error");} });
 app.get('/parent/logout', (req, res) => req.session.destroy(() => res.redirect('/parent/login'));
