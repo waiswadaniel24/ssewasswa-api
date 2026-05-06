@@ -1232,6 +1232,39 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   }
 });
 // === END TEMP ROUTE ===
+// === TEMP DEBUG + RESET ROUTES - DELETE AFTER USE ===
+app.get('/dev/show-schema', async (req, res) => {
+  try {
+    const u = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position`);
+    const t = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='tenants' ORDER BY ordinal_position`);
+    res.json({ users: u.rows, tenants: t.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
+  try {
+    const hash = await bcrypt.hash('admin123', 10);
+    
+    await pool.query(`
+      INSERT INTO tenants (id, name, type, status, subscription_plan, subdomain)
+      VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise', 'hq')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    
+    await pool.query(`
+      INSERT INTO users(email,password_hash,role,tenant_id)
+      VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1)
+      ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin'
+    `, );
+    
+    res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
+  } catch (e) {
+    res.status(500).send('Reset failed: ' + e.message);
+  }
+});
+// === END TEMP ROUTES ===
 // === START SERVER ===
 initDB().then(() => {
   app.listen(PORT, () => {
