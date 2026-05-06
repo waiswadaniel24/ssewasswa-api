@@ -1160,6 +1160,8 @@ async function initDB() {
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address TEXT`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'school'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS features_enabled TEXT[] DEFAULT '{}'`);
+await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'school_free'`);
     // --- PATCH FUND_OPPORTUNITIES TABLE FOR DONORS PAGE ---
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS description TEXT`);
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS summary TEXT`);
