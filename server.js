@@ -1214,16 +1214,18 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
     const hash = await bcrypt.hash('admin123', 10);
     
+    // 1. Create/update tenant - using correct column names
     await pool.query(`
-      INSERT INTO tenants (id, name, type, status, subscription_plan, subdomain)
-      VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise', 'hq')
-      ON CONFLICT (id) DO NOTHING
+      INSERT INTO tenants (id, name, subdomain, type, status, plan, subscription_plan)
+      VALUES (1, 'SSEWASSWA HQ', 'hq', 'school', 'active', 'enterprise', 'enterprise')
+      ON CONFLICT (id) DO UPDATE SET status='active', plan='enterprise', subscription_plan='enterprise'
     `);
     
+    // 2. Create/update user - using correct columns + approved=true
     await pool.query(`
-      INSERT INTO users(email,password_hash,role,tenant_id)
-      VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1)
-      ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin'
+      INSERT INTO users(email, password_hash, role, tenant_id, approved)
+      VALUES('waiswadaniel24@gmail.com', $1, 'super_admin', 1, true)
+      ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', approved=true
     `, );
     
     res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
