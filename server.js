@@ -764,25 +764,25 @@ async function initDB() {
     var client = null;
     try {
       console.log("DB attempt " + attempt + "/5...");
-      
+
       if (!process.env.DATABASE_URL) {
         console.error("FATAL: DATABASE_URL not set!");
         return false;
       }
-      
+
       client = await pool.connect();
-      
+
       if (!client) {
         throw new Error("pool.connect returned null");
       }
-      
+
       console.log("Connected! Testing query...");
       var result = await client.query("SELECT 1 as test");
       console.log("Query OK!");
       console.log("Creating tables...");
-      
+
       await client.query("BEGIN");
-      
+
       await client.query("CREATE TABLE IF NOT EXISTS session (sid varchar NOT NULL, sess json NOT NULL, expire timestamp NOT NULL, PRIMARY KEY (sid))");
       await client.query("CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, subdomain TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT NOW())");
       await client.query("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'free'");
@@ -820,38 +820,38 @@ async function initDB() {
       await client.query("INSERT INTO platform_wallet (id,balance) VALUES (1,0) ON CONFLICT DO NOTHING");
       await client.query("UPDATE tenants SET name='SSEWASSWA FOUNDATION UGANDA v1_OLD' WHERE subdomain='main' AND id!=1");
       await client.query("UPDATE tenants SET subdomain='main', name='SSEWASSWA FOUNDATION UGANDA' WHERE id=1");
-      var tenant = await client.query("INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (subdomain) DO NOTHING RETURNING id", ["SSEWASSWA FOUNDATION UGANDA","main","enterprise","0789736737","SSEWASSWA2024"]);
+      var tenant = await client.query("INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (subdomain) DO NOTHING RETURNING id", ["SSEWASSWA FOUNDATION UGANDA", "main", "enterprise", "0789736737", "SSEWASSWA2024"]);
       if (tenant.rows.length > 0) {
         var tid = tenant.rows[0].id;
         var hash = await bcrypt.hash("admin123", 10);
-        await client.query("INSERT INTO users (tenant_id,email,password_hash,role,approved,full_name,phone) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING", [tid,"waiswadaniel24@gmail.com",hash,"super_admin",true,"Daniel Waiswa","0789736737"]);
-        await client.query("INSERT INTO settings (tenant_id,school_motto,about_text,signup_code) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", [tid,"Excellence in Education","Digital tools for schools.","SSEWASSWA2024"]);
-        await client.query("INSERT INTO wallets (tenant_id,user_email,balance) VALUES ($1,$2,0) ON CONFLICT DO NOTHING", [tid,"waiswadaniel24@gmail.com",0]);
+        await client.query("INSERT INTO users (tenant_id,email,password_hash,role,approved,full_name,phone) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING", [tid, "waiswadaniel24@gmail.com", hash, "super_admin", true, "Daniel Waiswa", "0789736737"]);
+        await client.query("INSERT INTO settings (tenant_id,school_motto,about_text,signup_code) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", [tid, "Excellence in Education", "Digital tools for schools.", "SSEWASSWA2024"]);
+        await client.query("INSERT INTO wallets (tenant_id,user_email,balance) VALUES ($1,$2,0) ON CONFLICT DO NOTHING", [tid, "waiswadaniel24@gmail.com", 0]);
       }
       await client.query("COMMIT");
       console.log("Database ready!");
       client.release();
       client = null;
       return true;
-      
+
     } catch (err) {
       console.error("====== REAL DATABASE ERROR ======");
       console.error("Error:", err.message);
       console.error("Code:", err.code);
       console.error("Stack:", err.stack);
       console.error("========================");
-      
-      if (client) { 
-        try { await client.query("ROLLBACK"); } catch(e) { console.error("Rollback failed:", e.message); }
-        try { client.release(); } catch(e) { console.error("Release failed:", e.message); }
+
+      if (client) {
+        try { await client.query("ROLLBACK"); } catch (e) { console.error("Rollback failed:", e.message); }
+        try { client.release(); } catch (e) { console.error("Release failed:", e.message); }
         client = null;
       }
-      
+
       if (attempt === 5) {
         console.error("All 5 attempts failed");
         return false;
       }
-      
+
       console.log("Waiting 10 seconds...");
       await sleep(10000);
     }
