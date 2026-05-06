@@ -12,7 +12,8 @@ import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
 import { Redis } from 'ioredis';
 import RedisStore from 'connect-redis';
-import { Queue } from 'bullmq';
+// --- REMOVED BULLMQ IMPORT (Fixes the crash) ---
+// import { Queue } from 'bullmq'; 
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
@@ -38,7 +39,6 @@ const PgSession = connectPgSimple(session);
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL.includes('localhost')? false : { rejectUnauthorized: false }
