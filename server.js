@@ -949,7 +949,11 @@ app.get('/dev/database/:table', requireAuth, requireDeveloper, ah(async (req, re
   const rows = (await pool.query(`SELECT * FROM ${req.params.table} LIMIT 100`)).rows;
   res.json(rows);
 }));
-
+app.get('/dev/show-columns', async (req, res) => {
+  const users = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position`);
+  const tenants = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name='tenants' ORDER BY ordinal_position`);
+  res.json({ users: users.rows.map(r=>r.column_name), tenants: tenants.rows.map(r=>r.column_name) });
+});
 app.get('/dev/cache', requireAuth, requireDeveloper, ah(async (req, res) => {
   const sessions = (await pool.query('SELECT COUNT(*) as c FROM session WHERE expire>NOW()')).rows[0].c;
   res.send(renderPage('Cache', `<div class="card"><h2>System Cache</h2><p>Active Sessions: ${sessions}</p><p>Memory: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB / ${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB</p><p>Uptime: ${Math.round(process.uptime() / 3600)} hours</p><form method="POST" action="/dev/cache/flush"><button class="btn btn-red">Flush Expired Sessions</button></form></div>`, req.session.user));
