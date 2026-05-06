@@ -1206,7 +1206,6 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
   }
 }
 // === TEMP ADMIN RESET - DELETE AFTER USE ===
-const bcrypt = require('bcryptjs');
 app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
     const hash = await bcrypt.hash('admin123', 10);
