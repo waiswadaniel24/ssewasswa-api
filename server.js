@@ -1217,10 +1217,10 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
       ON CONFLICT (id) DO UPDATE SET status='active'
     `);
     
-    // 2. Insert user - removed 'name' column
+    // 2. Insert user - only core columns
     await pool.query(`
-      INSERT INTO users(email,password_hash,role,tenant_id,portals,status)
-      VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1,'{admin,academics,finance,marketplace,donors,developers}','active')
+      INSERT INTO users(email,password_hash,role,tenant_id,status)
+      VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1,'active')
       ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', status='active'
     `, );
     
