@@ -1,10 +1,11 @@
 /**
- * SSEWASSWA Network v6.0 - COMPLETE
+ * SSEWASSWA Network v6.0 - STABLE
  * DO NOT DELETE ANYTHING
  */
 
 import express from 'express';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import session from 'express-session';
@@ -25,8 +26,8 @@ import * as cheerio from 'cheerio';
 import compression from 'compression';
 import { exec } from 'child_process';
 import * as Sentry from '@sentry/node';
-import { Redis } from 'ioredis';
-import RedisStore from 'connect-redis';
+// import { Redis } from 'ioredis'; // DISABLED - uncomment for v9.0
+// import RedisStore from 'connect-redis'; // DISABLED - uncomment for v9.0
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 
@@ -38,7 +39,7 @@ const app = express();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
 });
 
 const PORT = process.env.PORT || 3000;
@@ -64,7 +65,10 @@ const transporter = nodemailer.createTransport({
 });
 
 // --- SENTRY SETUP ---
-Sentry.init({ dsn: process.env.SENTRY_DSN });
+if (process.env.SENTRY_DSN) {
+  Sentry.init({ dsn: process.env.SENTRY_DSN });
+  app.use(Sentry.Handlers.requestHandler());
+}
 
 // --- MIDDLEWARE ---
 // Sentry Request Handler must be first
@@ -1140,7 +1144,6 @@ async function initDB() {
     await c.query(`CREATE TABLE IF NOT EXISTS ai_predictions (id SERIAL PRIMARY KEY, tenant_id INT, type TEXT, prediction JSONB, confidence NUMERIC, created_at TIMESTAMPTZ DEFAULT NOW())`);
 
     // --- SCHEMA UPDATES (ALTER TABLES) ---
-    // Consolidated all ALTER TABLE statements here to avoid redundancy
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS primary_color TEXT DEFAULT '#1e40af'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT 'UG'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`);
@@ -1155,7 +1158,27 @@ async function initDB() {
     
     await c.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_number TEXT`);
     
-    await c.query(`ALTER TABLE attendance ADD CONSTRAINT IF NOT EXISTS attendance_unique UNIQUE(student_id,date)`);
+    // FIXED: Postgres doesn't support IF NOT EXISTS for ADD CONSTRAINT
+    // Use DO block to catch duplicate constraint error
+    await c.query(`
+      DO $$ 
+      BEGIN
+        ALTER TABLE attendance ADD CONSTRAINT attendance_unique UNIQUE(student_id,date);
+      EXCEPTION
+        WHEN duplicate_table THEN NULL;
+      END $$;
+    `);
+
+    // --- INDEXES FOR PERFORMANCE ---
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_students_tenant_class ON students(tenant_id, class)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_grades_student_term ON grades(student_id, term)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_transactions_tenant_status ON transactions(tenant_id, status)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_session_expire ON session(expire)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_products_approved ON products(approved)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date)`);
 
     await c.query('COMMIT');
     console.log('DB v6.0 Ready - All Tables Created');
@@ -1167,8 +1190,3 @@ async function initDB() {
     c.release();
   }
 }
-
-// === START SERVER ===
-initDB().then(() => app.listen(PORT, () => console.log(`SSEWASSWA v6.0 COMPLETE - LIVE on ${PORT}`)));
-
-// === END OF server.js ===
