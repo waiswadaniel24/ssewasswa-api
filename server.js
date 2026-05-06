@@ -1395,27 +1395,47 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
     const hash = await bcrypt.hash('admin123', 10);
     
-    // 1. Create/update tenant (Removed 'plan' to prevent column mismatch errors)
+    // 1. TENANT SETUP
+    // Step A: Insert only the absolute required fields (ID, Name, Subdomain)
     await pool.query(`
-      INSERT INTO tenants (id, name, subdomain, type, status)
-      VALUES (1, 'SSEWASSWA HQ', 'hq', 'school', 'active')
-      ON CONFLICT (id) DO UPDATE SET status='active', subscription_plan='enterprise', plan='enterprise'
+      INSERT INTO tenants (id, name, subdomain)
+      VALUES (1, 'SSEWASSWA HQ', 'hq')
+      ON CONFLICT (id) DO NOTHING
     `);
     
-    // 2. Create/update user
+    // Step B: Update all other settings (safe to run even if row exists)
     await pool.query(`
-      INSERT INTO users(email, password_hash, role, tenant_id, approved)
-      VALUES('waiswadaniel24@gmail.com', $1, 'super_admin', 1, true)
-      ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', approved=true
+      UPDATE tenants 
+      SET type = 'school',
+          status = 'active',
+          plan = 'enterprise',
+          subscription_plan = 'enterprise',
+          verified = true
+      WHERE id = 1
+    `);
+    
+    // 2. USER SETUP
+    // Step A: Insert the basic user
+    await pool.query(`
+      INSERT INTO users (email, password_hash, role, tenant_id)
+      VALUES('waiswadaniel24@gmail.com', $1, 'super_admin', 1)
+      ON CONFLICT (email) DO NOTHING
+    `, [hash]);
+    
+    // Step B: Update user to ensure they are approved
+    await pool.query(`
+      UPDATE users 
+      SET approved = true, 
+          password_hash = $1 
+      WHERE email = 'waiswadaniel24@gmail.com'
     `, [hash]);
     
     res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
   } catch (e) {
-    console.error(e);
+    console.error("Reset Error:", e);
     res.status(500).send('Reset failed: ' + e.message);
   }
 });
-
 // === START SERVER ===
 initDB().then(() => {
   app.listen(PORT, () => {
