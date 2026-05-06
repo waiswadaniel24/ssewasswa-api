@@ -89,16 +89,6 @@ const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
 app.use('/api/', limiter);
 app.use('/webhook/', limiter);
 
-// Redis Session Store
-const redis = new Redis(process.env.REDIS_URL);
-app.use(session({
-  store: new RedisStore({ client: redis }),
-  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 30 * 24 * 60 * 60 * 1000 }
-}));
-
 // --- CONSTANTS ---
 const CURRENCIES = {
   UGX: { symbol: 'UGX', rate: 1 },
@@ -1190,3 +1180,15 @@ async function initDB() {
     c.release();
   }
 }
+// === START SERVER ===
+initDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`SSEWASSWA v6.0 COMPLETE - LIVE on ${PORT}`);
+    console.log(`Dev Master: ${DEVELOPER_EMAIL}`);
+  });
+}).catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
+
+// === END OF server.js ===
