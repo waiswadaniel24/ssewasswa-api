@@ -1,51 +1,207 @@
 <!DOCTYPE html>
-<html>
-<body>
-<h2>Login</h2>
-<form id="loginForm">
-  <input name="username" placeholder="Username">
-  <input name="password" type="password" placeholder="Password">
-  <button>Login</button>
-</form>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SSEWASSWA Platform</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <style>
+    /* --- CSS RESET --- */
+    *{margin:0;padding:0;box-sizing:border-box;}html{font-family:'Inter',sans-serif;background:#f0f9ff;color:#1e293b;min-height:100vh;}
+    body{padding-bottom:80px}
+    .container{max-width:1200px;margin:0 auto;padding:20px;}
+    .grid{display:grid;gap:20px;}
+    .card{background:white;border-radius:16px;border:1px solid #e2e8f0;box-shadow:0 4px 6px rgba(0,0,0,0.05);padding:24px;position:relative;overflow:hidden;}
+    .btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;padding:10px 20px;border-radius:12px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:8px;transition:transform 0.1s ease;}.btn:hover{transform:scale(1.02);}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b);color:#1e293b; font-size:14px;} .btn-outline{background:white; color:#1e293b; border: 1px solid #cbd5e1;}.btn-outline:hover{background:#f0f9ff;}.btn-locked{background:#e2e8f0; color:#64748b; cursor: not-allowed;}
+  </style>
+</head>
+<body>``javascript
+/* === CLIENT SIDE LOGIC === */
+const app = express(); // Express app stub for routing if we were using real backend, here we simulate the routes
 
-<h2>Change Password</h2>
-<form id="pwForm">
-  <input name="oldPassword" type="password" placeholder="Old Password">
-  <input name="newPassword" type="password" placeholder="New Password">
-  <button>Change</button>
-</form>
+const SIMULATED_DB = {
+  users: [],
+  tenants: [],
+  students: [],
+  fees: [],
+  grades: [],
+  transactions: [],
+  logs: [],
+  marketplace: [],
+  chatHistory: [],
+  features: {
+    dashboard: true,
+    finance: true,
+    academics: true,
+    marketplace: true,
+    ai_chatbot: false, // LOCKED by default
+    ussd_gateway: false, // LOCKED by default
+    offline_sync: false, // LOCKED by default
+    super_admin: true
+  }
+};
 
-<script>
-// Register Service Worker
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js')
-    .then(reg => console.log('Service Worker registered'))
-    .catch(err => console.error('SW registration failed:', err));
+const STATE = {
+  currentUser: null, // Current logged in user
+  tenant: null, // Tenant data
+};
+
+const CONSTANTS = {
+  DEVELOPER_PHONE: '0789736737',
+  DEVELOPER_RATE: 0.05,
+  PLATFORM_COMMISSION: 0.10
+};
+
+/* === HELPER: AES-256 (Copied from your code) === */
+const ENCRYPTION_KEY = crypto.scryptSync(process.env.ENCRYPTION_SECRET||'default32charsecretkey1234567890ab','salt', 32);
+const IV_LENGTH = 16;
+
+function encrypt(text) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
 }
 
-// Login Form
-loginForm.onsubmit = async e => {
-  e.preventDefault();
-  const data = Object.fromEntries(new FormData(e.target));
-  const res = await fetch('/admin/login', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(data)
-  });
-  alert(await res.text());
+function decrypt(text) {
+  const parts = text.split(':');
+  const iv = Buffer.from(parts[0], 'hex');
+  const encrypted = parts[1];
+  const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
+
+/* === RENDER ENGINE === */
+function renderPortal(title, content, user, portal) {
+  const portals = { dashboard: 'Dashboard', finance: 'Finance', academics: 'Academics', marketplace: 'Marketplace', ai_chatbot: '🤖 AI Assistant', ussd_gateway: '📱 USSD', offline_sync: '📴 Offline Sync', dev: 'Super Admin' };
+  let nav = '';
+  if (user) {
+    const getLink = (k, v) => {
+      // Feature Gating Logic (Simulated)
+      if (k === 'ai_chatbot' && !SIMULATED_DB.features.ai_chatbot) return `<a href="#" class="btn btn-locked">🤖 AI Chatbot (Coming Soon)</a>`;
+      if (k === 'ussd_gateway' && !SIMULATED_DB.features.ussd_gateway) return `<a href="#" class="btn btn-locked">📱 USSD Gateway</a>`;
+      return `<a href="/portal/${k}" class="${portal === k ? 'active' : ''}">${v}</a>`;
+    };
+    
+    const links = user.role === 'super_admin' 
+      ? Object.entries(portals).map(([k, v]) => getLink(k, v)).join('')
+      : (user.portals || []).map(p => getLink(p, portals[p] || p)).join('');
+    
+    nav = `<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;margin:0 0 24px 0;">
+      <div style="display:flex;align-items:center;gap:12px"><b>${user.name} - ${user.role.toUpperCase()}</b></div>
+      <div style="display:flex;gap:12px;">
+        <a href="/" class="btn btn-outline">🏠</a>
+        <a href="/cart" class="btn btn-outline">🛒</a>
+        <a href="/logout" class="btn btn-red">🚪</a>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px; color: white;">${links}</div>
+    </div>`;
+  }
+  
+  return `
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
+<style>${document.querySelector('style').textContent}</style>
+<body>
+${nav}
+<main class="container" id="main">${content}</main>
+<footer style="text-align:center;padding:30px;font-size:12px;color:#64748b;border-top:1px solid #e2e8f0;">
+  <p>&copy; ${new Date().getFullYear()} SSEWASSWA Platform | <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a> | <a href="/help">Help</a></p>
+</footer>
+<div id="toast-container"></div>
+
+<script>
+/* === CLIENT LOGIC === */
+const api = {
+  // Mock Axios to simulate the `server.js` routes
+  post: (url, data) => new Promise((resolve) => { setTimeout(() => resolve({ data: { ok: true } }, 1000) }), // 1s delay to mimic network
+  get: (url) => new Promise((resolve) => setTimeout(() => resolve({ data: [] }), 100))
 };
 
-// Change Password Form
-pwForm.onsubmit = async e => {
-  e.preventDefault();
-  const data = Object.fromEntries(new FormData(e.target));
-  const res = await fetch('/admin/change-password', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(data)
-  });
-  alert(await res.text());
-};
-</script>
-</body>
-</html>
+// === INITIALIZATION ===
+function initApp() {
+  const storedState = localStorage.getItem('ssewasswa_db');
+  if (storedState) {
+    SIMULATED_DB = JSON.parse(storedState);
+    // Restore features if user is logged in
+    if (SIMULATED_DB.currentUser) {
+      const savedFeatures = localStorage.getItem(`features_${SIMULATED_DB.currentUser.tenant_id}`);
+      if(savedFeatures) {
+        Object.assign(SIMULATED_DB.features, JSON.parse(savedFeatures));
+      }
+    console.log('Database loaded from LocalStorage');
+  } else {
+    // Seed initial data if empty
+    if (!storedState || JSON.parse(storedState).tenants.length === 0) {
+      SIMULATED_DB.tenants.push({ id: 1, name: 'SSEWASSWA FOUNDATION UGANDA', subdomain: 'main', plan: 'free', features_enabled: { ai_chatbot: false, ussd_gateway: false, offline_sync: false } });
+      SIMULATED_DB.users.push({ id: 1, name: 'Super Admin', email: DEVELOPER_PHONE, role: 'super_admin', approved: true });
+      console.log('Seeded DB');
+    }
+  }
+}
+
+// === AUTH LOGIC ===
+async function handleLogin(email, password) {
+  // Simulated Backend: bcrypt
+  const u = SIMULATED_DB.users.find(u => u.email === email && u.password_hash === 'admin123'); // Simulate hash check
+  if (!u) throw new Error('Invalid Credentials');
+  
+  STATE.currentUser = u;
+  localStorage.setItem('ssewasswa_user', JSON.stringify(u));
+  console.log('Logged in as', u.name);
+  window.location.hash = '#app/dashboard';
+}
+
+function handleLogout() {
+  STATE.currentUser = null;
+  localStorage.removeItem('ssewasswa_user');
+  window.location.hash = '#login';
+}
+
+// === FEATURE TOGGLES ===
+async function toggleFeature(featureKey) {
+  if (!STATE.currentUser || STATE.currentUser.role !== 'super_admin') return alert('Access Denied');
+  
+  // Update simulated DB
+  if (!SIMULATED_DB.features[featureKey]) throw new Error('Payment Required (Simulated)');
+  
+  SIMULATED_DB.features[featureKey] = !SIMULATED_DB.features[featureKey];
+  
+  // Save state
+  const tId = STATE.currentUser.tenant_id;
+  if (!localStorage.getItem(`features_${tId}`)) localStorage.setItem(`features_${tId}`, JSON.stringify(SIMULATED_DB.features));
+  
+  window.location.reload(); // Reload UI to update locks
+}
+
+// === ROUTE HANDLERS (Simulated Backend Routes) ===
+const Router = {
+  routes: [
+    { path: '#login', handler: async () => { const u = (await api.get('/login')).data.users.find(u => u.email === (document.getElementById('email')?.value || '') && u.password_hash === 'admin123'); if (u) return handleLogin(u.email, 'password_hash) : handleLogin(null, null)); } },
+    { path: '#app', handler: async () => { if (!STATE.currentUser) window.location.hash = '#login'; res.send(renderPortal('Dashboard', '<div class="stats"><div class="stat-card"><div class="stat-num">UGX 5,000,000</div><div>Revenue</div></div><div class="card"><h2>Quick Actions</h2><div class="grid"><div class="card" onclick="window.location.hash='#app/students'">Students</div><div class="card" onclick="window.location.hash='#app/fees'">Finance</div><div class="card" onclick="window.location.hash='#app/academics'">Academics</div><div class="card" onclick="window.location.hash='#app/marketplace'">Marketplace</div></div></div>', null) },
+    { path: '#portal/admin', handler: async () => {
+      // Render Admin Settings
+      if (!STATE.currentUser || !['admin', 'super_admin'].includes(STATE.currentUser.role)) return res.send(renderPortal('Admin', `<div class="card"><h2>Admin Control</h2><p>Manage your school visibility.</p><form onsubmit="async(e) => { await api.post('/portal/settings/display', new FormData(e.target)); window.location.reload(); })">
+      <h3>System Status</h3>
+      <div class="grid">
+        <div class="card"><div class="stat-num">ONLINE</div><div>Database: LocalStorage</div></div>
+        <div class="card"><div class="stat-num">V5.6.0.0</div><div>State: Development</div></div>
+      </div>
+    ` } },
+    { path: '/dev/master', handler: async () => {
+      if (STATE.currentUser?.role !== 'super_admin') return res.send(renderPortal('Dev Master', `<div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);color:white;padding:40px;text-align:center;border-radius:16px;margin-bottom:24px"><h1>🔴 Developer Master Control</h1><div class="stats"><div class="stat-card"><div class="stat-num">V6.0.0</div><div>Revenue (Simulated)</div></div></div><div class="card"><h3>Feature Marketplace</h3>
+      <div class="grid">
+        <div class="card" onclick="toggleFeature('ai_chatbot')"><div class="stat-num">🤖 AI Chatbot</div><div class="btn ${SIMULATED_DB.features.ai_chatbot ? 'btn-red' : 'btn-outline'}">${SIMULATED_DB.features.ai_chatbot ? '🔒 Locked' : '🔓 Unlocked'}</div></div>
+        <div class="card" onclick="toggleFeature('ussd_gateway')"><div class="stat-num">📱 USSD Gateway</div><div class="btn ${SIMULATED_DB.features.ussd_gateway ? 'btn-red' : 'btn-outline'}">${SIMULED_DB.features.ussd_gateway ? '🔒 Locked' : '🔓 Unlocked'}</div></div>
+        <div class="card" onclick="toggleFeature('offline_sync')"><div class="stat-num">📴 Offline Sync</div><div class="btn ${SIMULATED_DB.features.offline_sync ? 'btn-red' : 'btn-outline'}">${SIMULATED_DB.features.offline_sync ? '🔒 Locked' : '🔓 Unlocked'}</div></div>
+      </div>
+    ` } }
+  ];
+Router.routes.forEach(route => app.get(route.path, route.handler));
+app.use(express.static('public'));
+app.use(express.json());
+app.listen(3000, () => console.log('SSEWASSWA v6.0 CLIENT-SIMULATION MODE');
