@@ -1,17 +1,14 @@
 {
   "name": "ssewasswa-network",
   "version": "6.0.0",
-  "description": "SSEWASSWA Network - Schools, Organisations, Marketplace, Donors Platform with Offline PWA, USSD, Auto-Revenue",
+  "description": "SSEWASSWA Network - Schools, Organisations, Marketplace, Donors Platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
-    "build": "echo 'No build step required'",
-    "postinstall": "echo 'SSEWASSWA v6.0 Ready'"
+    "dev": "nodemon server.js"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -27,31 +24,9 @@
     "cloudinary": "^1.41.3",
     "nodemailer": "^6.9.8",
     "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
     "openai": "^4.24.1",
     "pdfkit": "^0.14.0",
-    "cheerio": "^1.0-rc.12",
-    "express-rate-limit": "^7.1.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "keywords": [
-    "school-management",
-    "uganda",
-    "mtn-momo",
-    "ussd",
-    "pwa",
-    "offline",
-    "marketplace",
-    "donations",
-    "education",
-    "fintech",
-    "saas"
-  ],
-  "author": "SSEWASSWA Network",
-  "license": "UNLICENSED",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ssewasswa/network.git"
+    "cheerio": "^1.0-rc.12"
   }
 }
