@@ -68,10 +68,10 @@ const transporter = nodemailer.createTransport({
   auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
 });
 
-// v9.0: Background Queues
-const emailQueue = redis? new Queue('email', { connection: redis }) : null;
-const smsQueue = redis? new Queue('sms', { connection: redis }) : null;
-const webhookQueue = redis? new Queue('webhook', { connection: redis }) : null;
+// v9.0: Background Queues (DISABLED - BullMQ not installed)
+// const emailQueue = redis? new Queue('email', { connection: redis }) : null;
+// const smsQueue = redis? new Queue('sms', { connection: redis }) : null;
+// const webhookQueue = redis? new Queue('webhook', { connection: redis }) : null;
 
 // --- SENTRY SETUP ---
 if (process.env.SENTRY_DSN) {
