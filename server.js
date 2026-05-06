@@ -1210,9 +1210,9 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
     const hash = await bcrypt.hash('admin123', 10);
     await pool.query(`
-      INSERT INTO tenants (id, name, type, status, subscription_plan)
-      VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise')
-      ON CONFLICT (id) DO NOTHING
+      INSERT INTO tenants (id, name, type, status, subscription_plan, subdomain)
+      VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise', 'hq')
+      ON CONFLICT (id) DO UPDATE SET status='active'
     `);
     await pool.query(`
       INSERT INTO users(name,email,password_hash,role,tenant_id,portals,status)
