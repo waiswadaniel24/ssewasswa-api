@@ -792,7 +792,7 @@ app.post('/s/:subdomain/enroll', ah(async (req, res) => {
 }));
 // === PUBLIC PAGES ===
 app.get('/help', ah(async (req, res) => {
-  res.send(renderPage('Help', `<div class="card"><h1>Help Center</h1><h3>USSD Commands</h3><p>Dial <b>*270*StudentID#</b> to check fees</p><p>Dial <b>*270*StudentID*2#</b> to check results</p><h3>Support</h3><p>WhatsApp: +256 789 736737</p><p>Email: ssewasswa@gmail.com</p></div>`, null, true));
+  res.type('html').send(renderPage('Help', `<div class="card"><h1>Help Center</h1><h3>USSD Commands</h3><p>Dial <b>*270*StudentID#</b> to check fees</p><p>Dial <b>*270*StudentID*2#</b> to check results</p><h3>Support</h3><p>WhatsApp: +256 789 736737</p><p>Email: ssewasswa@gmail.com</p></div>`, null, true));
 }));
 
 app.get('/terms', (req, res) => res.send(renderPage('Terms', `
@@ -1391,16 +1391,15 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
 }
 
 // === TEMP ADMIN RESET - DELETE AFTER USE ===
-// Merged the two duplicate routes into one robust handler
 app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
     const hash = await bcrypt.hash('admin123', 10);
     
-    // 1. Create/update tenant - ensure all columns referenced exist
+    // 1. Create/update tenant (Removed 'plan' to prevent column mismatch errors)
     await pool.query(`
-      INSERT INTO tenants (id, name, subdomain, type, status, plan, subscription_plan)
-      VALUES (1, 'SSEWASSWA HQ', 'hq', 'school', 'active', 'enterprise', 'enterprise')
-      ON CONFLICT (id) DO UPDATE SET status='active', plan='enterprise', subscription_plan='enterprise'
+      INSERT INTO tenants (id, name, subdomain, type, status)
+      VALUES (1, 'SSEWASSWA HQ', 'hq', 'school', 'active')
+      ON CONFLICT (id) DO UPDATE SET status='active', subscription_plan='enterprise', plan='enterprise'
     `);
     
     // 2. Create/update user
@@ -1416,7 +1415,6 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
     res.status(500).send('Reset failed: ' + e.message);
   }
 });
-// === END TEMP ROUTE ===
 
 // === START SERVER ===
 initDB().then(() => {
