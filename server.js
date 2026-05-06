@@ -1134,7 +1134,7 @@ async function initDB() {
     await c.query(`CREATE TABLE IF NOT EXISTS ai_predictions (id SERIAL PRIMARY KEY, tenant_id INT, type TEXT, prediction JSONB, confidence NUMERIC, created_at TIMESTAMPTZ DEFAULT NOW())`);
 
 // --- SCHEMA UPDATES (ALTER TABLES) ---
-    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS primary_color TEXT DEFAULT '#1e40af'`);
+   await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS primary_color TEXT DEFAULT '#1e40af'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT 'UG'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS tax_rate NUMERIC DEFAULT 0`);
@@ -1158,11 +1158,8 @@ async function initDB() {
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS contact_phone TEXT`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS contact_email TEXT`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address TEXT`);
-
-    await c.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`);
-    
-    await c.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_number TEXT`);
-
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'school'`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`);
     // --- PATCH FUND_OPPORTUNITIES TABLE FOR DONORS PAGE ---
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS description TEXT`);
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS summary TEXT`);
