@@ -1214,14 +1214,12 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
     const hash = await bcrypt.hash('admin123', 10);
     
-    // 1. Ensure tenant exists
     await pool.query(`
       INSERT INTO tenants (id, name, type, status, subscription_plan, subdomain)
       VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise', 'hq')
       ON CONFLICT (id) DO NOTHING
     `);
     
-    // 2. Insert user - bare minimum columns
     await pool.query(`
       INSERT INTO users(email,password_hash,role,tenant_id)
       VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1)
