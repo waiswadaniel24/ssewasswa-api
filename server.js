@@ -1,4 +1,4 @@
-js/**
+/**
  * SSEWASSWA Network v9.0 - SCALABLE
  * Features: Redis Sessions, Background Workers, API v2, Webhooks
  */
@@ -67,14 +67,15 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
 });
+
 // v9.0: Background Queues
 const emailQueue = redis? new Queue('email', { connection: redis }) : null;
 const smsQueue = redis? new Queue('sms', { connection: redis }) : null;
 const webhookQueue = redis? new Queue('webhook', { connection: redis }) : null;
+
 // --- SENTRY SETUP ---
 if (process.env.SENTRY_DSN) {
   Sentry.init({ dsn: process.env.SENTRY_DSN });
-  app.use(Sentry.Handlers.requestHandler());
 }
 
 // --- MIDDLEWARE ---
@@ -166,7 +167,7 @@ const requireJWT = (req, res, next) => {
     if (err) return res.status(403).json({ error: 'Forbidden' });
     req.user = user;
     next();
-  }); // ✅ ADDED ); to close jwt.verify()
+  });
 };
 
 const requireRole = (...r) => (req, res, next) => {
@@ -183,6 +184,7 @@ const requireDeveloper = (req, res, next) => {
   if (req.session?.user?.email!== DEVELOPER_EMAIL) return res.status(403).send('403');
   next();
 };
+
 function encrypt(text) {
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
@@ -190,6 +192,7 @@ function encrypt(text) {
   enc += cipher.final('hex');
   return iv.toString('hex') + ':' + enc;
 }
+
 const requireApiKey = ah(async (req, res, next) => {
   const key = req.headers['x-api-key'];
   if (!key) return res.status(401).json({ error: 'API key required' });
@@ -201,13 +204,7 @@ const requireApiKey = ah(async (req, res, next) => {
   req.scopes = apiKey.scopes;
   next();
 });
-function encrypt(text) {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
-  let enc = cipher.update(text, 'utf8', 'hex');
-  enc += cipher.final('hex');
-  return iv.toString('hex') + ':' + enc;
-}
+
 function decrypt(text) {
   const p = text.split(':');
   const iv = Buffer.from(p[0], 'hex');
@@ -220,10 +217,29 @@ function decrypt(text) {
 async function logAction(userId, tenantId, action, details, ip) {
   await pool.query('INSERT INTO audit_logs(user_id,tenant_id,action,details,ip_address)VALUES($1,$2,$3,$4,$5)', [userId, tenantId, action, JSON.stringify(details), ip]);
 }
-// v9.0: Queue-based SMS
+
+// v9.0: Queue-based SMS with Fallback
 async function sendSMS(phone, message) {
   if (smsQueue) {
     await smsQueue.add('send', { phone, message });
+  } else if (process.env.AT_API_KEY) {
+    try {
+      await axios.post('https://api.africastalking.com/version1/messaging', 
+        new URLSearchParams({
+          username: process.env.AT_USERNAME || 'sandbox',
+          to: phone,
+          message: message
+        }).toString(), 
+        {
+          headers: { 
+            'apiKey': process.env.AT_API_KEY, 
+            'Content-Type': 'application/x-www-form-urlencoded' 
+          }
+        }
+      );
+    } catch (e) {
+      console.error('SMS fail:', e.message);
+    }
   } else {
     console.log('SMS:', phone, message);
   }
@@ -235,20 +251,6 @@ async function sendEmail(to, subject, html) {
     await emailQueue.add('send', { to, subject, html });
   } else {
     await transporter.sendMail({ to, subject, html });
-  }
-}
-async function sendSMS(phone, message) {
-  if (!process.env.AT_API_KEY) return console.log('SMS:', phone, message);
-  try {
-    await axios.post('https://api.africastalking.com/version1/messaging', {
-      username: process.env.AT_USERNAME || 'sandbox',
-      to: phone,
-      message
-    }, {
-      headers: { 'apiKey': process.env.AT_API_KEY, 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
-  } catch (e) {
-    console.error('SMS fail:', e.message);
   }
 }
 
@@ -278,6 +280,7 @@ function renderPage(title, content, user) {
   }
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><link rel="icon" href="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/favicon.png"><meta property="og:title" content="Ssewasswa - School Management"><meta property="og:image" content="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/og-image.jpg"><meta name="description" content="Run your school on your phone. Marks, fees, SMS to parents."><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b)}input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0;font-size:16px;min-height:44px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:20px;border-radius:16px;text-align:center}.stat-num{font-size:32px;font-weight:bold;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.badge{padding:6px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}</style></head><body>${nav}<div class="container">${content}</div></body></html>`;
 }
+
 // === TEMP DEBUG + RESET ROUTES - DELETE AFTER USE ===
 app.get('/dev/show-schema', ah(async (req, res) => {
   const u = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position`);
@@ -298,7 +301,7 @@ app.get('/dev/reset-admin-now-delete-me', ah(async (req, res) => {
     INSERT INTO users(email, password_hash, role, tenant_id, approved)
     VALUES('waiswadaniel24@gmail.com', $1, 'super_admin', 1, true)
     ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', approved=true
-  `, );
+  `, [hash]);
 
   res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
 }));
@@ -309,8 +312,9 @@ app.get('/', ah(async (req, res) => { res.sendFile(path.join(__dirname, 'public'
 
 app.get('/marketplace', ah(async (req, res) => {
   const products = (await pool.query('SELECT p.*,t.name as seller_name FROM products p JOIN tenants t ON p.tenant_id=t.id WHERE p.approved=true ORDER BY p.created_at DESC LIMIT 50')).rows;
-  res.send(renderPage('Marketplace', `<div class="grid">${products.map(p => `<div class="card"><img src="${p.image_url || '/img/default.jpg'}" style="width:100%;height:200px;object-fit:cover;border-radius:12px"><h3>${esc(p.name)}</h3><p style="color:#64748b">by ${esc(p.seller_name)}</p><p style="font-size:24px;color:#16a34a;font-weight:bold">UGX ${p.price.toLocaleString()}</p><a href="/product/${p.id}" class="btn btn-green">Buy Now</a></div>`).join('')}</div>`, null, true));
+  res.send(renderPage('Marketplace', `<div class="grid">${products.map(p => `<div class="card"><img src="${p.image_url || '/img/default.jpg'}" style="width:100%;height:200px;object-fit:cover;border-radius:12px"><h3>${esc(p.name)}</h3><p style="color:#64748b">by ${esc(p.seller_name)}</p><p style="font-size:24px;color:#16a34a;font-weight:bold">UGX ${p.price.toLocaleString()}</p><a href="/product/${p.id}" class="btn btn-green">Buy Now</a></div>`).join('')}</div>`, null));
 }));
+
 app.get('/api/stats', ah(async (req, res) => {
   res.json({
     schools: (await pool.query("SELECT COUNT(*) as c FROM tenants WHERE type='school'")).rows[0].c,
@@ -319,20 +323,21 @@ app.get('/api/stats', ah(async (req, res) => {
     products: (await pool.query("SELECT COUNT(*) as c FROM products WHERE approved=true")).rows[0].c
   });
 }));
+
 app.get('/product/:id', ah(async (req, res) => {
   const p = (await pool.query('SELECT p.*,t.name as seller_name FROM products p JOIN tenants t ON p.tenant_id=t.id WHERE p.id=$1', [req.params.id])).rows[0];
   if (!p) return res.status(404).send('Not found');
-  res.send(renderPage(p.name, `<div class="card"><img src="${p.image_url}" style="width:100%;max-height:400px;object-fit:cover;border-radius:16px"><h1>${esc(p.name)}</h1><p style="color:#64748b">Sold by ${esc(p.seller_name)}</p><p style="font-size:32px;color:#16a34a;font-weight:bold">UGX ${p.price.toLocaleString()}</p><p>${esc(p.description)}</p><form method="POST" action="/cart/add"><input type="hidden" name="product_id" value="${p.id}"><input type="number" name="quantity" value="1" min="1" max="${p.stock}"><button class="btn btn-green">Add to Cart</button></form></div>`, null, true));
+  res.send(renderPage(p.name, `<div class="card"><img src="${p.image_url}" style="width:100%;max-height:400px;object-fit:cover;border-radius:16px"><h1>${esc(p.name)}</h1><p style="color:#64748b">Sold by ${esc(p.seller_name)}</p><p style="font-size:32px;color:#16a34a;font-weight:bold">UGX ${p.price.toLocaleString()}</p><p>${esc(p.description)}</p><form method="POST" action="/cart/add"><input type="hidden" name="product_id" value="${p.id}"><input type="number" name="quantity" value="1" min="1" max="${p.stock}"><button class="btn btn-green">Add to Cart</button></form></div>`, null));
 }));
 
 app.get('/blog', ah(async (req, res) => {
   const posts = (await pool.query('SELECT n.*,t.name as author_name FROM news_articles n JOIN tenants t ON n.tenant_id=t.id WHERE n.published=true ORDER BY n.created_at DESC LIMIT 20')).rows;
-  res.send(renderPage('Blog', `<div class="grid">${posts.map(p => `<div class="card"><img src="${p.image_url || '/img/default.jpg'}" style="width:100%;height:200px;object-fit:cover;border-radius:12px"><h3>${esc(p.title)}</h3><p style="color:#64748b;font-size:13px">By ${esc(p.author_name)} • ${new Date(p.created_at).toDateString()}</p><p>${esc(p.summary)}</p><a href="/blog/${p.id}" class="btn">Read More</a></div>`).join('')}</div>`, null, true));
+  res.send(renderPage('Blog', `<div class="grid">${posts.map(p => `<div class="card"><img src="${p.image_url || '/img/default.jpg'}" style="width:100%;height:200px;object-fit:cover;border-radius:12px"><h3>${esc(p.title)}</h3><p style="color:#64748b;font-size:13px">By ${esc(p.author_name)} • ${new Date(p.created_at).toDateString()}</p><p>${esc(p.summary)}</p><a href="/blog/${p.id}" class="btn">Read More</a></div>`).join('')}</div>`, null));
 }));
 
 app.get('/schools', ah(async (req, res) => {
   const schools = (await pool.query("SELECT id,name,subdomain,description,logo_url,verified FROM tenants WHERE type='school' AND status='active' ORDER BY featured_until DESC NULLS LAST, created_at DESC")).rows;
-  res.send(renderPage('Schools', `<div class="grid">${schools.map(s => `<div class="card"><img src="${s.logo_url || '/img/school.jpg'}" style="width:100%;height:150px;object-fit:cover;border-radius:12px"><h3>${esc(s.name)} ${s.verified ? '✅' : ''}</h3><p>${esc(s.description || '').substring(0, 100)}</p><a href="/s/${s.subdomain}" class="btn">Visit Site</a></div>`).join('')}</div>`, null, true));
+  res.send(renderPage('Schools', `<div class="grid">${schools.map(s => `<div class="card"><img src="${s.logo_url || '/img/school.jpg'}" style="width:100%;height:150px;object-fit:cover;border-radius:12px"><h3>${esc(s.name)} ${s.verified ? '✅' : ''}</h3><p>${esc(s.description || '').substring(0, 100)}</p><a href="/s/${s.subdomain}" class="btn">Visit Site</a></div>`).join('')}</div>`, null));
 }));
 
 app.get('/s/:subdomain', ah(async (req, res) => {
@@ -343,7 +348,7 @@ app.get('/s/:subdomain', ah(async (req, res) => {
 
 app.get('/pay/:tenant_id', ah(async (req, res) => {
   const t = (await pool.query('SELECT * FROM tenants WHERE id=$1', [req.params.tenant_id])).rows[0];
-  res.send(renderPage('Pay', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Pay ${esc(t.name)}</h2><form method="POST" action="/pay/${t.id}"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" required><label>Purpose</label><select name="purpose" required><option value="fees">School Fees</option><option value="donation">Donation</option></select><label>Your Name</label><input name="name" required><label>Phone</label><input name="phone" placeholder="078..." required><label>Email</label><input name="email" type="email" required><label>Payment Method</label><select name="gateway" required><option value="mtn">MTN MoMo</option><option value="airtel">Airtel Money</option></select><button class="btn btn-green" style="width:100%">Pay Securely</button></form></div>`, null, true));
+  res.send(renderPage('Pay', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Pay ${esc(t.name)}</h2><form method="POST" action="/pay/${t.id}"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" required><label>Purpose</label><select name="purpose" required><option value="fees">School Fees</option><option value="donation">Donation</option></select><label>Your Name</label><input name="name" required><label>Phone</label><input name="phone" placeholder="078..." required><label>Email</label><input name="email" type="email" required><label>Payment Method</label><select name="gateway" required><option value="mtn">MTN MoMo</option><option value="airtel">Airtel Money</option></select><button class="btn btn-green" style="width:100%">Pay Securely</button></form></div>`, null));
 }));
 
 app.post('/pay/:tenant_id', ah(async (req, res) => {
@@ -358,7 +363,7 @@ app.post('/pay/:tenant_id', ah(async (req, res) => {
 
 // === AUTH ROUTES ===
 app.get('/login', ah(async (req, res) => {
-  res.send(renderPage('Login', `<div class="card" style="max-width:400px;margin:60px auto"><h1>Login</h1><form method="POST" action="/login"><input name="email" type="email" placeholder="Email" required><input name="password" type="password" placeholder="Password" required><div id="otp-field" style="display:none"><input name="otp" placeholder="Enter 6-digit code" maxlength="6"></div><button class="btn" style="width:100%">Login</button></form><p style="text-align:center;margin-top:20px"><a href="/forgot-password">Forgot Password?</a> • <a href="/register">Create Account</a></p></div>`, null, true));
+  res.send(renderPage('Login', `<div class="card" style="max-width:400px;margin:60px auto"><h1>Login</h1><form method="POST" action="/login"><input name="email" type="email" placeholder="Email" required><input name="password" type="password" placeholder="Password" required><div id="otp-field" style="display:none"><input name="otp" placeholder="Enter 6-digit code" maxlength="6"></div><button class="btn" style="width:100%">Login</button></form><p style="text-align:center;margin-top:20px"><a href="/forgot-password">Forgot Password?</a> • <a href="/register">Create Account</a></p></div>`, null));
 }));
 
 app.post('/login', ah(async (req, res) => {
@@ -383,7 +388,7 @@ app.get('/logout', (req, res) => { req.session.destroy(() => res.redirect('/logi
 app.get('/register', ah(async (req, res) => {
   const type = req.query.type || 'school';
   const plans = Object.entries(SUBSCRIPTION_PLANS).filter(([k, v]) => k.startsWith(type));
-  res.send(renderPage('Register', `<div class="card" style="max-width:800px;margin:40px auto"><h1>Create ${esc(type)}</h1><form method="POST" action="/register"><input type="hidden" name="type" value="${type}"><h3>1. Choose Plan</h3>${plans.map(([k, v]) => `<label class="card" style="cursor:pointer"><input type="radio" name="plan" value="${k}" required><b>${v.name}</b> - ${v.price === 0 ? 'FREE' : CURRENCIES[v.currency].symbol + ' ' + v.price.toLocaleString() + '/mo'}<ul>${v.features.map(f => `<li>${f}</li>`).join('')}</ul></label>`).join('')}<h3>2. Details</h3><input name="name" placeholder="Name" required><input name="subdomain" placeholder="Website: kings-primary" required><textarea name="description" placeholder="Description"></textarea><h3>3. Payment Details</h3><select name="gateway" required><option value="">Select</option><option value="mtn">MTN MoMo</option><option value="airtel">Airtel Money</option></select><input name="momo_number" placeholder="Mobile Money Number" required><input name="momo_name" placeholder="Name on Mobile Money" required><h3>4. Admin Account</h3><input name="admin_name" placeholder="Your Name" required><input name="admin_email" type="email" placeholder="Email" required><input name="admin_phone" placeholder="Phone: +256..." required><input name="admin_password" type="password" placeholder="Password" required><select name="country_code" required><option value="UG">Uganda +256</option><option value="KE">Kenya +254</option><option value="TZ">Tanzania +255</option></select><label><input type="checkbox" required> I agree to 5% platform fee</label><button class="btn btn-green">Create Account</button></form></div>`, null, true));
+  res.send(renderPage('Register', `<div class="card" style="max-width:800px;margin:40px auto"><h1>Create ${esc(type)}</h1><form method="POST" action="/register"><input type="hidden" name="type" value="${type}"><h3>1. Choose Plan</h3>${plans.map(([k, v]) => `<label class="card" style="cursor:pointer"><input type="radio" name="plan" value="${k}" required><b>${v.name}</b> - ${v.price === 0 ? 'FREE' : CURRENCIES[v.currency].symbol + ' ' + v.price.toLocaleString() + '/mo'}<ul>${v.features.map(f => `<li>${f}</li>`).join('')}</ul></label>`).join('')}<h3>2. Details</h3><input name="name" placeholder="Name" required><input name="subdomain" placeholder="Website: kings-primary" required><textarea name="description" placeholder="Description"></textarea><h3>3. Payment Details</h3><select name="gateway" required><option value="">Select</option><option value="mtn">MTN MoMo</option><option value="airtel">Airtel Money</option></select><input name="momo_number" placeholder="Mobile Money Number" required><input name="momo_name" placeholder="Name on Mobile Money" required><h3>4. Admin Account</h3><input name="admin_name" placeholder="Your Name" required><input name="admin_email" type="email" placeholder="Email" required><input name="admin_phone" placeholder="Phone: +256..." required><input name="admin_password" type="password" placeholder="Password" required><select name="country_code" required><option value="UG">Uganda +256</option><option value="KE">Kenya +254</option><option value="TZ">Tanzania +255</option></select><label><input type="checkbox" required> I agree to 5% platform fee</label><button class="btn btn-green">Create Account</button></form></div>`, null));
 }));
 
 app.post('/register', ah(async (req, res) => {
@@ -405,7 +410,7 @@ app.get('/verify-email/:token', ah(async (req, res) => {
 }));
 
 app.get('/forgot-password', ah(async (req, res) => {
-  res.send(renderPage('Reset Password', `<div class="card" style="max-width:400px;margin:60px auto"><h2>Reset Password</h2><form method="POST" action="/forgot-password"><input name="email" type="email" placeholder="Your Email" required><button class="btn" style="width:100%">Send Reset Link</button></form></div>`, null, true));
+  res.send(renderPage('Reset Password', `<div class="card" style="max-width:400px;margin:60px auto"><h2>Reset Password</h2><form method="POST" action="/forgot-password"><input name="email" type="email" placeholder="Your Email" required><button class="btn" style="width:100%">Send Reset Link</button></form></div>`, null));
 }));
 
 app.post('/forgot-password', ah(async (req, res) => {
@@ -453,13 +458,24 @@ app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, re
 
 // === PORTAL ROUTES CONTINUED ===
 app.post('/portal/academics/marks', requireAuth, requirePortal('academics'), ah(async (req, res) => {
-  const { marks } = req.body;
-  for (const m of JSON.parse(marks || '[]')) {
+  let marks = req.body.marks;
+  // Handle both JSON string and parsed object
+  if (typeof marks === 'string') {
+    try {
+      marks = JSON.parse(marks || '[]');
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid marks format' });
+    }
+  } else if (!marks) {
+    marks = [];
+  }
+
+  for (const m of marks) {
     const grade = m.score >= 80 ? 'A' : m.score >= 70 ? 'B' : m.score >= 60 ? 'C' : m.score >= 50 ? 'D' : 'F';
     await pool.query('INSERT INTO grades(tenant_id,student_id,subject,score,grade,term,teacher_id)VALUES($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, m.student_id, m.subject, m.score, grade, m.term, req.session.user.id]);
   }
   await logAction(req.session.user.id, req.session.user.tenant_id, 'enter_marks', { count: marks.length }, req.ip);
-  res.json({ ok: true, saved: JSON.parse(marks || '[]').length });
+  res.json({ ok: true, saved: marks.length });
 }));
 
 app.get('/portal/finance', requireAuth, requirePortal('finance'), ah(async (req, res) => {
@@ -467,7 +483,7 @@ app.get('/portal/finance', requireAuth, requirePortal('finance'), ah(async (req,
   const pending = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM fees WHERE tenant_id=$1 AND paid=false', [req.session.user.tenant_id])).rows[0].t;
   const collected = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM fees WHERE tenant_id=$1 AND paid=true', [req.session.user.tenant_id])).rows[0].t;
   const trans = (await pool.query('SELECT * FROM transactions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [req.session.user.tenant_id])).rows;
-  res.send(renderPage('Finance', `<div class="stats"><div class="stat-card"><div class="stat-num">UGX ${balance.toLocaleString()}</div><div>Wallet Balance</div></div><div class="stat-card"><div class="stat-num">UGX ${pending.toLocaleString()}</div><div>Pending Fees</div></div><div class="stat-card"><div class="stat-num">UGX ${collected.toLocaleString()}</div><div>Collected</div></div></div><div class="card"><h2>Withdraw Funds</h2><form method="POST" action="/portal/finance/withdraw"><input name="amount" type="number" max="${balance}" placeholder="Amount" required><input name="phone" placeholder="MTN/Airtel Number" required><button class="btn btn-green">Withdraw</button></form></div><div class="card"><h3>Recent Transactions</h3><table><tr><th>Date</th><th>Payer</th><th>Amount</th><th>Purpose</th><th>Status</th></tr>${trans.map(t => `<tr><td>${new Date(t.created_at).toLocaleDateString()}</td><td>${esc(t.payer_name)}</td><td>UGX ${t.amount.toLocaleString()}</td><td>${t.purpose}</td><td><span class="badge ${t.status === 'completed' ? 'badge-green' : 'badge-gold'}">${t.status}</span></td></tr>`).join('')}</table></div>`, req.session.user, 'finance'));
+  res.send(renderPage('Finance', `<div class="stats"><div class="stat-card"><div class="stat-num">UGX ${balance.toLocaleString()}</div><div>Wallet Balance</div></div><div class="stat-card"><div class="stat-num">UGX ${pending.toLocaleString()}</div><div>Pending Fees</div></div><div class="stat-card"><div class="stat-num">UGX ${collected.toLocaleString()}</div><div>Collected</div></div></div><div class="card"><h2>Withdraw Funds</h2><form method="POST" action="/portal/finance/withdraw"><input name="amount" type="number" max="${balance}" placeholder="Amount" required><input name="phone" placeholder="MTN/Airtel Number" required><button class="btn btn-green">Withdraw</button></form></div><div class="card"><h3>Recent Transactions</h3><table><tr><th>Date</th><th>Payer</th><th>Amount</th><th>Purpose</th><th>Status</th></tr>${trans.map(t => `<tr><td>${new Date(t.created_at).toLocaleDateString()}</td><td>${esc(t.payer_name)}</td><td>UGX ${t.amount.toLocaleString()}</td><td>${t.purpose}</td><td><span class="badge ${t.status === 'completed' ? 'badge-green' : 'badge-gold'}">${t.status}</span></td></tr>`).join('')}</table></div>`, req.session.user));
 }));
 
 app.post('/portal/finance/withdraw', requireAuth, requirePortal('finance'), ah(async (req, res) => {
@@ -480,7 +496,7 @@ app.post('/portal/finance/withdraw', requireAuth, requirePortal('finance'), ah(a
 
 app.get('/portal/students', requireAuth, requirePortal('admin'), ah(async (req, res) => {
   const students = (await pool.query('SELECT * FROM students WHERE tenant_id=$1 ORDER BY name', [req.session.user.tenant_id])).rows;
-  res.send(renderPage('Students', `<div class="card"><h2>Add Student</h2><form method="POST" action="/portal/students/add"><input name="name" placeholder="Full Name" required><input name="class" placeholder="Class" required><input name="parent_phone" placeholder="Parent Phone" required><button class="btn">Add Student</button></form></div><div class="card"><h3>All Students (${students.length})</h3><table><tr><th>Name</th><th>Class</th><th>Parent</th><th>Balance</th><th>Actions</th></tr>${students.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.parent_phone)}</td><td>UGX ${s.balance.toLocaleString()}</td><td><a href="/portal/reports/pdf/${s.id}" class="btn">Report</a></td></tr>`).join('')}</table></div>`, req.session.user, 'admin'));
+  res.send(renderPage('Students', `<div class="card"><h2>Add Student</h2><form method="POST" action="/portal/students/add"><input name="name" placeholder="Full Name" required><input name="class" placeholder="Class" required><input name="parent_phone" placeholder="Parent Phone" required><button class="btn">Add Student</button></form></div><div class="card"><h3>All Students (${students.length})</h3><table><tr><th>Name</th><th>Class</th><th>Parent</th><th>Balance</th><th>Actions</th></tr>${students.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.parent_phone)}</td><td>UGX ${s.balance.toLocaleString()}</td><td><a href="/portal/reports/pdf/${s.id}" class="btn">Report</a></td></tr>`).join('')}</table></div>`, req.session.user));
 }));
 
 app.post('/portal/students/add', requireAuth, requirePortal('admin'), ah(async (req, res) => {
@@ -508,7 +524,7 @@ app.post('/portal/students/bulk', requireAuth, requirePortal('admin'), upload.si
 app.get('/portal/marketplace', requireAuth, requirePortal('marketplace'), ah(async (req, res) => {
   const products = (await pool.query('SELECT * FROM products WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id])).rows;
   const orders = (await pool.query('SELECT o.*,p.name as product_name FROM orders o JOIN products p ON o.product_id=p.id WHERE p.tenant_id=$1 ORDER BY o.created_at DESC LIMIT 20', [req.session.user.tenant_id])).rows;
-  res.send(renderPage('Marketplace', `<div class="card"><h2>Add Product</h2><form method="POST" action="/portal/marketplace/add" enctype="multipart/form-data"><input name="name" placeholder="Product Name" required><textarea name="description" placeholder="Description" required></textarea><input name="price" type="number" placeholder="Price UGX" required><input name="stock" type="number" placeholder="Stock" required><select name="category" required><option value="">Category</option><option>Uniforms</option><option>Books</option><option>Food</option><option>Stationery</option></select><input type="file" name="image" accept="image/*"><button class="btn btn-green">Add Product</button></form></div><div class="card"><h3>Your Products (${products.length})</h3><div class="grid">${products.map(p => `<div class="card"><img src="${p.image_url || '/img/default.jpg'}" style="width:100%;height:150px;object-fit:cover;border-radius:12px"><h4>${esc(p.name)}</h4><p>UGX ${p.price.toLocaleString()} • Stock: ${p.stock}</p><span class="badge ${p.approved ? 'badge-green' : 'badge-gold'}">${p.approved ? 'Approved' : 'Pending'}</span></div>`).join('')}</div></div><div class="card"><h3>Recent Orders</h3><table><tr><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th></tr>${orders.map(o => `<tr><td>${esc(o.product_name)}</td><td>${esc(o.customer_name)}</td><td>${o.quantity}</td><td>UGX ${o.total.toLocaleString()}</td><td><span class="badge badge-blue">${o.status}</span></td></tr>`).join('')}</table></div>`, req.session.user, 'marketplace'));
+  res.send(renderPage('Marketplace', `<div class="card"><h2>Add Product</h2><form method="POST" action="/portal/marketplace/add" enctype="multipart/form-data"><input name="name" placeholder="Product Name" required><textarea name="description" placeholder="Description" required></textarea><input name="price" type="number" placeholder="Price UGX" required><input name="stock" type="number" placeholder="Stock" required><select name="category" required><option value="">Category</option><option>Uniforms</option><option>Books</option><option>Food</option><option>Stationery</option></select><input type="file" name="image" accept="image/*"><button class="btn btn-green">Add Product</button></form></div><div class="card"><h3>Your Products (${products.length})</h3><div class="grid">${products.map(p => `<div class="card"><img src="${p.image_url || '/img/default.jpg'}" style="width:100%;height:150px;object-fit:cover;border-radius:12px"><h4>${esc(p.name)}</h4><p>UGX ${p.price.toLocaleString()} • Stock: ${p.stock}</p><span class="badge ${p.approved ? 'badge-green' : 'badge-gold'}">${p.approved ? 'Approved' : 'Pending'}</span></div>`).join('')}</div></div><div class="card"><h3>Recent Orders</h3><table><tr><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th></tr>${orders.map(o => `<tr><td>${esc(o.product_name)}</td><td>${esc(o.customer_name)}</td><td>${o.quantity}</td><td>UGX ${o.total.toLocaleString()}</td><td><span class="badge badge-blue">${o.status}</span></td></tr>`).join('')}</table></div>`, req.session.user));
 }));
 
 app.post('/portal/marketplace/add', requireAuth, requirePortal('marketplace'), upload.single('image'), ah(async (req, res) => {
@@ -526,7 +542,7 @@ app.post('/portal/marketplace/add', requireAuth, requirePortal('marketplace'), u
 app.get('/portal/donors', requireAuth, requireRole('org_admin', 'donor'), ah(async (req, res) => {
   const opps = (await pool.query('SELECT * FROM fund_opportunities WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id])).rows;
   const apps = (await pool.query('SELECT a.*,f.title as opp_title,u.name as donor_name FROM fund_applications a JOIN fund_opportunities f ON a.opportunity_id=f.id JOIN users u ON a.donor_id=u.id WHERE f.tenant_id=$1 ORDER BY a.created_at DESC', [req.session.user.tenant_id])).rows;
-  res.send(renderPage('Donor Portal', `<div class="card"><h2>Create Funding Opportunity</h2><form method="POST" action="/portal/donors/create"><input name="title" placeholder="Title: Borehole Project" required><textarea name="summary" placeholder="Short summary" required></textarea><textarea name="description" placeholder="Full description" required></textarea><input name="amount" type="number" placeholder="Amount Needed USD" required><input name="deadline" type="date" required><select name="category" required><option value="">Category</option><option>Infrastructure</option><option>Education</option><option>Health</option><option>Agriculture</option></select><button class="btn btn-green">Post Opportunity</button></form></div><div class="card"><h3>Your Opportunities (${opps.length})</h3><table><tr><th>Title</th><th>Amount</th><th>Deadline</th><th>Applications</th></tr>${opps.map(o => `<tr><td>${esc(o.title)}</td><td>USD ${o.amount.toLocaleString()}</td><td>${new Date(o.deadline).toDateString()}</td><td>${apps.filter(a => a.opportunity_id === o.id).length}</td></tr>`).join('')}</table></div><div class="card"><h3>Donor Applications</h3><table><tr><th>Opportunity</th><th>Donor</th><th>Amount</th><th>Status</th><th>Action</th></tr>${apps.map(a => `<tr><td>${esc(a.opp_title)}</td><td>${esc(a.donor_name)}</td><td>USD ${a.amount.toLocaleString()}</td><td><span class="badge ${a.status === 'approved' ? 'badge-green' : 'badge-gold'}">${a.status}</span></td><td>${a.status === 'pending' ? `<a href="/portal/donors/approve/${a.id}" class="btn btn-green">Approve</a>` : ''}</td></tr>`).join('')}</table></div>`, req.session.user, 'donors'));
+  res.send(renderPage('Donor Portal', `<div class="card"><h2>Create Funding Opportunity</h2><form method="POST" action="/portal/donors/create"><input name="title" placeholder="Title: Borehole Project" required><textarea name="summary" placeholder="Short summary" required></textarea><textarea name="description" placeholder="Full description" required></textarea><input name="amount" type="number" placeholder="Amount Needed USD" required><input name="deadline" type="date" required><select name="category" required><option value="">Category</option><option>Infrastructure</option><option>Education</option><option>Health</option><option>Agriculture</option></select><button class="btn btn-green">Post Opportunity</button></form></div><div class="card"><h3>Your Opportunities (${opps.length})</h3><table><tr><th>Title</th><th>Amount</th><th>Deadline</th><th>Applications</th></tr>${opps.map(o => `<tr><td>${esc(o.title)}</td><td>USD ${o.amount.toLocaleString()}</td><td>${new Date(o.deadline).toDateString()}</td><td>${apps.filter(a => a.opportunity_id === o.id).length}</td></tr>`).join('')}</table></div><div class="card"><h3>Donor Applications</h3><table><tr><th>Opportunity</th><th>Donor</th><th>Amount</th><th>Status</th><th>Action</th></tr>${apps.map(a => `<tr><td>${esc(a.opp_title)}</td><td>${esc(a.donor_name)}</td><td>USD ${a.amount.toLocaleString()}</td><td><span class="badge ${a.status === 'approved' ? 'badge-green' : 'badge-gold'}">${a.status}</span></td><td>${a.status === 'pending' ? `<a href="/portal/donors/approve/${a.id}" class="btn btn-green">Approve</a>` : ''}</td></tr>`).join('')}</table></div>`, req.session.user));
 }));
 
 // === DEVELOPER SEED ROUTE ===
@@ -675,7 +691,7 @@ app.get('/cart', ah(async (req, res) => {
     return { ...p, quantity: c.quantity };
   })) : [];
   const total = products.reduce((sum, p) => sum + p.price * p.quantity, 0);
-  res.send(renderPage('Cart', `<div class="card"><h2>Shopping Cart</h2>${products.length ? `<table><tr><th>Product</th><th>Price</th><th>Qty</th><th>Total</th></tr>${products.map(p => `<tr><td>${esc(p.name)}</td><td>UGX ${p.price.toLocaleString()}</td><td>${p.quantity}</td><td>UGX ${(p.price * p.quantity).toLocaleString()}</td></tr>`).join('')}<tr><td colspan="3" style="text-align:right;font-weight:bold">Total:</td><td style="font-weight:bold;color:#16a34a">UGX ${total.toLocaleString()}</td></tr></table><a href="/checkout" class="btn btn-green">Checkout</a>` : '<p>Cart is empty</p><a href="/marketplace" class="btn">Continue Shopping</a>'}</div>`, null, true));
+  res.send(renderPage('Cart', `<div class="card"><h2>Shopping Cart</h2>${products.length ? `<table><tr><th>Product</th><th>Price</th><th>Qty</th><th>Total</th></tr>${products.map(p => `<tr><td>${esc(p.name)}</td><td>UGX ${p.price.toLocaleString()}</td><td>${p.quantity}</td><td>UGX ${(p.price * p.quantity).toLocaleString()}</td></tr>`).join('')}<tr><td colspan="3" style="text-align:right;font-weight:bold">Total:</td><td style="font-weight:bold;color:#16a34a">UGX ${total.toLocaleString()}</td></tr></table><a href="/checkout" class="btn btn-green">Checkout</a>` : '<p>Cart is empty</p><a href="/marketplace" class="btn">Continue Shopping</a>'}</div>`, null));
 }));
 
 app.post('/cart/add', ah(async (req, res) => {
@@ -695,7 +711,7 @@ app.get('/checkout', ah(async (req, res) => {
     return { ...p, quantity: c.quantity };
   }));
   const total = products.reduce((sum, p) => sum + p.price * p.quantity, 0);
-  res.send(renderPage('Checkout', `<div class="card" style="max-width:600px;margin:40px auto"><h2>Checkout</h2><form method="POST" action="/checkout"><h3>Delivery Details</h3><input name="customer_name" placeholder="Full Name" required><input name="phone" placeholder="Phone: 078..." required><textarea name="address" placeholder="Delivery Address" required></textarea><h3>Payment Method</h3><select name="gateway" required><option value="mtn">MTN MoMo</option><option value="airtel">Airtel Money</option></select><h3>Order Summary</h3><table>${products.map(p => `<tr><td>${esc(p.name)} x${p.quantity}</td><td>UGX ${(p.price * p.quantity).toLocaleString()}</td></tr>`).join('')}<tr><td style="font-weight:bold">Total:</td><td style="font-weight:bold;color:#16a34a">UGX ${total.toLocaleString()}</td></tr></table><button class="btn btn-green" style="width:100%">Pay Now</button></form></div>`, null, true));
+  res.send(renderPage('Checkout', `<div class="card" style="max-width:600px;margin:40px auto"><h2>Checkout</h2><form method="POST" action="/checkout"><h3>Delivery Details</h3><input name="customer_name" placeholder="Full Name" required><input name="phone" placeholder="Phone: 078..." required><textarea name="address" placeholder="Delivery Address" required></textarea><h3>Payment Method</h3><select name="gateway" required><option value="mtn">MTN MoMo</option><option value="airtel">Airtel Money</option></select><h3>Order Summary</h3><table>${products.map(p => `<tr><td>${esc(p.name)} x${p.quantity}</td><td>UGX ${(p.price * p.quantity).toLocaleString()}</td></tr>`).join('')}<tr><td style="font-weight:bold">Total:</td><td style="font-weight:bold;color:#16a34a">UGX ${total.toLocaleString()}</td></tr></table><button class="btn btn-green" style="width:100%">Pay Now</button></form></div>`, null));
 }));
 
 app.post('/checkout', ah(async (req, res) => {
@@ -720,13 +736,13 @@ app.get('/blog/:id', ah(async (req, res) => {
   const p = (await pool.query('SELECT n.*,t.name as author_name FROM news_articles n JOIN tenants t ON n.tenant_id=t.id WHERE n.id=$1 AND n.published=true', [req.params.id])).rows[0];
   if (!p) return res.status(404).send('Not found');
   await pool.query('UPDATE news_articles SET views=views+1 WHERE id=$1', [p.id]);
-  res.send(renderPage(p.title, `<div class="card"><img src="${p.image_url}" style="width:100%;max-height:400px;object-fit:cover;border-radius:16px"><h1>${esc(p.title)}</h1><p style="color:#64748b;font-size:13px">By ${esc(p.author_name)} • ${new Date(p.created_at).toDateString()} • ${p.views} views</p><div style="margin:20px 0">${p.content}</div></div>`, null, true));
+  res.send(renderPage(p.title, `<div class="card"><img src="${p.image_url}" style="width:100%;max-height:400px;object-fit:cover;border-radius:16px"><h1>${esc(p.title)}</h1><p style="color:#64748b;font-size:13px">By ${esc(p.author_name)} • ${new Date(p.created_at).toDateString()} • ${p.views} views</p><div style="margin:20px 0">${p.content}</div></div>`, null));
 }));
 
 app.get('/order/:ref', ah(async (req, res) => {
   const o = (await pool.query('SELECT o.*,p.name as product_name FROM orders o JOIN products p ON o.product_id=p.id WHERE o.ref=$1', [req.params.ref])).rows[0];
   if (!o) return res.status(404).send('Order not found');
-  res.send(renderPage('Order ' + o.ref, `<div class="card"><h2>Order #${esc(o.ref)}</h2><table><tr><td>Product:</td><td>${esc(o.product_name)}</td></tr><tr><td>Quantity:</td><td>${o.quantity}</td></tr><tr><td>Total:</td><td>UGX ${o.total.toLocaleString()}</td></tr><tr><td>Status:</td><td><span class="badge badge-${o.status === 'completed' ? 'green' : 'gold'}">${o.status}</span></td></tr><tr><td>Customer:</td><td>${esc(o.customer_name)}</td></tr><tr><td>Address:</td><td>${esc(o.address)}</td></tr></table></div>`, null, true));
+  res.send(renderPage('Order ' + o.ref, `<div class="card"><h2>Order #${esc(o.ref)}</h2><table><tr><td>Product:</td><td>${esc(o.product_name)}</td></tr><tr><td>Quantity:</td><td>${o.quantity}</td></tr><tr><td>Total:</td><td>UGX ${o.total.toLocaleString()}</td></tr><tr><td>Status:</td><td><span class="badge badge-${o.status === 'completed' ? 'green' : 'gold'}">${o.status}</span></td></tr><tr><td>Customer:</td><td>${esc(o.customer_name)}</td></tr><tr><td>Address:</td><td>${esc(o.address)}</td></tr></table></div>`, null));
 }));
 
 app.get('/donate/recurring', requireAuth, ah(async (req, res) => {
@@ -746,7 +762,7 @@ app.post('/donate/recurring', requireAuth, ah(async (req, res) => {
 app.get('/reset-password/:token', ah(async (req, res) => {
   const r = (await pool.query('SELECT * FROM password_resets WHERE token=$1 AND expires_at>NOW() AND used=false', [req.params.token])).rows[0];
   if (!r) return res.status(400).send('Invalid or expired token');
-  res.send(renderPage('New Password', `<div class="card" style="max-width:400px;margin:60px auto"><h2>Set New Password</h2><form method="POST" action="/reset-password/${req.params.token}"><input name="password" type="password" placeholder="New Password" required><input name="confirm" type="password" placeholder="Confirm Password" required><button class="btn" style="width:100%">Reset Password</button></form></div>`, null, true));
+  res.send(renderPage('New Password', `<div class="card" style="max-width:400px;margin:60px auto"><h2>Set New Password</h2><form method="POST" action="/reset-password/${req.params.token}"><input name="password" type="password" placeholder="New Password" required><input name="confirm" type="password" placeholder="Confirm Password" required><button class="btn" style="width:100%">Reset Password</button></form></div>`, null));
 }));
 
 app.post('/reset-password/:token', ah(async (req, res) => {
@@ -763,7 +779,7 @@ app.post('/reset-password/:token', ah(async (req, res) => {
 app.get('/s/:subdomain/enroll', ah(async (req, res) => {
   const t = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.subdomain])).rows[0];
   if (!t) return res.status(404).send('School not found');
-  res.send(renderPage('Enroll', `<div class="card" style="max-width:600px;margin:40px auto"><h2>Enroll at ${esc(t.name)}</h2><form method="POST" action="/s/${req.params.subdomain}/enroll"><input name="student_name" placeholder="Student Full Name" required><input name="dob" type="date" placeholder="Date of Birth" required><select name="gender" required><option value="">Gender</option><option value="Male">Male</option><option value="Female">Female</option></select><input name="class_applying" placeholder="Class Applying For" required><h3>Parent/Guardian</h3><input name="parent_name" placeholder="Your Name" required><input name="parent_phone" placeholder="Phone: 078..." required><input name="parent_email" type="email" placeholder="Email" required><button class="btn btn-green" style="width:100%">Submit Application</button></form></div>`, null, true));
+  res.send(renderPage('Enroll', `<div class="card" style="max-width:600px;margin:40px auto"><h2>Enroll at ${esc(t.name)}</h2><form method="POST" action="/s/${req.params.subdomain}/enroll"><input name="student_name" placeholder="Student Full Name" required><input name="dob" type="date" placeholder="Date of Birth" required><select name="gender" required><option value="">Gender</option><option value="Male">Male</option><option value="Female">Female</option></select><input name="class_applying" placeholder="Class Applying For" required><h3>Parent/Guardian</h3><input name="parent_name" placeholder="Your Name" required><input name="parent_phone" placeholder="Phone: 078..." required><input name="parent_email" type="email" placeholder="Email" required><button class="btn btn-green" style="width:100%">Submit Application</button></form></div>`, null));
 }));
 
 app.post('/s/:subdomain/enroll', ah(async (req, res) => {
@@ -772,7 +788,6 @@ app.post('/s/:subdomain/enroll', ah(async (req, res) => {
   await pool.query('INSERT INTO enrollments(tenant_id,student_name,dob,gender,class_applying,parent_name,parent_phone,parent_email,status)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t.id, student_name, dob, gender, class_applying, parent_name, parent_phone, parent_email, 'pending']);
   res.send(`<script>alert('Application submitted! ${t.name} will contact you.');window.location='/s/${t.subdomain}'</script>`);
 }));
-
 // === PUBLIC PAGES ===
 app.get('/help', ah(async (req, res) => {
   res.send(renderPage('Help', `<div class="card"><h1>Help Center</h1><h3>USSD Commands</h3><p>Dial <b>*270*StudentID#</b> to check fees</p><p>Dial <b>*270*StudentID*2#</b> to check results</p><h3>Support</h3><p>WhatsApp: +256 789 736737</p><p>Email: ssewasswa@gmail.com</p></div>`, null, true));
@@ -936,6 +951,11 @@ app.get('/portal/students/bulk-edit', requireAuth, requirePortal('admin'), ah(as
 
 app.post('/portal/students/bulk-edit', requireAuth, requirePortal('admin'), ah(async (req, res) => {
   const { field, old_value, new_value } = req.body;
+  // Security: Whitelist allowed fields to prevent SQL Injection
+  const allowedFields = ['class', 'status', 'gender', 'parent_phone'];
+  if (!allowedFields.includes(field)) {
+    return res.status(400).send('Invalid field specified');
+  }
   const result = await pool.query(`UPDATE students SET ${field}=$1 WHERE tenant_id=$2 AND ${field}=$3`, [new_value, req.session.user.tenant_id, old_value]);
   res.redirect('/portal/students?updated=' + result.rowCount);
 }));
@@ -1058,14 +1078,23 @@ app.get('/dev/database', requireAuth, requireDeveloper, ah(async (req, res) => {
 }));
 
 app.get('/dev/database/:table', requireAuth, requireDeveloper, ah(async (req, res) => {
+  // Security: Whitelist tables to prevent SQL Injection via URL params
+  const allowedTables = ['users', 'tenants', 'students', 'grades', 'products', 'orders', 'transactions', 'audit_logs', 'developer_revenue', 'attendance', 'fees', 'classes', 'subjects', 'timetables', 'exams', 'fees_structure', 'withdrawals', 'payroll', 'expenses', 'income', 'budgets', 'returns', 'reviews', 'fund_opportunities', 'fund_applications', 'donations', 'recurring_donations', 'otp_codes', 'email_verifications', 'password_resets', 'verification_docs', 'news_articles', 'advertisements', 'events', 'gallery', 'feedback', 'enrollments', 'messages', 'notifications', 'files', 'api_keys', 'white_labels', 'live_classes', 'social_takeovers', 'employer_matches', 'ai_conversations', 'ai_predictions', 'session'];
+  
+  if (!allowedTables.includes(req.params.table)) {
+    return res.status(400).send('Table not allowed');
+  }
+
   const rows = (await pool.query(`SELECT * FROM ${req.params.table} LIMIT 100`)).rows;
   res.json(rows);
 }));
+
 app.get('/dev/show-columns', async (req, res) => {
   const users = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position`);
   const tenants = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_name='tenants' ORDER BY ordinal_position`);
   res.json({ users: users.rows.map(r=>r.column_name), tenants: tenants.rows.map(r=>r.column_name) });
 });
+
 app.get('/dev/cache', requireAuth, requireDeveloper, ah(async (req, res) => {
   const sessions = (await pool.query('SELECT COUNT(*) as c FROM session WHERE expire>NOW()')).rows[0].c;
   res.send(renderPage('Cache', `<div class="card"><h2>System Cache</h2><p>Active Sessions: ${sessions}</p><p>Memory: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB / ${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB</p><p>Uptime: ${Math.round(process.uptime() / 3600)} hours</p><form method="POST" action="/dev/cache/flush"><button class="btn btn-red">Flush Expired Sessions</button></form></div>`, req.session.user));
@@ -1108,7 +1137,8 @@ app.post('/dev/scrape', requireAuth, requireDeveloper, ah(async (req, res) => {
   
   res.json({ ok: true, scraped: count });
 }));
-  // === CRON JOBS - AUTO TASKS ===
+
+// === CRON JOBS - AUTO TASKS ===
 // Daily 8am - SMS absent students
 cron.schedule('0 8 * * *', async () => {
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
@@ -1184,7 +1214,40 @@ async function initDB() {
     await c.query(`INSERT INTO platform_wallet (id,balance) VALUES (1,0) ON CONFLICT DO NOTHING`);
     
     // --- TENANTS & USERS ---
-    await c.query(`CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT, subdomain TEXT UNIQUE, type TEXT DEFAULT 'school', description TEXT, gateway TEXT DEFAULT 'mtn', momo_number_encrypted TEXT, momo_name TEXT, bank_name TEXT, bank_account TEXT, wallet_balance INTEGER DEFAULT 0, status TEXT DEFAULT 'active', subscription_plan TEXT DEFAULT 'school_free', subscription_status TEXT DEFAULT 'trial', verified BOOLEAN DEFAULT false, features_enabled JSONB DEFAULT '{"dashboard":true,"finance":true,"academics":true,"ai_chatbot":false,"ussd_gateway":false,"offline_sync":false}', social_links JSONB DEFAULT '{}', about_us TEXT, tagline TEXT, show_fees BOOLEAN DEFAULT true, show_results BOOLEAN DEFAULT false, show_gallery BOOLEAN DEFAULT true, show_news BOOLEAN DEFAULT true, show_donate BOOLEAN DEFAULT true, contact_phone TEXT, contact_email TEXT, address TEXT, allow_marketplace BOOLEAN DEFAULT true, seller_commission INT DEFAULT 10, featured_until TIMESTAMPTZ, country_code TEXT DEFAULT 'UG', created_at TIMESTAMPTZ DEFAULT NOW())`);
+    await c.query(`CREATE TABLE IF NOT EXISTS tenants (
+      id SERIAL PRIMARY KEY, 
+      name TEXT, 
+      subdomain TEXT UNIQUE, 
+      type TEXT DEFAULT 'school', 
+      description TEXT, 
+      gateway TEXT DEFAULT 'mtn', 
+      momo_number_encrypted TEXT, 
+      momo_name TEXT, 
+      bank_name TEXT, 
+      bank_account TEXT, 
+      wallet_balance INTEGER DEFAULT 0, 
+      status TEXT DEFAULT 'active', 
+      subscription_plan TEXT DEFAULT 'school_free', 
+      subscription_status TEXT DEFAULT 'trial', 
+      verified BOOLEAN DEFAULT false, 
+      features_enabled JSONB DEFAULT '{"dashboard":true,"finance":true,"academics":true,"ai_chatbot":false,"ussd_gateway":false,"offline_sync":false}', 
+      social_links JSONB DEFAULT '{}', 
+      about_us TEXT, 
+      tagline TEXT, 
+      show_fees BOOLEAN DEFAULT true, 
+      show_results BOOLEAN DEFAULT false, 
+      show_gallery BOOLEAN DEFAULT true, 
+      show_news BOOLEAN DEFAULT true, 
+      show_donate BOOLEAN DEFAULT true, 
+      contact_phone TEXT, 
+      contact_email TEXT, 
+      address TEXT, 
+      allow_marketplace BOOLEAN DEFAULT true, 
+      seller_commission INT DEFAULT 10, 
+      featured_until TIMESTAMPTZ, 
+      country_code TEXT DEFAULT 'UG', 
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
     await c.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, tenant_id INT, email TEXT UNIQUE, password_hash TEXT, role TEXT, portals TEXT[], name TEXT, phone_encrypted TEXT, approved BOOLEAN DEFAULT false, verified BOOLEAN DEFAULT false, two_fa_enabled BOOLEAN DEFAULT false, wallet_balance INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`);
     await c.query(`CREATE TABLE IF NOT EXISTS staff (id SERIAL PRIMARY KEY, tenant_id INT, name TEXT, role TEXT, photo_url TEXT, bio TEXT, public BOOLEAN DEFAULT false)`);
     
@@ -1276,8 +1339,10 @@ async function initDB() {
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address TEXT`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'school'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`);
-    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS features_enabled TEXT[] DEFAULT '{}'`);
+    // Note: features_enabled is defined as JSONB in CREATE TABLE, so we don't try to alter it to TEXT[] here.
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'school_free'`);
 await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'school_free'`);
+    
     // --- PATCH FUND_OPPORTUNITIES TABLE FOR DONORS PAGE ---
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS description TEXT`);
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS summary TEXT`);
@@ -1310,15 +1375,6 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
     await c.query(`CREATE INDEX IF NOT EXISTS idx_products_approved ON products(approved)`);
     await c.query(`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`);
     await c.query(`CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date)`);
-  // v9.0: Indexes
-    await c.query(`CREATE INDEX IF NOT EXISTS idx_students_tenant_class ON students(tenant_id, class)`);
-    await c.query(`CREATE INDEX IF NOT EXISTS idx_grades_student_term ON grades(student_id, term)`);
-    await c.query(`CREATE INDEX IF NOT EXISTS idx_transactions_tenant_status ON transactions(tenant_id, status)`);
-    await c.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)`);
-    await c.query(`CREATE INDEX IF NOT EXISTS idx_session_expire ON session(expire)`);
-    await c.query(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
-    await c.query(`CREATE INDEX IF NOT EXISTS idx_products_approved ON products(approved)`);
-    await c.query(`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`);
     await c.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`);
 
     await c.query('COMMIT');
@@ -1333,63 +1389,33 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
 }
 
 // === TEMP ADMIN RESET - DELETE AFTER USE ===
+// Merged the two duplicate routes into one robust handler
 app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
     const hash = await bcrypt.hash('admin123', 10);
     
-    // 1. Create/update tenant - using correct column names
+    // 1. Create/update tenant - ensure all columns referenced exist
     await pool.query(`
       INSERT INTO tenants (id, name, subdomain, type, status, plan, subscription_plan)
       VALUES (1, 'SSEWASSWA HQ', 'hq', 'school', 'active', 'enterprise', 'enterprise')
       ON CONFLICT (id) DO UPDATE SET status='active', plan='enterprise', subscription_plan='enterprise'
     `);
     
-    // 2. Create/update user - using correct columns + approved=true
+    // 2. Create/update user
     await pool.query(`
       INSERT INTO users(email, password_hash, role, tenant_id, approved)
       VALUES('waiswadaniel24@gmail.com', $1, 'super_admin', 1, true)
       ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', approved=true
-    `, );
+    `, [hash]);
     
     res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
   } catch (e) {
+    console.error(e);
     res.status(500).send('Reset failed: ' + e.message);
   }
 });
 // === END TEMP ROUTE ===
-// === TEMP DEBUG + RESET ROUTES - DELETE AFTER USE ===
-app.get('/dev/show-schema', async (req, res) => {
-  try {
-    const u = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position`);
-    const t = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='tenants' ORDER BY ordinal_position`);
-    res.json({ users: u.rows, tenants: t.rows });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
-app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
-  try {
-    const hash = await bcrypt.hash('admin123', 10);
-    
-    await pool.query(`
-      INSERT INTO tenants (id, name, type, status, subscription_plan, subdomain)
-      VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise', 'hq')
-      ON CONFLICT (id) DO NOTHING
-    `);
-    
-    await pool.query(`
-      INSERT INTO users(email,password_hash,role,tenant_id)
-      VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1)
-      ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin'
-    `, );
-    
-    res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
-  } catch (e) {
-    res.status(500).send('Reset failed: ' + e.message);
-  }
-});
-// === END TEMP ROUTES ===
 // === START SERVER ===
 initDB().then(() => {
   app.listen(PORT, () => {
