@@ -1169,15 +1169,19 @@ async function initDB() {
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS category TEXT`);
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`);
-    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS amount INT DEFAULT 0`);
+   await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS amount INT DEFAULT 0`);
     
     // --- FIX ATTENDANCE UNIQUE CONSTRAINT ---
     await c.query(`
       DO $$ 
       BEGIN
-        ALTER TABLE attendance ADD CONSTRAINT attendance_unique UNIQUE(student_id,date);
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'attendance_unique'
+        ) THEN
+          ALTER TABLE attendance ADD CONSTRAINT attendance_unique UNIQUE(student_id,date);
+        END IF;
       EXCEPTION
-        WHEN duplicate_object THEN NULL;
+        WHEN OTHERS THEN NULL;
       END $$;
     `);
 
