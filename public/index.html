@@ -1,51 +1,106 @@
-<!DOCTYPE html>
-<html>
-<body>
-<h2>Login</h2>
-<form id="loginForm">
-  <input name="username" placeholder="Username">
-  <input name="password" type="password" placeholder="Password">
-  <button>Login</button>
-</form>
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Join as Donor - SSEWASSWA Network</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui;background:#f0f9ff;color:#1e293b;line-height:1.6;padding:20px}
+.container{max-width:600px;margin:0 auto;background:white;border-radius:16px;padding:30px;box-shadow:0 4px 12px rgba(0,0,0,0.1)}
+h1{font-size:28px;margin-bottom:8px;color:#1e40af}
+.subtitle{color:#64748b;margin-bottom:30px}
+.card{border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin-bottom:20px}
+.card h3{font-size:18px;margin-bottom:15px;color:#1e40af}
+label{display:block;font-weight:600;margin:12px 0 6px;font-size:14px}
+input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:8px;font-size:16px;min-height:48px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#1e40af}
+.plan{display:block;padding:15px;border:2px solid #1e40af;border-radius:8px;cursor:pointer;margin-bottom:10px}
+.plan input{width:auto;margin-right:10px}
+.btn{width:100%;padding:16px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;margin-top:20px}
+.checkbox{display:flex;align-items:start;gap:10px;margin:20px 0}
+.checkbox input{width:auto;margin-top:4px}
+small{color:#64748b;font-size:13px}
+</style></head><body>
+<div class="container">
+  <h1>Create Donor Account</h1>
+  <p class="subtitle">14-day free trial. 5% platform fee only on successful grant disbursements.</p>
+  
+  <form id="donorForm">
+    <div class="card">
+      <h3>1. Choose Plan</h3>
+      <label class="plan">
+        <input type="radio" name="plan" value="premium" checked>
+        <strong>Donor Premium - UGX 50,000/month</strong><br>
+        <small>Post unlimited grants • Review applications • Track impact with receipts</small>
+      </label>
+    </div>
 
-<h2>Change Password</h2>
-<form id="pwForm">
-  <input name="oldPassword" type="password" placeholder="Old Password">
-  <input name="newPassword" type="password" placeholder="New Password">
-  <button>Change</button>
-</form>
+    <div class="card">
+      <h3>2. Organization Details</h3>
+      <label>Organization Name *</label>
+      <input type="text" name="org_name" required>
+      
+      <label>Website/Subdomain *</label>
+      <input type="text" name="subdomain" placeholder="kings-foundation" required>
+      <small>Your public page: ssewasswa.com/donor/kings-foundation</small>
+      
+      <label>Mission Statement</label>
+      <textarea name="description" rows="3" placeholder="We fund education for rural girls..."></textarea>
+    </div>
+
+    <div class="card">
+      <h3>3. Payment Details for Disbursements</h3>
+      <label>Mobile Money Provider *</label>
+      <select name="gateway" required>
+        <option value="mtn">MTN Mobile Money</option>
+        <option value="airtel">Airtel Money</option>
+      </select>
+      
+      <label>Mobile Money Number *</label>
+      <input type="tel" name="momo_number" placeholder="256789736737" required>
+      
+      <label>Name on Mobile Money *</label>
+      <input type="text" name="momo_name" required>
+    </div>
+
+    <div class="card">
+      <h3>4. Admin Account</h3>
+      <label>Your Full Name *</label>
+      <input type="text" name="admin_name" required>
+      
+      <label>Work Email *</label>
+      <input type="email" name="email" value="waiswadaniel24@gmail.com" required>
+      
+      <label>Phone Number *</label>
+      <input type="tel" name="phone" placeholder="+256..." required>
+      
+      <label>Password *</label>
+      <input type="password" name="password" minlength="8" required>
+      <small>Minimum 8 characters</small>
+    </div>
+
+    <label class="checkbox">
+      <input type="checkbox" required>
+      <span>I agree to 5% platform fee on disbursed grants. No fee on pledges or applications.</span>
+    </label>
+    
+    <button type="submit" class="btn">Create Account - Start Free Trial</button>
+  </form>
+</div>
 
 <script>
-// Register Service Worker
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js')
-    .then(reg => console.log('Service Worker registered'))
-    .catch(err => console.error('SW registration failed:', err));
-}
-
-// Login Form
-loginForm.onsubmit = async e => {
+document.getElementById('donorForm').onsubmit = async (e) => {
   e.preventDefault();
-  const data = Object.fromEntries(new FormData(e.target));
-  const res = await fetch('/admin/login', {
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd);
+  data.type = 'donor';
+  
+  const res = await fetch('/api/register', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(data)
   });
-  alert(await res.text());
-};
-
-// Change Password Form
-pwForm.onsubmit = async e => {
-  e.preventDefault();
-  const data = Object.fromEntries(new FormData(e.target));
-  const res = await fetch('/admin/change-password', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(data)
-  });
-  alert(await res.text());
+  const json = await res.json();
+  if(json.success) location.href = '/dashboard';
+  else alert(json.error || 'Registration failed');
 };
 </script>
-</body>
-</html>
+</body></html>

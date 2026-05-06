@@ -1,41 +1,32 @@
 {
-  "name": "sse-wasswa-erp",
-  "version": "7.0.0",
-  "description": "Multi-tenant School Management SaaS - Phase 2 with MoMo, SMS, Parent Portal",
-  "main": "server.js",
+  "name": "ssewasswa-network",
+  "version": "6.0.0",
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "start": "node server.js"
   },
   "dependencies": {
-    "axios": "^1.7.2",
+    "axios": "^1.6.0",
     "bcryptjs": "^2.4.3",
-    "body-parser": "^1.20.2",
+    "cheerio": "^1.0.0-rc.12",
+    "cloudinary": "^1.41.0",
+    "compression": "^1.7.4",
     "connect-pg-simple": "^9.0.1",
-    "csv-parser": "^3.0.0",
+    "connect-redis": "^7.1",
+    "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "web-push": "^3.6.7",
-    "uuid": "^9.0.1",
     "express": "^4.18.2",
-    "express-session": "^1.17.3",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "ioredis": "^5.3.2",
+    "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.7",
+    "openai": "^4.20.1",
+    "pdfkit": "^0.14.0",
     "pg": "^8.11.3",
-    "rss-parser": "^3.13.0",
-    "socket.io": "^4.7.5"
-  },
-  "keywords": [
-    "school",
-    "erp",
-    "saas",
-    "uganda",
-    "education",
-    "multi-tenant",
-    "momo",
-    "sms"
-  ],
-  "author": "SSEWASSWA Foundation",
-  "license": "MIT"
+    "uuid": "^9.0.1",
+    "@sentry/node": "^7.91.0"
+  }
 }
