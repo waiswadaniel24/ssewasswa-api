@@ -1205,6 +1205,27 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
     c.release();
   }
 }
+// === TEMP ADMIN RESET - DELETE AFTER USE ===
+const bcrypt = require('bcryptjs');
+app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
+  try {
+    const hash = await bcrypt.hash('admin123', 10);
+    await pool.query(`
+      INSERT INTO tenants (id, name, type, status, subscription_plan)
+      VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    await pool.query(`
+      INSERT INTO users(name,email,password_hash,role,tenant_id,portals,status)
+      VALUES('Daniel Waiswa','waiswadaniel24@gmail.com',$1,'super_admin',1,'{admin,academics,finance,marketplace,donors,developers}','active')
+      ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', status='active'
+    `, [hash]);
+    res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
+  } catch (e) {
+    res.status(500).send('Reset failed: ' + e.message);
+  }
+});
+// === END TEMP ROUTE ===
 // === START SERVER ===
 initDB().then(() => {
   app.listen(PORT, () => {
