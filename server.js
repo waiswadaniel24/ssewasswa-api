@@ -161,10 +161,11 @@ const requireJWT = (req, res, next) => {
     if (err) return res.status(403).json({ error: 'Forbidden' });
     req.user = user;
     next();
+  }); // ✅ ADDED ); to close jwt.verify()
 };
 
 const requireRole = (...r) => (req, res, next) => {
-  if (!req.session?.user || !r.includes(req.session.user.role)) return res.status(403).send('403');
+  if (!req.session?.user ||!r.includes(req.session.user.role)) return res.status(403).send('403');
   next();
 };
 
@@ -174,10 +175,9 @@ const requirePortal = (p) => (req, res, next) => {
 };
 
 const requireDeveloper = (req, res, next) => {
-  if (req.session?.user?.email !== DEVELOPER_EMAIL) return res.status(403).send('403');
+  if (req.session?.user?.email!== DEVELOPER_EMAIL) return res.status(403).send('403');
   next();
 };
-
 function encrypt(text) {
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
