@@ -1209,16 +1209,21 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
 app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
     const hash = await bcrypt.hash('admin123', 10);
+    
+    // 1. Ensure tenant exists
     await pool.query(`
       INSERT INTO tenants (id, name, type, status, subscription_plan, subdomain)
       VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise', 'hq')
       ON CONFLICT (id) DO UPDATE SET status='active'
     `);
+    
+    // 2. Insert user - removed 'name' column
     await pool.query(`
-      INSERT INTO users(name,email,password_hash,role,tenant_id,portals,status)
-      VALUES('Daniel Waiswa','waiswadaniel24@gmail.com',$1,'super_admin',1,'{admin,academics,finance,marketplace,donors,developers}','active')
+      INSERT INTO users(email,password_hash,role,tenant_id,portals,status)
+      VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1,'{admin,academics,finance,marketplace,donors,developers}','active')
       ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', status='active'
     `, );
+    
     res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
   } catch (e) {
     res.status(500).send('Reset failed: ' + e.message);
