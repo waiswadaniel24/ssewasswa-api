@@ -1,1 +1,106 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1e40af"><meta name="description" content="SSEWASSWA Network - Schools, Organisations, Marketplace, Donors. Works offline. USSD *270# supported."><link rel="manifest" href="/manifest.json"><link rel="icon" type="image/png" href="/icon-192.png"><title>SSEWASSWA Network</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b;line-height:1.6;font-size:16px}.container{max-width:1200px;margin:0 auto;padding:20px}.hero{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:60px 20px;text-align:center;border-radius:20px;margin-bottom:30px}.hero h1{font-size:clamp(32px,5vw,48px);margin-bottom:16px}.hero p{font-size:clamp(16px,2.5vw,20px);opacity:0.95}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:14px 28px;cursor:pointer;text-decoration:none;display:inline-block;margin:6px;font-weight:600;min-height:48px;font-size:16px}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:30px}.stat-card{background:white;padding:24px;border-radius:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.stat-num{font-size:36px;font-weight:bold;color:#1e40af;margin-bottom:8px}.trust-badge{display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#166534;padding:8px 14px;border-radius:20px;font-size:13px;margin:4px;font-weight:600}.currency{position:fixed;top:20px;right:20px;background:white;padding:12px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:100}.currency select{border:2px solid #e2e8f0;border-radius:8px;padding:8px;font-size:16px;min-height:44px}.install-prompt{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1e40af;color:white;padding:16px 24px;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.2);display:none;z-index:1000}.install-prompt.show{display:block}footer{background:white;border-top:1px solid #e2e8f0;margin-top:60px;padding:40px 20px;text-align:center}footer a{color:#1e40af;text-decoration:none;margin:0 10px}</style></head><body><div class="currency"><select id="currency-select" onchange="localStorage.setItem('currency',this.value);location.reload()"><option value="UGX">UGX 🇺🇬</option><option value="USD">USD 🇺🇸</option><option value="EUR">EUR 🇪🇺</option><option value="KES">KES 🇰🇪</option><option value="TZS">TZS 🇹🇿</option></select></div><div class="container"><header class="hero"><h1>SSEWASSWA Network</h1><p>Schools • Organisations • Marketplace • Donors • Education</p><p style="font-size:14px;margin-top:15px;opacity:0.9">✅ Works Offline • 📱 USSD *270# • 🔒 Bank-Level Security</p><div style="margin-top:30px"><a href="/marketplace" class="btn btn-gold">🛒 Shop Now</a><a href="/donors/public" class="btn btn-green">💝 Find Funding</a><a href="/schools" class="btn">🏫 Browse Schools</a><a href="/login" class="btn btn-red">🔐 Login</a></div></header><main><section class="stats"><div class="stat-card"><div class="stat-num" id="stat-schools">50+</div><div>Active Schools</div></div><div class="stat-card"><div class="stat-num" id="stat-students">10,000+</div><div>Students</div></div><div class="stat-card"><div class="stat-num" id="stat-donations">UGX 50M+</div><div>Donated</div></div><div class="stat-card"><div class="stat-num" id="stat-products">500+</div><div>Products</div></div></section><section class="card"><h2>Public Services - No Account Needed</h2><div class="grid"><a href="/marketplace" class="card" style="text-decoration:none;color:#1e293b"><h3>🛒 Marketplace</h3><p>Buy uniforms, books, food from schools & businesses.</p><span class="trust-badge">🔒 Secure Payment</span></a><a href="/blog" class="card" style="text-decoration:none;color:#1e293b"><h3>📰 News & Blog</h3><p>Latest updates, success stories, events.</p><span class="trust-badge">📱 Share on WhatsApp</span></a><a href="/schools" class="card" style="text-decoration:none;color:#1e293b"><h3>🏫 Find Schools</h3><p>Browse profiles, fees, results, enroll online.</p><span class="trust-badge">✅ Verified Schools</span></a><a href="/donors/public" class="card" style="text-decoration:none;color:#1e293b"><h3>💰 Funding Opportunities</h3><p>View open grants. No login needed.</p><span class="trust-badge">🎯 Transparent Use</span></a></div></section><section class="card"><h2>Create Your Account - Free 14-Day Trial</h2><div class="grid"><a href="/register?type=school" class="card" style="text-decoration:none;color:#1e293b"><h3>🏫 School</h3><p><b>Manage:</b> Fees, marks, students</p><p><b>Earn:</b> 0% commission first month</p><span class="btn">Start Free Trial</span></a><a href="/register?type=organisation" class="card" style="text-decoration:none;color:#1e293b"><h3>🤝 Organisation/NGO</h3><p><b>Manage:</b> Projects, members, donations</p><p><b>Earn:</b> Accept donations globally</p><span class="btn">Start Free Trial</span></a><a href="/register?type=business" class="card" style="text-decoration:none;color:#1e293b"><h3>💼 Business/Seller</h3><p><b>Sell:</b> Products to schools & parents</p><p><b>Earn:</b> Keep 90%, we take 10%</p><span class="btn btn-green">Start Selling</span></a><a href="/register?type=donor" class="card" style="text-decoration:none;color:#1e293b"><h3>💝 Donor/Funder</h3><p><b>Fund:</b> Schools, projects, students</p><p><b>Track:</b> See exact impact</p><span class="btn btn-gold">Join Donors</span></a></div></section><section class="card" style="background:linear-gradient(135deg,#dc2626,#ef4444);color:white;text-align:center"><h2>No Smartphone? Use USSD</h2><p style="font-size:24px;margin:20px 0;font-weight:bold">Dial *270*StudentID#</p><p>Check fees, results, pay from any phone. No internet needed.</p></section></main></div><footer><div style="margin-bottom:20px"><span class="trust-badge">🔒 SSL Secured</span><span class="trust-badge">🛡️ GDPR Compliant</span><span class="trust-badge">✅ Verified Platform</span><span class="trust-badge">♿ ADA Accessible</span><span class="trust-badge">📱 PWA Ready</span></div><p><b>SSEWASSWA Network</b> - Empowering Education in East Africa</p><div style="margin:20px 0"><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/help">Help</a><a href="/contact">Contact</a></div><p style="font-size:13px;color:#64748b">&copy; 2025 SSEWASSWA Network. WhatsApp: +256 789 736737</p></footer><div id="install-prompt" class="install-prompt"><p style="margin-bottom:12px"><b>Install SSEWASSWA App</b><br>Works offline, faster</p><button onclick="installPWA()" class="btn btn-green" style="margin:4px">Install</button><button onclick="dismissInstall()" class="btn" style="background:#64748b;margin:4px">Later</button></div><script>let deferredPrompt;window.addEventListener('beforeinstallprompt',(e)=>{e.preventDefault();deferredPrompt=e;document.getElementById('install-prompt').classList.add('show');});function installPWA(){if(deferredPrompt){deferredPrompt.prompt();deferredPrompt.userChoice.then(choice=>{deferredPrompt=null;document.getElementById('install-prompt').classList.remove('show');});}}function dismissInstall(){document.getElementById('install-prompt').classList.remove('show');localStorage.setItem('installDismissed',Date.now());}if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js');}document.getElementById('currency-select').value=localStorage.getItem('currency')||'UGX';fetch('/api/stats').then(r=>r.json()).then(d=>{document.getElementById('stat-schools').textContent=d.schools+'+';document.getElementById('stat-students').textContent=d.students.toLocaleString()+'+';document.getElementById('stat-donations').textContent='UGX '+(d.donations/1000000).toFixed(0)+'M+';document.getElementById('stat-products').textContent=d.products+'+';}).catch(()=>{});</script></body></html>
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Join as Donor - SSEWASSWA Network</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui;background:#f0f9ff;color:#1e293b;line-height:1.6;padding:20px}
+.container{max-width:600px;margin:0 auto;background:white;border-radius:16px;padding:30px;box-shadow:0 4px 12px rgba(0,0,0,0.1)}
+h1{font-size:28px;margin-bottom:8px;color:#1e40af}
+.subtitle{color:#64748b;margin-bottom:30px}
+.card{border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin-bottom:20px}
+.card h3{font-size:18px;margin-bottom:15px;color:#1e40af}
+label{display:block;font-weight:600;margin:12px 0 6px;font-size:14px}
+input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:8px;font-size:16px;min-height:48px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#1e40af}
+.plan{display:block;padding:15px;border:2px solid #1e40af;border-radius:8px;cursor:pointer;margin-bottom:10px}
+.plan input{width:auto;margin-right:10px}
+.btn{width:100%;padding:16px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;margin-top:20px}
+.checkbox{display:flex;align-items:start;gap:10px;margin:20px 0}
+.checkbox input{width:auto;margin-top:4px}
+small{color:#64748b;font-size:13px}
+</style></head><body>
+<div class="container">
+  <h1>Create Donor Account</h1>
+  <p class="subtitle">14-day free trial. 5% platform fee only on successful grant disbursements.</p>
+  
+  <form id="donorForm">
+    <div class="card">
+      <h3>1. Choose Plan</h3>
+      <label class="plan">
+        <input type="radio" name="plan" value="premium" checked>
+        <strong>Donor Premium - UGX 50,000/month</strong><br>
+        <small>Post unlimited grants • Review applications • Track impact with receipts</small>
+      </label>
+    </div>
+
+    <div class="card">
+      <h3>2. Organization Details</h3>
+      <label>Organization Name *</label>
+      <input type="text" name="org_name" required>
+      
+      <label>Website/Subdomain *</label>
+      <input type="text" name="subdomain" placeholder="kings-foundation" required>
+      <small>Your public page: ssewasswa.com/donor/kings-foundation</small>
+      
+      <label>Mission Statement</label>
+      <textarea name="description" rows="3" placeholder="We fund education for rural girls..."></textarea>
+    </div>
+
+    <div class="card">
+      <h3>3. Payment Details for Disbursements</h3>
+      <label>Mobile Money Provider *</label>
+      <select name="gateway" required>
+        <option value="mtn">MTN Mobile Money</option>
+        <option value="airtel">Airtel Money</option>
+      </select>
+      
+      <label>Mobile Money Number *</label>
+      <input type="tel" name="momo_number" placeholder="256789736737" required>
+      
+      <label>Name on Mobile Money *</label>
+      <input type="text" name="momo_name" required>
+    </div>
+
+    <div class="card">
+      <h3>4. Admin Account</h3>
+      <label>Your Full Name *</label>
+      <input type="text" name="admin_name" required>
+      
+      <label>Work Email *</label>
+      <input type="email" name="email" value="waiswadaniel24@gmail.com" required>
+      
+      <label>Phone Number *</label>
+      <input type="tel" name="phone" placeholder="+256..." required>
+      
+      <label>Password *</label>
+      <input type="password" name="password" minlength="8" required>
+      <small>Minimum 8 characters</small>
+    </div>
+
+    <label class="checkbox">
+      <input type="checkbox" required>
+      <span>I agree to 5% platform fee on disbursed grants. No fee on pledges or applications.</span>
+    </label>
+    
+    <button type="submit" class="btn">Create Account - Start Free Trial</button>
+  </form>
+</div>
+
+<script>
+document.getElementById('donorForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const data = Object.fromEntries(fd);
+  data.type = 'donor';
+  
+  const res = await fetch('/api/register', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  });
+  const json = await res.json();
+  if(json.success) location.href = '/dashboard';
+  else alert(json.error || 'Registration failed');
+};
+</script>
+</body></html>
