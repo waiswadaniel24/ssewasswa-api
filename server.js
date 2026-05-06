@@ -2,26 +2,92 @@
  * SSEWASSWA Network v6.0 - COMPLETE
  * DO NOT DELETE ANYTHING
  */
-const express=require('express'),path=require('path'),{Pool}=require('pg'),bcrypt=require('bcryptjs'),session=require('express-session'),pgSession=require('connect-pg-simple')(session),cors=require('cors'),{v4:uuidv4}=require('uuid'),multer=require('multer'),axios=require('axios'),cron=require('node-cron'),cloudinary=require('cloudinary').v2,crypto=require('crypto'),nodemailer=require('nodemailer'),helmet=require('helmet'),rateLimit=require('express-rate-limit'),{OpenAI}=require('openai'),PDFDocument=require('pdfkit'),cheerio=require('cheerio');
-const app=express(),pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false}}),PORT=process.env.PORT||3000,upload=multer({storage:multer.memoryStorage()});
-const DEVELOPER_EMAIL='ssewasswa@gmail.com',DEVELOPER_PHONE='0789736737',DEVELOPER_RATE=0.05,PLATFORM_COMMISSION=0.10,ENCRYPTION_KEY=crypto.scryptSync(process.env.ENCRYPTION_SECRET||'default32charsecretkey1234567890ab','salt',32);
-const openai=new OpenAI({apiKey:process.env.OPENAI_API_KEY||''});
-cloudinary.config({cloud_name:process.env.CLOUDINARY_CLOUD,api_key:process.env.CLOUDINARY_KEY,api_secret:process.env.CLOUDINARY_SECRET});
-const transporter=nodemailer.createTransport({service:'gmail',auth:{user:process.env.GMAIL_USER,pass:process.env.GMAIL_PASS}});
-app.use(helmet({contentSecurityPolicy:false}));app.use(rateLimit({windowMs:15*60*1000,max:100}));
-app.use(session({store:new pgSession({pool,tableName:'session',createTableIfMissing:true}),secret:process.env.SESSION_SECRET||require('crypto').randomBytes(32).toString('hex'),resave:false,saveUninitialized:false,cookie:{secure:process.env.NODE_ENV==='production',maxAge:30*24*60*60*1000}}));
-app.use(cors({origin:true,credentials:true}));app.use(express.json());app.use(express.urlencoded({extended:true}));app.use(express.static('public'));
-// Add to server.js - runs daily at 2am
+import express from 'express';
+import path from 'path';
+import pg from 'pg';
+import bcrypt from 'bcryptjs';
+import session from 'express-session';
+import connectPgSimple from 'connect-pg-simple';
+import cors from 'cors';
+import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
+import axios from 'axios';
 import cron from 'node-cron';
-import {exec} from 'child_process';
+import { v2 as cloudinary } from 'cloudinary';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { OpenAI } from 'openai';
+import PDFDocument from 'pdfkit';
+import cheerio from 'cheerio';
+import compression from 'compression';
+import { exec } from 'child_process';
+import * as Sentry from '@sentry/node';
+import { Redis } from 'ioredis';
+import RedisStore from 'connect-redis';
+import dotenv from 'dotenv';
 
+dotenv.config();
+const { Pool } = pg;
+const PgSession = connectPgSimple(session);
+const app = express();
+const pool = new Pool({connectionString: process.env.DATABASE_URL, ssl: {rejectUnauthorized: false}});
+const PORT = process.env.PORT || 3000;
+const upload = multer({storage: multer.memoryStorage()});
+
+const DEVELOPER_EMAIL='ssewasswa@gmail.com',DEVELOPER_PHONE='0789736737',DEVELOPER_RATE=0.05,PLATFORM_COMMISSION=0.10,ENCRYPTION_KEY=crypto.scryptSync(process.env.ENCRYPTION_SECRET||'default32charsecretkey1234567890ab','salt',32);
+const openai = new OpenAI({apiKey: process.env.OPENAI_API_KEY || ''});
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD,
+  api_key: process.env.CLOUDINARY_KEY,
+  api_secret: process.env.CLOUDINARY_SECRET
+});
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS}
+});
+
+// Sentry - must be first
+Sentry.init({dsn: process.env.SENTRY_DSN});
+app.use(Sentry.Handlers.requestHandler());
+
+// Security + performance
+app.use(helmet({contentSecurityPolicy: false}));
+app.use(compression());
+app.use(cors({origin: ['https://ssewasswa.com','http://localhost:3000'], credentials: true}));
+
+// Rate limiting
+const limiter = rateLimit({windowMs: 15*60*1000, max: 100});
+app.use('/api/', limiter);
+app.use('/webhook/', limiter);
+
+// Redis session - replace your old session code
+const redis = new Redis(process.env.REDIS_URL);
+app.use(session({
+  store: new RedisStore({client: redis}),
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
+  resave: false,
+  saveUninitialized: false,
+  cookie: {secure: process.env.NODE_ENV==='production', maxAge: 30*24*60*60*1000}
+}));
+
+app.use(express.json());
+app.use(express.urlencoded({extended: true}));
+app.use(express.static('public'));
+
+// Daily backup cron - only once
 cron.schedule('0 2 * * *', () => {
   const file = `backup-${Date.now()}.sql`;
   exec(`pg_dump ${process.env.DATABASE_URL} > /tmp/${file}`, (err) => {
     if(!err) console.log('Backup done:', file);
   });
 });
-// Top of server.js:
+
+// Sentry error handler - must be after all routes
+app.use(Sentry.Handlers.errorHandler());
 import * as Sentry from '@sentry/node';
 Sentry.init({dsn: process.env.SENTRY_DSN}); // Free: sentry.io signup
 app.use(Sentry.Handlers.requestHandler());
