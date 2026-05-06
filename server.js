@@ -1393,47 +1393,59 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
 // === TEMP ADMIN RESET - DELETE AFTER USE ===
 app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
+    console.log('--- RESET: Starting ---');
     const hash = await bcrypt.hash('admin123', 10);
     
     // 1. TENANT SETUP
-    // Step A: Insert only the absolute required fields (ID, Name, Subdomain)
-    await pool.query(`
-      INSERT INTO tenants (id, name, subdomain)
-      VALUES (1, 'SSEWASSWA HQ', 'hq')
-      ON CONFLICT (id) DO NOTHING
-    `);
+    console.log('RESET: Checking Tenant...');
+    const existingTenant = await pool.query('SELECT * FROM tenants WHERE id=1');
     
-    // Step B: Update all other settings (safe to run even if row exists)
-    await pool.query(`
-      UPDATE tenants 
-      SET type = 'school',
-          status = 'active',
-          plan = 'enterprise',
-          subscription_plan = 'enterprise',
-          verified = true
-      WHERE id = 1
-    `);
+    if (!existingTenant.rows[0]) {
+      console.log('RESET: Creating Tenant...');
+      // Only insert the bare minimum columns
+      await pool.query(
+        'INSERT INTO tenants (id, name, subdomain) VALUES ($1, $2, $3)', 
+        [1, 'SSEWASSWA HQ', 'hq']
+      );
+    }
     
+    console.log('RESET: Updating Tenant details...');
+    // Update safely using parameters
+    await pool.query(
+      `UPDATE tenants 
+       SET type = $1, status = $2, subscription_plan = $3, verified = $4 
+       WHERE id = 1`,
+      ['school', 'active', 'enterprise', true]
+    );
+
     // 2. USER SETUP
-    // Step A: Insert the basic user
-    await pool.query(`
-      INSERT INTO users (email, password_hash, role, tenant_id)
-      VALUES('waiswadaniel24@gmail.com', $1, 'super_admin', 1)
-      ON CONFLICT (email) DO NOTHING
-    `, [hash]);
+    console.log('RESET: Checking User...');
+    const existingUser = await pool.query('SELECT * FROM users WHERE email=$1', ['waiswadaniel24@gmail.com']);
     
-    // Step B: Update user to ensure they are approved
-    await pool.query(`
-      UPDATE users 
-      SET approved = true, 
-          password_hash = $1 
-      WHERE email = 'waiswadaniel24@gmail.com'
-    `, [hash]);
+    if (!existingUser.rows[0]) {
+      console.log('RESET: Creating User...');
+      await pool.query(
+        'INSERT INTO users (email, password_hash, role, tenant_id, approved) VALUES ($1, $2, $3, $4, $5)',
+        ['waiswadaniel24@gmail.com', hash, 'super_admin', 1, true]
+      );
+    } else {
+      console.log('RESET: Updating User...');
+      await pool.query(
+        'UPDATE users SET password_hash=$1, role=$2, approved=$3 WHERE email=$4',
+        [hash, 'super_admin', true, 'waiswadaniel24@gmail.com']
+      );
+    }
     
+    console.log('--- RESET: Success ---');
     res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
   } catch (e) {
-    console.error("Reset Error:", e);
-    res.status(500).send('Reset failed: ' + e.message);
+    console.error('--- RESET: FAILED ---');
+    console.error('Error Object:', e); // Detailed logging for Render Dashboard
+    res.status(500).json({ 
+      error: e.message, 
+      detail: e.detail || 'No details available',
+      stack: e.stack 
+    });
   }
 });
 // === START SERVER ===
