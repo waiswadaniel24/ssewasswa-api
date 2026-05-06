@@ -1218,14 +1218,14 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
     await pool.query(`
       INSERT INTO tenants (id, name, type, status, subscription_plan, subdomain)
       VALUES (1, 'SSEWASSWA HQ', 'school', 'active', 'enterprise', 'hq')
-      ON CONFLICT (id) DO UPDATE SET status='active'
+      ON CONFLICT (id) DO NOTHING
     `);
     
-    // 2. Insert user - only core columns
+    // 2. Insert user - bare minimum columns
     await pool.query(`
-      INSERT INTO users(email,password_hash,role,tenant_id,status)
-      VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1,'active')
-      ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', status='active'
+      INSERT INTO users(email,password_hash,role,tenant_id)
+      VALUES('waiswadaniel24@gmail.com',$1,'super_admin',1)
+      ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin'
     `, );
     
     res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
