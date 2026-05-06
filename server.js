@@ -79,7 +79,9 @@ if (process.env.SENTRY_DSN) {
 }
 
 // --- MIDDLEWARE ---
-app.use(Sentry.Handlers.requestHandler());
+if (Sentry.Handlers) {
+  app.use(Sentry.Handlers.requestHandler());
+}
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(cors({ origin: ['https://ssewasswa.com', 'http://localhost:3000'], credentials: true }));
