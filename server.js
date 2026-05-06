@@ -1169,7 +1169,7 @@ async function initDB() {
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS category TEXT`);
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`);
-   await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS amount INT DEFAULT 0`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS amount INT DEFAULT 0`);
     
     // --- FIX ATTENDANCE UNIQUE CONSTRAINT ---
     await c.query(`
@@ -1181,8 +1181,6 @@ async function initDB() {
       END $$;
     `);
 
-    await c.query('COMMIT');
-    console.log('DB v6.0 Ready - All Tables Created');
     // --- INDEXES FOR PERFORMANCE ---
     await c.query(`CREATE INDEX IF NOT EXISTS idx_students_tenant_class ON students(tenant_id, class)`);
     await c.query(`CREATE INDEX IF NOT EXISTS idx_grades_student_term ON grades(student_id, term)`);
