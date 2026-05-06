@@ -21,7 +21,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { OpenAI } from 'openai';
 import PDFDocument from 'pdfkit';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 import compression from 'compression';
 import { exec } from 'child_process';
 import * as Sentry from '@sentry/node';
