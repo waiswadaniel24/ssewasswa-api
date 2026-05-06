@@ -818,6 +818,8 @@ async function initDB() {
       await client.query("CREATE TABLE IF NOT EXISTS class_payments (id SERIAL PRIMARY KEY, class_id INTEGER REFERENCES live_classes(id) ON DELETE CASCADE, student_email TEXT NOT NULL, amount NUMERIC NOT NULL, phone TEXT, reference TEXT UNIQUE, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())");
       await client.query("CREATE TABLE IF NOT EXISTS withdrawals (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, amount NUMERIC NOT NULL, phone TEXT, fee NUMERIC DEFAULT 0, net_amount NUMERIC DEFAULT 0, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())");
       await client.query("INSERT INTO platform_wallet (id,balance) VALUES (1,0) ON CONFLICT DO NOTHING");
+      await client.query("UPDATE tenants SET name='SSEWASSWA FOUNDATION UGANDA v1_OLD' WHERE subdomain='main' AND id!=1");
+      await client.query("UPDATE tenants SET subdomain='main', name='SSEWASSWA FOUNDATION UGANDA' WHERE id=1");
       var tenant = await client.query("INSERT INTO tenants (name,subdomain,plan,momo_number,signup_code) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (subdomain) DO NOTHING RETURNING id", ["SSEWASSWA FOUNDATION UGANDA","main","enterprise","0789736737","SSEWASSWA2024"]);
       if (tenant.rows.length > 0) {
         var tid = tenant.rows[0].id;
