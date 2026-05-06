@@ -1,6 +1,6 @@
-/**
- * SSEWASSWA Network v6.0 - STABLE
- * DO NOT DELETE ANYTHING
+js/**
+ * SSEWASSWA Network v9.0 - SCALABLE
+ * Features: Redis Sessions, Background Workers, API v2, Webhooks
  */
 
 import express from 'express';
@@ -10,6 +10,9 @@ import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
+import { Redis } from 'ioredis';
+import RedisStore from 'connect-redis';
+import { Queue } from 'bullmq';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
@@ -24,10 +27,7 @@ import { OpenAI } from 'openai';
 import PDFDocument from 'pdfkit';
 import * as cheerio from 'cheerio';
 import compression from 'compression';
-import { exec } from 'child_process';
 import * as Sentry from '@sentry/node';
-// import { Redis } from 'ioredis'; // DISABLED - uncomment for v9.0
-// import RedisStore from 'connect-redis'; // DISABLED - uncomment for v9.0
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 
@@ -36,11 +36,15 @@ dotenv.config();
 const { Pool } = pg;
 const PgSession = connectPgSimple(session);
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+  ssl: process.env.DATABASE_URL.includes('localhost')? false : { rejectUnauthorized: false }
 });
+
+const redis = process.env.REDIS_URL? new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null }) : null;
 
 const PORT = process.env.PORT || 3000;
 const upload = multer({ storage: multer.memoryStorage() });
@@ -63,7 +67,10 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
 });
-
+// v9.0: Background Queues
+const emailQueue = redis? new Queue('email', { connection: redis }) : null;
+const smsQueue = redis? new Queue('sms', { connection: redis }) : null;
+const webhookQueue = redis? new Queue('webhook', { connection: redis }) : null;
 // --- SENTRY SETUP ---
 if (process.env.SENTRY_DSN) {
   Sentry.init({ dsn: process.env.SENTRY_DSN });
@@ -71,15 +78,10 @@ if (process.env.SENTRY_DSN) {
 }
 
 // --- MIDDLEWARE ---
-// Sentry Request Handler must be first
 app.use(Sentry.Handlers.requestHandler());
-
-// Security & Performance
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(cors({ origin: ['https://ssewasswa.com', 'http://localhost:3000'], credentials: true }));
-
-// Body Parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
@@ -88,6 +90,15 @@ app.use(express.static('public'));
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
 app.use('/api/', limiter);
 app.use('/webhook/', limiter);
+
+// v9.0: Redis Session Store
+app.use(session({
+  store: redis? new RedisStore({ client: redis }) : new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
+  secret: process.env.SESSION_SECRET || 'default_session_secret_change_me',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000, secure: process.env.NODE_ENV === 'production' }
+}));
 
 // --- CONSTANTS ---
 const CURRENCIES = {
@@ -179,7 +190,24 @@ function encrypt(text) {
   enc += cipher.final('hex');
   return iv.toString('hex') + ':' + enc;
 }
-
+const requireApiKey = ah(async (req, res, next) => {
+  const key = req.headers['x-api-key'];
+  if (!key) return res.status(401).json({ error: 'API key required' });
+  const hash = crypto.createHash('sha256').update(key).digest('hex');
+  const apiKey = (await pool.query('SELECT * FROM api_keys WHERE key_hash=$1', [hash])).rows[0];
+  if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
+  await pool.query('UPDATE api_keys SET last_used=NOW() WHERE id=$1', [apiKey.id]);
+  req.tenant_id = apiKey.tenant_id;
+  req.scopes = apiKey.scopes;
+  next();
+});
+function encrypt(text) {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+  let enc = cipher.update(text, 'utf8', 'hex');
+  enc += cipher.final('hex');
+  return iv.toString('hex') + ':' + enc;
+}
 function decrypt(text) {
   const p = text.split(':');
   const iv = Buffer.from(p[0], 'hex');
@@ -192,7 +220,23 @@ function decrypt(text) {
 async function logAction(userId, tenantId, action, details, ip) {
   await pool.query('INSERT INTO audit_logs(user_id,tenant_id,action,details,ip_address)VALUES($1,$2,$3,$4,$5)', [userId, tenantId, action, JSON.stringify(details), ip]);
 }
+// v9.0: Queue-based SMS
+async function sendSMS(phone, message) {
+  if (smsQueue) {
+    await smsQueue.add('send', { phone, message });
+  } else {
+    console.log('SMS:', phone, message);
+  }
+}
 
+// v9.0: Queue-based Email
+async function sendEmail(to, subject, html) {
+  if (emailQueue) {
+    await emailQueue.add('send', { to, subject, html });
+  } else {
+    await transporter.sendMail({ to, subject, html });
+  }
+}
 async function sendSMS(phone, message) {
   if (!process.env.AT_API_KEY) return console.log('SMS:', phone, message);
   try {
@@ -234,6 +278,31 @@ function renderPage(title, content, user) {
   }
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><link rel="icon" href="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/favicon.png"><meta property="og:title" content="Ssewasswa - School Management"><meta property="og:image" content="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/og-image.jpg"><meta name="description" content="Run your school on your phone. Marks, fees, SMS to parents."><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b)}input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0;font-size:16px;min-height:44px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:20px;border-radius:16px;text-align:center}.stat-num{font-size:32px;font-weight:bold;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.badge{padding:6px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}</style></head><body>${nav}<div class="container">${content}</div></body></html>`;
 }
+// === TEMP DEBUG + RESET ROUTES - DELETE AFTER USE ===
+app.get('/dev/show-schema', ah(async (req, res) => {
+  const u = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position`);
+  const t = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='tenants' ORDER BY ordinal_position`);
+  res.json({ users: u.rows, tenants: t.rows });
+}));
+
+app.get('/dev/reset-admin-now-delete-me', ah(async (req, res) => {
+  const hash = await bcrypt.hash('admin123', 10);
+
+  await pool.query(`
+    INSERT INTO tenants (id, name, subdomain, type, status, plan, subscription_plan)
+    VALUES (1, 'SSEWASSWA HQ', 'hq', 'school', 'active', 'enterprise')
+    ON CONFLICT (id) DO UPDATE SET status='active', plan='enterprise', subscription_plan='enterprise'
+  `);
+
+  await pool.query(`
+    INSERT INTO users(email, password_hash, role, tenant_id, approved)
+    VALUES('waiswadaniel24@gmail.com', $1, 'super_admin', 1, true)
+    ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', approved=true
+  `, );
+
+  res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
+}));
+// === END TEMP ROUTES ===
 
 // === PUBLIC ROUTES ===
 app.get('/', ah(async (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); }));
@@ -242,7 +311,14 @@ app.get('/marketplace', ah(async (req, res) => {
   const products = (await pool.query('SELECT p.*,t.name as seller_name FROM products p JOIN tenants t ON p.tenant_id=t.id WHERE p.approved=true ORDER BY p.created_at DESC LIMIT 50')).rows;
   res.send(renderPage('Marketplace', `<div class="grid">${products.map(p => `<div class="card"><img src="${p.image_url || '/img/default.jpg'}" style="width:100%;height:200px;object-fit:cover;border-radius:12px"><h3>${esc(p.name)}</h3><p style="color:#64748b">by ${esc(p.seller_name)}</p><p style="font-size:24px;color:#16a34a;font-weight:bold">UGX ${p.price.toLocaleString()}</p><a href="/product/${p.id}" class="btn btn-green">Buy Now</a></div>`).join('')}</div>`, null, true));
 }));
-
+app.get('/api/stats', ah(async (req, res) => {
+  res.json({
+    schools: (await pool.query("SELECT COUNT(*) as c FROM tenants WHERE type='school'")).rows[0].c,
+    students: (await pool.query("SELECT COUNT(*) as c FROM students")).rows[0].c,
+    donations: (await pool.query("SELECT COALESCE(SUM(amount),0) as t FROM donations")).rows[0].t,
+    products: (await pool.query("SELECT COUNT(*) as c FROM products WHERE approved=true")).rows[0].c
+  });
+}));
 app.get('/product/:id', ah(async (req, res) => {
   const p = (await pool.query('SELECT p.*,t.name as seller_name FROM products p JOIN tenants t ON p.tenant_id=t.id WHERE p.id=$1', [req.params.id])).rows[0];
   if (!p) return res.status(404).send('Not found');
@@ -545,6 +621,42 @@ app.post('/api/sync', requireAuth, ah(async (req, res) => {
     for (const a of data) await pool.query('INSERT INTO attendance(tenant_id,student_id,date,status,marked_by)VALUES($1,$2,$3,$4,$5)ON CONFLICT DO NOTHING', [a.tenant_id, a.student_id, a.date, a.status, a.marked_by]);
   }
   res.json({ ok: true, synced: data.length });
+}));
+// === API v2 - MOBILE ===
+app.post('/api/v2/auth/login', ah(async (req, res) => {
+  const { email, password } = req.body;
+  const u = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
+  if (!u ||!await bcrypt.compare(password, u.password_hash)) return res.status(401).json({ error: 'Invalid' });
+  const token = jwt.sign({ id: u.id, role: u.role, tenant_id: u.tenant_id }, process.env.SESSION_SECRET, { expiresIn: '30d' });
+  res.json({ token, user: { id: u.id, name: u.name, role: u.role, portals: u.portals } });
+}));
+
+app.get('/api/v2/students', requireJWT, ah(async (req, res) => {
+  const students = (await pool.query('SELECT id,name,class,dob,parent_phone,photo_url FROM students WHERE tenant_id=$1', [req.user.tenant_id])).rows;
+  res.json({ students });
+}));
+
+app.post('/api/v2/marks', requireJWT, requirePortal('academics'), ah(async (req, res) => {
+  const { student_id, subject, score, term } = req.body;
+  const grade = score >= 80? 'A' : score >= 70? 'B' : score >= 60? 'C' : score >= 50? 'D' : 'F';
+  await pool.query('INSERT INTO grades(tenant_id,student_id,subject,score,grade,term,teacher_id)VALUES($1,$2,$3,$4,$5,$6,$7)', [req.user.tenant_id, student_id, subject, score, grade, term, req.user.id]);
+  res.json({ ok: true, grade });
+}));
+
+// === API v2 - EXTERNAL ===
+app.post('/api/v2/apikey/create', requireAuth, requireRole('school_admin', 'org_admin', 'super_admin'), ah(async (req, res) => {
+  const { name, scopes } = req.body;
+  const key = 'sk_' + crypto.randomBytes(32).toString('hex');
+  const hash = crypto.createHash('sha256').update(key).digest('hex');
+  await pool.query('INSERT INTO api_keys(tenant_id,key_hash,name,scopes)VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, hash, name, scopes]);
+  res.json({ ok: true, key, warning: 'Save this key. It will not be shown again.' });
+}));
+
+app.post('/api/v2/webhook', requireApiKey, ah(async (req, res) => {
+  const { event, payload } = req.body;
+  await pool.query('INSERT INTO webhook_logs(tenant_id,event,payload,status)VALUES($1,$2,$3,$4)', [req.tenant_id, event, JSON.stringify(payload), 200]);
+  if (webhookQueue) await webhookQueue.add('process', { tenant_id: req.tenant_id, event, payload });
+  res.json({ ok: true, received: true });
 }));
 
 // === FEEDBACK ===
@@ -1198,9 +1310,19 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
     await c.query(`CREATE INDEX IF NOT EXISTS idx_products_approved ON products(approved)`);
     await c.query(`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`);
     await c.query(`CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date)`);
+  // v9.0: Indexes
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_students_tenant_class ON students(tenant_id, class)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_grades_student_term ON grades(student_id, term)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_transactions_tenant_status ON transactions(tenant_id, status)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_session_expire ON session(expire)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_products_approved ON products(approved)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`);
 
     await c.query('COMMIT');
-    console.log('DB v6.0 Ready - All Tables Created');
+    console.log('DB v9.0 Ready - Redis + Workers + API v2');
   } catch (e) {
     await c.query('ROLLBACK');
     console.error('Database Init Error:', e);
@@ -1209,6 +1331,7 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
     c.release();
   }
 }
+
 // === TEMP ADMIN RESET - DELETE AFTER USE ===
 app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
   try {
