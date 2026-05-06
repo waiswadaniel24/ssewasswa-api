@@ -1133,7 +1133,7 @@ async function initDB() {
     await c.query(`CREATE TABLE IF NOT EXISTS ai_conversations (id SERIAL PRIMARY KEY, user_id INT, role TEXT, content TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
     await c.query(`CREATE TABLE IF NOT EXISTS ai_predictions (id SERIAL PRIMARY KEY, tenant_id INT, type TEXT, prediction JSONB, confidence NUMERIC, created_at TIMESTAMPTZ DEFAULT NOW())`);
 
-    // --- SCHEMA UPDATES (ALTER TABLES) ---
+   // --- SCHEMA UPDATES (ALTER TABLES) ---
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS primary_color TEXT DEFAULT '#1e40af'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT 'UG'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`);
@@ -1147,6 +1147,27 @@ async function initDB() {
     await c.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`);
     
     await c.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_number TEXT`);
+
+    // --- PATCH FUND_OPPORTUNITIES TABLE FOR DONORS PAGE ---
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS description TEXT`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS summary TEXT`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS category TEXT`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS amount INT DEFAULT 0`);
+    
+    // --- FIX ATTENDANCE UNIQUE CONSTRAINT ---
+    await c.query(`
+      DO $$ 
+      BEGIN
+        ALTER TABLE attendance ADD CONSTRAINT attendance_unique UNIQUE(student_id,date);
+      EXCEPTION
+        WHEN duplicate_table THEN NULL;
+      END $$;
+    `);
+
+    await c.query('COMMIT');
+    console.log('DB v6.0 Ready - All Tables Created');
     
     // FIXED: Postgres doesn't support IF NOT EXISTS for ADD CONSTRAINT
     // Use DO block to catch duplicate constraint error
