@@ -1133,7 +1133,7 @@ async function initDB() {
     await c.query(`CREATE TABLE IF NOT EXISTS ai_conversations (id SERIAL PRIMARY KEY, user_id INT, role TEXT, content TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
     await c.query(`CREATE TABLE IF NOT EXISTS ai_predictions (id SERIAL PRIMARY KEY, tenant_id INT, type TEXT, prediction JSONB, confidence NUMERIC, created_at TIMESTAMPTZ DEFAULT NOW())`);
 
- // --- SCHEMA UPDATES (ALTER TABLES) ---
+// --- SCHEMA UPDATES (ALTER TABLES) ---
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS primary_color TEXT DEFAULT '#1e40af'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT 'UG'`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`);
@@ -1147,6 +1147,17 @@ async function initDB() {
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS about_us TEXT`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS tagline TEXT`);
     await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS featured_until TIMESTAMPTZ`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url TEXT`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS banner_url TEXT`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS gallery_urls TEXT[]`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS show_fees BOOLEAN DEFAULT false`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS show_results BOOLEAN DEFAULT false`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS show_gallery BOOLEAN DEFAULT false`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS show_news BOOLEAN DEFAULT false`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS show_donate BOOLEAN DEFAULT false`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS contact_phone TEXT`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS contact_email TEXT`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address TEXT`);
 
     await c.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`);
     
@@ -1166,7 +1177,7 @@ async function initDB() {
       BEGIN
         ALTER TABLE attendance ADD CONSTRAINT attendance_unique UNIQUE(student_id,date);
       EXCEPTION
-        WHEN duplicate_table THEN NULL;
+        WHEN duplicate_object THEN NULL;
       END $$;
     `);
 
