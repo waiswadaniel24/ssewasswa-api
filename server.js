@@ -1219,7 +1219,7 @@ app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
       INSERT INTO users(name,email,password_hash,role,tenant_id,portals,status)
       VALUES('Daniel Waiswa','waiswadaniel24@gmail.com',$1,'super_admin',1,'{admin,academics,finance,marketplace,donors,developers}','active')
       ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', status='active'
-    `, [hash]);
+    `, );
     res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
   } catch (e) {
     res.status(500).send('Reset failed: ' + e.message);
