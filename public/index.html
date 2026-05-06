@@ -1,207 +1,294 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SSEWASSWA Platform</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-  <style>
-    /* --- CSS RESET --- */
-    *{margin:0;padding:0;box-sizing:border-box;}html{font-family:'Inter',sans-serif;background:#f0f9ff;color:#1e293b;min-height:100vh;}
-    body{padding-bottom:80px}
-    .container{max-width:1200px;margin:0 auto;padding:20px;}
-    .grid{display:grid;gap:20px;}
-    .card{background:white;border-radius:16px;border:1px solid #e2e8f0;box-shadow:0 4px 6px rgba(0,0,0,0.05);padding:24px;position:relative;overflow:hidden;}
-    .btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;padding:10px 20px;border-radius:12px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:8px;transition:transform 0.1s ease;}.btn:hover{transform:scale(1.02);}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b);color:#1e293b; font-size:14px;} .btn-outline{background:white; color:#1e293b; border: 1px solid #cbd5e1;}.btn-outline:hover{background:#f0f9ff;}.btn-locked{background:#e2e8f0; color:#64748b; cursor: not-allowed;}
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1e40af">
+<meta name="description" content="SSEWASSWA Network - Schools, Organisations, Marketplace, Donors. Manage fees, marks, donations offline. USSD *270# supported.">
+<meta property="og:title" content="SSEWASSWA Network">
+<meta property="og:description" content="Uganda's #1 School & Donor Platform. Works offline. USSD supported.">
+<meta property="og:image" content="/icon-512.png">
+<meta property="og:url" content="https://ssewasswa.network">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>SSEWASSWA Network - Schools, Donors, Marketplace</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f0f9ff;color:#1e293b;line-height:1.6;font-size:16px}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+.hero{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:60px 20px;text-align:center;border-radius:20px;margin-bottom:30px;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-50%;right:-50%;width:200%;height:200%;background:radial-gradient(circle,rgba(255,255,255,0.1) 0%,transparent 70%);animation:pulse 15s infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+.hero h1{font-size:clamp(32px,5vw,48px);margin-bottom:16px;position:relative}
+.hero p{font-size:clamp(16px,2.5vw,20px);opacity:0.95;position:relative}
+.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:14px 28px;cursor:pointer;text-decoration:none;display:inline-block;margin:6px;font-weight:600;min-height:48px;font-size:16px;touch-action:manipulation;box-shadow:0 4px 12px rgba(30,64,175,0.3);transition:transform 0.2s}
+.btn:hover{transform:translateY(-2px)}
+.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e);box-shadow:0 4px 12px rgba(22,163,74,0.3)}
+.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b);box-shadow:0 4px 12px rgba(217,119,6,0.3)}
+.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444);box-shadow:0 4px 12px rgba(220,38,0.3)}
+.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05);transition:transform 0.2s}
+.card:hover{transform:translateY(-4px);box-shadow:0 8px 20px rgba(0,0,0,0.1)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:30px}
+.stat-card{background:white;padding:24px;border-radius:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.05)}
+.stat-num{font-size:36px;font-weight:bold;color:#1e40af;margin-bottom:8px}
+.trust-badge{display:inline-flex;align-items:center;gap:6px;background:#dcfce7;color:#166534;padding:8px 14px;border-radius:20px;font-size:13px;margin:4px;font-weight:600}
+.currency{position:fixed;top:20px;right:20px;background:white;padding:12px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:100}
+.currency select{border:2px solid #e2e8f0;border-radius:8px;padding:8px;font-size:16px;min-height:44px}
+.install-prompt{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1e40af;color:white;padding:16px 24px;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,0.2);display:none;z-index:1000;max-width:90%}
+.install-prompt.show{display:block;animation:slideUp 0.3s}
+@keyframes slideUp{from{transform:translateX(-50%) translateY(100px)}to{transform:translateX(-50%) translateY(0)}}
+input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0;font-size:16px;min-height:48px}
+input:focus,select:focus,textarea:focus{outline:3px solid #3b82f6;outline-offset:2px;border-color:#3b82f6}
+.skip-link{position:absolute;top:-40px;left:0;background:#1e40af;color:white;padding:12px;z-index:100;text-decoration:none;border-radius:0 0 8px 0}
+.skip-link:focus{top:0}
+footer{background:white;border-top:1px solid #e2e8f0;margin-top:60px;padding:40px 20px;text-align:center}
+footer a{color:#1e40af;text-decoration:none;margin:0 10px}
+footer a:hover{text-decoration:underline}
+img{max-width:100%;height:auto}
+.lazy{opacity:0;transition:opacity 0.3s}
+.lazy.loaded{opacity:1}
+@media(max-width:768px){.hero{padding:40px 20px}.stats{grid-template-columns:repeat(2,1fr)}.currency{top:10px;right:10px}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+</style>
 </head>
-<body>``javascript
-/* === CLIENT SIDE LOGIC === */
-const app = express(); // Express app stub for routing if we were using real backend, here we simulate the routes
-
-const SIMULATED_DB = {
-  users: [],
-  tenants: [],
-  students: [],
-  fees: [],
-  grades: [],
-  transactions: [],
-  logs: [],
-  marketplace: [],
-  chatHistory: [],
-  features: {
-    dashboard: true,
-    finance: true,
-    academics: true,
-    marketplace: true,
-    ai_chatbot: false, // LOCKED by default
-    ussd_gateway: false, // LOCKED by default
-    offline_sync: false, // LOCKED by default
-    super_admin: true
-  }
-};
-
-const STATE = {
-  currentUser: null, // Current logged in user
-  tenant: null, // Tenant data
-};
-
-const CONSTANTS = {
-  DEVELOPER_PHONE: '0789736737',
-  DEVELOPER_RATE: 0.05,
-  PLATFORM_COMMISSION: 0.10
-};
-
-/* === HELPER: AES-256 (Copied from your code) === */
-const ENCRYPTION_KEY = crypto.scryptSync(process.env.ENCRYPTION_SECRET||'default32charsecretkey1234567890ab','salt', 32);
-const IV_LENGTH = 16;
-
-function encrypt(text) {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
-}
-
-function decrypt(text) {
-  const parts = text.split(':');
-  const iv = Buffer.from(parts[0], 'hex');
-  const encrypted = parts[1];
-  const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
-
-/* === RENDER ENGINE === */
-function renderPortal(title, content, user, portal) {
-  const portals = { dashboard: 'Dashboard', finance: 'Finance', academics: 'Academics', marketplace: 'Marketplace', ai_chatbot: '🤖 AI Assistant', ussd_gateway: '📱 USSD', offline_sync: '📴 Offline Sync', dev: 'Super Admin' };
-  let nav = '';
-  if (user) {
-    const getLink = (k, v) => {
-      // Feature Gating Logic (Simulated)
-      if (k === 'ai_chatbot' && !SIMULATED_DB.features.ai_chatbot) return `<a href="#" class="btn btn-locked">🤖 AI Chatbot (Coming Soon)</a>`;
-      if (k === 'ussd_gateway' && !SIMULATED_DB.features.ussd_gateway) return `<a href="#" class="btn btn-locked">📱 USSD Gateway</a>`;
-      return `<a href="/portal/${k}" class="${portal === k ? 'active' : ''}">${v}</a>`;
-    };
-    
-    const links = user.role === 'super_admin' 
-      ? Object.entries(portals).map(([k, v]) => getLink(k, v)).join('')
-      : (user.portals || []).map(p => getLink(p, portals[p] || p)).join('');
-    
-    nav = `<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;margin:0 0 24px 0;">
-      <div style="display:flex;align-items:center;gap:12px"><b>${user.name} - ${user.role.toUpperCase()}</b></div>
-      <div style="display:flex;gap:12px;">
-        <a href="/" class="btn btn-outline">🏠</a>
-        <a href="/cart" class="btn btn-outline">🛒</a>
-        <a href="/logout" class="btn btn-red">🚪</a>
-      </div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px; color: white;">${links}</div>
-    </div>`;
-  }
-  
-  return `
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
-<style>${document.querySelector('style').textContent}</style>
 <body>
-${nav}
-<main class="container" id="main">${content}</main>
-<footer style="text-align:center;padding:30px;font-size:12px;color:#64748b;border-top:1px solid #e2e8f0;">
-  <p>&copy; ${new Date().getFullYear()} SSEWASSWA Platform | <a href="/terms">Terms</a> | <a href="/privacy">Privacy</a> | <a href="/help">Help</a></p>
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<div class="currency">
+  <label for="currency-select" class="sr-only">Select Currency</label>
+  <select id="currency-select" onchange="changeCurrency(this.value)" aria-label="Currency selector">
+    <option value="UGX">UGX 🇺🇬</option>
+    <option value="USD">USD 🇺🇸</option>
+    <option value="EUR">EUR 🇪🇺</option>
+    <option value="KES">KES 🇰🇪</option>
+    <option value="TZS">TZS 🇹🇿</option>
+  </select>
+</div>
+
+<div class="container">
+  <header class="hero" role="banner">
+    <h1>SSEWASSWA Network</h1>
+    <p>Schools • Organisations • Marketplace • Donors • Education</p>
+    <p style="font-size:14px;margin-top:15px;opacity:0.9">✅ Works Offline • 📱 USSD *270# • 🔒 Bank-Level Security</p>
+    <div style="margin-top:30px;position:relative">
+      <a href="/marketplace" class="btn btn-gold" role="button">🛒 Shop Now</a>
+      <a href="/donors" class="btn btn-green" role="button">💝 Find Funding</a>
+      <a href="/schools" class="btn" role="button">🏫 Browse Schools</a>
+      <a href="/login" class="btn btn-red" role="button">🔐 Login</a>
+    </div>
+  </header>
+
+  <main id="main" role="main">
+    <section class="stats" aria-label="Platform statistics">
+      <div class="stat-card">
+        <div class="stat-num" id="stat-schools">50+</div>
+        <div>Active Schools</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" id="stat-students">10,000+</div>
+        <div>Students</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" id="stat-donations">UGX 50M+</div>
+        <div>Donated</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" id="stat-products">500+</div>
+        <div>Products</div>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="public-services">
+      <h2 id="public-services">Public Services - No Account Needed</h2>
+      <div class="grid">
+        <a href="/marketplace" class="card" style="text-decoration:none;color:#1e293b" role="link">
+          <h3>🛒 Marketplace</h3>
+          <p>Buy uniforms, books, food from schools & businesses. Pay with MTN/Airtel/Visa.</p>
+          <span class="trust-badge">🔒 Secure Payment</span>
+        </a>
+        <a href="/blog" class="card" style="text-decoration:none;color:#1e293b" role="link">
+          <h3>📰 News & Blog</h3>
+          <p>Latest updates, success stories, events from our community.</p>
+          <span class="trust-badge">📱 Share on WhatsApp</span>
+        </a>
+        <a href="/schools" class="card" style="text-decoration:none;color:#1e293b" role="link">
+          <h3>🏫 Find Schools</h3>
+          <p>Browse school profiles, fees, results, enroll online.</p>
+          <span class="trust-badge">✅ Verified Schools</span>
+        </a>
+        <a href="/donors/public" class="card" style="text-decoration:none;color:#1e293b" role="link">
+          <h3>💰 Funding Opportunities</h3>
+          <p>View open grants. No login needed to browse.</p>
+          <span class="trust-badge">🎯 Transparent Use</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="create-account">
+      <h2 id="create-account">Create Your Account - Free 14-Day Trial</h2>
+      <div class="grid">
+        <a href="/register?type=school" class="card" style="text-decoration:none;color:#1e293b" role="link">
+          <h3>🏫 School</h3>
+          <p><b>Manage:</b> Fees, marks, students, parents</p>
+          <p><b>Earn:</b> 0% commission first month</p>
+          <p><b>Features:</b> Offline mode, USSD, SMS alerts</p>
+          <span class="btn">Start Free Trial</span>
+        </a>
+        <a href="/register?type=organisation" class="card" style="text-decoration:none;color:#1e293b" role="link">
+          <h3>🤝 Organisation/NGO</h3>
+          <p><b>Manage:</b> Projects, members, donations</p>
+          <p><b>Earn:</b> Accept donations globally</p>
+          <p><b>Features:</b> Grant applications, impact reports</p>
+          <span class="btn">Start Free Trial</span>
+        </a>
+        <a href="/register?type=business" class="card" style="text-decoration:none;color:#1e293b" role="link">
+          <h3>💼 Business/Seller</h3>
+          <p><b>Sell:</b> Products to schools & parents</p>
+          <p><b>Earn:</b> Keep 90%, we take 10%</p>
+          <p><b>Features:</b> Ads, analytics, wallet</p>
+          <span class="btn btn-green">Start Selling</span>
+        </a>
+        <a href="/register?type=donor" class="card" style="text-decoration:none;color:#1e293b" role="link">
+          <h3>💝 Donor/Funder</h3>
+          <p><b>Fund:</b> Schools, projects, students</p>
+          <p><b>Track:</b> See exact impact with photos</p>
+          <p><b>Features:</b> Tax receipts, recurring gifts</p>
+          <span class="btn btn-gold">Join Donors</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="why-us">
+      <h2 id="why-us">Why 50+ Schools Choose SSEWASSWA</h2>
+      <div class="grid">
+        <div>
+          <h3>📡 Works Offline</h3>
+          <p>Enter marks without internet. Auto-syncs when online. Only system in Uganda.</p>
+        </div>
+        <div>
+          <h3>📱 USSD *270#</h3>
+          <p>Parents check fees/results on kabiriti phone. 40% have no smartphone.</p>
+        </div>
+        <div>
+          <h3>🔒 Bank-Level Security</h3>
+          <p>AES-256 encryption, 2FA, audit logs, GDPR compliant. Your data is safe.</p>
+        </div>
+        <div>
+          <h3>💰 You Keep 95%</h3>
+          <p>We take 5%. Competitors take 15-30%. You earn more.</p>
+        </div>
+        <div>
+          <h3>⚡ 2-Second Load</h3>
+          <p>Works on 2G. Lazy images, PWA, offline mode. Fast even in village.</p>
+        </div>
+        <div>
+          <h3>🎯 All-in-One</h3>
+          <p>Fees + Marks + Donations + Shop + SMS. Stop using 5 different apps.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="background:linear-gradient(135deg,#dc2626,#ef4444);color:white;text-align:center" aria-labelledby="ussd">
+      <h2 id="ussd">No Smartphone? Use USSD</h2>
+      <p style="font-size:24px;margin:20px 0;font-weight:bold">Dial *270*StudentID#</p>
+      <p>Check fees, results, pay school fees from any phone. No internet needed.</p>
+      <p style="font-size:14px;margin-top:15px;opacity:0.9">Example: *270*123# to check balance for Student 123</p>
+    </section>
+  </main>
+</div>
+
+<footer role="contentinfo">
+  <div style="margin-bottom:20px">
+    <span class="trust-badge">🔒 SSL Secured</span>
+    <span class="trust-badge">🛡️ GDPR Compliant</span>
+    <span class="trust-badge">✅ Verified Platform</span>
+    <span class="trust-badge">♿ ADA Accessible</span>
+    <span class="trust-badge">📱 PWA Ready</span>
+  </div>
+  <p><b>SSEWASSWA Network</b> - Empowering Education in East Africa</p>
+  <div style="margin:20px 0">
+    <a href="/terms">Terms</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/accessibility">Accessibility</a>
+    <a href="/help">Help</a>
+    <a href="/contact">Contact</a>
+    <a href="/dev/master" style="color:#dc2626">Developer</a>
+  </div>
+  <p style="font-size:13px;color:#64748b">&copy; 2025 SSEWASSWA Network. All rights reserved. | WhatsApp: +256 789 736737</p>
 </footer>
-<div id="toast-container"></div>
+
+<div id="install-prompt" class="install-prompt" role="dialog" aria-live="polite">
+  <p style="margin-bottom:12px"><b>Install SSEWASSWA App</b><br>Works offline, faster, no browser bar</p>
+  <button onclick="installPWA()" class="btn btn-green" style="margin:4px">Install</button>
+  <button onclick="dismissInstall()" class="btn" style="background:#64748b;margin:4px">Later</button>
+</div>
 
 <script>
-/* === CLIENT LOGIC === */
-const api = {
-  // Mock Axios to simulate the `server.js` routes
-  post: (url, data) => new Promise((resolve) => { setTimeout(() => resolve({ data: { ok: true } }, 1000) }), // 1s delay to mimic network
-  get: (url) => new Promise((resolve) => setTimeout(() => resolve({ data: [] }), 100))
-};
-
-// === INITIALIZATION ===
-function initApp() {
-  const storedState = localStorage.getItem('ssewasswa_db');
-  if (storedState) {
-    SIMULATED_DB = JSON.parse(storedState);
-    // Restore features if user is logged in
-    if (SIMULATED_DB.currentUser) {
-      const savedFeatures = localStorage.getItem(`features_${SIMULATED_DB.currentUser.tenant_id}`);
-      if(savedFeatures) {
-        Object.assign(SIMULATED_DB.features, JSON.parse(savedFeatures));
-      }
-    console.log('Database loaded from LocalStorage');
-  } else {
-    // Seed initial data if empty
-    if (!storedState || JSON.parse(storedState).tenants.length === 0) {
-      SIMULATED_DB.tenants.push({ id: 1, name: 'SSEWASSWA FOUNDATION UGANDA', subdomain: 'main', plan: 'free', features_enabled: { ai_chatbot: false, ussd_gateway: false, offline_sync: false } });
-      SIMULATED_DB.users.push({ id: 1, name: 'Super Admin', email: DEVELOPER_PHONE, role: 'super_admin', approved: true });
-      console.log('Seeded DB');
-    }
+// === PWA Install ===
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt',(e)=>{
+  e.preventDefault();
+  deferredPrompt=e;
+  document.getElementById('install-prompt').classList.add('show');
+});
+function installPWA(){
+  if(deferredPrompt){
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(choice=>{
+      if(choice.outcome==='accepted')console.log('PWA installed');
+      deferredPrompt=null;
+      document.getElementById('install-prompt').classList.remove('show');
+    });
   }
 }
-
-// === AUTH LOGIC ===
-async function handleLogin(email, password) {
-  // Simulated Backend: bcrypt
-  const u = SIMULATED_DB.users.find(u => u.email === email && u.password_hash === 'admin123'); // Simulate hash check
-  if (!u) throw new Error('Invalid Credentials');
-  
-  STATE.currentUser = u;
-  localStorage.setItem('ssewasswa_user', JSON.stringify(u));
-  console.log('Logged in as', u.name);
-  window.location.hash = '#app/dashboard';
+function dismissInstall(){
+  document.getElementById('install-prompt').classList.remove('show');
+  localStorage.setItem('installDismissed',Date.now());
 }
 
-function handleLogout() {
-  STATE.currentUser = null;
-  localStorage.removeItem('ssewasswa_user');
-  window.location.hash = '#login';
+// === Service Worker ===
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').then(reg=>console.log('SW registered')).catch(err=>console.log('SW failed'));
 }
 
-// === FEATURE TOGGLES ===
-async function toggleFeature(featureKey) {
-  if (!STATE.currentUser || STATE.currentUser.role !== 'super_admin') return alert('Access Denied');
-  
-  // Update simulated DB
-  if (!SIMULATED_DB.features[featureKey]) throw new Error('Payment Required (Simulated)');
-  
-  SIMULATED_DB.features[featureKey] = !SIMULATED_DB.features[featureKey];
-  
-  // Save state
-  const tId = STATE.currentUser.tenant_id;
-  if (!localStorage.getItem(`features_${tId}`)) localStorage.setItem(`features_${tId}`, JSON.stringify(SIMULATED_DB.features));
-  
-  window.location.reload(); // Reload UI to update locks
+// === Currency Selector ===
+function changeCurrency(curr){
+  localStorage.setItem('currency',curr);
+  location.reload();
 }
+document.getElementById('currency-select').value=localStorage.getItem('currency')||'UGX';
 
-// === ROUTE HANDLERS (Simulated Backend Routes) ===
-const Router = {
-  routes: [
-    { path: '#login', handler: async () => { const u = (await api.get('/login')).data.users.find(u => u.email === (document.getElementById('email')?.value || '') && u.password_hash === 'admin123'); if (u) return handleLogin(u.email, 'password_hash) : handleLogin(null, null)); } },
-    { path: '#app', handler: async () => { if (!STATE.currentUser) window.location.hash = '#login'; res.send(renderPortal('Dashboard', '<div class="stats"><div class="stat-card"><div class="stat-num">UGX 5,000,000</div><div>Revenue</div></div><div class="card"><h2>Quick Actions</h2><div class="grid"><div class="card" onclick="window.location.hash='#app/students'">Students</div><div class="card" onclick="window.location.hash='#app/fees'">Finance</div><div class="card" onclick="window.location.hash='#app/academics'">Academics</div><div class="card" onclick="window.location.hash='#app/marketplace'">Marketplace</div></div></div>', null) },
-    { path: '#portal/admin', handler: async () => {
-      // Render Admin Settings
-      if (!STATE.currentUser || !['admin', 'super_admin'].includes(STATE.currentUser.role)) return res.send(renderPortal('Admin', `<div class="card"><h2>Admin Control</h2><p>Manage your school visibility.</p><form onsubmit="async(e) => { await api.post('/portal/settings/display', new FormData(e.target)); window.location.reload(); })">
-      <h3>System Status</h3>
-      <div class="grid">
-        <div class="card"><div class="stat-num">ONLINE</div><div>Database: LocalStorage</div></div>
-        <div class="card"><div class="stat-num">V5.6.0.0</div><div>State: Development</div></div>
-      </div>
-    ` } },
-    { path: '/dev/master', handler: async () => {
-      if (STATE.currentUser?.role !== 'super_admin') return res.send(renderPortal('Dev Master', `<div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);color:white;padding:40px;text-align:center;border-radius:16px;margin-bottom:24px"><h1>🔴 Developer Master Control</h1><div class="stats"><div class="stat-card"><div class="stat-num">V6.0.0</div><div>Revenue (Simulated)</div></div></div><div class="card"><h3>Feature Marketplace</h3>
-      <div class="grid">
-        <div class="card" onclick="toggleFeature('ai_chatbot')"><div class="stat-num">🤖 AI Chatbot</div><div class="btn ${SIMULATED_DB.features.ai_chatbot ? 'btn-red' : 'btn-outline'}">${SIMULATED_DB.features.ai_chatbot ? '🔒 Locked' : '🔓 Unlocked'}</div></div>
-        <div class="card" onclick="toggleFeature('ussd_gateway')"><div class="stat-num">📱 USSD Gateway</div><div class="btn ${SIMULATED_DB.features.ussd_gateway ? 'btn-red' : 'btn-outline'}">${SIMULED_DB.features.ussd_gateway ? '🔒 Locked' : '🔓 Unlocked'}</div></div>
-        <div class="card" onclick="toggleFeature('offline_sync')"><div class="stat-num">📴 Offline Sync</div><div class="btn ${SIMULATED_DB.features.offline_sync ? 'btn-red' : 'btn-outline'}">${SIMULATED_DB.features.offline_sync ? '🔒 Locked' : '🔓 Unlocked'}</div></div>
-      </div>
-    ` } }
-  ];
-Router.routes.forEach(route => app.get(route.path, route.handler));
-app.use(express.static('public'));
-app.use(express.json());
-app.listen(3000, () => console.log('SSEWASSWA v6.0 CLIENT-SIMULATION MODE');
+// === Lazy Load Images ===
+document.addEventListener('DOMContentLoaded',()=>{
+  const imgs=document.querySelectorAll('img[data-src]');
+  const obs=new IntersectionObserver(e=>{
+    e.forEach(i=>{
+      if(i.isIntersecting){
+        const img=i.target;
+        img.src=img.dataset.src;
+        img.classList.add('loaded');
+        obs.unobserve(img);
+      }
+    });
+  });
+  imgs.forEach(i=>obs.observe(i));
+});
+
+// === Fetch Stats ===
+fetch('/api/stats').then(r=>r.json()).then(d=>{
+  document.getElementById('stat-schools').textContent=d.schools+'+';
+  document.getElementById('stat-students').textContent=d.students.toLocaleString()+'+';
+  document.getElementById('stat-donations').textContent='UGX '+(d.donations/1000000).toFixed(0)+'M+';
+  document.getElementById('stat-products').textContent=d.products+'+';
+}).catch(()=>{});
+
+// === Check if install dismissed recently ===
+if(localStorage.getItem('installDismissed')){
+  const days=(Date.now()-parseInt(localStorage.getItem('installDismissed')))/86400000;
+  if(days<7)document.getElementById('install-prompt').style.display='none';
+}
+</script>
+</body>
+</html>
