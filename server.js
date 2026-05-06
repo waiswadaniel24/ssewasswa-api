@@ -1148,6 +1148,14 @@ async function initDB() {
     
     await c.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_number TEXT`);
 
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS description TEXT`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS about_us TEXT`);
+    await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS tagline TEXT`);
+    
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS description TEXT`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS summary TEXT`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS category TEXT`);
+    await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true`);
     // --- PATCH FUND_OPPORTUNITIES TABLE FOR DONORS PAGE ---
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS description TEXT`);
     await c.query(`ALTER TABLE fund_opportunities ADD COLUMN IF NOT EXISTS summary TEXT`);
