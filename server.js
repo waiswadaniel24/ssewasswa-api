@@ -79,7 +79,6 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_KEY,
   api_secret: process.env.CLOUDINARY_SECRET
 });
-import cron from 'node-cron';
 
 cron.schedule('0 0 * * *', async () => {
   try {
