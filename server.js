@@ -731,6 +731,7 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
           <button class="btn btn-green">Record Payment</button>
         </form>
       </div>
+    </div>
     <div class="card"><h3>Fees Ledger</h3>
       <table><tr><th>ID</th><th>Student</th><th>Class</th><th>Due</th><th>Paid</th><th>Balance</th><th>Phone</th><th>Action</th></tr>
       ${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name||f.linked_student||'')}</td><td>${esc(f.student_class||'')}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone||'')}</td><td><a href="/portal/finance/receipt/${f.id}" class="btn">PDF</a></td></tr>`).join('')}
@@ -738,6 +739,7 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
     </div>
   `, req.session.user));
 }));
+
 app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
   const { student_id, amount, phone } = req.body;
   const student = (await pool.query('SELECT name,class FROM students WHERE id=$1 AND tenant_id=$2', [student_id, req.session.user.tenant_id])).rows[0];
@@ -747,11 +749,7 @@ app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
   res.redirect('/portal/finance');
 }));
 
-app.post('/portal/finance/pay', requireAuth, ah(async (req, res) => {
-  const { fee_id, amount } = req.body;
-  await pool.query('UPDATE fees SET paid=COALESCE(paid,0)+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, req.session.user.tenant_id]);
-  res.redirect('/portal/finance');
-}));
+// SINGLE PAY ROUTE - WITH SMS
 app.post('/portal/finance/pay', requireAuth, ah(async (req, res) => {
   const { fee_id, amount } = req.body;
   const fee = (await pool.query('UPDATE fees SET paid=COALESCE(paid,0)+$1 WHERE id=$2 AND tenant_id=$3 RETURNING *', [amount, fee_id, req.session.user.tenant_id])).rows[0];
@@ -762,6 +760,28 @@ app.post('/portal/finance/pay', requireAuth, ah(async (req, res) => {
     await logAction(req.session.user.id, req.session.user.tenant_id, 'fee_payment', { fee_id, amount }, req.ip);
   }
   res.redirect('/portal/finance');
+}));
+
+app.get('/portal/finance/receipt/:id', requireAuth, ah(async (req, res) => {
+  const f = (await pool.query('SELECT f.*,t.name as school_name FROM fees f JOIN tenants t ON f.tenant_id=t.id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!f) return res.status(404).send('Receipt not found');
+
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Receipt-${f.id}.pdf"`);
+  doc.pipe(res);
+  doc.fontSize(20).text(f.school_name, { align: 'center' });
+  doc.fontSize(14).text('Payment Receipt', { align: 'center' }).moveDown();
+  doc.fontSize(12).text(`Receipt #: FEE${f.id}`);
+  doc.text(`Date: ${new Date().toDateString()}`).moveDown();
+  doc.text(`Student: ${f.student_name}`);
+  doc.text(`Class: ${f.student_class}`);
+  doc.text(`Amount Due: UGX ${f.amount.toLocaleString()}`);
+  doc.text(`Amount Paid: UGX ${f.paid.toLocaleString()}`);
+  doc.text(`Balance: UGX ${(f.amount-f.paid).toLocaleString()}`);
+  doc.text(`Phone: ${f.phone}`).moveDown();
+  doc.fontSize(10).text('Thank you for your payment.', { align: 'center' });
+  doc.end();
 }));
 // === MARKETPLACE - SINGLE DEFINITION ===
 app.get('/portal/marketplace', requireAuth, ah(async (req, res) => {
@@ -799,9 +819,6 @@ app.post('/portal/marketplace/add', requireAuth, ah(async (req, res) => {
     [req.session.user.tenant_id, name, price, stock, image_url, category]);
   res.redirect('/portal/marketplace');
 }));
-app.get('/portal/finance/receipt/:id', requireAuth, ah(async (req, res) => {
-  const f = (await pool.query('SELECT f.*,t.name as school_name FROM fees f JOIN tenants t ON f.tenant_id=t.id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
-  if (!f) return res.status(404).send('Receipt not found');
 
   const doc = new PDFDocument({ size: 'A4', margin: 50 });
   res.setHeader('Content-Type', 'application/pdf');
