@@ -144,6 +144,12 @@ const SUBSCRIPTION_PLANS = {
     name: 'Donor Premium', price: 50000, currency: 'UGX',
     features: ['Post grants', 'Review applications', 'Impact tracking'],
     portals: ['dashboard', 'opportunities', 'history', 'impact']
+const SUBSCRIPTION_PLANS = {
+  // ... your existing plans
+  enterprise: {
+    name: 'Enterprise', price: 500000, currency: 'UGX',
+    features: ['White label', 'API access', 'Dedicated support', 'Unlimited everything'],
+    portals: ['academics', 'stores', 'admin', 'papers', 'funds', 'reports', 'finance', 'marketplace', 'programs', 'news', 'ads', 'entertainment', 'api', 'whitelabel']
   }
 };
 
