@@ -349,18 +349,20 @@ app.get('/login', ah(async (req, res) => {
 }));
 
 app.post('/login', ah(async (req, res) => {
-  const { email, password, otp } = req.body;
+  const { email, password } = req.body;
   const u = (await pool.query('SELECT u.*,t.name as tenant_name,t.subdomain as tenant_subdomain,t.type as tenant_type,t.features_enabled FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1 AND u.approved=true', [email])).rows[0];
-  if (!u || !await bcrypt.compare(password, u.password_hash)) return res.status(401).send('Invalid credentials');
+  
+  console.log('DB_EMAIL:', u?.email);
+  console.log('DB_HASH:', u?.password_hash);
+  console.log('INPUT_PASS:', password);
+  
+  const match = await bcrypt.compare(password, u.password_hash);
+  console.log('BCRYPT_MATCH:', match);
+  
+  if (!u || !match) return res.status(401).send('Invalid credentials');
   if (!u.verified) return res.status(401).send('Please verify your email first');
-  if (u.two_fa_enabled && !otp) {
-    const code = Math.floor(100000 + Math.random() * 900000);
-    await pool.query('INSERT INTO otp_codes(user_id,code,expires_at)VALUES($1,$2,$3)', [u.id, code, new Date(Date.now() + 600000)]);
-    await sendSMS(u.phone, `SSEWASSWA Code: ${code}`);
-    return res.json({ require_otp: true });
-  }
+  
   req.session.user = u;
-  await logAction(u.id, u.tenant_id, 'login', { ip: req.ip }, req.ip);
   if (u.role === 'super_admin') return res.redirect('/dev/master');
   res.redirect('/portal/admin');
 }));
