@@ -738,7 +738,7 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
-})); // LINE 839 SHOULD BE THIS ONE - ONLY ONE
+}));
 
 app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
   const { student_id, amount, phone } = req.body;
@@ -762,6 +762,7 @@ app.post('/portal/finance/pay', requireAuth, ah(async (req, res) => {
   res.redirect('/portal/finance');
 }));
 
+// PDF RECEIPT - SINGLE DEFINITION
 app.get('/portal/finance/receipt/:id', requireAuth, ah(async (req, res) => {
   const f = (await pool.query('SELECT f.*,t.name as school_name FROM fees f JOIN tenants t ON f.tenant_id=t.id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
   if (!f) return res.status(404).send('Receipt not found');
@@ -783,6 +784,7 @@ app.get('/portal/finance/receipt/:id', requireAuth, ah(async (req, res) => {
   doc.fontSize(10).text('Thank you for your payment.', { align: 'center' });
   doc.end();
 }));
+
 // === MARKETPLACE - SINGLE DEFINITION ===
 app.get('/portal/marketplace', requireAuth, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
@@ -820,24 +822,6 @@ app.post('/portal/marketplace/add', requireAuth, ah(async (req, res) => {
   res.redirect('/portal/marketplace');
 }));
 
-  const doc = new PDFDocument({ size: 'A4', margin: 50 });
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="Receipt-${f.id}.pdf"`);
-  doc.pipe(res);
-  doc.fontSize(20).text(f.school_name, { align: 'center' });
-  doc.fontSize(14).text('Payment Receipt', { align: 'center' }).moveDown();
-  doc.fontSize(12).text(`Receipt #: FEE${f.id}`);
-  doc.text(`Date: ${new Date().toDateString()}`).moveDown();
-  doc.text(`Student: ${f.student_name}`);
-  doc.text(`Class: ${f.student_class}`);
-  doc.text(`Amount Due: UGX ${f.amount.toLocaleString()}`);
-  doc.text(`Amount Paid: UGX ${f.paid.toLocaleString()}`);
-  doc.text(`Balance: UGX ${(f.amount-f.paid).toLocaleString()}`);
-  doc.text(`Phone: ${f.phone}`).moveDown();
-  doc.fontSize(10).text('Thank you for your payment.', { align: 'center' });
-  doc.end();
-}));
-
 // === PUBLIC SITE ===
 app.get('/portal/public', requireAuth, ah(async (req, res) => {
   const page = (await pool.query('SELECT * FROM public_pages WHERE tenant_id=$1', [req.session.user.tenant_id])).rows[0] || {};
@@ -853,14 +837,6 @@ app.get('/portal/public', requireAuth, ah(async (req, res) => {
     </div>
   `, req.session.user));
 }));
-
-app.post('/portal/public/save', requireAuth, ah(async (req, res) => {
-  const { about, contact, logo_url } = req.body;
-  await pool.query('INSERT INTO public_pages(tenant_id,about,contact,logo_url) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id) DO UPDATE SET about=$2,contact=$3,logo_url=$4,updated_at=NOW()',
-    [req.session.user.tenant_id, about, contact, logo_url]);
-  res.redirect('/portal/public');
-}));
-
 // === ADMIN ===
 app.get('/portal/admin', requireAuth, ah(async (req, res) => {
   const users = (await pool.query('SELECT id,name,email,role FROM users WHERE tenant_id=$1', [req.session.user.tenant_id])).rows;
