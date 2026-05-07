@@ -694,9 +694,19 @@ app.post('/portal/students/add', requireAuth, ah(async (req, res) => {
 // === FINANCE - SINGLE DEFINITION ===
 app.get('/portal/finance', requireAuth, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
-  const fees = (await pool.query('SELECT * FROM fees WHERE tenant_id=$1 ORDER BY id DESC LIMIT 100', [tid])).rows;
+  const fees = (await pool.query(`
+    SELECT f.id, f.student_name, f.student_class, f.amount,
+           COALESCE(f.paid,0) as paid, f.phone, s.name as linked_student
+    FROM fees f
+    LEFT JOIN students s ON f.student_id=s.id
+    WHERE f.tenant_id=$1
+    ORDER BY f.id DESC LIMIT 100
+  `, [tid])).rows;
+
+  const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
   const totalDue = fees.reduce((s,f)=>s+(f.amount-f.paid),0);
   const totalPaid = fees.reduce((s,f)=>s+f.paid,0);
+
   res.send(renderPage('Finance', `
     <div class="stats">
       <div class="stat-card"><div class="stat-num">UGX ${totalDue.toLocaleString()}</div><div>Outstanding</div></div>
@@ -705,8 +715,10 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
     <div class="grid">
       <div class="card"><h3>Add Fee</h3>
         <form method="POST" action="/portal/finance/add">
-          <input name="student_name" placeholder="Student Name" required>
-          <input name="student_class" placeholder="Class: P.6" required>
+          <select name="student_id" required>
+            <option value="">Select Student</option>
+            ${students.map(s=>`<option value="${s.id}">${esc(s.name)} - ${esc(s.class)}</option>`).join('')}
+          </select>
           <input name="amount" placeholder="Amount Due" type="number" required>
           <input name="phone" placeholder="Parent Phone: 256..." required>
           <button class="btn">Add Fee</button>
@@ -719,27 +731,29 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
           <button class="btn btn-green">Record Payment</button>
         </form>
       </div>
+    </div>
     <div class="card"><h3>Fees Ledger</h3>
       <table><tr><th>ID</th><th>Student</th><th>Class</th><th>Due</th><th>Paid</th><th>Balance</th><th>Phone</th></tr>
-      ${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name)}</td><td>${esc(f.student_class)}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone)}</td></tr>`).join('')}
+      ${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name||f.linked_student||'')}</td><td>${esc(f.student_class||'')}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone||'')}</td></tr>`).join('')}
       </table>
     </div>
   `, req.session.user));
 }));
 
 app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
-  const { student_name, student_class, amount, phone } = req.body;
-  await pool.query('INSERT INTO fees(tenant_id,student_name,student_class,amount,phone) VALUES($1,$2,$3,$4,$5)',
-    [req.session.user.tenant_id, student_name, student_class, amount, phone]);
+  const { student_id, amount, phone } = req.body;
+  const student = (await pool.query('SELECT name,class FROM students WHERE id=$1 AND tenant_id=$2', [student_id, req.session.user.tenant_id])).rows[0];
+  if (!student) return res.status(400).send('Student not found');
+  await pool.query('INSERT INTO fees(tenant_id,student_id,student_name,student_class,amount,phone,paid) VALUES($1,$2,$3,$4,$5,$6,0)',
+    [req.session.user.tenant_id, student_id, student.name, student.class, amount, phone]);
   res.redirect('/portal/finance');
 }));
 
 app.post('/portal/finance/pay', requireAuth, ah(async (req, res) => {
   const { fee_id, amount } = req.body;
-  await pool.query('UPDATE fees SET paid=paid+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, req.session.user.tenant_id]);
+  await pool.query('UPDATE fees SET paid=COALESCE(paid,0)+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, req.session.user.tenant_id]);
   res.redirect('/portal/finance');
 }));
-
 // === MARKETPLACE - SINGLE DEFINITION ===
 app.get('/portal/marketplace', requireAuth, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
