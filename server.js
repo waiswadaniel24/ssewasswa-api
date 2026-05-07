@@ -64,7 +64,19 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_KEY,
   api_secret: process.env.CLOUDINARY_SECRET
 });
+// Run once per day at midnight
+const cron = require('node-cron'); // npm i node-cron
 
+cron.schedule('0 0 * * *', async () => {
+  const { rows } = await pool.query(`
+    UPDATE tenants
+    SET subscription_status = 'canceled'
+    WHERE subscription_status = 'trial'
+    AND trial_ends_at < NOW()
+    RETURNING id, name
+  `);
+  if (rows.length) console.log(`Locked ${rows.length} expired schools`);
+});
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
@@ -172,11 +184,24 @@ const requireAuth = (req, res, next) => {
   if (!req.session?.user) return res.redirect('/login');
   next();
 };
-const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -545,11 +570,24 @@ app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
       </div>
     `, req.session.user));
   }
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -617,11 +655,24 @@ app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
   }
 
   res.redirect('/dev/master');
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -651,11 +702,24 @@ app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, re
     req.session.flash = { type: 'error', msg: 'Injection failed: ' + e.message };
   }
   res.redirect('/dev/master');
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -680,11 +744,24 @@ app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
       </div>
     </div>
   `, req.session.user));
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -697,11 +774,24 @@ app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
 // === ACADEMICS ===
 app.get('/portal/academics', requireAuth, ah(async (req, res) => {
   res.send(renderPage('Academics', `<div class="card"><h3>Academics</h3><p>Timetables, subjects, classes coming soon.</p></div>`, req.session.user));
-const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -732,11 +822,24 @@ app.get('/portal/marksheets', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -751,11 +854,24 @@ app.post('/portal/marksheets/add', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO marksheets(tenant_id,student_name,class,subject,mark,term) VALUES($1,$2,$3,$4,$5,$6)',
     [req.session.user.tenant_id, student_name, cls, subject, mark, term]);
   res.redirect('/portal/marksheets');
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -783,11 +899,24 @@ app.get('/portal/students', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -801,11 +930,24 @@ app.post('/portal/students/add', requireAuth, ah(async (req, res) => {
   const { name, class: cls, parent_phone } = req.body;
   await pool.query('INSERT INTO students(tenant_id,name,class,parent_phone)VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, name, cls, parent_phone]);
   res.redirect('/portal/students');
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -883,11 +1025,24 @@ app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO fees(tenant_id,student_id,student_name,student_class,amount,phone,paid) VALUES($1,$2,$3,$4,$5,$6,0)',
     [req.session.user.tenant_id, student_id, student.name, student.class, amount, phone]);
   res.redirect('/portal/finance');
-const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -968,11 +1123,24 @@ app.post('/portal/marketplace/add', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO marketplace_products(tenant_id,name,price,stock,image_url,category) VALUES($1,$2,$3,$4,$5,$6)',
     [req.session.user.tenant_id, name, price, stock, image_url, category]);
   res.redirect('/portal/marketplace');
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+  const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1025,11 +1193,24 @@ app.get('/dev/seed', requireAuth, requireDeveloper, ah(async (req, res) => {
   await pool.query(`INSERT INTO users(name,email,password_hash,role,tenant_id,verified,approved) VALUES('Demo Admin','admin@kings.test',$1,'school_admin',$2,true,true)`, [await bcrypt.hash('demo123', 10), tid]);
   for (let i = 1; i <= 30; i++) await pool.query(`INSERT INTO students(tenant_id,name,class,parent_phone) VALUES($1,$2,$3,$4)`, [tid, `Student ${i}`, `P${Math.ceil(i / 10)}`, '+256700000000']);
   res.json({ ok: true, login: 'admin@kings.test / demo123' });
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1045,11 +1226,24 @@ app.post('/portal/donors/create', requireAuth, requireRole('org_admin'), ah(asyn
   await pool.query('INSERT INTO fund_opportunities(tenant_id,title,summary,description,amount,currency,deadline,category,active)VALUES($1,$2,$3,$4,$5,$6,$7,$8,true)', [req.session.user.tenant_id, title, summary, description, amount, 'USD', deadline, category]);
   await logAction(req.session.user.id, req.session.user.tenant_id, 'create_opportunity', { title, amount }, req.ip);
   res.redirect('/portal/donors?created=1');
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1062,11 +1256,24 @@ app.post('/portal/donors/create', requireAuth, requireRole('org_admin'), ah(asyn
 app.get('/portal/donors/approve/:id', requireAuth, requireRole('org_admin'), ah(async (req, res) => {
   await pool.query('UPDATE fund_applications SET status=$1 WHERE id=$2', ['approved', req.params.id]);
   res.redirect('/portal/donors?approved=1');
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1099,11 +1306,24 @@ app.get('/portal/reports/pdf/:student_id', requireAuth, ah(async (req, res) => {
   doc.fontSize(14).text(`Average: ${avg.toFixed(1)}%`, 50, y + 10);
   doc.fontSize(10).text('Computer generated document.', 50, 700);
   doc.end();
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1134,11 +1354,24 @@ app.get('/portal/marksheets', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+  const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1230,7 +1463,14 @@ app.post('/ussd', ah(async (req, res) => {
   res.set('Content-Type', 'text/plain');
   res.send(response);
 }));
-
+app.post('/portal/admin/toggle-perm', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  if (req.body.csrf_token!== req.session.csrf) return res.status(403).send('Forbidden');
+  await pool.query(
+    'UPDATE route_permissions SET requires_subscription = NOT requires_subscription WHERE route_path=$1',
+    [req.body.route_path]
+  );
+  res.redirect('/portal/admin');
+}));
 // === API ROUTES (PUBLIC/WEB) ===
 app.get('/api/stats', ah(async (req, res) => {
   res.json({
@@ -1561,11 +1801,24 @@ app.get('/portal/exams', requireAuth, requireActiveSub, ah(async (req, res) => {
       ${exams.map(e=>`<div><b>${esc(e.name)}</b> - <a href="/portal/exams/${e.id}/marks">Enter Marks</a> | <a href="/portal/exams/${e.id}/reports">Reports</a></div>`).join('') || 'No exams yet'}
     </div>
   `, req.session.user));
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1579,11 +1832,24 @@ app.post('/portal/exams/add', requireAuth, ah(async (req, res) => {
   const { name, term, year } = req.body;
   await pool.query('INSERT INTO exams(tenant_id,name,term,year) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, name, term, year]);
   res.redirect('/portal/exams');
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1617,11 +1883,24 @@ app.get('/portal/exams/:id/reports/:student_id', requireAuth, ah(async (req, res
   marks.forEach(m=> doc.text(`${m.subject.padEnd(16)} ${m.score} ${m.grade||''}`));
   doc.moveDown().text(`Average: ${avg}%`);
   doc.end();
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1648,11 +1927,24 @@ app.get('/blog/:id', ah(async (req, res) => {
   if (!p) return res.status(404).send('Not found');
   await pool.query('UPDATE news_articles SET views=views+1 WHERE id=$1', [p.id]);
   res.send(renderPage(p.title, `<div class="card"><img src="${p.image_url}" style="width:100%;max-height:400px;object-fit:cover;border-radius:16px"><h1>${esc(p.title)}</h1><p style="color:#64748b;font-size:13px">By ${esc(p.author_name)} • ${new Date(p.created_at).toDateString()} • ${p.views} views</p><div style="margin:20px 0">${p.content}</div></div>`, null));
-const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1666,11 +1958,24 @@ app.get('/order/:ref', ah(async (req, res) => {
   const o = (await pool.query('SELECT o.*,p.name as product_name FROM orders o JOIN products p ON o.product_id=p.id WHERE o.ref=$1', [req.params.ref])).rows[0];
   if (!o) return res.status(404).send('Order not found');
   res.send(renderPage('Order ' + o.ref, `<div class="card"><h2>Order #${esc(o.ref)}</h2><table><tr><td>Product:</td><td>${esc(o.product_name)}</td></tr><tr><td>Quantity:</td><td>${o.quantity}</td></tr><tr><td>Total:</td><td>UGX ${o.total.toLocaleString()}</td></tr><tr><td>Status:</td><td><span class="badge badge-${o.status === 'completed' ? 'green' : 'gold'}">${o.status}</span></td></tr><tr><td>Customer:</td><td>${esc(o.customer_name)}</td></tr><tr><td>Address:</td><td>${esc(o.address)}</td></tr></table></div>`, null));
-const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1683,11 +1988,24 @@ const requireActiveSub = (req, res, next) => {
 app.get('/donate/recurring', requireAuth, ah(async (req, res) => {
   const opps = (await pool.query('SELECT id,title FROM fund_opportunities WHERE active=true')).rows;
   res.send(renderPage('Recurring Donations', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Set Up Monthly Donation</h2><form method="POST" action="/donate/recurring"><label>Amount (UGX)</label><input name="amount" type="number" min="5000" required><label>Frequency</label><select name="frequency" required><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option></select><label>To Opportunity</label><select name="opportunity_id" required>${opps.map(o => `<option value="${o.id}">${esc(o.title)}</option>`).join('')}</select><button class="btn btn-green" style="width:100%">Activate Recurring</button></form></div>`, req.session.user));
-const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1721,11 +2039,24 @@ app.post('/reset-password/:token', ah(async (req, res) => {
   await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, r.user_id]);
   await pool.query('UPDATE password_resets SET used=true WHERE id=$1', [r.id]);
   res.send(`<script>alert('Password reset successful!');window.location='/login'</script>`);
-  const requireActiveSub = (req, res, next) => {
-  const t = req.session.user;
-  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
-    return next();
-  }
+ const requireActiveSubDynamic = ah(async (req, res, next) => {
+  const path = req.route.path; // '/portal/finance'
+
+  const { rows } = await pool.query(
+    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
+    [path]
+  );
+
+  // If route not in table OR requires_subscription=false, skip check
+  if (!rows.length || rows[0].requires_subscription === false) return next();
+
+  // Original paywall logic
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const sub = t[0];
+  if (sub.subscription_status === 'active') return next();
+  if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
+  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
+});
   res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
       <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
@@ -1734,7 +2065,26 @@ app.post('/reset-password/:token', ah(async (req, res) => {
   `, req.session.user));
 };
 }));
+app.post('/webhook/stripe', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
 
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === 'invoice.payment_succeeded') {
+    const customerEmail = event.data.object.customer_email;
+    const { rows } = await pool.query('SELECT id FROM users WHERE email=$1', [customerEmail]);
+    if (rows[0]) {
+      await pool.query(`UPDATE tenants SET subscription_status='active', plan='premium', trial_ends_at=NULL WHERE id=(SELECT tenant_id FROM users WHERE id=$1)`, [rows[0].id]);
+      console.log(`Activated tenant for ${customerEmail}`);
+    }
+  }
+  res.json({received: true});
+});
 app.get('/s/:subdomain/enroll', ah(async (req, res) => {
   const t = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.subdomain])).rows[0];
   if (!t) return res.status(404).send('School not found');
@@ -1781,7 +2131,41 @@ app.get('/public/:subdomain', ah(async (req, res) => {
     </div>
   </body></html>`);
 }));
+app.post('/portal/register', ah(async (req, res) => {
+  const { schoolName, subdomain, email, password } = req.body;
 
+  // 1. Basic validation
+  if (!schoolName ||!subdomain ||!email ||!password) {
+    return res.status(400).send('All fields required');
+  }
+
+  const cleanSubdomain = subdomain.toLowerCase().replace(/[^a-z0-9-]/g, '');
+
+  // 2. Check if subdomain taken
+  const { rows: existing } = await pool.query('SELECT id FROM tenants WHERE subdomain=$1', [cleanSubdomain]);
+  if (existing.length) return res.status(400).send('Subdomain already taken');
+
+  // 3. Create tenant with 14 day trial - THIS IS YOUR LINE
+  const { rows: tenantRows } = await pool.query(`
+    INSERT INTO tenants (name, subdomain, subscription_status, trial_ends_at, plan)
+    VALUES ($1, $2, 'trial', NOW() + INTERVAL '14 days', 'basic')
+    RETURNING id
+  `, [schoolName, cleanSubdomain]);
+
+  const tenantId = tenantRows[0].id;
+
+  // 4. Create admin user for that tenant
+  const hash = await bcrypt.hash(password, 10);
+  const { rows: userRows } = await pool.query(`
+    INSERT INTO users (email, password_hash, role, tenant_id, approved, verified)
+    VALUES ($1, $2, 'admin', $3, true, true)
+    RETURNING id, email, role, tenant_id
+  `, [email, hash, tenantId]);
+
+  // 5. Auto login
+  req.session.user = userRows[0];
+  res.redirect('/portal/dashboard');
+}));
 // Edit public page
 app.post('/portal/public/save', requireAuth, ah(async (req, res) => {
   const { about, contact, logo_url } = req.body;
@@ -1844,7 +2228,6 @@ app.get('/portal/admin/settings', requireAuth, requireRole('school_admin', 'org_
   const t = (await pool.query('SELECT * FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0];
   res.send(renderPage('Settings', `<div class="card"><h2>School Settings</h2><form method="POST" action="/portal/admin/settings"><label>School Name</label><input name="name" value="${esc(t.name)}" required><label>Tagline</label><input name="tagline" value="${esc(t.tagline || '')}"><label>About Us</label><textarea name="about_us">${esc(t.about_us || '')}</textarea><label>Contact Phone</label><input name="contact_phone" value="${esc(t.contact_phone || '')}"><label>Contact Email</label><input name="contact_email" value="${esc(t.contact_email || '')}"><label>Address</label><textarea name="address">${esc(t.address || '')}</textarea><h3>Public Site Options</h3><label><input type="checkbox" name="show_fees" ${t.show_fees ? 'checked' : ''}> Show Fees Page</label><label><input type="checkbox" name="show_results" ${t.show_results ? 'checked' : ''}> Show Results</label><label><input type="checkbox" name="show_gallery" ${t.show_gallery ? 'checked' : ''}> Show Gallery</label><label><input type="checkbox" name="show_news" ${t.show_news ? 'checked' : ''}> Show News</label><label><input type="checkbox" name="show_donate" ${t.show_donate ? 'checked' : ''}> Show Donate Button</label><button class="btn btn-green">Save Settings</button></form></div>`, req.session.user, 'admin'));
 }));
-
 app.post('/portal/admin/settings', requireAuth, requireRole('school_admin', 'org_admin', 'super_admin'), ah(async (req, res) => {
   const { name, tagline, about_us, contact_phone, contact_email, address, show_fees, show_results, show_gallery, show_news, show_donate } = req.body;
   await pool.query('UPDATE tenants SET name=$1,tagline=$2,about_us=$3,contact_phone=$4,contact_email=$5,address=$6,show_fees=$7,show_results=$8,show_gallery=$9,show_news=$10,show_donate=$11 WHERE id=$12', [name, tagline, about_us, contact_phone, contact_email, address, show_fees === 'on', show_results === 'on', show_gallery === 'on', show_news === 'on', show_donate === 'on', req.session.user.tenant_id]);
