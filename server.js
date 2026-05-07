@@ -291,9 +291,14 @@ function renderPage(title, content, user) {
     };
     nav = `<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:12px 20px;margin:0 0 24px 0"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><div><b>${esc(user.tenant_name)}</b> - ${esc(user.name)} ${user.verified ? '✅' : ''}</div><div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px">${Object.entries(portals).map(([k, v]) => `<a href="/portal/${k}" style="color:white;text-decoration:none">${v}</a>`).join('')}${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fef3c7;text-decoration:none;font-weight:bold">🔴 Dev</a>` : ''}<a href="/logout" style="color:white;text-decoration:none">Logout</a></div></div></div>`;
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><link rel="icon" href="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/favicon.png"><meta property="og:title" content="Ssewasswa - School Management"><meta property="og:image" content="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/og-image.jpg"><meta name="description" content="Run your school on your phone. Marks, fees, SMS to parents."><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b)}input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0;font-size:16px;min-height:44px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:20px;border-radius:16px;text-align:center}.stat-num{font-size:32px;font-weight:bold;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.badge{padding:6px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}</style></head><body>${nav}<div class="container">${content}</div></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><link rel="icon" href="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/favicon.png"><meta property="og:title" content="Ssewasswa - School Management"><meta property="og:image" content="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/og-image.jpg"><meta name="description" content="Run your school on your phone. Marks, fees, SMS to parents."><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b)}input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0;font-size:16px;min-height:44px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:20px;border-radius:16px;text-align:center}.stat-num{font-size:32px;font-weight:bold;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.badge{padding:6px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}
+  
+  /* Flash messages for Dev Master */
+  .alert{padding:1rem;margin:1rem 0;border-radius:12px;font-weight:600}
+  .alert-success{background:#d1fae5;color:#065f46;border:1px solid #10b981}
+  .alert-error{background:#fee2e2;color:#991b1b;border:1px solid #ef4444}
+  </style></head><body>${nav}<div class="container">${content}</div></body></html>`;
 }
-
 // === PUBLIC ROUTES ===
 app.get('/', ah(async (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); }));
 
@@ -414,6 +419,9 @@ app.post('/forgot-password', ah(async (req, res) => {
 
 // === DEVELOPER PORTAL ===
 app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
+  const flash = req.session.flash;
+  delete req.session.flash; // show once
+
   const stats = {
     tenants: (await pool.query('SELECT COUNT(*) as c FROM tenants')).rows[0].c,
     users: (await pool.query('SELECT COUNT(*) as c FROM users')).rows[0].c,
@@ -421,28 +429,88 @@ app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
     wallet: (await pool.query('SELECT balance FROM platform_wallet WHERE id=1')).rows[0]?.balance || 0
   };
   const tenants = (await pool.query('SELECT id,name,subdomain,type,wallet_balance,subscription_plan,verified FROM tenants ORDER BY created_at DESC LIMIT 50')).rows;
-  res.send(renderPage('Dev Master', `<div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>🔴 DEVELOPER MASTER CONTROL</h1></div><div class="stats"><div class="stat-card"><div class="stat-num">${stats.tenants}</div><div>Tenants</div></div><div class="stat-card"><div class="stat-num">${stats.users}</div><div>Users</div></div><div class="stat-card"><div class="stat-num">UGX ${Math.round(stats.revenue_30d).toLocaleString()}</div><div>30-Day Rev</div></div><div class="stat-card"><div class="stat-num">UGX ${stats.wallet.toLocaleString()}</div><div>Ready Withdraw</div></div></div><div class="card"><h2>Manual Controls</h2><form method="POST" action="/dev/execute"><select name="action" required><option value="">Action</option><option value="add_balance">Add Balance</option><option value="verify_tenant">Verify Tenant</option><option value="ban_user">Ban User</option><option value="delete_tenant">Delete Tenant</option><option value="withdraw_all">Withdraw All</option></select><input name="target_id" placeholder="ID" required><input name="amount" type="number" placeholder="Amount"><button class="btn btn-red">Execute</button></form></div><div class="card"><h2>Revenue Injection</h2><form method="POST" action="/dev/inject-revenue"><input name="amount" type="number" placeholder="Amount UGX" required><input name="source" placeholder="Source" required><button class="btn btn-green">Inject</button></form></div><div class="card"><h2>Auto-Scraper</h2><form method="POST" action="/dev/scrape"><input name="url" placeholder="URL to scrape" required><select name="type"><option value="news">News</option><option value="grants">Grants</option></select><button class="btn">Scrape</button></form></div><div class="card"><h2>All Tenants</h2><table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Verified</th><th>Action</th></tr>${tenants.map(t => `<tr><td>${t.id}</td><td>${esc(t.name)}</td><td>${t.type}</td><td>UGX ${t.wallet_balance.toLocaleString()}</td><td>${t.verified ? '✅' : '❌'}</td><td><a href="/dev/edit-tenant/${t.id}" class="btn">Edit</a></td></tr>`).join('')}</table></div>`, req.session.user));
+
+  const flashHtml = flash? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+
+  res.send(renderPage('Dev Master', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>🔴 DEVELOPER MASTER CONTROL</h1></div>
+    ${flashHtml}
+    <div class="stats">...` // rest of your HTML
+ , req.session.user));
 }));
 
+// === DEVELOPER ACTIONS ===
 app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
   const { action, target_id, amount } = req.body;
-  if (action === 'add_balance') await pool.query('UPDATE tenants SET wallet_balance=wallet_balance+$1 WHERE id=$2', [amount, target_id]);
-  if (action === 'verify_tenant') await pool.query('UPDATE tenants SET verified=true WHERE id=$1', [target_id]);
-  if (action === 'ban_user') await pool.query('UPDATE users SET approved=false WHERE id=$1', [target_id]);
-  if (action === 'delete_tenant') await pool.query('DELETE FROM tenants WHERE id=$1', [target_id]);
-  if (action === 'withdraw_all') {
-    const w = (await pool.query('SELECT balance FROM platform_wallet WHERE id=1')).rows[0].balance;
-    await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1');
-    await pool.query('INSERT INTO withdrawals(user_email,amount,net_amount,phone,status,ref)VALUES($1,$2,$3,$4,$5,$6)', [DEVELOPER_EMAIL, w, w, DEVELOPER_PHONE, 'paid', 'DEV' + Date.now()]);
+  let msg = '';
+
+  try {
+    switch(action) {
+      case 'add_balance':
+        if (!amount || amount <= 0) throw new Error('Invalid amount');
+        const bal = await pool.query(
+          'UPDATE tenants SET wallet_balance=wallet_balance+$1 WHERE id=$2 RETURNING name,wallet_balance',
+          [amount, target_id]
+        );
+        if (!bal.rowCount) throw new Error('Tenant not found');
+        msg = `Added UGX ${parseInt(amount).toLocaleString()} to ${bal.rows[0].name}. New balance: UGX ${bal.rows[0].wallet_balance.toLocaleString()}`;
+        break;
+
+      case 'verify_tenant':
+        const v = await pool.query('UPDATE tenants SET verified=true WHERE id=$1 RETURNING name', [target_id]);
+        if (!v.rowCount) throw new Error('Tenant not found');
+        msg = `Verified tenant: ${v.rows[0].name}`;
+        break;
+
+      case 'ban_user':
+        const b = await pool.query('UPDATE users SET approved=false WHERE id=$1 RETURNING email', [target_id]);
+        if (!b.rowCount) throw new Error('User not found');
+        msg = `Banned user: ${b.rows[0].email}`;
+        break;
+
+      case 'delete_tenant':
+        const d = await pool.query('DELETE FROM tenants WHERE id=$1 RETURNING name', [target_id]);
+        if (!d.rowCount) throw new Error('Tenant not found');
+        msg = `Deleted tenant: ${d.rows[0].name}`;
+        break;
+
+      case 'withdraw_all':
+        const w = (await pool.query('SELECT balance FROM platform_wallet WHERE id=1')).rows[0];
+        if (!w || w.balance <= 0) throw new Error('No balance to withdraw');
+        await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1');
+        await pool.query(
+          'INSERT INTO withdrawals(user_email,amount,net_amount,phone,status,ref) VALUES($1,$2,$3,$4,$5,$6)',
+          [DEVELOPER_EMAIL, w.balance, w.balance, DEVELOPER_PHONE, 'paid', 'DEV' + Date.now()]
+        );
+        await pool.query(
+          'INSERT INTO developer_revenue(amount,type) VALUES($1,$2)',
+          [-w.balance, 'withdrawal']
+        );
+        msg = `Withdrew UGX ${w.balance.toLocaleString()} to ${DEVELOPER_PHONE}`;
+        break;
+
+      default:
+        throw new Error('Invalid action');
+    }
+    req.session.flash = { type: 'success', msg };
+  } catch(e) {
+    req.session.flash = { type: 'error', msg: e.message };
   }
-  res.redirect('/dev/master?executed=1');
+
+  res.redirect('/dev/master');
 }));
 
 app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, res) => {
   const { amount, source } = req.body;
-  await pool.query('INSERT INTO developer_revenue(amount,type)VALUES($1,$2)', [amount, source]);
+  if (!amount || amount <= 0 ||!source) {
+    req.session.flash = { type: 'error', msg: 'Amount and source required' };
+    return res.redirect('/dev/master');
+  }
+
+  await pool.query('INSERT INTO developer_revenue(amount,type) VALUES($1,$2)', [amount, source]);
   await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amount]);
-  res.redirect('/dev/master?injected=1');
+  req.session.flash = { type: 'success', msg: `Injected UGX ${parseInt(amount).toLocaleString()} from ${esc(source)}` };
+  res.redirect('/dev/master');
 }));
 
 // === PORTAL ROUTES CONTINUED ===
