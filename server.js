@@ -754,6 +754,17 @@ app.post('/portal/finance/pay', requireAuth, ah(async (req, res) => {
   await pool.query('UPDATE fees SET paid=COALESCE(paid,0)+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, req.session.user.tenant_id]);
   res.redirect('/portal/finance');
 }));
+app.post('/portal/finance/pay', requireAuth, ah(async (req, res) => {
+  const { fee_id, amount } = req.body;
+  const fee = (await pool.query('UPDATE fees SET paid=COALESCE(paid,0)+$1 WHERE id=$2 AND tenant_id=$3 RETURNING *', [amount, fee_id, req.session.user.tenant_id])).rows[0];
+  if (fee) {
+    const balance = fee.amount - fee.paid;
+    const msg = `SSEWASSWA: UGX ${parseInt(amount).toLocaleString()} received for ${fee.student_name}. Balance: UGX ${balance.toLocaleString()}. Ref: FEE${fee.id}`;
+    await sendSMS(fee.phone, msg);
+    await logAction(req.session.user.id, req.session.user.tenant_id, 'fee_payment', { fee_id, amount }, req.ip);
+  }
+  res.redirect('/portal/finance');
+}));
 // === MARKETPLACE - SINGLE DEFINITION ===
 app.get('/portal/marketplace', requireAuth, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
@@ -790,7 +801,31 @@ app.post('/portal/marketplace/add', requireAuth, ah(async (req, res) => {
     [req.session.user.tenant_id, name, price, stock, image_url, category]);
   res.redirect('/portal/marketplace');
 }));
+app.get('/portal/finance/receipt/:id', requireAuth, ah(async (req, res) => {
+  const f = (await pool.query('SELECT f.*,t.name as school_name FROM fees f JOIN tenants t ON f.tenant_id=t.id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!f) return res.status(404).send('Receipt not found');
 
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Receipt-${f.id}.pdf"`);
+  doc.pipe(res);
+  doc.fontSize(20).text(f.school_name, { align: 'center' });
+  doc.fontSize(14).text('Payment Receipt', { align: 'center' }).moveDown();
+  doc.fontSize(12).text(`Receipt #: FEE${f.id}`);
+  doc.text(`Date: ${new Date().toDateString()}`).moveDown();
+  doc.text(`Student: ${f.student_name}`);
+  doc.text(`Class: ${f.student_class}`);
+  doc.text(`Amount Due: UGX ${f.amount.toLocaleString()}`);
+  doc.text(`Amount Paid: UGX ${f.paid.toLocaleString()}`);
+  doc.text(`Balance: UGX ${(f.amount-f.paid).toLocaleString()}`);
+  doc.text(`Phone: ${f.phone}`).moveDown();
+  doc.fontSize(10).text('Thank you for your payment.', { align: 'center' });
+  doc.end();
+}));
+
+// Add receipt button to finance ledger
+// In /portal/finance table, change the row to:
+${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name)}</td><td>${esc(f.student_class)}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone)}</td><td><a href="/portal/finance/receipt/${f.id}" class="btn">PDF</a></td></tr>`).join('')}
 // === PUBLIC SITE ===
 app.get('/portal/public', requireAuth, ah(async (req, res) => {
   const page = (await pool.query('SELECT * FROM public_pages WHERE tenant_id=$1', [req.session.user.tenant_id])).rows[0] || {};
@@ -911,6 +946,34 @@ app.post('/portal/marksheets/add', requireAuth, ah(async (req, res) => {
     [req.session.user.tenant_id, student_name, cls, subject, mark, term]);
   res.redirect('/portal/marksheets');
 }));
+app.get('/portal/marksheets/bulk', requireAuth, ah(async (req, res) => {
+  res.send(renderPage('Bulk Marks', `
+    <div class="card"><h3>Upload Marks CSV</h3>
+      <p>Format: Student Name,Class,Subject,Mark,Term</p>
+      <p>Example: John Doe,P.6,Math,85,1</p>
+      <form method="POST" action="/portal/marksheets/bulk" enctype="multipart/form-data">
+        <input type="file" name="csv" accept=".csv" required>
+        <button class="btn btn-green">Upload & Save</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/portal/marksheets/bulk', requireAuth, upload.single('csv'), ah(async (req, res) => {
+  const csv = req.file.buffer.toString();
+  const rows = csv.split('\n').slice(1).filter(r => r.trim());
+  let count = 0;
+  for (const row of rows) {
+    const [student_name, cls, subject, mark, term] = row.split(',').map(s => s.trim());
+    if (student_name && subject && mark) {
+      await pool.query('INSERT INTO marksheets(tenant_id,student_name,class,subject,mark,term)VALUES($1,$2,$3,$4,$5,$6)',
+        [req.session.user.tenant_id, student_name, cls, subject, mark, term]);
+      count++;
+    }
+  }
+  await logAction(req.session.user.id, req.session.user.tenant_id, 'bulk_marks', { count }, req.ip);
+  res.redirect('/portal/marksheets?imported=' + count);
+}));
 // === USSD ROUTE ===
 app.post('/ussd', ah(async (req, res) => {
   const { sessionId, serviceCode, phoneNumber, text } = req.body;
@@ -959,6 +1022,52 @@ app.post('/api/sync', requireAuth, ah(async (req, res) => {
     for (const a of data) await pool.query('INSERT INTO attendance(tenant_id,student_id,date,status,marked_by)VALUES($1,$2,$3,$4,$5)ON CONFLICT DO NOTHING', [a.tenant_id, a.student_id, a.date, a.status, a.marked_by]);
   }
   res.json({ ok: true, synced: data.length });
+}));
+app.get('/portal/gallery', requireAuth, ah(async (req, res) => {
+  const photos = (await pool.query('SELECT * FROM gallery WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id])).rows;
+  res.send(renderPage('Gallery', `
+    <div class="card"><h3>Upload Photo</h3>
+      <form method="POST" action="/portal/gallery/add" enctype="multipart/form-data">
+        <input type="file" name="image" accept="image/*" required>
+        <input name="caption" placeholder="Caption">
+        <button class="btn">Upload</button>
+      </form>
+    </div>
+    <div class="card"><h3>Gallery</h3>
+      <div class="grid">
+        ${photos.map(p=>`<div class="card"><img src="${p.image_url}" style="width:100%;height:200px;object-fit:cover;border-radius:12px"><p>${esc(p.caption)}</p></div>`).join('') || '<p>No photos yet.</p>'}
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/portal/gallery/add', requireAuth, upload.single('image'), ah(async (req, res) => {
+  const result = await new Promise((resolve, reject) => cloudinary.uploader.upload_stream({ folder: 'gallery' }, (e, r) => e? reject(e) : resolve(r)).end(req.file.buffer));
+  await pool.query('INSERT INTO gallery(tenant_id,image_url,caption)VALUES($1,$2,$3)', [req.session.user.tenant_id, result.secure_url, req.body.caption]);
+  res.redirect('/portal/gallery');
+}));
+
+// Update public page to show gallery
+app.get('/public/:subdomain', ah(async (req, res) => {
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.subdomain])).rows[0];
+  if (!tenant) return res.status(404).send('School not found');
+  const page = (await pool.query('SELECT * FROM public_pages WHERE tenant_id=$1', [tenant.id])).rows[0] || {};
+  const products = (await pool.query('SELECT * FROM marketplace_products WHERE tenant_id=$1 LIMIT 6', [tenant.id])).rows;
+  const news = (await pool.query('SELECT * FROM scraped_news WHERE tenant_id=$1 ORDER BY id DESC LIMIT 3', [tenant.id])).rows;
+  const gallery = (await pool.query('SELECT * FROM gallery WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 8', [tenant.id])).rows;
+
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(tenant.name)}</title><style>body{font-family:system-ui;margin:0;background:#f8fafc}.hero{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:60px 20px;text-align:center}.container{max-width:1200px;margin:0 auto;padding:20px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}.card{background:white;padding:20px;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}</style></head><body>
+    <div class="hero"><h1>${esc(tenant.name)}</h1><p>${tenant.verified?'✅ Verified School':''}</p></div>
+    <div class="container">
+      <div class="grid">
+        <div class="card"><h3>About Us</h3><p>${esc(page.about||'Welcome to our school.')}</p></div>
+        <div class="card"><h3>Contact</h3><p>${esc(page.contact||'Contact admin for details.')}</p></div>
+      </div>
+      ${gallery.length?`<h2>Gallery</h2><div class="grid">${gallery.map(g=>`<div class="card"><img src="${g.image_url}" style="width:100%;height:200px;object-fit:cover;border-radius:12px"><p>${esc(g.caption||'')}</p></div>`).join('')}</div>`:''}
+      ${products.length?`<h2>School Shop</h2><div class="grid">${products.map(p=>`<div class="card"><b>${esc(p.name)}</b><br>UGX ${parseInt(p.price).toLocaleString()}</div>`).join('')}</div>`:''}
+      ${news.length?`<h2>News</h2><div class="grid">${news.map(n=>`<div class="card"><b>${esc(n.title)}</b><p>${esc(n.content?.substring(0,100))}...</p></div>`).join('')}</div>`:''}
+    </div>
+  </body></html>`);
 }));
 // === API v2 - MOBILE ===
 app.post('/api/v2/auth/login', ah(async (req, res) => {
