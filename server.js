@@ -195,10 +195,9 @@ const requirePortal = (p) => (req, res, next) => {
 };
 
 const requireDeveloper = (req, res, next) => {
-  if (req.session?.user?.email!== DEVELOPER_EMAIL) return res.status(403).send('403');
+  if (req.session?.user?.role !== 'super_admin') return res.status(403).send('403');
   next();
 };
-
 function encrypt(text) {
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
