@@ -536,14 +536,23 @@ app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
 
 app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, res) => {
   const { amount, source } = req.body;
-  if (!amount || amount <= 0 ||!source) {
-    req.session.flash = { type: 'error', msg: 'Amount and source required' };
+  const amt = parseInt(amount);
+  
+  if (!amt || amt <= 0 || !source?.trim()) {
+    req.session.flash = { type: 'error', msg: 'Valid amount and source required' };
     return res.redirect('/dev/master');
   }
 
-  await pool.query('INSERT INTO developer_revenue(amount,type) VALUES($1,$2)', [amount, source]);
-  await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amount]);
-  req.session.flash = { type: 'success', msg: `Injected UGX ${parseInt(amount).toLocaleString()} from ${esc(source)}` };
+  await pool.query('BEGIN');
+  try {
+    await pool.query('INSERT INTO developer_revenue(amount,type) VALUES($1,$2)', [amt, source.trim()]);
+    await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amt]);
+    await pool.query('COMMIT');
+    req.session.flash = { type: 'success', msg: `Injected UGX ${amt.toLocaleString()} from ${esc(source)}` };
+  } catch(e) {
+    await pool.query('ROLLBACK');
+    req.session.flash = { type: 'error', msg: 'Injection failed: ' + e.message };
+  }
   res.redirect('/dev/master');
 }));
 
@@ -1197,38 +1206,35 @@ app.post('/dev/cache/flush', requireAuth, requireDeveloper, ah(async (req, res) 
 }));
 
 app.post('/dev/scrape', requireAuth, requireDeveloper, ah(async (req, res) => {
-  const { url, type } = req.body;
-  const { data } = await axios.get(url);
-  const $ = cheerio.load(data);
-  let count = 0;
-
-  if (type === 'news') {
-    const promises = [];
-    $('article,.news-item').each((i, el) => {
-      const title = $(el).find('h1,h2,h3').first().text().trim();
-      const summary = $(el).find('p').first().text().trim().substring(0, 200);
-      if (title) {
-        promises.push(pool.query('INSERT INTO news_articles(tenant_id,title,summary,published)VALUES($1,$2,$3,true)', [1, title, summary]));
-        count++;
-      }
-    });
-    await Promise.all(promises);
-  } else if (type === 'grants') {
-    const promises = [];
-    $('.opportunity,.grant').each((i, el) => {
-      const title = $(el).find('h2,h3').first().text().trim();
-      const desc = $(el).find('p').first().text().trim();
-      if (title) {
-        promises.push(pool.query('INSERT INTO fund_opportunities(tenant_id,title,summary,description,amount,currency,deadline,category,active)VALUES($1,$2,$3,$4,$5,$6,$7,$8,true)', [1, title, desc.substring(0, 200), desc, 10000, 'USD', new Date(Date.now() + 2592000000), 'General']));
-        count++;
-      }
-    });
-    await Promise.all(promises);
-  }
+  const { url, tenant_id } = req.body;
   
-  res.json({ ok: true, scraped: count });
-}));
+  if (!url?.startsWith('http')) {
+    req.session.flash = { type: 'error', msg: 'Valid URL required' };
+    return res.redirect('/dev/master');
+  }
 
+  try {
+    const response = await fetch(url);
+    const html = await response.text();
+    
+    // Dead simple scraper - grabs title + meta description + first image
+    const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || 'No title';
+    const desc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)?.[1] || 
+                 html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)?.[1] || '';
+    const img = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i)?.[1] || 
+                html.match(/<img[^>]*src=["']([^"']+)["']/i)?.[1] || '';
+
+    await pool.query(
+      'INSERT INTO scraped_news(url,title,content,image_url,tenant_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT (url) DO NOTHING',
+      [url, title.trim(), desc.trim(), img, tenant_id || null]
+    );
+    
+    req.session.flash = { type: 'success', msg: `Scraped: ${esc(title.substring(0,50))}...` };
+  } catch(e) {
+    req.session.flash = { type: 'error', msg: 'Scrape failed: ' + e.message };
+  }
+  res.redirect('/dev/master');
+}));
 // === CRON JOBS - AUTO TASKS ===
 // Daily 8am - SMS absent students
 cron.schedule('0 8 * * *', async () => {
