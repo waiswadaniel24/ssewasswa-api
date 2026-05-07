@@ -204,7 +204,12 @@ const requirePortal = (p) => (req, res, next) => {
   if (req.session.user.role === 'super_admin' || req.session.user.portals?.includes(p)) return next();
   res.status(403).send('403 Portal Access Denied');
 };
-
+const requireSuperAdmin = (req, res, next) => {
+  if (req.session.user?.email!== 'waiswadaniel24@gmail.com') { // CHANGE THIS
+    return res.status(403).send('Forbidden');
+  }
+  next();
+};
 const requireDeveloper = (req, res, next) => {
   if (req.session?.user?.role !== 'super_admin') return res.status(403).send('403');
   next();
@@ -1988,7 +1993,69 @@ app.post('/portal/admin/permissions/:id', requireAuth, requireRole('school_admin
   await pool.query('UPDATE users SET role=$1,portals=$2 WHERE id=$3 AND tenant_id=$4', [role, portalArray, req.params.id, req.session.user.tenant_id]);
   res.redirect('/portal/admin/permissions?updated=1');
 }));
+// --- SUPER ADMIN PANEL ---
+app.get('/portal/admin', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { rows: schools } = await pool.query(`
+    SELECT id, name, subdomain, subscription_status, plan, trial_ends_at, created_at,
+           (SELECT COUNT(*) FROM students s WHERE s.tenant_id = tenants.id) as student_count
+    FROM tenants ORDER BY created_at DESC
+  `);
 
+  const body = `
+    <div class="card">
+      <h2>Super Admin - All Schools</h2>
+      <table class="table">
+        <thead><tr><th>School</th><th>Subdomain</th><th>Plan</th><th>Status</th><th>Trial Ends</th><th>Students</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${schools.map(s => `
+            <tr>
+              <td>${esc(s.name)}</td>
+              <td>${esc(s.subdomain)}</td>
+              <td><span class="badge">${s.plan}</span></td>
+              <td><span class="badge ${s.subscription_status==='active'?'green':s.subscription_status==='trial'?'yellow':'red'}">${s.subscription_status}</span></td>
+              <td>${s.trial_ends_at? new Date(s.trial_ends_at).toLocaleDateString() : '-'}</td>
+              <td>${s.student_count}</td>
+              <td>
+                <form method="POST" action="/portal/admin/activate/${s.id}" style="display:inline">
+                  <button class="btn btn-sm btn-green">Activate</button>
+                </form>
+                <form method="POST" action="/portal/admin/cancel/${s.id}" style="display:inline">
+                  <button class="btn btn-sm btn-red">Cancel</button>
+                </form>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    <style>
+     .badge{padding:4px 8px;border-radius:4px;font-size:12px}
+     .badge.green{background:#10b981;color:#fff}
+     .badge.yellow{background:#f59e0b;color:#fff}
+     .badge.red{background:#ef4444;color:#fff}
+     .btn-sm{padding:4px 8px;font-size:12px;margin:2px}
+    </style>
+  `;
+  res.send(renderPage('Admin Panel', body, req.session.user));
+}));
+
+app.post('/portal/admin/activate/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query(`UPDATE tenants SET subscription_status='active', plan='premium', trial_ends_at=NULL WHERE id=$1`, [req.params.id]);
+  res.redirect('/portal/admin');
+}));
+
+app.post('/portal/admin/cancel/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query(`UPDATE tenants SET subscription_status='canceled' WHERE id=$1`, [req.params.id]);
+  res.redirect('/portal/admin');
+}));
+
+app.post('/portal/admin/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const id = req.params.id;
+  await pool.query('DELETE FROM students WHERE tenant_id=$1', [id]);
+  await pool.query('DELETE FROM users WHERE tenant_id=$1', [id]);
+  await pool.query('DELETE FROM tenants WHERE id=$1', [id]);
+  res.redirect('/portal/admin');
+}));
 // === AI PORTALS ===
 app.get('/portal/ai/chat', requireAuth, requirePortal('academics'), ah(async (req, res) => {
   res.send(renderPage('AI Assistant', `<div class="card"><h2>AI Teaching Assistant</h2><div id="chat" style="height:400px;overflow-y:auto;border:1px solid #e2e8f0;padding:12px;border-radius:12px;margin-bottom:12px"></div><form id="ai-form"><input id="ai-input" placeholder="Ask: Create lesson plan for Algebra..." style="width:calc(100% - 100px)"><button class="btn">Send</button></form></div><script>document.getElementById('ai-form').onsubmit=async(e)=>{e.preventDefault();const input=document.getElementById('ai-input');const chat=document.getElementById('chat');chat.innerHTML+='<p><b>You:</b> '+input.value+'</p>';const res=await fetch('/portal/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:input.value})});const data=await res.json();chat.innerHTML+='<p><b>AI:</b> '+data.reply+'</p>';input.value='';chat.scrollTop=chat.scrollHeight;};</script>`, req.session.user, 'academics'));
