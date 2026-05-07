@@ -37,6 +37,7 @@ dotenv.config();
 const { Pool } = pg;
 const PgSession = connectPgSimple(session);
 const app = express();
+app.set('trust proxy', 1); // ADD THIS LINE
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const pool = new Pool({
@@ -97,11 +98,16 @@ app.use('/webhook/', limiter);
 
 // v9.0: Redis Session Store
 app.use(session({
-  store: redis? new RedisStore({ client: redis }) : new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
+  store: redis ? new RedisStore({ client: redis }) : new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'default_session_secret_change_me',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000, secure: process.env.NODE_ENV === 'production' }
+  proxy: true, // ADD THIS
+  cookie: { 
+    maxAge: 30 * 24 * 60 * 60 * 1000, 
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax' // ADD THIS
+  }
 }));
 
 // --- CONSTANTS ---
