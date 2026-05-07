@@ -172,7 +172,18 @@ const requireAuth = (req, res, next) => {
   if (!req.session?.user) return res.redirect('/login');
   next();
 };
-
+const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 const requireJWT = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -529,6 +540,18 @@ app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
       </div>
     `, req.session.user));
   }
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 // === DEVELOPER ACTIONS ===
 app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
@@ -589,6 +612,18 @@ app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
   }
 
   res.redirect('/dev/master');
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, res) => {
@@ -611,6 +646,18 @@ app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, re
     req.session.flash = { type: 'error', msg: 'Injection failed: ' + e.message };
   }
   res.redirect('/dev/master');
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 // === SCHOOL PORTALS - DASHBOARD ===
 app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
@@ -628,11 +675,35 @@ app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
       </div>
     </div>
   `, req.session.user));
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // === ACADEMICS ===
 app.get('/portal/academics', requireAuth, ah(async (req, res) => {
   res.send(renderPage('Academics', `<div class="card"><h3>Academics</h3><p>Timetables, subjects, classes coming soon.</p></div>`, req.session.user));
+const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // === MARKSHEETS ===
@@ -656,6 +727,18 @@ app.get('/portal/marksheets', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.post('/portal/marksheets/add', requireAuth, ah(async (req, res) => {
@@ -663,6 +746,18 @@ app.post('/portal/marksheets/add', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO marksheets(tenant_id,student_name,class,subject,mark,term) VALUES($1,$2,$3,$4,$5,$6)',
     [req.session.user.tenant_id, student_name, cls, subject, mark, term]);
   res.redirect('/portal/marksheets');
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // === STUDENTS ===
@@ -683,12 +778,36 @@ app.get('/portal/students', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.post('/portal/students/add', requireAuth, ah(async (req, res) => {
   const { name, class: cls, parent_phone } = req.body;
   await pool.query('INSERT INTO students(tenant_id,name,class,parent_phone)VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, name, cls, parent_phone]);
   res.redirect('/portal/students');
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // === FINANCE - SINGLE DEFINITION ===
@@ -738,6 +857,18 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
@@ -747,6 +878,18 @@ app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO fees(tenant_id,student_id,student_name,student_class,amount,phone,paid) VALUES($1,$2,$3,$4,$5,$6,0)',
     [req.session.user.tenant_id, student_id, student.name, student.class, amount, phone]);
   res.redirect('/portal/finance');
+const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // SINGLE PAY ROUTE - WITH SMS
@@ -820,6 +963,18 @@ app.post('/portal/marketplace/add', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO marketplace_products(tenant_id,name,price,stock,image_url,category) VALUES($1,$2,$3,$4,$5,$6)',
     [req.session.user.tenant_id, name, price, stock, image_url, category]);
   res.redirect('/portal/marketplace');
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // === PUBLIC SITE ===
@@ -865,6 +1020,18 @@ app.get('/dev/seed', requireAuth, requireDeveloper, ah(async (req, res) => {
   await pool.query(`INSERT INTO users(name,email,password_hash,role,tenant_id,verified,approved) VALUES('Demo Admin','admin@kings.test',$1,'school_admin',$2,true,true)`, [await bcrypt.hash('demo123', 10), tid]);
   for (let i = 1; i <= 30; i++) await pool.query(`INSERT INTO students(tenant_id,name,class,parent_phone) VALUES($1,$2,$3,$4)`, [tid, `Student ${i}`, `P${Math.ceil(i / 10)}`, '+256700000000']);
   res.json({ ok: true, login: 'admin@kings.test / demo123' });
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // === DONOR PORTAL ACTIONS ===
@@ -873,11 +1040,35 @@ app.post('/portal/donors/create', requireAuth, requireRole('org_admin'), ah(asyn
   await pool.query('INSERT INTO fund_opportunities(tenant_id,title,summary,description,amount,currency,deadline,category,active)VALUES($1,$2,$3,$4,$5,$6,$7,$8,true)', [req.session.user.tenant_id, title, summary, description, amount, 'USD', deadline, category]);
   await logAction(req.session.user.id, req.session.user.tenant_id, 'create_opportunity', { title, amount }, req.ip);
   res.redirect('/portal/donors?created=1');
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.get('/portal/donors/approve/:id', requireAuth, requireRole('org_admin'), ah(async (req, res) => {
   await pool.query('UPDATE fund_applications SET status=$1 WHERE id=$2', ['approved', req.params.id]);
   res.redirect('/portal/donors?approved=1');
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // === PDF REPORTS ===
@@ -903,6 +1094,18 @@ app.get('/portal/reports/pdf/:student_id', requireAuth, ah(async (req, res) => {
   doc.fontSize(14).text(`Average: ${avg.toFixed(1)}%`, 50, y + 10);
   doc.fontSize(10).text('Computer generated document.', 50, 700);
   doc.end();
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 // === MARKSHEETS PORTAL ===
@@ -926,6 +1129,18 @@ app.get('/portal/marksheets', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.post('/portal/marksheets/add', requireAuth, ah(async (req, res) => {
@@ -945,6 +1160,18 @@ app.get('/portal/marksheets/bulk', requireAuth, ah(async (req, res) => {
       </form>
     </div>
   `, req.session.user));
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.post('/portal/marksheets/bulk', requireAuth, upload.single('csv'), ah(async (req, res) => {
@@ -961,6 +1188,18 @@ app.post('/portal/marksheets/bulk', requireAuth, upload.single('csv'), ah(async 
   }
   await logAction(req.session.user.id, req.session.user.tenant_id, 'bulk_marks', { count }, req.ip);
   res.redirect('/portal/marksheets?imported=' + count);
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 // === USSD ROUTE ===
 app.post('/ussd', ah(async (req, res) => {
@@ -1149,24 +1388,308 @@ app.post('/checkout', ah(async (req, res) => {
   req.session.cart = [];
   res.send(`<script>alert('Order placed! Ref: ${ref}. Check ${phone} to approve payment of UGX ${total.toLocaleString()}');window.location='/order/${ref}'</script>`);
 }));
+// === PARENT AUTH ===
+app.get('/portal/parent/login', (req, res) => {
+  res.send(renderPage('Parent Login', `
+    <div class="card" style="max-width:400px;margin:50px auto">
+      <h3>Parent Portal</h3>
+      <form method="POST" action="/portal/parent/send-otp">
+        <input name="phone" placeholder="Phone: 256..." required>
+        <button class="btn">Send OTP</button>
+      </form>
+    </div>
+  `, null, false));
+});
 
+app.post('/portal/parent/send-otp', ah(async (req, res) => {
+  const { phone } = req.body;
+  const tenant = await pool.query('SELECT id FROM tenants WHERE subdomain=$1', [req.subdomain || req.hostname.split('.')[0]]).rows[0];
+  if (!tenant) return res.status(404).send('School not found');
+
+  const students = (await pool.query('SELECT id FROM students WHERE tenant_id=$1 AND parent_phone=$2', [tenant.id, phone])).rows;
+  if (!students.length) return res.status(400).send('No student found with this phone');
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  await pool.query(`
+    INSERT INTO parent_users(tenant_id, phone, student_ids, otp, otp_expires)
+    VALUES($1,$2,$3,$4,NOW()+INTERVAL '10 min')
+    ON CONFLICT (tenant_id, phone) DO UPDATE SET otp=$4, otp_expires=NOW()+INTERVAL '10 min'
+  `, [tenant.id, phone, students.map(s=>s.id), otp]);
+
+  await sendSMS(phone, `SSEWASSWA Parent Portal OTP: ${otp}. Valid 10 min.`);
+  res.send(renderPage('Enter OTP', `
+    <div class="card" style="max-width:400px;margin:50px auto">
+      <h3>Enter OTP</h3>
+      <form method="POST" action="/portal/parent/verify-otp">
+        <input name="phone" type="hidden" value="${esc(phone)}">
+        <input name="otp" placeholder="6-digit OTP" required>
+        <button class="btn">Login</button>
+      </form>
+    </div>
+  `, null, false));
+}));
+
+app.post('/portal/parent/verify-otp', ah(async (req, res) => {
+  const { phone, otp } = req.body;
+  const tenant = await pool.query('SELECT id FROM tenants WHERE subdomain=$1', [req.subdomain || req.hostname.split('.')[0]]).rows[0];
+  const parent = (await pool.query('SELECT * FROM parent_users WHERE tenant_id=$1 AND phone=$2 AND otp=$3 AND otp_expires>NOW()', [tenant.id, phone, otp])).rows[0];
+  if (!parent) return res.status(400).send('Invalid or expired OTP');
+
+  req.session.parent = { id: parent.id, tenant_id: tenant.id, phone, student_ids: parent.student_ids };
+  await pool.query('UPDATE parent_users SET last_login=NOW(), otp=NULL WHERE id=$1', [parent.id]);
+  res.redirect('/portal/parent');
+}));
+
+const requireParent = (req, res, next) => {
+  if (!req.session.parent) return res.redirect('/portal/parent/login');
+  next();
+};
+
+app.get('/portal/parent', requireParent, ah(async (req, res) => {
+  const p = req.session.parent;
+  const students = (await pool.query('SELECT * FROM students WHERE id = ANY($1)', [p.student_ids])).rows;
+  const fees = (await pool.query('SELECT * FROM fees WHERE student_id = ANY($1) ORDER BY id DESC', [p.student_ids])).rows;
+  const school = (await pool.query('SELECT name FROM tenants WHERE id=$1', [p.tenant_id])).rows[0];
+
+  res.send(renderPage(`${school.name} - Parent`, `
+    <div class="card"><h3>My Children</h3>
+      ${students.map(s=>`<div><b>${esc(s.name)}</b> - ${esc(s.class)}</div>`).join('')}
+    </div>
+    <div class="card"><h3>Fee Balances</h3>
+      <table><tr><th>Student</th><th>Due</th><th>Paid</th><th>Balance</th><th>Action</th></tr>
+      ${fees.map(f=>`<tr><td>${esc(f.student_name)}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td><a href="/portal/parent/receipt/${f.id}" class="btn">Receipt</a></td></tr>`).join('')}
+      </table>
+    </div>
+  `, null, false));
+}));
+
+app.get('/portal/parent/receipt/:id', requireParent, ah(async (req, res) => {
+  const f = (await pool.query('SELECT f.*,t.name as school_name FROM fees f JOIN tenants t ON f.tenant_id=t.id WHERE f.id=$1 AND f.tenant_id=$2 AND f.student_id = ANY($3)',
+    [req.params.id, req.session.parent.tenant_id, req.session.parent.student_ids])).rows[0];
+  if (!f) return res.status(404).send('Receipt not found');
+  // same PDF code as staff route
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Receipt-${f.id}.pdf"`);
+  doc.pipe(res);
+  doc.fontSize(20).text(f.school_name, { align: 'center' });
+  doc.fontSize(14).text('Payment Receipt', { align: 'center' }).moveDown();
+  doc.fontSize(12).text(`Receipt #: FEE${f.id}`);
+  doc.text(`Date: ${new Date().toDateString()}`).moveDown();
+  doc.text(`Student: ${f.student_name}`);
+  doc.text(`Class: ${f.student_class}`);
+  doc.text(`Amount Due: UGX ${f.amount.toLocaleString()}`);
+  doc.text(`Amount Paid: UGX ${f.paid.toLocaleString()}`);
+  doc.text(`Balance: UGX ${(f.amount-f.paid).toLocaleString()}`);
+  doc.end();
+}));
+// === ATTENDANCE ===
+app.get('/portal/attendance', requireAuth, requireActiveSub, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const date = req.query.date || new Date().toISOString().slice(0,10);
+  const students = (await pool.query('SELECT id,name,class,parent_phone FROM students WHERE tenant_id=$1 ORDER BY class,name', [tid])).rows;
+  const records = (await pool.query('SELECT student_id,status FROM attendance WHERE tenant_id=$1 AND date=$2', [tid, date])).rows;
+  const map = Object.fromEntries(records.map(r=>[r.student_id, r.status]));
+
+  res.send(renderPage('Attendance', `
+    <div class="card"><h3>Mark Attendance - ${date}</h3>
+      <form method="GET"><input type="date" name="date" value="${date}" onchange="this.form.submit()"></form>
+      <form method="POST" action="/portal/attendance/save">
+        <input type="hidden" name="date" value="${date}">
+        <table><tr><th>Student</th><th>Class</th><th>Status</th></tr>
+        ${students.map(s=>`<tr>
+          <td>${esc(s.name)}</td><td>${esc(s.class)}</td>
+          <td>
+            <select name="status_${s.id}">
+              <option value="present" ${map[s.id]==='present'?'selected':''}>Present</option>
+              <option value="absent" ${map[s.id]==='absent'?'selected':''}>Absent</option>
+              <option value="late" ${map[s.id]==='late'?'selected':''}>Late</option>
+            </select>
+          </td>
+        </tr>`).join('')}
+        </table>
+        <button class="btn">Save & Notify Absentees</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/portal/attendance/save', requireAuth, requireActiveSub, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { date,...statuses } = req.body;
+  const toNotify = [];
+
+  for (const [key, status] of Object.entries(statuses)) {
+    const student_id = key.split('_')[1];
+    await pool.query(`
+      INSERT INTO attendance(tenant_id,student_id,date,status,marked_by) VALUES($1,$2,$3,$4,$5)
+      ON CONFLICT (tenant_id,student_id,date) DO UPDATE SET status=$4,marked_by=$5
+    `, [tid, student_id, date, status, req.session.user.id]);
+
+    if (status === 'absent') {
+      const s = (await pool.query('SELECT name,parent_phone FROM students WHERE id=$1', [student_id])).rows[0];
+      if (s?.parent_phone) toNotify.push({ phone: s.parent_phone, name: s.name });
+    }
+  }
+
+  // Queue SMS for absentees
+  for (const n of toNotify) {
+    await pool.query('INSERT INTO sms_queue(tenant_id,phone,message) VALUES($1,$2,$3)',
+      [tid, n.phone, `SSEWASSWA: ${n.name} was marked absent today ${date}. Reply 1 if you are aware.`]);
+  }
+  res.redirect(`/portal/attendance?date=${date}`);
+}));
+// === EXAMS ===
+app.get('/portal/exams', requireAuth, requireActiveSub, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const exams = (await pool.query('SELECT * FROM exams WHERE tenant_id=$1 ORDER BY id DESC', [tid])).rows;
+  res.send(renderPage('Exams', `
+    <div class="card"><h3>Create Exam</h3>
+      <form method="POST" action="/portal/exams/add">
+        <input name="name" placeholder="Mid Term 1 2026" required>
+        <input name="term" placeholder="Term 1">
+        <input name="year" type="number" placeholder="2026" required>
+        <button class="btn">Create</button>
+      </form>
+    </div>
+    <div class="card"><h3>Exam List</h3>
+      ${exams.map(e=>`<div><b>${esc(e.name)}</b> - <a href="/portal/exams/${e.id}/marks">Enter Marks</a> | <a href="/portal/exams/${e.id}/reports">Reports</a></div>`).join('') || 'No exams yet'}
+    </div>
+  `, req.session.user));
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
+}));
+
+app.post('/portal/exams/add', requireAuth, ah(async (req, res) => {
+  const { name, term, year } = req.body;
+  await pool.query('INSERT INTO exams(tenant_id,name,term,year) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, name, term, year]);
+  res.redirect('/portal/exams');
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
+}));
+
+app.get('/portal/exams/:id/reports/:student_id', requireAuth, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const exam = (await pool.query('SELECT * FROM exams WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  const student = (await pool.query('SELECT * FROM students WHERE id=$1 AND tenant_id=$2', [req.params.student_id, tid])).rows[0];
+  const marks = (await pool.query('SELECT * FROM marks WHERE exam_id=$1 AND student_id=$2', [req.params.id, req.params.student_id])).rows;
+  const school = (await pool.query('SELECT name FROM tenants WHERE id=$1', [tid])).rows[0];
+  if (!exam ||!student) return res.status(404).send('Not found');
+
+  const total = marks.reduce((s,m)=>s+m.score,0);
+  const avg = marks.length? (total/marks.length).toFixed(1) : 0;
+
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Report-${student.name}.pdf"`);
+  doc.pipe(res);
+  doc.fontSize(18).text(school.name, { align: 'center' });
+  doc.fontSize(14).text('Student Report Card', { align: 'center' }).moveDown();
+  doc.fontSize(12).text(`Name: ${student.name}`);
+  doc.text(`Class: ${student.class}`);
+  doc.text(`Exam: ${exam.name}`).moveDown();
+  doc.text('Subject Score Grade');
+  marks.forEach(m=> doc.text(`${m.subject.padEnd(16)} ${m.score} ${m.grade||''}`));
+  doc.moveDown().text(`Average: ${avg}%`);
+  doc.end();
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
+}));
+app.get('/portal/billing', requireAuth, ah(async (req, res) => {
+  const t = (await pool.query('SELECT * FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0];
+  res.send(renderPage('Billing', `
+    <div class="card"><h3>Subscription</h3>
+      <p>Status: <b>${t.subscription_status}</b></p>
+      <p>Plan: ${t.plan}</p>
+      ${t.subscription_status==='trial'?`<p>Trial ends: ${new Date(t.trial_ends_at).toDateString()}</p>`:''}
+      <p>UGX 50,000/month. Mobile Money: 077XXXXXX</p>
+      <p>After payment, send proof to support@ssewasswa.com</p>
+    </div>
+  `, req.session.user));
+}));
 // === MISSING ROUTES v6.0 ===
 app.get('/blog/:id', ah(async (req, res) => {
   const p = (await pool.query('SELECT n.*,t.name as author_name FROM news_articles n JOIN tenants t ON n.tenant_id=t.id WHERE n.id=$1 AND n.published=true', [req.params.id])).rows[0];
   if (!p) return res.status(404).send('Not found');
   await pool.query('UPDATE news_articles SET views=views+1 WHERE id=$1', [p.id]);
   res.send(renderPage(p.title, `<div class="card"><img src="${p.image_url}" style="width:100%;max-height:400px;object-fit:cover;border-radius:16px"><h1>${esc(p.title)}</h1><p style="color:#64748b;font-size:13px">By ${esc(p.author_name)} • ${new Date(p.created_at).toDateString()} • ${p.views} views</p><div style="margin:20px 0">${p.content}</div></div>`, null));
+const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.get('/order/:ref', ah(async (req, res) => {
   const o = (await pool.query('SELECT o.*,p.name as product_name FROM orders o JOIN products p ON o.product_id=p.id WHERE o.ref=$1', [req.params.ref])).rows[0];
   if (!o) return res.status(404).send('Order not found');
   res.send(renderPage('Order ' + o.ref, `<div class="card"><h2>Order #${esc(o.ref)}</h2><table><tr><td>Product:</td><td>${esc(o.product_name)}</td></tr><tr><td>Quantity:</td><td>${o.quantity}</td></tr><tr><td>Total:</td><td>UGX ${o.total.toLocaleString()}</td></tr><tr><td>Status:</td><td><span class="badge badge-${o.status === 'completed' ? 'green' : 'gold'}">${o.status}</span></td></tr><tr><td>Customer:</td><td>${esc(o.customer_name)}</td></tr><tr><td>Address:</td><td>${esc(o.address)}</td></tr></table></div>`, null));
+const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.get('/donate/recurring', requireAuth, ah(async (req, res) => {
   const opps = (await pool.query('SELECT id,title FROM fund_opportunities WHERE active=true')).rows;
   res.send(renderPage('Recurring Donations', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Set Up Monthly Donation</h2><form method="POST" action="/donate/recurring"><label>Amount (UGX)</label><input name="amount" type="number" min="5000" required><label>Frequency</label><select name="frequency" required><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option></select><label>To Opportunity</label><select name="opportunity_id" required>${opps.map(o => `<option value="${o.id}">${esc(o.title)}</option>`).join('')}</select><button class="btn btn-green" style="width:100%">Activate Recurring</button></form></div>`, req.session.user));
+const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.post('/donate/recurring', requireAuth, ah(async (req, res) => {
@@ -1193,6 +1716,18 @@ app.post('/reset-password/:token', ah(async (req, res) => {
   await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, r.user_id]);
   await pool.query('UPDATE password_resets SET used=true WHERE id=$1', [r.id]);
   res.send(`<script>alert('Password reset successful!');window.location='/login'</script>`);
+  const requireActiveSub = (req, res, next) => {
+  const t = req.session.user;
+  if (t.subscription_status === 'active' || (t.subscription_status === 'trial' && new Date(t.trial_ends_at) > new Date())) {
+    return next();
+  }
+  res.status(402).send(renderPage('Subscription Required', `
+    <div class="card"><h3>Subscription Expired</h3>
+      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
+    </div>
+  `, req.session.user));
+};
 }));
 
 app.get('/s/:subdomain/enroll', ah(async (req, res) => {
