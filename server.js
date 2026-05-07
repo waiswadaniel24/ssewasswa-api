@@ -200,7 +200,7 @@ const requireAuth = (req, res, next) => {
   next();
 };
 const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
+  const path = req.route.path;
 
   const { rows } = await pool.query(
     'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
@@ -211,19 +211,20 @@ const requireActiveSubDynamic = ah(async (req, res, next) => {
   if (!rows.length || rows[0].requires_subscription === false) return next();
 
   // Original paywall logic
-  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
+  const { rows: t } = await pool.query('SELECT subscription_status, trial_ends_at, plan FROM tenants WHERE id=$1', [req.session.user.tenant_id]);
   const sub = t[0];
+
   if (sub.subscription_status === 'active') return next();
   if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
-  return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
-});
-  res.status(402).send(renderPage('Subscription Required', `
+
+  // Block them - only ONE response
+  return res.status(402).send(renderPage('Subscription Required', `
     <div class="card"><h3>Subscription Expired</h3>
-      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
+      <p>Your ${sub.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
       <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
     </div>
   `, req.session.user));
-};
+});
 const requireJWT = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -233,7 +234,6 @@ const requireJWT = (req, res, next) => {
     req.user = user;
     next();
   });
-};
 
 const requireRole = (...r) => (req, res, next) => {
   if (!req.session?.user ||!r.includes(req.session.user.role)) return res.status(403).send('403');
