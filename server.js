@@ -432,7 +432,7 @@ app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
     const flashHtml = flash? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
 
     res.send(renderPage('Dev Master', `
-      <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>🔴 DEVELOPER MASTER CONTROL</h1></div>
+      <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:20px;border-radius:16px;margin-bottom:20px;color:white"><h1>🔴 DEVELOPER MASTER CONTROL</h1></div>
       ${flashHtml}
       <div class="stats">
         <div class="stat-card"><div class="stat-num">${tCount}</div><div>Tenants</div></div>
@@ -440,20 +440,41 @@ app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
         <div class="stat-card"><div class="stat-num">UGX ${parseInt(rev).toLocaleString()}</div><div>30-Day Rev</div></div>
         <div class="stat-card"><div class="stat-num">UGX ${parseInt(wal).toLocaleString()}</div><div>Ready Withdraw</div></div>
       </div>
-      <div class="card"><h3>Manual Controls</h3>
-        <form method="POST" action="/dev/execute">
-          <select name="action">
-            <option value="add_balance">Add Balance</option>
-            <option value="verify_tenant">Verify Tenant</option>
-            <option value="ban_user">Ban User</option>
-            <option value="delete_tenant">Delete Tenant</option>
-            <option value="withdraw_all">Withdraw All</option>
-          </select>
-          <input name="target_id" placeholder="ID" type="number">
-          <input name="amount" placeholder="Amount" type="number">
-          <button class="btn btn-red">Execute</button>
-        </form>
+
+      <div class="grid">
+        <div class="card"><h3>Manual Controls</h3>
+          <form method="POST" action="/dev/execute">
+            <select name="action" required>
+              <option value="">Select Action</option>
+              <option value="add_balance">Add Balance</option>
+              <option value="verify_tenant">Verify Tenant</option>
+              <option value="ban_user">Ban User</option>
+              <option value="delete_tenant">Delete Tenant</option>
+              <option value="withdraw_all">Withdraw All</option>
+            </select>
+            <input name="target_id" placeholder="Target ID" type="number">
+            <input name="amount" placeholder="Amount UGX" type="number">
+            <button class="btn btn-red">Execute</button>
+          </form>
+        </div>
+
+        <div class="card"><h3>Revenue Injection</h3>
+          <form method="POST" action="/dev/inject-revenue">
+            <input name="amount" placeholder="Amount UGX" type="number" required>
+            <input name="source" placeholder="Source: Grant, Ads, Sub" required>
+            <button class="btn btn-gold">Inject Revenue</button>
+          </form>
+        </div>
+
+        <div class="card"><h3>Auto-Scraper</h3>
+          <form method="POST" action="/dev/scrape">
+            <input name="url" placeholder="https://news-site.com/article" type="url" required>
+            <input name="tenant_id" placeholder="Tenant ID (optional)" type="number">
+            <button class="btn">Scrape & Save</button>
+          </form>
+        </div>
       </div>
+
       <div class="card"><h3>All Tenants</h3>
         <table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Verified</th></tr>
         ${tenants.map(t=>`<tr><td>${t.id}</td><td>${esc(t.name)}</td><td>${esc(t.type)}</td><td>UGX ${parseInt(t.wallet_balance).toLocaleString()}</td><td>${t.verified?'✅':'❌'}</td></tr>`).join('')}
@@ -472,7 +493,6 @@ app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
     `, req.session.user));
   }
 }));
-  //... rest of your render
 // === DEVELOPER ACTIONS ===
 app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
   const { action, target_id, amount } = req.body;
