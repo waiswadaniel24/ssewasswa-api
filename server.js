@@ -733,13 +733,12 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
       </div>
     </div>
     <div class="card"><h3>Fees Ledger</h3>
-      <table><tr><th>ID</th><th>Student</th><th>Class</th><th>Due</th><th>Paid</th><th>Balance</th><th>Phone</th></tr>
-      ${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name||f.linked_student||'')}</td><td>${esc(f.student_class||'')}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone||'')}</td></tr>`).join('')}
+      <table><tr><th>ID</th><th>Student</th><th>Class</th><th>Due</th><th>Paid</th><th>Balance</th><th>Phone</th><th>Action</th></tr>
+      ${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name||f.linked_student||'')}</td><td>${esc(f.student_class||'')}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone||'')}</td><td><a href="/portal/finance/receipt/${f.id}" class="btn">PDF</a></td></tr>`).join('')}
       </table>
     </div>
   `, req.session.user));
 }));
-
 app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
   const { student_id, amount, phone } = req.body;
   const student = (await pool.query('SELECT name,class FROM students WHERE id=$1 AND tenant_id=$2', [student_id, req.session.user.tenant_id])).rows[0];
