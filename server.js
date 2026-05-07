@@ -282,23 +282,60 @@ function renderPage(title, content, user) {
   user = user || null;
   let nav = '';
   if (user) {
-    const portals = user.tenant_type === 'organisation' ? {
-      dashboard: 'Dashboard', members: 'Members', finance: 'Finance', reports: 'Reports', projects: 'Projects', marketplace: 'Marketplace', public: 'Public Site', programs: 'Programs', news: 'News', ads: 'Adverts'
-    } : user.role === 'seller' ? {
-      seller: 'Seller Dashboard', orders: 'Orders', products: 'Products', wallet: 'Wallet', ads: 'Advertise', analytics: 'Analytics'
-    } : {
-      academics: 'Academics', stores: 'Stores', admin: 'Admin', papers: 'Papers', funds: 'Donors', reports: 'Marksheets', finance: 'Finance', marketplace: 'Marketplace', public: 'Public Site', programs: 'Programs', news: 'News', ads: 'Adverts', entertainment: 'Entertainment'
-    };
-    nav = `<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:12px 20px;margin:0 0 24px 0"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><div><b>${esc(user.tenant_name)}</b> - ${esc(user.name)} ${user.verified ? '✅' : ''}</div><div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px">${Object.entries(portals).map(([k, v]) => `<a href="/portal/${k}" style="color:white;text-decoration:none">${v}</a>`).join('')}${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fef3c7;text-decoration:none;font-weight:bold">🔴 Dev</a>` : ''}<a href="/logout" style="color:white;text-decoration:none">Logout</a></div></div></div>`;
+    // Define portals based on tenant_type and role
+    let portals = {};
+
+    if (user.tenant_type === 'organisation') {
+      portals = {
+        dashboard: 'Dashboard',
+        members: 'Members',
+        finance: 'Finance',
+        reports: 'Reports',
+        projects: 'Projects',
+        marketplace: 'Marketplace',
+        public: 'Public Site',
+        programs: 'Programs',
+        news: 'News',
+        ads: 'Adverts'
+      };
+    } else if (user.role === 'seller') {
+      portals = {
+        seller: 'Seller Dashboard',
+        orders: 'Orders',
+        products: 'Products',
+        wallet: 'Wallet',
+        ads: 'Advertise',
+        analytics: 'Analytics'
+      };
+    } else {
+      // Default: school
+      portals = {
+        dashboard: 'Dashboard',
+        academics: 'Academics',
+        marksheets: 'Marksheets',
+        finance: 'Finance',
+        marketplace: 'Marketplace',
+        public: 'Public Site',
+        admin: 'Admin',
+        news: 'News'
+      };
+    }
+
+    nav = `<div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:12px 20px;margin:0 0 24px 0">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div><b>${esc(user.tenant_name || 'Ssewasswa')}</b> - ${esc(user.name)} ${user.verified? '✅' : ''}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px">
+          ${Object.entries(portals).map(([k, v]) => `<a href="/portal/${k}" style="color:white;text-decoration:none">${v}</a>`).join('')}
+          ${user.role === 'super_admin'? `<a href="/dev/master" style="color:#fef3c7;text-decoration:none;font-weight:bold">🔴 Dev</a>` : ''}
+          <a href="/logout" style="color:white;text-decoration:none">Logout</a>
+        </div>
+      </div>
+    </div>`;
   }
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><link rel="icon" href="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/favicon.png"><meta property="og:title" content="Ssewasswa - School Management"><meta property="og:image" content="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/og-image.jpg"><meta name="description" content="Run your school on your phone. Marks, fees, SMS to parents."><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b)}input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0;font-size:16px;min-height:44px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:20px;border-radius:16px;text-align:center}.stat-num{font-size:32px;font-weight:bold;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.badge{padding:6px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}
-  
-  /* Flash messages for Dev Master */
-  .alert{padding:1rem;margin:1rem 0;border-radius:12px;font-weight:600}
-  .alert-success{background:#d1fae5;color:#065f46;border:1px solid #10b981}
-  .alert-error{background:#fee2e2;color:#991b1b;border:1px solid #ef4444}
-  </style></head><body>${nav}<div class="container">${content}</div></body></html>`;
+
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} - Ssewasswa</title><link rel="icon" href="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/favicon.png"><meta property="og:title" content="Ssewasswa - School Management"><meta property="og:image" content="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/og-image.jpg"><meta name="description" content="Run your school on your phone. Marks, fees, SMS to parents."><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b)}input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0;font-size:16px;min-height:44px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:20px;border-radius:16px;text-align:center}.stat-num{font-size:32px;font-weight:bold;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.badge{padding:6px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}.alert{padding:1rem;margin:1rem 0;border-radius:12px;font-weight:600}.alert-success{background:#d1fae5;color:#065f46;border:1px solid #10b981}.alert-error{background:#fee2e2;color:#991b1b;border:1px solid #ef4444}</style></head><body>${nav}<div class="container">${content}</div></body></html>`;
 }
+
 // === PUBLIC ROUTES ===
 app.get('/', ah(async (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); }));
 
@@ -575,96 +612,215 @@ app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, re
   }
   res.redirect('/dev/master');
 }));
-
-// === PORTAL ROUTES CONTINUED ===
-app.post('/portal/academics/marks', requireAuth, requirePortal('academics'), ah(async (req, res) => {
-  let marks = req.body.marks;
-  // Handle both JSON string and parsed object
-  if (typeof marks === 'string') {
-    try {
-      marks = JSON.parse(marks || '[]');
-    } catch (e) {
-      return res.status(400).json({ error: 'Invalid marks format' });
-    }
-  } else if (!marks) {
-    marks = [];
-  }
-
-  for (const m of marks) {
-    const grade = m.score >= 80 ? 'A' : m.score >= 70 ? 'B' : m.score >= 60 ? 'C' : m.score >= 50 ? 'D' : 'F';
-    await pool.query('INSERT INTO grades(tenant_id,student_id,subject,score,grade,term,teacher_id)VALUES($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, m.student_id, m.subject, m.score, grade, m.term, req.session.user.id]);
-  }
-  await logAction(req.session.user.id, req.session.user.tenant_id, 'enter_marks', { count: marks.length }, req.ip);
-  res.json({ ok: true, saved: marks.length });
+// === SCHOOL PORTALS - DASHBOARD ===
+app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
+  res.send(renderPage('Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:30px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Welcome, ${esc(req.session.user.name)}</h1>
+      <p>${esc(req.session.user.tenant_name)}</p>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Quick Actions</h3>
+        <a href="/portal/finance" class="btn">Manage Fees</a>
+        <a href="/portal/marksheets" class="btn">Enter Marks</a>
+        <a href="/portal/marketplace" class="btn">School Shop</a>
+        <a href="/portal/public" class="btn">Edit Website</a>
+      </div>
+    </div>
+  `, req.session.user));
 }));
 
-app.get('/portal/finance', requireAuth, requirePortal('finance'), ah(async (req, res) => {
-  const balance = (await pool.query('SELECT wallet_balance FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0].wallet_balance;
-  const pending = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM fees WHERE tenant_id=$1 AND paid=false', [req.session.user.tenant_id])).rows[0].t;
-  const collected = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM fees WHERE tenant_id=$1 AND paid=true', [req.session.user.tenant_id])).rows[0].t;
-  const trans = (await pool.query('SELECT * FROM transactions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [req.session.user.tenant_id])).rows;
-  res.send(renderPage('Finance', `<div class="stats"><div class="stat-card"><div class="stat-num">UGX ${balance.toLocaleString()}</div><div>Wallet Balance</div></div><div class="stat-card"><div class="stat-num">UGX ${pending.toLocaleString()}</div><div>Pending Fees</div></div><div class="stat-card"><div class="stat-num">UGX ${collected.toLocaleString()}</div><div>Collected</div></div></div><div class="card"><h2>Withdraw Funds</h2><form method="POST" action="/portal/finance/withdraw"><input name="amount" type="number" max="${balance}" placeholder="Amount" required><input name="phone" placeholder="MTN/Airtel Number" required><button class="btn btn-green">Withdraw</button></form></div><div class="card"><h3>Recent Transactions</h3><table><tr><th>Date</th><th>Payer</th><th>Amount</th><th>Purpose</th><th>Status</th></tr>${trans.map(t => `<tr><td>${new Date(t.created_at).toLocaleDateString()}</td><td>${esc(t.payer_name)}</td><td>UGX ${t.amount.toLocaleString()}</td><td>${t.purpose}</td><td><span class="badge ${t.status === 'completed' ? 'badge-green' : 'badge-gold'}">${t.status}</span></td></tr>`).join('')}</table></div>`, req.session.user));
+// === ACADEMICS ===
+app.get('/portal/academics', requireAuth, ah(async (req, res) => {
+  res.send(renderPage('Academics', `<div class="card"><h3>Academics</h3><p>Timetables, subjects, classes coming soon.</p></div>`, req.session.user));
 }));
 
-app.post('/portal/finance/withdraw', requireAuth, requirePortal('finance'), ah(async (req, res) => {
-  const { amount, phone } = req.body;
-  await pool.query('UPDATE tenants SET wallet_balance=wallet_balance-$1 WHERE id=$2', [amount, req.session.user.tenant_id]);
-  await pool.query('INSERT INTO withdrawals(tenant_id,amount,net_amount,phone,status,ref)VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, amount, amount, phone, 'pending', 'WD' + Date.now()]);
-  await logAction(req.session.user.id, req.session.user.tenant_id, 'withdraw', { amount, phone }, req.ip);
-  res.json({ ok: true, msg: 'Withdrawal requested' });
+// === MARKSHEETS ===
+app.get('/portal/marksheets', requireAuth, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const marks = (await pool.query('SELECT * FROM marksheets WHERE tenant_id=$1 ORDER BY id DESC LIMIT 200', [tid])).rows;
+  res.send(renderPage('Marksheets', `
+    <div class="card"><h3>Enter Marks</h3>
+      <form method="POST" action="/portal/marksheets/add">
+        <input name="student_name" placeholder="Student Name" required>
+        <input name="class" placeholder="Class: P.6" required>
+        <input name="subject" placeholder="Subject: Math" required>
+        <input name="mark" placeholder="Mark: 85" type="number" max="100" required>
+        <input name="term" placeholder="Term: 1" required>
+        <button class="btn">Save Mark</button>
+      </form>
+    </div>
+    <div class="card"><h3>Recent Marks</h3>
+      <table><tr><th>Student</th><th>Class</th><th>Subject</th><th>Mark</th><th>Term</th></tr>
+      ${marks.map(m=>`<tr><td>${esc(m.student_name)}</td><td>${esc(m.class)}</td><td>${esc(m.subject)}</td><td>${m.mark}</td><td>${esc(m.term)}</td></tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
 }));
 
-app.get('/portal/students', requireAuth, requirePortal('admin'), ah(async (req, res) => {
+app.post('/portal/marksheets/add', requireAuth, ah(async (req, res) => {
+  const { student_name, class: cls, subject, mark, term } = req.body;
+  await pool.query('INSERT INTO marksheets(tenant_id,student_name,class,subject,mark,term) VALUES($1,$2,$3,$4,$5,$6)',
+    [req.session.user.tenant_id, student_name, cls, subject, mark, term]);
+  res.redirect('/portal/marksheets');
+}));
+
+// === STUDENTS ===
+app.get('/portal/students', requireAuth, ah(async (req, res) => {
   const students = (await pool.query('SELECT * FROM students WHERE tenant_id=$1 ORDER BY name', [req.session.user.tenant_id])).rows;
-  res.send(renderPage('Students', `<div class="card"><h2>Add Student</h2><form method="POST" action="/portal/students/add"><input name="name" placeholder="Full Name" required><input name="class" placeholder="Class" required><input name="parent_phone" placeholder="Parent Phone" required><button class="btn">Add Student</button></form></div><div class="card"><h3>All Students (${students.length})</h3><table><tr><th>Name</th><th>Class</th><th>Parent</th><th>Balance</th><th>Actions</th></tr>${students.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.parent_phone)}</td><td>UGX ${s.balance.toLocaleString()}</td><td><a href="/portal/reports/pdf/${s.id}" class="btn">Report</a></td></tr>`).join('')}</table></div>`, req.session.user));
+  res.send(renderPage('Students', `
+    <div class="card"><h2>Add Student</h2>
+      <form method="POST" action="/portal/students/add">
+        <input name="name" placeholder="Full Name" required>
+        <input name="class" placeholder="Class" required>
+        <input name="parent_phone" placeholder="Parent Phone" required>
+        <button class="btn">Add Student</button>
+      </form>
+    </div>
+    <div class="card"><h3>All Students (${students.length})</h3>
+      <table><tr><th>Name</th><th>Class</th><th>Parent</th><th>Actions</th></tr>
+      ${students.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.class)}</td><td>${esc(s.parent_phone)}</td><td><a href="/portal/reports/pdf/${s.id}" class="btn">Report</a></td></tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
 }));
 
-app.post('/portal/students/add', requireAuth, requirePortal('admin'), ah(async (req, res) => {
+app.post('/portal/students/add', requireAuth, ah(async (req, res) => {
   const { name, class: cls, parent_phone } = req.body;
   await pool.query('INSERT INTO students(tenant_id,name,class,parent_phone)VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, name, cls, parent_phone]);
-  await logAction(req.session.user.id, req.session.user.tenant_id, 'add_student', { name }, req.ip);
-  res.redirect('/portal/students?added=1');
+  res.redirect('/portal/students');
 }));
 
-app.post('/portal/students/bulk', requireAuth, requirePortal('admin'), upload.single('csv'), ah(async (req, res) => {
-  const csv = req.file.buffer.toString();
-  const rows = csv.split('\n').slice(1);
-  let count = 0;
-  for (const row of rows) {
-    const [name, dob, gender, class_name, parent_phone] = row.split(',');
-    if (name) {
-      await pool.query('INSERT INTO students(tenant_id,name,dob,gender,class,parent_phone)VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, name.trim(), dob, gender, class_name, parent_phone]);
-      count++;
-    }
-  }
-  await logAction(req.session.user.id, req.session.user.tenant_id, 'bulk_import', { count }, req.ip);
-  res.json({ ok: true, imported: count });
+// === FINANCE - SINGLE DEFINITION ===
+app.get('/portal/finance', requireAuth, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const fees = (await pool.query('SELECT * FROM fees WHERE tenant_id=$1 ORDER BY id DESC LIMIT 100', [tid])).rows;
+  const totalDue = fees.reduce((s,f)=>s+(f.amount-f.paid),0);
+  const totalPaid = fees.reduce((s,f)=>s+f.paid,0);
+  res.send(renderPage('Finance', `
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">UGX ${totalDue.toLocaleString()}</div><div>Outstanding</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${totalPaid.toLocaleString()}</div><div>Collected</div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Add Fee</h3>
+        <form method="POST" action="/portal/finance/add">
+          <input name="student_name" placeholder="Student Name" required>
+          <input name="student_class" placeholder="Class: P.6" required>
+          <input name="amount" placeholder="Amount Due" type="number" required>
+          <input name="phone" placeholder="Parent Phone: 256..." required>
+          <button class="btn">Add Fee</button>
+        </form>
+      </div>
+      <div class="card"><h3>Record Payment</h3>
+        <form method="POST" action="/portal/finance/pay">
+          <input name="fee_id" placeholder="Fee ID" type="number" required>
+          <input name="amount" placeholder="Amount Paid" type="number" required>
+          <button class="btn btn-green">Record Payment</button>
+        </form>
+      </div>
+    <div class="card"><h3>Fees Ledger</h3>
+      <table><tr><th>ID</th><th>Student</th><th>Class</th><th>Due</th><th>Paid</th><th>Balance</th><th>Phone</th></tr>
+      ${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name)}</td><td>${esc(f.student_class)}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone)}</td></tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
 }));
 
-app.get('/portal/marketplace', requireAuth, requirePortal('marketplace'), ah(async (req, res) => {
-  const products = (await pool.query('SELECT * FROM products WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id])).rows;
-  const orders = (await pool.query('SELECT o.*,p.name as product_name FROM orders o JOIN products p ON o.product_id=p.id WHERE p.tenant_id=$1 ORDER BY o.created_at DESC LIMIT 20', [req.session.user.tenant_id])).rows;
-  res.send(renderPage('Marketplace', `<div class="card"><h2>Add Product</h2><form method="POST" action="/portal/marketplace/add" enctype="multipart/form-data"><input name="name" placeholder="Product Name" required><textarea name="description" placeholder="Description" required></textarea><input name="price" type="number" placeholder="Price UGX" required><input name="stock" type="number" placeholder="Stock" required><select name="category" required><option value="">Category</option><option>Uniforms</option><option>Books</option><option>Food</option><option>Stationery</option></select><input type="file" name="image" accept="image/*"><button class="btn btn-green">Add Product</button></form></div><div class="card"><h3>Your Products (${products.length})</h3><div class="grid">${products.map(p => `<div class="card"><img src="${p.image_url || '/img/default.jpg'}" style="width:100%;height:150px;object-fit:cover;border-radius:12px"><h4>${esc(p.name)}</h4><p>UGX ${p.price.toLocaleString()} • Stock: ${p.stock}</p><span class="badge ${p.approved ? 'badge-green' : 'badge-gold'}">${p.approved ? 'Approved' : 'Pending'}</span></div>`).join('')}</div></div><div class="card"><h3>Recent Orders</h3><table><tr><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th></tr>${orders.map(o => `<tr><td>${esc(o.product_name)}</td><td>${esc(o.customer_name)}</td><td>${o.quantity}</td><td>UGX ${o.total.toLocaleString()}</td><td><span class="badge badge-blue">${o.status}</span></td></tr>`).join('')}</table></div>`, req.session.user));
+app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
+  const { student_name, student_class, amount, phone } = req.body;
+  await pool.query('INSERT INTO fees(tenant_id,student_name,student_class,amount,phone) VALUES($1,$2,$3,$4,$5)',
+    [req.session.user.tenant_id, student_name, student_class, amount, phone]);
+  res.redirect('/portal/finance');
 }));
 
-app.post('/portal/marketplace/add', requireAuth, requirePortal('marketplace'), upload.single('image'), ah(async (req, res) => {
-  const { name, description, price, stock, category } = req.body;
-  let image_url = '';
-  if (req.file) {
-    const result = await new Promise((resolve, reject) => cloudinary.uploader.upload_stream({ folder: 'products' }, (e, r) => e ? reject(e) : resolve(r)).end(req.file.buffer));
-    image_url = result.secure_url;
-  }
-  await pool.query('INSERT INTO products(tenant_id,name,description,price,stock,category,image_url,approved)VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [req.session.user.tenant_id, name, description, price, stock, category, image_url, false]);
-  await logAction(req.session.user.id, req.session.user.tenant_id, 'add_product', { name, price }, req.ip);
-  res.redirect('/portal/marketplace?added=1');
+app.post('/portal/finance/pay', requireAuth, ah(async (req, res) => {
+  const { fee_id, amount } = req.body;
+  await pool.query('UPDATE fees SET paid=paid+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, req.session.user.tenant_id]);
+  res.redirect('/portal/finance');
 }));
 
-app.get('/portal/donors', requireAuth, requireRole('org_admin', 'donor'), ah(async (req, res) => {
-  const opps = (await pool.query('SELECT * FROM fund_opportunities WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id])).rows;
-  const apps = (await pool.query('SELECT a.*,f.title as opp_title,u.name as donor_name FROM fund_applications a JOIN fund_opportunities f ON a.opportunity_id=f.id JOIN users u ON a.donor_id=u.id WHERE f.tenant_id=$1 ORDER BY a.created_at DESC', [req.session.user.tenant_id])).rows;
-  res.send(renderPage('Donor Portal', `<div class="card"><h2>Create Funding Opportunity</h2><form method="POST" action="/portal/donors/create"><input name="title" placeholder="Title: Borehole Project" required><textarea name="summary" placeholder="Short summary" required></textarea><textarea name="description" placeholder="Full description" required></textarea><input name="amount" type="number" placeholder="Amount Needed USD" required><input name="deadline" type="date" required><select name="category" required><option value="">Category</option><option>Infrastructure</option><option>Education</option><option>Health</option><option>Agriculture</option></select><button class="btn btn-green">Post Opportunity</button></form></div><div class="card"><h3>Your Opportunities (${opps.length})</h3><table><tr><th>Title</th><th>Amount</th><th>Deadline</th><th>Applications</th></tr>${opps.map(o => `<tr><td>${esc(o.title)}</td><td>USD ${o.amount.toLocaleString()}</td><td>${new Date(o.deadline).toDateString()}</td><td>${apps.filter(a => a.opportunity_id === o.id).length}</td></tr>`).join('')}</table></div><div class="card"><h3>Donor Applications</h3><table><tr><th>Opportunity</th><th>Donor</th><th>Amount</th><th>Status</th><th>Action</th></tr>${apps.map(a => `<tr><td>${esc(a.opp_title)}</td><td>${esc(a.donor_name)}</td><td>USD ${a.amount.toLocaleString()}</td><td><span class="badge ${a.status === 'approved' ? 'badge-green' : 'badge-gold'}">${a.status}</span></td><td>${a.status === 'pending' ? `<a href="/portal/donors/approve/${a.id}" class="btn btn-green">Approve</a>` : ''}</td></tr>`).join('')}</table></div>`, req.session.user));
+// === MARKETPLACE - SINGLE DEFINITION ===
+app.get('/portal/marketplace', requireAuth, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const products = (await pool.query('SELECT * FROM marketplace_products WHERE tenant_id=$1 ORDER BY id DESC', [tid])).rows;
+  res.send(renderPage('Marketplace', `
+    <div class="card"><h3>Add Product</h3>
+      <form method="POST" action="/portal/marketplace/add">
+        <input name="name" placeholder="Uniform, Book, etc" required>
+        <input name="price" placeholder="Price UGX" type="number" required>
+        <input name="stock" placeholder="Stock Qty" type="number" required>
+        <input name="image_url" placeholder="Image URL">
+        <input name="category" placeholder="Category">
+        <button class="btn">Add Product</button>
+      </form>
+    </div>
+    <div class="card"><h3>Your Products</h3>
+      <div class="grid">
+        ${products.map(p=>`
+          <div class="card">
+            <b>${esc(p.name)}</b><br>
+            UGX ${parseInt(p.price).toLocaleString()}<br>
+            Stock: ${p.stock}<br>
+            <span class="badge">${esc(p.category||'General')}</span>
+          </div>
+        `).join('') || '<p>No products yet.</p>'}
+      </div>
+    </div>
+  `, req.session.user));
 }));
 
+app.post('/portal/marketplace/add', requireAuth, ah(async (req, res) => {
+  const { name, price, stock, image_url, category } = req.body;
+  await pool.query('INSERT INTO marketplace_products(tenant_id,name,price,stock,image_url,category) VALUES($1,$2,$3,$4,$5,$6)',
+    [req.session.user.tenant_id, name, price, stock, image_url, category]);
+  res.redirect('/portal/marketplace');
+}));
+
+// === PUBLIC SITE ===
+app.get('/portal/public', requireAuth, ah(async (req, res) => {
+  const page = (await pool.query('SELECT * FROM public_pages WHERE tenant_id=$1', [req.session.user.tenant_id])).rows[0] || {};
+  res.send(renderPage('Public Site', `
+    <div class="card"><h3>Edit Public Site</h3>
+      <form method="POST" action="/portal/public/save">
+        <label>About</label><textarea name="about" rows="4">${esc(page.about||'')}</textarea>
+        <label>Contact Info</label><textarea name="contact" rows="3">${esc(page.contact||'')}</textarea>
+        <label>Logo URL</label><input name="logo_url" value="${esc(page.logo_url||'')}">
+        <button class="btn">Save</button>
+      </form>
+      <br><a href="/public/${req.session.user.subdomain}" target="_blank" class="btn btn-green">View Live Site →</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/portal/public/save', requireAuth, ah(async (req, res) => {
+  const { about, contact, logo_url } = req.body;
+  await pool.query('INSERT INTO public_pages(tenant_id,about,contact,logo_url) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id) DO UPDATE SET about=$2,contact=$3,logo_url=$4,updated_at=NOW()',
+    [req.session.user.tenant_id, about, contact, logo_url]);
+  res.redirect('/portal/public');
+}));
+
+// === ADMIN ===
+app.get('/portal/admin', requireAuth, ah(async (req, res) => {
+  const users = (await pool.query('SELECT id,name,email,role FROM users WHERE tenant_id=$1', [req.session.user.tenant_id])).rows;
+  res.send(renderPage('Admin', `
+    <div class="card"><h3>Users</h3>
+      <table><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th></tr>
+      ${users.map(u=>`<tr><td>${u.id}</td><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${esc(u.role)}</td></tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+// === NEWS ===
+app.get('/portal/news', requireAuth, ah(async (req, res) => {
+  const news = (await pool.query('SELECT * FROM scraped_news WHERE tenant_id=$1 ORDER BY id DESC LIMIT 20', [req.session.user.tenant_id])).rows;
+  res.send(renderPage('News', `
+    <div class="card"><h3>School News</h3>
+      ${news.length? news.map(n=>`<div class="card"><b>${esc(n.title)}</b><p>${esc(n.content?.substring(0,200))}...</p><small>${n.created_at}</small></div>`).join('') : '<p>No news yet. Use Dev Master to scrape URLs.</p>'}
+    </div>
+  `, req.session.user));
+}));
 // === DEVELOPER SEED ROUTE ===
 app.get('/dev/seed', requireAuth, requireDeveloper, ah(async (req, res) => {
   const t = await pool.query(`INSERT INTO tenants(name,subdomain,type,status,subscription_plan) VALUES('Kings Primary Demo','kings','school','active','school_pro') RETURNING id`);
@@ -689,26 +845,35 @@ app.get('/portal/donors/approve/:id', requireAuth, requireRole('org_admin'), ah(
 
 // === PDF REPORTS ===
 app.get('/portal/reports/pdf/:student_id', requireAuth, requirePortal('reports'), ah(async (req, res) => {
-  const s = (await pool.query('SELECT s.*,t.name as school_name FROM students s JOIN tenants t ON s.tenant_id=t.id WHERE s.id=$1 AND s.tenant_id=$2', [req.params.student_id, req.session.user.tenant_id])).rows[0];
-  const grades = (await pool.query('SELECT * FROM grades WHERE student_id=$1 AND term=$2 ORDER BY subject', [s.id, req.query.term || '1'])).rows;
-  const avg = grades.reduce((sum, g) => sum + g.score, 0) / (grades.length || 1);
-  const doc = new PDFDocument({ size: 'A4', margin: 50 });
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${s.name}-Report.pdf"`);
-  doc.pipe(res);
-  doc.fontSize(20).text(s.school_name, { align: 'center' });
-  doc.fontSize(12).text('Academic Report Card', { align: 'center' }).moveDown();
-  doc.fontSize(14).text(`Name: ${s.name}`).text(`Class: ${s.class}`).text(`Term: ${req.query.term || '1'}`).moveDown();
-  let y = doc.y;
-  doc.text('Subject', 50, y).text('Score', 250, y).text('Grade', 350, y);
-  doc.moveTo(50, y + 15).lineTo(550, y + 15).stroke();
-  y += 25;
-  grades.forEach(g => { doc.text(g.subject, 50, y).text(g.score.toString(), 250, y).text(g.grade, 350, y); y += 20; });
-  doc.fontSize(14).text(`Average: ${avg.toFixed(1)}%`, 50, y + 10);
-  doc.fontSize(10).text('Computer generated document.', 50, 700);
-  doc.end();
+app.get('/portal/reports', requireAuth, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const marks = (await pool.query('SELECT * FROM marksheets WHERE tenant_id=$1 ORDER BY id DESC LIMIT 200', [tid])).rows;
+
+  res.send(renderPage('Marksheets', `
+    <div class="card"><h3>Enter Marks</h3>
+      <form method="POST" action="/portal/reports/add">
+        <input name="student_name" placeholder="Student Name" required>
+        <input name="class" placeholder="Class: P.6" required>
+        <input name="subject" placeholder="Subject: Math" required>
+        <input name="mark" placeholder="Mark: 85" type="number" max="100" required>
+        <input name="term" placeholder="Term: 1" required>
+        <button class="btn">Save Mark</button>
+      </form>
+    </div>
+    <div class="card"><h3>Recent Marks</h3>
+      <table><tr><th>Student</th><th>Class</th><th>Subject</th><th>Mark</th><th>Term</th></tr>
+      ${marks.map(m=>`<tr><td>${esc(m.student_name)}</td><td>${esc(m.class)}</td><td>${esc(m.subject)}</td><td>${m.mark}</td><td>${esc(m.term)}</td></tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
 }));
 
+app.post('/portal/reports/add', requireAuth, ah(async (req, res) => {
+  const { student_name, class: cls, subject, mark, term } = req.body;
+  await pool.query('INSERT INTO marksheets(tenant_id,student_name,class,subject,mark,term) VALUES($1,$2,$3,$4,$5,$6)',
+    [req.session.user.tenant_id, student_name, cls, subject, mark, term]);
+  res.redirect('/portal/reports');
+}));
 // === USSD ROUTE ===
 app.post('/ussd', ah(async (req, res) => {
   const { sessionId, serviceCode, phoneNumber, text } = req.body;
@@ -922,7 +1087,49 @@ app.get('/terms', (req, res) => res.send(renderPage('Terms', `
 <p>5. Uganda law applies. Disputes in Kampala courts.</p>
 </div>
 `, null)));
+app.get('/public/:subdomain', ah(async (req, res) => {
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.subdomain])).rows[0];
+  if (!tenant) return res.status(404).send('School not found');
 
+  const page = (await pool.query('SELECT * FROM public_pages WHERE tenant_id=$1', [tenant.id])).rows[0] || {};
+  const products = (await pool.query('SELECT * FROM marketplace_products WHERE tenant_id=$1 LIMIT 6', [tenant.id])).rows;
+  const news = (await pool.query('SELECT * FROM scraped_news WHERE tenant_id=$1 ORDER BY id DESC LIMIT 3', [tenant.id])).rows;
+
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(tenant.name)}</title><style>body{font-family:system-ui;margin:0;background:#f8fafc}.hero{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:60px 20px;text-align:center}.container{max-width:1200px;margin:0 auto;padding:20px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}.card{background:white;padding:20px;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}</style></head><body>
+    <div class="hero"><h1>${esc(tenant.name)}</h1><p>${tenant.verified?'✅ Verified School':''}</p></div>
+    <div class="container">
+      <div class="grid">
+        <div class="card"><h3>About Us</h3><p>${esc(page.about||'Welcome to our school.')}</p></div>
+        <div class="card"><h3>Contact</h3><p>${esc(page.contact||'Contact admin for details.')}</p></div>
+      </div>
+      ${products.length?`<h2>School Shop</h2><div class="grid">${products.map(p=>`<div class="card"><b>${esc(p.name)}</b><br>UGX ${parseInt(p.price).toLocaleString()}</div>`).join('')}</div>`:''}
+      ${news.length?`<h2>News</h2><div class="grid">${news.map(n=>`<div class="card"><b>${esc(n.title)}</b><p>${esc(n.content?.substring(0,100))}...</p></div>`).join('')}</div>`:''}
+    </div>
+  </body></html>`);
+}));
+
+// Edit public page
+app.post('/portal/public/save', requireAuth, ah(async (req, res) => {
+  const { about, contact, logo_url } = req.body;
+  await pool.query('INSERT INTO public_pages(tenant_id,about,contact,logo_url) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id) DO UPDATE SET about=$2,contact=$3,logo_url=$4,updated_at=NOW()',
+    [req.session.user.tenant_id, about, contact, logo_url]);
+  res.redirect('/portal/public');
+}));
+
+app.get('/portal/public', requireAuth, ah(async (req, res) => {
+  const page = (await pool.query('SELECT * FROM public_pages WHERE tenant_id=$1', [req.session.user.tenant_id])).rows[0] || {};
+  res.send(renderPage('Public Site', `
+    <div class="card"><h3>Edit Public Site</h3>
+      <form method="POST" action="/portal/public/save">
+        <label>About</label><textarea name="about" rows="4">${esc(page.about||'')}</textarea>
+        <label>Contact Info</label><textarea name="contact" rows="3">${esc(page.contact||'')}</textarea>
+        <label>Logo URL</label><input name="logo_url" value="${esc(page.logo_url||'')}">
+        <button class="btn">Save</button>
+      </form>
+      <br><a href="/public/${req.session.user.subdomain}" target="_blank" class="btn btn-green">View Live Site →</a>
+    </div>
+  `, req.session.user));
+}));
 app.get('/privacy', (req, res) => res.send(renderPage('Privacy Policy', `
 <div class="card"><h2>Privacy Policy - Ssewasswa</h2>
 <p><b>Data we collect:</b> Student names, marks, parent phone numbers for SMS.</p>
