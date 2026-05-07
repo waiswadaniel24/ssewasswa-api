@@ -738,7 +738,7 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
-}));
+})); // LINE 839 SHOULD BE THIS ONE - ONLY ONE
 
 app.post('/portal/finance/add', requireAuth, ah(async (req, res) => {
   const { student_id, amount, phone } = req.body;
