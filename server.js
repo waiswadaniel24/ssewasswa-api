@@ -838,9 +838,6 @@ app.post('/portal/marketplace/add', requireAuth, ah(async (req, res) => {
   doc.end();
 }));
 
-// Add receipt button to finance ledger
-// In /portal/finance table, change the row to:
-${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name)}</td><td>${esc(f.student_class)}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone)}</td><td><a href="/portal/finance/receipt/${f.id}" class="btn">PDF</a></td></tr>`).join('')}
 // === PUBLIC SITE ===
 app.get('/portal/public', requireAuth, ah(async (req, res) => {
   const page = (await pool.query('SELECT * FROM public_pages WHERE tenant_id=$1', [req.session.user.tenant_id])).rows[0] || {};
