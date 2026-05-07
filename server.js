@@ -1371,103 +1371,82 @@ await c.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_plan TE
 }
 
 // === TEMP ADMIN RESET - DELETE AFTER USE ===
-// WARNING: This route DELETES your Users and Tenants table and recreates them.
-app.get('/dev/reset-admin-now-delete-me', async (req, res) => {
-  try {
-    console.log('--- NUCLEAR RESET STARTING ---');
-    
-    // 1. CLEAN SLATE: Drop existing tables to clear any corruption
-    console.log('Dropping tables...');
-    await pool.query('DROP TABLE IF EXISTS users CASCADE');
-    await pool.query('DROP TABLE IF EXISTS tenants CASCADE');
+// WARNING: DELETES ALL DATA
+app.get('/dev/reset-admin-now-delete-me', ah(async (req, res) => {
+  console.log('--- NUCLEAR RESET STARTING ---');
 
-    // 2. RECREATE TABLES (Exact schema from initDB)
-    console.log('Recreating tables...');
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tenants (
-        id SERIAL PRIMARY KEY, 
-        name TEXT, 
-        subdomain TEXT UNIQUE, 
-        type TEXT DEFAULT 'school', 
-        description TEXT, 
-        gateway TEXT DEFAULT 'mtn', 
-        momo_number_encrypted TEXT, 
-        momo_name TEXT, 
-        bank_name TEXT, 
-        bank_account TEXT, 
-        wallet_balance INTEGER DEFAULT 0, 
-        status TEXT DEFAULT 'active', 
-        subscription_plan TEXT DEFAULT 'school_free', 
-        subscription_status TEXT DEFAULT 'trial', 
-        verified BOOLEAN DEFAULT false, 
-        features_enabled JSONB DEFAULT '{"dashboard":true,"finance":true,"academics":true,"ai_chatbot":false,"ussd_gateway":false,"offline_sync":false}', 
-        social_links JSONB DEFAULT '{}', 
-        about_us TEXT, 
-        tagline TEXT, 
-        show_fees BOOLEAN DEFAULT true, 
-        show_results BOOLEAN DEFAULT false, 
-        show_gallery BOOLEAN DEFAULT true, 
-        show_news BOOLEAN DEFAULT true, 
-        show_donate BOOLEAN DEFAULT true, 
-        contact_phone TEXT, 
-        contact_email TEXT, 
-        address TEXT, 
-        allow_marketplace BOOLEAN DEFAULT true, 
-        seller_commission INT DEFAULT 10, 
-        featured_until TIMESTAMPTZ, 
-        country_code TEXT DEFAULT 'UG', 
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
+  await pool.query('DROP TABLE IF EXISTS users CASCADE');
+  await pool.query('DROP TABLE IF EXISTS tenants CASCADE');
 
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY, 
-        tenant_id INT, 
-        email TEXT UNIQUE, 
-        password_hash TEXT, 
-        role TEXT, 
-        portals TEXT[], 
-        name TEXT, 
-        phone_encrypted TEXT, 
-        approved BOOLEAN DEFAULT false, 
-        verified BOOLEAN DEFAULT false, 
-        two_fa_enabled BOOLEAN DEFAULT false, 
-        wallet_balance INTEGER DEFAULT 0, 
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
+  await pool.query(`
+    CREATE TABLE tenants (
+      id SERIAL PRIMARY KEY,
+      name TEXT,
+      subdomain TEXT UNIQUE,
+      type TEXT DEFAULT 'school',
+      description TEXT,
+      gateway TEXT DEFAULT 'mtn',
+      momo_number_encrypted TEXT,
+      momo_name TEXT,
+      bank_name TEXT,
+      bank_account TEXT,
+      wallet_balance INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',
+      subscription_plan TEXT DEFAULT 'school_free',
+      subscription_status TEXT DEFAULT 'trial',
+      verified BOOLEAN DEFAULT false,
+      features_enabled JSONB DEFAULT '{"dashboard":true,"finance":true,"academics":true}',
+      social_links JSONB DEFAULT '{}',
+      about_us TEXT,
+      tagline TEXT,
+      show_fees BOOLEAN DEFAULT true,
+      show_results BOOLEAN DEFAULT false,
+      show_gallery BOOLEAN DEFAULT true,
+      show_news BOOLEAN DEFAULT true,
+      show_donate BOOLEAN DEFAULT true,
+      contact_phone TEXT,
+      contact_email TEXT,
+      address TEXT,
+      allow_marketplace BOOLEAN DEFAULT true,
+      seller_commission INT DEFAULT 10,
+      featured_until TIMESTAMPTZ,
+      country_code TEXT DEFAULT 'UG',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 
-    // 3. INSERT ADMIN DATA
-    console.log('Creating Admin User...');
-    const hash = await bcrypt.hash('admin123', 10);
-    const adminEmail = 'waiswadaniel24@gmail.com';
+  await pool.query(`
+    CREATE TABLE users (
+      id SERIAL PRIMARY KEY,
+      tenant_id INT,
+      email TEXT UNIQUE,
+      password_hash TEXT,
+      role TEXT,
+      portals TEXT[],
+      name TEXT,
+      phone_encrypted TEXT,
+      approved BOOLEAN DEFAULT false,
+      verified BOOLEAN DEFAULT false,
+      two_fa_enabled BOOLEAN DEFAULT false,
+      wallet_balance INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 
-    // Insert Tenant
-    const tenantResult = await pool.query(
-      'INSERT INTO tenants (name, subdomain, type, status, subscription_plan) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      ['SSEWASSWA HQ', 'hq', 'school', 'active', 'enterprise']
-    );
-    const tenantId = tenantResult.rows[0].id;
+  const hash = await bcrypt.hash('admin123', 10);
 
-    // Insert User
-    await pool.query(
-      'INSERT INTO users (email, password_hash, role, tenant_id, approved, name) VALUES ($1, $2, $3, $4, $5, $6)',
-      [adminEmail, hash, 'super_admin', tenantId, true, 'Super Admin']
-    );
+  const tenantResult = await pool.query(
+    'INSERT INTO tenants (name, subdomain, type, status, subscription_plan) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+    ['SSEWASSWA HQ', 'hq', 'school', 'active', 'enterprise']
+  );
 
-    console.log('--- RESET COMPLETE ---');
-    res.send('✅ SYSTEM RESET: Tables recreated and Admin User created.<br>Email: ' + adminEmail + '<br>Password: admin123');
-  } catch (e) {
-    console.error('--- RESET FAILED ---');
-    console.error(e);
-    res.status(500).json({ 
-      error: e.message, 
-      detail: e.detail,
-      hint: "Check logs for SQL details" 
-    });
-  }
-});
+  await pool.query(
+    'INSERT INTO users (email, password_hash, role, tenant_id, approved, verified, name) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    ['waiswadaniel24@gmail.com', hash, 'super_admin', tenantResult.rows[0].id, true, true, 'Super Admin']
+  );
+
+  res.send('✅ NUCLEAR RESET DONE: waiswadaniel24@gmail.com / admin123');
+}));
 // === START SERVER ===
 initDB().then(() => {
   app.listen(PORT, () => {
