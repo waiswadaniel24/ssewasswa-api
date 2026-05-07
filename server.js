@@ -84,10 +84,8 @@ import cron from 'node-cron';
 cron.schedule('0 0 * * *', async () => {
   try {
     const { rows } = await pool.query(`
-      UPDATE tenants
-      SET subscription_status = 'canceled'
-      WHERE subscription_status = 'trial'
-      AND trial_ends_at < NOW()
+      UPDATE tenants SET subscription_status='canceled' 
+      WHERE subscription_status='trial' AND trial_ends_at < NOW()
       RETURNING id, name
     `);
     if (rows.length) console.log(`Locked ${rows.length} expired schools`);
