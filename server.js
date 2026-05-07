@@ -731,6 +731,7 @@ app.get('/portal/finance', requireAuth, ah(async (req, res) => {
           <button class="btn btn-green">Record Payment</button>
         </form>
       </div>
+    </div>
     <div class="card"><h3>Fees Ledger</h3>
       <table><tr><th>ID</th><th>Student</th><th>Class</th><th>Due</th><th>Paid</th><th>Balance</th><th>Phone</th><th>Action</th></tr>
       ${fees.map(f=>`<tr><td>${f.id}</td><td>${esc(f.student_name||f.linked_student||'')}</td><td>${esc(f.student_class||'')}</td><td>${f.amount}</td><td>${f.paid}</td><td>${f.amount-f.paid}</td><td>${esc(f.phone||'')}</td><td><a href="/portal/finance/receipt/${f.id}" class="btn">PDF</a></td></tr>`).join('')}
