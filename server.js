@@ -420,25 +420,23 @@ app.post('/forgot-password', ah(async (req, res) => {
 // === DEVELOPER PORTAL ===
 app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
   const flash = req.session.flash;
-  delete req.session.flash; // show once
+  delete req.session.flash;
 
-  const stats = {
-    tenants: (await pool.query('SELECT COUNT(*) as c FROM tenants')).rows[0].c,
-    users: (await pool.query('SELECT COUNT(*) as c FROM users')).rows[0].c,
-    revenue_30d: (await pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`)).rows[0].t,
-    wallet: (await pool.query('SELECT balance FROM platform_wallet WHERE id=1')).rows[0]?.balance || 0
-  };
-  const tenants = (await pool.query('SELECT id,name,subdomain,type,wallet_balance,subscription_plan,verified FROM tenants ORDER BY created_at DESC LIMIT 50')).rows;
+  // Safe queries with defaults
+  const statsQuery = await pool.query(`
+    SELECT
+      (SELECT COUNT(*) FROM tenants) as tenants,
+      (SELECT COUNT(*) FROM users) as users,
+      (SELECT COALESCE(SUM(amount),0) FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days') as revenue_30d,
+      (SELECT COALESCE(balance,0) FROM platform_wallet WHERE id=1) as wallet
+  `);
+
+  const stats = statsQuery.rows[0];
+  const tenants = (await pool.query('SELECT id,name,subdomain,type,COALESCE(wallet_balance,0) as wallet_balance,subscription_plan,verified FROM tenants ORDER BY created_at DESC LIMIT 50')).rows;
 
   const flashHtml = flash? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
 
-  res.send(renderPage('Dev Master', `
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>🔴 DEVELOPER MASTER CONTROL</h1></div>
-    ${flashHtml}
-    <div class="stats">...` // rest of your HTML
- , req.session.user));
-}));
-
+  //... rest of your render
 // === DEVELOPER ACTIONS ===
 app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
   const { action, target_id, amount } = req.body;
