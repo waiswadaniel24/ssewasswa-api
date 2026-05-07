@@ -44,7 +44,22 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL.includes('localhost')? false : { rejectUnauthorized: false }
 });
-
+// Auto-run migrations on boot
+const runMigrations = async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE tenants 
+      ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'trial',
+      ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '14 days',
+      ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'basic',
+      ADD COLUMN IF NOT EXISTS custom_domain TEXT;
+    `);
+    console.log('Migrations OK');
+  } catch (e) {
+    console.error('Migration failed:', e.message);
+  }
+};
+runMigrations();
 // Force disabled to prevent connection errors
 const redis = null; 
 
@@ -64,18 +79,21 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_KEY,
   api_secret: process.env.CLOUDINARY_SECRET
 });
-// Run once per day at midnight
-const cron = require('node-cron'); // npm i node-cron
+import cron from 'node-cron';
 
 cron.schedule('0 0 * * *', async () => {
-  const { rows } = await pool.query(`
-    UPDATE tenants
-    SET subscription_status = 'canceled'
-    WHERE subscription_status = 'trial'
-    AND trial_ends_at < NOW()
-    RETURNING id, name
-  `);
-  if (rows.length) console.log(`Locked ${rows.length} expired schools`);
+  try {
+    const { rows } = await pool.query(`
+      UPDATE tenants
+      SET subscription_status = 'canceled'
+      WHERE subscription_status = 'trial'
+      AND trial_ends_at < NOW()
+      RETURNING id, name
+    `);
+    if (rows.length) console.log(`Locked ${rows.length} expired schools`);
+  } catch (e) {
+    console.error('Cron error:', e.message);
+  }
 });
 const transporter = nodemailer.createTransport({
   service: 'gmail',
