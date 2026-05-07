@@ -844,14 +844,37 @@ app.get('/portal/donors/approve/:id', requireAuth, requireRole('org_admin'), ah(
 }));
 
 // === PDF REPORTS ===
-app.get('/portal/reports/pdf/:student_id', requireAuth, requirePortal('reports'), ah(async (req, res) => {
-app.get('/portal/reports', requireAuth, ah(async (req, res) => {
+app.get('/portal/reports/pdf/:student_id', requireAuth, ah(async (req, res) => {
+  const s = (await pool.query('SELECT s.*,t.name as school_name FROM students s JOIN tenants t ON s.tenant_id=t.id WHERE s.id=$1 AND s.tenant_id=$2', [req.params.student_id, req.session.user.tenant_id])).rows[0];
+  if (!s) return res.status(404).send('Student not found');
+
+  const grades = (await pool.query('SELECT * FROM grades WHERE student_id=$1 AND term=$2 ORDER BY subject', [s.id, req.query.term || '1'])).rows;
+  const avg = grades.length? grades.reduce((sum, g) => sum + g.score, 0) / grades.length : 0;
+
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${s.name}-Report.pdf"`);
+  doc.pipe(res);
+  doc.fontSize(20).text(s.school_name, { align: 'center' });
+  doc.fontSize(12).text('Academic Report Card', { align: 'center' }).moveDown();
+  doc.fontSize(14).text(`Name: ${s.name}`).text(`Class: ${s.class}`).text(`Term: ${req.query.term || '1'}`).moveDown();
+  let y = doc.y;
+  doc.text('Subject', 50, y).text('Score', 250, y).text('Grade', 350, y);
+  doc.moveTo(50, y + 15).lineTo(550, y + 15).stroke();
+  y += 25;
+  grades.forEach(g => { doc.text(g.subject, 50, y).text(g.score.toString(), 250, y).text(g.grade, 350, y); y += 20; });
+  doc.fontSize(14).text(`Average: ${avg.toFixed(1)}%`, 50, y + 10);
+  doc.fontSize(10).text('Computer generated document.', 50, 700);
+  doc.end();
+}));
+
+// === MARKSHEETS PORTAL ===
+app.get('/portal/marksheets', requireAuth, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const marks = (await pool.query('SELECT * FROM marksheets WHERE tenant_id=$1 ORDER BY id DESC LIMIT 200', [tid])).rows;
-
   res.send(renderPage('Marksheets', `
     <div class="card"><h3>Enter Marks</h3>
-      <form method="POST" action="/portal/reports/add">
+      <form method="POST" action="/portal/marksheets/add">
         <input name="student_name" placeholder="Student Name" required>
         <input name="class" placeholder="Class: P.6" required>
         <input name="subject" placeholder="Subject: Math" required>
@@ -868,11 +891,11 @@ app.get('/portal/reports', requireAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/portal/reports/add', requireAuth, ah(async (req, res) => {
+app.post('/portal/marksheets/add', requireAuth, ah(async (req, res) => {
   const { student_name, class: cls, subject, mark, term } = req.body;
   await pool.query('INSERT INTO marksheets(tenant_id,student_name,class,subject,mark,term) VALUES($1,$2,$3,$4,$5,$6)',
     [req.session.user.tenant_id, student_name, cls, subject, mark, term]);
-  res.redirect('/portal/reports');
+  res.redirect('/portal/marksheets');
 }));
 // === USSD ROUTE ===
 app.post('/ussd', ah(async (req, res) => {
