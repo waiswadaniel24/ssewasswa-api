@@ -419,23 +419,59 @@ app.post('/forgot-password', ah(async (req, res) => {
 
 // === DEVELOPER PORTAL ===
 app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
-  const flash = req.session.flash;
-  delete req.session.flash;
+  try {
+    const flash = req.session.flash;
+    delete req.session.flash;
 
-  // Safe queries with defaults
-  const statsQuery = await pool.query(`
-    SELECT
-      (SELECT COUNT(*) FROM tenants) as tenants,
-      (SELECT COUNT(*) FROM users) as users,
-      (SELECT COALESCE(SUM(amount),0) FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days') as revenue_30d,
-      (SELECT COALESCE(balance,0) FROM platform_wallet WHERE id=1) as wallet
-  `);
+    const tCount = (await pool.query('SELECT COUNT(*) FROM tenants')).rows[0].count;
+    const uCount = (await pool.query('SELECT COUNT(*) FROM users')).rows[0].count;
+    const rev = (await pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`)).rows[0].t;
+    const wal = (await pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1')).rows[0]?.b || 0;
+    const tenants = (await pool.query('SELECT id,name,type,COALESCE(wallet_balance,0) as wallet_balance,verified FROM tenants ORDER BY id DESC LIMIT 50')).rows;
 
-  const stats = statsQuery.rows[0];
-  const tenants = (await pool.query('SELECT id,name,subdomain,type,COALESCE(wallet_balance,0) as wallet_balance,subscription_plan,verified FROM tenants ORDER BY created_at DESC LIMIT 50')).rows;
+    const flashHtml = flash? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
 
-  const flashHtml = flash? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+    res.send(renderPage('Dev Master', `
+      <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>🔴 DEVELOPER MASTER CONTROL</h1></div>
+      ${flashHtml}
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num">${tCount}</div><div>Tenants</div></div>
+        <div class="stat-card"><div class="stat-num">${uCount}</div><div>Users</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(rev).toLocaleString()}</div><div>30-Day Rev</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(wal).toLocaleString()}</div><div>Ready Withdraw</div></div>
+      </div>
+      <div class="card"><h3>Manual Controls</h3>
+        <form method="POST" action="/dev/execute">
+          <select name="action">
+            <option value="add_balance">Add Balance</option>
+            <option value="verify_tenant">Verify Tenant</option>
+            <option value="ban_user">Ban User</option>
+            <option value="delete_tenant">Delete Tenant</option>
+            <option value="withdraw_all">Withdraw All</option>
+          </select>
+          <input name="target_id" placeholder="ID" type="number">
+          <input name="amount" placeholder="Amount" type="number">
+          <button class="btn btn-red">Execute</button>
+        </form>
+      </div>
+      <div class="card"><h3>All Tenants</h3>
+        <table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Verified</th></tr>
+        ${tenants.map(t=>`<tr><td>${t.id}</td><td>${esc(t.name)}</td><td>${esc(t.type)}</td><td>UGX ${parseInt(t.wallet_balance).toLocaleString()}</td><td>${t.verified?'✅':'❌'}</td></tr>`).join('')}
+        </table>
+      </div>
+    `, req.session.user));
 
+  } catch(e) {
+    console.error('DEV MASTER ERROR:', e);
+    res.status(500).send(renderPage('Dev Error', `
+      <div class="alert alert-error">
+        <b>Dev Master Crashed</b><br>
+        ${esc(e.message)}<br><br>
+        <small>Check Render logs for full stack trace</small>
+      </div>
+    `, req.session.user));
+  }
+}));
   //... rest of your render
 // === DEVELOPER ACTIONS ===
 app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
