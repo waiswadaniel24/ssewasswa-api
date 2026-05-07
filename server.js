@@ -144,8 +144,7 @@ const SUBSCRIPTION_PLANS = {
     name: 'Donor Premium', price: 50000, currency: 'UGX',
     features: ['Post grants', 'Review applications', 'Impact tracking'],
     portals: ['dashboard', 'opportunities', 'history', 'impact']
-const SUBSCRIPTION_PLANS = {
-  // ... your existing plans
+  },
   enterprise: {
     name: 'Enterprise', price: 500000, currency: 'UGX',
     features: ['White label', 'API access', 'Dedicated support', 'Unlimited everything'],
@@ -289,32 +288,6 @@ function renderPage(title, content, user) {
   }
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><link rel="icon" href="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/favicon.png"><meta property="og:title" content="Ssewasswa - School Management"><meta property="og:image" content="https://res.cloudinary.com/dn5xr5p0r/image/upload/v1/ssewasswa/og-image.jpg"><meta name="description" content="Run your school on your phone. Marks, fees, SMS to parents."><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui;background:#f0f9ff;color:#1e293b}.container{max-width:1200px;margin:0 auto;padding:20px}.card{background:white;border:1px solid #e2e8f0;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05)}.btn{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:12px;padding:12px 24px;cursor:pointer;text-decoration:none;display:inline-block;margin:4px;font-weight:600}.btn-green{background:linear-gradient(135deg,#16a34a,#22c55e)}.btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}.btn-gold{background:linear-gradient(135deg,#d97706,#f59e0b)}input,select,textarea{width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:12px;margin:8px 0;font-size:16px;min-height:44px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e2e8f0}th{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}.stat-card{background:white;padding:20px;border-radius:16px;text-align:center}.stat-num{font-size:32px;font-weight:bold;color:#1e40af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}.badge{padding:6px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block}.badge-green{background:#dcfce7;color:#166534}.badge-red{background:#fee2e2;color:#991b1b}.badge-gold{background:#fef3c7;color:#92400e}</style></head><body>${nav}<div class="container">${content}</div></body></html>`;
 }
-
-// === TEMP DEBUG + RESET ROUTES - DELETE AFTER USE ===
-app.get('/dev/show-schema', ah(async (req, res) => {
-  const u = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='users' ORDER BY ordinal_position`);
-  const t = await pool.query(`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='tenants' ORDER BY ordinal_position`);
-  res.json({ users: u.rows, tenants: t.rows });
-}));
-
-app.get('/dev/reset-admin-now-delete-me', ah(async (req, res) => {
-  const hash = await bcrypt.hash('admin123', 10);
-
-  await pool.query(`
-    INSERT INTO tenants (id, name, subdomain, type, status, plan, subscription_plan)
-    VALUES (1, 'SSEWASSWA HQ', 'hq', 'school', 'active', 'enterprise')
-    ON CONFLICT (id) DO UPDATE SET status='active', plan='enterprise', subscription_plan='enterprise'
-  `);
-
-  await pool.query(`
-    INSERT INTO users(email, password_hash, role, tenant_id, approved)
-    VALUES('waiswadaniel24@gmail.com', $1, 'super_admin', 1, true)
-    ON CONFLICT(email) DO UPDATE SET password_hash=$1, role='super_admin', approved=true
-  `, [hash]);
-
-  res.send('✅ Admin reset: waiswadaniel24@gmail.com / admin123. DELETE THIS ROUTE NOW.');
-}));
-// === END TEMP ROUTES ===
 
 // === PUBLIC ROUTES ===
 app.get('/', ah(async (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); }));
