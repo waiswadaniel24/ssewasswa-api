@@ -483,7 +483,8 @@ app.post('/forgot-password', ah(async (req, res) => {
   res.send(`<script>alert('Reset link sent');window.location='/login'</script>`);
 }));
 
-const rev = (await pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`)).rows[0].t const wal = (await pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1')).rows[0]?.b || 0;
+const rev = (await pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`)).rows[0].t;
+const wal = (await pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1')).rows[0]?.b || 0;
 app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
   const { action, target_id, amount } = req.body;
   let msg = '';
