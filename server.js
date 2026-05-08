@@ -241,10 +241,7 @@ const requireSuperAdmin = (req, res, next) => {
   }
   next();
 };
-const requireAuth = (req, res, next) => {
-  if (!req.session.user) return res.redirect('/login');
-  next();
-};
+
 const requireDeveloper = (req, res, next) => {
   if (req.session?.user?.role!== 'super_admin') return res.status(403).send('403');
   next();
