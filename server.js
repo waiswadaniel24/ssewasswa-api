@@ -487,6 +487,7 @@ app.get('/make-me-admin', ah(async (req, res) => {
   await pool.query("UPDATE users SET role = 'super_admin' WHERE email = 'waiswadaniel24@gmail.com'");
   res.send('Done. You are now super_admin. Delete this route now and login again.');
 }));
+app.get('/test123', (req, res) => res.send('route works'));
 app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   try {
     const flash = req.session.flash;
