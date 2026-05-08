@@ -482,129 +482,121 @@ app.post('/forgot-password', ah(async (req, res) => {
   await transporter.sendMail({ to: u.email, subject: 'Reset Password', html: `Click to reset: <a href="${resetUrl}">${resetUrl}</a><br>Expires in 1 hour.` });
   res.send(`<script>alert('Reset link sent');window.location='/login'</script>`);
 }));
-// === DEVELOPER PORTAL ===
-app.get('/make-me-admin', ah(async (req, res) => {
-  await pool.query("UPDATE users SET role = 'super_admin' WHERE email = 'waiswadaniel24@gmail.com'");
-  res.send('Done. You are now super_admin. Delete this route now and login again.');
-}));
-app.get('/test123', (req, res) => res.send('route works'));
+// === DEVELOPER MASTER CONTROL - FULL PANEL ===
 app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   try {
     const flash = req.session.flash;
     delete req.session.flash;
-    const tCount = (await pool.query('SELECT COUNT(*) FROM tenants')).rows[0].count;
-    const uCount = (await pool.query('SELECT COUNT(*) FROM users')).rows[0].count;
-    const rev = (await pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`)).rows[0].t;
-    const wal = (await pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1')).rows[0]?.b || 0;
-    const tenants = (await pool.query('SELECT id,name,type,COALESCE(wallet_balance,0) as wallet_balance,verified FROM tenants ORDER BY id DESC LIMIT 50')).rows;
+
+    const [tCount, uCount, rev, wal, tenants, users] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM tenants'),
+      pool.query('SELECT COUNT(*) FROM users'),
+      pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`),
+      pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1'),
+      pool.query('SELECT id,name,type,COALESCE(wallet_balance,0) as wallet_balance,verified,subdomain FROM tenants ORDER BY id DESC LIMIT 50'),
+      pool.query('SELECT id,email,role,approved FROM users ORDER BY id DESC LIMIT 50')
+    ]);
+
     const flashHtml = flash? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+
     res.send(renderPage('Dev Master', `
-      <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:20px;border-radius:16px;margin-bottom:20px;color:white"><h1>🔴 DEVELOPER MASTER CONTROL</h1></div>
-      ${flashHtml}
-      <div class="stats">
-        <div class="stat-card"><div class="stat-num">${tCount}</div><div>Tenants</div></div>
-        <div class="stat-card"><div class="stat-num">${uCount}</div><div>Users</div></div>
-        <div class="stat-card"><div class="stat-num">UGX ${parseInt(rev).toLocaleString()}</div><div>30-Day Rev</div></div>
-        <div class="stat-card"><div class="stat-num">UGX ${parseInt(wal).toLocaleString()}</div><div>Ready Withdraw</div></div>
+      <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
+        <h1>🔴 DEVELOPER MASTER CONTROL</h1>
+        <p style="opacity:0.9">Full system control - Free Render</p>
       </div>
+      ${flashHtml}
+
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num">${tCount.rows[0].count}</div><div>Tenants</div></div>
+        <div class="stat-card"><div class="stat-num">${uCount.rows[0].count}</div><div>Users</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(rev.rows[0].t).toLocaleString()}</div><div>30-Day Rev</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(wal.rows[0]?.b || 0).toLocaleString()}</div><div>Ready Withdraw</div></div>
+      </div>
+
       <div class="grid">
-        <div class="card"><h3>Manual Controls</h3>
-          <form method="POST" action="/dev/execute">
-            <select name="action" required>
-              <option value="">Select Action</option>
-              <option value="add_balance">Add Balance</option>
-              <option value="verify_tenant">Verify Tenant</option>
-              <option value="ban_user">Ban User</option>
-              <option value="delete_tenant">Delete Tenant</option>
-              <option value="withdraw_all">Withdraw All</option>
-            </select>
-            <input name="target_id" placeholder="Target ID" type="number">
-            <input name="amount" placeholder="Amount UGX" type="number">
-            <button class="btn btn-red">Execute</button>
-          </form>
-        </div>
-        <div class="card"><h3>Revenue Injection</h3>
+        <div class="card"><h3>💰 Revenue Controls</h3>
           <form method="POST" action="/dev/inject-revenue">
             <input name="amount" placeholder="Amount UGX" type="number" required>
             <input name="source" placeholder="Source: Grant, Ads, Sub" required>
             <button class="btn btn-gold">Inject Revenue</button>
           </form>
+          <form method="POST" action="/dev/withdraw-all" style="margin-top:10px">
+            <button class="btn btn-red">Withdraw All to ${esc(DEVELOPER_PHONE)}</button>
+          </form>
         </div>
-        <div class="card"><h3>Auto-Scraper</h3>
+
+        <div class="card"><h3>🏢 Tenant Controls</h3>
+          <form method="POST" action="/dev/execute">
+            <select name="action" required>
+              <option value="">Select Action</option>
+              <option value="add_balance">Add Balance</option>
+              <option value="verify_tenant">Verify Tenant</option>
+              <option value="unverify_tenant">Unverify Tenant</option>
+              <option value="delete_tenant">DELETE Tenant</option>
+              <option value="reset_wallet">Reset Wallet to 0</option>
+            </select>
+            <input name="target_id" placeholder="Tenant ID" type="number" required>
+            <input name="amount" placeholder="Amount UGX (if needed)" type="number">
+            <button class="btn btn-red">Execute</button>
+          </form>
+        </div>
+
+        <div class="card"><h3>👤 User Controls</h3>
+          <form method="POST" action="/dev/user-action">
+            <select name="action" required>
+              <option value="">Select Action</option>
+              <option value="ban_user">Ban User</option>
+              <option value="unban_user">Unban User</option>
+              <option value="make_admin">Make Super Admin</option>
+              <option value="make_teacher">Make Teacher</option>
+              <option value="delete_user">DELETE User</option>
+            </select>
+            <input name="user_id" placeholder="User ID" type="number" required>
+            <button class="btn btn-red">Execute</button>
+          </form>
+        </div>
+
+        <div class="card"><h3>🤖 Auto-Scraper</h3>
           <form method="POST" action="/dev/scrape">
             <input name="url" placeholder="https://news-site.com/article" type="url" required>
             <input name="tenant_id" placeholder="Tenant ID (optional)" type="number">
-            <button class="btn">Scrape & Save</button>
+            <button class="btn">Scrape & Save as News</button>
           </form>
         </div>
-      <div class="card"><h3>All Tenants</h3>
-        <table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Verified</th></tr>
-        ${tenants.map(t=>`<tr><td>${t.id}</td><td>${esc(t.name)}</td><td>${esc(t.type)}</td><td>UGX ${parseInt(t.wallet_balance).toLocaleString()}</td><td>${t.verified?'✅':'❌'}</td></tr>`).join('')}
-        </table>
+
+        <div class="card"><h3>⚡ Quick Actions</h3>
+          <form method="POST" action="/dev/quick" style="display:grid;gap:8px">
+            <button name="action" value="verify_all" class="btn">Verify All Tenants</button>
+            <button name="action" value="approve_all_users" class="btn">Approve All Users</button>
+            <button name="action" value="reset_platform" class="btn btn-red" onclick="return confirm('Reset ALL revenue?')">Reset Platform Wallet</button>
+          </form>
+        </div>
+
+        <div class="card"><h3>🗄️ SQL Runner</h3>
+          <form method="POST" action="/dev/sql">
+            <textarea name="sql" placeholder="SELECT * FROM users LIMIT 5" rows="3" style="width:100%;margin-bottom:8px;font-family:monospace"></textarea>
+            <button class="btn btn-red">Run SQL</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card"><h3>All Tenants</h3>
+          <table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Subdomain</th><th>Verified</th></tr>
+          ${tenants.rows.map(t=>`<tr><td>${t.id}</td><td>${esc(t.name)}</td><td>${esc(t.type)}</td><td>UGX ${parseInt(t.wallet_balance).toLocaleString()}</td><td>${esc(t.subdomain||'-')}</td><td>${t.verified?'✅':'❌'}</td></tr>`).join('')}
+          </table>
+        </div>
+        <div class="card"><h3>All Users</h3>
+          <table><tr><th>ID</th><th>Email</th><th>Role</th><th>Approved</th></tr>
+          ${users.rows.map(u=>`<tr><td>${u.id}</td><td>${esc(u.email)}</td><td>${esc(u.role)}</td><td>${u.approved?'✅':'❌'}</td></tr>`).join('')}
+          </table>
+        </div>
       </div>
     `, req.session.user));
   } catch(e) {
     console.error('DEV MASTER ERROR:', e);
-    res.status(500).send(renderPage('Dev Error', `
-      <div class="alert alert-error">
-        <b>Dev Master Crashed</b><br>
-        ${esc(e.message)}<br><br>
-        <small>Check Render logs for full stack trace</small>
-      </div>
-    `, req.session.user));
+    res.status(500).send(renderPage('Dev Error', `<div class="alert alert-error"><b>Dev Master Crashed</b><br>${esc(e.message)}</div>`, req.session.user));
   }
-}));
-app.post('/dev/execute', requireAuth, requireSuperAdmin, ah(async (req, res) => {
-  const { action, target_id, amount } = req.body;
-  let msg = '';
-  try {
-    switch(action) {
-      case 'add_balance':
-        if (!amount || amount <= 0) throw new Error('Invalid amount');
-        const bal = await pool.query(
-          'UPDATE tenants SET wallet_balance=wallet_balance+$1 WHERE id=$2 RETURNING name,wallet_balance',
-          [amount, target_id]
-        );
-        if (!bal.rowCount) throw new Error('Tenant not found');
-        msg = `Added UGX ${parseInt(amount).toLocaleString()} to ${bal.rows[0].name}. New balance: UGX ${bal.rows[0].wallet_balance.toLocaleString()}`;
-        break;
-      case 'verify_tenant':
-        const v = await pool.query('UPDATE tenants SET verified=true WHERE id=$1 RETURNING name', [target_id]);
-        if (!v.rowCount) throw new Error('Tenant not found');
-        msg = `Verified tenant: ${v.rows[0].name}`;
-        break;
-      case 'ban_user':
-        const b = await pool.query('UPDATE users SET approved=false WHERE id=$1 RETURNING email', [target_id]);
-        if (!b.rowCount) throw new Error('User not found');
-        msg = `Banned user: ${b.rows[0].email}`;
-        break;
-      case 'delete_tenant':
-        const d = await pool.query('DELETE FROM tenants WHERE id=$1 RETURNING name', [target_id]);
-        if (!d.rowCount) throw new Error('Tenant not found');
-        msg = `Deleted tenant: ${d.rows[0].name}`;
-        break;
-      case 'withdraw_all':
-        const w = (await pool.query('SELECT balance FROM platform_wallet WHERE id=1')).rows[0];
-        if (!w || w.balance <= 0) throw new Error('No balance to withdraw');
-        await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1');
-        await pool.query(
-          'INSERT INTO withdrawals(user_email,amount,net_amount,phone,status,ref) VALUES($1,$2,$3,$4,$5,$6)',
-          [DEVELOPER_EMAIL, w.balance, w.balance, DEVELOPER_PHONE, 'paid', 'DEV' + Date.now()]
-        );
-        await pool.query(
-          'INSERT INTO developer_revenue(amount,type) VALUES($1,$2)',
-          [-w.balance, 'withdrawal']
-        );
-        msg = `Withdrew UGX ${w.balance.toLocaleString()} to ${DEVELOPER_PHONE}`;
-        break;
-      default:
-        throw new Error('Invalid action');
-    }
-    req.session.flash = { type: 'success', msg };
-  } catch(e) {
-    req.session.flash = { type: 'error', msg: e.message };
-  }
-  res.redirect('/dev/master');
 }));
 
 app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, res) => {
@@ -627,6 +619,135 @@ app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, r
   res.redirect('/dev/master');
 }));
 
+app.post('/dev/withdraw-all', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  try {
+    const w = (await pool.query('SELECT balance FROM platform_wallet WHERE id=1')).rows[0];
+    if (!w || w.balance <= 0) throw new Error('No balance to withdraw');
+    await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1');
+    await pool.query('INSERT INTO withdrawals(user_email,amount,net_amount,phone,status,ref) VALUES($1,$2,$3,$4,$5,$6)',
+      [DEVELOPER_EMAIL, w.balance, w.balance, DEVELOPER_PHONE, 'paid', 'DEV' + Date.now()]);
+    await pool.query('INSERT INTO developer_revenue(amount,type) VALUES($1,$2)', [-w.balance, 'withdrawal']);
+    req.session.flash = { type: 'success', msg: `Withdrew UGX ${w.balance.toLocaleString()} to ${DEVELOPER_PHONE}` };
+  } catch(e) {
+    req.session.flash = { type: 'error', msg: e.message };
+  }
+  res.redirect('/dev/master');
+}));
+
+app.post('/dev/execute', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { action, target_id, amount } = req.body;
+  let msg = '';
+  try {
+    switch(action) {
+      case 'add_balance':
+        if (!amount || amount <= 0) throw new Error('Invalid amount');
+        const bal = await pool.query('UPDATE tenants SET wallet_balance=wallet_balance+$1 WHERE id=$2 RETURNING name,wallet_balance', [amount, target_id]);
+        if (!bal.rowCount) throw new Error('Tenant not found');
+        msg = `Added UGX ${parseInt(amount).toLocaleString()} to ${bal.rows[0].name}`;
+        break;
+      case 'verify_tenant':
+        const v = await pool.query('UPDATE tenants SET verified=true WHERE id=$1 RETURNING name', [target_id]);
+        if (!v.rowCount) throw new Error('Tenant not found');
+        msg = `Verified: ${v.rows[0].name}`;
+        break;
+      case 'unverify_tenant':
+        const uv = await pool.query('UPDATE tenants SET verified=false WHERE id=$1 RETURNING name', [target_id]);
+        if (!uv.rowCount) throw new Error('Tenant not found');
+        msg = `Unverified: ${uv.rows[0].name}`;
+        break;
+      case 'delete_tenant':
+        const d = await pool.query('DELETE FROM tenants WHERE id=$1 RETURNING name', [target_id]);
+        if (!d.rowCount) throw new Error('Tenant not found');
+        msg = `Deleted tenant: ${d.rows[0].name}`;
+        break;
+      case 'reset_wallet':
+        await pool.query('UPDATE tenants SET wallet_balance=0 WHERE id=$1', [target_id]);
+        msg = `Reset wallet for tenant ID ${target_id}`;
+        break;
+      default: throw new Error('Invalid action');
+    }
+    req.session.flash = { type: 'success', msg };
+  } catch(e) {
+    req.session.flash = { type: 'error', msg: e.message };
+  }
+  res.redirect('/dev/master');
+}));
+
+app.post('/dev/user-action', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { action, user_id } = req.body;
+  let msg = '';
+  try {
+    switch(action) {
+      case 'ban_user':
+        const b = await pool.query('UPDATE users SET approved=false WHERE id=$1 RETURNING email', [user_id]);
+        if (!b.rowCount) throw new Error('User not found');
+        msg = `Banned: ${b.rows[0].email}`;
+        break;
+      case 'unban_user':
+        const ub = await pool.query('UPDATE users SET approved=true WHERE id=$1 RETURNING email', [user_id]);
+        if (!ub.rowCount) throw new Error('User not found');
+        msg = `Unbanned: ${ub.rows[0].email}`;
+        break;
+      case 'make_admin':
+        const ma = await pool.query('UPDATE users SET role=\'super_admin\' WHERE id=$1 RETURNING email', [user_id]);
+        if (!ma.rowCount) throw new Error('User not found');
+        msg = `Made admin: ${ma.rows[0].email}`;
+        break;
+      case 'make_teacher':
+        const mt = await pool.query('UPDATE users SET role=\'teacher\' WHERE id=$1 RETURNING email', [user_id]);
+        if (!mt.rowCount) throw new Error('User not found');
+        msg = `Made teacher: ${mt.rows[0].email}`;
+        break;
+      case 'delete_user':
+        const du = await pool.query('DELETE FROM users WHERE id=$1 RETURNING email', [user_id]);
+        if (!du.rowCount) throw new Error('User not found');
+        msg = `Deleted user: ${du.rows[0].email}`;
+        break;
+      default: throw new Error('Invalid action');
+    }
+    req.session.flash = { type: 'success', msg };
+  } catch(e) {
+    req.session.flash = { type: 'error', msg: e.message };
+  }
+  res.redirect('/dev/master');
+}));
+
+app.post('/dev/quick', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { action } = req.body;
+  try {
+    if (action === 'verify_all') {
+      await pool.query('UPDATE tenants SET verified=true');
+      req.session.flash = { type: 'success', msg: 'All tenants verified' };
+    } else if (action === 'approve_all_users') {
+      await pool.query('UPDATE users SET approved=true');
+      req.session.flash = { type: 'success', msg: 'All users approved' };
+    } else if (action === 'reset_platform') {
+      await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1');
+      req.session.flash = { type: 'success', msg: 'Platform wallet reset to 0' };
+    }
+  } catch(e) {
+    req.session.flash = { type: 'error', msg: e.message };
+  }
+  res.redirect('/dev/master');
+}));
+
+app.post('/dev/sql', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  try {
+    const { sql } = req.body;
+    if (!sql?.trim()) throw new Error('SQL required');
+    if (/drop|truncate|alter/i.test(sql)) throw new Error('Destructive SQL blocked');
+    const result = await pool.query(sql);
+    req.session.flash = { type: 'success', msg: `SQL OK: ${result.rowCount} rows. ${JSON.stringify(result.rows.slice(0,3))}` };
+  } catch(e) {
+    req.session.flash = { type: 'error', msg: 'SQL Error: ' + e.message };
+  }
+  res.redirect('/dev/master');
+}));
+
+app.post('/dev/scrape', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  req.session.flash = { type: 'error', msg: 'Scraper not implemented yet. Add cheerio + axios to package.json first.' };
+  res.redirect('/dev/master');
+}));
 // === SCHOOL PORTALS - DASHBOARD ===
 app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
   res.send(renderPage('Dashboard', `
