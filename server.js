@@ -776,13 +776,7 @@ app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
       </div>
     </div>
   `, req.session.user));
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
 
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -854,13 +848,7 @@ app.get('/portal/marksheets', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
 
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -886,13 +874,6 @@ app.post('/portal/marksheets/add', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO marksheets(tenant_id,student_name,class,subject,mark,term) VALUES($1,$2,$3,$4,$5,$6)',
     [req.session.user.tenant_id, student_name, cls, subject, mark, term]);
   res.redirect('/portal/marksheets');
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -931,13 +912,6 @@ app.get('/portal/students', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -962,13 +936,6 @@ app.post('/portal/students/add', requireAuth, ah(async (req, res) => {
   const { name, class: cls, parent_phone } = req.body;
   await pool.query('INSERT INTO students(tenant_id,name,class,parent_phone)VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, name, cls, parent_phone]);
   res.redirect('/portal/students');
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -1155,13 +1122,6 @@ app.post('/portal/marketplace/add', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO marketplace_products(tenant_id,name,price,stock,image_url,category) VALUES($1,$2,$3,$4,$5,$6)',
     [req.session.user.tenant_id, name, price, stock, image_url, category]);
   res.redirect('/portal/marketplace');
-  const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -1225,13 +1185,6 @@ app.get('/dev/seed', requireAuth, requireDeveloper, ah(async (req, res) => {
   await pool.query(`INSERT INTO users(name,email,password_hash,role,tenant_id,verified,approved) VALUES('Demo Admin','admin@kings.test',$1,'school_admin',$2,true,true)`, [await bcrypt.hash('demo123', 10), tid]);
   for (let i = 1; i <= 30; i++) await pool.query(`INSERT INTO students(tenant_id,name,class,parent_phone) VALUES($1,$2,$3,$4)`, [tid, `Student ${i}`, `P${Math.ceil(i / 10)}`, '+256700000000']);
   res.json({ ok: true, login: 'admin@kings.test / demo123' });
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -1258,13 +1211,6 @@ app.post('/portal/donors/create', requireAuth, requireRole('org_admin'), ah(asyn
   await pool.query('INSERT INTO fund_opportunities(tenant_id,title,summary,description,amount,currency,deadline,category,active)VALUES($1,$2,$3,$4,$5,$6,$7,$8,true)', [req.session.user.tenant_id, title, summary, description, amount, 'USD', deadline, category]);
   await logAction(req.session.user.id, req.session.user.tenant_id, 'create_opportunity', { title, amount }, req.ip);
   res.redirect('/portal/donors?created=1');
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -1338,13 +1284,6 @@ app.get('/portal/reports/pdf/:student_id', requireAuth, ah(async (req, res) => {
   doc.fontSize(14).text(`Average: ${avg.toFixed(1)}%`, 50, y + 10);
   doc.fontSize(10).text('Computer generated document.', 50, 700);
   doc.end();
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -1386,13 +1325,6 @@ app.get('/portal/marksheets', requireAuth, ah(async (req, res) => {
       </table>
     </div>
   `, req.session.user));
-  const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -1833,13 +1765,6 @@ app.get('/portal/exams', requireAuth, requireActiveSub, ah(async (req, res) => {
       ${exams.map(e=>`<div><b>${esc(e.name)}</b> - <a href="/portal/exams/${e.id}/marks">Enter Marks</a> | <a href="/portal/exams/${e.id}/reports">Reports</a></div>`).join('') || 'No exams yet'}
     </div>
   `, req.session.user));
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -1864,13 +1789,6 @@ app.post('/portal/exams/add', requireAuth, ah(async (req, res) => {
   const { name, term, year } = req.body;
   await pool.query('INSERT INTO exams(tenant_id,name,term,year) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, name, term, year]);
   res.redirect('/portal/exams');
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -1915,13 +1833,6 @@ app.get('/portal/exams/:id/reports/:student_id', requireAuth, ah(async (req, res
   marks.forEach(m=> doc.text(`${m.subject.padEnd(16)} ${m.score} ${m.grade||''}`));
   doc.moveDown().text(`Average: ${avg}%`);
   doc.end();
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
@@ -2071,13 +1982,6 @@ app.post('/reset-password/:token', ah(async (req, res) => {
   await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, r.user_id]);
   await pool.query('UPDATE password_resets SET used=true WHERE id=$1', [r.id]);
   res.send(`<script>alert('Password reset successful!');window.location='/login'</script>`);
- const requireActiveSubDynamic = ah(async (req, res, next) => {
-  const path = req.route.path; // '/portal/finance'
-
-  const { rows } = await pool.query(
-    'SELECT requires_subscription FROM route_permissions WHERE route_path=$1',
-    [path]
-  );
 
   // If route not in table OR requires_subscription=false, skip check
   if (!rows.length || rows[0].requires_subscription === false) return next();
