@@ -760,14 +760,6 @@ app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, re
   if (sub.subscription_status === 'trial' && new Date(sub.trial_ends_at) > new Date()) return next();
   return res.send(renderPage('Subscription Expired', `<div class="card"><h2>Upgrade Required</h2><p>This feature needs an active subscription.</p><a href="/portal/billing" class="btn btn-green">Upgrade Now</a></div>`, req.session.user));
 });
-  res.status(402).send(renderPage('Subscription Required', `
-    <div class="card"><h3>Subscription Expired</h3>
-      <p>Your ${t.plan} plan expired. Renew to access Finance, Attendance, and Reports.</p>
-      <a href="/portal/billing" class="btn btn-green">Upgrade Now</a>
-    </div>
-  `, req.session.user));
-};
-}));
 // === SCHOOL PORTALS - DASHBOARD ===
 app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
   res.send(renderPage('Dashboard', `
