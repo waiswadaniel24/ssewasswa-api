@@ -1408,7 +1408,7 @@ app.post('/dev/scrape', requireAuth, requireDeveloper, ah(async (req, res) => {
 }));
 
 // === CRON JOBS ===
-cron.schedule('0 8 * *', async () => {
+cron.schedule('0 8 * * *', async () => { // <-- Add the 5th *
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
   const absent = (await pool.query(`SELECT s.name,s.parent_phone,t.name as school FROM students s JOIN tenants t ON s.tenant_id=t.id WHERE s.id NOT IN (SELECT student_id FROM attendance WHERE date=$1) AND s.parent_phone IS NOT NULL`, [yesterday])).rows;
   for (const s of absent) {
