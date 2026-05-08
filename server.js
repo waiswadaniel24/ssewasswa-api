@@ -128,7 +128,7 @@ app.use(session({
     sameSite: 'lax'
   }
 }));
-
+app.get('/ping', (req, res) => res.send('pong'));
 // --- CONSTANTS ---
 const CURRENCIES = {
   UGX: { symbol: 'UGX', rate: 1 },
