@@ -554,7 +554,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     `, req.session.user));
   }
 }));
-app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
+app.post('/dev/execute', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const { action, target_id, amount } = req.body;
   let msg = '';
   try {
@@ -607,7 +607,7 @@ app.post('/dev/execute', requireAuth, requireDeveloper, ah(async (req, res) => {
   res.redirect('/dev/master');
 }));
 
-app.post('/dev/inject-revenue', requireAuth, requireDeveloper, ah(async (req, res) => {
+app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const { amount, source } = req.body;
   const amt = parseInt(amount);
   if (!amt || amt <= 0 ||!source?.trim()) {
