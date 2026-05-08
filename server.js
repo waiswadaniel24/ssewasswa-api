@@ -1415,11 +1415,7 @@ app.post('/api/employer-match/apply', requireAuth, ah(async (req, res) => {
   await pool.query('INSERT INTO employer_applications(match_id,student_id,status)VALUES($1,$2,$3)', [match_id, student_id, 'pending']);
   res.json({ ok: true, msg: 'Application submitted' });
 }));
-app.get('/change-my-pass', ah(async (req, res) => {
-  const newHash = await bcrypt.hash('YourNewStrongPassword123', 10);
-  await pool.query("UPDATE users SET password_hash = $1 WHERE email = 'waiswadaniel24@gmail.com'", [newHash]);
-  res.send('Password changed. Delete this route now.');
-}));
+
 // === DEVELOPER & DATABASE ===
 app.get('/dev/health', requireAuth, requireDeveloper, ah(async (req, res) => {
   const db = (await pool.query('SELECT NOW(),pg_database_size(current_database()) as size')).rows[0];
