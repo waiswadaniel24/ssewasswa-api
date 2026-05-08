@@ -241,7 +241,10 @@ const requireSuperAdmin = (req, res, next) => {
   }
   next();
 };
-
+const requireAuth = (req, res, next) => {
+  if (!req.session.user) return res.redirect('/login');
+  next();
+};
 const requireDeveloper = (req, res, next) => {
   if (req.session?.user?.role!== 'super_admin') return res.status(403).send('403');
   next();
@@ -483,7 +486,11 @@ app.post('/forgot-password', ah(async (req, res) => {
   res.send(`<script>alert('Reset link sent');window.location='/login'</script>`);
 }));
 // === DEVELOPER PORTAL ===
-app.get('/dev/master', requireAuth, requireDeveloper, ah(async (req, res) => {
+app.get('/make-me-admin', ah(async (req, res) => {
+  await pool.query("UPDATE users SET role = 'super_admin' WHERE email = 'waiswadaniel24@gmail.com'");
+  res.send('Done. You are now super_admin. Delete this route now and login again.');
+}));
+app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   try {
     const flash = req.session.flash;
     delete req.session.flash;
