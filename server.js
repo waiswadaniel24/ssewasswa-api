@@ -38,6 +38,9 @@ const app = express();
 app.set('trust proxy', 1);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const axios = require('axios');
+const cheerio = require('cheerio');
+const { Parser } = require('json2csv');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL.includes('localhost')? false : { rejectUnauthorized: false }
@@ -482,36 +485,59 @@ app.post('/forgot-password', ah(async (req, res) => {
   await transporter.sendMail({ to: u.email, subject: 'Reset Password', html: `Click to reset: <a href="${resetUrl}">${resetUrl}</a><br>Expires in 1 hour.` });
   res.send(`<script>alert('Reset link sent');window.location='/login'</script>`);
 }));
-// === DEVELOPER MASTER CONTROL - FULL PANEL ===
+app.get('/setup-logs-table', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query(`CREATE TABLE IF NOT EXISTS dev_logs (
+    id SERIAL PRIMARY KEY,
+    action TEXT NOT NULL,
+    details TEXT,
+    user_email TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  res.send('Logs table created. Delete this route.');
+}));
+// === LOG HELPER ===
+async function logAction(email, action, details) {
+  try {
+    await pool.query('INSERT INTO dev_logs(action,details,user_email) VALUES($1,$2,$3)', [action, details, email]);
+  } catch(e) { console.error('Log failed:', e.message); }
+}
+
+// === DEVELOPER MASTER CONTROL - FULL ===
 app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   try {
     const flash = req.session.flash;
     delete req.session.flash;
 
-    const [tCount, uCount, rev, wal, tenants, users] = await Promise.all([
+    const [tCount, uCount, rev, wal, tenants, users, logs, chartData] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM tenants'),
       pool.query('SELECT COUNT(*) FROM users'),
       pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`),
       pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1'),
       pool.query('SELECT id,name,type,COALESCE(wallet_balance,0) as wallet_balance,verified,subdomain FROM tenants ORDER BY id DESC LIMIT 50'),
-      pool.query('SELECT id,email,role,approved FROM users ORDER BY id DESC LIMIT 50')
+      pool.query('SELECT id,email,role,approved FROM users ORDER BY id DESC LIMIT 50'),
+      pool.query('SELECT * FROM dev_logs ORDER BY id DESC LIMIT 20'),
+      pool.query(`SELECT DATE(created_at) as day, SUM(amount) as total FROM developer_revenue
+                  WHERE created_at>NOW()-INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY day ASC`)
     ]);
 
     const flashHtml = flash? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+    const chartLabels = chartData.rows.map(r => new Date(r.day).toLocaleDateString('en-GB', {month:'short',day:'numeric'})).join("','");
+    const chartValues = chartData.rows.map(r => r.total).join(',');
 
     res.send(renderPage('Dev Master', `
+      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
-        <h1>🔴 DEVELOPER MASTER CONTROL</h1>
-        <p style="opacity:0.9">Full system control - Free Render</p>
+        <h1>🔴 DEVELOPER MASTER CONTROL</h1><p style="opacity:0.9">Full system control - Free Render</p>
       </div>
       ${flashHtml}
-
       <div class="stats">
         <div class="stat-card"><div class="stat-num">${tCount.rows[0].count}</div><div>Tenants</div></div>
         <div class="stat-card"><div class="stat-num">${uCount.rows[0].count}</div><div>Users</div></div>
         <div class="stat-card"><div class="stat-num">UGX ${parseInt(rev.rows[0].t).toLocaleString()}</div><div>30-Day Rev</div></div>
         <div class="stat-card"><div class="stat-num">UGX ${parseInt(wal.rows[0]?.b || 0).toLocaleString()}</div><div>Ready Withdraw</div></div>
       </div>
+
+      <div class="card" style="margin-bottom:20px"><h3>📈 30-Day Revenue</h3><canvas id="revChart"></canvas></div>
 
       <div class="grid">
         <div class="card"><h3>💰 Revenue Controls</h3>
@@ -527,12 +553,9 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 
         <div class="card"><h3>🏢 Tenant Controls</h3>
           <form method="POST" action="/dev/execute">
-            <select name="action" required>
-              <option value="">Select Action</option>
-              <option value="add_balance">Add Balance</option>
-              <option value="verify_tenant">Verify Tenant</option>
-              <option value="unverify_tenant">Unverify Tenant</option>
-              <option value="delete_tenant">DELETE Tenant</option>
+            <select name="action" required><option value="">Select Action</option>
+              <option value="add_balance">Add Balance</option><option value="verify_tenant">Verify Tenant</option>
+              <option value="unverify_tenant">Unverify Tenant</option><option value="delete_tenant">DELETE Tenant</option>
               <option value="reset_wallet">Reset Wallet to 0</option>
             </select>
             <input name="target_id" placeholder="Tenant ID" type="number" required>
@@ -543,12 +566,9 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 
         <div class="card"><h3>👤 User Controls</h3>
           <form method="POST" action="/dev/user-action">
-            <select name="action" required>
-              <option value="">Select Action</option>
-              <option value="ban_user">Ban User</option>
-              <option value="unban_user">Unban User</option>
-              <option value="make_admin">Make Super Admin</option>
-              <option value="make_teacher">Make Teacher</option>
+            <select name="action" required><option value="">Select Action</option>
+              <option value="ban_user">Ban User</option><option value="unban_user">Unban User</option>
+              <option value="make_admin">Make Super Admin</option><option value="make_teacher">Make Teacher</option>
               <option value="delete_user">DELETE User</option>
             </select>
             <input name="user_id" placeholder="User ID" type="number" required>
@@ -578,6 +598,22 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
             <button class="btn btn-red">Run SQL</button>
           </form>
         </div>
+
+        <div class="card"><h3>💾 Backup / Export</h3>
+          <a href="/dev/export/tenants" class="btn">Export Tenants CSV</a>
+          <a href="/dev/export/users" class="btn" style="margin-top:8px">Export Users CSV</a>
+          <a href="/dev/export/revenue" class="btn" style="margin-top:8px">Export Revenue CSV</a>
+        </div>
+
+        <div class="card"><h3>📋 Activity Logs</h3>
+          <div style="max-height:300px;overflow:auto;font-size:12px">
+            ${logs.rows.map(l=>`<div style="border-bottom:1px solid #eee;padding:4px 0">
+              <b>${esc(l.action)}</b> by ${esc(l.user_email)}<br>
+              <small>${new Date(l.created_at).toLocaleString()}</small><br>
+              <code>${esc(l.details||'')}</code>
+            </div>`).join('') || 'No logs yet'}
+          </div>
+        </div>
       </div>
 
       <div class="grid">
@@ -592,6 +628,17 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
           </table>
         </div>
       </div>
+
+      <script>
+        new Chart(document.getElementById('revChart'), {
+          type: 'line',
+          data: {
+            labels: ['${chartLabels}'],
+            datasets: [{ label: 'UGX Revenue', data: [${chartValues}], borderColor: '#dc2626', tension: 0.3 }]
+          },
+          options: { responsive: true, plugins: { legend: { display: false } } }
+        });
+      </script>
     `, req.session.user));
   } catch(e) {
     console.error('DEV MASTER ERROR:', e);
@@ -599,6 +646,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   }
 }));
 
+// Add logAction to all existing POST routes
 app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const { amount, source } = req.body;
   const amt = parseInt(amount);
@@ -611,6 +659,7 @@ app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, r
     await pool.query('INSERT INTO developer_revenue(amount,type) VALUES($1,$2)', [amt, source.trim()]);
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amt]);
     await pool.query('COMMIT');
+    await logAction(req.session.user.email, 'INJECT_REVENUE', `UGX ${amt} from ${source}`);
     req.session.flash = { type: 'success', msg: `Injected UGX ${amt.toLocaleString()} from ${esc(source)}` };
   } catch(e) {
     await pool.query('ROLLBACK');
@@ -627,6 +676,7 @@ app.post('/dev/withdraw-all', requireAuth, requireSuperAdmin, ah(async (req, res
     await pool.query('INSERT INTO withdrawals(user_email,amount,net_amount,phone,status,ref) VALUES($1,$2,$3,$4,$5,$6)',
       [DEVELOPER_EMAIL, w.balance, w.balance, DEVELOPER_PHONE, 'paid', 'DEV' + Date.now()]);
     await pool.query('INSERT INTO developer_revenue(amount,type) VALUES($1,$2)', [-w.balance, 'withdrawal']);
+    await logAction(req.session.user.email, 'WITHDRAW_ALL', `UGX ${w.balance} to ${DEVELOPER_PHONE}`);
     req.session.flash = { type: 'success', msg: `Withdrew UGX ${w.balance.toLocaleString()} to ${DEVELOPER_PHONE}` };
   } catch(e) {
     req.session.flash = { type: 'error', msg: e.message };
@@ -666,6 +716,7 @@ app.post('/dev/execute', requireAuth, requireSuperAdmin, ah(async (req, res) => 
         break;
       default: throw new Error('Invalid action');
     }
+    await logAction(req.session.user.email, 'TENANT_ACTION', `${action} on ID ${target_id} ${amount?`| UGX ${amount}`:''}`);
     req.session.flash = { type: 'success', msg };
   } catch(e) {
     req.session.flash = { type: 'error', msg: e.message };
@@ -705,6 +756,7 @@ app.post('/dev/user-action', requireAuth, requireSuperAdmin, ah(async (req, res)
         break;
       default: throw new Error('Invalid action');
     }
+    await logAction(req.session.user.email, 'USER_ACTION', `${action} on ID ${user_id}`);
     req.session.flash = { type: 'success', msg };
   } catch(e) {
     req.session.flash = { type: 'error', msg: e.message };
@@ -717,12 +769,15 @@ app.post('/dev/quick', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   try {
     if (action === 'verify_all') {
       await pool.query('UPDATE tenants SET verified=true');
+      await logAction(req.session.user.email, 'QUICK_ACTION', 'verify_all');
       req.session.flash = { type: 'success', msg: 'All tenants verified' };
     } else if (action === 'approve_all_users') {
       await pool.query('UPDATE users SET approved=true');
+      await logAction(req.session.user.email, 'QUICK_ACTION', 'approve_all_users');
       req.session.flash = { type: 'success', msg: 'All users approved' };
     } else if (action === 'reset_platform') {
       await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1');
+      await logAction(req.session.user.email, 'QUICK_ACTION', 'reset_platform');
       req.session.flash = { type: 'success', msg: 'Platform wallet reset to 0' };
     }
   } catch(e) {
@@ -735,9 +790,10 @@ app.post('/dev/sql', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   try {
     const { sql } = req.body;
     if (!sql?.trim()) throw new Error('SQL required');
-    if (/drop|truncate|alter/i.test(sql)) throw new Error('Destructive SQL blocked');
+    if (/drop|truncate|alter table.*drop|delete from (users|tenants) where/i.test(sql)) throw new Error('Destructive SQL blocked');
     const result = await pool.query(sql);
-    req.session.flash = { type: 'success', msg: `SQL OK: ${result.rowCount} rows. ${JSON.stringify(result.rows.slice(0,3))}` };
+    await logAction(req.session.user.email, 'SQL_RUN', sql.substring(0,100));
+    req.session.flash = { type: 'success', msg: `SQL OK: ${result.rowCount} rows affected. ${JSON.stringify(result.rows.slice(0,3))}` };
   } catch(e) {
     req.session.flash = { type: 'error', msg: 'SQL Error: ' + e.message };
   }
@@ -745,27 +801,45 @@ app.post('/dev/sql', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 }));
 
 app.post('/dev/scrape', requireAuth, requireSuperAdmin, ah(async (req, res) => {
-  req.session.flash = { type: 'error', msg: 'Scraper not implemented yet. Add cheerio + axios to package.json first.' };
+  try {
+    const { url, tenant_id } = req.body;
+    if (!url) throw new Error('URL required');
+    const { data } = await axios.get(url, { timeout: 10000 });
+    const $ = cheerio.load(data);
+    const title = $('meta[property="og:title"]').attr('content') || $('title').text() || 'Scraped Article';
+    const desc = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '';
+    const img = $('meta[property="og:image"]').attr('content') || '';
+
+    let tid = tenant_id;
+    if (!tid) {
+      const first = await pool.query('SELECT id FROM tenants LIMIT 1');
+      if (!first.rowCount) throw new Error('No tenants exist. Create one first.');
+      tid = first.rows[0].id;
+    }
+
+    await pool.query('INSERT INTO news(tenant_id,title,content,image_url,published) VALUES($1,$2,$3,$4,true)',
+      [tid, title.substring(0,200), desc.substring(0,1000), img]);
+    await logAction(req.session.user.email, 'SCRAPE', `URL: ${url} -> Tenant ${tid}`);
+    req.session.flash = { type: 'success', msg: `Scraped: ${title.substring(0,50)}...` };
+  } catch(e) {
+    req.session.flash = { type: 'error', msg: 'Scrape failed: ' + e.message };
+  }
   res.redirect('/dev/master');
 }));
-// === SCHOOL PORTALS - DASHBOARD ===
-app.get('/portal/dashboard', requireAuth, ah(async (req, res) => {
-  res.send(renderPage('Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:30px;border-radius:16px;margin-bottom:20px;color:white">
-      <h1>Welcome, ${esc(req.session.user.name)}</h1>
-      <p>${esc(req.session.user.tenant_name)}</p>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Quick Actions</h3>
-        <a href="/portal/finance" class="btn">Manage Fees</a>
-        <a href="/portal/marksheets" class="btn">Enter Marks</a>
-        <a href="/portal/marketplace" class="btn">School Shop</a>
-        <a href="/portal/public" class="btn">Edit Website</a>
-      </div>
-    </div>
-  `, req.session.user));
-}));
 
+// === EXPORT ROUTES ===
+app.get('/dev/export/:table', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { table } = req.params;
+  const allowed = ['tenants', 'users', 'developer_revenue'];
+  if (!allowed.includes(table)) return res.status(400).send('Invalid table');
+  const data = (await pool.query(`SELECT * FROM ${table} ORDER BY id DESC`)).rows;
+  const parser = new Parser();
+  const csv = parser.parse(data);
+  await logAction(req.session.user.email, 'EXPORT', `Table: ${table}`);
+  res.header('Content-Type', 'text/csv');
+  res.attachment(`${table}-${Date.now()}.csv`);
+  res.send(csv);
+}));
 // === ACADEMICS ===
 app.get('/portal/academics', requireAuth, ah(async (req, res) => {
   res.send(renderPage('Academics', `<div class="card"><h3>Academics</h3><p>Timetables, subjects, classes coming soon.</p></div>`, req.session.user));
