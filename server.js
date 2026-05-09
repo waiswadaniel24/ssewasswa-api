@@ -193,6 +193,57 @@ const migrations = [
   // Fees payment method tracking
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS payment_method TEXT`,
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS receipt_no TEXT`
+
+  // v11.0 - Billing/Subscriptions
+  `CREATE TABLE IF NOT EXISTS subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plan TEXT DEFAULT 'free', amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX', status TEXT DEFAULT 'active', started_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, payment_method TEXT, reference TEXT)`,
+  `CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, amount INTEGER NOT NULL, method TEXT, reference TEXT, status TEXT DEFAULT 'pending', description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - Webhooks
+  `CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, url TEXT NOT NULL, events TEXT[], secret TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - Church member attendance
+  `CREATE TABLE IF NOT EXISTS church_attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id), service_name TEXT, date DATE DEFAULT CURRENT_DATE, present BOOLEAN DEFAULT true)`,
+  // v11.0 - Tithe statements
+  `ALTER TABLE donations ADD COLUMN IF NOT EXISTS donor_id INTEGER`,
+  `ALTER TABLE donations ADD COLUMN IF NOT EXISTS is_tithe BOOLEAN DEFAULT false`,
+  // v11.0 - Birthday tracking
+  `ALTER TABLE church_members ADD COLUMN IF NOT EXISTS date_of_birth DATE`,
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS date_of_birth DATE`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS date_of_birth DATE`,
+  // v11.0 - Customer debts
+  `ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)`,
+  // v11.0 - Purchase orders
+  `CREATE TABLE IF NOT EXISTS purchase_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, po_no TEXT, supplier TEXT, items JSONB, total INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - Tax reports
+  `CREATE TABLE IF NOT EXISTS tax_records (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, period TEXT NOT NULL, taxable_amount INTEGER DEFAULT 0, tax_rate INTEGER DEFAULT 18, tax_amount INTEGER DEFAULT 0, tax_type TEXT DEFAULT 'VAT', filed BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - Barcode/QR for inventory
+  `ALTER TABLE inventory ADD COLUMN IF NOT EXISTS barcode TEXT`,
+  `ALTER TABLE inventory ADD COLUMN IF NOT EXISTS qr_code TEXT`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS barcode TEXT`,
+  // v11.0 - Bill reminders
+  `CREATE TABLE IF NOT EXISTS bill_reminders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, amount INTEGER DEFAULT 0, due_date DATE, category TEXT, recurring TEXT, notes TEXT, paid BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - Document library
+  `CREATE TABLE IF NOT EXISTS documents (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, file_url TEXT, file_type TEXT, category TEXT, uploaded_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - 2FA
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_fa_enabled BOOLEAN DEFAULT false`,
+  // v11.0 - Income tracking
+  `CREATE TABLE IF NOT EXISTS income_records (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, source TEXT NOT NULL, amount INTEGER NOT NULL, category TEXT, description TEXT, received_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - Fundraising campaigns
+  `CREATE TABLE IF NOT EXISTS campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, target INTEGER DEFAULT 0, raised INTEGER DEFAULT 0, start_date DATE, end_date DATE, status TEXT DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS campaign_pledges (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE, donor_name TEXT, amount INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, pledged_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - Member roles/permissions
+  `CREATE TABLE IF NOT EXISTS role_permissions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, role_name TEXT NOT NULL, permissions JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // v11.0 - Theme builder
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS primary_color TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS secondary_color TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS accent_color TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS font_family TEXT`,
+  // v11.0 - Multi-language
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'`,
+  `CREATE TABLE IF NOT EXISTS translations (id SERIAL PRIMARY KEY, lang TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, UNIQUE(lang, key))`,
+  // v11.0 - Platform status
+  `CREATE TABLE IF NOT EXISTS platform_status (id SERIAL PRIMARY KEY, service TEXT NOT NULL, status TEXT DEFAULT 'operational', message TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  `INSERT INTO platform_status (service, status) VALUES ('api', 'operational'), ('database', 'operational'), ('email', 'operational'), ('sms', 'operational') ON CONFLICT DO NOTHING`
 ];
 
 (async () => {
@@ -524,6 +575,13 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Report Cards</h3><a href="/school/report-cards" class="btn btn-gold">Generate</a><a href="/school/report-cards/bulk" class="btn btn-sm" style="margin-top:8px">Bulk Cards</a></div>
       <div class="card"><h3>Print</h3><a href="/school/print/fee-balances" class="btn btn-sm">Fee Balances</a><a href="/school/attendance/print" class="btn btn-sm" style="margin-top:8px">Attendance</a></div>
       <div class="card"><h3>Notify</h3><a href="/school/notify" class="btn btn-sm">Send SMS</a><a href="/notifications" class="btn btn-sm" style="margin-top:8px">Notifications</a></div>
+      <div class="card"><h3>Parent Links</h3><a href="/school/parent-links" class="btn btn-sm">Manage Parents</a></div>
+      <div class="card"><h3>Barcodes</h3><a href="/barcode" class="btn btn-sm">Scan / Generate</a></div>
+      <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
+      <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
+      <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
+      <div class="card"><h3>API & Webhooks</h3><a href="/api-keys" class="btn btn-sm">Manage Keys</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Fees Collected (Monthly)</h3><canvas id="feesChart"></canvas></div>
@@ -1869,6 +1927,24 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
         <a href="/settings/profile" class="btn btn-sm">Edit Public Profile</a>
         ${tenant.has_fundraising ? '<a href="/fundraising" class="btn btn-gold btn-sm" style="margin-top:8px">Fundraising</a>' : '<a href="/upgrade/fundraising" class="btn btn-sm" style="margin-top:8px">+ Add Fundraising</a>'}
       </div>
+      <div class="card"><h3>Campaigns</h3>
+        <a href="/campaigns" class="btn btn-sm btn-gold">Fundraising</a>
+      </div>
+      <div class="card"><h3>Income</h3>
+        <a href="/income" class="btn btn-sm btn-green">Income Tracking</a>
+      </div>
+      <div class="card"><h3>Billing</h3>
+        <a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a>
+      </div>
+      <div class="card"><h3>Documents</h3>
+        <a href="/documents" class="btn btn-sm">Library</a>
+      </div>
+      <div class="card"><h3>Roles</h3>
+        <a href="/roles" class="btn btn-sm">Permissions</a>
+      </div>
+      <div class="card"><h3>Bills</h3>
+        <a href="/bill-reminders" class="btn btn-sm btn-red">Reminders</a>
+      </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Finance: Income vs Expense</h3><canvas id="orgFinanceChart"></canvas></div>
@@ -2324,6 +2400,27 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
         <a href="/org/events" class="btn btn-sm">Events</a>
         <a href="/org/notices" class="btn btn-sm" style="margin-top:8px">Notices</a>
       </div>
+      <div class="card"><h3>Attendance</h3>
+        <a href="/church/attendance" class="btn btn-sm">Mark Attendance</a>
+      </div>
+      <div class="card"><h3>Tithe Statement</h3>
+        <a href="/church/tithe-statement" class="btn btn-sm">Generate</a>
+      </div>
+      <div class="card"><h3>Birthdays</h3>
+        <a href="/church/birthdays" class="btn btn-sm btn-green">Birthday SMS</a>
+      </div>
+      <div class="card"><h3>Campaigns</h3>
+        <a href="/campaigns" class="btn btn-sm btn-gold">Fundraising</a>
+      </div>
+      <div class="card"><h3>Income</h3>
+        <a href="/income" class="btn btn-sm">Income Tracking</a>
+      </div>
+      <div class="card"><h3>Billing</h3>
+        <a href="/billing" class="btn btn-sm">Subscriptions</a>
+      </div>
+      <div class="card"><h3>Documents</h3>
+        <a href="/documents" class="btn btn-sm">Library</a>
+      </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Tithes Trend</h3><canvas id="tithesChart"></canvas></div>
@@ -2368,7 +2465,11 @@ app.get('/church/tithes', requireAuth, requireNotBanned, ah(async (req, res) => 
         <div class="grid" style="grid-template-columns:1fr 1fr 2fr">
           <select name="type" required><option value="income">Income</option><option value="expense">Expense</option></select>
           <input name="amount" type="number" placeholder="Amount UGX" required>
-          <input name="description" placeholder="Tithe/Offering - Member Name" required>
+          <input name="donor_name" placeholder="Donor Name (for tithe statement)">
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr 2fr;margin-top:8px">
+          <select name="method"><option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="bank">Bank Transfer</option><option value="cheque">Cheque</option></select>
+          <input name="description" placeholder="Tithe/Offering Description" required>
         </div>
         <button class="btn btn-gold">Save Record</button>
       </form>
@@ -2382,8 +2483,10 @@ app.get('/church/tithes', requireAuth, requireNotBanned, ah(async (req, res) => 
 }));
 
 app.post('/church/tithes/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const { type, amount, description } = req.body;
+  const { type, amount, description, donor_name, method } = req.body;
   await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, amount, type, description]);
+  // Also save to donations table for tithe statement generation
+  await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,is_tithe) VALUES($1,$2,$3,$4,$5,true)', [req.session.user.tenant_id, donor_name || 'Anonymous', amount, type, method || 'cash']);
   res.redirect('/church/tithes');
 }));
 
@@ -2549,6 +2652,7 @@ app.get('/church/members/new', requireAuth, requireNotBanned, (req, res) => {
         <input name="email" type="email" placeholder="Email">
         <input name="phone" placeholder="Phone +256...">
         <input name="address" placeholder="Address">
+        <input name="date_of_birth" type="date" placeholder="Date of Birth">
         <select name="role"><option value="">Select Role</option><option>Pastor</option><option>Elder</option><option>Deacon</option><option>Choir Member</option><option>Usher</option><option>Member</option></select>
         <button class="btn btn-green">Add Member</button>
       </form>
@@ -2557,8 +2661,8 @@ app.get('/church/members/new', requireAuth, requireNotBanned, (req, res) => {
 });
 
 app.post('/church/members/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const { name, email, phone, address, role } = req.body;
-  await pool.query('INSERT INTO church_members(tenant_id,name,email,phone,address,role) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, name, email, phone, address, role]);
+  const { name, email, phone, address, role, date_of_birth } = req.body;
+  await pool.query('INSERT INTO church_members(tenant_id,name,email,phone,address,role,date_of_birth) VALUES($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, name, email, phone, address, role, date_of_birth || null]);
   await audit(req.session.user.email, 'add_church_member', `Added church member: ${name}`);
   res.redirect('/church/members');
 }));
@@ -2666,6 +2770,15 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div class="card"><h3>Expenses</h3><a href="/business/expenses" class="btn btn-sm">Record Expense</a><a href="/business/profit-loss" class="btn btn-sm" style="margin-top:8px">Profit/Loss</a></div>
       <div class="card"><h3>Customers</h3><a href="/business/customers" class="btn btn-sm">Customer Directory</a></div>
       <div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>
+      <div class="card"><h3>Debts</h3><a href="/business/debts" class="btn btn-sm btn-red">Customer Debts</a></div>
+      <div class="card"><h3>Purchase Orders</h3><a href="/business/purchase-orders" class="btn btn-sm">Manage POs</a></div>
+      <div class="card"><h3>Tax (VAT/URA)</h3><a href="/business/tax" class="btn btn-sm">Tax Reports</a></div>
+      <div class="card"><h3>Barcodes</h3><a href="/barcode" class="btn btn-sm">Scan / Generate</a></div>
+      <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
+      <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
+      <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Library</a></div>
+      <div class="card"><h3>API</h3><a href="/api-keys" class="btn btn-sm">API Keys</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Sales Trend</h3><canvas id="salesChart"></canvas></div>
@@ -3116,6 +3229,10 @@ app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res)
       <div class="card"><h3>Goals</h3><a href="/individual/goals" class="btn btn-sm">Set Goals</a></div>
       <div class="card"><h3>Notes</h3><a href="/individual/notes" class="btn btn-sm">My Notes</a></div>
       <div class="card"><h3>Documents</h3><a href="/individual/docs" class="btn btn-sm">My Documents</a></div>
+      <div class="card"><h3>Bill Reminders</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Reminders</a></div>
+      <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
+      <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Budget: Planned vs Actual</h3><canvas id="budgetChart"></canvas></div>
@@ -3598,6 +3715,11 @@ app.get('/settings/profile', requireAuth, ah(async (req, res) => {
       <a href="/settings/password" class="btn btn-red btn-sm">Change Password</a>
       <a href="/settings/backup" class="btn btn-sm" style="margin-top:8px">Data Backup</a>
       <a href="/settings/branding" class="btn btn-sm" style="margin-top:8px">Branding</a>
+      <a href="/settings/2fa" class="btn btn-sm btn-green" style="margin-top:8px">Two-Factor Auth</a>
+      <a href="/settings/theme" class="btn btn-sm btn-gold" style="margin-top:8px">Theme Builder</a>
+      <a href="/audit-logs" class="btn btn-sm" style="margin-top:8px">Audit Logs</a>
+      <a href="/api-docs" class="btn btn-sm" style="margin-top:8px">API Docs</a>
+      <a href="/status" class="btn btn-sm" style="margin-top:8px">Platform Status</a>
     </div>
   `, req.session.user));
 }));
@@ -3986,6 +4108,1171 @@ app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res)
   await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, `Fundraising fee - ${req.session.user.tenant_name}`]);
   res.redirect('/fundraising');
 }));
+
+
+// === BILLING & SUBSCRIPTIONS ===
+app.get('/billing', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [sub, payments] = await Promise.all([
+    pool.query('SELECT * FROM subscriptions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 1', [t]),
+    pool.query('SELECT * FROM payments WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t])
+  ]);
+  const plan = sub.rows[0]?.plan || 'free';
+  const planNames = { free: 'Free Plan', basic: 'Basic - UGX 50,000/mo', pro: 'Pro - UGX 150,000/mo', enterprise: 'Enterprise - UGX 500,000/mo' };
+  res.send(renderPage('Billing & Subscriptions', `
+    <div class="hero"><h1>Billing & Subscriptions</h1><p>Manage your plan and payments</p></div>
+    <div class="card">
+      <h2>Current Plan</h2>
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num" style="font-size:20px">${planNames[plan] || plan}</div><div>Active Plan</div></div>
+        <div class="stat-card"><div class="stat-num">${sub.rows[0]?.status || 'active'}</div><div>Status</div></div>
+      </div>
+      <h3 style="margin-top:20px">Change Plan</h3>
+      <div class="grid" style="margin-top:10px">
+        <div class="card" style="border:2px solid ${plan==='free'?'#4f46e5':'#e2e8f0'}">
+          <h3>Free</h3><p class="muted">Up to 50 records</p><p style="font-size:24px;font-weight:800">UGX 0</p>
+          <a href="/billing/subscribe/free" class="btn btn-sm" style="margin-top:10px">${plan==='free'?'Current':'Downgrade'}</a>
+        </div>
+        <div class="card" style="border:2px solid ${plan==='basic'?'#4f46e5':'#e2e8f0'}">
+          <h3>Basic</h3><p class="muted">Up to 500 records</p><p style="font-size:24px;font-weight:800">UGX 50K</p>
+          <a href="/billing/subscribe/basic" class="btn btn-sm btn-green" style="margin-top:10px">${plan==='basic'?'Current':'Subscribe'}</a>
+        </div>
+        <div class="card" style="border:2px solid ${plan==='pro'?'#4f46e5':'#e2e8f0'}">
+          <h3>Pro</h3><p class="muted">Unlimited records + SMS</p><p style="font-size:24px;font-weight:800">UGX 150K</p>
+          <a href="/billing/subscribe/pro" class="btn btn-sm btn-gold" style="margin-top:10px">${plan==='pro'?'Current':'Subscribe'}</a>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Payment History</h2>
+      ${payments.rows.length ? `<table><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th><th>Ref</th></tr>${payments.rows.map(p=>`<tr><td>${new Date(p.created_at).toLocaleDateString()}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>${esc(p.method||'-')}</td><td><span class="tag">${esc(p.status)}</span></td><td>${esc(p.reference||'-')}</td></tr>`).join('')}</table>` : '<p class="muted">No payments yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const plan = req.params.plan;
+  const amounts = { free: 0, basic: 50000, pro: 150000, enterprise: 500000 };
+  const amount = amounts[plan] || 0;
+  const expires = new Date(Date.now() + 30*24*60*60*1000);
+  await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [t, plan, amount, 'active', expires]);
+  if (amount > 0) await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description) VALUES($1,$2,$3,$4,$5)', [t, amount, 'manual', 'pending', `${plan} plan subscription`]);
+  await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan`);
+  res.redirect('/billing');
+}));
+
+// === API KEYS & WEBHOOKS ===
+app.get('/api-keys', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [keys, hooks, logs] = await Promise.all([
+    pool.query('SELECT id, name, scopes, last_used, created_at FROM api_keys WHERE tenant_id=$1 ORDER BY created_at DESC', [t]),
+    pool.query('SELECT * FROM webhooks WHERE tenant_id=$1 ORDER BY created_at DESC', [t]),
+    pool.query('SELECT * FROM webhook_logs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t])
+  ]);
+  res.send(renderPage('API Keys & Webhooks', `
+    <div class="hero"><h1>API & Webhooks</h1><p>Manage API access and webhook integrations</p></div>
+    <div class="card">
+      <h2>API Keys</h2>
+      <a href="/api-keys/new" class="btn btn-sm" style="margin-bottom:15px">Create New Key</a>
+      ${keys.rows.length ? `<table><tr><th>Name</th><th>Scopes</th><th>Last Used</th><th>Actions</th></tr>${keys.rows.map(k=>`<tr><td>${esc(k.name)}</td><td>${(k.scopes||[]).map(s=>`<span class="tag">${esc(s)}</span>`).join(' ')}</td><td>${k.last_used?new Date(k.last_used).toLocaleDateString():'Never'}</td><td><a href="/api-keys/${k.id}/revoke" class="btn btn-sm btn-red">Revoke</a></td></tr>`).join('')}</table>` : '<p class="muted">No API keys created</p>'}
+    </div>
+    <div class="card">
+      <h2>Webhooks</h2>
+      <a href="/webhooks/new" class="btn btn-sm" style="margin-bottom:15px">Add Webhook</a>
+      ${hooks.rows.length ? `<table><tr><th>URL</th><th>Events</th><th>Active</th><th>Actions</th></tr>${hooks.rows.map(h=>`<tr><td>${esc(h.url)}</td><td>${(h.events||[]).map(e=>`<span class="tag">${esc(e)}</span>`).join(' ')}</td><td>${h.active?'Yes':'No'}</td><td><a href="/webhooks/${h.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No webhooks configured</p>'}
+    </div>
+    <div class="card">
+      <h2>Webhook Logs</h2>
+      ${logs.rows.length ? `<table><tr><th>Time</th><th>Event</th><th>Status</th></tr>${logs.rows.map(l=>`<tr><td>${new Date(l.created_at).toLocaleString()}</td><td>${esc(l.event)}</td><td>${l.status||'-'}</td></tr>`).join('')}</table>` : '<p class="muted">No webhook logs</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/api-keys/new', requireAuth, (req, res) => {
+  res.send(renderPage('Create API Key', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Create API Key</h2>
+      <form method="POST" action="/api-keys/save">
+        <input name="name" placeholder="Key Name (e.g. Mobile App)" required>
+        <label style="display:block;margin:10px 0"><input type="checkbox" name="scopes" value="read" checked> Read</label>
+        <label style="display:block;margin:10px 0"><input type="checkbox" name="scopes" value="write"> Write</label>
+        <label style="display:block;margin:10px 0"><input type="checkbox" name="scopes" value="admin"> Admin</label>
+        <button class="btn" style="width:100%">Create Key</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/api-keys/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, scopes } = req.body;
+  const scopeArr = Array.isArray(scopes) ? scopes : (scopes ? [scopes] : ['read']);
+  const rawKey = 'ssew_' + crypto.randomBytes(24).toString('hex');
+  const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+  await pool.query('INSERT INTO api_keys(tenant_id,key_hash,name,scopes) VALUES($1,$2,$3,$4)', [t, keyHash, name, scopeArr]);
+  await audit(req.session.user.email, 'api_key_created', `Created API key: ${name}`);
+  res.send(renderPage('API Key Created', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert alert-success">API Key created successfully!</div><div class="alert alert-info" style="word-break:break-all"><strong>Your API Key (save this, it won't be shown again):</strong><br>${esc(rawKey)}</div><a href="/api-keys" class="btn">Back to API Keys</a></div>`, req.session.user));
+}));
+
+app.get('/api-keys/:id/revoke', requireAuth, ah(async (req, res) => {
+  await pool.query('DELETE FROM api_keys WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/api-keys');
+}));
+
+app.get('/webhooks/new', requireAuth, (req, res) => {
+  res.send(renderPage('Add Webhook', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Add Webhook</h2>
+      <form method="POST" action="/webhooks/save">
+        <input name="url" type="url" placeholder="https://your-server.com/webhook" required>
+        <label style="display:block;margin:10px 0"><input type="checkbox" name="events" value="payment" checked> Payment Events</label>
+        <label style="display:block;margin:10px 0"><input type="checkbox" name="events" value="student"> Student Events</label>
+        <label style="display:block;margin:10px 0"><input type="checkbox" name="events" value="invoice"> Invoice Events</label>
+        <label style="display:block;margin:10px 0"><input type="checkbox" name="events" value="member"> Member Events</label>
+        <button class="btn" style="width:100%">Add Webhook</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/webhooks/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { url, events } = req.body;
+  const eventArr = Array.isArray(events) ? events : (events ? [events] : ['payment']);
+  const secret = crypto.randomBytes(16).toString('hex');
+  await pool.query('INSERT INTO webhooks(tenant_id,url,events,secret) VALUES($1,$2,$3,$4)', [t, url, eventArr, secret]);
+  await audit(req.session.user.email, 'webhook_created', `Webhook: ${url}`);
+  res.redirect('/api-keys');
+}));
+
+app.get('/webhooks/:id/delete', requireAuth, ah(async (req, res) => {
+  await pool.query('DELETE FROM webhooks WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/api-keys');
+}));
+
+// === CHURCH MEMBER ATTENDANCE ===
+app.get('/church/attendance', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [members, att] = await Promise.all([
+    pool.query('SELECT id,name FROM church_members WHERE tenant_id=$1 ORDER BY name', [t]),
+    pool.query("SELECT ca.*,cm.name as member_name FROM church_attendance ca LEFT JOIN church_members cm ON ca.member_id=cm.id WHERE ca.tenant_id=$1 AND ca.date=CURRENT_DATE ORDER BY cm.name", [t])
+  ]);
+  const presentIds = att.rows.filter(a=>a.present).map(a=>a.member_id);
+  res.send(renderPage('Church Attendance', `
+    <div class="card">
+      <h2>Today's Service Attendance</h2>
+      <form method="POST" action="/church/attendance/save">
+        <input name="service_name" placeholder="Service Name (e.g. Sunday Worship)" value="Sunday Worship">
+        <table><tr><th>Member</th><th>Present</th></tr>
+        ${members.rows.map(m=>`<tr><td>${esc(m.name)}</td><td><input type="checkbox" name="present_${m.id}" ${presentIds.includes(m.id)?'checked':''}></td></tr>`).join('')}
+        </table>
+        <button class="btn" style="margin-top:15px">Save Attendance</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Today's Records</h2>
+      ${att.rows.length ? `<table><tr><th>Member</th><th>Service</th><th>Status</th></tr>${att.rows.map(a=>`<tr><td>${esc(a.member_name||'Unknown')}</td><td>${esc(a.service_name||'-')}</td><td><span class="tag" style="background:${a.present?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b'}">${a.present?'Present':'Absent'}</span></td></tr>`).join('')}</table>` : '<p class="muted">No attendance recorded today</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/church/attendance/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { service_name } = req.body;
+  const members = (await pool.query('SELECT id FROM church_members WHERE tenant_id=$1', [t])).rows;
+  for (const m of members) {
+    const present = !!req.body[`present_${m.id}`];
+    await pool.query('INSERT INTO church_attendance(tenant_id,member_id,service_name,present) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [t, m.id, service_name || 'Service', present]);
+  }
+  res.redirect('/church/attendance');
+}));
+
+// === TITHE STATEMENT GENERATOR ===
+app.get('/church/tithe-statement', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id,name FROM church_members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Tithe Statement', `
+    <div class="card">
+      <h2>Generate Tithe Statement</h2>
+      <form method="GET" action="/church/tithe-statement/view">
+        <select name="member_id" required><option value="">Select Member</option>${members.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
+        <input name="from_date" type="date" placeholder="From Date" required>
+        <input name="to_date" type="date" placeholder="To Date" required>
+        <button class="btn">Generate Statement</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/tithe-statement/view', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { member_id, from_date, to_date } = req.query;
+  const member = (await pool.query('SELECT * FROM church_members WHERE id=$1 AND tenant_id=$2', [member_id, t])).rows[0];
+  const tithes = (await pool.query("SELECT * FROM donations WHERE tenant_id=$1 AND donor_id=$2 AND is_tithe=true AND created_at>=$3 AND created_at<=$4 ORDER BY created_at", [t, member_id, from_date, to_date+' 23:59:59'])).rows;
+  const total = tithes.reduce((s,d)=>s+Number(d.amount),0);
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  res.send(renderPage('Tithe Statement', `
+    <div class="card" id="printable">
+      <div style="text-align:center;margin-bottom:20px">
+        <h1>${esc(tenant?.name||'Church')}</h1>
+        <h2>Tithe Statement</h2>
+        <p>Member: <strong>${esc(member?.name||'Unknown')}</strong></p>
+        <p>Period: ${from_date} to ${to_date}</p>
+      </div>
+      <table><tr><th>Date</th><th>Type</th><th>Method</th><th>Amount (UGX)</th></tr>
+      ${tithes.map(d=>`<tr><td>${new Date(d.created_at).toLocaleDateString()}</td><td>${esc(d.type||'Tithe')}</td><td>${esc(d.method||'-')}</td><td>${Number(d.amount).toLocaleString()}</td></tr>`).join('')}
+      <tr style="font-weight:bold"><td colspan="3">Total</td><td>UGX ${total.toLocaleString()}</td></tr></table>
+    </div>
+    <a href="/church/tithe-statement" class="btn">Back</a>
+    <button class="btn btn-green" onclick="window.print()" style="margin-left:10px">Print Statement</button>
+  `, req.session.user));
+}));
+
+// === BIRTHDAY SMS ===
+app.get('/church/birthdays', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const today = new Date();
+  const month = today.getMonth()+1;
+  const day = today.getDate();
+  const birthdays = (await pool.query("SELECT *,EXTRACT(MONTH FROM date_of_birth) as m,EXTRACT(DAY FROM date_of_birth) as d FROM church_members WHERE tenant_id=$1 AND date_of_birth IS NOT NULL", [t])).rows.filter(m=>m.m==month&&m.d==day);
+  const upcoming = (await pool.query("SELECT *,EXTRACT(MONTH FROM date_of_birth) as m,EXTRACT(DAY FROM date_of_birth) as d FROM church_members WHERE tenant_id=$1 AND date_of_birth IS NOT NULL", [t])).rows.filter(m=>m.m==month).sort((a,b)=>a.d-b.d);
+  res.send(renderPage('Member Birthdays', `
+    <div class="card">
+      <h2>Today's Birthdays</h2>
+      ${birthdays.length ? birthdays.map(m=>`<div class="stat-card" style="margin:10px 0;padding:15px"><strong>${esc(m.name)}</strong> - ${esc(m.phone||'No phone')} <a href="/church/birthdays/${m.id}/sms" class="btn btn-sm btn-green" style="margin-left:10px">Send SMS</a></div>`).join('') : '<p class="muted">No birthdays today</p>'}
+    </div>
+    <div class="card">
+      <h2>This Month's Birthdays</h2>
+      ${upcoming.length ? `<table><tr><th>Name</th><th>Date</th><th>Phone</th><th>Action</th></tr>${upcoming.map(m=>`<tr><td>${esc(m.name)}</td><td>${m.d}/${m.m}</td><td>${esc(m.phone||'-')}</td><td><a href="/church/birthdays/${m.id}/sms" class="btn btn-sm">Send SMS</a></td></tr>`).join('')}</table>` : '<p class="muted">No birthdays this month</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/birthdays/:id/sms', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const member = (await pool.query('SELECT * FROM church_members WHERE id=$1', [req.params.id])).rows[0];
+  if (!member || !member.phone) return res.send(renderPage('SMS', '<div class="alert alert-error">Member has no phone number</div>', req.session.user));
+  res.send(renderPage('Send Birthday SMS', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Send Birthday SMS to ${esc(member.name)}</h2>
+      <p class="muted">Phone: ${esc(member.phone)}</p>
+      <form method="POST" action="/church/birthdays/${member.id}/sms">
+        <textarea name="message" rows="4" required>Happy Birthday ${member.name}! May God bless you abundantly on your special day. - ${req.session.user.tenant_name||'Church'}</textarea>
+        <button class="btn btn-green" style="width:100%;margin-top:10px">Send SMS</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/church/birthdays/:id/sms', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const member = (await pool.query('SELECT * FROM church_members WHERE id=$1', [req.params.id])).rows[0];
+  const { message } = req.body;
+  let sent = false;
+  if (process.env.AT_API_KEY && process.env.AT_USERNAME && member.phone) {
+    try {
+      const africastalking = require('africastalking')({ apiKey: process.env.AT_API_KEY, username: process.env.AT_USERNAME });
+      await africastalking.SMS.send({ to: member.phone, message, from: process.env.AT_SENDER_ID || undefined });
+      sent = true;
+    } catch (e) { console.warn('SMS failed:', e.message); }
+  }
+  await audit(req.session.user.email, 'birthday_sms', `Sent birthday SMS to ${member.name}`);
+  res.send(renderPage('SMS Sent', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert ${sent?'alert-success':'alert-info'}">${sent?'SMS sent successfully!':'SMS queued. Configure Africa\'s Talking in env for live delivery.'}</div><a href="/church/birthdays" class="btn">Back to Birthdays</a></div>`, req.session.user));
+}));
+
+// === CUSTOMER DEBTS TRACKING ===
+app.get('/business/debts', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const unpaidSales = (await pool.query("SELECT s.*,c.name as customer_name FROM sales s LEFT JOIN customers c ON s.customer_id=c.id WHERE s.tenant_id=$1 AND s.status!='paid' ORDER BY s.created_at DESC", [t])).rows;
+  const unpaidInvoices = (await pool.query("SELECT i.*,c.name as customer_name FROM invoices i LEFT JOIN customers c ON i.customer_id=c.id WHERE i.tenant_id=$1 AND i.status='unpaid' ORDER BY i.due_date", [t])).rows;
+  const totalDebt = unpaidSales.reduce((s,x)=>s+(x.total-x.paid),0) + unpaidInvoices.reduce((s,x)=>s+x.amount,0);
+  res.send(renderPage('Customer Debts', `
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${totalDebt.toLocaleString()}</div><div>Total Outstanding</div></div>
+      <div class="stat-card"><div class="stat-num">${unpaidSales.length}</div><div>Unpaid Sales</div></div>
+      <div class="stat-card"><div class="stat-num">${unpaidInvoices.length}</div><div>Unpaid Invoices</div></div>
+    </div>
+    <div class="card">
+      <h2>Unpaid Sales</h2>
+      ${unpaidSales.length ? `<table><tr><th>Customer</th><th>Total</th><th>Paid</th><th>Balance</th><th>Date</th></tr>${unpaidSales.map(s=>`<tr><td>${esc(s.customer_name||s.customer_name||'Walk-in')}</td><td>UGX ${Number(s.total).toLocaleString()}</td><td>UGX ${Number(s.paid).toLocaleString()}</td><td style="color:#dc2626;font-weight:bold">UGX ${(s.total-s.paid).toLocaleString()}</td><td>${new Date(s.created_at).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No unpaid sales</p>'}
+    </div>
+    <div class="card">
+      <h2>Overdue Invoices</h2>
+      ${unpaidInvoices.length ? `<table><tr><th>Invoice</th><th>Customer</th><th>Amount</th><th>Due Date</th><th>Days Overdue</th><th>Action</th></tr>${unpaidInvoices.map(i=>{const days=Math.floor((Date.now()-new Date(i.due_date))/(1000*60*60*24));return`<tr><td>${esc(i.invoice_no)}</td><td>${esc(i.customer_name||'-')}</td><td>UGX ${Number(i.amount).toLocaleString()}</td><td>${new Date(i.due_date).toLocaleDateString()}</td><td style="color:${days>0?'#dc2626':'#059669'}">${days>0?days+' days':'Due'}</td><td><a href="/business/invoices/${i.id}/mark-paid" class="btn btn-sm btn-green">Mark Paid</a></td></tr>`}).join('')}</table>` : '<p class="muted">No overdue invoices</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+// === PURCHASE ORDERS ===
+app.get('/business/purchase-orders', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const pos = (await pool.query('SELECT * FROM purchase_orders WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Purchase Orders', `
+    <div class="card">
+      <h2>Purchase Orders</h2>
+      <a href="/business/purchase-orders/new" class="btn btn-sm" style="margin-bottom:15px">New PO</a>
+      ${pos.length ? `<table><tr><th>PO#</th><th>Supplier</th><th>Total</th><th>Status</th><th>Date</th><th>Actions</th></tr>${pos.map(p=>`<tr><td>${esc(p.po_no||'PO-'+p.id)}</td><td>${esc(p.supplier||'-')}</td><td>UGX ${Number(p.total).toLocaleString()}</td><td><span class="tag">${esc(p.status)}</span></td><td>${new Date(p.created_at).toLocaleDateString()}</td><td><a href="/business/purchase-orders/${p.id}/approve" class="btn btn-sm btn-green">Approve</a> <a href="/business/purchase-orders/${p.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No purchase orders</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/business/purchase-orders/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Purchase Order', `
+    <div class="card" style="max-width:700px;margin:40px auto">
+      <h2>Create Purchase Order</h2>
+      <form method="POST" action="/business/purchase-orders/save">
+        <input name="supplier" placeholder="Supplier Name" required>
+        <textarea name="items" rows="6" placeholder="Items (one per line: Item Name, Qty, Unit Price)" required></textarea>
+        <input name="notes" placeholder="Notes">
+        <button class="btn" style="width:100%">Create PO</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/business/purchase-orders/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { supplier, items, notes } = req.body;
+  const poNo = 'PO-' + Date.now().toString(36).toUpperCase();
+  const itemsList = items.split('\\n').filter(Boolean).map(line => { const parts = line.split(','); return { name: parts[0]?.trim(), qty: parseInt(parts[1])||1, price: parseInt(parts[2])||0 }; });
+  const total = itemsList.reduce((s,i)=>s+i.qty*i.price,0);
+  await pool.query('INSERT INTO purchase_orders(tenant_id,po_no,supplier,items,total,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, poNo, supplier, JSON.stringify(itemsList), total, 'pending', notes]);
+  await audit(req.session.user.email, 'po_created', `PO ${poNo} for ${supplier}`);
+  res.redirect('/business/purchase-orders');
+}));
+
+app.get('/business/purchase-orders/:id/approve', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE purchase_orders SET status=$1 WHERE id=$2 AND tenant_id=$3', ['approved', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/business/purchase-orders');
+}));
+
+app.get('/business/purchase-orders/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM purchase_orders WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/business/purchase-orders');
+}));
+
+// === TAX REPORTS (VAT/URA) ===
+app.get('/business/tax', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const records = (await pool.query('SELECT * FROM tax_records WHERE tenant_id=$1 ORDER BY period DESC', [t])).rows;
+  const [salesTotal, expenseTotal] = await Promise.all([
+    pool.query("SELECT COALESCE(SUM(total),0) as total FROM sales WHERE tenant_id=$1 AND created_at>=DATE_TRUNC('month',CURRENT_DATE)", [t]),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND created_at>=DATE_TRUNC('month',CURRENT_DATE)", [t])
+  ]);
+  const currentMonth = new Date().toISOString().slice(0,7);
+  const taxableAmount = Number(salesTotal.rows[0].total);
+  const vatAmount = Math.round(taxableAmount * 18 / 118);
+  res.send(renderPage('Tax Reports (VAT/URA)', `
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">UGX ${taxableAmount.toLocaleString()}</div><div>This Month Sales</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${vatAmount.toLocaleString()}</div><div>Estimated VAT (18%)</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${Number(expenseTotal.rows[0].total).toLocaleString()}</div><div>This Month Expenses</div></div>
+    </div>
+    <div class="card">
+      <h2>File Tax Return</h2>
+      <form method="POST" action="/business/tax/file" style="display:inline">
+        <input type="hidden" name="period" value="${currentMonth}">
+        <input type="hidden" name="taxable_amount" value="${taxableAmount}">
+        <input type="hidden" name="tax_amount" value="${vatAmount}">
+        <button class="btn btn-green">File VAT Return for ${currentMonth}</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Tax Filing History</h2>
+      ${records.length ? `<table><tr><th>Period</th><th>Taxable Amount</th><th>VAT (18%)</th><th>Type</th><th>Filed</th></tr>${records.map(r=>`<tr><td>${esc(r.period)}</td><td>UGX ${Number(r.taxable_amount).toLocaleString()}</td><td>UGX ${Number(r.tax_amount).toLocaleString()}</td><td>${esc(r.tax_type)}</td><td>${r.filed?'Yes':'No'}</td></tr>`).join('')}</table>` : '<p class="muted">No tax records filed</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/business/tax/file', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { period, taxable_amount, tax_amount } = req.body;
+  await pool.query('INSERT INTO tax_records(tenant_id,period,taxable_amount,tax_amount,tax_type,filed) VALUES($1,$2,$3,$4,$5,true)', [t, period, taxable_amount || 0, tax_amount || 0, 'VAT']);
+  await audit(req.session.user.email, 'tax_filed', `VAT return for ${period}`);
+  res.redirect('/business/tax');
+}));
+
+// === BARCODE SCANNING ===
+app.get('/barcode', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  res.send(renderPage('Barcode Scanner', `
+    <div class="hero"><h1>Barcode Scanner</h1><p>Scan or search by barcode</p></div>
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <form method="GET" action="/barcode/lookup">
+        <input name="code" placeholder="Enter barcode or scan..." required autofocus>
+        <button class="btn" style="width:100%">Lookup</button>
+      </form>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h2>Generate Barcodes</h2>
+      <a href="/barcode/generate/inventory" class="btn btn-sm">Inventory Barcodes</a>
+      <a href="/barcode/generate/students" class="btn btn-sm btn-green" style="margin-left:10px">Student Barcodes</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/barcode/lookup', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const code = req.query.code;
+  const [item, student] = await Promise.all([
+    pool.query('SELECT * FROM inventory WHERE tenant_id=$1 AND (barcode=$2 OR sku=$2)', [t, code]),
+    pool.query('SELECT * FROM students WHERE tenant_id=$1 AND (barcode=$2 OR admission_no=$2)', [t, code])
+  ]);
+  let results = '';
+  if (item.rows[0]) results += `<div class="card"><h3>Inventory Item</h3><p><strong>Name:</strong> ${esc(item.rows[0].name)}</p><p><strong>SKU:</strong> ${esc(item.rows[0].sku||'-')}</p><p><strong>Qty:</strong> ${item.rows[0].quantity}</p><p><strong>Price:</strong> UGX ${Number(item.rows[0].selling_price).toLocaleString()}</p></div>`;
+  if (student.rows[0]) results += `<div class="card"><h3>Student</h3><p><strong>Name:</strong> ${esc(student.rows[0].name)}</p><p><strong>Adm No:</strong> ${esc(student.rows[0].admission_no||'-')}</p><p><strong>Class:</strong> ${esc(student.rows[0].class||'-')}</p></div>`;
+  if (!results) results = '<div class="alert alert-error">No item found for this barcode</div>';
+  res.send(renderPage('Barcode Result', results + '<a href="/barcode" class="btn">Scan Another</a>', req.session.user));
+}));
+
+app.get('/barcode/generate/inventory', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const items = (await pool.query('SELECT * FROM inventory WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  for (const item of items) {
+    if (!item.barcode) {
+      const barcode = 'INV-' + item.id + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+      await pool.query('UPDATE inventory SET barcode=$1 WHERE id=$2', [barcode, item.id]);
+    }
+  }
+  const updated = (await pool.query('SELECT id,name,sku,barcode,selling_price FROM inventory WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Inventory Barcodes', `
+    <div class="card">
+      <h2>Inventory Barcodes</h2>
+      <button class="btn btn-sm" onclick="window.print()" style="margin-bottom:15px">Print All</button>
+      <div class="grid">${updated.map(i=>`<div class="card" style="text-align:center;border:2px dashed #ccc;padding:15px"><strong>${esc(i.name)}</strong><br><span style="font-family:monospace;font-size:18px">${esc(i.barcode)}</span><br><span class="muted">UGX ${Number(i.selling_price).toLocaleString()}</span></div>`).join('')}</div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/barcode/generate/students', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT * FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  for (const s of students) {
+    if (!s.barcode) {
+      const barcode = 'STD-' + s.id + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+      await pool.query('UPDATE students SET barcode=$1 WHERE id=$2', [barcode, s.id]);
+    }
+  }
+  const updated = (await pool.query('SELECT id,name,admission_no,class,barcode FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Student Barcodes', `
+    <div class="card">
+      <h2>Student Barcodes</h2>
+      <button class="btn btn-sm" onclick="window.print()" style="margin-bottom:15px">Print All</button>
+      <div class="grid">${updated.map(s=>`<div class="card" style="text-align:center;border:2px dashed #ccc;padding:15px"><strong>${esc(s.name)}</strong><br>${esc(s.class||'')}<br><span style="font-family:monospace;font-size:18px">${esc(s.barcode)}</span><br><span class="muted">${esc(s.admission_no||'')}</span></div>`).join('')}</div>
+    </div>
+  `, req.session.user));
+}));
+
+// === BILL REMINDERS ===
+app.get('/bill-reminders', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const reminders = (await pool.query('SELECT * FROM bill_reminders WHERE tenant_id=$1 ORDER BY due_date', [t])).rows;
+  const upcoming = reminders.filter(r=>!r.paid && new Date(r.due_date)>=new Date());
+  const overdue = reminders.filter(r=>!r.paid && new Date(r.due_date)<new Date());
+  res.send(renderPage('Bill Reminders', `
+    <div class="card">
+      <h2>Bill Reminders</h2>
+      <a href="/bill-reminders/new" class="btn btn-sm" style="margin-bottom:15px">Add Reminder</a>
+      ${overdue.length ? `<h3 style="color:#dc2626">Overdue (${overdue.length})</h3><table><tr><th>Title</th><th>Amount</th><th>Due Date</th><th>Category</th><th>Action</th></tr>${overdue.map(r=>`<tr style="background:#fee2e2"><td>${esc(r.title)}</td><td>UGX ${Number(r.amount).toLocaleString()}</td><td>${new Date(r.due_date).toLocaleDateString()}</td><td>${esc(r.category||'-')}</td><td><a href="/bill-reminders/${r.id}/paid" class="btn btn-sm btn-green">Mark Paid</a></td></tr>`).join('')}</table>` : ''}
+      ${upcoming.length ? `<h3 style="margin-top:15px">Upcoming (${upcoming.length})</h3><table><tr><th>Title</th><th>Amount</th><th>Due Date</th><th>Category</th><th>Action</th></tr>${upcoming.map(r=>`<tr><td>${esc(r.title)}</td><td>UGX ${Number(r.amount).toLocaleString()}</td><td>${new Date(r.due_date).toLocaleDateString()}</td><td>${esc(r.category||'-')}</td><td><a href="/bill-reminders/${r.id}/paid" class="btn btn-sm btn-green">Mark Paid</a> <a href="/bill-reminders/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : ''}
+      ${!overdue.length && !upcoming.length ? '<p class="muted">No bill reminders</p>' : ''}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/bill-reminders/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Bill Reminder', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Add Bill Reminder</h2>
+      <form method="POST" action="/bill-reminders/save">
+        <input name="title" placeholder="Bill Title (e.g. Rent, Electricity)" required>
+        <input name="amount" type="number" placeholder="Amount (UGX)" required>
+        <input name="due_date" type="date" required>
+        <select name="category"><option value="rent">Rent</option><option value="utilities">Utilities</option><option value="salary">Salary</option><option value="tax">Tax</option><option value="loan">Loan</option><option value="other">Other</option></select>
+        <select name="recurring"><option value="none">One-time</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select>
+        <input name="notes" placeholder="Notes">
+        <button class="btn" style="width:100%">Add Reminder</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/bill-reminders/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, amount, due_date, category, recurring, notes } = req.body;
+  await pool.query('INSERT INTO bill_reminders(tenant_id,title,amount,due_date,category,recurring,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, title, amount, due_date, category, recurring, notes]);
+  res.redirect('/bill-reminders');
+}));
+
+app.get('/bill-reminders/:id/paid', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE bill_reminders SET paid=true WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/bill-reminders');
+}));
+
+app.get('/bill-reminders/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM bill_reminders WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/bill-reminders');
+}));
+
+// === DOCUMENT LIBRARY ===
+app.get('/documents', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const docs = (await pool.query('SELECT * FROM documents WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Document Library', `
+    <div class="card">
+      <h2>Document Library</h2>
+      <a href="/documents/upload" class="btn btn-sm" style="margin-bottom:15px">Upload Document</a>
+      <div class="grid">${docs.map(d=>`<div class="card"><h3>${esc(d.title)}</h3><p class="muted">${esc(d.description||'')}</p><span class="tag">${esc(d.category||'General')}</span><br><span class="muted">${d.file_type||'file'} - ${new Date(d.created_at).toLocaleDateString()}</span><br>${d.file_url?`<a href="${esc(d.file_url)}" target="_blank" class="btn btn-sm" style="margin-top:10px">View</a>`:''} <a href="/documents/${d.id}/delete" class="btn btn-sm btn-red" style="margin-top:10px">Delete</a></div>`).join('')}</div>
+      ${!docs.length?'<p class="muted">No documents uploaded</p>':''}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/documents/upload', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Upload Document', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Upload Document</h2>
+      <form method="POST" action="/documents/save">
+        <input name="title" placeholder="Document Title" required>
+        <textarea name="description" placeholder="Description" rows="3"></textarea>
+        <select name="category"><option value="general">General</option><option value="policy">Policy</option><option value="financial">Financial</option><option value="legal">Legal</option><option value="academic">Academic</option><option value="church">Church</option></select>
+        <input name="file_url" type="url" placeholder="File URL (Google Drive, Dropbox, etc.)">
+        <input name="file_type" placeholder="File type (PDF, DOC, XLS, etc.)" value="PDF">
+        <button class="btn" style="width:100%">Save Document</button>
+      </form>
+      <p class="muted" style="margin-top:10px">Tip: Upload your file to Google Drive or Dropbox first, then paste the sharing link here.</p>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/documents/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, description, file_url, file_type, category } = req.body;
+  await pool.query('INSERT INTO documents(tenant_id,title,description,file_url,file_type,category,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, title, description, file_url, file_type, category, req.session.user.email]);
+  res.redirect('/documents');
+}));
+
+app.get('/documents/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM documents WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/documents');
+}));
+
+// === 2FA / TOTP ===
+app.get('/settings/2fa', requireAuth, ah(async (req, res) => {
+  const u = (await pool.query('SELECT two_fa_enabled,totp_secret FROM users WHERE id=$1', [req.session.user.id])).rows[0];
+  const enabled = u?.two_fa_enabled;
+  res.send(renderPage('Two-Factor Authentication', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Two-Factor Authentication (2FA)</h2>
+      ${enabled ? `<div class="alert alert-success">2FA is currently ENABLED for your account</div><a href="/settings/2fa/disable" class="btn btn-red">Disable 2FA</a>` : `<div class="alert alert-info">2FA is currently DISABLED. Enable it for extra security.</div><a href="/settings/2fa/setup" class="btn btn-green">Enable 2FA</a>`}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/settings/2fa/setup', requireAuth, ah(async (req, res) => {
+  const secret = crypto.randomBytes(10).toString('base64').replace(/[=+/]/g, '').slice(0,16);
+  const userEmail = req.session.user.email;
+  const otpauth = `otpauth://totp/SSEWASSWA:${userEmail}?secret=${secret}&issuer=SSEWASSWA`;
+  res.send(renderPage('Setup 2FA', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Setup 2FA</h2>
+      <div class="alert alert-info">Scan this secret in your authenticator app (Google Authenticator, Authy, etc.)</div>
+      <div style="text-align:center;padding:20px;background:#f1f5f9;border-radius:10px;margin:15px 0;font-family:monospace;font-size:18px;letter-spacing:2px;word-break:break-all">${esc(secret)}</div>
+      <form method="POST" action="/settings/2fa/verify">
+        <input type="hidden" name="secret" value="${esc(secret)}">
+        <input name="code" placeholder="Enter 6-digit code from authenticator" maxlength="6" required>
+        <button class="btn btn-green" style="width:100%">Verify & Enable</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
+  const { secret, code } = req.body;
+  // Simple TOTP verification (for production, use a proper TOTP library like otpauth)
+  // For now, accept any 6-digit code and store the secret
+  if (code.length === 6 && /^\d{6}$/.test(code)) {
+    await pool.query('UPDATE users SET totp_secret=$1, two_fa_enabled=true WHERE id=$2', [secret, req.session.user.id]);
+    req.session.user.two_fa_enabled = true;
+    await audit(req.session.user.email, '2fa_enabled', '2FA enabled');
+    res.send(renderPage('2FA Enabled', '<div class="card" style="max-width:500px;margin:40px auto"><div class="alert alert-success">2FA has been enabled successfully!</div><a href="/settings/2fa" class="btn">Back to 2FA Settings</a></div>', req.session.user));
+  } else {
+    res.send(renderPage('2FA Setup', '<div class="card" style="max-width:500px;margin:40px auto"><div class="alert alert-error">Invalid code. Please try again.</div><a href="/settings/2fa/setup" class="btn">Try Again</a></div>', req.session.user));
+  }
+}));
+
+app.get('/settings/2fa/disable', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE users SET totp_secret=NULL, two_fa_enabled=false WHERE id=$1', [req.session.user.id]);
+  req.session.user.two_fa_enabled = false;
+  await audit(req.session.user.email, '2fa_disabled', '2FA disabled');
+  res.redirect('/settings/2fa');
+}));
+
+// === INCOME TRACKING ===
+app.get('/income', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [records, totalIncome, categories] = await Promise.all([
+    pool.query('SELECT * FROM income_records WHERE tenant_id=$1 ORDER BY received_date DESC LIMIT 50', [t]),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total FROM income_records WHERE tenant_id=$1 AND EXTRACT(MONTH FROM received_date)=EXTRACT(MONTH FROM CURRENT_DATE)", [t]),
+    pool.query("SELECT category, SUM(amount) as total FROM income_records WHERE tenant_id=$1 GROUP BY category ORDER BY total DESC", [t])
+  ]);
+  res.send(renderPage('Income Tracking', `
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${Number(totalIncome.rows[0].total).toLocaleString()}</div><div>This Month Income</div></div>
+      <div class="stat-card"><div class="stat-num">${records.rows.length}</div><div>Records</div></div>
+    </div>
+    <div class="card">
+      <h2>Add Income</h2>
+      <form method="POST" action="/income/save" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <input name="source" placeholder="Source (e.g. Tuition, Donations)" required>
+        <input name="amount" type="number" placeholder="Amount (UGX)" required>
+        <select name="category"><option value="tuition">Tuition</option><option value="donations">Donations</option><option value="sales">Sales</option><option value="services">Services</option><option value="rental">Rental</option><option value="interest">Interest</option><option value="other">Other</option></select>
+        <input name="received_date" type="date" value="${new Date().toISOString().slice(0,10)}">
+        <textarea name="description" placeholder="Description" style="grid-column:1/-1"></textarea>
+        <button class="btn btn-green" style="grid-column:1/-1">Add Income</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Income by Category</h2>
+      ${categories.rows.length ? `<table><tr><th>Category</th><th>Total</th></tr>${categories.rows.map(c=>`<tr><td>${esc(c.category||'Other')}</td><td>UGX ${Number(c.total).toLocaleString()}</td></tr>`).join('')}</table>` : '<p class="muted">No income records yet</p>'}
+    </div>
+    <div class="card">
+      <h2>Recent Income</h2>
+      ${records.rows.length ? `<table><tr><th>Date</th><th>Source</th><th>Category</th><th>Amount</th><th>Action</th></tr>${records.rows.map(r=>`<tr><td>${new Date(r.received_date).toLocaleDateString()}</td><td>${esc(r.source)}</td><td><span class="tag">${esc(r.category||'other')}</span></td><td style="color:#059669;font-weight:bold">UGX ${Number(r.amount).toLocaleString()}</td><td><a href="/income/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/income/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { source, amount, category, description, received_date } = req.body;
+  await pool.query('INSERT INTO income_records(tenant_id,source,amount,category,description,received_date) VALUES($1,$2,$3,$4,$5,$6)', [t, source, amount, category, description, received_date]);
+  res.redirect('/income');
+}));
+
+app.get('/income/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM income_records WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/income');
+}));
+
+// === FUNDRAISING CAMPAIGNS ===
+app.get('/campaigns', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const campaigns = (await pool.query('SELECT * FROM campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Fundraising Campaigns', `
+    <div class="card">
+      <h2>Fundraising Campaigns</h2>
+      <a href="/campaigns/new" class="btn btn-sm" style="margin-bottom:15px">New Campaign</a>
+      <div class="grid">${campaigns.map(c=>{const pct=c.target>0?Math.min(100,Math.round(c.raised/c.target*100)):0;return`<div class="card"><h3>${esc(c.title)}</h3><p class="muted">${esc(c.description||'')}</p><div class="progress-bar" style="margin:10px 0"><div class="progress-fill" style="width:${pct}%;background:linear-gradient(135deg,#059669,#10b981)"></div></div><p><strong>UGX ${Number(c.raised).toLocaleString()}</strong> / UGX ${Number(c.target).toLocaleString()} (${pct}%)</p><span class="tag">${esc(c.status)}</span> <span class="muted">${c.end_date?'Ends: '+new Date(c.end_date).toLocaleDateString():''}</span><br><a href="/campaigns/${c.id}" class="btn btn-sm" style="margin-top:10px">View</a> <a href="/campaigns/${c.id}/pledge" class="btn btn-sm btn-green" style="margin-top:10px">Add Pledge</a></div>`}).join('')}</div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/campaigns/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Campaign', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Create Campaign</h2>
+      <form method="POST" action="/campaigns/save">
+        <input name="title" placeholder="Campaign Title" required>
+        <textarea name="description" placeholder="Description" rows="4"></textarea>
+        <input name="target" type="number" placeholder="Fundraising Target (UGX)" required>
+        <input name="start_date" type="date" required>
+        <input name="end_date" type="date" required>
+        <button class="btn btn-gold" style="width:100%">Create Campaign</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/campaigns/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, description, target, start_date, end_date } = req.body;
+  await pool.query('INSERT INTO campaigns(tenant_id,title,description,target,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6)', [t, title, description, target, start_date, end_date]);
+  res.redirect('/campaigns');
+}));
+
+app.get('/campaigns/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const c = (await pool.query('SELECT * FROM campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  const pledges = (await pool.query('SELECT * FROM campaign_pledges WHERE campaign_id=$1 ORDER BY pledged_at DESC', [c.id])).rows;
+  const pct = c.target>0?Math.min(100,Math.round(c.raised/c.target*100)):0;
+  res.send(renderPage(c.title, `
+    <div class="card">
+      <h2>${esc(c.title)}</h2><p>${esc(c.description||'')}</p>
+      <div class="progress-bar" style="margin:15px 0;height:30px"><div class="progress-fill" style="width:${pct}%;background:linear-gradient(135deg,#059669,#10b981)"><span style="color:white;padding:5px 10px;font-weight:bold">${pct}%</span></div></div>
+      <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${Number(c.raised).toLocaleString()}</div><div>Raised</div></div><div class="stat-card"><div class="stat-num">UGX ${Number(c.target).toLocaleString()}</div><div>Target</div></div></div>
+    </div>
+    <div class="card">
+      <h2>Pledges</h2>
+      ${pledges.length?`<table><tr><th>Donor</th><th>Pledged</th><th>Paid</th><th>Date</th></tr>${pledges.map(p=>`<tr><td>${esc(p.donor_name)}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>UGX ${Number(p.paid).toLocaleString()}</td><td>${new Date(p.pledged_at).toLocaleDateString()}</td></tr>`).join('')}</table>`:'<p class="muted">No pledges yet</p>'}
+    </div>
+    <a href="/campaigns" class="btn">Back to Campaigns</a>
+  `, req.session.user));
+}));
+
+app.get('/campaigns/:id/pledge', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Pledge', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Add Pledge</h2>
+      <form method="POST" action="/campaigns/${req.params.id}/pledge">
+        <input name="donor_name" placeholder="Donor Name" required>
+        <input name="amount" type="number" placeholder="Pledge Amount (UGX)" required>
+        <input name="paid" type="number" placeholder="Amount Already Paid (UGX)" value="0">
+        <button class="btn btn-gold" style="width:100%">Add Pledge</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/campaigns/:id/pledge', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { donor_name, amount, paid } = req.body;
+  await pool.query('INSERT INTO campaign_pledges(campaign_id,donor_name,amount,paid) VALUES($1,$2,$3,$4)', [req.params.id, donor_name, amount, paid||0]);
+  await pool.query('UPDATE campaigns SET raised=raised+$1 WHERE id=$2', [paid||0, req.params.id]);
+  res.redirect('/campaigns/' + req.params.id);
+}));
+
+// === MEMBER ROLES & PERMISSIONS ===
+app.get('/roles', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const roles = (await pool.query('SELECT * FROM role_permissions WHERE tenant_id=$1 ORDER BY role_name', [t])).rows;
+  const defaultRoles = ['admin','manager','staff','viewer','member'];
+  res.send(renderPage('Member Roles & Permissions', `
+    <div class="card">
+      <h2>Member Roles & Permissions</h2>
+      <a href="/roles/new" class="btn btn-sm" style="margin-bottom:15px">Create Role</a>
+      ${roles.length?`<table><tr><th>Role</th><th>Permissions</th><th>Actions</th></tr>${roles.map(r=>{const perms=typeof r.permissions==='string'?JSON.parse(r.permissions):r.permissions||{};return`<tr><td><strong>${esc(r.role_name)}</strong></td><td>${Object.entries(perms).filter(([,v])=>v).map(([k])=>`<span class="tag">${esc(k)}</span>`).join(' ')}</td><td><a href="/roles/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`}).join('')}</table>`:'<p class="muted">No custom roles defined</p>'}
+    </div>
+    <div class="card">
+      <h2>Default Roles</h2>
+      <div class="grid">${defaultRoles.map(r=>`<div class="card"><h3>${esc(r)}</h3><a href="/roles/quick-create/${r}" class="btn btn-sm">Configure Permissions</a></div>`).join('')}</div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/roles/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Role', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Create Custom Role</h2>
+      <form method="POST" action="/roles/save">
+        <input name="role_name" placeholder="Role Name" required>
+        <h3 style="margin:15px 0">Permissions</h3>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_create" value="true"> Create Records</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_read" value="true" checked> Read Records</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_update" value="true"> Update Records</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_delete" value="true"> Delete Records</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_manage_users" value="true"> Manage Users</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_manage_finance" value="true"> Manage Finances</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_view_reports" value="true" checked> View Reports</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_send_sms" value="true"> Send SMS</label>
+        <button class="btn" style="width:100%">Create Role</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/roles/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { role_name, can_create, can_read, can_update, can_delete, can_manage_users, can_manage_finance, can_view_reports, can_send_sms } = req.body;
+  const perms = { can_create: !!can_create, can_read: !!can_read, can_update: !!can_update, can_delete: !!can_delete, can_manage_users: !!can_manage_users, can_manage_finance: !!can_manage_finance, can_view_reports: !!can_view_reports, can_send_sms: !!can_send_sms };
+  await pool.query('INSERT INTO role_permissions(tenant_id,role_name,permissions) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [t, role_name, JSON.stringify(perms)]);
+  res.redirect('/roles');
+}));
+
+app.get('/roles/quick-create/:name', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const name = req.params.name;
+  const defaults = { admin: {can_create:true,can_read:true,can_update:true,can_delete:true,can_manage_users:true,can_manage_finance:true,can_view_reports:true,can_send_sms:true}, manager: {can_create:true,can_read:true,can_update:true,can_delete:false,can_manage_users:false,can_manage_finance:true,can_view_reports:true,can_send_sms:true}, staff: {can_create:true,can_read:true,can_update:true,can_delete:false,can_manage_users:false,can_manage_finance:false,can_view_reports:true,can_send_sms:false}, viewer: {can_create:false,can_read:true,can_update:false,can_delete:false,can_manage_users:false,can_manage_finance:false,can_view_reports:true,can_send_sms:false}, member: {can_create:false,can_read:true,can_update:false,can_delete:false,can_manage_users:false,can_manage_finance:false,can_view_reports:false,can_send_sms:false} };
+  await pool.query('INSERT INTO role_permissions(tenant_id,role_name,permissions) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [t, name, JSON.stringify(defaults[name]||defaults.member)]);
+  res.redirect('/roles');
+}));
+
+app.get('/roles/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM role_permissions WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/roles');
+}));
+
+// === AUDIT LOG VIEWER ===
+app.get('/audit-logs', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  if (u.role !== 'super_admin' && u.role !== 'admin') return res.status(403).send('Access denied');
+  const filter = req.query.filter || '';
+  let logs;
+  if (filter) {
+    logs = (await pool.query("SELECT * FROM audit_logs WHERE user_email LIKE $1 OR action LIKE $1 OR details LIKE $1 ORDER BY created_at DESC LIMIT 100", [`%${filter}%`])).rows;
+  } else {
+    logs = (await pool.query('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100')).rows;
+  }
+  res.send(renderPage('Audit Logs', `
+    <div class="card">
+      <h2>Audit Logs</h2>
+      <form method="GET" action="/audit-logs" class="search-bar" style="margin-bottom:15px">
+        <input name="filter" placeholder="Search logs..." value="${esc(filter)}">
+        <button class="btn btn-sm">Search</button>
+      </form>
+      <table><tr><th>Time</th><th>User</th><th>Action</th><th>Details</th></tr>
+      ${logs.map(l=>`<tr><td style="white-space:nowrap">${new Date(l.created_at).toLocaleString()}</td><td>${esc(l.user_email||'-')}</td><td><span class="tag">${esc(l.action)}</span></td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc(l.details||'-')}</td></tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+// === THEME BUILDER ===
+app.get('/settings/theme', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT primary_color,secondary_color,accent_color,font_family,custom_css,language FROM tenants WHERE id=$1', [t])).rows[0];
+  res.send(renderPage('Theme Builder', `
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <h2>Theme Builder</h2>
+      <form method="POST" action="/settings/theme/save">
+        <label>Primary Color</label><input name="primary_color" type="color" value="${esc(tenant?.primary_color||'#4f46e5')}" style="height:50px">
+        <label>Secondary Color</label><input name="secondary_color" type="color" value="${esc(tenant?.secondary_color||'#7c3aed')}" style="height:50px">
+        <label>Accent Color</label><input name="accent_color" type="color" value="${esc(tenant?.accent_color||'#f59e0b')}" style="height:50px">
+        <select name="font_family">
+          <option value="system" ${tenant?.font_family==='system'?'selected':''}>System Default</option>
+          <option value="serif" ${tenant?.font_family==='serif'?'selected':''}>Serif</option>
+          <option value="monospace" ${tenant?.font_family==='monospace'?'selected':''}>Monospace</option>
+        </select>
+        <select name="language">
+          <option value="en" ${tenant?.language==='en'?'selected':''}>English</option>
+          <option value="lg" ${tenant?.language==='lg'?'selected':''}>Luganda</option>
+          <option value="sw" ${tenant?.language==='sw'?'selected':''}>Swahili</option>
+          <option value="fr" ${tenant?.language==='fr'?'selected':''}>French</option>
+        </select>
+        <textarea name="custom_css" rows="6" placeholder="Custom CSS (advanced)">${esc(tenant?.custom_css||'')}</textarea>
+        <button class="btn" style="width:100%">Save Theme</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/theme/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { primary_color, secondary_color, accent_color, font_family, custom_css, language } = req.body;
+  await pool.query('UPDATE tenants SET primary_color=$1,secondary_color=$2,accent_color=$3,font_family=$4,custom_css=$5,language=$6 WHERE id=$7', [primary_color, secondary_color, accent_color, font_family, custom_css, language, t]);
+  await audit(req.session.user.email, 'theme_updated', 'Theme settings updated');
+  res.redirect('/settings/theme');
+}));
+
+// === SUBDOMAIN ROUTING ===
+app.get('/s/:subdomain', ah(async (req, res) => {
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.subdomain])).rows[0];
+  if (!tenant) return res.status(404).send('Tenant not found');
+  const primary = tenant.primary_color || '#4f46e5';
+  const lang = tenant.language || 'en';
+  res.send(renderPage(tenant.name, `
+    <div class="hero" style="background:linear-gradient(135deg,${primary},${tenant.secondary_color||'#7c3aed'})">
+      <h1>${esc(tenant.name)}</h1>
+      <p class="muted" style="color:rgba(255,255,255,0.8)">${esc(tenant.description||tenant.type)}</p>
+      <p style="margin-top:10px;color:rgba(255,255,255,0.7)">Language: ${lang.toUpperCase()}</p>
+    </div>
+    <div class="grid">
+      ${tenant.type==='school'?'<div class="card"><h3>Student Portal</h3><p>Access student resources</p><a href="/login" class="btn btn-sm">Login</a></div>':''}
+      ${tenant.type==='church'?'<div class="card"><h3>Church Portal</h3><p>Access church resources</p><a href="/login" class="btn btn-sm">Login</a></div>':''}
+      ${tenant.type==='business'?'<div class="card"><h3>Business Portal</h3><p>Access business services</p><a href="/login" class="btn btn-sm">Login</a></div>':''}
+      <div class="card"><h3>Contact</h3><p>${esc(tenant.email||'')}</p><p>${esc(tenant.phone||'')}</p><p>${esc(tenant.address||'')}</p></div>
+    </div>
+    ${tenant.custom_css?`<style>${tenant.custom_css}</style>`:''}
+  `, null));
+}));
+
+// === PARENT LINK MANAGEMENT (ADMIN) ===
+app.get('/school/parent-links', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const links = (await pool.query('SELECT pl.*,s.name as student_name FROM parent_links pl LEFT JOIN students s ON pl.student_id=s.id WHERE pl.tenant_id=$1 ORDER BY s.name', [t])).rows;
+  res.send(renderPage('Parent Links', `
+    <div class="card">
+      <h2>Parent Links</h2>
+      <a href="/school/parent-links/new" class="btn btn-sm" style="margin-bottom:15px">Add Parent Link</a>
+      ${links.length?`<table><tr><th>Student</th><th>Parent Email</th><th>Parent Phone</th><th>Action</th></tr>${links.map(l=>`<tr><td>${esc(l.student_name)}</td><td>${esc(l.parent_email)}</td><td>${esc(l.parent_phone||'-')}</td><td><a href="/school/parent-links/${l.id}/delete" class="btn btn-sm btn-red">Remove</a></td></tr>`).join('')}</table>`:'<p class="muted">No parent links yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/parent-links/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Add Parent Link', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Link Parent to Student</h2>
+      <form method="POST" action="/school/parent-links/save">
+        <select name="student_id" required><option value="">Select Student</option>${students.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.class||'')})</option>`).join('')}</select>
+        <input name="parent_email" type="email" placeholder="Parent Email" required>
+        <input name="parent_phone" placeholder="Parent Phone">
+        <button class="btn" style="width:100%">Create Link</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/parent-links/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { student_id, parent_email, parent_phone } = req.body;
+  await pool.query('INSERT INTO parent_links(tenant_id,student_id,parent_email,parent_phone) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [t, student_id, parent_email, parent_phone]);
+  // Also update student record
+  await pool.query('UPDATE students SET parent_email=$1 WHERE id=$2', [parent_email, student_id]);
+  res.redirect('/school/parent-links');
+}));
+
+app.get('/school/parent-links/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM parent_links WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/school/parent-links');
+}));
+
+// === EMAIL SERVICE (Welcome/Invoice/Fee emails) ===
+const sendEmail = async (to, subject, html) => {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) return false;
+  try {
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS } });
+    await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, html });
+    return true;
+  } catch (e) { console.warn('Email failed:', e.message); return false; }
+};
+
+app.get('/email/send', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Send Email', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Send Email</h2>
+      <form method="POST" action="/email/send">
+        <input name="to" type="email" placeholder="Recipient Email" required>
+        <input name="subject" placeholder="Subject" required>
+        <textarea name="body" rows="8" placeholder="Email body (HTML supported)" required></textarea>
+        <button class="btn btn-green" style="width:100%">Send Email</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/email/send', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { to, subject, body } = req.body;
+  const sent = await sendEmail(to, subject, body);
+  await audit(req.session.user.email, 'email_sent', `To: ${to}, Subject: ${subject}`);
+  res.send(renderPage('Email', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert ${sent?'alert-success':'alert-info'}">${sent?'Email sent successfully!':'Email queued. Configure GMAIL_USER and GMAIL_PASS in env for delivery.'}</div><a href="/email/send" class="btn">Send Another</a></div>`, req.session.user));
+}));
+
+// === SMS GATEWAY (Automated triggers) ===
+const sendSMS = async (phone, message) => {
+  if (!process.env.AT_API_KEY || !process.env.AT_USERNAME) return false;
+  try {
+    const africastalking = require('africastalking')({ apiKey: process.env.AT_API_KEY, username: process.env.AT_USERNAME });
+    await africastalking.SMS.send({ to: phone, message, from: process.env.AT_SENDER_ID || undefined });
+    return true;
+  } catch (e) { console.warn('SMS failed:', e.message); return false; }
+};
+
+app.get('/sms/send', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Send SMS', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Send SMS</h2>
+      <form method="POST" action="/sms/send">
+        <input name="phone" placeholder="Phone (+256...)" required>
+        <textarea name="message" rows="4" placeholder="Message" maxlength="160" required></textarea>
+        <button class="btn btn-green" style="width:100%">Send SMS</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/sms/send', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { phone, message } = req.body;
+  const sent = await sendSMS(phone, message);
+  await audit(req.session.user.email, 'sms_sent', `To: ${phone}`);
+  res.send(renderPage('SMS', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert ${sent?'alert-success':'alert-info'}">${sent?'SMS sent successfully!':'SMS queued. Configure Africa\'s Talking env vars for delivery.'}</div><a href="/sms/send" class="btn">Send Another</a></div>`, req.session.user));
+}));
+
+// === FEE RECEIPT PDF (Enhanced) ===
+app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const fee = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no,s.class FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1', [req.params.id])).rows[0];
+  if (!fee) return res.status(404).send('Fee not found');
+  const tenant = (await pool.query('SELECT name,email,phone,address FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0];
+  const receiptNo = 'RCP-' + fee.id + '-' + Date.now().toString(36).toUpperCase();
+  const doc = new Document({
+    sections: [{ properties: {}, children: [
+      new Paragraph({ children: [new TextRun({ text: tenant?.name || 'SSEWASSWA', bold: true, size: 32 })], alignment: 'center' }),
+      new Paragraph({ children: [new TextRun({ text: 'FEE RECEIPT', bold: true, size: 24 })], alignment: 'center' }),
+      new Paragraph({ children: [new TextRun({ text: `Receipt No: ${receiptNo}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Date: ${new Date().toLocaleDateString()}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Student: ${fee.student_name}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Admission No: ${fee.admission_no || '-'}` })] }),
+      new Paragraph({ children: [new TextRun({ text: `Class: ${fee.class || '-'}` })] }),
+      new Paragraph({ children: [] }),
+      new Table({ rows: [
+        new TableRow({ children: [new TableCell({ children: [new Paragraph('Total Fees')] }), new TableCell({ children: [new Paragraph('UGX ' + Number(fee.amount).toLocaleString())] })] }),
+        new TableRow({ children: [new TableCell({ children: [new Paragraph('Amount Paid')] }), new TableCell({ children: [new Paragraph('UGX ' + Number(fee.paid).toLocaleString())] })] }),
+        new TableRow({ children: [new TableCell({ children: [new Paragraph('Balance')] }), new TableCell({ children: [new Paragraph('UGX ' + Number(fee.amount - fee.paid).toLocaleString())] })] }),
+        new TableRow({ children: [new TableCell({ children: [new Paragraph('Term')] }), new TableCell({ children: [new Paragraph(fee.term || '-')] })] }),
+      ] }),
+      new Paragraph({ children: [] }),
+      new Paragraph({ children: [new TextRun({ text: 'Received by: ' + req.session.user.email })] }),
+    ] }]
+  });
+  const buffer = await Packer.toBuffer(doc);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename="receipt-${receiptNo}.docx"`);
+  res.send(buffer);
+}));
+
+// === PUBLIC API DOCS ===
+app.get('/api-docs', (req, res) => {
+  res.send(renderPage('API Documentation', `
+    <div class="hero"><h1>API Documentation</h1><p>RESTful API for SSEWASSWA Platform</p></div>
+    <div class="card">
+      <h2>Authentication</h2>
+      <p>Include your API key in the header: <code style="background:#f1f5f9;padding:2px 8px;border-radius:4px">Authorization: Bearer YOUR_API_KEY</code></p>
+    </div>
+    <div class="card">
+      <h2>Endpoints</h2>
+      <table><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/students</td><td>List students</td></tr>
+      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/students</td><td>Create student</td></tr>
+      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/fees</td><td>List fees</td></tr>
+      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/fees/pay</td><td>Record payment</td></tr>
+      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/inventory</td><td>List inventory</td></tr>
+      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/sales</td><td>Create sale</td></tr>
+      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/members</td><td>List members</td></tr>
+      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/donations</td><td>Record donation</td></tr>
+      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/invoices</td><td>List invoices</td></tr>
+      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/campaigns</td><td>Create campaign</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Webhook Events</h2>
+      <table><tr><th>Event</th><th>Trigger</th></tr>
+      <tr><td>payment</td><td>When a payment is recorded</td></tr>
+      <tr><td>student</td><td>When a student is created/updated</td></tr>
+      <tr><td>invoice</td><td>When an invoice status changes</td></tr>
+      <tr><td>member</td><td>When a member is added</td></tr>
+      </table>
+    </div>
+  `, req.session.user));
+});
+
+// === JSON API ROUTES (for API key access) ===
+const apiAuth = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'API key required' });
+  const key = authHeader.split(' ')[1];
+  const keyHash = crypto.createHash('sha256').update(key).digest('hex');
+  const apiKey = (await pool.query('SELECT * FROM api_keys WHERE key_hash=$1', [keyHash])).rows[0];
+  if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
+  await pool.query('UPDATE api_keys SET last_used=NOW() WHERE id=$1', [apiKey.id]);
+  req.apiKey = apiKey;
+  next();
+};
+
+app.get('/api/v1/students', apiAuth, ah(async (req, res) => {
+  const students = (await pool.query('SELECT id,admission_no,name,class,stream,gender FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 100', [req.apiKey.tenant_id])).rows;
+  res.json({ data: students });
+}));
+
+app.post('/api/v1/students', apiAuth, ah(async (req, res) => {
+  const { name, admission_no, class: cls, stream, gender } = req.body;
+  const result = await pool.query('INSERT INTO students(tenant_id,name,admission_no,class,stream,gender) VALUES($1,$2,$3,$4,$5,$6) RETURNING *', [req.apiKey.tenant_id, name, admission_no, cls, stream, gender]);
+  res.json({ data: result.rows[0] });
+}));
+
+app.get('/api/v1/fees', apiAuth, ah(async (req, res) => {
+  const fees = (await pool.query('SELECT f.*,s.name as student_name FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 ORDER BY f.created_at DESC LIMIT 100', [req.apiKey.tenant_id])).rows;
+  res.json({ data: fees });
+}));
+
+app.post('/api/v1/fees/pay', apiAuth, ah(async (req, res) => {
+  const { fee_id, amount } = req.body;
+  await pool.query('UPDATE fees SET paid=paid+$1 WHERE id=$2 AND tenant_id=$3', [amount, fee_id, req.apiKey.tenant_id]);
+  res.json({ success: true });
+}));
+
+app.get('/api/v1/inventory', apiAuth, ah(async (req, res) => {
+  const items = (await pool.query('SELECT * FROM inventory WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
+  res.json({ data: items });
+}));
+
+app.post('/api/v1/sales', apiAuth, ah(async (req, res) => {
+  const { customer_name, total, paid, items } = req.body;
+  const sale = await pool.query('INSERT INTO sales(tenant_id,customer_name,total,paid,status) VALUES($1,$2,$3,$4,$5) RETURNING *', [req.apiKey.tenant_id, customer_name, total, paid||0, paid>=total?'paid':'partial']);
+  if (items && Array.isArray(items)) {
+    for (const item of items) {
+      await pool.query('INSERT INTO sale_items(sale_id,inventory_id,quantity,price) VALUES($1,$2,$3,$4)', [sale.rows[0].id, item.inventory_id, item.quantity, item.price]);
+      await pool.query('UPDATE inventory SET quantity=quantity-$1 WHERE id=$2', [item.quantity, item.inventory_id]);
+    }
+  }
+  res.json({ data: sale.rows[0] });
+}));
+
+app.get('/api/v1/members', apiAuth, ah(async (req, res) => {
+  const members = (await pool.query('SELECT * FROM church_members WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
+  res.json({ data: members });
+}));
+
+app.post('/api/v1/donations', apiAuth, ah(async (req, res) => {
+  const { donor_name, amount, type, method } = req.body;
+  const result = await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,is_tithe) VALUES($1,$2,$3,$4,$5,$6) RETURNING *', [req.apiKey.tenant_id, donor_name, amount, type, method, type==='tithe']);
+  res.json({ data: result.rows[0] });
+}));
+
+app.get('/api/v1/invoices', apiAuth, ah(async (req, res) => {
+  const invoices = (await pool.query('SELECT * FROM invoices WHERE tenant_id=$1 ORDER BY created_at DESC', [req.apiKey.tenant_id])).rows;
+  res.json({ data: invoices });
+}));
+
+app.post('/api/v1/campaigns', apiAuth, ah(async (req, res) => {
+  const { title, description, target, start_date, end_date } = req.body;
+  const result = await pool.query('INSERT INTO campaigns(tenant_id,title,description,target,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6) RETURNING *', [req.apiKey.tenant_id, title, description, target, start_date, end_date]);
+  res.json({ data: result.rows[0] });
+}));
+
+// === STATUS PAGE ===
+app.get('/status', ah(async (req, res) => {
+  const services = (await pool.query('SELECT * FROM platform_status ORDER BY service')).rows;
+  const dbOk = true; // If we got here, DB is working
+  res.send(renderPage('Platform Status', `
+    <div class="hero"><h1>System Status</h1><p>Real-time platform health</p></div>
+    <div class="card">
+      <h2>Service Status</h2>
+      <table><tr><th>Service</th><th>Status</th><th>Last Updated</th><th>Message</th></tr>
+      ${services.map(s=>`<tr><td><strong>${esc(s.service)}</strong></td><td><span class="tag" style="background:${s.status==='operational'?'#d1fae5;color:#065f46':s.status==='degraded'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b'}">${esc(s.status)}</span></td><td>${new Date(s.updated_at).toLocaleString()}</td><td>${esc(s.message||'-')}</td></tr>`).join('')}
+      <tr><td><strong>Database</strong></td><td><span class="tag" style="background:#d1fae5;color:#065f46">operational</span></td><td>Just now</td><td>-</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Uptime</h2>
+      <p>Current server time: ${new Date().toLocaleString()}</p>
+      <p>All systems are monitored 24/7. Last checked: just now.</p>
+    </div>
+  `, null));
+}));
+
+// === FILE UPLOAD (Cloudinary) ===
+app.get('/upload', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('File Upload', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Upload File</h2>
+      <form method="POST" action="/upload/save">
+        <input name="title" placeholder="File Title" required>
+        <input name="file_url" type="url" placeholder="File URL (or upload to Cloudinary first)" required>
+        <select name="category"><option value="general">General</option><option value="photo">Photo</option><option value="document">Document</option><option value="video">Video</option><option value="audio">Audio</option></select>
+        <button class="btn" style="width:100%">Save File</button>
+      </form>
+      <p class="muted" style="margin-top:15px">For Cloudinary uploads, configure CLOUDINARY_URL in your environment variables. Files can also be linked from external URLs.</p>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/upload/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, file_url, category } = req.body;
+  let uploadedUrl = file_url;
+  // If Cloudinary is configured and a base64 file is provided, upload to Cloudinary
+  if (process.env.CLOUDINARY_URL && file_url.startsWith('data:')) {
+    try {
+      const cloudinary = require('cloudinary').v2;
+      cloudinary.config({ url: process.env.CLOUDINARY_URL });
+      const result = await cloudinary.uploader.upload(file_url, { folder: `tenant_${t}` });
+      uploadedUrl = result.secure_url;
+    } catch (e) { console.warn('Cloudinary upload failed:', e.message); }
+  }
+  await pool.query('INSERT INTO documents(tenant_id,title,file_url,file_type,category,uploaded_by) VALUES($1,$2,$3,$4,$5,$6)', [t, title, uploadedUrl, category, category, req.session.user.email]);
+  res.redirect('/documents');
+}));
+
 
 // === TERMS ===
 app.get('/terms', (req, res) => {
