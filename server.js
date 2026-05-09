@@ -40,7 +40,7 @@ app.use('/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5 }));
 
 // === UTILS ===
 const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-const esc = s => String(s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+const esc = s => String(s === null || s === undefined ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 const requireAuth = (req, res, next) => req.session.user ? next() : res.redirect('/login');
 const requireNotBanned = (req, res, next) => req.session.user?.banned ? res.status(403).send('Account banned') : next();
 const requireTenantAccess = (req, res, next) => {
@@ -96,7 +96,10 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, phone TEXT, address TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS budget_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT NOT NULL, planned INTEGER DEFAULT 0, actual INTEGER DEFAULT 0, month TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS goals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, target INTEGER DEFAULT 0, current INTEGER DEFAULT 0, deadline DATE, created_at TIMESTAMP DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS personal_notes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS webhook_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event TEXT, payload JSONB, status INTEGER, response TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Clean up old corrupted audit data (old code stored data in wrong columns)
+  `DELETE FROM audit_logs WHERE user_email IS NULL OR user_email = 'login' OR action::text LIKE '%object%'`
+];
    // === SAFE COLUMN MIGRATIONS (handles tables from older schema versions) ===
   // tenants: all columns except id, name, type
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
@@ -2269,7 +2272,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`),
     pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1'),
     pool.query('SELECT id,name,type,COALESCE(wallet_balance,0) as wallet_balance,verified,subdomain,approved,banned,ban_reason FROM tenants ORDER BY id DESC LIMIT 50'),
-    pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 20'),
+    pool.query('SELECT user_email,action,details,created_at FROM audit_logs ORDER BY id DESC LIMIT 20'),
     pool.query(`SELECT DATE(created_at) as day, SUM(amount) as total FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY day ASC`)
   ]);
   const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
