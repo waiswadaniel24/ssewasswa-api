@@ -1,6 +1,6 @@
 {
   "name": "ssewasswa-platform",
-  "version": "9.0.0",
+  "version": "10.0.0",
   "description": "Multi-portal platform: School, Org, Church, Business, Individual",
   "main": "server.js",
   "scripts": {

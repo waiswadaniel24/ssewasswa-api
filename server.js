@@ -62,6 +62,8 @@ const requireRole = (...roles) => (req, res, next) => {
   res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission to access this page.</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
 };
 const audit = (email, action, details) => pool.query('INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', [email, action, details]).catch(() => {});
+const notify = (tenantId, email, title, message, type) => pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type) VALUES($1,$2,$3,$4,$5)', [tenantId, email, title, message, type || 'info']).catch(() => {});
+const notifyAll = (tenantId, title, message, type) => pool.query('INSERT INTO notifications(tenant_id,title,message,type) VALUES($1,$2,$3,$4)', [tenantId, title, message, type || 'info']).catch(() => {});
 
 // === MIGRATIONS ===
 const migrations = [
@@ -178,7 +180,19 @@ const migrations = [
   // Donations
   `CREATE TABLE IF NOT EXISTS donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, donor_name TEXT NOT NULL, amount INTEGER NOT NULL, type TEXT, method TEXT, reference TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   // Parent links
-  `CREATE TABLE IF NOT EXISTS parent_links (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, parent_email TEXT NOT NULL, parent_phone TEXT, UNIQUE(student_id, parent_email))`
+  `CREATE TABLE IF NOT EXISTS parent_links (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, parent_email TEXT NOT NULL, parent_phone TEXT, UNIQUE(student_id, parent_email))`,
+  // v10.0 new tables
+  `CREATE TABLE IF NOT EXISTS sign_in_out (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, staff_id INTEGER REFERENCES staff(id), name TEXT NOT NULL, role TEXT, clock_in TIMESTAMPTZ, clock_out TIMESTAMPTZ, date DATE DEFAULT CURRENT_DATE, notes TEXT)`,
+  `CREATE TABLE IF NOT EXISTS notifications (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT, title TEXT NOT NULL, message TEXT, type TEXT DEFAULT 'info', read BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS fee_receipts (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, fee_id INTEGER REFERENCES fees(id), receipt_no TEXT UNIQUE, student_id INTEGER REFERENCES students(id), amount INTEGER NOT NULL, paid INTEGER NOT NULL, method TEXT, received_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Staff sign-in columns
+  `ALTER TABLE staff ADD COLUMN IF NOT EXISTS phone TEXT`,
+  `ALTER TABLE staff ADD COLUMN IF NOT EXISTS subject TEXT`,
+  // Student gender for better charts
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS gender TEXT`,
+  // Fees payment method tracking
+  `ALTER TABLE fees ADD COLUMN IF NOT EXISTS payment_method TEXT`,
+  `ALTER TABLE fees ADD COLUMN IF NOT EXISTS receipt_no TEXT`
 ];
 
 (async () => {
@@ -265,9 +279,10 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
+      <a href="/notifications" title="Notifications">🔔</a>
+      <a href="/dashboard">Dashboard</a>
       <a href="/search">Search</a>
       <a href="/settings/profile">Settings</a>
-      <a href="/dashboard">Dashboard</a>
       <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">Logout</a>
@@ -498,14 +513,17 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
     </div>
     <div class="grid">
       <div class="card"><h3>Students</h3><a href="/school/students" class="btn">Manage Students</a><a href="/school/students/import" class="btn btn-green btn-sm" style="margin-top:8px">CSV Import</a></div>
-      <div class="card"><h3>Fees</h3><a href="/school/fees" class="btn">Fee Management</a><a href="/school/fee-structures" class="btn btn-sm" style="margin-top:8px">Fee Structures</a></div>
+      <div class="card"><h3>Fees</h3><a href="/school/fees" class="btn">Fee Management</a><a href="/school/fee-structures" class="btn btn-sm" style="margin-top:8px">Fee Structures</a><a href="/school/fees/receipts" class="btn btn-gold btn-sm" style="margin-top:8px">Receipts</a></div>
       <div class="card"><h3>Exams & Marks</h3><a href="/school/exams" class="btn">Exam Results</a><a href="/school/exams/new" class="btn btn-sm" style="margin-top:8px">New Exam</a></div>
-      <div class="card"><h3>Attendance</h3><a href="/school/attendance" class="btn">Mark Attendance</a></div>
+      <div class="card"><h3>Attendance</h3><a href="/school/attendance" class="btn">Mark Attendance</a><a href="/school/attendance/print" class="btn btn-sm" style="margin-top:8px">Print Sheet</a></div>
       <div class="card"><h3>Staff</h3><a href="/school/staff" class="btn btn-sm">Manage Staff</a><a href="/school/staff/new" class="btn btn-sm" style="margin-top:8px">Add Staff</a></div>
+      <div class="card"><h3>Sign In/Out</h3><a href="/school/signin" class="btn btn-sm">Clock In/Out</a><a href="/school/signin/history?from=${new Date(Date.now()-7*86400000).toISOString().split('T')[0]}&to=${new Date().toISOString().split('T')[0]}" class="btn btn-sm" style="margin-top:8px">History</a></div>
       <div class="card"><h3>Timetable</h3><a href="/school/timetable" class="btn btn-sm">View Timetable</a></div>
       <div class="card"><h3>Grading</h3><a href="/school/grading" class="btn btn-sm">Grading Scale</a></div>
       <div class="card"><h3>Promote</h3><a href="/school/promote" class="btn btn-sm">Student Promotion</a></div>
-      <div class="card"><h3>Reports</h3><a href="/school/reports" class="btn">Generate Reports</a><a href="/school/report-cards" class="btn btn-gold btn-sm" style="margin-top:8px">Report Cards</a></div>
+      <div class="card"><h3>Report Cards</h3><a href="/school/report-cards" class="btn btn-gold">Generate</a><a href="/school/report-cards/bulk" class="btn btn-sm" style="margin-top:8px">Bulk Cards</a></div>
+      <div class="card"><h3>Print</h3><a href="/school/print/fee-balances" class="btn btn-sm">Fee Balances</a><a href="/school/attendance/print" class="btn btn-sm" style="margin-top:8px">Attendance</a></div>
+      <div class="card"><h3>Notify</h3><a href="/school/notify" class="btn btn-sm">Send SMS</a><a href="/notifications" class="btn btn-sm" style="margin-top:8px">Notifications</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Fees Collected (Monthly)</h3><canvas id="feesChart"></canvas></div>
@@ -1310,10 +1328,494 @@ app.get('/school/reports/export', requireAuth, requireNotBanned, ah(async (req, 
   res.send(csv);
 }));
 
-// ============================================================
-// ============================================================
-// PHASE 2: ORGANIZATION / CHURCH / BUSINESS ROUTES
-// ============================================================
+// === SCHOOL: SIGN IN/OUT (Clock In/Out) ===
+app.get('/school/signin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const today = new Date().toISOString().split('T')[0];
+  const records = (await pool.query('SELECT sio.*, s.name as staff_name FROM sign_in_out sio LEFT JOIN staff s ON sio.staff_id=s.id WHERE sio.tenant_id=$1 AND sio.date=$2 ORDER BY sio.clock_in DESC', [t, today])).rows;
+  const staffList = (await pool.query('SELECT id,name,role FROM staff WHERE tenant_id=$1 AND banned=false ORDER BY name', [t])).rows;
+  const stillIn = records.filter(r => !r.clock_out).length;
+  const totalToday = records.length;
+  res.send(renderPage('Sign In / Sign Out', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Staff Sign In / Sign Out</h1><p>${new Date().toLocaleDateString('en-GB',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${totalToday}</div><div>Signed In Today</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${stillIn}</div><div>Currently In</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${totalToday - stillIn}</div><div>Signed Out</div></div>
+    </div>
+    <div class="card"><h3>Quick Clock In</h3>
+      <form method="POST" action="/school/signin/clock-in" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+        <select name="staff_id" style="width:auto;margin:0" required>
+          <option value="">Select Staff Member</option>
+          ${staffList.map(s => `<option value="${s.id}">${esc(s.name)} - ${esc(s.role)}</option>`).join('')}
+        </select>
+        <input name="notes" placeholder="Notes (optional)" style="width:auto;margin:0">
+        <button class="btn btn-green">Clock In</button>
+      </form>
+    </div>
+    <div class="card"><h3>Today's Records</h3>
+      <table><tr><th>Name</th><th>Role</th><th>Clock In</th><th>Clock Out</th><th>Duration</th><th>Actions</th></tr>
+      ${records.map(r => {
+        const clockIn = r.clock_in ? new Date(r.clock_in).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : '-';
+        const clockOut = r.clock_out ? new Date(r.clock_out).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : '';
+        let duration = '-';
+        if (r.clock_in && r.clock_out) {
+          const diff = (new Date(r.clock_out) - new Date(r.clock_in)) / 1000 / 60;
+          duration = Math.floor(diff/60) + 'h ' + Math.round(diff%60) + 'm';
+        }
+        return `<tr>
+          <td>${esc(r.name || r.staff_name || 'Unknown')}</td>
+          <td><span class="tag">${esc(r.role || '')}</span></td>
+          <td style="color:#059669;font-weight:600">${clockIn}</td>
+          <td style="color:${r.clock_out?'#dc2626':'#94a3b8'};font-weight:600">${clockOut || 'Still In'}</td>
+          <td>${duration}</td>
+          <td>${!r.clock_out ? `<a href="/school/signin/${r.id}/clock-out" class="btn btn-red btn-sm" onclick="return confirm('Clock out ${esc(r.name||r.staff_name)}?')">Clock Out</a>` : '<span class="muted">Done</span>'}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6" style="text-align:center;padding:30px">No one signed in yet today</td></tr>'}
+      </table>
+    </div>
+    <div class="card"><h3>History</h3>
+      <form method="GET" action="/school/signin/history" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+        <label style="font-weight:600">From:</label><input name="from" type="date" value="${new Date(Date.now()-7*86400000).toISOString().split('T')[0]}" style="width:auto;margin:0" required>
+        <label style="font-weight:600">To:</label><input name="to" type="date" value="${today}" style="width:auto;margin:0" required>
+        <button class="btn btn-sm">View History</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/signin/clock-in', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { staff_id, notes } = req.body;
+  const staff = (await pool.query('SELECT name,role FROM staff WHERE id=$1 AND tenant_id=$2', [staff_id, t])).rows[0];
+  if (!staff) return res.redirect('/school/signin');
+  const existing = (await pool.query('SELECT id FROM sign_in_out WHERE staff_id=$1 AND tenant_id=$2 AND date=CURRENT_DATE AND clock_out IS NULL', [staff_id, t])).rows[0];
+  if (existing) return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">This staff member is already clocked in and has not clocked out.</div><a href="/school/signin" class="btn">Back</a></div>', req.session.user));
+  await pool.query('INSERT INTO sign_in_out(tenant_id,staff_id,name,role,clock_in,date,notes) VALUES($1,$2,$3,$4,NOW(),CURRENT_DATE,$5)', [t, staff_id, staff.name, staff.role, notes]);
+  await notify(t, req.session.user.email, 'Staff Clock In', staff.name + ' signed in', 'attendance');
+  await audit(req.session.user.email, 'clock_in', staff.name + ' clocked in');
+  res.redirect('/school/signin');
+}));
+
+app.get('/school/signin/:id/clock-out', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const record = (await pool.query('SELECT * FROM sign_in_out WHERE id=$1 AND tenant_id=$2 AND clock_out IS NULL', [req.params.id, t])).rows[0];
+  if (!record) return res.redirect('/school/signin');
+  await pool.query('UPDATE sign_in_out SET clock_out=NOW() WHERE id=$1', [req.params.id]);
+  await audit(req.session.user.email, 'clock_out', (record.name || 'Staff') + ' clocked out');
+  res.redirect('/school/signin');
+}));
+
+app.get('/school/signin/history', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { from, to } = req.query;
+  const records = (await pool.query('SELECT * FROM sign_in_out WHERE tenant_id=$1 AND date>=$2 AND date<=$3 ORDER BY date DESC, clock_in DESC', [t, from, to])).rows;
+  res.send(renderPage('Sign In/Out History', `
+    <div class="card"><h3>Sign In/Out History: ${esc(from)} to ${esc(to)}</h3>
+      <div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap">
+        <a href="/school/signin" class="btn btn-sm">Back to Today</a>
+        <a href="/school/signin/history/export?from=${esc(from)}&to=${esc(to)}" class="btn btn-green btn-sm">Export CSV</a>
+      </div>
+      <table><tr><th>Date</th><th>Name</th><th>Role</th><th>Clock In</th><th>Clock Out</th><th>Duration</th><th>Notes</th></tr>
+      ${records.map(r => {
+        const cin = r.clock_in ? new Date(r.clock_in).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : '-';
+        const cout = r.clock_out ? new Date(r.clock_out).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : 'No Out';
+        let dur = '-';
+        if (r.clock_in && r.clock_out) { const d=(new Date(r.clock_out)-new Date(r.clock_in))/60000; dur=Math.floor(d/60)+'h '+Math.round(d%60)+'m'; }
+        return `<tr><td>${r.date}</td><td>${esc(r.name)}</td><td><span class="tag">${esc(r.role||'')}</span></td><td>${cin}</td><td>${cout}</td><td>${dur}</td><td class="muted">${esc(r.notes||'')}</td></tr>`;
+      }).join('') || '<tr><td colspan="7" style="text-align:center">No records found</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/signin/history/export', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { from, to } = req.query;
+  const records = (await pool.query('SELECT date,name,role,clock_in,clock_out,notes FROM sign_in_out WHERE tenant_id=$1 AND date>=$2 AND date<=$3 ORDER BY date,clock_in', [t, from, to])).rows;
+  const csv = ['Date,Name,Role,Clock In,Clock Out,Notes'].concat(records.map(r => `${r.date},"${r.name}","${r.role||''}",${r.clock_in||''},${r.clock_out||''},"${r.notes||''}"`)).join('\n');
+  res.header('Content-Type','text/csv'); res.attachment('signin-history.csv'); res.send(csv);
+}));
+
+// === SCHOOL: FEE RECEIPTS ===
+app.get('/school/fees/receipts', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const receipts = (await pool.query('SELECT fr.*, s.name as student_name, s.admission_no, s.class FROM fee_receipts fr JOIN students s ON fr.student_id=s.id WHERE fr.tenant_id=$1 ORDER BY fr.created_at DESC LIMIT 50', [t])).rows;
+  res.send(renderPage('Fee Receipts', `
+    <div class="card"><h3>Recent Fee Receipts</h3>
+      <table><tr><th>Receipt No</th><th>Student</th><th>Class</th><th>Amount Paid</th><th>Method</th><th>Date</th><th>Actions</th></tr>
+      ${receipts.map(r => `<tr>
+        <td><strong>${esc(r.receipt_no)}</strong></td><td>${esc(r.student_name)}</td><td>${esc(r.class)}</td>
+        <td>UGX ${parseInt(r.paid).toLocaleString()}</td><td><span class="tag">${esc(r.method||'cash')}</span></td>
+        <td class="muted">${new Date(r.created_at).toLocaleDateString()}</td>
+        <td><a href="/school/fees/${r.fee_id}/receipt" class="btn btn-sm">View</a></td>
+      </tr>`).join('') || '<tr><td colspan="7" style="text-align:center">No receipts yet. Receipts are generated when you view a fee record.</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/fees/:id/receipt', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const fee = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no,s.class,s.guardian_name FROM fees f JOIN students s ON f.student_id=s.id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!fee) return res.status(404).send('Fee record not found');
+  const tenant = (await pool.query('SELECT name,address,phone,email,logo_url FROM tenants WHERE id=$1', [t])).rows[0];
+  const receiptNo = fee.receipt_no || ('RCP-' + fee.id + '-' + Date.now().toString(36).toUpperCase());
+  if (!fee.receipt_no) {
+    try { await pool.query('UPDATE fees SET receipt_no=$1 WHERE id=$2', [receiptNo, fee.id]); } catch(e) {}
+    try { await pool.query('INSERT INTO fee_receipts(tenant_id,fee_id,receipt_no,student_id,amount,paid,method,received_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(receipt_no) DO NOTHING', [t, fee.id, receiptNo, fee.student_id, fee.amount, fee.paid, fee.payment_method||'cash', req.session.user.email]); } catch(e) {}
+  }
+  res.send(renderPage('Fee Receipt', `
+    <div class="card" style="max-width:700px;margin:20px auto;border:2px solid #4f46e5">
+      <div style="text-align:center;padding:20px;border-bottom:2px solid #e2e8f0">
+        ${tenant.logo_url ? `<img src="${esc(tenant.logo_url)}" style="height:60px;margin-bottom:10px" alt="Logo">` : ''}
+        <h2 style="color:#4f46e5">${esc(tenant.name)}</h2>
+        <p class="muted">${esc(tenant.address||'')} ${tenant.phone?'| '+esc(tenant.phone):''} ${tenant.email?'| '+esc(tenant.email):''}</p>
+        <h3 style="margin-top:10px;color:#3730a3">OFFICIAL FEE RECEIPT</h3>
+      </div>
+      <div style="padding:20px">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:20px">
+          <div><strong>Receipt No:</strong> ${esc(receiptNo)}</div>
+          <div><strong>Date:</strong> ${new Date().toLocaleDateString('en-GB',{year:'numeric',month:'long',day:'numeric'})}</div>
+        </div>
+        <div style="background:#f1f5f9;padding:15px;border-radius:10px;margin-bottom:20px">
+          <p><strong>Student Name:</strong> ${esc(fee.student_name)}</p>
+          <p><strong>Admission No:</strong> ${esc(fee.admission_no)}</p>
+          <p><strong>Class:</strong> ${esc(fee.class)}</p>
+          ${fee.guardian_name ? `<p><strong>Guardian:</strong> ${esc(fee.guardian_name)}</p>` : ''}
+        </div>
+        <table>
+          <tr style="background:#4f46e5;color:white"><th style="color:white">Description</th><th style="color:white;text-align:right">Amount (UGX)</th></tr>
+          <tr><td>School Fees - ${esc(fee.term||'Term')} ${fee.year||''}</td><td style="text-align:right">${parseInt(fee.amount).toLocaleString()}</td></tr>
+          <tr style="font-weight:bold"><td>Total Fees</td><td style="text-align:right">${parseInt(fee.amount).toLocaleString()}</td></tr>
+          <tr style="color:#059669;font-weight:bold"><td>Amount Paid</td><td style="text-align:right">${parseInt(fee.paid).toLocaleString()}</td></tr>
+          <tr style="color:${fee.amount-fee.paid>0?'#dc2626':'#059669'};font-weight:bold"><td>Balance</td><td style="text-align:right">${(fee.amount-fee.paid).toLocaleString()}</td></tr>
+        </table>
+        <div style="margin-top:30px;display:flex;justify-content:space-between;flex-wrap:wrap">
+          <div><p class="muted">Received By: ___________________</p></div>
+          <div><p class="muted">Parent/Guardian: ___________________</p></div>
+        </div>
+        <div style="margin-top:10px;text-align:center">
+          <p class="muted" style="font-size:11px">This is an official receipt from ${esc(tenant.name)}. Keep for your records.</p>
+        </div>
+      </div>
+      <div style="text-align:center;padding:15px;border-top:1px solid #e2e8f0">
+        <button class="btn btn-sm" onclick="window.print()">Print Receipt</button>
+        <a href="/school/fees" class="btn btn-sm" style="margin-left:8px">Back to Fees</a>
+      </div>
+    </div>
+    <style>@media print{.nav,.btn{display:none!important}.card{border:none!important;box-shadow:none!important}body{background:white!important}}</style>
+  `, req.session.user));
+}));
+
+// === SCHOOL: BULK REPORT CARDS (Printable HTML) ===
+app.get('/school/report-cards/bulk', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const exams = (await pool.query('SELECT id,name,term,year FROM exams WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
+  res.send(renderPage('Bulk Report Cards', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Generate Report Cards for Entire Class</h3>
+      <p class="muted" style="margin-bottom:15px">Generate printable report cards for all students in a class. Each card includes positions, grades, and comments.</p>
+      <form method="POST" action="/school/report-cards/bulk/generate">
+        <select name="exam_id" required><option value="">Select Exam</option>
+          ${exams.map(e => `<option value="${e.id}">${esc(e.name)} - ${esc(e.term)} ${e.year||''}</option>`).join('')}
+        </select>
+        <select name="class" required><option value="">Select Class</option>
+          ${classes.map(c => `<option>${esc(c.class)}</option>`).join('')}
+        </select>
+        <button class="btn btn-gold" onclick="return confirm('Generate report cards for all students in this class?')">Generate All Report Cards</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/report-cards/bulk/generate', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { exam_id, class: cls } = req.body;
+  const exam = (await pool.query('SELECT * FROM exams WHERE id=$1 AND tenant_id=$2', [exam_id, t])).rows[0];
+  const students = (await pool.query('SELECT id,name,admission_no,class,stream FROM students WHERE tenant_id=$1 AND class=$2 ORDER BY name', [t, cls])).rows;
+  const tenant = (await pool.query('SELECT name,address,phone,email,logo_url FROM tenants WHERE id=$1', [t])).rows[0];
+  const gradingScales = (await pool.query('SELECT * FROM grading_scales WHERE tenant_id=$1 ORDER BY min_score DESC', [t])).rows;
+  const allMarks = (await pool.query('SELECT m.student_id,m.subject,m.score,m.grade FROM marks m WHERE m.exam_id=$1', [exam_id])).rows;
+  const studentData = {};
+  for (const s of students) {
+    const sMarks = allMarks.filter(m => m.student_id === s.id);
+    const total = sMarks.reduce((a, m) => a + (parseInt(m.score) || 0), 0);
+    const avg = sMarks.length > 0 ? Math.round(total / sMarks.length) : 0;
+    const fee = (await pool.query('SELECT amount,paid FROM fees WHERE student_id=$1 AND tenant_id=$2 LIMIT 1', [s.id, t])).rows[0];
+    studentData[s.id] = { total, avg, marks: sMarks, fee, position: 0 };
+  }
+  const sorted = Object.entries(studentData).sort((a, b) => b[1].total - a[1].total);
+  sorted.forEach((entry, idx) => { studentData[entry[0]].position = idx + 1; });
+  function getGradeInfo(score) {
+    for (const g of gradingScales) { if (score >= g.min_score && score <= g.max_score) return g; }
+    return { grade: 'F', comment: 'Fail' };
+  }
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Cards - ${esc(cls)}</title>
+    <style>
+    *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b}
+    .report-card{background:white;max-width:800px;margin:20px auto;padding:30px;border:2px solid #4f46e5;border-radius:12px;page-break-after:always}
+    .report-card:last-child{page-break-after:auto}
+    .header{text-align:center;border-bottom:3px solid #4f46e5;padding-bottom:15px;margin-bottom:20px}
+    .header h1{color:#4f46e5;font-size:24px}.header h2{color:#3730a3;font-size:18px;margin-top:5px}
+    .student-info{background:#f1f5f9;padding:12px 15px;border-radius:8px;margin-bottom:15px;display:flex;flex-wrap:wrap;gap:5px 20px}
+    .student-info p{font-size:14px}.student-info strong{color:#1e293b}
+    table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:8px 10px;text-align:left;border:1px solid #e2e8f0;font-size:13px}
+    th{background:#4f46e5;color:white;font-weight:600}
+    .totals{margin-top:15px;padding:12px;background:#f1f5f9;border-radius:8px}
+    .totals p{margin:4px 0;font-size:14px}.totals strong{color:#4f46e5}
+    .signatures{margin-top:30px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:20px}
+    .signatures p{border-top:1px solid #94a3b8;padding-top:5px;font-size:13px;color:#64748b;min-width:200px}
+    .print-bar{position:fixed;top:0;left:0;right:0;background:#4f46e5;color:white;padding:10px 20px;text-align:center;z-index:999;display:flex;justify-content:center;gap:10px;align-items:center}
+    .print-bar button,.print-bar a{padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:14px}
+    @media print{.print-bar{display:none!important}.report-card{border:none!important;border-radius:0!important;margin:0!important;page-break-after:always}}
+    </style></head><body>
+    <div class="print-bar">
+      <span>Bulk Report Cards: ${esc(cls)} - ${esc(exam.name)}</span>
+      <button onclick="window.print()" style="background:#059669;color:white">Print All</button>
+      <a href="/school/report-cards" style="background:white;color:#4f46e5;text-decoration:none">Back</a>
+    </div>
+    <div style="height:50px"></div>
+    ${students.map(s => {
+      const d = studentData[s.id];
+      const gi = getGradeInfo(d.avg);
+      return `<div class="report-card">
+        <div class="header">
+          ${tenant.logo_url ? `<img src="${esc(tenant.logo_url)}" style="height:50px;margin-bottom:8px" alt="Logo">` : ''}
+          <h1>${esc(tenant.name)}</h1>
+          <h2>STUDENT REPORT CARD</h2>
+          <p style="color:#64748b;font-size:14px">${esc(exam.name)} | ${esc(exam.term)} ${exam.year||''} | Class: ${esc(s.class)}</p>
+        </div>
+        <div class="student-info">
+          <p><strong>Name:</strong> ${esc(s.name)}</p>
+          <p><strong>Adm No:</strong> ${esc(s.admission_no)}</p>
+          <p><strong>Stream:</strong> ${esc(s.stream||'N/A')}</p>
+          <p><strong>Position:</strong> ${d.position} out of ${students.length}</p>
+        </div>
+        <table><tr><th>Subject</th><th>Score</th><th>Grade</th></tr>
+        ${d.marks.map(m => `<tr><td>${esc(m.subject)}</td><td>${m.score||0}</td><td><strong>${esc(m.grade||getGradeInfo(parseInt(m.score)||0).grade)}</strong></td></tr>`).join('') || '<tr><td colspan="3" style="text-align:center">No marks recorded</td></tr>'}
+        </table>
+        <div class="totals">
+          <p><strong>Total Score:</strong> ${d.total} out of ${d.marks.length * 100}</p>
+          <p><strong>Average Score:</strong> ${d.avg}</p>
+          <p><strong>Overall Grade:</strong> ${esc(gi.grade)} - ${esc(gi.comment)}</p>
+          <p><strong>Position in Class:</strong> ${d.position} / ${students.length}</p>
+          ${d.fee ? `<p><strong>Fee Balance:</strong> UGX ${(d.fee.amount - d.fee.paid).toLocaleString()}</p>` : ''}
+        </div>
+        <div style="margin-top:15px">
+          <p><strong>Class Teacher Comment:</strong> ________________________________</p>
+          <p style="margin-top:10px"><strong>Head Teacher Comment:</strong> ________________________________</p>
+        </div>
+        <div class="signatures">
+          <p>Class Teacher: _______________</p>
+          <p>Head Teacher: _______________</p>
+          <p>Parent/Guardian: _______________</p>
+        </div>
+      </div>`;
+    }).join('')}
+  </body></html>`);
+}));
+
+// === SCHOOL: PRINT FEE BALANCES ===
+app.get('/school/print/fee-balances', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const filterClass = req.query.class || '';
+  let q = 'SELECT s.name,s.admission_no,s.class,s.stream,f.amount,f.paid,f.term,f.year FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1';
+  const params = [t];
+  if (filterClass) { q += ' AND s.class=$2'; params.push(filterClass); }
+  q += ' ORDER BY s.class,s.name';
+  const records = (await pool.query(q, params)).rows;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const totalDue = records.reduce((a, r) => a + (r.amount - r.paid), 0);
+  const totalPaid = records.reduce((a, r) => a + parseInt(r.paid), 0);
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fee Balances</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b}
+    .print-bar{position:fixed;top:0;left:0;right:0;background:#4f46e5;color:white;padding:10px 20px;text-align:center;z-index:999;display:flex;justify-content:center;gap:10px;align-items:center}
+    .print-bar button,.print-bar a{padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:14px}
+    table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:8px;text-align:left;border:1px solid #e2e8f0;font-size:13px}
+    th{background:#4f46e5;color:white}.right{text-align:right}
+    @media print{.print-bar{display:none!important}}
+    </style></head><body>
+    <div class="print-bar"><span>Fee Balance Report - ${esc(tenant.name)}</span>
+      <button onclick="window.print()" style="background:#059669;color:white">Print</button>
+      <a href="/school/fees" style="background:white;color:#4f46e5;text-decoration:none">Back</a>
+    </div>
+    <div style="max-width:1100px;margin:60px auto 20px;padding:0 20px">
+      <h2 style="text-align:center;color:#4f46e5">${esc(tenant.name)} - Fee Balance Report</h2>
+      <p style="text-align:center;color:#64748b">${new Date().toLocaleDateString()} | ${filterClass ? 'Class: '+esc(filterClass) : 'All Classes'}</p>
+      <table><tr><th>Student</th><th>Adm No</th><th>Class</th><th>Term</th><th class="right">Total Fees</th><th class="right">Paid</th><th class="right">Balance</th></tr>
+      ${records.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.admission_no)}</td><td>${esc(r.class)}</td><td>${esc(r.term||'')} ${r.year||''}</td><td class="right">${parseInt(r.amount).toLocaleString()}</td><td class="right" style="color:#059669">${parseInt(r.paid).toLocaleString()}</td><td class="right" style="color:${r.amount-r.paid>0?'#dc2626':'#059669'}">${(r.amount-r.paid).toLocaleString()}</td></tr>`).join('')}
+      <tr style="font-weight:bold;background:#f1f5f9"><td colspan="4">TOTALS</td><td class="right">${(totalDue+totalPaid).toLocaleString()}</td><td class="right" style="color:#059669">${totalPaid.toLocaleString()}</td><td class="right" style="color:#dc2626">${totalDue.toLocaleString()}</td></tr>
+      </table>
+    </div>
+  </body></html>`);
+}));
+
+// === SCHOOL: PRINT ATTENDANCE SHEET ===
+app.get('/school/attendance/print', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const filterClass = req.query.class || '';
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  let q = 'SELECT s.name,s.admission_no,s.class,a.status FROM students s LEFT JOIN attendance a ON s.id=a.student_id AND a.date=$2 WHERE s.tenant_id=$1';
+  const params = [t, date];
+  if (filterClass) { q += ' AND s.class=$3'; params.push(filterClass); }
+  q += ' ORDER BY s.class,s.name';
+  const records = (await pool.query(q, params)).rows;
+  const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const present = records.filter(r => r.status === 'present').length;
+  const absent = records.filter(r => r.status === 'absent').length;
+  const unmarked = records.filter(r => !r.status).length;
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Attendance Sheet</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b}
+    .print-bar{position:fixed;top:0;left:0;right:0;background:#4f46e5;color:white;padding:10px 20px;z-index:999;display:flex;justify-content:center;gap:10px;align-items:center;flex-wrap:wrap}
+    .print-bar button,.print-bar a,.print-bar select,.print-bar input{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px}
+    table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:8px;text-align:left;border:1px solid #e2e8f0;font-size:13px}
+    th{background:#4f46e5;color:white}
+    @media print{.print-bar{display:none!important}}
+    </style></head><body>
+    <div class="print-bar">
+      <span>Attendance - ${esc(tenant.name)}</span>
+      <form method="GET" action="/school/attendance/print" style="display:flex;gap:8px;align-items:center">
+        <select name="class" style="width:auto"><option value="">All Classes</option>${classes.map(c=>`<option ${filterClass===c.class?'selected':''}>${esc(c.class)}</option>`).join('')}</select>
+        <input name="date" type="date" value="${date}" style="width:auto">
+        <button type="submit" style="background:#059669;color:white">Filter</button>
+      </form>
+      <button onclick="window.print()" style="background:#d97706;color:white">Print</button>
+      <a href="/school/attendance" style="background:white;color:#4f46e5;text-decoration:none">Back</a>
+    </div>
+    <div style="max-width:900px;margin:60px auto 20px;padding:0 20px">
+      <h2 style="text-align:center;color:#4f46e5">${esc(tenant.name)} - Attendance Sheet</h2>
+      <p style="text-align:center;color:#64748b">Date: ${new Date(date).toLocaleDateString('en-GB',{weekday:'long',year:'numeric',month:'long',day:'numeric'})} | ${filterClass?'Class: '+esc(filterClass):'All Classes'}</p>
+      <p style="text-align:center;margin:8px 0"><span style="color:#059669;font-weight:bold">Present: ${present}</span> | <span style="color:#dc2626;font-weight:bold">Absent: ${absent}</span> | <span style="color:#64748b;font-weight:bold">Unmarked: ${unmarked}</span></p>
+      <table><tr><th>#</th><th>Student Name</th><th>Adm No</th><th>Class</th><th>Status</th><th>Signature</th></tr>
+      ${records.map((r,i) => `<tr><td>${i+1}</td><td>${esc(r.name)}</td><td>${esc(r.admission_no)}</td><td>${esc(r.class)}</td><td style="color:${r.status==='present'?'#059669':r.status==='absent'?'#dc2626':'#94a3b8'};font-weight:600">${r.status ? r.status.toUpperCase() : 'NOT MARKED'}</td><td style="min-width:120px"></td></tr>`).join('')}
+      </table>
+    </div>
+  </body></html>`);
+}));
+
+// === NOTIFICATION CENTER ===
+app.get('/notifications', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  const t = u.tenant_id;
+  const notifications = (await pool.query('SELECT * FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) ORDER BY created_at DESC LIMIT 50', [t, u.email])).rows;
+  const unread = notifications.filter(n => !n.read).length;
+  await pool.query('UPDATE notifications SET read=true WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) AND read=false', [t, u.email]);
+  res.send(renderPage('Notifications', `
+    <div class="card"><h3>Notifications <span class="tag">${unread} new</span></h3>
+      ${notifications.length > 0 ? notifications.map(n => `
+        <div style="padding:12px;border-bottom:1px solid #e2e8f0;${!n.read?'background:#eff6ff;border-radius:8px':''}">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:5px">
+            <strong style="color:${n.type==='error'?'#dc2626':n.type==='success'?'#059669':n.type==='warning'?'#d97706':'#4f46e5'}">${esc(n.title)}</strong>
+            <span class="muted">${new Date(n.created_at).toLocaleString()}</span>
+          </div>
+          <p style="margin-top:4px;color:#475569">${esc(n.message)}</p>
+        </div>
+      `).join('') : '<p style="text-align:center;padding:40px;color:#94a3b8">No notifications yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/notifications/count', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  const t = u.tenant_id;
+  const count = (await pool.query('SELECT COUNT(*) FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) AND read=false', [t, u.email])).rows[0].count;
+  res.json({ count: parseInt(count) });
+}));
+
+// === SCHOOL: SMS NOTIFICATIONS ===
+app.get('/school/notify', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id,name,guardian_phone,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
+  res.send(renderPage('Send SMS Notifications', `
+    <div class="card" style="max-width:700px;margin:40px auto"><h3>Send SMS / Notification</h3>
+      <p class="muted" style="margin-bottom:15px">Send SMS messages to parents/guardians. SMS requires Africa's Talking API key. In-app notifications are always free.</p>
+      <form method="POST" action="/school/notify/send">
+        <select name="target" id="targetSelect" required>
+          <option value="all">All Parents</option>
+          <option value="class">Specific Class</option>
+          <option value="student">Specific Student</option>
+        </select>
+        <select name="class" id="classSelect" style="display:none">
+          ${classes.map(c => `<option>${esc(c.class)}</option>`).join('')}
+        </select>
+        <select name="student_id" id="studentSelect" style="display:none">
+          ${students.map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.class)})</option>`).join('')}
+        </select>
+        <input name="subject" placeholder="Subject / Title" required>
+        <textarea name="message" rows="4" placeholder="Type your message here..." required></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn" name="type" value="notification">Send In-App Notification</button>
+          <button class="btn btn-green" name="type" value="sms" onclick="return confirm('Send SMS? This may cost credits.')">Send SMS</button>
+        </div>
+      </form>
+      <script>
+        document.getElementById('targetSelect').addEventListener('change', function() {
+          document.getElementById('classSelect').style.display = this.value === 'class' ? 'block' : 'none';
+          document.getElementById('studentSelect').style.display = this.value === 'student' ? 'block' : 'none';
+        });
+      </script>
+    </div>
+    <div class="card"><h3>Africa's Talking SMS Setup</h3>
+      <p class="muted">To send SMS, add these environment variables on Render:</p>
+      <table><tr><th>Variable</th><th>Value</th></tr>
+        <tr><td>AT_API_KEY</td><td>Your Africa's Talking API Key</td></tr>
+        <tr><td>AT_USERNAME</td><td>Your Africa's Talking Username</td></tr>
+        <tr><td>AT_SENDER_ID</td><td>(Optional) Sender ID</td></tr>
+      </table>
+      <p class="muted" style="margin-top:10px">Sign up at <a href="https://africastalking.com" target="_blank">africastalking.com</a> - Free sandbox for testing!</p>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/notify/send', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { target, class: cls, student_id, subject, message, type } = req.body;
+  let recipients = [];
+  if (target === 'student' && student_id) {
+    const s = (await pool.query('SELECT name,guardian_phone,parent_email FROM students WHERE id=$1 AND tenant_id=$2', [student_id, t])).rows[0];
+    if (s) recipients.push(s);
+  } else if (target === 'class' && cls) {
+    recipients = (await pool.query('SELECT name,guardian_phone,parent_email FROM students WHERE tenant_id=$1 AND class=$2', [t, cls])).rows;
+  } else {
+    recipients = (await pool.query('SELECT name,guardian_phone,parent_email FROM students WHERE tenant_id=$1', [t])).rows;
+  }
+  if (type === 'notification' || type === 'sms') {
+    await notifyAll(t, subject, message, type === 'sms' ? 'sms' : 'info');
+    for (const r of recipients) {
+      if (r.parent_email) await notify(t, r.parent_email, subject, message, 'info');
+    }
+  }
+  let smsResult = '';
+  if (type === 'sms') {
+    const phones = recipients.map(r => r.guardian_phone).filter(p => p && p.startsWith('+'));
+    if (phones.length > 0 && process.env.AT_API_KEY && process.env.AT_USERNAME) {
+      try {
+        const atRes = await fetch('https://api.africastalking.com/version1/messaging', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'ApiKey': process.env.AT_API_KEY, 'Accept': 'application/json' },
+          body: `username=${encodeURIComponent(process.env.AT_USERNAME)}&to=${phones.join(',')}&message=${encodeURIComponent(message)}${process.env.AT_SENDER_ID ? '&from='+encodeURIComponent(process.env.AT_SENDER_ID) : ''}`
+        });
+        const atData = await atRes.json();
+        smsResult = atData.SMSMessageData?.Message || 'SMS queued';
+      } catch (e) { smsResult = 'SMS failed: ' + e.message; }
+    } else if (phones.length === 0) {
+      smsResult = 'No valid phone numbers found (must start with +)';
+    } else {
+      smsResult = 'Africa\'s Talking not configured. Add AT_API_KEY and AT_USERNAME env vars.';
+    }
+  }
+  await audit(req.session.user.email, 'send_notification', `Sent "${subject}" to ${recipients.length} recipients via ${type}`);
+  res.send(renderPage('Notification Sent', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <div class="alert alert-success">In-app notification sent to ${recipients.length} recipients!</div>
+      ${smsResult ? `<div class="alert alert-info">SMS: ${esc(smsResult)}</div>` : ''}
+      <a href="/school/notify" class="btn">Send Another</a>
+    </div>
+  `, req.session.user));
+}));
 
 // === ORGANIZATION PORTAL (enhanced) ===
 app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -2911,8 +3413,8 @@ app.get('/parent/child/:id', ah(async (req, res) => {
       <div class="stat-card"><div class="stat-num">${presentDays}</div><div>Days Present</div></div>
     </div>
     <div class="card"><h3>Fee Records</h3>
-      <table><tr><th>Term</th><th>Year</th><th>Amount</th><th>Paid</th><th>Balance</th></tr>
-      ${fees.rows.map(f => `<tr><td>${esc(f.term)}</td><td>${f.year||''}</td><td>UGX ${parseInt(f.amount).toLocaleString()}</td><td style="color:#059669">UGX ${parseInt(f.paid).toLocaleString()}</td><td style="color:${f.amount-f.paid>0?'#dc2626':'#059669'}">UGX ${(f.amount-f.paid).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan="5">No fee records</td></tr>'}
+      <table><tr><th>Term</th><th>Year</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Receipt</th></tr>
+      ${fees.rows.map(f => `<tr><td>${esc(f.term)}</td><td>${f.year||''}</td><td>UGX ${parseInt(f.amount).toLocaleString()}</td><td style="color:#059669">UGX ${parseInt(f.paid).toLocaleString()}</td><td style="color:${f.amount-f.paid>0?'#dc2626':'#059669'}">UGX ${(f.amount-f.paid).toLocaleString()}</td><td>${f.paid > 0 ? `<a href="/parent/fee/${f.id}/receipt" class="btn btn-sm">View Receipt</a>` : '-'}</td></tr>`).join('') || '<tr><td colspan="6">No fee records</td></tr>'}
       </table>
     </div>
     <div class="card"><h3>Exam Results</h3>
@@ -2925,8 +3427,96 @@ app.get('/parent/child/:id', ah(async (req, res) => {
       ${attendance.rows.map(a => `<tr><td>${new Date(a.date).toLocaleDateString()}</td><td style="color:${a.status==='present'?'#059669':'#dc2626'}">${a.status}</td></tr>`).join('') || '<tr><td colspan="2">No attendance records</td></tr>'}
       </table>
     </div>
-    <div style="margin-top:20px"><a href="/parent/dashboard" class="btn btn-sm">Back to Dashboard</a></div>
+    <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap">
+      <a href="/parent/dashboard" class="btn btn-sm">Back to Dashboard</a>
+      <a href="/parent/child/${student.id}/report" class="btn btn-gold btn-sm">Download Report Card</a>
+    </div>
   `, null));
+}));
+
+// Parent: View Fee Receipt
+app.get('/parent/fee/:id/receipt', ah(async (req, res) => {
+  if (!req.session.parent) return res.redirect('/parent/login');
+  const t = req.session.parent.tenant_id;
+  const fee = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no,s.class,s.guardian_name FROM fees f JOIN students s ON f.student_id=s.id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!fee) return res.status(404).send('Fee record not found');
+  const tenant = (await pool.query('SELECT name,address,phone,email,logo_url FROM tenants WHERE id=$1', [t])).rows[0];
+  const receiptNo = fee.receipt_no || ('RCP-' + fee.id + '-' + Date.now().toString(36).toUpperCase());
+  res.send(renderPage('Fee Receipt', `
+    <div class="card" style="max-width:700px;margin:20px auto;border:2px solid #4f46e5">
+      <div style="text-align:center;padding:20px;border-bottom:2px solid #e2e8f0">
+        <h2 style="color:#4f46e5">${esc(tenant.name)}</h2>
+        <h3 style="margin-top:10px;color:#3730a3">OFFICIAL FEE RECEIPT</h3>
+      </div>
+      <div style="padding:20px">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:20px">
+          <div><strong>Receipt No:</strong> ${esc(receiptNo)}</div>
+          <div><strong>Date:</strong> ${new Date().toLocaleDateString()}</div>
+        </div>
+        <div style="background:#f1f5f9;padding:15px;border-radius:10px;margin-bottom:20px">
+          <p><strong>Student:</strong> ${esc(fee.student_name)}</p>
+          <p><strong>Class:</strong> ${esc(fee.class)}</p>
+        </div>
+        <table>
+          <tr style="background:#4f46e5;color:white"><th style="color:white">Description</th><th style="color:white;text-align:right">Amount (UGX)</th></tr>
+          <tr><td>School Fees - ${esc(fee.term||'Term')} ${fee.year||''}</td><td style="text-align:right">${parseInt(fee.amount).toLocaleString()}</td></tr>
+          <tr style="color:#059669;font-weight:bold"><td>Amount Paid</td><td style="text-align:right">${parseInt(fee.paid).toLocaleString()}</td></tr>
+          <tr style="color:${fee.amount-fee.paid>0?'#dc2626':'#059669'};font-weight:bold"><td>Balance</td><td style="text-align:right">${(fee.amount-fee.paid).toLocaleString()}</td></tr>
+        </table>
+      </div>
+      <div style="text-align:center;padding:15px;border-top:1px solid #e2e8f0">
+        <button class="btn btn-sm" onclick="window.print()">Print Receipt</button>
+      </div>
+    </div>
+    <style>@media print{.nav,.btn{display:none!important}.card{border:none!important;box-shadow:none!important}}</style>
+  `, null));
+}));
+
+// Parent: Download Report Card
+app.get('/parent/child/:id/report', ah(async (req, res) => {
+  if (!req.session.parent) return res.redirect('/parent/login');
+  const t = req.session.parent.tenant_id;
+  const student = (await pool.query('SELECT * FROM students WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!student) return res.status(404).send('Student not found');
+  const allExams = (await pool.query('SELECT e.id,e.name,e.term,e.year FROM exams e JOIN marks m ON e.id=m.exam_id WHERE m.student_id=$1 ORDER BY e.created_at DESC', [student.id])).rows;
+  const gradingScales = (await pool.query('SELECT * FROM grading_scales WHERE tenant_id=$1 ORDER BY min_score DESC', [t])).rows;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  function getGradeInfo(score) { for (const g of gradingScales) { if (score >= g.min_score && score <= g.max_score) return g; } return { grade: 'F', comment: 'Fail' }; }
+  let cardsHtml = '';
+  for (const exam of allExams) {
+    const examMarks = (await pool.query('SELECT subject,score,grade FROM marks WHERE exam_id=$1 AND student_id=$2', [exam.id, student.id])).rows;
+    const total = examMarks.reduce((a, m) => a + (parseInt(m.score) || 0), 0);
+    const avg = examMarks.length > 0 ? Math.round(total / examMarks.length) : 0;
+    const gi = getGradeInfo(avg);
+    cardsHtml += `<div class="report" style="page-break-after:always">
+      <div class="header"><h1>${esc(tenant.name)}</h1><h2>STUDENT REPORT CARD</h2>
+        <p style="color:#64748b;font-size:14px">${esc(exam.name)} | ${esc(exam.term)} ${exam.year||''}</p></div>
+      <div class="info"><p><strong>Name:</strong> ${esc(student.name)} | <strong>Adm No:</strong> ${esc(student.admission_no)} | <strong>Class:</strong> ${esc(student.class)}</p></div>
+      <table><tr><th>Subject</th><th>Score</th><th>Grade</th></tr>
+      ${examMarks.map(m => `<tr><td>${esc(m.subject)}</td><td>${m.score||0}</td><td><strong>${esc(m.grade||getGradeInfo(parseInt(m.score)||0).grade)}</strong></td></tr>`).join('') || '<tr><td colspan="3" style="text-align:center">No marks</td></tr>'}
+      </table>
+      <div style="margin-top:10px;padding:10px;background:#f1f5f9;border-radius:8px">
+        <p><strong>Total:</strong> ${total} | <strong>Average:</strong> ${avg} | <strong>Grade:</strong> ${esc(gi.grade)} - ${esc(gi.comment)}</p>
+      </div>
+      <div class="sig"><p>Class Teacher: _______________</p><p>Head Teacher: _______________</p><p>Parent: _______________</p></div>
+    </div>`;
+  }
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Card - ${esc(student.name)}</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b;background:#f8fafc}
+    .report{max-width:800px;margin:20px auto;padding:30px;background:white;border:2px solid #4f46e5;border-radius:12px}
+    .header{text-align:center;border-bottom:3px solid #4f46e5;padding-bottom:15px;margin-bottom:20px}
+    h1{color:#4f46e5;font-size:24px}h2{color:#3730a3;font-size:18px;margin-top:5px}
+    .info{background:#f1f5f9;padding:12px;border-radius:8px;margin-bottom:15px}
+    table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:8px;border:1px solid #e2e8f0;font-size:13px}
+    th{background:#4f46e5;color:white}
+    .sig{margin-top:30px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:20px}
+    .sig p{border-top:1px solid #94a3b8;padding-top:5px;font-size:13px;color:#64748b;min-width:180px}
+    .print-btn{position:fixed;top:10px;right:10px;z-index:999}
+    @media print{.print-btn{display:none!important}.report{border:none!important;border-radius:0!important}}
+    </style></head><body>
+    <div class="print-btn"><button onclick="window.print()" style="padding:10px 20px;background:#4f46e5;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:600">Print</button></div>
+    ${cardsHtml || '<div class="report"><p style="text-align:center;padding:40px">No exam results available yet</p></div>'}
+  </body></html>`);
 }));
 
 app.get('/parent/logout', (req, res) => {
