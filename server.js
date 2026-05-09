@@ -106,7 +106,10 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS favicon_url TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_css TEXT`,
-  // users: all columns except id, tenant_id, email, password
+   // users: add ALL columns that might be missing from old schema
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT false`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT false`,
@@ -131,8 +134,13 @@ const migrations = [
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT`,
-  // unique index for subdomain (non-null only)
+   // add unique constraint to subdomain (only on non-null values to avoid NULL conflicts)
   `CREATE UNIQUE INDEX IF NOT EXISTS tenants_subdomain_key ON tenants(subdomain) WHERE subdomain IS NOT NULL`,
+  // add unique constraint to users.email (needed for ON CONFLICT)
+  `CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users(email) WHERE email IS NOT NULL`,
+  // add foreign key for users.tenant_id if not exists
+  `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_tenant_id_fkey`,
+  `ALTER TABLE users ADD CONSTRAINT users_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE`,
   // v9.0 new tables
   `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, key_hash TEXT UNIQUE, name TEXT, scopes TEXT[], last_used TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS webhook_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event TEXT, payload JSONB, status INTEGER, response TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
@@ -253,7 +261,7 @@ app.get('/login', (req, res) => {
 app.post('/login', ah(async (req, res) => {
   const { email, password } = req.body;
   const u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
-  if (!u || u.banned || !u.approved) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
+   if (!u || u.banned || !u.approved || !u.password) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
   if (!(await bcrypt.compare(password, u.password))) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
   req.session.user = u;
   await audit(email, 'login', 'User logged in');
