@@ -2091,10 +2091,11 @@ app.get('/settings/password', requireAuth, (req, res) => {
 app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
   if (new_password !== confirm_password) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Passwords do not match</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
-   const u = (await pool.query('SELECT password, password_hash FROM users WHERE id=$1', ...)).rows[0];
-  const storedHash = u.password_hash || u.password;
-  if (!storedHash || !(await bcrypt.compare(current_password, storedHash))) return ...
-  await pool.query('UPDATE users SET password=$1, password_hash=$1 WHERE id=$2', [hash, ...]);
+     const u = (await pool.query('SELECT password, password_hash FROM users WHERE id=$1', [req.session.user.id])).rows[0];
+   const storedHash = u.password_hash || u.password;
+   if (!storedHash || !(await bcrypt.compare(current_password, storedHash))) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
+   const hash = await bcrypt.hash(new_password, 10);
+   await pool.query('UPDATE users SET password=$1, password_hash=$1 WHERE id=$2', [hash, req.session.user.id]);
   await audit(req.session.user.email, 'password_change', 'Password changed');
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Password changed successfully!</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
 }));
