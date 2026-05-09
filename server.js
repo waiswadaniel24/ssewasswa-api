@@ -134,10 +134,12 @@ const migrations = [
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT`,
-   // add unique constraint to subdomain (only on non-null values to avoid NULL conflicts)
-  `CREATE UNIQUE INDEX IF NOT EXISTS tenants_subdomain_key ON tenants(subdomain) WHERE subdomain IS NOT NULL`,
-  // add unique constraint to users.email (needed for ON CONFLICT)
-  `CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users(email) WHERE email IS NOT NULL`,
+  // Drop old partial indexes — ON CONFLICT cannot use partial (WHERE clause) indexes!
+  `DROP INDEX IF EXISTS tenants_subdomain_key`,
+  `DROP INDEX IF EXISTS users_email_key`,
+  // Recreate as regular unique indexes (PostgreSQL allows multiple NULLs, so partial WHERE is not needed)
+  `CREATE UNIQUE INDEX IF NOT EXISTS tenants_subdomain_key ON tenants(subdomain)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users(email)`,
   // add foreign key for users.tenant_id if not exists
   `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_tenant_id_fkey`,
   `ALTER TABLE users ADD CONSTRAINT users_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE`,
@@ -156,8 +158,10 @@ const migrations = [
       const devPass = 'Daniel@2025';
       const devHash = await bcrypt.hash(devPass, 10);
       const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
-      await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin'`, [devTenant.rows[0].id, devEmail, devHash]);
-      console.log('DB Ready. Dev login:', devEmail, devPass);
+          await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
+      // Verify dev user was created correctly
+      const check = await pool.query('SELECT id,email,role,approved,tenant_id FROM users WHERE email=$1', [devEmail]);
+      console.log('DB Ready. Dev user:', check.rows[0]?.email, 'role:', check.rows[0]?.role, 'approved:', check.rows[0]?.approved, 'tenant_id:', check.rows[0]?.tenant_id);
       break;
     } catch (e) {
       console.error(`DB Init Error (attempt ${attempt}/3):`, e.message);
@@ -260,8 +264,8 @@ app.get('/login', (req, res) => {
 
 app.post('/login', ah(async (req, res) => {
   const { email, password } = req.body;
-  const u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
-   if (!u || u.banned || !u.approved || !u.password) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
+   const u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
+  if (!u || u.banned || !u.approved || !u.password) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
   if (!(await bcrypt.compare(password, u.password))) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
   req.session.user = u;
   await audit(email, 'login', 'User logged in');
