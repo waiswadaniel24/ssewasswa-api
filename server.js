@@ -4,6 +4,7 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle } = require('docx');
@@ -20,6 +21,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
+
 // === SESSION ===
 app.use(session({
   store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
@@ -52,16 +54,15 @@ const requireTenantAccess = (req, res, next) => {
   return res.status(403).send('Access denied to this tenant');
 };
 const requireSuperAdmin = (req, res, next) => req.session.user?.role === 'super_admin' ? next() : res.status(403).send('Super admin only');
-const audit = (email, action, details) => {
-  let detailsStr = '';
-  if (details!= null) {
-    detailsStr = typeof details === 'object'? JSON.stringify(details) : String(details);
-  }
-  return pool.query(
-    'INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)',
-    [email, action, detailsStr]
-  ).catch(err => console.warn('Audit log failed:', err.message));
+const requireRole = (...roles) => (req, res, next) => {
+  const u = req.session.user;
+  if (!u) return res.redirect('/login');
+  if (u.role === 'super_admin') return next();
+  if (roles.includes(u.role) || roles.includes('all')) return next();
+  res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission to access this page.</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
 };
+const audit = (email, action, details) => pool.query('INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', [email, action, details]).catch(() => {});
+
 // === MIGRATIONS ===
 const migrations = [
   `CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, email TEXT, phone TEXT, subdomain TEXT UNIQUE, verified BOOLEAN DEFAULT false, approved BOOLEAN DEFAULT false, banned BOOLEAN DEFAULT false, ban_reason TEXT, has_fundraising BOOLEAN DEFAULT false, wallet_balance INTEGER DEFAULT 0, description TEXT, address TEXT, logo_url TEXT, created_at TIMESTAMP DEFAULT NOW())`,
@@ -87,6 +88,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS entertainment_videos (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS entertainment_music (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, artist TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS entertainment_games (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, player_name TEXT, score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`,
+  // NEW TABLES FOR ENHANCED FEATURES
   `CREATE TABLE IF NOT EXISTS meeting_minutes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, meeting_date DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS notice_board (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, priority TEXT DEFAULT 'normal', created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS sermons (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, preacher TEXT, sermon_date DATE, scripture TEXT, notes TEXT, created_at TIMESTAMP DEFAULT NOW())`,
@@ -96,9 +98,8 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS budget_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT NOT NULL, planned INTEGER DEFAULT 0, actual INTEGER DEFAULT 0, month TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS goals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, target INTEGER DEFAULT 0, current INTEGER DEFAULT 0, deadline DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS personal_notes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, created_at TIMESTAMP DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, key_hash TEXT UNIQUE, name TEXT, scopes TEXT[], last_used TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS webhook_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event TEXT, payload JSONB, status INTEGER, response TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  // === SAFE COLUMN MIGRATIONS ===
+  // === SAFE COLUMN MIGRATIONS (handles tables created by older schema versions) ===
+  // tenants: all columns except id, name, type (which existed in the original table)
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subdomain TEXT`,
@@ -114,6 +115,7 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS favicon_url TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_css TEXT`,
+  // users: add ALL columns that might be missing from old schema
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT`,
@@ -124,8 +126,10 @@ const migrations = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS dark_mode BOOLEAN DEFAULT false`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
+  // Sync password data between password and password_hash columns
   `UPDATE users SET password_hash = password WHERE password IS NOT NULL AND (password_hash IS NULL OR password_hash = '')`,
   `UPDATE users SET password = password_hash WHERE password_hash IS NOT NULL AND (password IS NULL OR password = '')`,
+  // students
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS admission_no TEXT`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS class TEXT`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS stream TEXT`,
@@ -134,55 +138,86 @@ const migrations = [
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_email TEXT`,
+  // fees
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS paid INTEGER DEFAULT 0`,
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS term TEXT`,
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS year INTEGER`,
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
+  // projects
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT`,
+  // events
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT`,
+  // Fix indexes: must drop constraints before dropping indexes they depend on
   `ALTER TABLE tenants DROP CONSTRAINT IF EXISTS tenants_subdomain_key`,
   `DROP INDEX IF EXISTS tenants_subdomain_key`,
   `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key`,
   `DROP INDEX IF EXISTS users_email_key`,
+  // Recreate as regular unique indexes (no WHERE clause — PostgreSQL allows multiple NULLs in unique indexes)
   `CREATE UNIQUE INDEX IF NOT EXISTS tenants_subdomain_key ON tenants(subdomain)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users(email)`,
+  // add foreign key for users.tenant_id if not exists
   `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_tenant_id_fkey`,
   `ALTER TABLE users ADD CONSTRAINT users_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE`,
-  `DELETE FROM audit_logs WHERE user_email IS NULL OR user_email = 'login'`
+  // v9.0 new tables
+  `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, key_hash TEXT UNIQUE, name TEXT, scopes TEXT[], last_used TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS webhook_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event TEXT, payload JSONB, status INTEGER, response TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS password_resets (id SERIAL PRIMARY KEY, email TEXT NOT NULL, token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, used BOOLEAN DEFAULT false)`,
+  // Clean up expired password reset tokens
+  `DELETE FROM password_resets WHERE expires_at < NOW()`,
+  // Staff sub-accounts
+  `CREATE TABLE IF NOT EXISTS staff (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, email TEXT UNIQUE NOT NULL, password TEXT, password_hash TEXT, name TEXT NOT NULL, role TEXT DEFAULT 'teacher', approved BOOLEAN DEFAULT true, banned BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`,
+  // Timetable
+  `CREATE TABLE IF NOT EXISTS timetable (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, class TEXT NOT NULL, day TEXT NOT NULL, period INTEGER NOT NULL, subject TEXT NOT NULL, teacher TEXT, start_time TEXT, end_time TEXT)`,
+  // Grading scales
+  `CREATE TABLE IF NOT EXISTS grading_scales (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, min_score INTEGER NOT NULL, max_score INTEGER NOT NULL, grade TEXT NOT NULL, comment TEXT)`,
+  // Fee structures
+  `CREATE TABLE IF NOT EXISTS fee_structures (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, class TEXT NOT NULL, term TEXT NOT NULL, amount INTEGER NOT NULL, year INTEGER)`,
+  // Church members
+  `CREATE TABLE IF NOT EXISTS church_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, phone TEXT, address TEXT, role TEXT, joined_at TIMESTAMP DEFAULT NOW())`,
+  // Donations
+  `CREATE TABLE IF NOT EXISTS donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, donor_name TEXT NOT NULL, amount INTEGER NOT NULL, type TEXT, method TEXT, reference TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+  // Parent links
+  `CREATE TABLE IF NOT EXISTS parent_links (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, parent_email TEXT NOT NULL, parent_phone TEXT, UNIQUE(student_id, parent_email))`
 ];
 
 (async () => {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
+      // Run each migration individually so one failure doesn't stop the rest
       for (const q of migrations) {
-        try { await pool.query(q); } catch (e) { if (!e.message.includes('already exists')) console.warn('Migration warning:', e.message); }
+        try { await pool.query(q); } catch (e) { /* column/index already exists is OK */ if (!e.message.includes('already exists')) console.warn('Migration warning:', e.message); }
       }
       const devEmail = 'waiswadaniel24@gmail.com';
       const devPass = 'Daniel@2025';
       const devHash = await bcrypt.hash(devPass, 10);
       const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
+      // Try inserting with both password columns — if one doesn't exist, catch and retry with the other
       try {
         await pool.query(`INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,password_hash=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
       } catch (insertErr) {
         if (insertErr.message.includes('password_hash')) {
+          // DB doesn't have password_hash column — use only password
           await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
         } else if (insertErr.message.includes('password')) {
+          // DB has password_hash but not password
           await pool.query(`INSERT INTO users(tenant_id,email,password_hash,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
         } else {
           throw insertErr;
         }
       }
+      // Verify dev user was created correctly
       const check = await pool.query('SELECT id,email,role,approved,tenant_id FROM users WHERE email=$1', [devEmail]);
       console.log('DB Ready. Dev user:', check.rows[0]?.email, 'role:', check.rows[0]?.role, 'approved:', check.rows[0]?.approved, 'tenant_id:', check.rows[0]?.tenant_id);
       break;
     } catch (e) {
       console.error(`DB Init Error (attempt ${attempt}/3):`, e.message);
       if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
-      else console.error('DB Init failed after 3 attempts.');
+      else console.error('DB Init failed after 3 attempts. App will run but login may not work.');
     }
   }
 })();
+
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user) => {
   const dark = user?.dark_mode;
@@ -233,6 +268,7 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
       <a href="/search">Search</a>
       <a href="/settings/profile">Settings</a>
       <a href="/dashboard">Dashboard</a>
+      <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">Logout</a>
     ` : `<a href="/login">Login</a><a href="/register">Register</a>`}
@@ -241,10 +277,7 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 <div class="container">${content}</div>
 </body></html>`;
 };
-app.get('/', (req, res) => {
-  if (req.session.user) return res.redirect('/dashboard');
-  res.redirect('/login');
-});
+
 // === AUTH ===
 app.get('/', (req, res) => {
   if (req.session.user) return res.redirect('/dashboard');
@@ -274,29 +307,32 @@ app.get('/login', (req, res) => {
         <button class="btn" style="width:100%">Login</button>
       </form>
       <p style="text-align:center;margin-top:15px">No account? <a href="/register">Register</a></p>
+      <p style="text-align:center;margin-top:8px"><a href="/forgot-password" style="font-size:13px">Forgot Password?</a></p>
+      <p style="text-align:center;margin-top:8px"><a href="/parent/login" style="font-size:13px">Parent Portal</a></p>
     </div>
   `, null));
 });
 
 app.post('/login', ah(async (req, res) => {
   const { email, password } = req.body;
-  const u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
-if (!u || u.banned ||!u.approved ||!u.password) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
-if (!(await bcrypt.compare(password, u.password))) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
-
-  // Only check password column now
-  if (!u || u.banned ||!u.approved ||!u.password) {
-    return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
+  // Try to get user — handle both password and password_hash column names
+  let u;
+  try {
+    u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
+  } catch (e) {
+    if (e.message.includes('password_hash')) {
+      // DB doesn't have password_hash column, select without it
+      u = (await pool.query('SELECT u.id,u.tenant_id,u.email,u.password,u.role,u.approved,u.banned,u.ban_reason,u.dark_mode,u.created_at,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
+    } else throw e;
   }
-
-  if (!(await bcrypt.compare(password, u.password))) {
-    return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
-  }
-
+  const storedHash = u?.password_hash || u?.password;
+  if (!u || u.banned || !u.approved || !storedHash) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
+  if (!(await bcrypt.compare(password, storedHash))) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
   req.session.user = u;
-  await audit(email, 'login', { ip: req.ip, route: '/login' }); // Now this will be JSON string
+  await audit(email, 'login', 'User logged in');
   res.redirect('/dashboard');
 }));
+
 app.get('/register', (req, res) => {
   res.send(renderPage('Register', `
     <div class="card" style="max-width:450px;margin:40px auto">
@@ -325,21 +361,117 @@ app.post('/register', ah(async (req, res) => {
   const hash = await bcrypt.hash(password, 10);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
   const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,true) RETURNING id', [org_name, type, email, phone, subdomain]);
-
-  // REMOVED password_hash column
-  await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
-
-  await audit(email, 'register', { org: org_name, type }); // Object now, will be JSON string
+  // Try inserting with both password columns, fall back to just password
+  try {
+    await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
+  } catch (e) {
+    if (e.message.includes('password_hash')) {
+      await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
+    } else throw e;
+  }
+  await audit(email, 'register', `New ${type} account: ${org_name}`);
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Account created! You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
 }));
+
 app.get('/logout', (req, res) => {
   if (req.session.user) audit(req.session.user.email, 'logout', 'User logged out').catch(() => {});
   req.session.destroy(() => res.redirect('/'));
 });
-app.get('/logout', (req, res) => {
-  if (req.session.user) audit(req.session.user.email, 'logout', { ip: req.ip }).catch(() => {});
-  req.session.destroy(() => res.redirect('/login')); // Changed from '/'
+
+// === FORGOT PASSWORD ===
+app.get('/forgot-password', (req, res) => {
+  res.send(renderPage('Forgot Password', `
+    <div class="card" style="max-width:450px;margin:40px auto">
+      <h2 style="text-align:center;margin-bottom:20px">Reset Password</h2>
+      <p class="muted" style="text-align:center;margin-bottom:15px">Enter your email and we'll send you a reset link.</p>
+      <form method="POST" action="/forgot-password">
+        <input name="email" type="email" placeholder="Your Email" required>
+        <button class="btn" style="width:100%">Send Reset Link</button>
+      </form>
+      <p style="text-align:center;margin-top:15px"><a href="/login">Back to Login</a></p>
+    </div>
+  `, null));
 });
+
+app.post('/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 3 }), ah(async (req, res) => {
+  const { email } = req.body;
+  const user = (await pool.query('SELECT id,email FROM users WHERE email=$1', [email])).rows[0];
+  // Always show success message to prevent email enumeration
+  const successMsg = '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-success">If an account with that email exists, a reset link has been sent. Check your inbox.</div><a href="/login" class="btn">Back to Login</a></div>';
+
+  if (!user) return res.send(renderPage('Forgot Password', successMsg, null));
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  await pool.query('INSERT INTO password_resets(email,token,expires_at) VALUES($1,$2,$3)', [email, token, expiresAt]);
+
+  const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 3000}`;
+  const resetUrl = `${baseUrl}/reset-password?token=${token}`;
+
+  // Try to send email if Gmail is configured
+  if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
+    try {
+      const nodemailer = require('nodemailer');
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
+      });
+      await transporter.sendMail({
+        from: process.env.GMAIL_USER,
+        to: email,
+        subject: 'SSEWASSWA - Password Reset',
+        html: `<h2>Password Reset</h2><p>Click below to reset your password. This link expires in 1 hour.</p><a href="${resetUrl}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none">Reset Password</a><p style="margin-top:15px;color:#666">If you didn't request this, ignore this email.</p>`
+      });
+    } catch (e) {
+      console.warn('Email send failed:', e.message);
+    }
+  }
+
+  // Always show the token URL in development or if email is not configured
+  const showToken = !process.env.GMAIL_USER || process.env.NODE_ENV !== 'production';
+  const tokenInfo = showToken ? `<div class="alert alert-info" style="margin-top:15px;word-break:break-all"><strong>Reset URL:</strong> <a href="${resetUrl}">${resetUrl}</a></div>` : '';
+
+  await audit(email, 'password_reset_request', 'Password reset requested');
+  res.send(renderPage('Forgot Password', successMsg.replace('</div>', tokenInfo + '</div>'), null));
+}));
+
+app.get('/reset-password', ah(async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.redirect('/forgot-password');
+  const reset = (await pool.query('SELECT * FROM password_resets WHERE token=$1 AND used=false AND expires_at>NOW()', [token])).rows[0];
+  if (!reset) return res.send(renderPage('Reset Password', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">This reset link is invalid or expired.</div><a href="/forgot-password" class="btn">Request New Link</a></div>', null));
+  res.send(renderPage('Reset Password', `
+    <div class="card" style="max-width:450px;margin:40px auto">
+      <h2 style="text-align:center;margin-bottom:20px">Set New Password</h2>
+      <form method="POST" action="/reset-password">
+        <input type="hidden" name="token" value="${esc(token)}">
+        <input name="password" type="password" placeholder="New Password (min 6)" minlength="6" required>
+        <input name="confirm_password" type="password" placeholder="Confirm Password" required>
+        <button class="btn" style="width:100%">Reset Password</button>
+      </form>
+    </div>
+  `, null));
+}));
+
+app.post('/reset-password', ah(async (req, res) => {
+  const { token, password, confirm_password } = req.body;
+  if (password !== confirm_password) return res.send(renderPage('Reset Password', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Passwords do not match</div><a href="/reset-password?token=' + esc(token) + '" class="btn">Try Again</a></div>', null));
+  const reset = (await pool.query('SELECT * FROM password_resets WHERE token=$1 AND used=false AND expires_at>NOW()', [token])).rows[0];
+  if (!reset) return res.send(renderPage('Reset Password', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">This reset link is invalid or expired.</div><a href="/forgot-password" class="btn">Request New Link</a></div>', null));
+  const hash = await bcrypt.hash(password, 10);
+  // Update password in both columns
+  try {
+    await pool.query('UPDATE users SET password=$1,password_hash=$1 WHERE email=$2', [hash, reset.email]);
+  } catch (e) {
+    if (e.message.includes('password_hash')) {
+      await pool.query('UPDATE users SET password=$1 WHERE email=$2', [hash, reset.email]);
+    } else throw e;
+  }
+  await pool.query('UPDATE password_resets SET used=true WHERE token=$1', [token]);
+  await audit(reset.email, 'password_reset', 'Password reset completed');
+  res.send(renderPage('Password Reset', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-success">Password reset successfully! You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
+}));
+
 // === DASHBOARD ROUTER ===
 app.get('/dashboard', requireAuth, (req, res) => {
   const u = req.session.user;
@@ -366,11 +498,35 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
     </div>
     <div class="grid">
       <div class="card"><h3>Students</h3><a href="/school/students" class="btn">Manage Students</a><a href="/school/students/import" class="btn btn-green btn-sm" style="margin-top:8px">CSV Import</a></div>
-      <div class="card"><h3>Fees</h3><a href="/school/fees" class="btn">Fee Management</a><a href="/school/fees/pay" class="btn btn-green btn-sm" style="margin-top:8px">Record Payment</a></div>
+      <div class="card"><h3>Fees</h3><a href="/school/fees" class="btn">Fee Management</a><a href="/school/fee-structures" class="btn btn-sm" style="margin-top:8px">Fee Structures</a></div>
       <div class="card"><h3>Exams & Marks</h3><a href="/school/exams" class="btn">Exam Results</a><a href="/school/exams/new" class="btn btn-sm" style="margin-top:8px">New Exam</a></div>
       <div class="card"><h3>Attendance</h3><a href="/school/attendance" class="btn">Mark Attendance</a></div>
+      <div class="card"><h3>Staff</h3><a href="/school/staff" class="btn btn-sm">Manage Staff</a><a href="/school/staff/new" class="btn btn-sm" style="margin-top:8px">Add Staff</a></div>
+      <div class="card"><h3>Timetable</h3><a href="/school/timetable" class="btn btn-sm">View Timetable</a></div>
+      <div class="card"><h3>Grading</h3><a href="/school/grading" class="btn btn-sm">Grading Scale</a></div>
+      <div class="card"><h3>Promote</h3><a href="/school/promote" class="btn btn-sm">Student Promotion</a></div>
       <div class="card"><h3>Reports</h3><a href="/school/reports" class="btn">Generate Reports</a><a href="/school/report-cards" class="btn btn-gold btn-sm" style="margin-top:8px">Report Cards</a></div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <div class="card"><h3>Fees Collected (Monthly)</h3><canvas id="feesChart"></canvas></div>
+    <div class="card"><h3>Attendance Trend (Last 7 Days)</h3><canvas id="attendanceChart"></canvas></div>
+    <div class="card"><h3>Gender Distribution</h3><canvas id="genderChart"></canvas></div>
+    <script>
+    (async function(){
+      try {
+        const fr = await fetch('/school/charts/fees'); const fd = await fr.json();
+        new Chart(document.getElementById('feesChart'),{type:'bar',data:{labels:fd.labels,datasets:[{label:'Fees Collected UGX',data:fd.values,backgroundColor:'rgba(79,70,229,0.6)'}]},options:{responsive:true}});
+      }catch(e){}
+      try {
+        const ar = await fetch('/school/charts/attendance'); const ad = await ar.json();
+        new Chart(document.getElementById('attendanceChart'),{type:'line',data:{labels:ad.labels,datasets:[{label:'Present',data:ad.present,borderColor:'#059669',fill:false},{label:'Absent',data:ad.absent,borderColor:'#dc2626',fill:false}]},options:{responsive:true}});
+      }catch(e){}
+      try {
+        const gr = await fetch('/school/charts/gender'); const gd = await gr.json();
+        new Chart(document.getElementById('genderChart'),{type:'doughnut',data:{labels:gd.labels,datasets:[{data:gd.values,backgroundColor:['#4f46e5','#ec4899','#64748b']}]},options:{responsive:true}});
+      }catch(e){}
+    })();
+    </script>
   `, req.session.user));
 }));
 
@@ -709,6 +865,350 @@ app.post('/school/attendance/save', requireAuth, requireNotBanned, ah(async (req
   res.redirect('/school/attendance');
 }));
 
+// === SCHOOL: CHART DATA APIs ===
+app.get('/school/charts/fees', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, COALESCE(SUM(paid),0) as total FROM fees WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '12 months' GROUP BY month ORDER BY MIN(created_at)", [t])).rows;
+  res.json({ labels: data.map(d => d.month), values: data.map(d => parseInt(d.total)) });
+}));
+
+app.get('/school/charts/attendance', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT date, COUNT(*) FILTER(WHERE status='present') as present, COUNT(*) FILTER(WHERE status='absent') as absent FROM attendance WHERE tenant_id=$1 AND date > CURRENT_DATE-7 GROUP BY date ORDER BY date", [t])).rows;
+  res.json({ labels: data.map(d => new Date(d.date).toLocaleDateString('en-GB',{weekday:'short',day:'numeric'})), present: data.map(d => parseInt(d.present)), absent: data.map(d => parseInt(d.absent)) });
+}));
+
+app.get('/school/charts/gender', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  try {
+    const data = (await pool.query("SELECT COALESCE(gender,'Unknown') as gender, COUNT(*) as cnt FROM students WHERE tenant_id=$1 GROUP BY gender", [t])).rows;
+    if (data.length === 0) { const c = (await pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [t])).rows; res.json({ labels: ['Students'], values: [parseInt(c[0].count)] }); }
+    else res.json({ labels: data.map(d => d.gender), values: data.map(d => parseInt(d.cnt)) });
+  } catch (e) { const c = (await pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [t])).rows; res.json({ labels: ['Students'], values: [parseInt(c[0].count)] }); }
+}));
+
+// === SCHOOL: STAFF MANAGEMENT ===
+app.get('/school/staff', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const staffList = (await pool.query('SELECT * FROM staff WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Staff Management', `
+    <div class="card"><h3>Staff Members</h3>
+      <a href="/school/staff/new" class="btn btn-sm" style="margin-bottom:15px">+ Add Staff</a>
+      <table><tr><th>Name</th><th>Email</th><th>Role</th><th>Approved</th><th>Status</th><th>Actions</th></tr>
+      ${staffList.map(s => `<tr>
+        <td>${esc(s.name)}</td><td>${esc(s.email)}</td><td><span class="tag">${esc(s.role)}</span></td>
+        <td>${s.approved ? '<span style="color:#059669">Yes</span>' : '<span style="color:#dc2626">No</span>'}</td>
+        <td>${s.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>'}</td>
+        <td>
+          <a href="/school/staff/${s.id}/edit" class="btn btn-sm">Edit</a>
+          <a href="/school/staff/${s.id}/ban" class="btn btn-sm" style="background:${s.banned?'#059669':'#dc2626'}">${s.banned?'Unban':'Ban'}</a>
+          <a href="/school/staff/${s.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete ${esc(s.name)}?')">Del</a>
+        </td>
+      </tr>`).join('') || '<tr><td colspan="6">No staff yet</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/staff/new', requireAuth, requireNotBanned, requireRole('head_teacher', 'school'), ah(async (req, res) => {
+  res.send(renderPage('Add Staff', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Add New Staff Member</h3>
+      <form method="POST" action="/school/staff/save">
+        <input name="name" placeholder="Full Name" required>
+        <input name="email" type="email" placeholder="Email" required>
+        <input name="password" type="password" placeholder="Password (min 6)" minlength="6" required>
+        <select name="role" required>
+          <option value="head_teacher">Head Teacher</option>
+          <option value="deputy">Deputy Head</option>
+          <option value="teacher" selected>Teacher</option>
+          <option value="bursar">Bursar</option>
+          <option value="secretary">Secretary</option>
+          <option value="librarian">Librarian</option>
+        </select>
+        <button class="btn btn-green">Create Staff Account</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/staff/save', requireAuth, requireNotBanned, requireRole('head_teacher', 'school'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, email, password, role } = req.body;
+  const hash = await bcrypt.hash(password, 10);
+  try {
+    await pool.query('INSERT INTO staff(tenant_id,email,password,password_hash,name,role,approved) VALUES($1,$2,$3,$3,$4,$5,true)', [t, email, hash, name, role]);
+  } catch (e) {
+    if (e.message.includes('staff_email_key') || e.message.includes('unique')) {
+      return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">A staff member with this email already exists.</div><a href="/school/staff" class="btn">Back</a></div>', req.session.user));
+    }
+    throw e;
+  }
+  await audit(req.session.user.email, 'add_staff', `Added staff: ${name} (${role})`);
+  res.redirect('/school/staff');
+}));
+
+app.get('/school/staff/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const s = (await pool.query('SELECT * FROM staff WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!s) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Staff', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Edit Staff: ${esc(s.name)}</h3>
+      <form method="POST" action="/school/staff/${s.id}/update">
+        <input name="name" value="${esc(s.name)}" required>
+        <input name="email" type="email" value="${esc(s.email)}" required>
+        <select name="role" required>
+          <option value="head_teacher" ${s.role==='head_teacher'?'selected':''}>Head Teacher</option>
+          <option value="deputy" ${s.role==='deputy'?'selected':''}>Deputy Head</option>
+          <option value="teacher" ${s.role==='teacher'?'selected':''}>Teacher</option>
+          <option value="bursar" ${s.role==='bursar'?'selected':''}>Bursar</option>
+          <option value="secretary" ${s.role==='secretary'?'selected':''}>Secretary</option>
+          <option value="librarian" ${s.role==='librarian'?'selected':''}>Librarian</option>
+        </select>
+        <button class="btn">Update Staff</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/staff/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { name, email, role } = req.body;
+  await pool.query('UPDATE staff SET name=$1,email=$2,role=$3 WHERE id=$4 AND tenant_id=$5', [name, email, role, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'edit_staff', `Updated staff: ${name}`);
+  res.redirect('/school/staff');
+}));
+
+app.get('/school/staff/:id/ban', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const s = (await pool.query('SELECT * FROM staff WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!s) return res.status(404).send('Not found');
+  await pool.query('UPDATE staff SET banned=$1 WHERE id=$2 AND tenant_id=$3', [!s.banned, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'toggle_ban_staff', `${s.banned?'Unbanned':'Banned'} staff: ${s.name}`);
+  res.redirect('/school/staff');
+}));
+
+app.get('/school/staff/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM staff WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'delete_staff', `Deleted staff ID: ${req.params.id}`);
+  res.redirect('/school/staff');
+}));
+
+// === SCHOOL: TIMETABLE ===
+app.get('/school/timetable', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const filterClass = req.query.class || '';
+  let q = 'SELECT * FROM timetable WHERE tenant_id=$1';
+  const params = [t];
+  if (filterClass) { q += ' AND class=$2'; params.push(filterClass); }
+  q += ' ORDER BY day,period';
+  const entries = (await pool.query(q, params)).rows;
+  const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
+  const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const maxPeriod = entries.length > 0 ? Math.max(...entries.map(e => e.period)) : 8;
+  res.send(renderPage('Timetable', `
+    <div class="card"><h3>Timetable</h3>
+      <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+        <a href="/school/timetable/new" class="btn btn-sm">+ Add Entry</a>
+        <form method="GET" action="/school/timetable" style="display:flex;gap:10px">
+          <select name="class" style="width:auto;margin:0"><option value="">All Classes</option>
+            ${classes.map(c => `<option ${filterClass===c.class?'selected':''}>${esc(c.class)}</option>`).join('')}
+          </select>
+          <button class="btn btn-sm">Filter</button>
+        </form>
+      </div>
+      <div style="overflow-x:auto">
+      <table style="min-width:800px"><tr><th>Period</th>${days.map(d => `<th>${d}</th>`).join('')}</tr>
+      ${Array.from({length:maxPeriod},(_,i)=>i+1).map(p => `<tr><td><strong>Period ${p}</strong></td>${days.map(d => {
+        const entry = entries.find(e => e.day===d && e.period===p);
+        return entry ? `<td><strong>${esc(entry.subject)}</strong><br><span class="muted">${esc(entry.teacher||'')}</span><br><a href="/school/timetable/${entry.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')" style="margin-top:4px;padding:4px 8px;font-size:10px">Del</a></td>` : '<td>-</td>';
+      }).join('')}</tr>`).join('')}
+      </table>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/timetable/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
+  const staffList = (await pool.query('SELECT name FROM staff WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Add Timetable Entry', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Add Timetable Entry</h3>
+      <form method="POST" action="/school/timetable/save">
+        <select name="class" required><option value="">Select Class</option>
+          ${classes.map(c => `<option>${esc(c.class)}</option>`).join('')}
+        </select>
+        <select name="day" required><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option>Saturday</option></select>
+        <input name="period" type="number" placeholder="Period Number (e.g. 1, 2, 3)" min="1" max="10" required>
+        <input name="subject" placeholder="Subject (e.g. Mathematics)" required>
+        <select name="teacher"><option value="">Select Teacher</option>
+          ${staffList.map(s => `<option>${esc(s.name)}</option>`).join('')}
+        </select>
+        <input name="start_time" type="time" placeholder="Start Time">
+        <input name="end_time" type="time" placeholder="End Time">
+        <button class="btn btn-green">Add Entry</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/timetable/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { class: cls, day, period, subject, teacher, start_time, end_time } = req.body;
+  await pool.query('INSERT INTO timetable(tenant_id,class,day,period,subject,teacher,start_time,end_time) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+    [req.session.user.tenant_id, cls, day, period, subject, teacher, start_time, end_time]);
+  await audit(req.session.user.email, 'add_timetable', `Added ${subject} for ${cls} ${day} P${period}`);
+  res.redirect('/school/timetable');
+}));
+
+app.get('/school/timetable/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM timetable WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/school/timetable');
+}));
+
+// === SCHOOL: GRADING SYSTEM ===
+app.get('/school/grading', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const scales = (await pool.query('SELECT * FROM grading_scales WHERE tenant_id=$1 ORDER BY min_score DESC', [t])).rows;
+  res.send(renderPage('Grading Scale', `
+    <div class="card"><h3>Grading Scale</h3>
+      <form method="POST" action="/school/grading/save" style="margin-bottom:20px">
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr 2fr">
+          <input name="min_score" type="number" placeholder="Min Score" required>
+          <input name="max_score" type="number" placeholder="Max Score" required>
+          <input name="grade" placeholder="Grade (e.g. D1)" required>
+          <input name="comment" placeholder="Comment (e.g. Excellent)">
+        </div>
+        <button class="btn btn-green">Add Grade Range</button>
+      </form>
+      <table><tr><th>Min</th><th>Max</th><th>Grade</th><th>Comment</th><th>Action</th></tr>
+      ${scales.map(s => `<tr><td>${s.min_score}</td><td>${s.max_score}</td><td><span class="tag">${esc(s.grade)}</span></td><td>${esc(s.comment)}</td>
+        <td><a href="/school/grading/${s.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
+      </tr>`).join('') || '<tr><td colspan="5">No grading scale set. Add ranges above.</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/grading/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { min_score, max_score, grade, comment } = req.body;
+  await pool.query('INSERT INTO grading_scales(tenant_id,min_score,max_score,grade,comment) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, min_score, max_score, grade, comment]);
+  await audit(req.session.user.email, 'add_grade_range', `Added grade ${grade} (${min_score}-${max_score})`);
+  res.redirect('/school/grading');
+}));
+
+app.get('/school/grading/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM grading_scales WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/school/grading');
+}));
+
+// === SCHOOL: FEE STRUCTURES ===
+app.get('/school/fee-structures', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const structures = (await pool.query('SELECT * FROM fee_structures WHERE tenant_id=$1 ORDER BY class,term', [t])).rows;
+  res.send(renderPage('Fee Structures', `
+    <div class="card"><h3>Fee Structures</h3>
+      <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+        <a href="/school/fee-structures/new" class="btn btn-sm">+ Add Fee Structure</a>
+      </div>
+      <table><tr><th>Class</th><th>Term</th><th>Amount (UGX)</th><th>Year</th><th>Actions</th></tr>
+      ${structures.map(s => `<tr><td>${esc(s.class)}</td><td>${esc(s.term)}</td><td>${parseInt(s.amount).toLocaleString()}</td><td>${s.year||''}</td>
+        <td><a href="/school/fee-structures/${s.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
+      </tr>`).join('') || '<tr><td colspan="5">No fee structures yet</td></tr>'}
+      </table>
+    </div>
+    <div class="card"><h3>Auto-Generate Fee Records</h3>
+      <p class="muted">Generate fee records for all students in a class based on fee structures.</p>
+      <form method="POST" action="/school/fee-structures/generate">
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+          <input name="class" placeholder="Class (e.g. S1)" required>
+          <input name="term" placeholder="Term (e.g. Term 1)" required>
+          <input name="year" type="number" placeholder="Year (e.g. 2025)" required>
+        </div>
+        <button class="btn btn-gold">Generate Fee Records</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/fee-structures/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
+  res.send(renderPage('Add Fee Structure', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Add Fee Structure</h3>
+      <form method="POST" action="/school/fee-structures/save">
+        <select name="class" required><option value="">Select Class</option>
+          ${classes.map(c => `<option>${esc(c.class)}</option>`).join('')}
+          <option value="__all">All Classes</option>
+        </select>
+        <input name="term" placeholder="Term (e.g. Term 1)" required>
+        <input name="amount" type="number" placeholder="Amount UGX" required>
+        <input name="year" type="number" placeholder="Year (e.g. 2025)">
+        <button class="btn btn-green">Save Fee Structure</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/fee-structures/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { class: cls, term, amount, year } = req.body;
+  if (cls === '__all') {
+    const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL', [req.session.user.tenant_id])).rows;
+    for (const c of classes) {
+      await pool.query('INSERT INTO fee_structures(tenant_id,class,term,amount,year) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, c.class, term, amount, year]);
+    }
+  } else {
+    await pool.query('INSERT INTO fee_structures(tenant_id,class,term,amount,year) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, cls, term, amount, year]);
+  }
+  await audit(req.session.user.email, 'add_fee_structure', `Added fee structure: ${cls} ${term} UGX ${amount}`);
+  res.redirect('/school/fee-structures');
+}));
+
+app.get('/school/fee-structures/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM fee_structures WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/school/fee-structures');
+}));
+
+app.post('/school/fee-structures/generate', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { class: cls, term, year } = req.body;
+  const structure = (await pool.query('SELECT * FROM fee_structures WHERE tenant_id=$1 AND class=$2 AND term=$3 ORDER BY id DESC LIMIT 1', [t, cls, term])).rows[0];
+  if (!structure) return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">No fee structure found for this class/term combination.</div><a href="/school/fee-structures" class="btn">Back</a></div>', req.session.user));
+  const students = (await pool.query('SELECT id FROM students WHERE tenant_id=$1 AND class=$2', [t, cls])).rows;
+  let generated = 0;
+  for (const s of students) {
+    const existing = (await pool.query('SELECT id FROM fees WHERE tenant_id=$1 AND student_id=$2 AND term=$3 AND year=$4', [t, s.id, term, year])).rows;
+    if (existing.length === 0) {
+      await pool.query('INSERT INTO fees(tenant_id,student_id,amount,paid,term,year) VALUES($1,$2,$3,0,$4,$5)', [t, s.id, structure.amount, term, year]);
+      generated++;
+    }
+  }
+  await audit(req.session.user.email, 'generate_fees', `Generated ${generated} fee records for ${cls} ${term}`);
+  res.send(renderPage('Fee Records Generated', `<div class="card"><div class="alert alert-success">Generated ${generated} fee records for ${esc(cls)} ${esc(term)} at UGX ${parseInt(structure.amount).toLocaleString()} each.</div><a href="/school/fees" class="btn">View Fees</a></div>`, req.session.user));
+}));
+
+// === SCHOOL: STUDENT PROMOTION ===
+app.get('/school/promote', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
+  res.send(renderPage('Student Promotion', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Promote Students</h3>
+      <p class="muted" style="margin-bottom:15px">Select a class to promote. All students in that class will be moved to the new class.</p>
+      <form method="POST" action="/school/promote/execute">
+        <select name="from_class" required><option value="">From Class</option>
+          ${classes.map(c => `<option>${esc(c.class)}</option>`).join('')}
+        </select>
+        <input name="to_class" placeholder="New Class (e.g. S2)" required>
+        <button class="btn btn-gold" onclick="return confirm('Promote ALL students in this class? This cannot be undone.')">Promote Students</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/promote/execute', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { from_class, to_class } = req.body;
+  const result = await pool.query('UPDATE students SET class=$1 WHERE tenant_id=$2 AND class=$3', [to_class, t, from_class]);
+  await audit(req.session.user.email, 'student_promotion', `Promoted ${result.rowCount} students from ${from_class} to ${to_class}`);
+  res.send(renderPage('Promotion Complete', `<div class="card"><div class="alert alert-success">Successfully promoted ${result.rowCount} students from ${esc(from_class)} to ${esc(to_class)}.</div><a href="/school/students" class="btn">View Students</a></div>`, req.session.user));
+}));
+
 // === SCHOOL: REPORT CARDS (.docx) ===
 app.get('/school/report-cards', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
@@ -868,7 +1368,39 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
         ${tenant.has_fundraising ? '<a href="/fundraising" class="btn btn-gold btn-sm" style="margin-top:8px">Fundraising</a>' : '<a href="/upgrade/fundraising" class="btn btn-sm" style="margin-top:8px">+ Add Fundraising</a>'}
       </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <div class="card"><h3>Finance: Income vs Expense</h3><canvas id="orgFinanceChart"></canvas></div>
+    <div class="card"><h3>Member Growth</h3><canvas id="orgMemberChart"></canvas></div>
+    <script>
+    (async function(){
+      try {
+        const fr = await fetch('/org/charts/finance'); const fd = await fr.json();
+        new Chart(document.getElementById('orgFinanceChart'),{type:'bar',data:{labels:fd.labels,datasets:[{label:'Income',data:fd.income,backgroundColor:'rgba(5,150,105,0.6)'},{label:'Expense',data:fd.expense,backgroundColor:'rgba(220,38,38,0.6)'}]},options:{responsive:true}});
+      }catch(e){}
+      try {
+        const mr = await fetch('/org/charts/members'); const md = await mr.json();
+        new Chart(document.getElementById('orgMemberChart'),{type:'line',data:{labels:md.labels,datasets:[{label:'Members',data:md.values,borderColor:'#7c3aed',fill:true,backgroundColor:'rgba(124,58,237,0.1)'}]},options:{responsive:true}});
+      }catch(e){}
+    })();
+    </script>
   `, req.session.user));
+}));
+
+// === ORG CHART DATA APIs ===
+app.get('/org/charts/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, type, COALESCE(SUM(amount),0) as total FROM org_finance WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '12 months' GROUP BY month,type ORDER BY MIN(created_at)", [t])).rows;
+  const months = [...new Set(data.map(d => d.month))];
+  res.json({ labels: months, income: months.map(m => parseInt(data.find(d => d.month===m && d.type==='income')?.total||0)), expense: months.map(m => parseInt(data.find(d => d.month===m && d.type==='expense')?.total||0)) });
+}));
+
+app.get('/org/charts/members', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(joined_at,'Mon YYYY') as month, COUNT(*) as cnt FROM members WHERE tenant_id=$1 AND joined_at > NOW()-INTERVAL '12 months' GROUP BY month ORDER BY MIN(joined_at)", [t])).rows;
+  let cumulative = 0;
+  const base = (await pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [t])).rows[0].count;
+  cumulative = parseInt(base) - data.reduce((a,d) => a + parseInt(d.cnt), 0);
+  res.json({ labels: data.map(d => d.month), values: data.map(d => { cumulative += parseInt(d.cnt); return cumulative; }) });
 }));
 
 // === ORG: MEMBERS (with edit/delete) ===
@@ -1279,12 +1811,47 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Services</h3>
         <a href="/church/schedule" class="btn btn-sm">Service Schedule</a>
       </div>
+      <div class="card"><h3>Members</h3>
+        <a href="/church/members" class="btn btn-sm">Church Members</a>
+        <a href="/church/members/new" class="btn btn-sm" style="margin-top:8px">Add Member</a>
+      </div>
+      <div class="card"><h3>Donations</h3>
+        <a href="/church/donations" class="btn btn-sm">Donation Tracker</a>
+      </div>
       <div class="card"><h3>Events</h3>
         <a href="/org/events" class="btn btn-sm">Events</a>
         <a href="/org/notices" class="btn btn-sm" style="margin-top:8px">Notices</a>
       </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <div class="card"><h3>Tithes Trend</h3><canvas id="tithesChart"></canvas></div>
+    <div class="card"><h3>Donation Types</h3><canvas id="donationTypesChart"></canvas></div>
+    <script>
+    (async function(){
+      try {
+        const tr = await fetch('/church/charts/tithes'); const td = await tr.json();
+        new Chart(document.getElementById('tithesChart'),{type:'line',data:{labels:td.labels,datasets:[{label:'Tithes UGX',data:td.values,borderColor:'#d97706',fill:true,backgroundColor:'rgba(217,119,6,0.1)'}]},options:{responsive:true}});
+      }catch(e){}
+      try {
+        const dr = await fetch('/church/charts/donations'); const dd = await dr.json();
+        new Chart(document.getElementById('donationTypesChart'),{type:'pie',data:{labels:dd.labels,datasets:[{data:dd.values,backgroundColor:['#4f46e5','#059669','#d97706','#dc2626','#7c3aed','#0891b2']}]},options:{responsive:true}});
+      }catch(e){}
+    })();
+    </script>
   `, req.session.user));
+}));
+
+// === CHURCH CHART DATA APIs ===
+app.get('/church/charts/tithes', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, COALESCE(SUM(amount),0) as total FROM org_finance WHERE tenant_id=$1 AND type='income' AND (description ILIKE '%tithe%' OR description ILIKE '%offering%') AND created_at > NOW()-INTERVAL '12 months' GROUP BY month ORDER BY MIN(created_at)", [t])).rows;
+  res.json({ labels: data.map(d => d.month), values: data.map(d => parseInt(d.total)) });
+}));
+
+app.get('/church/charts/donations', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query('SELECT COALESCE(type,\'General\') as dtype, COALESCE(SUM(amount),0) as total FROM donations WHERE tenant_id=$1 GROUP BY dtype ORDER BY total DESC', [t])).rows;
+  if (data.length === 0) { res.json({ labels: ['No donations yet'], values: [0] }); } else { res.json({ labels: data.map(d => d.dtype), values: data.map(d => parseInt(d.total)) }); }
 }));
 
 // === CHURCH: TITHE/OFFERING TRACKER ===
@@ -1456,6 +2023,116 @@ app.get('/church/schedule/:id/delete', requireAuth, requireNotBanned, ah(async (
   res.redirect('/church/schedule');
 }));
 
+// === CHURCH: MEMBERS ===
+app.get('/church/members', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT * FROM church_members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Church Members', `
+    <div class="card"><h3>Church Members</h3>
+      <a href="/church/members/new" class="btn btn-sm" style="margin-bottom:15px">+ Add Member</a>
+      <table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Joined</th><th>Actions</th></tr>
+      ${members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${esc(m.phone)}</td><td>${esc(m.role)}</td><td>${m.joined_at ? new Date(m.joined_at).toLocaleDateString() : ''}</td>
+        <td><a href="/church/members/${m.id}/edit" class="btn btn-sm">Edit</a> <a href="/church/members/${m.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
+      </tr>`).join('') || '<tr><td colspan="6">No church members yet</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/members/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Church Member', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Add Church Member</h3>
+      <form method="POST" action="/church/members/save">
+        <input name="name" placeholder="Full Name" required>
+        <input name="email" type="email" placeholder="Email">
+        <input name="phone" placeholder="Phone +256...">
+        <input name="address" placeholder="Address">
+        <select name="role"><option value="">Select Role</option><option>Pastor</option><option>Elder</option><option>Deacon</option><option>Choir Member</option><option>Usher</option><option>Member</option></select>
+        <button class="btn btn-green">Add Member</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/church/members/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { name, email, phone, address, role } = req.body;
+  await pool.query('INSERT INTO church_members(tenant_id,name,email,phone,address,role) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, name, email, phone, address, role]);
+  await audit(req.session.user.email, 'add_church_member', `Added church member: ${name}`);
+  res.redirect('/church/members');
+}));
+
+app.get('/church/members/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const m = (await pool.query('SELECT * FROM church_members WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!m) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Church Member', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Edit: ${esc(m.name)}</h3>
+      <form method="POST" action="/church/members/${m.id}/update">
+        <input name="name" value="${esc(m.name)}" required>
+        <input name="email" type="email" value="${esc(m.email)}">
+        <input name="phone" value="${esc(m.phone)}">
+        <input name="address" value="${esc(m.address)}">
+        <select name="role"><option value="">Select Role</option><option ${m.role==='Pastor'?'selected':''}>Pastor</option><option ${m.role==='Elder'?'selected':''}>Elder</option><option ${m.role==='Deacon'?'selected':''}>Deacon</option><option ${m.role==='Choir Member'?'selected':''}>Choir Member</option><option ${m.role==='Usher'?'selected':''}>Usher</option><option ${m.role==='Member'?'selected':''}>Member</option></select>
+        <button class="btn">Update Member</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/church/members/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { name, email, phone, address, role } = req.body;
+  await pool.query('UPDATE church_members SET name=$1,email=$2,phone=$3,address=$4,role=$5 WHERE id=$6 AND tenant_id=$7', [name, email, phone, address, role, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'edit_church_member', `Updated church member: ${name}`);
+  res.redirect('/church/members');
+}));
+
+app.get('/church/members/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM church_members WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/church/members');
+}));
+
+// === CHURCH: DONATIONS ===
+app.get('/church/donations', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const donations = (await pool.query('SELECT * FROM donations WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const total = donations.reduce((a, d) => a + parseInt(d.amount), 0);
+  res.send(renderPage('Donations', `
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${total.toLocaleString()}</div><div>Total Donations</div></div></div>
+    <div class="card"><h3>Record Donation</h3>
+      <form method="POST" action="/church/donations/save">
+        <div class="grid" style="grid-template-columns:2fr 1fr 1fr">
+          <input name="donor_name" placeholder="Donor Name" required>
+          <input name="amount" type="number" placeholder="Amount UGX" required>
+          <select name="type"><option>Tithe</option><option>Offering</option><option>Building Fund</option><option>Charity</option><option>Project</option><option>Other</option></select>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <select name="method"><option>Cash</option><option>Mobile Money</option><option>Bank Transfer</option><option>Cheque</option></select>
+          <input name="reference" placeholder="Reference/Receipt #">
+        </div>
+        <button class="btn btn-gold">Record Donation</button>
+      </form>
+    </div>
+    <div class="card"><h3>Donation History</h3>
+      <table><tr><th>Donor</th><th>Amount</th><th>Type</th><th>Method</th><th>Reference</th><th>Date</th><th>Action</th></tr>
+      ${donations.map(d => `<tr><td>${esc(d.donor_name)}</td><td>UGX ${parseInt(d.amount).toLocaleString()}</td><td><span class="tag">${esc(d.type)}</span></td><td>${esc(d.method)}</td><td>${esc(d.reference)}</td><td>${new Date(d.created_at).toLocaleDateString()}</td>
+        <td><a href="/church/donations/${d.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
+      </tr>`).join('') || '<tr><td colspan="7">No donations yet</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/church/donations/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { donor_name, amount, type, method, reference } = req.body;
+  await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,reference) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, donor_name, amount, type, method, reference]);
+  await audit(req.session.user.email, 'add_donation', `Donation UGX ${amount} from ${donor_name}`);
+  res.redirect('/church/donations');
+}));
+
+app.get('/church/donations/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM donations WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/church/donations');
+}));
+
 // ============================================================
 // BUSINESS PORTAL (enhanced)
 // ============================================================
@@ -1488,7 +2165,35 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div class="card"><h3>Customers</h3><a href="/business/customers" class="btn btn-sm">Customer Directory</a></div>
       <div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <div class="card"><h3>Sales Trend</h3><canvas id="salesChart"></canvas></div>
+    <div class="card"><h3>Expenses Breakdown</h3><canvas id="expensesChart"></canvas></div>
+    <script>
+    (async function(){
+      try {
+        const sr = await fetch('/business/charts/sales'); const sd = await sr.json();
+        new Chart(document.getElementById('salesChart'),{type:'line',data:{labels:sd.labels,datasets:[{label:'Sales UGX',data:sd.values,borderColor:'#0891b2',fill:true,backgroundColor:'rgba(8,145,178,0.1)'}]},options:{responsive:true}});
+      }catch(e){}
+      try {
+        const er = await fetch('/business/charts/expenses'); const ed = await er.json();
+        new Chart(document.getElementById('expensesChart'),{type:'doughnut',data:{labels:ed.labels,datasets:[{data:ed.values,backgroundColor:['#4f46e5','#059669','#d97706','#dc2626','#7c3aed','#0891b2','#ec4899']}]},options:{responsive:true}});
+      }catch(e){}
+    })();
+    </script>
   `, req.session.user));
+}));
+
+// === BUSINESS CHART DATA APIs ===
+app.get('/business/charts/sales', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, COALESCE(SUM(total),0) as total FROM sales WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '12 months' GROUP BY month ORDER BY MIN(created_at)", [t])).rows;
+  res.json({ labels: data.map(d => d.month), values: data.map(d => parseInt(d.total)) });
+}));
+
+app.get('/business/charts/expenses', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query('SELECT COALESCE(category,\'Other\') as cat, COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 GROUP BY cat ORDER BY total DESC', [t])).rows;
+  res.json({ labels: data.map(d => d.cat), values: data.map(d => parseInt(d.total)) });
 }));
 
 // === BUSINESS: POS ===
@@ -1910,7 +2615,24 @@ app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res)
       <div class="card"><h3>Notes</h3><a href="/individual/notes" class="btn btn-sm">My Notes</a></div>
       <div class="card"><h3>Documents</h3><a href="/individual/docs" class="btn btn-sm">My Documents</a></div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <div class="card"><h3>Budget: Planned vs Actual</h3><canvas id="budgetChart"></canvas></div>
+    <script>
+    (async function(){
+      try {
+        const br = await fetch('/individual/charts/budget'); const bd = await br.json();
+        new Chart(document.getElementById('budgetChart'),{type:'bar',data:{labels:bd.labels,datasets:[{label:'Planned',data:bd.planned,backgroundColor:'rgba(79,70,229,0.6)'},{label:'Actual',data:bd.actual,backgroundColor:'rgba(220,38,38,0.6)'}]},options:{responsive:true}});
+      }catch(e){}
+    })();
+    </script>
   `, req.session.user));
+}));
+
+// === INDIVIDUAL CHART DATA API ===
+app.get('/individual/charts/budget', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query('SELECT category, planned, actual FROM budget_items WHERE tenant_id=$1 ORDER BY category', [t])).rows;
+  res.json({ labels: data.map(d => d.category), planned: data.map(d => parseInt(d.planned)), actual: data.map(d => parseInt(d.actual)) });
 }));
 
 // === INDIVIDUAL: BUDGET TRACKER ===
@@ -2091,6 +2813,128 @@ app.get('/individual/docs', requireAuth, requireNotBanned, (req, res) => {
   `, req.session.user));
 });
 
+// === PARENT PORTAL ===
+app.get('/parent/login', (req, res) => {
+  if (req.session.parent) return res.redirect('/parent/dashboard');
+  res.send(renderPage('Parent Portal', `
+    <div class="card" style="max-width:450px;margin:40px auto">
+      <h2 style="text-align:center;margin-bottom:20px">Parent Portal</h2>
+      <p class="muted" style="text-align:center;margin-bottom:15px">Enter your email to view your child's information.</p>
+      <form method="POST" action="/parent/login">
+        <input name="email" type="email" placeholder="Your Email Address" required>
+        <input name="phone" placeholder="Phone (optional)">
+        <button class="btn" style="width:100%">Login</button>
+      </form>
+    </div>
+  `, null));
+});
+
+app.post('/parent/login', ah(async (req, res) => {
+  const { email, phone } = req.body;
+  // Find students linked via parent_links or guardian info
+  const linkedStudents = [];
+  try {
+    const viaLinks = (await pool.query('SELECT pl.*, s.name as student_name, s.class, s.tenant_id FROM parent_links pl JOIN students s ON pl.student_id=s.id WHERE pl.parent_email=$1', [email])).rows;
+    for (const l of viaLinks) {
+      linkedStudents.push({ id: l.student_id, name: l.student_name, class: l.class, tenant_id: l.tenant_id });
+    }
+  } catch (e) { /* parent_links table might not have data yet */ }
+  // Also check student parent_email field
+  try {
+    const viaStudent = (await pool.query('SELECT id, name, class, tenant_id FROM students WHERE parent_email=$1', [email])).rows;
+    for (const s of viaStudent) {
+      if (!linkedStudents.find(ls => ls.id === s.id)) linkedStudents.push(s);
+    }
+  } catch (e) {}
+  // Also check guardian_name matching if phone provided
+  if (phone) {
+    try {
+      const viaGuardian = (await pool.query('SELECT id, name, class, tenant_id FROM students WHERE guardian_phone=$1', [phone])).rows;
+      for (const s of viaGuardian) {
+        if (!linkedStudents.find(ls => ls.id === s.id)) linkedStudents.push(s);
+      }
+    } catch (e) {}
+  }
+
+  if (linkedStudents.length === 0) {
+    return res.send(renderPage('Parent Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">No students found linked to this email/phone. Please contact the school.</div><a href="/parent/login" class="btn">Try Again</a></div>', null));
+  }
+
+  // Store parent session info
+  req.session.parent = { email, phone, tenant_id: linkedStudents[0].tenant_id };
+  req.session.parentStudents = linkedStudents;
+  res.redirect('/parent/dashboard');
+}));
+
+app.get('/parent/dashboard', ah(async (req, res) => {
+  if (!req.session.parent) return res.redirect('/parent/login');
+  const students = req.session.parentStudents || [];
+  res.send(renderPage('Parent Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
+      <h1>Parent Portal</h1><p>View your children's information</p>
+    </div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${students.length}</div><div>Children</div></div></div>
+    <div class="grid">
+      ${students.map(s => `
+        <div class="card">
+          <h3>${esc(s.name)}</h3>
+          <p class="muted">Class: ${esc(s.class)}</p>
+          <a href="/parent/child/${s.id}" class="btn btn-sm" style="margin-top:8px">View Details</a>
+        </div>
+      `).join('') || '<p>No children found</p>'}
+    </div>
+    <div class="card"><a href="/parent/logout" class="btn btn-red btn-sm">Logout</a></div>
+  `, null));
+}));
+
+app.get('/parent/child/:id', ah(async (req, res) => {
+  if (!req.session.parent) return res.redirect('/parent/login');
+  const t = req.session.parent.tenant_id;
+  const student = (await pool.query('SELECT * FROM students WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!student) return res.status(404).send('Student not found');
+  const [fees, marks, attendance] = await Promise.all([
+    pool.query('SELECT * FROM fees WHERE student_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [student.id, t]),
+    pool.query('SELECT m.*, e.name as exam_name FROM marks m JOIN exams e ON m.exam_id=e.id WHERE m.student_id=$1 ORDER BY e.created_at DESC', [student.id]),
+    pool.query('SELECT * FROM attendance WHERE student_id=$1 AND tenant_id=$2 ORDER BY date DESC LIMIT 30', [student.id, t])
+  ]);
+  const totalFees = fees.rows.reduce((a, f) => a + parseInt(f.amount), 0);
+  const totalPaid = fees.rows.reduce((a, f) => a + parseInt(f.paid), 0);
+  const presentDays = attendance.rows.filter(a => a.status === 'present').length;
+  res.send(renderPage(`${student.name}`, `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:30px">
+      <h1>${esc(student.name)}</h1><p>Adm# ${esc(student.admission_no)} | Class: ${esc(student.class)}</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">UGX ${totalFees.toLocaleString()}</div><div>Total Fees</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalPaid.toLocaleString()}</div><div>Paid</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${totalFees-totalPaid>0?'#dc2626':'#059669'}">UGX ${(totalFees-totalPaid).toLocaleString()}</div><div>Balance</div></div>
+      <div class="stat-card"><div class="stat-num">${presentDays}</div><div>Days Present</div></div>
+    </div>
+    <div class="card"><h3>Fee Records</h3>
+      <table><tr><th>Term</th><th>Year</th><th>Amount</th><th>Paid</th><th>Balance</th></tr>
+      ${fees.rows.map(f => `<tr><td>${esc(f.term)}</td><td>${f.year||''}</td><td>UGX ${parseInt(f.amount).toLocaleString()}</td><td style="color:#059669">UGX ${parseInt(f.paid).toLocaleString()}</td><td style="color:${f.amount-f.paid>0?'#dc2626':'#059669'}">UGX ${(f.amount-f.paid).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan="5">No fee records</td></tr>'}
+      </table>
+    </div>
+    <div class="card"><h3>Exam Results</h3>
+      <table><tr><th>Exam</th><th>Subject</th><th>Score</th><th>Grade</th></tr>
+      ${marks.rows.map(m => `<tr><td>${esc(m.exam_name)}</td><td>${esc(m.subject)}</td><td>${m.score}</td><td><span class="tag">${esc(m.grade)}</span></td></tr>`).join('') || '<tr><td colspan="4">No results yet</td></tr>'}
+      </table>
+    </div>
+    <div class="card"><h3>Recent Attendance</h3>
+      <table><tr><th>Date</th><th>Status</th></tr>
+      ${attendance.rows.map(a => `<tr><td>${new Date(a.date).toLocaleDateString()}</td><td style="color:${a.status==='present'?'#059669':'#dc2626'}">${a.status}</td></tr>`).join('') || '<tr><td colspan="2">No attendance records</td></tr>'}
+      </table>
+    </div>
+    <div style="margin-top:20px"><a href="/parent/dashboard" class="btn btn-sm">Back to Dashboard</a></div>
+  `, null));
+}));
+
+app.get('/parent/logout', (req, res) => {
+  delete req.session.parent;
+  delete req.session.parentStudents;
+  res.redirect('/parent/login');
+});
+
 // ============================================================
 // PLATFORM-WIDE FEATURES
 // ============================================================
@@ -2120,11 +2964,26 @@ app.get('/settings/password', requireAuth, (req, res) => {
 app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
   if (new_password !== confirm_password) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Passwords do not match</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
-     const u = (await pool.query('SELECT password, password_hash FROM users WHERE id=$1', [req.session.user.id])).rows[0];
-   const storedHash = u.password_hash || u.password;
-   if (!storedHash || !(await bcrypt.compare(current_password, storedHash))) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
-   const hash = await bcrypt.hash(new_password, 10);
-   await pool.query('UPDATE users SET password=$1, password_hash=$1 WHERE id=$2', [hash, req.session.user.id]);
+  // Try getting both password columns, fall back to just password
+  let u;
+  try {
+    u = (await pool.query('SELECT password, password_hash FROM users WHERE id=$1', [req.session.user.id])).rows[0];
+  } catch (e) {
+    if (e.message.includes('password_hash')) {
+      u = (await pool.query('SELECT password FROM users WHERE id=$1', [req.session.user.id])).rows[0];
+    } else throw e;
+  }
+  const storedHash = u.password_hash || u.password;
+  if (!storedHash || !(await bcrypt.compare(current_password, storedHash))) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
+  const hash = await bcrypt.hash(new_password, 10);
+  // Try updating both columns, fall back to just password
+  try {
+    await pool.query('UPDATE users SET password=$1, password_hash=$1 WHERE id=$2', [hash, req.session.user.id]);
+  } catch (e) {
+    if (e.message.includes('password_hash')) {
+      await pool.query('UPDATE users SET password=$1 WHERE id=$2', [hash, req.session.user.id]);
+    } else throw e;
+  }
   await audit(req.session.user.email, 'password_change', 'Password changed');
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Password changed successfully!</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
 }));
@@ -2147,7 +3006,8 @@ app.get('/settings/profile', requireAuth, ah(async (req, res) => {
     <div class="card" style="max-width:600px;margin:20px auto">
       <h3>Account Settings</h3>
       <a href="/settings/password" class="btn btn-red btn-sm">Change Password</a>
-      <a href="/settings/backup" class="btn btn-sm" style="margin-top:8px">Export All Data</a>
+      <a href="/settings/backup" class="btn btn-sm" style="margin-top:8px">Data Backup</a>
+      <a href="/settings/branding" class="btn btn-sm" style="margin-top:8px">Branding</a>
     </div>
   `, req.session.user));
 }));
@@ -2162,6 +3022,42 @@ app.post('/settings/profile/save', requireAuth, ah(async (req, res) => {
 
 // === DATA BACKUP/EXPORT ===
 app.get('/settings/backup', requireAuth, ah(async (req, res) => {
+  res.send(renderPage('Data Backup', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h3>Data Backup & Restore</h3>
+      <p class="muted" style="margin-bottom:15px">Export all your data as JSON for backup, or import from a previous backup.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+        <a href="/settings/backup/download" class="btn btn-green">Download Full Backup (JSON)</a>
+        <a href="/settings/backup/csv" class="btn btn-sm">Export CSV</a>
+      </div>
+      <hr style="margin:20px 0">
+      <h3>Import Data</h3>
+      <p class="muted" style="margin-bottom:15px">Upload a JSON backup file to restore data. <strong>Warning:</strong> This may overwrite existing data.</p>
+      <form method="POST" action="/settings/backup/upload" enctype="multipart/form-data">
+        <input name="backup_file" type="file" accept=".json" required>
+        <button class="btn btn-red" onclick="return confirm('Importing data may overwrite existing records. Are you sure?')">Upload & Import</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/settings/backup/download', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const tables = ['students', 'fees', 'exams', 'marks', 'attendance', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'sale_items', 'invoices', 'expenses', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'service_schedule', 'customers', 'budget_items', 'goals', 'personal_notes', 'staff', 'timetable', 'grading_scales', 'fee_structures', 'church_members', 'donations', 'parent_links'];
+  const backup = { _meta: { version: '1.0', exported: new Date().toISOString(), tenant: tenant.name, tenant_id: t } };
+  for (const table of tables) {
+    try {
+      const data = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t])).rows;
+      if (data.length > 0) backup[table] = data;
+    } catch (e) { /* table might not exist */ }
+  }
+  res.header('Content-Type', 'application/json');
+  res.attachment(`backup-${tenant.name.replace(/\s/g, '-')}-${new Date().toISOString().split('T')[0]}.json`);
+  res.send(JSON.stringify(backup, null, 2));
+}));
+
+app.get('/settings/backup/csv', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
   const tables = ['students', 'fees', 'exams', 'marks', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'invoices', 'expenses', 'attendance', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'customers', 'budget_items', 'goals', 'personal_notes'];
@@ -2182,6 +3078,75 @@ app.get('/settings/backup', requireAuth, ah(async (req, res) => {
   res.header('Content-Type', 'text/csv');
   res.attachment(`backup-${tenant.name.replace(/\s/g, '-')}-${new Date().toISOString().split('T')[0]}.csv`);
   res.send(backup);
+}));
+
+app.post('/settings/backup/upload', requireAuth, express.raw({ type: 'application/json', limit: '50mb' }), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  let backup;
+  try {
+    // Handle both multer-style file upload and raw body
+    if (req.body && typeof req.body === 'string') {
+      backup = JSON.parse(req.body);
+    } else if (Buffer.isBuffer(req.body)) {
+      backup = JSON.parse(req.body.toString());
+    } else {
+      return res.send(renderPage('Import Error', '<div class="card"><div class="alert alert-error">Invalid backup file format.</div><a href="/settings/backup" class="btn">Back</a></div>', req.session.user));
+    }
+  } catch (e) {
+    return res.send(renderPage('Import Error', '<div class="card"><div class="alert alert-error">Could not parse JSON file. Please ensure it is a valid backup.</div><a href="/settings/backup" class="btn">Back</a></div>', req.session.user));
+  }
+
+  if (!backup._meta || !backup._meta.version) {
+    return res.send(renderPage('Import Error', '<div class="card"><div class="alert alert-error">Invalid backup file. Missing metadata.</div><a href="/settings/backup" class="btn">Back</a></div>', req.session.user));
+  }
+
+  const allowedTables = ['students', 'fees', 'exams', 'marks', 'attendance', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'invoices', 'expenses', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'service_schedule', 'customers', 'budget_items', 'goals', 'personal_notes', 'staff', 'timetable', 'grading_scales', 'fee_structures', 'church_members', 'donations', 'parent_links'];
+  let imported = 0;
+  for (const table of allowedTables) {
+    if (backup[table] && Array.isArray(backup[table])) {
+      for (const row of backup[table]) {
+        try {
+          const cols = Object.keys(row).filter(k => k !== 'id');
+          const vals = cols.map(k => row[k]);
+          const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
+          // Ensure tenant_id is set to current tenant
+          const tenantIdx = cols.indexOf('tenant_id');
+          if (tenantIdx >= 0) vals[tenantIdx] = t;
+          await pool.query(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${placeholders}) ON CONFLICT DO NOTHING`, vals);
+          imported++;
+        } catch (e) { /* skip rows with constraint violations */ }
+      }
+    }
+  }
+  await audit(req.session.user.email, 'data_import', `Imported ${imported} records from backup`);
+  res.send(renderPage('Import Complete', `<div class="card"><div class="alert alert-success">Successfully imported ${imported} records.</div><a href="/settings/backup" class="btn">Back to Backup</a></div>`, req.session.user));
+}));
+
+// === TENANT BRANDING ===
+app.get('/settings/branding', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  res.send(renderPage('Branding Settings', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Organization Branding</h3>
+      <form method="POST" action="/settings/branding/save">
+        <input name="logo_url" value="${esc(tenant.logo_url || '')}" placeholder="Logo URL (https://...)">
+        <p class="muted">Enter the URL of your organization's logo image.</p>
+        <input name="favicon_url" value="${esc(tenant.favicon_url || '')}" placeholder="Favicon URL (https://...)">
+        <p class="muted">Enter the URL of your favicon (16x16 or 32x32 .ico/.png).</p>
+        <textarea name="custom_css" rows="8" placeholder="Custom CSS (e.g. .nav { background: red; })">${esc(tenant.custom_css || '')}</textarea>
+        <p class="muted">Add custom CSS to style your portal pages.</p>
+        <button class="btn btn-green">Save Branding</button>
+      </form>
+      ${tenant.logo_url ? `<div style="margin-top:20px;text-align:center"><h4>Current Logo</h4><img src="${esc(tenant.logo_url)}" alt="Logo" style="max-height:100px;margin-top:10px"></div>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/branding/save', requireAuth, ah(async (req, res) => {
+  const { logo_url, favicon_url, custom_css } = req.body;
+  await pool.query('UPDATE tenants SET logo_url=$1,favicon_url=$2,custom_css=$3 WHERE id=$4', [logo_url, favicon_url, custom_css, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'branding_update', 'Updated organization branding');
+  res.redirect('/settings/branding');
 }));
 
 // === SEARCH ===
@@ -2431,18 +3396,7 @@ app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res)
   await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, `Fundraising fee - ${req.session.user.tenant_name}`]);
   res.redirect('/fundraising');
 }));
-app.get('/api/stats', ah(async (req, res) => {
-  const [schools, students, donations] = await Promise.all([
-    pool.query("SELECT COUNT(*) FROM tenants WHERE type='school'"),
-    pool.query('SELECT COUNT(*) FROM students'),
-    pool.query('SELECT COALESCE(SUM(amount),0) FROM developer_revenue')
-  ]);
-  res.json({
-    schools: parseInt(schools.rows[0].count),
-    students: parseInt(students.rows[0].count),
-    donations: parseInt(donations.rows[0].coalesce)
-  });
-}));
+
 // === TERMS ===
 app.get('/terms', (req, res) => {
   res.send(renderPage('Terms of Service', `
