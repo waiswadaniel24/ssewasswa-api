@@ -158,7 +158,7 @@ const migrations = [
       const devPass = 'Daniel@2025';
       const devHash = await bcrypt.hash(devPass, 10);
       const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
-          await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
+          await pool.query(`INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,password_hash=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
       // Verify dev user was created correctly
       const check = await pool.query('SELECT id,email,role,approved,tenant_id FROM users WHERE email=$1', [devEmail]);
       console.log('DB Ready. Dev user:', check.rows[0]?.email, 'role:', check.rows[0]?.role, 'approved:', check.rows[0]?.approved, 'tenant_id:', check.rows[0]?.tenant_id);
@@ -265,8 +265,9 @@ app.get('/login', (req, res) => {
 app.post('/login', ah(async (req, res) => {
   const { email, password } = req.body;
    const u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
-  if (!u || u.banned || !u.approved || !u.password) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
-  if (!(await bcrypt.compare(password, u.password))) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
+   const storedHash = u?.password_hash || u?.password;
+  if (!u || u.banned || !u.approved || !storedHash) return ...
+  if (!(await bcrypt.compare(password, storedHash))) return ...
   req.session.user = u;
   await audit(email, 'login', 'User logged in');
   res.redirect('/dashboard');
@@ -300,7 +301,7 @@ app.post('/register', ah(async (req, res) => {
   const hash = await bcrypt.hash(password, 10);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
   const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,true) RETURNING id', [org_name, type, email, phone, subdomain]);
-  await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
+  await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
   await audit(email, 'register', `New ${type} account: ${org_name}`);
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Account created! You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
 }));
@@ -2090,10 +2091,10 @@ app.get('/settings/password', requireAuth, (req, res) => {
 app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
   if (new_password !== confirm_password) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Passwords do not match</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
-  const u = (await pool.query('SELECT password FROM users WHERE id=$1', [req.session.user.id])).rows[0];
-  if (!(await bcrypt.compare(current_password, u.password))) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
-  const hash = await bcrypt.hash(new_password, 10);
-  await pool.query('UPDATE users SET password=$1 WHERE id=$2', [hash, req.session.user.id]);
+   const u = (await pool.query('SELECT password, password_hash FROM users WHERE id=$1', ...)).rows[0];
+  const storedHash = u.password_hash || u.password;
+  if (!storedHash || !(await bcrypt.compare(current_password, storedHash))) return ...
+  await pool.query('UPDATE users SET password=$1, password_hash=$1 WHERE id=$2', [hash, ...]);
   await audit(req.session.user.email, 'password_change', 'Password changed');
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Password changed successfully!</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
 }));
