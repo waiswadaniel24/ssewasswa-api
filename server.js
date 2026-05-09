@@ -54,15 +54,14 @@ const requireTenantAccess = (req, res, next) => {
 const requireSuperAdmin = (req, res, next) => req.session.user?.role === 'super_admin' ? next() : res.status(403).send('Super admin only');
 const audit = (email, action, details) => {
   let detailsStr = '';
-  if (details != null) {
-    detailsStr = typeof details === 'object' ? JSON.stringify(details) : String(details);
+  if (details!= null) {
+    detailsStr = typeof details === 'object'? JSON.stringify(details) : String(details);
   }
   return pool.query(
-    'INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', 
+    'INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)',
     [email, action, detailsStr]
   ).catch(err => console.warn('Audit log failed:', err.message));
 };
-
 // === MIGRATIONS ===
 const migrations = [
   `CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, email TEXT, phone TEXT, subdomain TEXT UNIQUE, verified BOOLEAN DEFAULT false, approved BOOLEAN DEFAULT false, banned BOOLEAN DEFAULT false, ban_reason TEXT, has_fundraising BOOLEAN DEFAULT false, wallet_balance INTEGER DEFAULT 0, description TEXT, address TEXT, logo_url TEXT, created_at TIMESTAMP DEFAULT NOW())`,
@@ -274,6 +273,8 @@ app.get('/login', (req, res) => {
 app.post('/login', ah(async (req, res) => {
   const { email, password } = req.body;
   const u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
+if (!u || u.banned ||!u.approved ||!u.password) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
+if (!(await bcrypt.compare(password, u.password))) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
 
   // Only check password column now
   if (!u || u.banned ||!u.approved ||!u.password) {
