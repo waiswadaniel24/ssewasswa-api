@@ -2265,13 +2265,18 @@ app.get('/entertainment', requireAuth, ah(async (req, res) => {
 // === DEV MASTER CONTROL ===
 app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const flash = req.session.flash; delete req.session.flash;
-  const [tCount, uCount, rev, wal, tenants, logs, chartData] = await Promise.all([
+  let logs = { rows: [] };
+  try {
+    logs = await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 20');
+  } catch (e) {
+    console.warn('Audit logs query failed:', e.message);
+  }
+  const [tCount, uCount, rev, wal, tenants, chartData] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM tenants'),
     pool.query('SELECT COUNT(*) FROM users'),
     pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`),
     pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1'),
     pool.query('SELECT id,name,type,COALESCE(wallet_balance,0) as wallet_balance,verified,subdomain,approved,banned,ban_reason FROM tenants ORDER BY id DESC LIMIT 50'),
-    pool.query('SELECT user_email,action,details,created_at FROM audit_logs ORDER BY id DESC LIMIT 20'),
     pool.query(`SELECT DATE(created_at) as day, SUM(amount) as total FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY day ASC`)
   ]);
   const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
@@ -2330,7 +2335,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     </div>
     <div class="card"><h3>Recent Audit Logs</h3>
       <table><tr><th>User</th><th>Action</th><th>Details</th><th>Time</th></tr>
-      ${logs.rows.map(l => `<tr><td>${esc(l.user_email)}</td><td>${esc(l.action)}</td><td>${esc(l.details)}</td><td>${new Date(l.created_at).toLocaleString()}</td></tr>`).join('')}
+      ${logs.rows.map(l => `<tr><td>${esc(l.user_email || l.email || '')}</td><td>${esc(l.action || '')}</td><td>${esc(l.details || '')}</td><td>${l.created_at ? new Date(l.created_at).toLocaleString() : ''}</td></tr>`).join('')}
       </table>
     </div>
     <script>
@@ -2464,7 +2469,7 @@ app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card">
 // === ERROR HANDLER ===
 app.use((err, req, res, next) => {
   console.error('Server Error:', err);
-  const msg = process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message;
+  const msg = err.message || 'Something went wrong';
   res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, req.session.user));
 });
 
