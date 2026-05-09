@@ -239,7 +239,10 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 <div class="container">${content}</div>
 </body></html>`;
 };
-
+app.get('/', (req, res) => {
+  if (req.session.user) return res.redirect('/dashboard');
+  res.redirect('/login');
+});
 // === AUTH ===
 app.get('/', (req, res) => {
   if (req.session.user) return res.redirect('/dashboard');
@@ -320,16 +323,21 @@ app.post('/register', ah(async (req, res) => {
   const hash = await bcrypt.hash(password, 10);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
   const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,true) RETURNING id', [org_name, type, email, phone, subdomain]);
-  await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
-  await audit(email, 'register', `New ${type} account: ${org_name}`);
+
+  // REMOVED password_hash column
+  await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
+
+  await audit(email, 'register', { org: org_name, type }); // Object now, will be JSON string
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Account created! You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
 }));
-
 app.get('/logout', (req, res) => {
   if (req.session.user) audit(req.session.user.email, 'logout', 'User logged out').catch(() => {});
   req.session.destroy(() => res.redirect('/'));
 });
-
+app.get('/logout', (req, res) => {
+  if (req.session.user) audit(req.session.user.email, 'logout', { ip: req.ip }).catch(() => {});
+  req.session.destroy(() => res.redirect('/login')); // Changed from '/'
+});
 // === DASHBOARD ROUTER ===
 app.get('/dashboard', requireAuth, (req, res) => {
   const u = req.session.user;
