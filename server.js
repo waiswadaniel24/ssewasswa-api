@@ -35,7 +35,7 @@ app.use(session({
 }));
 
 // === RATE LIMIT ===
-app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }));
+app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50 }));
 app.use('/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5 }));
 
 // === UTILS ===
@@ -89,30 +89,75 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS budget_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT NOT NULL, planned INTEGER DEFAULT 0, actual INTEGER DEFAULT 0, month TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS goals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, target INTEGER DEFAULT 0, current INTEGER DEFAULT 0, deadline DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS personal_notes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, created_at TIMESTAMP DEFAULT NOW())`,
-  // Add new columns to existing tables if they don't exist
+   // === SAFE COLUMN MIGRATIONS (handles tables from older schema versions) ===
+  // tenants: all columns except id, name, type
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
-`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subdomain TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT false`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT false`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT false`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ban_reason TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS has_fundraising BOOLEAN DEFAULT false`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS wallet_balance INTEGER DEFAULT 0`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS favicon_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_css TEXT`,
+  // users: all columns except id, tenant_id, email, password
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT false`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT false`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS dark_mode BOOLEAN DEFAULT false`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
+  // students
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS admission_no TEXT`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS class TEXT`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS stream TEXT`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS guardian_name TEXT`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS guardian_phone TEXT`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_email TEXT`,
+  // fees
+  `ALTER TABLE fees ADD COLUMN IF NOT EXISTS paid INTEGER DEFAULT 0`,
+  `ALTER TABLE fees ADD COLUMN IF NOT EXISTS term TEXT`,
+  `ALTER TABLE fees ADD COLUMN IF NOT EXISTS year INTEGER`,
+  `ALTER TABLE fees ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
+  // projects & events
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS description TEXT`,
-  `ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT`
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT`,
+  // unique index for subdomain (non-null only)
+  `CREATE UNIQUE INDEX IF NOT EXISTS tenants_subdomain_key ON tenants(subdomain) WHERE subdomain IS NOT NULL`,
+  // v9.0 new tables
+  `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, key_hash TEXT UNIQUE, name TEXT, scopes TEXT[], last_used TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS webhook_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event TEXT, payload JSONB, status INTEGER, response TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
 ];
-
 (async () => {
-  try {
-    for (const q of migrations) await pool.query(q);
-    const devEmail = 'waiswadaniel24@gmail.com';
-    const devPass = 'Daniel@2025';
-    const devHash = await bcrypt.hash(devPass, 10);
-    const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
-    await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin'`, [devTenant.rows[0].id, devEmail, devHash]);
-    console.log('DB Ready. Dev login:', devEmail, devPass);
-  } catch (e) { console.error('DB Init Error:', e); }
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      // Run each migration individually so one failure doesn't stop the rest
+      for (const q of migrations) {
+        try { await pool.query(q); } catch (e) { if (!e.message.includes('already exists')) console.warn('Migration warning:', e.message); }
+      }
+      const devEmail = 'waiswadaniel24@gmail.com';
+      const devPass = 'Daniel@2025';
+      const devHash = await bcrypt.hash(devPass, 10);
+      const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
+      await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin'`, [devTenant.rows[0].id, devEmail, devHash]);
+      console.log('DB Ready. Dev login:', devEmail, devPass);
+      break;
+    } catch (e) {
+      console.error(`DB Init Error (attempt ${attempt}/3):`, e.message);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
+      else console.error('DB Init failed after 3 attempts.');
+    }
+  }
 })();
-
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user) => {
   const dark = user?.dark_mode;
