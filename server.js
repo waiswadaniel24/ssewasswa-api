@@ -266,8 +266,8 @@ app.post('/login', ah(async (req, res) => {
   const { email, password } = req.body;
    const u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
    const storedHash = u?.password_hash || u?.password;
-  if (!u || u.banned || !u.approved || !storedHash) return ...
-  if (!(await bcrypt.compare(password, storedHash))) return ...
+  if (!u || u.banned || !u.approved || !storedHash) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
+  if (!(await bcrypt.compare(password, storedHash))) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
   req.session.user = u;
   await audit(email, 'login', 'User logged in');
   res.redirect('/dashboard');
