@@ -509,7 +509,6 @@ app.get('/org/reports/export', requireAuth, requireNotBanned, ah(async (req, res
   res.attachment(filename);
   res.send(csv);
 }));
-
 // === BUSINESS: POS ===
 app.get('/business/pos', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
@@ -895,7 +894,6 @@ app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, r
   await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amount]);
   res.redirect('/dev/master');
 }));
-
 // === FUNDRAISING UPGRADE ===
 app.get('/upgrade/fundraising', requireAuth, (req, res) => {
   res.send(renderPage('Fundraising Module', `
