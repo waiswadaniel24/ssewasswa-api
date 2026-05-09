@@ -65,7 +65,7 @@ const audit = (email, action, details) => {
 // === MIGRATIONS ===
 const migrations = [
   `CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, email TEXT, phone TEXT, subdomain TEXT UNIQUE, verified BOOLEAN DEFAULT false, approved BOOLEAN DEFAULT false, banned BOOLEAN DEFAULT false, ban_reason TEXT, has_fundraising BOOLEAN DEFAULT false, wallet_balance INTEGER DEFAULT 0, description TEXT, address TEXT, logo_url TEXT, created_at TIMESTAMP DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT DEFAULT 'user', approved BOOLEAN DEFAULT false, banned BOOLEAN DEFAULT false, ban_reason TEXT, dark_mode BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, email TEXT UNIQUE NOT NULL, password TEXT, password_hash TEXT, role TEXT DEFAULT 'user', approved BOOLEAN DEFAULT false, banned BOOLEAN DEFAULT false, ban_reason TEXT, dark_mode BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, admission_no TEXT, name TEXT NOT NULL, class TEXT, stream TEXT, guardian_name TEXT, guardian_phone TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, amount INTEGER NOT NULL, paid INTEGER DEFAULT 0, term TEXT, year INTEGER, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER, date DATE NOT NULL, status TEXT, UNIQUE(student_id, date))`,
@@ -87,7 +87,6 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS entertainment_videos (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS entertainment_music (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, artist TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS entertainment_games (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, player_name TEXT, score INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`,
-  // NEW TABLES FOR ENHANCED FEATURES
   `CREATE TABLE IF NOT EXISTS meeting_minutes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, meeting_date DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS notice_board (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, priority TEXT DEFAULT 'normal', created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS sermons (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, preacher TEXT, sermon_date DATE, scripture TEXT, notes TEXT, created_at TIMESTAMP DEFAULT NOW())`,
@@ -96,11 +95,10 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, phone TEXT, address TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS budget_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT NOT NULL, planned INTEGER DEFAULT 0, actual INTEGER DEFAULT 0, month TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS goals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, target INTEGER DEFAULT 0, current INTEGER DEFAULT 0, deadline DATE, created_at TIMESTAMP DEFAULT NOW())`,
-   `CREATE TABLE IF NOT EXISTS webhook_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event TEXT, payload JSONB, status INTEGER, response TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `DELETE FROM audit_logs WHERE user_email IS NULL OR user_email = 'login'`
-];
-   // === SAFE COLUMN MIGRATIONS (handles tables from older schema versions) ===
-  // tenants: all columns except id, name, type
+  `CREATE TABLE IF NOT EXISTS personal_notes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, key_hash TEXT UNIQUE, name TEXT, scopes TEXT[], last_used TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS webhook_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event TEXT, payload JSONB, status INTEGER, response TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === SAFE COLUMN MIGRATIONS ===
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subdomain TEXT`,
@@ -116,17 +114,18 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS favicon_url TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_css TEXT`,
-   // users: add ALL columns that might be missing from old schema
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT false`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT false`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS dark_mode BOOLEAN DEFAULT false`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
-  // students
+  `UPDATE users SET password_hash = password WHERE password IS NOT NULL AND (password_hash IS NULL OR password_hash = '')`,
+  `UPDATE users SET password = password_hash WHERE password_hash IS NOT NULL AND (password IS NULL OR password = '')`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS admission_no TEXT`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS class TEXT`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS stream TEXT`,
@@ -135,32 +134,27 @@ const migrations = [
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT`,
   `ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_email TEXT`,
-  // fees
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS paid INTEGER DEFAULT 0`,
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS term TEXT`,
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS year INTEGER`,
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
-  // projects & events
   `ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS venue TEXT`,
-  // Drop old partial indexes — ON CONFLICT cannot use partial (WHERE clause) indexes!
+  `ALTER TABLE tenants DROP CONSTRAINT IF EXISTS tenants_subdomain_key`,
   `DROP INDEX IF EXISTS tenants_subdomain_key`,
+  `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key`,
   `DROP INDEX IF EXISTS users_email_key`,
-  // Recreate as regular unique indexes (PostgreSQL allows multiple NULLs, so partial WHERE is not needed)
   `CREATE UNIQUE INDEX IF NOT EXISTS tenants_subdomain_key ON tenants(subdomain)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON users(email)`,
-  // add foreign key for users.tenant_id if not exists
   `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_tenant_id_fkey`,
   `ALTER TABLE users ADD CONSTRAINT users_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE`,
-  // v9.0 new tables
-  `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, key_hash TEXT UNIQUE, name TEXT, scopes TEXT[], last_used TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS webhook_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event TEXT, payload JSONB, status INTEGER, response TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
+  `DELETE FROM audit_logs WHERE user_email IS NULL OR user_email = 'login'`
 ];
+
 (async () => {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      // Run each migration individually so one failure doesn't stop the rest
       for (const q of migrations) {
         try { await pool.query(q); } catch (e) { if (!e.message.includes('already exists')) console.warn('Migration warning:', e.message); }
       }
@@ -168,11 +162,17 @@ const migrations = [
       const devPass = 'Daniel@2025';
       const devHash = await bcrypt.hash(devPass, 10);
       const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
-
-      // REMOVED password_hash - only use password now
-      await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
-
-      // Verify dev user was created correctly
+      try {
+        await pool.query(`INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,password_hash=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
+      } catch (insertErr) {
+        if (insertErr.message.includes('password_hash')) {
+          await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
+        } else if (insertErr.message.includes('password')) {
+          await pool.query(`INSERT INTO users(tenant_id,email,password_hash,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
+        } else {
+          throw insertErr;
+        }
+      }
       const check = await pool.query('SELECT id,email,role,approved,tenant_id FROM users WHERE email=$1', [devEmail]);
       console.log('DB Ready. Dev user:', check.rows[0]?.email, 'role:', check.rows[0]?.role, 'approved:', check.rows[0]?.approved, 'tenant_id:', check.rows[0]?.tenant_id);
       break;
