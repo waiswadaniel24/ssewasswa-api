@@ -19,7 +19,7 @@ app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.json({ limit: '10mb' }));
-
+app.use(express.static('public'));
 // === SESSION ===
 app.use(session({
   store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
@@ -2391,7 +2391,18 @@ app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res)
   await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, `Fundraising fee - ${req.session.user.tenant_name}`]);
   res.redirect('/fundraising');
 }));
-
+app.get('/api/stats', ah(async (req, res) => {
+  const [schools, students, donations] = await Promise.all([
+    pool.query("SELECT COUNT(*) FROM tenants WHERE type='school'"),
+    pool.query('SELECT COUNT(*) FROM students'),
+    pool.query('SELECT COALESCE(SUM(amount),0) FROM developer_revenue')
+  ]);
+  res.json({
+    schools: parseInt(schools.rows[0].count),
+    students: parseInt(students.rows[0].count),
+    donations: parseInt(donations.rows[0].coalesce)
+  });
+}));
 // === TERMS ===
 app.get('/terms', (req, res) => {
   res.send(renderPage('Terms of Service', `
