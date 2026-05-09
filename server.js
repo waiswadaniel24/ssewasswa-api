@@ -90,6 +90,8 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS goals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, target INTEGER DEFAULT 0, current INTEGER DEFAULT 0, deadline DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS personal_notes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   // Add new columns to existing tables if they don't exist
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
+`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS address TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url TEXT`,
