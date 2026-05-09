@@ -156,15 +156,28 @@ ${body}</div></body></html>`;
     CREATE TABLE IF NOT EXISTS social_posts (
       id SERIAL PRIMARY KEY, tenant_id INT, author_name TEXT, content TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
     );
-    CREATE TABLE IF NOT EXISTS entertainment_videos (
-      id SERIAL PRIMARY KEY, tenant_id INT, title TEXT, url TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS entertainment_music (
-      id SERIAL PRIMARY KEY, tenant_id INT, title TEXT, artist TEXT, url TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS entertainment_games (
-      id SERIAL PRIMARY KEY, tenant_id INT, name TEXT, score INT, player_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    );
+   `CREATE TABLE IF NOT EXISTS entertainment_videos (
+  id SERIAL PRIMARY KEY,
+  tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+)`,
+`CREATE TABLE IF NOT EXISTS entertainment_music (
+  id SERIAL PRIMARY KEY,
+  tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  artist TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+)`,
+`CREATE TABLE IF NOT EXISTS entertainment_games (
+  id SERIAL PRIMARY KEY,
+  tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  player_name TEXT,
+  score INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW()
+)`,
     CREATE TABLE IF NOT EXISTS campaigns (
       id SERIAL PRIMARY KEY, tenant_id INT, title TEXT, target INT, raised INT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -1556,7 +1569,6 @@ app.get('/terms', (req, res) => {
     </div>
   `, null));
 }));
-
 // === 404 ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p></div>', req.session.user)));
 
