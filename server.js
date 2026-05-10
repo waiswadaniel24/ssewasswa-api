@@ -14456,16 +14456,8 @@ app.get('/entertainment/news', requireAuth, requireNotBanned, ah(async (req, res
 // ============================================================
 // === ADD FEATURES TO ALL DASHBOARDS ===
 // ============================================================
-app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session.user)));
+// NOTE: 404 and error handlers are moved AFTER launch routes (see below)
 
-// === ERROR HANDLER ===
-app.use((err, req, res, next) => {
-  console.error('Server Error:', err);
-  const msg = err.message || 'Something went wrong';
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, req.session.user));
-});
-
-// === START ===
 // === LAUNCH ROUTES (public site, scraping, entertainment, fundraising, etc.) ===
 try {
   const launchRoutes = require('./launch-routes');
@@ -14474,6 +14466,16 @@ try {
 } catch (e) {
   console.warn('[Launch] Failed to load launch routes:', e.message);
 }
+
+// === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
+app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session.user)));
+
+// === ERROR HANDLER ===
+app.use((err, req, res, next) => {
+  console.error('Server Error:', err);
+  const msg = err.message || 'Something went wrong';
+  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, req.session.user));
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
