@@ -957,11 +957,14 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('entertainment_hub', 'Entertainment Hub', 'Videos, music, news and auto-scraped content', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('web_scraping', 'Web Scraping', 'Auto-import news and events from external sites', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`,
   // ============ v12 BLOG & ADVERT ENHANCEMENTS ============
+  `CREATE TABLE IF NOT EXISTS daily_adverts (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT, image_url TEXT, link_url TEXT, position TEXT DEFAULT 'homepage', start_date DATE, end_date DATE, is_active BOOLEAN DEFAULT true, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS position TEXT DEFAULT 'homepage'`,
   `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS created_by TEXT`,
   `CREATE TABLE IF NOT EXISTS blog_posts (id SERIAL PRIMARY KEY, slug TEXT UNIQUE, title TEXT NOT NULL, content TEXT NOT NULL, excerpt TEXT, image_url TEXT, category TEXT DEFAULT 'news', author TEXT, is_published BOOLEAN DEFAULT false, published_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS auto_verified BOOLEAN DEFAULT false`
+  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS auto_verified BOOLEAN DEFAULT false`,
+  // ============ v13 FIXES ============
+  `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS details TEXT`
 ];
 
 (async () => {
@@ -1087,6 +1090,14 @@ ${process.env.GA_TRACKING_ID ? `
   </div>
 </nav>
 <div class="container">${content}</div>
+<footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
+  <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
+    <div><strong style="font-size:16px">SSEWASSWA Platform</strong><p class="muted" style="margin-top:8px">The Operating System for African Institutions - Schools, Clinics, Churches & Businesses</p></div>
+    <div><strong>Need Help?</strong><p class="muted" style="margin-top:6px">Email: <a href="mailto:support@ssewasswa.onrender.com" style="color:#4f46e5">support@ssewasswa.onrender.com</a></p><p class="muted">Phone: <a href="tel:+256700000000" style="color:#4f46e5">+256 700 000 000</a></p><p class="muted"><a href="/help" style="color:#4f46e5">Help Center & FAQs</a></p></div>
+    <div><strong>Quick Links</strong><p class="muted" style="margin-top:6px"><a href="/blog" style="color:#4f46e5">Blog & News</a></p><p class="muted"><a href="/p/entertainment" style="color:#4f46e5">Entertainment</a></p><p class="muted"><a href="/p/fundraising" style="color:#4f46e5">Fundraising</a></p><p class="muted"><a href="/register" style="color:#4f46e5">Get Started</a></p></div>
+  </div>
+  <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}"><p class="muted">&copy; ${new Date().getFullYear()} SSEWASSWA. All rights reserved.</p></div>
+</footer>
 </body></html>`;
 };
 
@@ -5150,8 +5161,9 @@ app.get('/dev/withdraw', requireAuth, requireSuperAdmin, ah(async (req, res) => 
       ${withdrawals.rows.length > 0 ? `
         <table><tr><th>Amount</th><th>Phone</th><th>Network</th><th>Date</th><th>Status</th></tr>
         ${withdrawals.rows.map(w => {
-          const meta = w.source === 'withdrawal' ? JSON.parse(w.details || '{}') : {};
-          return `<tr><td>UGX ${parseInt(w.amount).toLocaleString()}</td><td>${esc(meta.phone || 'N/A')}</td><td>${esc(meta.network || 'N/A')}</td><td>${new Date(w.created_at).toLocaleString()}</td><td>${w.amount < 0 ? '<span style="color:#d97706">Processing</span>' : '<span style="color:#059669">Completed</span>'}</td></tr>`;
+          let meta = {};
+          try { meta = w.source === 'withdrawal' ? JSON.parse(w.details || '{}') : {}; } catch(e) {}
+          return `<tr><td style="font-weight:700;color:${w.amount < 0 ? '#dc2626' : '#059669'}">UGX ${Math.abs(parseInt(w.amount)).toLocaleString()}</td><td>${esc(meta.phone || 'N/A')}</td><td>${esc(meta.network || 'N/A')}</td><td>${new Date(w.created_at).toLocaleString()}</td><td>${w.amount < 0 ? '<span style="color:#d97706">Processing</span>' : '<span style="color:#059669">Completed</span>'}</td></tr>`;
         }).join('')}
         </table>
       ` : '<p class="muted">No withdrawals yet</p>'}
@@ -5212,6 +5224,48 @@ app.get('/dev/activity', requireAuth, requireSuperAdmin, ah(async (req, res) => 
         event.target.classList.add('active');
       }
     </script>
+  `, req.session.user));
+}));
+
+// === HELP CENTER ===
+app.get('/help', ah(async (req, res) => {
+  res.send(renderPage('Help Center', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:40px 20px;border-radius:16px;margin-bottom:20px;color:white;text-align:center">
+      <h1>Help Center</h1><p style="opacity:0.9;margin-top:8px">Find answers, get support, and learn how to use SSEWASSWA</p>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Getting Started</h3>
+        <p class="muted" style="margin-bottom:10px">New to SSEWASSWA? Here is how to begin:</p>
+        <ul style="padding-left:20px;line-height:2">
+          <li><a href="/register">Create your account</a> - Sign up with your email</li>
+          <li><a href="/login">Log in</a> - Access your dashboard</li>
+          <li><a href="/setup">Complete setup</a> - Configure your organization</li>
+          <li><a href="/guide">Read the guide</a> - Step-by-step tutorials</li>
+        </ul>
+      </div>
+      <div class="card"><h3>Common Questions</h3>
+        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I add students or members?</summary><p class="muted" style="padding:8px 0">Log in, go to your Dashboard, then use the relevant section (Students for schools, Members for churches, Patients for clinics).</p></details>
+        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I accept payments?</summary><p class="muted" style="padding:8px 0">Go to Settings then Billing. You can set up mobile money (MTN/Airtel) and card payments.</p></details>
+        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I create a public website?</summary><p class="muted" style="padding:8px 0">From your Dashboard, go to Public Site. You can create pages, add events, and share your organization's link.</p></details>
+        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">Is SSEWASSWA free?</summary><p class="muted" style="padding:8px 0">Yes! SSEWASSWA has a free tier with core features. Premium features like fundraising and advanced reports are available on paid plans.</p></details>
+        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I contact support?</summary><p class="muted" style="padding:8px 0">Email us at <a href="mailto:support@ssewasswa.onrender.com">support@ssewasswa.onrender.com</a> or call <a href="tel:+256700000000">+256 700 000 000</a>.</p></details>
+      </div>
+      <div class="card"><h3>Contact Support</h3>
+        <p class="muted" style="margin-bottom:12px">We are here to help you succeed</p>
+        <div style="margin-bottom:12px"><strong>Email:</strong><br><a href="mailto:support@ssewasswa.onrender.com" style="color:#4f46e5;font-size:16px">support@ssewasswa.onrender.com</a></div>
+        <div style="margin-bottom:12px"><strong>Phone:</strong><br><a href="tel:+256700000000" style="color:#4f46e5;font-size:16px">+256 700 000 000</a></div>
+        <div style="margin-bottom:12px"><strong>Response Time:</strong><br><span class="muted">Usually within 24 hours</span></div>
+      </div>
+      <div class="card"><h3>Platform Features</h3>
+        <ul style="padding-left:20px;line-height:2">
+          <li><strong>Schools:</strong> Student management, fees, grades, attendance</li>
+          <li><strong>Clinics:</strong> Patient records, appointments, billing</li>
+          <li><strong>Churches:</strong> Members, donations, events, sermons</li>
+          <li><strong>Businesses:</strong> Sales, CRM, inventory, invoices</li>
+          <li><strong>All:</strong> Public website, entertainment, fundraising, blog</li>
+        </ul>
+      </div>
+    </div>
   `, req.session.user));
 }));
 
@@ -8603,6 +8657,14 @@ ${process.env.GA_TRACKING_ID ? `
   </div>
 </nav>
 <div class="container">${content}</div>
+<footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
+  <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
+    <div><strong style="font-size:16px">SSEWASSWA Platform</strong><p class="muted" style="margin-top:8px">The Operating System for African Institutions - Schools, Clinics, Churches & Businesses</p></div>
+    <div><strong>Need Help?</strong><p class="muted" style="margin-top:6px">Email: <a href="mailto:support@ssewasswa.onrender.com" style="color:#4f46e5">support@ssewasswa.onrender.com</a></p><p class="muted">Phone: <a href="tel:+256700000000" style="color:#4f46e5">+256 700 000 000</a></p><p class="muted"><a href="/help" style="color:#4f46e5">Help Center & FAQs</a></p></div>
+    <div><strong>Quick Links</strong><p class="muted" style="margin-top:6px"><a href="/blog" style="color:#4f46e5">Blog & News</a></p><p class="muted"><a href="/p/entertainment" style="color:#4f46e5">Entertainment</a></p><p class="muted"><a href="/p/fundraising" style="color:#4f46e5">Fundraising</a></p><p class="muted"><a href="/register" style="color:#4f46e5">Get Started</a></p></div>
+  </div>
+  <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}"><p class="muted">&copy; ${new Date().getFullYear()} SSEWASSWA. All rights reserved.</p></div>
+</footer>
 </body></html>`;
 };
 
