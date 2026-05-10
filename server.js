@@ -964,7 +964,26 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS blog_posts (id SERIAL PRIMARY KEY, slug TEXT UNIQUE, title TEXT NOT NULL, content TEXT NOT NULL, excerpt TEXT, image_url TEXT, category TEXT DEFAULT 'news', author TEXT, is_published BOOLEAN DEFAULT false, published_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS auto_verified BOOLEAN DEFAULT false`,
   // ============ v13 FIXES ============
-  `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS details TEXT`
+  `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS source TEXT`,
+  `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS details TEXT`,
+  `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
+  // daily_adverts: ensure all columns exist even if table was created with different schema
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS title TEXT`,
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS image_url TEXT`,
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS link_url TEXT`,
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS start_date DATE`,
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS end_date DATE`,
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+  // blog_posts: ensure all columns
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS slug TEXT`,
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS excerpt TEXT`,
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS image_url TEXT`,
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'news'`,
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS author TEXT`,
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false`,
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ`,
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
 ];
 
 (async () => {
