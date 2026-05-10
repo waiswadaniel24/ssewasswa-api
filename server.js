@@ -792,6 +792,11 @@ const migrations = [
   `ALTER TABLE exams ADD COLUMN IF NOT EXISTS year INTEGER`,
   `ALTER TABLE fee_structures ADD COLUMN IF NOT EXISTS education_level TEXT`,
   `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS education_level TEXT`,
+  // ============ FIX: Add missing columns to tables created before schema updates ============
+  `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+  `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_email TEXT`,
+  `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'info'`,
+  `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read BOOLEAN DEFAULT false`,
   // ============ v11 CLINIC WORKFLOW TABLES ============
   // Clinic Staff Roles (Doctor, Pharmacist, Lab Attendant, Nurse)
   `CREATE TABLE IF NOT EXISTS clinic_staff (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, phone TEXT, role TEXT NOT NULL DEFAULT 'doctor', specialization TEXT, license_no TEXT, department TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -7272,7 +7277,7 @@ app.get('/business/cashflow', requireAuth, requireNotBanned, ah(async (req, res)
   const t = req.session.user.tenant_id;
   const [receivables, payables, expenses, incomes] = await Promise.all([
     pool.query("SELECT COALESCE(SUM(amount),0) as total FROM invoices WHERE tenant_id=$1 AND status='unpaid'", [t]),
-    pool.query("SELECT COALESCE(SUM(amount),0) as total FROM purchase_orders WHERE tenant_id=$1 AND status='pending' OR status='approved'", [t]),
+    pool.query("SELECT COALESCE(SUM(total),0) as total FROM purchase_orders WHERE tenant_id=$1 AND (status='pending' OR status='approved')", [t]),
     pool.query("SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1", [t]),
     pool.query("SELECT COALESCE(SUM(amount),0) as total FROM income_records WHERE tenant_id=$1", [t])
   ]);
