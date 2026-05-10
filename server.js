@@ -935,7 +935,11 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('meal_management', 'Meal Management', 'Meal plans and boarding meal attendance', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('patient_queue', 'Patient Queue', 'Triage and queue management for clinic', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('quotations', 'Quotations', 'Create and manage price quotations for customers', '3.0', 'business', 'None', true) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('deliveries', 'Deliveries', 'Track order dispatch and delivery status', '3.0', 'business', 'None', true) ON CONFLICT DO NOTHING`
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('deliveries', 'Deliveries', 'Track order dispatch and delivery status', '3.0', 'business', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('public_site', 'Public Website', 'Build a public-facing website with pages', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('fundraising', 'Fundraising', 'Launch campaigns and collect donations', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('entertainment_hub', 'Entertainment Hub', 'Videos, music, news and auto-scraped content', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('web_scraping', 'Web Scraping', 'Auto-import news and events from external sites', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`
 ];
 
 (async () => {
@@ -1316,6 +1320,9 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
       <div class="card"><h3>Forums</h3><a href="/forums" class="btn btn-sm">Discussions</a></div>
       <div class="card"><h3>Login History</h3><a href="/login-history" class="btn btn-sm">Security</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
+      <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
       <div class="card"><h3>Policies</h3><a href="/policies" class="btn btn-sm">Policy Docs</a></div>
       <div class="card"><h3>Committees</h3><a href="/committees" class="btn btn-sm">Manage</a></div>
     </div>
@@ -3178,6 +3185,9 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#f0fdfa;border:2px solid #14b8a6"><h3 style="color:#14b8a6">NEW: Volunteers</h3><a href="/church/volunteers" class="btn btn-sm">Scheduling</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Sermon Archive</h3><a href="/church/sermons" class="btn btn-sm">Full Archive</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #f59e0b"><h3 style="color:#f59e0b">NEW: Prayer Requests</h3><a href="/church/prayer-requests" class="btn btn-sm">Prayer Wall</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
+      <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Tithes Trend</h3><canvas id="tithesChart"></canvas></div>
@@ -3544,6 +3554,9 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">NEW: Warranties</h3><a href="/business/warranties" class="btn btn-sm">Track Warranties</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Quotations</h3><a href="/business/quotations" class="btn btn-sm">Quotes</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Deliveries</h3><a href="/business/deliveries" class="btn btn-sm">Track Deliveries</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
+      <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Sales Trend</h3><canvas id="salesChart"></canvas></div>
@@ -11520,7 +11533,12 @@ self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(fetch('/
     `CREATE TABLE IF NOT EXISTS meeting_agendas (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, meeting_id INTEGER REFERENCES meeting_minutes(id) ON DELETE CASCADE, item_text TEXT NOT NULL, order_no INTEGER DEFAULT 1, completed BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS incidents (id SERIAL PRIMARY KEY, service TEXT, title TEXT NOT NULL, status TEXT DEFAULT 'investigating', created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ)`,
     `CREATE TABLE IF NOT EXISTS quotations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, quote_no TEXT, customer_name TEXT, customer_contact TEXT, items JSONB, total INTEGER DEFAULT 0, status TEXT DEFAULT 'draft', valid_until DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS deliveries (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, order_no TEXT, customer_name TEXT, customer_address TEXT, items JSONB, driver_name TEXT, vehicle TEXT, status TEXT DEFAULT 'pending', dispatched_at TIMESTAMPTZ, delivered_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
+    `CREATE TABLE IF NOT EXISTS deliveries (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, order_no TEXT, customer_name TEXT, customer_address TEXT, items JSONB, driver_name TEXT, vehicle TEXT, status TEXT DEFAULT 'pending', dispatched_at TIMESTAMPTZ, delivered_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS public_pages (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, slug TEXT NOT NULL, page_type TEXT DEFAULT 'page', page_order INTEGER DEFAULT 1, content TEXT, hero_title TEXT, hero_subtitle TEXT, meta_description TEXT, is_published BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, slug))`,
+    `CREATE TABLE IF NOT EXISTS fundraising_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, target INTEGER DEFAULT 0, deadline DATE, category TEXT DEFAULT 'general', organizer TEXT, contact_phone TEXT, status TEXT DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS campaign_donations (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, donor_name TEXT, amount INTEGER DEFAULT 0, method TEXT DEFAULT 'cash', message TEXT, donated_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS scraped_content (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, source TEXT, title TEXT, summary TEXT, url TEXT, category TEXT DEFAULT 'news', scraped_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, title, source))`,
+    `CREATE TABLE IF NOT EXISTS scrape_sources (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, url TEXT NOT NULL, category TEXT DEFAULT 'news', scrape_type TEXT DEFAULT 'rss', selector TEXT, max_items INTEGER DEFAULT 20, is_active BOOLEAN DEFAULT true, last_scraped_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`
   ];
   for (const q of additionalMigrations) {
     try { await pool.query(q); } catch(e) { /* already exists OK */ }
@@ -14135,7 +14153,330 @@ app.post('/settings/dashboard/save', requireAuth, requireNotBanned, requireFeatu
   res.redirect('/settings/dashboard');
 }));
 
-// === 404 ===
+// ============================================================
+// === PUBLIC WEBSITE / LANDING PAGE BUILDER ===
+// ============================================================
+app.get('/public-site', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const pages = (await pool.query('SELECT * FROM public_pages WHERE tenant_id=$1 ORDER BY page_order', [t])).rows;
+  res.send(renderPage('Public Website', `<div class="card"><h2>🌐 Public Website Builder</h2><p class="muted">Create a public-facing website for your organization</p>
+    <a href="/public-site/new" class="btn btn-green" style="margin:10px 0">+ Add Page</a>
+    <a href="/public-site/preview" class="btn btn-gold" style="margin:10px 0" target="_blank">Preview Site</a>
+    <table><tr><th>Page</th><th>Slug</th><th>Published</th><th>Order</th><th>Actions</th></tr>
+    ${pages.map(p=>`<tr><td><strong>${esc(p.title)}</strong></td><td>/<span class="tag">${esc(p.slug)}</span></td><td>${p.is_published?'<span style="color:#059669">Live</span>':'<span style="color:#dc2626">Draft</span>'}</td><td>${p.page_order}</td><td><a href="/public-site/${p.id}/edit" class="btn btn-sm">Edit</a> <a href="/public-site/${p.id}/publish" class="btn btn-sm btn-green">Publish</a> <a href="/public-site/${p.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete?')">Del</a></td></tr>`).join('')||'<tr><td colspan="5">No pages yet. Create your first page!</td></tr>'}</table></div>`, req.session.user));
+}));
+
+app.get('/public-site/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Public Page', `<div class="card" style="max-width:700px;margin:40px auto"><h2>Add Public Page</h2>
+    <form method="POST" action="/public-site/save">
+      <input name="title" placeholder="Page Title (e.g. About Us, Contact)" required>
+      <input name="slug" placeholder="URL Slug (e.g. about, contact, home)" required>
+      <select name="page_type"><option value="page">Regular Page</option><option value="home">Homepage</option><option value="contact">Contact Page</option><option value="gallery">Gallery Page</option><option value="events">Events Page</option></select>
+      <input name="page_order" type="number" value="1" placeholder="Display Order">
+      <textarea name="content" rows="10" placeholder="Page content (supports HTML)"></textarea>
+      <input name="hero_title" placeholder="Hero Section Title (optional)">
+      <input name="hero_subtitle" placeholder="Hero Section Subtitle (optional)">
+      <input name="meta_description" placeholder="SEO Meta Description">
+      <button class="btn btn-green" style="width:100%">Create Page</button>
+    </form></div>`, req.session.user));
+});
+
+app.post('/public-site/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, slug, page_type, page_order, content, hero_title, hero_subtitle, meta_description } = req.body;
+  await pool.query('INSERT INTO public_pages(tenant_id,title,slug,page_type,page_order,content,hero_title,hero_subtitle,meta_description) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, title, slug, page_type||'page', page_order||1, content||'', hero_title||'', hero_subtitle||'', meta_description||'']);
+  res.redirect('/public-site');
+}));
+
+app.get('/public-site/preview', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const pages = (await pool.query("SELECT * FROM public_pages WHERE tenant_id=$1 AND is_published=true ORDER BY page_order", [t])).rows;
+  const homePage = pages.find(p => p.page_type === 'home') || pages[0];
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(tenant.name||'SSEWASSWA')} - Public Site</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b}.pub-nav{background:#4f46e5;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}.pub-nav a{color:white;text-decoration:none;padding:8px 16px;border-radius:6px}.pub-hero{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:100px 30px;text-align:center}.pub-content{max-width:900px;margin:40px auto;padding:0 20px}.pub-footer{background:#1e293b;color:white;padding:30px;text-align:center;margin-top:60px}h1{font-size:48px;margin-bottom:15px}h2{font-size:28px;margin-bottom:10px}p{line-height:1.8;margin-bottom:15px}.pub-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin:20px 0}.pub-card{background:white;border-radius:12px;padding:25px;box-shadow:0 2px 12px rgba(0,0,0,0.08);border:1px solid #e2e8f0}</style></head><body>
+    <nav class="pub-nav"><div style="font-size:22px;font-weight:800">${esc(tenant.name||'SSEWASSWA')}</div><div>${pages.map(p=>`<a href="/s/${esc(p.slug)}">${esc(p.title)}</a>`).join('')}</div></nav>
+    ${homePage?`<div class="pub-hero"><h1>${esc(homePage.hero_title||homePage.title)}</h1><p style="font-size:20px;opacity:0.9">${esc(homePage.hero_subtitle||'')}</p></div><div class="pub-content">${homePage.content||'<p>Welcome to our site!</p>'}</div>`:'<div class="pub-hero"><h1>Welcome</h1><p>Your public website starts here</p></div>'}
+    <div class="pub-footer"><p>&copy; ${new Date().getFullYear()} ${esc(tenant.name||'SSEWASSWA')}. Powered by SSEWASSWA Platform.</p></div></body></html>`);
+}));
+
+app.get('/public-site/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const p = (await pool.query('SELECT * FROM public_pages WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!p) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Page', `<div class="card" style="max-width:700px;margin:40px auto"><h2>Edit: ${esc(p.title)}</h2>
+    <form method="POST" action="/public-site/${p.id}/update">
+      <input name="title" value="${esc(p.title)}" required>
+      <input name="slug" value="${esc(p.slug)}" required>
+      <select name="page_type"><option value="page" ${p.page_type==='page'?'selected':''}>Regular Page</option><option value="home" ${p.page_type==='home'?'selected':''}>Homepage</option><option value="contact" ${p.page_type==='contact'?'selected':''}>Contact Page</option><option value="gallery" ${p.page_type==='gallery'?'selected':''}>Gallery Page</option><option value="events" ${p.page_type==='events'?'selected':''}>Events Page</option></select>
+      <input name="page_order" type="number" value="${p.page_order||1}">
+      <textarea name="content" rows="10">${esc(p.content||'')}</textarea>
+      <input name="hero_title" value="${esc(p.hero_title||'')}" placeholder="Hero Title">
+      <input name="hero_subtitle" value="${esc(p.hero_subtitle||'')}" placeholder="Hero Subtitle">
+      <input name="meta_description" value="${esc(p.meta_description||'')}" placeholder="SEO Description">
+      <button class="btn" style="width:100%">Update Page</button>
+    </form></div>`, req.session.user));
+}));
+
+app.post('/public-site/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { title, slug, page_type, page_order, content, hero_title, hero_subtitle, meta_description } = req.body;
+  await pool.query('UPDATE public_pages SET title=$1,slug=$2,page_type=$3,page_order=$4,content=$5,hero_title=$6,hero_subtitle=$7,meta_description=$8 WHERE id=$9 AND tenant_id=$10', [title, slug, page_type, page_order||1, content, hero_title, hero_subtitle, meta_description, req.params.id, req.session.user.tenant_id]);
+  res.redirect('/public-site');
+}));
+
+app.get('/public-site/:id/publish', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE public_pages SET is_published=NOT is_published WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/public-site');
+}));
+
+app.get('/public-site/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM public_pages WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/public-site');
+}));
+
+// Public site viewer (no auth required)
+app.get('/s/:slug', ah(async (req, res) => {
+  const page = (await pool.query('SELECT p.*,t.name as org_name FROM public_pages p JOIN tenants t ON t.id=p.tenant_id WHERE p.slug=$1 AND p.is_published=true', [req.params.slug])).rows[0];
+  if (!page) return res.status(404).send('Page not found');
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${esc(page.meta_description||'')}"><title>${esc(page.title)} - ${esc(page.org_name)}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b;line-height:1.8}.pub-nav{background:#4f46e5;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}.pub-nav a{color:white;text-decoration:none;padding:8px 16px;border-radius:6px}.pub-hero{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:80px 30px;text-align:center}.pub-content{max-width:900px;margin:40px auto;padding:0 20px}.pub-footer{background:#1e293b;color:white;padding:30px;text-align:center;margin-top:60px}</style></head><body>
+    <nav class="pub-nav"><div style="font-size:22px;font-weight:800">${esc(page.org_name)}</div><div><a href="/">Home</a></div></nav>
+    <div class="pub-hero"><h1 style="font-size:42px">${esc(page.hero_title||page.title)}</h1><p style="font-size:18px;opacity:0.9">${esc(page.hero_subtitle||'')}</p></div>
+    <div class="pub-content">${page.content||''}</div>
+    <div class="pub-footer"><p>&copy; ${new Date().getFullYear()} ${esc(page.org_name)}</p></div></body></html>`);
+}));
+
+// ============================================================
+// === FUNDRAISING / CROWDFUNDING ===
+// ============================================================
+app.get('/fundraising', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const campaigns = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised FROM fundraising_campaigns c WHERE c.tenant_id=$1 ORDER BY c.created_at DESC', [t])).rows;
+  res.send(renderPage('Fundraising', `<div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>🎯 Fundraising</h1><p>Launch campaigns, collect donations, track progress</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${campaigns.length}</div><div>Campaigns</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${campaigns.reduce((a,c)=>a+parseInt(c.raised||0),0).toLocaleString()}</div><div>Total Raised</div></div>
+      <div class="stat-card"><div class="stat-num">${campaigns.filter(c=>c.status==='active').length}</div><div>Active</div></div>
+    </div>
+    <div class="card"><h3>Campaigns</h3>
+    <a href="/fundraising/new" class="btn btn-green" style="margin:10px 0">+ New Campaign</a>
+    <table><tr><th>Campaign</th><th>Goal (UGX)</th><th>Raised (UGX)</th><th>Progress</th><th>Status</th><th>Actions</th></tr>
+    ${campaigns.map(c=>{const pct=c.target>0?Math.min(100,Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)):0;return `<tr><td><strong>${esc(c.title)}</strong><br><span class="muted">${esc((c.description||'').substring(0,60))}</span></td><td>${parseInt(c.target||0).toLocaleString()}</td><td style="color:#059669">${parseInt(c.raised||0).toLocaleString()}</td><td><div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${pct>=100?'#059669':'#4f46e5'}">${pct}%</div></div></td><td><span class="tag" style="background:${c.status==='active'?'#d1fae5;color:#065f46':c.status==='completed'?'#e0e7ff;color:#3730a3':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td><a href="/fundraising/${c.id}" class="btn btn-sm">View</a> <a href="/fundraising/${c.id}/donate" class="btn btn-sm btn-green">Donate</a> <a href="/fundraising/${c.id}/close" class="btn btn-sm">Close</a> <a href="/fundraising/${c.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete?')">Del</a></td></tr>`}).join('')||'<tr><td colspan="6">No campaigns yet</td></tr>'}</table></div>`, req.session.user));
+}));
+
+app.get('/fundraising/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Campaign', `<div class="card" style="max-width:650px;margin:40px auto"><h2>🎯 Create Fundraising Campaign</h2>
+    <form method="POST" action="/fundraising/save">
+      <input name="title" placeholder="Campaign Title (e.g. Build New Classroom)" required>
+      <textarea name="description" rows="4" placeholder="Campaign description - tell your story" required></textarea>
+      <input name="target" type="number" placeholder="Fundraising Goal (UGX)" required>
+      <input name="deadline" type="date" placeholder="Campaign Deadline">
+      <select name="category"><option value="general">General</option><option value="building">Building Fund</option><option value="education">Education</option><option value="medical">Medical</option><option value="church">Church Project</option><option value="community">Community</option><option value="emergency">Emergency Relief</option></select>
+      <input name="organizer" placeholder="Organizer Name">
+      <input name="contact_phone" placeholder="Contact Phone">
+      <textarea name="updates" rows="3" placeholder="Initial update / campaign pitch"></textarea>
+      <button class="btn btn-green" style="width:100%">Launch Campaign</button>
+    </form></div>`, req.session.user));
+});
+
+app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, description, target, deadline, category, organizer, contact_phone, updates } = req.body;
+  await pool.query('INSERT INTO fundraising_campaigns(tenant_id,title,description,target,deadline,category,organizer,contact_phone) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, title, description, target||0, deadline||null, category||'general', organizer||'', contact_phone||'']);
+  res.redirect('/fundraising');
+}));
+
+app.get('/fundraising/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const c = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised FROM fundraising_campaigns c WHERE c.id=$1 AND c.tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!c) return res.status(404).send('Not found');
+  const donations = (await pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 ORDER BY donated_at DESC', [c.id])).rows;
+  const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
+  res.send(renderPage('Campaign: '+c.title, `<div class="card"><h2>🎯 ${esc(c.title)}</h2>
+    <p class="muted">${esc(c.category)} | by ${esc(c.organizer||'Admin')}</p>
+    <p style="margin:15px 0">${esc(c.description||'')}</p>
+    <div class="progress-bar" style="height:30px;margin:15px 0"><div class="progress-fill" style="width:${pct}%;background:${pct>=100?'#059669':'#4f46e5'};display:flex;align-items:center;justify-content:center;color:white;font-weight:700">${pct}%</div></div>
+    <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${parseInt(c.raised||0).toLocaleString()}</div><div>Raised</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${parseInt(c.target||0).toLocaleString()}</div><div>Goal</div></div>
+      <div class="stat-card"><div class="stat-num">${donations.length}</div><div>Donations</div></div>
+    </div>
+    <div style="margin:15px 0"><a href="/fundraising/${c.id}/donate" class="btn btn-green">💰 Donate Now</a></div>
+    <h3>Recent Donations</h3>
+    ${donations.length?`<table><tr><th>Donor</th><th>Amount</th><th>Method</th><th>Date</th></tr>${donations.map(d=>`<tr><td>${esc(d.donor_name||'Anonymous')}</td><td>UGX ${parseInt(d.amount||0).toLocaleString()}</td><td>${esc(d.method||'Cash')}</td><td>${d.donated_at?new Date(d.donated_at).toLocaleDateString():''}</td></tr>`).join('')}</table>`:'<p class="muted">No donations yet</p>'}
+    </div>`, req.session.user));
+}));
+
+app.get('/fundraising/:id/donate', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!c) return res.status(404).send('Not found');
+  res.send(renderPage('Donate', `<div class="card" style="max-width:500px;margin:40px auto"><h2>💰 Donate to: ${esc(c.title)}</h2>
+    <form method="POST" action="/fundraising/${c.id}/donate-save">
+      <input name="donor_name" placeholder="Your Name (or leave blank for anonymous)">
+      <input name="amount" type="number" placeholder="Amount (UGX)" required>
+      <select name="method"><option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card</option><option value="online">Online</option></select>
+      <textarea name="message" rows="2" placeholder="Message of support (optional)"></textarea>
+      <button class="btn btn-green" style="width:100%">Donate</button>
+    </form></div>`, req.session.user));
+}));
+
+app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { donor_name, amount, method, message } = req.body;
+  await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [req.params.id, donor_name||'Anonymous', amount||0, method||'cash', message||'']);
+  res.redirect('/fundraising/'+req.params.id);
+}));
+
+app.get('/fundraising/:id/close', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE fundraising_campaigns SET status=$1 WHERE id=$2 AND tenant_id=$3', ['completed', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/fundraising');
+}));
+
+app.get('/fundraising/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/fundraising');
+}));
+
+// ============================================================
+// === ENTERTAINMENT HUB ===
+// ============================================================
+app.get('/entertainment', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [videos, music, scraped] = await Promise.all([
+    pool.query('SELECT * FROM entertainment_videos WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t]),
+    pool.query('SELECT * FROM entertainment_music WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t]),
+    pool.query('SELECT * FROM scraped_content WHERE tenant_id=$1 ORDER BY scraped_at DESC LIMIT 30', [t])
+  ]);
+  res.send(renderPage('Entertainment Hub', `<div class="hero" style="background:linear-gradient(135deg,#7c3aed,#ec4899)"><h1>🎬 Entertainment Hub</h1><p>Videos, Music, News, Events & More</p></div>
+    <div class="tab-bar"><a href="/entertainment" class="active">All</a><a href="/entertainment/videos">Videos</a><a href="/entertainment/music">Music</a><a href="/entertainment/news">News & Events</a><a href="/entertainment/scrape-settings">Auto-Import</a></div>
+    <div class="card"><h3>📺 Videos</h3>
+    <a href="/entertainment/videos/new" class="btn btn-sm btn-green" style="margin-bottom:10px">+ Add Video</a>
+    <div class="grid">${videos.rows.map(v=>`<div class="card" style="padding:15px"><h4>${esc(v.title)}</h4><a href="${esc(v.url)}" target="_blank" class="btn btn-sm" style="margin-top:8px">▶ Play</a></div>`).join('')||'<p class="muted">No videos yet</p>'}</div></div>
+    <div class="card"><h3>🎵 Music</h3>
+    <a href="/entertainment/music/new" class="btn btn-sm btn-green" style="margin-bottom:10px">+ Add Music</a>
+    <div class="grid">${music.rows.map(m=>`<div class="card" style="padding:15px"><h4>${esc(m.title)}</h4>${m.artist?`<p class="muted">${esc(m.artist)}</p>`:''}</div>`).join('')||'<p class="muted">No music yet</p>'}</div></div>
+    <div class="card"><h3>📰 Auto-Imported News & Events</h3><p class="muted">Latest content scraped from the web</p>
+    <a href="/entertainment/scrape-settings" class="btn btn-sm" style="margin:10px 0">Configure Auto-Import</a>
+    <a href="/entertainment/scrape-now" class="btn btn-sm btn-green" style="margin:10px 0">Import Now</a>
+    <table><tr><th>Title</th><th>Source</th><th>Category</th><th>Date</th><th>Link</th></tr>
+    ${scraped.rows.map(s=>`<tr><td><strong>${esc((s.title||'').substring(0,60))}</strong></td><td><span class="tag">${esc(s.source||'')}</span></td><td>${esc(s.category||'')}</td><td>${s.scraped_at?new Date(s.scraped_at).toLocaleDateString():''}</td><td>${s.url?`<a href="${esc(s.url)}" target="_blank">Read</a>`:'-'}</td></tr>`).join('')||'<tr><td colspan="5">No imported content yet. Click "Import Now" to fetch!</td></tr>'}</table></div>`, req.session.user));
+}));
+
+app.get('/entertainment/videos/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Video', `<div class="card" style="max-width:500px;margin:40px auto"><h3>Add Video</h3>
+    <form method="POST" action="/entertainment/videos/save"><input name="title" placeholder="Video Title" required><input name="url" placeholder="Video URL (YouTube, Vimeo, etc.)" required><button class="btn btn-green" style="width:100%">Add Video</button></form></div>`, req.session.user));
+});
+
+app.post('/entertainment/videos/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { title, url } = req.body;
+  await pool.query('INSERT INTO entertainment_videos(tenant_id,title,url) VALUES($1,$2,$3)', [req.session.user.tenant_id, title, url]);
+  res.redirect('/entertainment');
+}));
+
+app.get('/entertainment/music/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Music', `<div class="card" style="max-width:500px;margin:40px auto"><h3>Add Music Track</h3>
+    <form method="POST" action="/entertainment/music/save"><input name="title" placeholder="Song Title" required><input name="artist" placeholder="Artist Name"><input name="url" placeholder="Audio URL (optional)"><button class="btn btn-green" style="width:100%">Add Track</button></form></div>`, req.session.user));
+});
+
+app.post('/entertainment/music/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { title, artist, url } = req.body;
+  await pool.query('INSERT INTO entertainment_music(tenant_id,title,artist,url) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, title, artist, url||'']);
+  res.redirect('/entertainment');
+}));
+
+// === SCRAPE SETTINGS ===
+app.get('/entertainment/scrape-settings', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sources = (await pool.query('SELECT * FROM scrape_sources WHERE tenant_id=$1 ORDER BY category', [t])).rows;
+  res.send(renderPage('Auto-Import Settings', `<div class="card"><h2>⚙️ Auto-Import Settings</h2><p class="muted">Configure sources to automatically import news, events, and entertainment content</p>
+    <a href="/entertainment/scrape-settings/new" class="btn btn-green" style="margin:10px 0">+ Add Source</a>
+    <a href="/entertainment/scrape-now" class="btn btn-gold" style="margin:10px 0">🔄 Import Now</a>
+    <table><tr><th>Source Name</th><th>URL</th><th>Category</th><th>Active</th><th>Last Scrape</th><th>Actions</th></tr>
+    ${sources.map(s=>`<tr><td><strong>${esc(s.name)}</strong></td><td><a href="${esc(s.url)}" target="_blank">${esc((s.url||'').substring(0,40))}</a></td><td><span class="tag">${esc(s.category)}</span></td><td>${s.is_active?'<span style="color:#059669">Active</span>':'<span style="color:#dc2626">Off</span>'}</td><td>${s.last_scraped_at?new Date(s.last_scraped_at).toLocaleString():'Never'}</td><td><a href="/entertainment/scrape-settings/${s.id}/toggle" class="btn btn-sm">${s.is_active?'Disable':'Enable'}</a> <a href="/entertainment/scrape-settings/${s.id}/delete" class="btn btn-sm btn-red">Del</a></td></tr>`).join('')||'<tr><td colspan="6">No sources configured. Add your first news source!</td></tr>'}</table>
+    <div class="card" style="margin-top:20px;background:#eff6ff"><h3>📖 Built-in Sources (Auto-configured)</h3><p class="muted">These sources are pre-configured and always available:</p>
+    <ul style="margin:10px 0;padding-left:20px"><li>Daily Monitor Uganda - News</li><li>New Vision Uganda - News</li><li>UG Pulse - Entertainment</li><li>Matooke Republic - Entertainment & Gossip</li><li>Uganda Events - Events</li><li>MTN Uganda - Promotions</li></ul></div>
+    </div>`, req.session.user));
+}));
+
+app.get('/entertainment/scrape-settings/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Scrape Source', `<div class="card" style="max-width:550px;margin:40px auto"><h3>Add News/Content Source</h3>
+    <form method="POST" action="/entertainment/scrape-settings/save">
+      <input name="name" placeholder="Source Name (e.g. Daily Monitor)" required>
+      <input name="url" placeholder="Website URL (e.g. https://www.monitor.co.ug)" required>
+      <select name="category"><option value="news">News</option><option value="entertainment">Entertainment</option><option value="sports">Sports</option><option value="events">Events</option><option value="technology">Technology</option><option value="business">Business</option><option value="lifestyle">Lifestyle</option></select>
+      <select name="scrape_type"><option value="rss">RSS Feed</option><option value="html">Web Page Scrape</option><option value="api">API Endpoint</option></select>
+      <input name="selector" placeholder="CSS Selector for articles (e.g. .article-title, h2.story-title)">
+      <input name="max_items" type="number" value="20" placeholder="Max items to import per scrape">
+      <button class="btn btn-green" style="width:100%">Add Source</button>
+    </form></div>`, req.session.user));
+});
+
+app.post('/entertainment/scrape-settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, url, category, scrape_type, selector, max_items } = req.body;
+  await pool.query('INSERT INTO scrape_sources(tenant_id,name,url,category,scrape_type,selector,max_items) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, name, url, category||'news', scrape_type||'rss', selector||'', max_items||20]);
+  res.redirect('/entertainment/scrape-settings');
+}));
+
+app.get('/entertainment/scrape-settings/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE scrape_sources SET is_active=NOT is_active WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/entertainment/scrape-settings');
+}));
+
+app.get('/entertainment/scrape-settings/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM scrape_sources WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/entertainment/scrape-settings');
+}));
+
+// === SCRAPE NOW (Web Fetcher) ===
+app.get('/entertainment/scrape-now', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sources = (await pool.query('SELECT * FROM scrape_sources WHERE tenant_id=$1 AND is_active=true', [t])).rows;
+  let imported = 0;
+  const ZAI = (await import('z-ai-web-dev-sdk')).default;
+  const zai = await ZAI.create();
+  for (const src of sources) {
+    try {
+      const searchResult = await zai.functions.invoke('web_search', { query: `${src.name} ${src.category} Uganda latest`, num: src.max_items || 10 });
+      if (Array.isArray(searchResult)) {
+        for (const item of searchResult) {
+          try {
+            await pool.query('INSERT INTO scraped_content(tenant_id,source,title,summary,url,category,scraped_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT DO NOTHING', [t, src.name, item.name||item.title||'', item.snippet||'', item.url||'', src.category]);
+            imported++;
+          } catch(e) {}
+        }
+      }
+      await pool.query('UPDATE scrape_sources SET last_scraped_at=NOW() WHERE id=$1', [src.id]);
+    } catch(e) { console.warn('Scrape error for', src.name, e.message); }
+  }
+  // Also scrape from built-in sources if no custom sources
+  if (sources.length === 0) {
+    const builtin = ['Daily Monitor Uganda', 'New Vision Uganda', 'UG Pulse Entertainment', 'Matooke Republic'];
+    for (const name of builtin) {
+      try {
+        const results = await zai.functions.invoke('web_search', { query: `${name} latest news Uganda 2025`, num: 10 });
+        if (Array.isArray(results)) {
+          for (const item of results) {
+            try {
+              await pool.query('INSERT INTO scraped_content(tenant_id,source,title,summary,url,category,scraped_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT DO NOTHING', [t, name, item.name||item.title||'', item.snippet||'', item.url||'', 'news']);
+              imported++;
+            } catch(e) {}
+          }
+        }
+      } catch(e) { console.warn('Built-in scrape error:', name, e.message); }
+    }
+  }
+  await audit(req.session.user.email, 'scrape_content', `Imported ${imported} items from web`);
+  res.redirect('/entertainment');
+}));
+
+app.get('/entertainment/news', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const news = (await pool.query("SELECT * FROM scraped_content WHERE tenant_id=$1 AND category='news' ORDER BY scraped_at DESC LIMIT 50", [t])).rows;
+  res.send(renderPage('News & Events', `<div class="card"><h2>📰 News & Events</h2>
+    <a href="/entertainment/scrape-now" class="btn btn-green btn-sm" style="margin-bottom:15px">🔄 Import Latest</a>
+    <div class="grid">${news.map(n=>`<div class="card" style="padding:18px"><h4>${esc((n.title||'').substring(0,80))}</h4><p class="muted">${esc((n.summary||'').substring(0,120))}</p><p><span class="tag">${esc(n.source||'')}</span> ${n.scraped_at?new Date(n.scraped_at).toLocaleDateString():''}</p>${n.url?`<a href="${esc(n.url)}" target="_blank" class="btn btn-sm" style="margin-top:8px">Read More →</a>`:''}</div>`).join('')||'<p class="muted">No news yet. Click "Import Latest" to fetch!</p>'}</div></div>`, req.session.user));
+}));
+
+// ============================================================
+// === ADD FEATURES TO ALL DASHBOARDS ===
+// ============================================================
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session.user)));
 
 // === ERROR HANDLER ===
