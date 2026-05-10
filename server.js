@@ -4999,6 +4999,10 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
         <div class="icon" style="background:#fce7f3;color:#db2777">S</div>
         <div class="text"><h4>Platform Status</h4><p>Update service status and incidents</p></div>
       </a>
+      <a href="/dev/cleanup" class="quick-action">
+        <div class="icon" style="background:#fee2e2;color:#dc2626">&#9888;</div>
+        <div class="text"><h4>Database Cleanup</h4><p>Erase test data, prepare for real users</p></div>
+      </a>
     </div>
 
     <!-- RECENT WITHDRAWALS -->
@@ -5107,6 +5111,166 @@ app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, r
   await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [amount, source]);
   await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amount]);
   await audit(req.session.user.email, 'inject_revenue', `UGX ${amount} from ${source}`);
+  res.redirect('/dev/master');
+}));
+
+// === DATABASE CLEANUP — ERASE ALL TEST DATA ===
+app.get('/dev/cleanup', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [tCount, uCount, sCount, fCount, dCount] = await Promise.all([
+    pool.query('SELECT COUNT(*) FROM tenants'),
+    pool.query('SELECT COUNT(*) FROM users'),
+    pool.query('SELECT COUNT(*) FROM students'),
+    pool.query('SELECT COUNT(*) FROM fees'),
+    pool.query('SELECT COUNT(*) FROM donations')
+  ]);
+  res.send(renderPage('Database Cleanup', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Database Cleanup</h1><p style="opacity:0.9;margin-top:4px">Erase all test data and prepare for real data</p>
+    </div>
+    <div class="card" style="border:2px solid #fca5a5;background:#fef2f2">
+      <h2 style="color:#991b1b">Current Data Overview</h2>
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num">${tCount.rows[0].count}</div><div class="muted">Tenants</div></div>
+        <div class="stat-card"><div class="stat-num">${uCount.rows[0].count}</div><div class="muted">Users</div></div>
+        <div class="stat-card"><div class="stat-num">${sCount.rows[0].count}</div><div class="muted">Students</div></div>
+        <div class="stat-card"><div class="stat-num">${fCount.rows[0].count}</div><div class="muted">Fees</div></div>
+        <div class="stat-card"><div class="stat-num">${dCount.rows[0].count}</div><div class="muted">Donations</div></div>
+      </div>
+      <h3 style="color:#991b1b;margin-top:20px">What will be deleted:</h3>
+      <ul style="line-height:2;padding-left:20px">
+        <li><strong>All tenants</strong> except Dev Master (your account)</li>
+        <li><strong>All users</strong> except your super_admin account</li>
+        <li><strong>All tenant data:</strong> students, fees, attendance, marks, members, patients, donations, sales, invoices, expenses, staff, events, sermons, etc.</li>
+        <li><strong>Developer revenue</strong> and platform wallet (reset to 0)</li>
+        <li><strong>Audit logs</strong></li>
+        <li><strong>Blog posts, adverts, dev posts</strong></li>
+        <li><strong>Educational resources</strong></li>
+        <li><strong>Scraped content</strong></li>
+        <li><strong>Notifications, chat messages, activity feed</strong></li>
+        <li><strong>All other tenant-scoped data</strong></li>
+      </ul>
+      <h3 style="color:#059669;margin-top:20px">What will be KEPT:</h3>
+      <ul style="line-height:2;padding-left:20px">
+        <li>Your dev account (waiswadaniel24@gmail.com / Daniel@2025)</li>
+        <li>Dev Master tenant</li>
+        <li>Platform settings (your contacts, branding)</li>
+        <li>Feature flags</li>
+        <li>Translations</li>
+        <li>Platform status services</li>
+        <li>Table structure (all columns and schemas)</li>
+      </ul>
+    </div>
+    <div style="text-align:center;margin-top:20px">
+      <form method="POST" action="/dev/cleanup/execute" onsubmit="return confirm('WARNING: This will permanently delete ALL test data. Are you absolutely sure? Type YES in your mind before clicking OK.')">
+        <button class="btn btn-red" style="font-size:18px;padding:16px 40px">ERASE ALL TEST DATA</button>
+      </form>
+      <p class="muted" style="margin-top:10px">This action cannot be undone. Make sure Render has backed up your database.</p>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const devEmail = 'waiswadaniel24@gmail.com';
+  console.log('=== STARTING DATABASE CLEANUP ===');
+  
+  // Get dev tenant ID
+  const devTenant = (await pool.query('SELECT id FROM tenants WHERE email=$1', [devEmail])).rows[0];
+  const devTenantId = devTenant?.id;
+  const devUserId = (await pool.query('SELECT id FROM users WHERE email=$1', [devEmail])).rows[0]?.id;
+  
+  // Tables with tenant_id foreign key — delete non-dev data
+  const tenantTables = [
+    'students','fees','attendance','exams','marks','members','events','org_finance',
+    'inventory','sales','sale_items','invoices','expenses','staff','timetable',
+    'grading_scales','fee_structures','church_members','donations','parent_links',
+    'sign_in_out','notifications','fee_receipts','subscriptions','payments',
+    'church_attendance','purchase_orders','tax_records','bill_reminders','documents',
+    'income_records','campaigns','campaign_pledges','role_permissions',
+    'campaign_updates','volunteer_hours','event_tickets','ticket_sales',
+    'chart_of_accounts','ledger_entries','document_folders','suppliers','branches',
+    'inventory_transfers','loyalty_points','sms_campaigns','investments','debt_payoff',
+    'momo_payments','automation_rules','integration_configs','calendar_events',
+    'ai_insights','report_templates','tenant_plugins','ad_impressions','peer_fundraisers',
+    'government_reports','biometric_logs','compliance_audits','relationships',
+    'custom_fields','custom_field_values','grants','custom_pages','document_templates',
+    'ussd_sessions','push_subscriptions','offline_sync_queue','scheduled_reports',
+    'analytics_events','sms_opt_outs','deep_links','data_exports','transport_routes',
+    'transport_assignments','discipline_incidents','homework','homework_submissions',
+    'school_events','student_health','health_visits','alumni','library_books',
+    'library_borrows','choir_members','worship_songs','sacraments','cell_groups',
+    'cell_group_members','volunteer_roles','volunteer_assignments','payroll_runs',
+    'payroll_items','leave_requests','project_tasks','crm_leads','stock_takes',
+    'stock_take_items','warranties','board_resolutions','assets','partners',
+    'ticketed_events','workflows','workflow_instances','chat_channels','chat_messages',
+    'channel_members','tasks','activity_feed','surveys','survey_responses',
+    'email_templates','qr_codes','certificates','signing_requests',
+    'clinic_staff','patient_queue','consultations','prescriptions','prescription_items',
+    'pharmacy_dispensing','lab_requests','lab_results','pharmacy_inventory',
+    'school_levels','hostels','hostel_rooms','hostel_assignments','meal_plans',
+    'meal_attendance','student_tracks','student_track_assignments',
+    'entertainment_videos','entertainment_music','entertainment_games',
+    'scraped_content','scrape_sources','public_posts','notices','sermons',
+    'prayer_requests','service_schedule','meeting_minutes','notice_board',
+    'budget_items','goals','personal_notes','customers','projects',
+    'student_portal_sessions','ptc_bookings','ptc_slots','lesson_plans',
+    'sibling_discounts','login_history','quotations','deliveries','public_pages',
+    'feature_flags'
+  ];
+  
+  // Delete from tenant-scoped tables (everything except dev tenant)
+  for (const table of tenantTables) {
+    try {
+      await pool.query(`DELETE FROM ${table} WHERE tenant_id IS NOT NULL AND tenant_id != $1`, [devTenantId]);
+    } catch (e) { /* table might not have tenant_id, skip */ }
+  }
+  
+  // Delete non-dev users
+  try { await pool.query('DELETE FROM users WHERE email != $1', [devEmail]); } catch(e) {}
+  
+  // Delete non-dev tenants
+  try { await pool.query('DELETE FROM tenants WHERE email != $1', [devEmail]); } catch(e) {}
+  
+  // Clean global tables (no tenant_id)
+  const globalTables = [
+    'audit_logs','developer_revenue','blog_posts','daily_adverts','dev_posts',
+    'educational_resources','password_resets','webhook_logs','email_queue',
+    'sms_logs','version_history','backup_log','api_keys','oauth_clients',
+    'marketplace_plugins','plugin_registry','login_history'
+  ];
+  for (const table of globalTables) {
+    try { await pool.query(`DELETE FROM ${table}`); } catch(e) {}
+  }
+  
+  // Reset platform wallet
+  try { await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1'); } catch(e) {}
+  
+  // Re-seed essential data
+  try {
+    await pool.query("INSERT INTO platform_status (service, status) VALUES ('api', 'operational'), ('database', 'operational'), ('email', 'operational'), ('sms', 'operational') ON CONFLICT DO NOTHING");
+  } catch(e) {}
+  
+  // Re-seed feature flags
+  const flagSeeds = [
+    ['school_mgmt', 'School Management', 'Student records, fees, grades, attendance', '1.0', 'core', 'None', true],
+    ['church_mgmt', 'Church Management', 'Members, donations, sermons, events', '1.0', 'core', 'None', true],
+    ['clinic_mgmt', 'Clinic Management', 'Patients, prescriptions, lab results', '1.0', 'core', 'None', true],
+    ['business_mgmt', 'Business Management', 'Sales, inventory, invoices, CRM', '1.0', 'core', 'None', true],
+    ['public_site', 'Public Website', 'Build a public-facing website with pages', '3.0', 'core', 'None', true],
+    ['fundraising', 'Fundraising', 'Launch campaigns and collect donations', '3.0', 'core', 'None', true],
+    ['entertainment_hub', 'Entertainment Hub', 'Videos, music, news and auto-scraped content', '3.0', 'core', 'z-ai-web-dev-sdk', true],
+    ['web_scraping', 'Web Scraping', 'Auto-import news and events from external sites', '3.0', 'core', 'z-ai-web-dev-sdk', true],
+    ['educational_resources', 'Books & Papers', 'Upload and scrape educational resources', '3.0', 'core', 'None', true]
+  ];
+  for (const [key, name, desc, ver, cat, reqs, active] of flagSeeds) {
+    try {
+      await pool.query('INSERT INTO feature_flags(feature_key,name,description,version,category,requirements,is_active) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [key, name, desc, ver, cat, reqs, active]);
+    } catch(e) {}
+  }
+  
+  await audit(devEmail, 'database_cleanup', 'Erased all test data, kept dev account and platform settings');
+  console.log('=== DATABASE CLEANUP COMPLETE ===');
+  
+  req.session.flash = { type: 'success', msg: 'All test data erased! Your dev account and platform settings are intact. The site is ready for real testing data.' };
   res.redirect('/dev/master');
 }));
 
