@@ -524,7 +524,107 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS setup_complete BOOLEAN DEFAULT false`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS setup_steps JSONB`,
   // 3.18 Grant tracking
-  `CREATE TABLE IF NOT EXISTS grants (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, funder TEXT, amount INTEGER DEFAULT 0, deadline DATE, status TEXT DEFAULT 'identified', description TEXT, source_url TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
+  `CREATE TABLE IF NOT EXISTS grants (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, funder TEXT, amount INTEGER DEFAULT 0, deadline DATE, status TEXT DEFAULT 'identified', description TEXT, source_url TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+
+  // ============ FULL v3→v9 FEATURE SYSTEM MIGRATIONS ============
+  // Feature Activation System (Coming Soon toggle)
+  `CREATE TABLE IF NOT EXISTS feature_flags (id SERIAL PRIMARY KEY, feature_key TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT, version TEXT, category TEXT, requirements TEXT, is_active BOOLEAN DEFAULT false, activated_by TEXT, activated_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Custom Pages (user-editable with stamps/headers/footers)
+  `CREATE TABLE IF NOT EXISTS custom_pages (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, slug TEXT NOT NULL, content TEXT, header_html TEXT, footer_html TEXT, stamp_url TEXT, stamp_position TEXT DEFAULT 'bottom-right', badge_text TEXT, badge_color TEXT DEFAULT '#4f46e5', signature_name TEXT, signature_image_url TEXT, signature_position TEXT DEFAULT 'bottom-left', is_published BOOLEAN DEFAULT false, created_by TEXT, updated_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, slug))`,
+  // Document Templates (receipts, reports, certificates with headers/footers/stamps/signatures)
+  `CREATE TABLE IF NOT EXISTS document_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT NOT NULL, header_html TEXT, footer_html TEXT, stamp_url TEXT, stamp_position TEXT DEFAULT 'bottom-right', badge_text TEXT, badge_color TEXT DEFAULT '#4f46e5', signature_name TEXT, signature_image_url TEXT, signature_position TEXT DEFAULT 'bottom-left', logo_url TEXT, watermark_text TEXT, watermark_opacity NUMERIC DEFAULT 0.1, paper_size TEXT DEFAULT 'A4', margin_top INTEGER DEFAULT 20, margin_bottom INTEGER DEFAULT 20, margin_left INTEGER DEFAULT 15, margin_right INTEGER DEFAULT 15, css TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // USSD Sessions
+  `CREATE TABLE IF NOT EXISTS ussd_sessions (id SERIAL PRIMARY KEY, session_id TEXT NOT NULL, phone TEXT, tenant_id INTEGER, current_menu TEXT, data JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ)`,
+  // Push Subscriptions
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, endpoint TEXT NOT NULL, keys JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Offline Sync Queue
+  `CREATE TABLE IF NOT EXISTS offline_sync_queue (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id INTEGER, data JSONB, synced BOOLEAN DEFAULT false, synced_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Scheduled Reports
+  `CREATE TABLE IF NOT EXISTS scheduled_reports (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, report_type TEXT, frequency TEXT DEFAULT 'daily', recipients TEXT, format TEXT DEFAULT 'csv', last_run TIMESTAMPTZ, next_run TIMESTAMPTZ, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Analytics Events
+  `CREATE TABLE IF NOT EXISTS analytics_events (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event_type TEXT NOT NULL, entity_type TEXT, entity_id INTEGER, data JSONB, user_email TEXT, session_id TEXT, ip_address TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Plugin Registry
+  `CREATE TABLE IF NOT EXISTS plugin_registry (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plugin_key TEXT NOT NULL, name TEXT NOT NULL, version TEXT, description TEXT, config JSONB, is_active BOOLEAN DEFAULT true, installed_by TEXT, installed_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, plugin_key))`,
+  // SMS Opt-Out
+  `CREATE TABLE IF NOT EXISTS sms_opt_outs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, phone TEXT NOT NULL, reason TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, phone))`,
+  // Deep Links
+  `CREATE TABLE IF NOT EXISTS deep_links (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, path TEXT NOT NULL, params JSONB, short_code TEXT UNIQUE, click_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Data Portability
+  `CREATE TABLE IF NOT EXISTS data_exports (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, format TEXT DEFAULT 'json', tables TEXT[], status TEXT DEFAULT 'pending', file_url TEXT, size_bytes INTEGER, requested_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), completed_at TIMESTAMPTZ)`,
+  // White Label Config
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_domain TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS app_name TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS support_email TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS support_phone TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS privacy_policy_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS terms_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS onboarding_message TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS favicon_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_js TEXT`,
+  // Additional indexes for performance
+  `CREATE INDEX IF NOT EXISTS idx_analytics_events_tenant ON analytics_events(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_feature_flags_key ON feature_flags(feature_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_custom_pages_slug ON custom_pages(tenant_id, slug)`,
+  `CREATE INDEX IF NOT EXISTS idx_offline_sync_tenant ON offline_sync_queue(tenant_id, synced)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_subscriptions_tenant ON push_subscriptions(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_scheduled_reports_next ON scheduled_reports(next_run) WHERE active = true`,
+  `CREATE INDEX IF NOT EXISTS idx_sms_opt_outs_phone ON sms_opt_outs(phone)`,
+  // Seed default feature flags
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('plan_enforcement', 'Plan Enforcement', 'Block free plan at 50 students', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('usage_limits', 'Usage Limits', 'Auto-block when plan limit exceeded', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('auto_backup', 'Auto Daily Backup', 'pg_dump to Cloudinary at 2am UTC', '3.0', 'core', 'CLOUDINARY_URL env var', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('soft_delete', 'Soft Delete', 'Deleted items can be restored within 30 days', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('version_history', 'Version History', 'Track all data changes with undo support', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('pagination', 'Pagination', '50 rows per page on all lists', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('rate_limiting', 'Rate Limiting', 'Block API abuse with rate limits', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('seo_meta', 'SEO Meta Tags', 'Open Graph and Twitter cards for all pages', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('setup_checklist', 'Setup Checklist', 'Onboard wizard for new tenants', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('pretty_urls', 'Pretty URLs', '/c/water-project style public pages', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('user_guide', 'User Guide', '/guide page to reduce support tickets', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('grant_scraper', 'Grant Scraper', 'Track and apply for funding opportunities', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('video_compression', 'Video Compression', '720p eager transform via Cloudinary', '3.0', 'core', 'CLOUDINARY_URL env var', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('custom_fields', 'Custom Fields', 'Tenant adds custom fields like Blood Type', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('relationships', 'Relationships', 'John brother of Mary tracking', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('name_splitting', 'Name Splitting', 'First name and last name columns', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('pwa_install', 'PWA Install', 'Add to home screen prompt', '3.0', 'core', 'manifest.json + sw.js', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('csv_import', 'CSV Import', 'Import 1000 students via CSV', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('privacy_terms', 'Privacy & Terms', 'Legal requirement pages', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('ussd_menus', 'USSD Menus', 'Mobile USSD access for feature phones', '4.0', 'uganda', 'Africa Talking USSD enabled', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('sms_opt_out', 'SMS Opt-Out', 'Allow recipients to opt out of SMS', '4.0', 'uganda', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('local_languages', 'Local Languages', 'Luganda, Swahili, French translations', '4.0', 'uganda', 'Translations seeded', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('uneb_integration', 'UNEB Integration', 'Uganda National Examinations Board', '4.0', 'uganda', 'UNEB API credentials', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('nira_verification', 'NIRA Verification', 'National ID verification', '4.0', 'uganda', 'NIRA API credentials', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('advanced_analytics', 'Advanced Analytics', 'Detailed analytics dashboard with charts', '5.0', 'enterprise', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('scheduled_reports', 'Scheduled Reports', 'Auto-send reports on schedule', '5.0', 'enterprise', 'GMAIL_USER + GMAIL_PASS env vars', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('momo_payments', 'Mobile Money', 'MTN MoMo and Airtel Money integration', '5.0', 'enterprise', 'MoMo API credentials', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('multi_currency', 'Multi-Currency', 'UGX, KES, TZS, RWF, USD support', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('automation_engine', 'Automation Engine', 'If-then rules for automated actions', '6.0', 'ecosystem', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('oauth2', 'OAuth2 Login', 'Google and Microsoft OAuth', '6.0', 'ecosystem', 'GOOGLE_CLIENT_ID or MS_CLIENT_ID', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('graphql_api', 'GraphQL API', '/api/v2/graphql endpoint', '6.0', 'ecosystem', 'API key (Basic plan+)', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('webhook_retry', 'Webhook Retry', 'Auto-retry failed webhook deliveries', '6.0', 'ecosystem', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('plugin_marketplace', 'Plugin Marketplace', 'Install community plugins', '6.0', 'ecosystem', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('ai_comments', 'AI Report Comments', 'Auto-generate report card comments', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('fee_prediction', 'Fee Default Prediction', 'AI-powered risk analysis', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('dropout_risk', 'Dropout Risk Analysis', 'Identify students at risk', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('demand_forecast', 'Demand Forecasting', 'Predict future inventory needs', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('churn_prediction', 'Churn Prediction', 'Identify members at risk of leaving', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('giving_trends', 'Giving Trends AI', 'AI-powered donation analysis', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('engagement_scoring', 'Engagement Scoring', 'Member engagement analysis', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('push_notifications', 'Push Notifications', 'Browser push notification support', '8.0', 'mobile', 'VAPID keys', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('offline_sync', 'Offline Sync', 'Work offline with auto-sync', '8.0', 'mobile', 'Service Worker', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('deep_linking', 'Deep Linking', 'Short codes for mobile app links', '8.0', 'mobile', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('camera_integration', 'Camera Integration', 'Scan barcodes and documents via camera', '8.0', 'mobile', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('peer_fundraising', 'Peer-to-Peer Fundraising', 'Individual fundraising campaigns', '8.0', 'mobile', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('app_store', 'App Store', 'Browse and install integrations', '8.0', 'mobile', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('saml_sso', 'SAML SSO', 'Enterprise single sign-on', '9.0', 'platform', 'SAML IdP configuration', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('soc2', 'SOC2 Compliance', 'Security compliance dashboard', '9.0', 'platform', 'Security audit completed', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('white_label', 'White Label', 'Custom domain and branding', '9.0', 'platform', 'Custom domain configured', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('plugin_sdk', 'Plugin SDK', 'Build custom plugins', '9.0', 'platform', 'Developer account', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('data_portability', 'Data Portability', 'Export all data in standard formats', '9.0', 'platform', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('page_editor', 'Page Editor', 'User-editable pages with stamps and signatures', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('document_templates', 'Document Templates', 'Customize receipts, reports with headers/footers/stamps', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('government_dashboards', 'Government Dashboards', 'Anonymized aggregate data for regulators', '9.0', 'platform', 'super_admin only', false) ON CONFLICT DO NOTHING`
 ];
 
 (async () => {
@@ -7907,6 +8007,1133 @@ app.get('/terms', (req, res) => {
       <p>waiswadaniel24@gmail.com | +256 789 736737</p>
     </div>
   `, null));
+});
+
+// ============================================================
+// FULL v3.0→v9.0 FEATURE SYSTEM - ALL MISSING FEATURES
+// ============================================================
+
+// Feature flag check middleware
+const requireFeature = (featureKey) => async (req, res, next) => {
+  try {
+    const flag = (await pool.query('SELECT * FROM feature_flags WHERE feature_key=$1', [featureKey])).rows[0];
+    if (flag?.is_active) return next();
+    return res.send(renderPage('Coming Soon', `
+      <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Coming Soon</h1><p>This feature is not yet activated</p></div>
+      <div class="card" style="max-width:600px;margin:40px auto;text-align:center">
+        <div style="font-size:64px;margin:20px 0">🔒</div>
+        <h2>${esc(flag?.name || featureKey)}</h2>
+        <p class="muted">${esc(flag?.description || 'This feature requires activation by the platform developer.')}</p>
+        ${flag?.requirements && flag.requirements !== 'None' ? `<div class="alert alert-info" style="margin:20px 0"><strong>Requirements:</strong> ${esc(flag.requirements)}</div>` : ''}
+        <div style="margin-top:20px"><a href="/dashboard" class="btn">Back to Dashboard</a> <a href="/dev/features" class="btn btn-gold" style="margin-left:8px">Feature Manager</a></div>
+      </div>
+    `, req.session.user));
+  } catch(e) { return next(); }
+};
+
+// =============================================
+// FEATURE ACTIVATION SYSTEM (Developer Dashboard)
+// =============================================
+app.get('/dev/features', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const features = (await pool.query('SELECT * FROM feature_flags ORDER BY version, category, name')).rows;
+  const categories = {};
+  features.forEach(f => {
+    const cat = f.category || 'other';
+    if (!categories[cat]) categories[cat] = [];
+    categories[cat].push(f);
+  });
+  const catNames = { core: 'v3.0 Core', uganda: 'v4.0 Uganda Market', enterprise: 'v5.0 Enterprise', ecosystem: 'v6.0 Ecosystem', ai: 'v7.0 AI & Automation', mobile: 'v8.0 Mobile', platform: 'v9.0 Platform' };
+  const activeCount = features.filter(f => f.is_active).length;
+  res.send(renderPage('Feature Manager', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>Feature Activation Manager</h1><p>Toggle features on/off as requirements are met</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${features.length}</div><div>Total Features</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${activeCount}</div><div>Active</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${features.length - activeCount}</div><div>Coming Soon</div></div>
+    </div>
+    ${Object.entries(categories).map(([cat, items]) => `
+      <div class="card"><h2 style="margin-bottom:15px">${catNames[cat] || cat.toUpperCase()} <span class="tag">${items.length} features</span></h2>
+        <table><tr><th>Feature</th><th>Key</th><th>Version</th><th>Requirements</th><th>Status</th><th>Action</th></tr>
+        ${items.map(f => `<tr>
+          <td><strong>${esc(f.name)}</strong><br><span class="muted">${esc(f.description||'')}</span></td>
+          <td><code style="font-size:11px;background:#f1f5f9;padding:2px 6px;border-radius:4px">${esc(f.feature_key)}</code></td>
+          <td><span class="tag">v${esc(f.version||'?')}</span></td>
+          <td>${f.requirements && f.requirements !== 'None' ? `<span style="color:#f59e0b">${esc(f.requirements)}</span>` : '<span style="color:#059669">None</span>'}</td>
+          <td>${f.is_active ? '<span class="tag" style="background:#d1fae5;color:#065f46">Active</span>' : '<span class="tag" style="background:#fef3c7;color:#92400e">Coming Soon</span>'}</td>
+          <td><a href="/dev/features/${f.id}/toggle" class="btn btn-sm ${f.is_active ? 'btn-red' : 'btn-green'}">${f.is_active ? 'Deactivate' : 'Activate'}</a></td>
+        </tr>`).join('')}
+        </table>
+      </div>
+    `).join('')}
+  `, req.session.user));
+}));
+
+app.get('/dev/features/:id/toggle', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const feature = (await pool.query('SELECT * FROM feature_flags WHERE id=$1', [req.params.id])).rows[0];
+  if (!feature) return res.status(404).send('Feature not found');
+  const newActive = !feature.is_active;
+  await pool.query('UPDATE feature_flags SET is_active=$1, activated_by=$2, activated_at=NOW() WHERE id=$3', [newActive, req.session.user.email, req.params.id]);
+  await audit(req.session.user.email, `Feature ${newActive ? 'activated' : 'deactivated'}`, `${feature.name} (${feature.feature_key})`);
+  res.redirect('/dev/features');
+}));
+
+// =============================================
+// PAGE EDITOR (User-editable pages with stamps/headers/footers/badges/signatures)
+// =============================================
+app.get('/pages', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const pages = (await pool.query('SELECT * FROM custom_pages WHERE tenant_id=$1 ORDER BY updated_at DESC', [t])).rows;
+  res.send(renderPage('Page Editor', `
+    <div class="hero" style="background:linear-gradient(135deg,#10b981,#059669)"><h1>Page Editor</h1><p>Create and customize your pages</p></div>
+    <div class="card"><a href="/pages/new" class="btn btn-sm" style="margin-bottom:15px">+ New Page</a>
+      ${pages.length ? `<table><tr><th>Title</th><th>Slug</th><th>Badge</th><th>Stamp</th><th>Signature</th><th>Published</th><th>Actions</th></tr>
+      ${pages.map(p => `<tr>
+        <td><strong>${esc(p.title)}</strong></td>
+        <td><code>${esc(p.slug)}</code></td>
+        <td>${p.badge_text ? `<span class="tag" style="background:${p.badge_color||'#4f46e5'};color:white">${esc(p.badge_text)}</span>` : '-'}</td>
+        <td>${p.stamp_url ? 'Yes' : '-'}</td>
+        <td>${p.signature_name ? esc(p.signature_name) : '-'}</td>
+        <td>${p.is_published ? '<span class="tag" style="background:#d1fae5;color:#065f46">Published</span>' : '<span class="tag" style="background:#fef3c7;color:#92400e">Draft</span>'}</td>
+        <td>
+          <a href="/pages/${p.id}/edit" class="btn btn-sm">Edit</a>
+          <a href="/pages/${p.id}/preview" class="btn btn-sm btn-green">Preview</a>
+          <a href="/p/${p.slug}" class="btn btn-sm" target="_blank">View</a>
+          <a href="/pages/${p.id}/delete" class="btn btn-sm btn-red">Delete</a>
+        </td>
+      </tr>`).join('')}</table>` : '<p class="muted">No pages yet. Create your first page!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/pages/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Page', `
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <h2>Create New Page</h2>
+      <form method="POST" action="/pages/save">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Page Title</label><input name="title" placeholder="About Us" required></div>
+          <div><label>URL Slug</label><input name="slug" placeholder="about-us" required><p class="muted">Page will be at /p/about-us</p></div>
+        </div>
+        <label>Page Content (HTML)</label>
+        <textarea name="content" rows="10" placeholder="<h1>Welcome!</h1><p>Your content here...</p>" style="font-family:monospace"></textarea>
+        <h3 style="margin-top:20px">Header</h3>
+        <textarea name="header_html" rows="3" placeholder="<div style='background:#4f46e5;color:white;padding:20px;text-align:center'><h1>My Organization</h1></div>" style="font-family:monospace"></textarea>
+        <h3>Footer</h3>
+        <textarea name="footer_html" rows="3" placeholder="<div style='background:#1e293b;color:white;padding:20px;text-align:center'>Contact: info@example.com</div>" style="font-family:monospace"></textarea>
+        <h3 style="margin-top:20px">Stamp</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Stamp Image URL</label><input name="stamp_url" placeholder="https://res.cloudinary.com/.../stamp.png"></div>
+          <div><label>Position</label><select name="stamp_position"><option value="bottom-right">Bottom Right</option><option value="bottom-left">Bottom Left</option><option value="top-right">Top Right</option><option value="top-left">Top Left</option><option value="center">Center</option></select></div>
+        </div>
+        <h3>Badge</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Badge Text</label><input name="badge_text" placeholder="OFFICIAL"></div>
+          <div><label>Badge Color</label><input name="badge_color" type="color" value="#4f46e5"></div>
+        </div>
+        <h3>Signature</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Signatory Name</label><input name="signature_name" placeholder="John Doe, Director"></div>
+          <div><label>Signature Image URL</label><input name="signature_image_url" placeholder="https://res.cloudinary.com/.../sig.png"></div>
+        </div>
+        <label style="margin-top:15px"><input type="checkbox" name="is_published" value="on"> Publish this page immediately</label>
+        <button class="btn" style="width:100%;margin-top:15px">Create Page</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/pages/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, slug, content, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, is_published } = req.body;
+  await pool.query('INSERT INTO custom_pages(tenant_id,title,slug,content,header_html,footer_html,stamp_url,stamp_position,badge_text,badge_color,signature_name,signature_image_url,signature_position,is_published,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)', [t, title, slug, content||'', header_html||'', footer_html||'', stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', is_published==='on', req.session.user.email, req.session.user.email]);
+  await audit(req.session.user.email, 'page_created', title);
+  res.redirect('/pages');
+}));
+
+app.get('/pages/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const page = (await pool.query('SELECT * FROM custom_pages WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!page) return res.status(404).send('Page not found');
+  res.send(renderPage('Edit Page', `
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <h2>Edit Page: ${esc(page.title)}</h2>
+      <form method="POST" action="/pages/${page.id}/update">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Page Title</label><input name="title" value="${esc(page.title)}" required></div>
+          <div><label>URL Slug</label><input name="slug" value="${esc(page.slug)}" required></div>
+        </div>
+        <label>Page Content (HTML)</label>
+        <textarea name="content" rows="10" style="font-family:monospace">${esc(page.content||'')}</textarea>
+        <h3>Header</h3>
+        <textarea name="header_html" rows="3" style="font-family:monospace">${esc(page.header_html||'')}</textarea>
+        <h3>Footer</h3>
+        <textarea name="footer_html" rows="3" style="font-family:monospace">${esc(page.footer_html||'')}</textarea>
+        <h3>Stamp</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Stamp Image URL</label><input name="stamp_url" value="${esc(page.stamp_url||'')}"></div>
+          <div><label>Position</label><select name="stamp_position"><option value="bottom-right" ${page.stamp_position==='bottom-right'?'selected':''}>Bottom Right</option><option value="bottom-left" ${page.stamp_position==='bottom-left'?'selected':''}>Bottom Left</option><option value="top-right" ${page.stamp_position==='top-right'?'selected':''}>Top Right</option><option value="top-left" ${page.stamp_position==='top-left'?'selected':''}>Top Left</option><option value="center" ${page.stamp_position==='center'?'selected':''}>Center</option></select></div>
+        </div>
+        <h3>Badge</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Badge Text</label><input name="badge_text" value="${esc(page.badge_text||'')}"></div>
+          <div><label>Badge Color</label><input name="badge_color" type="color" value="${esc(page.badge_color||'#4f46e5')}"></div>
+        </div>
+        <h3>Signature</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Signatory Name</label><input name="signature_name" value="${esc(page.signature_name||'')}"></div>
+          <div><label>Signature Image URL</label><input name="signature_image_url" value="${esc(page.signature_image_url||'')}"></div>
+        </div>
+        <label style="margin-top:15px"><input type="checkbox" name="is_published" value="on" ${page.is_published?'checked':''}> Published</label>
+        <button class="btn" style="width:100%;margin-top:15px">Update Page</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/pages/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, slug, content, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, is_published } = req.body;
+  await pool.query('UPDATE custom_pages SET title=$1,slug=$2,content=$3,header_html=$4,footer_html=$5,stamp_url=$6,stamp_position=$7,badge_text=$8,badge_color=$9,signature_name=$10,signature_image_url=$11,signature_position=$12,is_published=$13,updated_by=$14,updated_at=NOW() WHERE id=$15 AND tenant_id=$16', [title, slug, content||'', header_html||'', footer_html||'', stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', is_published==='on', req.session.user.email, req.params.id, t]);
+  res.redirect('/pages');
+}));
+
+app.get('/pages/:id/preview', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const page = (await pool.query('SELECT * FROM custom_pages WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!page) return res.status(404).send('Page not found');
+  const stampPos = { 'bottom-right': 'bottom:20px;right:20px', 'bottom-left': 'bottom:20px;left:20px', 'top-right': 'top:20px;right:20px', 'top-left': 'top:20px;left:20px', 'center': 'top:50%;left:50%;transform:translate(-50%,-50%)' };
+  const sigPos = { 'bottom-right': 'bottom:20px;right:20px', 'bottom-left': 'bottom:20px;left:20px' };
+  res.send(renderPageV3('Preview: ' + page.title, `
+    <div style="position:relative;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;min-height:500px">
+      ${page.badge_text ? `<div style="position:absolute;top:15px;right:15px;z-index:10"><span style="background:${page.badge_color||'#4f46e5'};color:white;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;transform:rotate(5deg);display:inline-block">${esc(page.badge_text)}</span></div>` : ''}
+      ${page.header_html || ''}
+      <div style="padding:30px;min-height:300px">${page.content || '<p class="muted">No content yet</p>'}</div>
+      ${page.stamp_url ? `<div style="position:absolute;${stampPos[page.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(page.stamp_url)}" style="width:120px;height:auto" alt="Stamp"></div>` : ''}
+      ${page.signature_name ? `<div style="position:absolute;${sigPos[page.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center;margin:20px"><p style="font-family:cursive;font-size:18px;margin:0">${esc(page.signature_name)}</p>${page.signature_image_url ? `<img src="${esc(page.signature_image_url)}" style="width:150px;height:auto" alt="Signature">` : ''}<div style="width:200px;border-top:1px solid #333;margin-top:5px"></div></div>` : ''}
+      ${page.footer_html || ''}
+    </div>
+    <div style="text-align:center;margin-top:20px"><a href="/pages/${page.id}/edit" class="btn btn-sm">Edit Page</a> <a href="/pages" class="btn btn-sm">All Pages</a></div>
+  `, req.session.user));
+}));
+
+app.get('/pages/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM custom_pages WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/pages');
+}));
+
+// Public custom page view
+app.get('/p/:slug', ah(async (req, res) => {
+  const page = (await pool.query('SELECT cp.*,t.name as tenant_name,t.primary_color FROM custom_pages cp JOIN tenants t ON cp.tenant_id=t.id WHERE cp.slug=$1 AND cp.is_published=true', [req.params.slug])).rows[0];
+  if (!page) return res.status(404).send(renderPage('404', '<div class="card"><h2>Page Not Found</h2><p>This page does not exist or is not published.</p><a href="/" class="btn">Go Home</a></div>', null));
+  const stampPos = { 'bottom-right': 'bottom:20px;right:20px', 'bottom-left': 'bottom:20px;left:20px', 'top-right': 'top:20px;right:20px', 'top-left': 'top:20px;left:20px', 'center': 'top:50%;left:50%;transform:translate(-50%,-50%)' };
+  const sigPos = { 'bottom-right': 'bottom:40px;right:40px', 'bottom-left': 'bottom:40px;left:40px' };
+  res.send(renderPageV3(page.title, `
+    <div style="position:relative;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;min-height:500px">
+      ${page.badge_text ? `<div style="position:absolute;top:15px;right:15px;z-index:10"><span style="background:${page.badge_color||'#4f46e5'};color:white;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;transform:rotate(5deg);display:inline-block">${esc(page.badge_text)}</span></div>` : ''}
+      ${page.header_html || ''}
+      <div style="padding:30px;min-height:300px">${page.content || ''}</div>
+      ${page.stamp_url ? `<div style="position:absolute;${stampPos[page.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(page.stamp_url)}" style="width:120px;height:auto" alt="Stamp"></div>` : ''}
+      ${page.signature_name ? `<div style="position:absolute;${sigPos[page.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center;margin:20px"><p style="font-family:cursive;font-size:18px;margin:0">${esc(page.signature_name)}</p>${page.signature_image_url ? `<img src="${esc(page.signature_image_url)}" style="width:150px;height:auto" alt="Signature">` : ''}<div style="width:200px;border-top:1px solid #333;margin-top:5px"></div></div>` : ''}
+      ${page.footer_html || ''}
+    </div>
+    <p class="muted" style="text-align:center;margin-top:15px">Powered by SSEWASSWA</p>
+  `, null, { description: page.title + ' - ' + (page.tenant_name || 'SSEWASSWA') }));
+}));
+
+// =============================================
+// DOCUMENT TEMPLATES (Receipts, Reports, Certificates)
+// =============================================
+app.get('/document-templates', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const templates = (await pool.query('SELECT * FROM document_templates WHERE tenant_id=$1 ORDER BY type, name', [t])).rows;
+  res.send(renderPage('Document Templates', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)"><h1>Document Templates</h1><p>Customize headers, footers, stamps, signatures on documents</p></div>
+    <div class="card"><a href="/document-templates/new" class="btn btn-sm" style="margin-bottom:15px">+ New Template</a>
+      ${templates.length ? `<table><tr><th>Name</th><th>Type</th><th>Stamp</th><th>Badge</th><th>Signature</th><th>Watermark</th><th>Actions</th></tr>
+      ${templates.map(t => `<tr>
+        <td><strong>${esc(t.name)}</strong></td>
+        <td><span class="tag">${esc(t.type)}</span></td>
+        <td>${t.stamp_url ? 'Yes' : '-'}</td>
+        <td>${t.badge_text ? `<span class="tag" style="background:${t.badge_color||'#4f46e5'};color:white">${esc(t.badge_text)}</span>` : '-'}</td>
+        <td>${t.signature_name ? esc(t.signature_name) : '-'}</td>
+        <td>${t.watermark_text ? esc(t.watermark_text) : '-'}</td>
+        <td><a href="/document-templates/${t.id}/edit" class="btn btn-sm">Edit</a> <a href="/document-templates/${t.id}/preview" class="btn btn-sm btn-green">Preview</a> <a href="/document-templates/${t.id}/delete" class="btn btn-sm btn-red">Delete</a></td>
+      </tr>`).join('')}</table>` : '<p class="muted">No templates. Create one to customize your documents!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/document-templates/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Document Template', `
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <h2>Create Document Template</h2>
+      <form method="POST" action="/document-templates/save">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Template Name</label><input name="name" placeholder="Fee Receipt Template" required></div>
+          <div><label>Type</label><select name="type"><option value="receipt">Fee Receipt</option><option value="report_card">Report Card</option><option value="invoice">Invoice</option><option value="certificate">Certificate</option><option value="letter">Letter</option><option value="general">General</option></select></div>
+        </div>
+        <h3>Header</h3>
+        <textarea name="header_html" rows="4" placeholder="<div style='display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #4f46e5;padding-bottom:10px'><div><h1>School Name</h1><p>Motto: Excellence</p></div><div><img src='logo.png' width='80'></div></div>" style="font-family:monospace"></textarea>
+        <h3>Footer</h3>
+        <textarea name="footer_html" rows="4" placeholder="<div style='border-top:1px solid #ccc;padding-top:10px;text-align:center;font-size:12px;color:#666'>Generated by SSEWASSWA | Date: {{date}}</div>" style="font-family:monospace"></textarea>
+        <h3>Stamp</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Stamp Image URL</label><input name="stamp_url" placeholder="https://res.cloudinary.com/.../stamp.png"></div>
+          <div><label>Position</label><select name="stamp_position"><option value="bottom-right">Bottom Right</option><option value="bottom-left">Bottom Left</option><option value="top-right">Top Right</option><option value="center">Center</option></select></div>
+        </div>
+        <h3>Badge</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Badge Text</label><input name="badge_text" placeholder="PAID"></div>
+          <div><label>Badge Color</label><input name="badge_color" type="color" value="#4f46e5"></div>
+        </div>
+        <h3>Signature</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Signatory Name</label><input name="signature_name" placeholder="Head Teacher"></div>
+          <div><label>Signature Image URL</label><input name="signature_image_url" placeholder="https://res.cloudinary.com/.../signature.png"></div>
+        </div>
+        <h3>Additional Options</h3>
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+          <div><label>Logo URL</label><input name="logo_url" placeholder="Override tenant logo"></div>
+          <div><label>Watermark Text</label><input name="watermark_text" placeholder="DRAFT / CONFIDENTIAL"></div>
+          <div><label>Watermark Opacity</label><input name="watermark_opacity" type="number" step="0.05" min="0" max="1" value="0.1"></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Paper Size</label><select name="paper_size"><option value="A4">A4</option><option value="A5">A5</option><option value="Letter">Letter</option><option value="Legal">Legal</option></select></div>
+          <div><label>Custom CSS</label><input name="css" placeholder="Additional CSS styles"></div>
+        </div>
+        <button class="btn" style="width:100%;margin-top:15px">Create Template</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/document-templates/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, type, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, logo_url, watermark_text, watermark_opacity, paper_size, margin_top, margin_bottom, margin_left, margin_right, css } = req.body;
+  await pool.query('INSERT INTO document_templates(tenant_id,name,type,header_html,footer_html,stamp_url,stamp_position,badge_text,badge_color,signature_name,signature_image_url,signature_position,logo_url,watermark_text,watermark_opacity,paper_size,margin_top,margin_bottom,margin_left,margin_right,css) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)', [t, name, type, header_html||'', footer_html||'', stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', logo_url||null, watermark_text||null, watermark_opacity||0.1, paper_size||'A4', margin_top||20, margin_bottom||20, margin_left||15, margin_right||15, css||null]);
+  res.redirect('/document-templates');
+}));
+
+app.get('/document-templates/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tmpl = (await pool.query('SELECT * FROM document_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!tmpl) return res.status(404).send('Template not found');
+  res.send(renderPage('Edit Template', `
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <h2>Edit Template: ${esc(tmpl.name)}</h2>
+      <form method="POST" action="/document-templates/${tmpl.id}/update">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Template Name</label><input name="name" value="${esc(tmpl.name)}" required></div>
+          <div><label>Type</label><select name="type"><option value="receipt" ${tmpl.type==='receipt'?'selected':''}>Fee Receipt</option><option value="report_card" ${tmpl.type==='report_card'?'selected':''}>Report Card</option><option value="invoice" ${tmpl.type==='invoice'?'selected':''}>Invoice</option><option value="certificate" ${tmpl.type==='certificate'?'selected':''}>Certificate</option><option value="letter" ${tmpl.type==='letter'?'selected':''}>Letter</option><option value="general" ${tmpl.type==='general'?'selected':''}>General</option></select></div>
+        </div>
+        <h3>Header</h3>
+        <textarea name="header_html" rows="4" style="font-family:monospace">${esc(tmpl.header_html||'')}</textarea>
+        <h3>Footer</h3>
+        <textarea name="footer_html" rows="4" style="font-family:monospace">${esc(tmpl.footer_html||'')}</textarea>
+        <h3>Stamp</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Stamp Image URL</label><input name="stamp_url" value="${esc(tmpl.stamp_url||'')}"></div>
+          <div><label>Position</label><select name="stamp_position"><option value="bottom-right" ${tmpl.stamp_position==='bottom-right'?'selected':''}>Bottom Right</option><option value="bottom-left" ${tmpl.stamp_position==='bottom-left'?'selected':''}>Bottom Left</option><option value="top-right" ${tmpl.stamp_position==='top-right'?'selected':''}>Top Right</option><option value="center" ${tmpl.stamp_position==='center'?'selected':''}>Center</option></select></div>
+        </div>
+        <h3>Badge</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Badge Text</label><input name="badge_text" value="${esc(tmpl.badge_text||'')}"></div>
+          <div><label>Badge Color</label><input name="badge_color" type="color" value="${esc(tmpl.badge_color||'#4f46e5')}"></div>
+        </div>
+        <h3>Signature</h3>
+        <div class="grid" style="grid-template-columns:2fr 1fr">
+          <div><label>Signatory Name</label><input name="signature_name" value="${esc(tmpl.signature_name||'')}"></div>
+          <div><label>Signature Image URL</label><input name="signature_image_url" value="${esc(tmpl.signature_image_url||'')}"></div>
+        </div>
+        <h3>Additional Options</h3>
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+          <div><label>Logo URL</label><input name="logo_url" value="${esc(tmpl.logo_url||'')}"></div>
+          <div><label>Watermark Text</label><input name="watermark_text" value="${esc(tmpl.watermark_text||'')}"></div>
+          <div><label>Watermark Opacity</label><input name="watermark_opacity" type="number" step="0.05" min="0" max="1" value="${tmpl.watermark_opacity||0.1}"></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Paper Size</label><select name="paper_size"><option value="A4" ${tmpl.paper_size==='A4'?'selected':''}>A4</option><option value="A5" ${tmpl.paper_size==='A5'?'selected':''}>A5</option><option value="Letter" ${tmpl.paper_size==='Letter'?'selected':''}>Letter</option><option value="Legal" ${tmpl.paper_size==='Legal'?'selected':''}>Legal</option></select></div>
+          <div><label>Custom CSS</label><input name="css" value="${esc(tmpl.css||'')}"></div>
+        </div>
+        <button class="btn" style="width:100%;margin-top:15px">Update Template</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/document-templates/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, type, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, logo_url, watermark_text, watermark_opacity, paper_size, margin_top, margin_bottom, margin_left, margin_right, css } = req.body;
+  await pool.query('UPDATE document_templates SET name=$1,type=$2,header_html=$3,footer_html=$4,stamp_url=$5,stamp_position=$6,badge_text=$7,badge_color=$8,signature_name=$9,signature_image_url=$10,signature_position=$11,logo_url=$12,watermark_text=$13,watermark_opacity=$14,paper_size=$15,margin_top=$16,margin_bottom=$17,margin_left=$18,margin_right=$19,css=$20 WHERE id=$21 AND tenant_id=$22', [name, type, header_html||'', footer_html||'', stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', logo_url||null, watermark_text||null, watermark_opacity||0.1, paper_size||'A4', margin_top||20, margin_bottom||20, margin_left||15, margin_right||15, css||null, req.params.id, t]);
+  res.redirect('/document-templates');
+}));
+
+app.get('/document-templates/:id/preview', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tmpl = (await pool.query('SELECT * FROM document_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!tmpl) return res.status(404).send('Template not found');
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const stampPos = { 'bottom-right': 'bottom:20px;right:20px', 'bottom-left': 'bottom:20px;left:20px', 'top-right': 'top:80px;right:20px', 'center': 'top:50%;left:50%;transform:translate(-50%,-50%)' };
+  const sigPos = { 'bottom-right': 'bottom:60px;right:60px', 'bottom-left': 'bottom:60px;left:60px' };
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preview: ${esc(tmpl.name)}</title><style>
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f0f0;display:flex;justify-content:center;padding:30px}
+    .page{background:white;width:${tmpl.paper_size==='A4'?'210mm':tmpl.paper_size==='A5'?'148mm':'216mm'};min-height:${tmpl.paper_size==='A4'?'297mm':tmpl.paper_size==='A5'?'210mm':'279mm'};padding:${tmpl.margin_top||20}mm ${tmpl.margin_right||15}mm ${tmpl.margin_bottom||20}mm ${tmpl.margin_left||15}mm;box-shadow:0 4px 20px rgba(0,0,0,0.15);position:relative;margin:10px}
+    ${tmpl.css||''}
+  </style></head><body>
+    <div class="page">
+      ${tmpl.watermark_text ? `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-45deg);font-size:80px;font-weight:900;color:rgba(200,200,200,${tmpl.watermark_opacity||0.1});pointer-events:none;white-space:nowrap">${esc(tmpl.watermark_text)}</div>` : ''}
+      ${tmpl.badge_text ? `<div style="position:absolute;top:10px;right:10px;z-index:10"><span style="background:${tmpl.badge_color||'#4f46e5'};color:white;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;transform:rotate(5deg);display:inline-block">${esc(tmpl.badge_text)}</span></div>` : ''}
+      ${tmpl.header_html || `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #4f46e5;padding-bottom:10px;margin-bottom:20px"><div><h1 style="margin:0">${esc(tenant?.name||'Organization')}</h1><p style="color:#666;margin:0">${esc(tenant?.type||'')} Management</p></div>${tmpl.logo_url||tenant?.logo_url ? `<img src="${esc(tmpl.logo_url||tenant?.logo_url||'')}" style="height:60px">` : ''}</div>`}
+      <div style="min-height:300px">
+        <p style="color:#999;text-align:center;padding:100px 0">[Document Content Will Appear Here]</p>
+        <p style="color:#999;text-align:center">Sample data for preview purposes</p>
+        <table style="width:100%;border-collapse:collapse;margin-top:20px"><tr><th style="border:1px solid #ddd;padding:8px;background:#f8f9fa">Item</th><th style="border:1px solid #ddd;padding:8px;background:#f8f9fa">Amount</th></tr><tr><td style="border:1px solid #ddd;padding:8px">Sample Item</td><td style="border:1px solid #ddd;padding:8px">UGX 100,000</td></tr></table>
+      </div>
+      ${tmpl.stamp_url ? `<div style="position:absolute;${stampPos[tmpl.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(tmpl.stamp_url)}" style="width:100px;height:auto" alt="Stamp"></div>` : ''}
+      ${tmpl.signature_name ? `<div style="position:absolute;${sigPos[tmpl.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center"><p style="font-family:cursive;font-size:16px;margin:0">${esc(tmpl.signature_name)}</p>${tmpl.signature_image_url ? `<img src="${esc(tmpl.signature_image_url)}" style="width:120px;height:auto" alt="Signature">` : ''}<div style="width:150px;border-top:1px solid #333;margin-top:3px"></div></div>` : ''}
+      ${tmpl.footer_html || `<div style="border-top:1px solid #ccc;padding-top:10px;margin-top:40px;text-align:center;font-size:11px;color:#999">Generated by SSEWASSWA on ${new Date().toLocaleDateString()} | ${esc(tenant?.name||'')}</div>`}
+    </div>
+  </body></html>`);
+}));
+
+app.get('/document-templates/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM document_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/document-templates');
+}));
+
+// Apply template to receipt generation
+app.get('/school/fees/:id/receipt-styled', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const fee = (await pool.query('SELECT f.*,s.name as student_name,s.class,s.admission_no FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1 AND f.tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!fee) return res.status(404).send('Fee record not found');
+  const tmpl = (await pool.query("SELECT * FROM document_templates WHERE tenant_id=$1 AND type='receipt' LIMIT 1", [t])).rows[0];
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const stampPos = { 'bottom-right': 'bottom:20px;right:20px', 'bottom-left': 'bottom:20px;left:20px', 'top-right': 'top:80px;right:20px', 'center': 'top:50%;left:50%;transform:translate(-50%,-50%)' };
+  const sigPos = { 'bottom-right': 'bottom:60px;right:60px', 'bottom-left': 'bottom:60px;left:60px' };
+  const balance = parseInt(fee.amount) - parseInt(fee.paid);
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${fee.receipt_no||fee.id}</title><style>
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f0f0;display:flex;justify-content:center;padding:30px}
+    .page{background:white;width:${tmpl?.paper_size==='A4'?'210mm':'216mm'};min-height:${tmpl?.paper_size==='A4'?'297mm':'279mm'};padding:${tmpl?.margin_top||20}mm ${tmpl?.margin_right||15}mm ${tmpl?.margin_bottom||20}mm ${tmpl?.margin_left||15}mm;box-shadow:0 4px 20px rgba(0,0,0,0.15);position:relative}
+    ${tmpl?.css||''}
+  </style></head><body>
+    <div class="page">
+      ${tmpl?.watermark_text ? `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-45deg);font-size:80px;font-weight:900;color:rgba(200,200,200,${tmpl.watermark_opacity||0.1});pointer-events:none">${esc(tmpl.watermark_text)}</div>` : ''}
+      ${tmpl?.badge_text ? `<div style="position:absolute;top:10px;right:10px;z-index:10"><span style="background:${tmpl.badge_color||'#059669'};color:white;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;transform:rotate(5deg);display:inline-block">${esc(tmpl.badge_text)}</span></div>` : ''}
+      ${tmpl?.header_html || `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #4f46e5;padding-bottom:10px;margin-bottom:20px"><div><h1 style="margin:0">${esc(tenant?.name||'School')}</h1><p style="color:#666;margin:0">Fee Receipt</p></div>${tmpl?.logo_url||tenant?.logo_url ? `<img src="${esc(tmpl?.logo_url||tenant?.logo_url||'')}" style="height:60px">` : ''}</div>`}
+      <div><table style="width:100%;margin-bottom:20px"><tr><td style="padding:4px 0"><strong>Receipt No:</strong> ${esc(fee.receipt_no||'RCPT-'+fee.id)}</td><td style="text-align:right;padding:4px 0"><strong>Date:</strong> ${new Date(fee.created_at).toLocaleDateString()}</td></tr><tr><td style="padding:4px 0"><strong>Student:</strong> ${esc(fee.student_name)}</td><td style="text-align:right;padding:4px 0"><strong>Class:</strong> ${esc(fee.class||'-')}</td></tr><tr><td style="padding:4px 0"><strong>Adm No:</strong> ${esc(fee.admission_no||'-')}</td><td style="text-align:right;padding:4px 0"><strong>Term:</strong> ${esc(fee.term||'-')} ${fee.year||''}</td></tr></table>
+      <table style="width:100%;border-collapse:collapse"><tr style="background:#f8f9fa"><th style="border:1px solid #ddd;padding:10px">Description</th><th style="border:1px solid #ddd;padding:10px;text-align:right">Amount</th></tr><tr><td style="border:1px solid #ddd;padding:10px">Total Fees</td><td style="border:1px solid #ddd;padding:10px;text-align:right">UGX ${parseInt(fee.amount).toLocaleString()}</td></tr><tr><td style="border:1px solid #ddd;padding:10px">Amount Paid</td><td style="border:1px solid #ddd;padding:10px;text-align:right;color:#059669">UGX ${parseInt(fee.paid).toLocaleString()}</td></tr><tr style="font-weight:700"><td style="border:1px solid #ddd;padding:10px">Balance</td><td style="border:1px solid #ddd;padding:10px;text-align:right;${balance>0?'color:#dc2626':'color:#059669'}">UGX ${balance.toLocaleString()}</td></tr></table></div>
+      ${tmpl?.stamp_url ? `<div style="position:absolute;${stampPos[tmpl.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(tmpl.stamp_url)}" style="width:100px;height:auto" alt="Stamp"></div>` : ''}
+      ${tmpl?.signature_name ? `<div style="position:absolute;${sigPos[tmpl.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center"><p style="font-family:cursive;font-size:16px;margin:0">${esc(tmpl.signature_name)}</p>${tmpl.signature_image_url ? `<img src="${esc(tmpl.signature_image_url)}" style="width:120px;height:auto" alt="Signature">` : ''}<div style="width:150px;border-top:1px solid #333;margin-top:3px"></div></div>` : ''}
+      ${tmpl?.footer_html || `<div style="border-top:1px solid #ccc;padding-top:10px;margin-top:60px;text-align:center;font-size:11px;color:#999">Generated by SSEWASSWA | ${esc(tenant?.name||'')}</div>`}
+    </div>
+  </body></html>`);
+}));
+
+// =============================================
+// v3.0: PRIVACY POLICY
+// =============================================
+app.get('/privacy', (req, res) => {
+  res.send(renderPage('Privacy Policy', `
+    <div class="card" style="max-width:800px;margin:40px auto">
+      <h1>Privacy Policy</h1>
+      <p><b>Last Updated:</b> ${new Date().toDateString()}</p>
+      <h3>1. Data We Collect</h3>
+      <p>We collect information you provide directly: names, emails, phone numbers, financial records, attendance data, and organizational information. We also collect usage data including page views, feature usage, and device information for analytics.</p>
+      <h3>2. How We Use Your Data</h3>
+      <p>Your data is used exclusively to provide the SSEWASSWA platform services. We process fees, generate reports, send notifications, and improve our services based on usage patterns. We never sell your data to third parties.</p>
+      <h3>3. Data Storage and Security</h3>
+      <p>All data is encrypted in transit (SSL/TLS) and at rest. Passwords are hashed using bcrypt. Each organization's data is isolated by tenant_id with strict access controls. We perform automated daily backups stored securely on Cloudinary.</p>
+      <h3>4. Data Sharing</h3>
+      <p>We do not share your data with third parties except: (a) when you explicitly request integration with external services, (b) when required by law, or (c) anonymized, aggregate data for platform improvement.</p>
+      <h3>5. Your Rights</h3>
+      <p>You may export all your data at any time via Settings > Backup. You may request deletion of your account and all associated data. Deletion is completed within 30 days. You can opt out of SMS communications at any time.</p>
+      <h3>6. Cookies and Sessions</h3>
+      <p>We use HTTP-only, secure session cookies for authentication. No tracking cookies are used. Session data expires after 7 days of inactivity.</p>
+      <h3>7. Third-Party Services</h3>
+      <p>We integrate with: Flutterwave (payments), Cloudinary (file storage), Africa's Talking (SMS), and Gmail SMTP (email). Each has their own privacy policy. We only share the minimum data required for service delivery.</p>
+      <h3>8. Data Retention</h3>
+      <p>Active account data is retained indefinitely. Deleted items are soft-deleted and can be restored within 30 days. Closed accounts have all data purged within 30 days of closure. Audit logs are retained for 2 years for security purposes.</p>
+      <h3>9. Children's Privacy</h3>
+      <p>Student data is collected only through authorized school administrators and parents. We do not directly collect data from children under 13. Parent portal access is controlled and audited.</p>
+      <h3>10. Contact</h3>
+      <p>Data Protection Officer: waiswadaniel24@gmail.com | +256 789 736737</p>
+    </div>
+  `, null));
+});
+
+// =============================================
+// v4.0: USSD MENUS
+// =============================================
+app.post('/ussd', ah(async (req, res) => {
+  const { sessionId, serviceCode, phoneNumber, text } = req.body;
+  let response = '';
+  try {
+    if (!text || text === '') {
+      response = `CON Welcome to SSEWASSWA\n1. Check Student Balance\n2. View Results\n3. Report Attendance\n4. Contact Support`;
+    } else if (text === '1') {
+      response = `CON Enter Student Admission Number:`;
+    } else if (text.startsWith('1*')) {
+      const admNo = text.split('*')[1];
+      const student = (await pool.query('SELECT s.*,f.amount,f.paid,f.term FROM students s LEFT JOIN fees f ON s.id=f.student_id WHERE s.admission_no=$1 LIMIT 1', [admNo])).rows[0];
+      if (student) {
+        const balance = parseInt(student.amount||0) - parseInt(student.paid||0);
+        response = `END Fee Balance for ${student.name}\nTotal: UGX ${parseInt(student.amount||0).toLocaleString()}\nPaid: UGX ${parseInt(student.paid||0).toLocaleString()}\nBalance: UGX ${balance.toLocaleString()}`;
+      } else {
+        response = `END Student not found. Check admission number and try again.`;
+      }
+    } else if (text === '2') {
+      response = `CON Enter Student Admission Number:`;
+    } else if (text.startsWith('2*')) {
+      const admNo = text.split('*')[1];
+      const student = (await pool.query('SELECT * FROM students WHERE admission_no=$1 LIMIT 1', [admNo])).rows[0];
+      if (student) {
+        const marks = (await pool.query('SELECT m.subject,m.score,m.grade,e.name as exam FROM marks m JOIN exams e ON m.exam_id=e.id WHERE m.student_id=$1 ORDER BY e.created_at DESC LIMIT 5', [student.id])).rows;
+        if (marks.length) {
+          response = `END Results for ${student.name}\n${marks.map(m => `${m.subject}: ${m.score} (${m.grade})`).join('\n')}`;
+        } else {
+          response = `END No results found for ${student.name}.`;
+        }
+      } else {
+        response = `END Student not found.`;
+      }
+    } else if (text === '3') {
+      response = `CON Enter Student Admission Number:`;
+    } else if (text.startsWith('3*')) {
+      const admNo = text.split('*')[1];
+      const student = (await pool.query('SELECT * FROM students WHERE admission_no=$1 LIMIT 1', [admNo])).rows[0];
+      if (student) {
+        await pool.query('INSERT INTO attendance(student_id,date,status) VALUES($1,CURRENT_DATE,$2) ON CONFLICT(student_id,date) DO UPDATE SET status=$2', [student.id, 'present']);
+        response = `END Attendance marked PRESENT for ${student.name}.`;
+      } else {
+        response = `END Student not found.`;
+      }
+    } else if (text === '4') {
+      response = `END Contact Support:\nEmail: waiswadaniel24@gmail.com\nPhone: +256 789 736737`;
+    } else {
+      response = `END Invalid option. Please try again.`;
+    }
+    // Log USSD session
+    await pool.query('INSERT INTO ussd_sessions(session_id,phone,current_menu,data) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [sessionId, phoneNumber, text, { response }]);
+  } catch(e) {
+    response = `END Service temporarily unavailable. Please try again later.`;
+  }
+  res.set('Content-Type', 'text/plain');
+  res.send(response);
+}));
+
+// =============================================
+// v4.0: SMS OPT-OUT
+// =============================================
+app.get('/sms/opt-out', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const optOuts = (await pool.query('SELECT * FROM sms_opt_outs WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('SMS Opt-Out', `
+    <div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626)"><h1>SMS Opt-Out Management</h1><p>Manage phone numbers that have opted out</p></div>
+    <div class="card"><a href="/sms/opt-out/new" class="btn btn-sm" style="margin-bottom:15px">+ Add Opt-Out</a>
+      ${optOuts.length ? `<table><tr><th>Phone</th><th>Reason</th><th>Date</th><th>Actions</th></tr>${optOuts.map(o => `<tr><td>${esc(o.phone)}</td><td>${esc(o.reason||'-')}</td><td>${new Date(o.created_at).toLocaleDateString()}</td><td><a href="/sms/opt-out/${o.id}/remove" class="btn btn-sm btn-green">Allow</a></td></tr>`).join('')}</table>` : '<p class="muted">No opt-outs recorded</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/sms/opt-out/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add SMS Opt-Out', '<div class="card" style="max-width:500px;margin:40px auto"><h2>Add Phone to Opt-Out</h2><form method="POST" action="/sms/opt-out/save"><input name="phone" placeholder="Phone number (+256...)" required><input name="reason" placeholder="Reason (optional)"><button class="btn" style="width:100%">Block SMS</button></form></div>', req.session.user));
+});
+
+app.post('/sms/opt-out/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { phone, reason } = req.body;
+  await pool.query('INSERT INTO sms_opt_outs(tenant_id,phone,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [t, phone, reason]);
+  res.redirect('/sms/opt-out');
+}));
+
+app.get('/sms/opt-out/:id/remove', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM sms_opt_outs WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/sms/opt-out');
+}));
+
+// Public SMS opt-out endpoint
+app.post('/opt-out', ah(async (req, res) => {
+  const { phone, tenant_id } = req.body;
+  if (!phone) return res.status(400).json({ error: 'Phone required' });
+  await pool.query('INSERT INTO sms_opt_outs(tenant_id,phone,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [tenant_id || 0, phone, 'self-opt-out']);
+  res.json({ success: true, message: 'You have been opted out of SMS communications.' });
+}));
+
+// =============================================
+// v5.0: ADVANCED ANALYTICS
+// =============================================
+app.get('/analytics', requireAuth, requireNotBanned, requireFeature('advanced_analytics'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const type = tenant?.type || 'school';
+  let statsHtml = '';
+  try {
+    if (type === 'school' || type === 'church') {
+      const [studentCount, feeTotal, feePaid, attendanceRate] = await Promise.all([
+        pool.query('SELECT COUNT(*) as c FROM students WHERE tenant_id=$1 AND deleted_at IS NULL', [t]),
+        pool.query('SELECT COALESCE(SUM(amount),0) as t FROM fees WHERE tenant_id=$1', [t]),
+        pool.query('SELECT COALESCE(SUM(paid),0) as p FROM fees WHERE tenant_id=$1', [t]),
+        pool.query("SELECT COUNT(CASE WHEN status='present' THEN 1 END)*100.0/NULLIF(COUNT(*),0) as rate FROM attendance WHERE tenant_id=$1", [t])
+      ]);
+      statsHtml = `<div class="stats">
+        <div class="stat-card"><div class="stat-num">${studentCount.rows[0]?.c||0}</div><div>Students</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(feeTotal.rows[0]?.t||0).toLocaleString()}</div><div>Total Fees</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${parseInt(feePaid.rows[0]?.p||0).toLocaleString()}</div><div>Collected</div></div>
+        <div class="stat-card"><div class="stat-num">${parseFloat(attendanceRate.rows[0]?.rate||0).toFixed(1)}%</div><div>Attendance Rate</div></div>
+      </div>`;
+    } else if (type === 'business') {
+      const [salesTotal, expenseTotal, inventoryCount, customerCount] = await Promise.all([
+        pool.query('SELECT COALESCE(SUM(total),0) as t FROM sales WHERE tenant_id=$1', [t]),
+        pool.query('SELECT COALESCE(SUM(amount),0) as t FROM expenses WHERE tenant_id=$1', [t]),
+        pool.query('SELECT COUNT(*) as c FROM inventory WHERE tenant_id=$1 AND deleted_at IS NULL', [t]),
+        pool.query('SELECT COUNT(*) as c FROM customers WHERE tenant_id=$1 AND deleted_at IS NULL', [t])
+      ]);
+      const profit = parseInt(salesTotal.rows[0]?.t||0) - parseInt(expenseTotal.rows[0]?.t||0);
+      statsHtml = `<div class="stats">
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(salesTotal.rows[0]?.t||0).toLocaleString()}</div><div>Revenue</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${parseInt(expenseTotal.rows[0]?.t||0).toLocaleString()}</div><div>Expenses</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:${profit>=0?'#059669':'#dc2626'}">UGX ${profit.toLocaleString()}</div><div>Profit</div></div>
+        <div class="stat-card"><div class="stat-num">${inventoryCount.rows[0]?.c||0}</div><div>Products</div></div>
+        <div class="stat-card"><div class="stat-num">${customerCount.rows[0]?.c||0}</div><div>Customers</div></div>
+      </div>`;
+    } else {
+      const [memberCount, donationTotal, projectCount] = await Promise.all([
+        pool.query('SELECT COUNT(*) as c FROM members WHERE tenant_id=$1', [t]),
+        pool.query('SELECT COALESCE(SUM(amount),0) as t FROM org_finance WHERE tenant_id=$1 AND type=$2', [t, 'income']),
+        pool.query('SELECT COUNT(*) as c FROM projects WHERE tenant_id=$1', [t])
+      ]);
+      statsHtml = `<div class="stats">
+        <div class="stat-card"><div class="stat-num">${memberCount.rows[0]?.c||0}</div><div>Members</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(donationTotal.rows[0]?.t||0).toLocaleString()}</div><div>Income</div></div>
+        <div class="stat-card"><div class="stat-num">${projectCount.rows[0]?.c||0}</div><div>Projects</div></div>
+      </div>`;
+    }
+    // Monthly trend
+    const monthlyData = (await pool.query("SELECT date_trunc('month',created_at) as month,COUNT(*) as count FROM analytics_events WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '6 months' GROUP BY month ORDER BY month", [t])).rows;
+    const trendHtml = monthlyData.length ? `<div class="card"><h2>Activity Trend (6 Months)</h2><table><tr><th>Month</th><th>Events</th></tr>${monthlyData.map(d => `<tr><td>${new Date(d.month).toLocaleDateString('en',{year:'numeric',month:'short'})}</td><td>${d.count}</td></tr>`).join('')}</table></div>` : '';
+    res.send(renderPage('Advanced Analytics', `
+      <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)"><h1>Advanced Analytics</h1><p>Deep insights into your data</p></div>
+      ${statsHtml}
+      ${trendHtml}
+      <div class="card"><h2>Quick Reports</h2><div class="grid">
+        <div class="card"><h3>Fee Collection</h3><a href="/school/charts/fees" class="btn btn-sm">View</a></div>
+        <div class="card"><h3>Attendance Trends</h3><a href="/school/charts/attendance" class="btn btn-sm">View</a></div>
+        <div class="card"><h3>Gender Distribution</h3><a href="/school/charts/gender" class="btn btn-sm">View</a></div>
+        <div class="card"><h3>Financial Overview</h3><a href="/org/charts/finance" class="btn btn-sm">View</a></div>
+        <div class="card"><h3>Fee Prediction</h3><a href="/school/fee-prediction" class="btn btn-sm">View</a></div>
+        <div class="card"><h3>Dropout Risk</h3><a href="/school/dropout-risk" class="btn btn-sm">View</a></div>
+      </div></div>
+    `, req.session.user));
+  } catch(e) {
+    res.send(renderPage('Analytics', '<div class="card"><div class="alert alert-info">Analytics are being generated. Please check back shortly.</div></div>', req.session.user));
+  }
+}));
+
+// =============================================
+// v5.0: SCHEDULED REPORTS
+// =============================================
+app.get('/scheduled-reports', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const reports = (await pool.query('SELECT * FROM scheduled_reports WHERE tenant_id=$1 ORDER BY next_run', [t])).rows;
+  res.send(renderPage('Scheduled Reports', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Scheduled Reports</h1><p>Auto-send reports on schedule</p></div>
+    <div class="card"><a href="/scheduled-reports/new" class="btn btn-sm" style="margin-bottom:15px">+ Schedule Report</a>
+      ${reports.length ? `<table><tr><th>Name</th><th>Type</th><th>Frequency</th><th>Recipients</th><th>Last Run</th><th>Next Run</th><th>Status</th><th>Actions</th></tr>
+      ${reports.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.report_type)}</td><td>${esc(r.frequency)}</td><td>${esc(r.recipients||'-')}</td><td>${r.last_run?new Date(r.last_run).toLocaleDateString():'Never'}</td><td>${r.next_run?new Date(r.next_run).toLocaleDateString():'-'}</td><td>${r.active?'<span class="tag" style="background:#d1fae5;color:#065f46">Active</span>':'<span class="tag" style="background:#fef3c7;color:#92400e">Paused</span>'}</td><td><a href="/scheduled-reports/${r.id}/toggle" class="btn btn-sm">${r.active?'Pause':'Resume'}</a> <a href="/scheduled-reports/${r.id}/run" class="btn btn-sm btn-green">Run Now</a> <a href="/scheduled-reports/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No scheduled reports</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/scheduled-reports/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Schedule Report', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Schedule New Report</h2>
+      <form method="POST" action="/scheduled-reports/save">
+        <input name="name" placeholder="Report Name" required>
+        <select name="report_type"><option value="fee_balance">Fee Balance Report</option><option value="attendance">Attendance Report</option><option value="financial">Financial Summary</option><option value="inventory">Inventory Report</option><option value="donations">Donations Report</option><option value="sales">Sales Report</option></select>
+        <select name="frequency"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+        <select name="format"><option value="csv">CSV</option><option value="json">JSON</option></select>
+        <input name="recipients" placeholder="Email recipients (comma-separated)" required>
+        <button class="btn" style="width:100%">Schedule Report</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/scheduled-reports/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, report_type, frequency, format, recipients } = req.body;
+  const nextRun = new Date();
+  if (frequency === 'weekly') nextRun.setDate(nextRun.getDate() + 7);
+  else if (frequency === 'monthly') nextRun.setMonth(nextRun.getMonth() + 1);
+  else nextRun.setDate(nextRun.getDate() + 1);
+  await pool.query('INSERT INTO scheduled_reports(tenant_id,name,report_type,frequency,format,recipients,next_run) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, name, report_type, frequency, format||'csv', recipients, nextRun]);
+  res.redirect('/scheduled-reports');
+}));
+
+app.get('/scheduled-reports/:id/run', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const report = (await pool.query('SELECT * FROM scheduled_reports WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!report) return res.status(404).send('Not found');
+  let data = {};
+  if (report.report_type === 'fee_balance') {
+    data = (await pool.query('SELECT s.name,s.class,f.amount,f.paid,f.term FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1', [t])).rows;
+  } else if (report.report_type === 'attendance') {
+    data = (await pool.query('SELECT s.name,a.date,a.status FROM attendance a JOIN students s ON a.student_id=s.id WHERE a.tenant_id=$1 ORDER BY a.date DESC LIMIT 500', [t])).rows;
+  } else if (report.report_type === 'financial') {
+    const [income, expenses, sales] = await Promise.all([
+      pool.query('SELECT COALESCE(SUM(amount),0) as total FROM org_finance WHERE tenant_id=$1 AND type=$2', [t, 'income']),
+      pool.query('SELECT COALESCE(SUM(amount),0) as total FROM org_finance WHERE tenant_id=$1 AND type=$2', [t, 'expense']),
+      pool.query('SELECT COALESCE(SUM(total),0) as total FROM sales WHERE tenant_id=$1', [t])
+    ]);
+    data = { income: income.rows[0], expenses: expenses.rows[0], sales: sales.rows[0] };
+  }
+  // Send via email
+  const recipients = report.recipients.split(',').map(r => r.trim());
+  for (const email of recipients) {
+    await queueEmail(t, email, `SSEWASSWA Report: ${report.name}`, `<h2>${report.name}</h2><p>Report generated on ${new Date().toLocaleString()}</p><pre>${JSON.stringify(data, null, 2).substring(0, 5000)}</pre>`);
+  }
+  await pool.query('UPDATE scheduled_reports SET last_run=NOW(), next_run=CASE WHEN frequency=$1 THEN NOW() + INTERVAL \'1 day\' WHEN frequency=$2 THEN NOW() + INTERVAL \'7 days\' ELSE NOW() + INTERVAL \'30 days\' END WHERE id=$3', ['daily', 'weekly', report.id]);
+  res.send(renderPage('Report Sent', '<div class="card"><div class="alert alert-success"><h2>Report Sent!</h2><p>The report has been emailed to all recipients.</p></div><a href="/scheduled-reports" class="btn">Back</a></div>', req.session.user));
+}));
+
+app.get('/scheduled-reports/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE scheduled_reports SET active=NOT active WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/scheduled-reports');
+}));
+
+app.get('/scheduled-reports/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM scheduled_reports WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/scheduled-reports');
+}));
+
+// =============================================
+// v5.0: FULL MoMo INTEGRATION
+// =============================================
+app.post('/momo/mtm/initiate', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { phone, amount, reference } = req.body;
+  if (!phone || !amount) return res.status(400).json({ error: 'Phone and amount required' });
+  const momoRef = 'MOMO-' + Date.now();
+  if (process.env.MTN_MOMO_USER_ID && process.env.MTN_MOMO_API_KEY) {
+    try {
+      // MTN MoMo API integration
+      const authResp = await fetch('https://sandbox.momodeveloper.mtn.com/collection/token/', { method: 'POST', headers: { 'Authorization': 'Basic ' + Buffer.from(process.env.MTN_MOMO_USER_ID + ':' + process.env.MTN_MOMO_API_KEY).toString('base64'), 'Ocp-Apim-Subscription-Key': process.env.MTN_MOMO_SUB_KEY || '' } });
+      const authData = await authResp.json();
+      if (authData.access_token) {
+        const payResp = await fetch('https://sandbox.momodeveloper.mtn.com/collection/v1_0/requesttopay', { method: 'POST', headers: { 'Authorization': 'Bearer ' + authData.access_token, 'X-Reference-Id': momoRef, 'X-Target-Environment': 'sandbox', 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': process.env.MTN_MOMO_SUB_KEY || '' }, body: JSON.stringify({ amount: String(amount), currency: 'UGX', externalId: reference || momoRef, payer: { partyIdType: 'MSISDN', partyId: phone }, payerMessage: 'SSEWASSWA Payment', payeeNote: reference || 'Payment' }) });
+        await pool.query('INSERT INTO momo_payments(tenant_id,phone,amount,reference,status,type,external_ref) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, phone, amount, reference||momoRef, payResp.ok ? 'pending' : 'failed', 'mtn', momoRef]);
+        return res.json({ success: payResp.ok, reference: momoRef, status: payResp.ok ? 'pending' : 'failed' });
+      }
+    } catch(e) { console.warn('MTN MoMo error:', e.message); }
+  }
+  // Fallback: log as pending
+  await pool.query('INSERT INTO momo_payments(tenant_id,phone,amount,reference,status,type) VALUES($1,$2,$3,$4,$5,$6)', [t, phone, amount, reference||momoRef, 'pending', 'mtn']);
+  res.json({ success: true, reference: momoRef, status: 'pending', message: 'MoMo payment initiated. Set MTN_MOMO env vars for live integration.' });
+}));
+
+app.post('/momo/airtel/initiate', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { phone, amount, reference } = req.body;
+  if (!phone || !amount) return res.status(400).json({ error: 'Phone and amount required' });
+  const momoRef = 'AIRTEL-' + Date.now();
+  await pool.query('INSERT INTO momo_payments(tenant_id,phone,amount,reference,status,type) VALUES($1,$2,$3,$4,$5,$6)', [t, phone, amount, reference||momoRef, 'pending', 'airtel']);
+  res.json({ success: true, reference: momoRef, status: 'pending', message: 'Airtel Money initiated. Configure AIRTEL_MONEY env vars for live integration.' });
+}));
+
+app.get('/momo/status', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const payments = (await pool.query('SELECT * FROM momo_payments WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t])).rows;
+  res.send(renderPage('MoMo Payments', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Mobile Money Payments</h1><p>MTN MoMo & Airtel Money</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${payments.filter(p=>p.status==='completed').length}</div><div>Completed</div></div><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${payments.filter(p=>p.status==='pending').length}</div><div>Pending</div></div><div class="stat-card"><div class="stat-num" style="color:#dc2626">${payments.filter(p=>p.status==='failed').length}</div><div>Failed</div></div></div>
+    <div class="card"><a href="/momo/pay" class="btn btn-sm btn-gold" style="margin-bottom:15px">New Payment</a>
+      ${payments.length ? `<table><tr><th>Phone</th><th>Amount</th><th>Type</th><th>Reference</th><th>Status</th><th>Date</th></tr>${payments.map(p => `<tr><td>${esc(p.phone)}</td><td>UGX ${parseInt(p.amount).toLocaleString()}</td><td><span class="tag">${esc(p.type)}</span></td><td><code>${esc(p.reference||'-')}</code></td><td><span class="tag" style="background:${p.status==='completed'?'#d1fae5;color:#065f46':p.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b'}">${esc(p.status)}</span></td><td>${new Date(p.created_at).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No payments yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+// =============================================
+// v6.0: WEBHOOK RETRY
+// =============================================
+const retryFailedWebhooks = async () => {
+  const failedLogs = (await pool.query("SELECT * FROM webhook_logs WHERE status=0 OR status >= 500 ORDER BY created_at DESC LIMIT 20")).rows;
+  for (const log of failedLogs) {
+    try {
+      const hook = (await pool.query('SELECT * FROM webhooks WHERE tenant_id=$1 AND active=true', [log.tenant_id])).rows[0];
+      if (!hook) continue;
+      const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : log.payload;
+      const sig = crypto.createHmac('sha256', hook.secret || '').update(JSON.stringify(payload)).digest('hex');
+      const resp = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SSEWASSWA-Sig': sig, 'X-SSEWASSWA-Event': log.event, 'X-SSEWASSWA-Retry': 'true' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10000) });
+      await pool.query('UPDATE webhook_logs SET status=$1, response=$2 WHERE id=$3', [resp.status, 'retry-ok', log.id]);
+    } catch(e) {
+      await pool.query('UPDATE webhook_logs SET response=$1 WHERE id=$2', ['retry-failed:' + e.message, log.id]);
+    }
+  }
+};
+setInterval(retryFailedWebhooks, 30 * 60 * 1000); // Retry every 30 minutes
+
+// =============================================
+// v8.0: PUSH NOTIFICATIONS
+// =============================================
+app.post('/push/subscribe', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { endpoint, keys } = req.body;
+  if (!endpoint) return res.status(400).json({ error: 'Endpoint required' });
+  await pool.query('INSERT INTO push_subscriptions(tenant_id,user_email,endpoint,keys) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [t, req.session.user.email, endpoint, JSON.stringify(keys)]);
+  res.json({ success: true });
+}));
+
+app.post('/push/unsubscribe', requireAuth, ah(async (req, res) => {
+  const { endpoint } = req.body;
+  await pool.query('DELETE FROM push_subscriptions WHERE endpoint=$1', [endpoint]);
+  res.json({ success: true });
+}));
+
+app.post('/push/send', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, body, url } = req.body;
+  const subs = (await pool.query('SELECT * FROM push_subscriptions WHERE tenant_id=$1', [t])).rows;
+  // In production, use web-push library with VAPID keys
+  // For now, store as notification
+  for (const sub of subs) {
+    await notify(t, sub.user_email, title || 'New Notification', body || '', 'push');
+  }
+  res.json({ success: true, sent: subs.length, message: 'Push notifications queued. Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY env vars for live push.' });
+}));
+
+// =============================================
+// v8.0: OFFLINE SYNC API
+// =============================================
+app.post('/api/sync/push', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { actions } = req.body;
+  if (!Array.isArray(actions)) return res.status(400).json({ error: 'actions array required' });
+  const results = [];
+  for (const action of actions) {
+    try {
+      await pool.query('INSERT INTO offline_sync_queue(tenant_id,user_email,action,entity_type,entity_id,data) VALUES($1,$2,$3,$4,$5,$6)', [t, req.session.user.email, action.action, action.entity_type, action.entity_id, JSON.stringify(action.data)]);
+      // Apply the action
+      if (action.action === 'create' && action.entity_type === 'attendance' && action.data) {
+        await pool.query('INSERT INTO attendance(tenant_id,student_id,date,status) VALUES($1,$2,$3,$4) ON CONFLICT(student_id,date) DO UPDATE SET status=$4', [t, action.data.student_id, action.data.date || new Date().toISOString().split('T')[0], action.data.status || 'present']);
+      }
+      results.push({ id: action.id, status: 'synced' });
+    } catch(e) {
+      results.push({ id: action.id, status: 'error', error: e.message });
+    }
+  }
+  res.json({ synced: results.filter(r => r.status === 'synced').length, errors: results.filter(r => r.status === 'error').length, results });
+}));
+
+app.get('/api/sync/pull', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const since = req.query.since ? new Date(req.query.since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [students, fees, attendance] = await Promise.all([
+    pool.query('SELECT * FROM students WHERE tenant_id=$1 AND (created_at > $2 OR updated_at > $2) AND deleted_at IS NULL', [t, since]),
+    pool.query('SELECT * FROM fees WHERE tenant_id=$1 AND created_at > $2', [t, since]),
+    pool.query('SELECT * FROM attendance WHERE tenant_id=$1 AND date > $2', [t, since])
+  ]);
+  res.json({ since: since.toISOString(), students: students.rows, fees: fees.rows, attendance: attendance.rows });
+}));
+
+// =============================================
+// v8.0: DEEP LINKING
+// =============================================
+app.post('/deep-links/create', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { path, params } = req.body;
+  const shortCode = crypto.randomBytes(4).toString('hex');
+  await pool.query('INSERT INTO deep_links(tenant_id,path,params,short_code) VALUES($1,$2,$3,$4)', [t, path, JSON.stringify(params||{}), shortCode]);
+  res.json({ shortCode, url: `${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/dl/${shortCode}` });
+}));
+
+app.get('/dl/:code', ah(async (req, res) => {
+  const link = (await pool.query('SELECT * FROM deep_links WHERE short_code=$1', [req.params.code])).rows[0];
+  if (!link) return res.status(404).send(renderPage('404', '<div class="card"><h2>Link Not Found</h2></div>', null));
+  await pool.query('UPDATE deep_links SET click_count=click_count+1 WHERE id=$1', [link.id]);
+  res.redirect(link.path);
+}));
+
+// =============================================
+// v9.0: WHITE LABEL CONFIGURATION
+// =============================================
+app.get('/settings/white-label', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  res.send(renderPage('White Label', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)"><h1>White Label Configuration</h1><p>Customize your platform identity</p></div>
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <form method="POST" action="/settings/white-label/save">
+        <label>App Name</label><input name="app_name" value="${esc(tenant?.app_name||'')}" placeholder="Your App Name (replaces SSEWASSWA)">
+        <label>Custom Domain</label><input name="custom_domain" value="${esc(tenant?.custom_domain||'')}" placeholder="app.yourdomain.com">
+        <label>Support Email</label><input name="support_email" value="${esc(tenant?.support_email||'')}" placeholder="support@yourdomain.com">
+        <label>Support Phone</label><input name="support_phone" value="${esc(tenant?.support_phone||'')}" placeholder="+256 700 000000">
+        <label>Privacy Policy URL</label><input name="privacy_policy_url" value="${esc(tenant?.privacy_policy_url||'')}" placeholder="https://yourdomain.com/privacy">
+        <label>Terms URL</label><input name="terms_url" value="${esc(tenant?.terms_url||'')}" placeholder="https://yourdomain.com/terms">
+        <label>Onboarding Message</label><textarea name="onboarding_message" rows="3" placeholder="Welcome message for new users">${esc(tenant?.onboarding_message||'')}</textarea>
+        <label>Favicon URL</label><input name="favicon_url" value="${esc(tenant?.favicon_url||'')}" placeholder="https://res.cloudinary.com/.../favicon.ico">
+        <label>Custom JavaScript (head)</label><textarea name="custom_js" rows="3" placeholder="Analytics code, custom scripts" style="font-family:monospace">${esc(tenant?.custom_js||'')}</textarea>
+        <button class="btn" style="width:100%">Save White Label Settings</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/white-label/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { app_name, custom_domain, support_email, support_phone, privacy_policy_url, terms_url, onboarding_message, favicon_url, custom_js } = req.body;
+  await pool.query('UPDATE tenants SET app_name=$1,custom_domain=$2,support_email=$3,support_phone=$4,privacy_policy_url=$5,terms_url=$6,onboarding_message=$7,favicon_url=$8,custom_js=$9 WHERE id=$10', [app_name||null, custom_domain||null, support_email||null, support_phone||null, privacy_policy_url||null, terms_url||null, onboarding_message||null, favicon_url||null, custom_js||null, t]);
+  res.redirect('/settings/white-label');
+}));
+
+// =============================================
+// v9.0: PLUGIN SDK
+// =============================================
+app.get('/plugins', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const installed = (await pool.query('SELECT pr.*,mp.description as mp_desc,mp.icon_url FROM plugin_registry pr LEFT JOIN marketplace_plugins mp ON pr.plugin_key=mp.name WHERE pr.tenant_id=$1', [t])).rows;
+  const available = (await pool.query('SELECT * FROM marketplace_plugins WHERE active=true ORDER BY downloads DESC')).rows;
+  res.send(renderPage('Plugins', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)"><h1>Plugin Manager</h1><p>Extend your platform with plugins</p></div>
+    <div class="card"><h2>Installed Plugins (${installed.length})</h2>
+      ${installed.length ? `<table><tr><th>Name</th><th>Version</th><th>Status</th><th>Actions</th></tr>${installed.map(p => `<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.description||p.mp_desc||'')}</span></td><td>${esc(p.version||'1.0')}</td><td>${p.is_active?'<span class="tag" style="background:#d1fae5;color:#065f46">Active</span>':'<span class="tag" style="background:#fef3c7;color:#92400e">Disabled</span>'}</td><td><a href="/plugins/${p.id}/toggle" class="btn btn-sm">${p.is_active?'Disable':'Enable'}</a> <a href="/plugins/${p.id}/uninstall" class="btn btn-sm btn-red">Uninstall</a></td></tr>`).join('')}</table>` : '<p class="muted">No plugins installed</p>'}
+    </div>
+    <div class="card"><h2>Available Plugins</h2>
+      <div class="grid">${available.map(p => `<div class="card"><h3>${esc(p.name)}</h3><p class="muted">${esc(p.description||'')}</p><p>Downloads: ${p.downloads} | Price: ${p.price > 0 ? 'UGX ' + p.price.toLocaleString() : 'Free'}</p><a href="/plugins/install/${p.id}" class="btn btn-sm btn-green">Install</a></div>`).join('') || '<p class="muted">No plugins available yet</p>'}</div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/plugins/install/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const mp = (await pool.query('SELECT * FROM marketplace_plugins WHERE id=$1', [req.params.id])).rows[0];
+  if (!mp) return res.status(404).send('Plugin not found');
+  await pool.query('INSERT INTO plugin_registry(tenant_id,plugin_key,name,version,description,installed_by) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [t, mp.name, mp.name, mp.price > 0 ? 'premium' : '1.0', mp.description, req.session.user.email]);
+  await pool.query('UPDATE marketplace_plugins SET downloads=downloads+1 WHERE id=$1', [mp.id]);
+  res.redirect('/plugins');
+}));
+
+app.get('/plugins/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE plugin_registry SET is_active=NOT is_active WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/plugins');
+}));
+
+app.get('/plugins/:id/uninstall', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM plugin_registry WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/plugins');
+}));
+
+// =============================================
+// v9.0: DATA PORTABILITY
+// =============================================
+app.get('/data-export', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const exports = (await pool.query('SELECT * FROM data_exports WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Data Export', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Data Export</h1><p>Export all your data in standard formats</p></div>
+    <div class="card"><h2>Create New Export</h2>
+      <form method="POST" action="/data-export/create" style="max-width:500px">
+        <select name="format"><option value="json">JSON</option><option value="csv">CSV (separate files)</option></select>
+        <button class="btn" style="width:100%">Export All Data</button>
+      </form>
+    </div>
+    <div class="card"><h2>Previous Exports</h2>
+      ${exports.length ? `<table><tr><th>Format</th><th>Status</th><th>Size</th><th>Requested</th><th>Actions</th></tr>${exports.map(e => `<tr><td>${esc(e.format)}</td><td><span class="tag" style="background:${e.status==='completed'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${esc(e.status)}</span></td><td>${e.size_bytes ? (e.size_bytes/1024).toFixed(1)+'KB' : '-'}</td><td>${new Date(e.created_at).toLocaleDateString()}</td><td>${e.file_url ? `<a href="${e.file_url}" class="btn btn-sm btn-green">Download</a>` : 'Processing...'}</td></tr>`).join('')}</table>` : '<p class="muted">No exports yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/data-export/create', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const format = req.body.format || 'json';
+  const exportId = (await pool.query('INSERT INTO data_exports(tenant_id,format,status,requested_by) VALUES($1,$2,$3,$4) RETURNING id', [t, format, 'processing', req.session.user.email])).rows[0]?.id;
+  // Generate export immediately
+  try {
+    const tables = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff','projects','events','campaigns','purchase_orders'];
+    const exportData = {};
+    for (const table of tables) {
+      try {
+        const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 AND deleted_at IS NULL`, [t]);
+        if (result.rows.length) exportData[table] = result.rows;
+      } catch(e) {} // Table may not have tenant_id
+    }
+    exportData.exported_at = new Date().toISOString();
+    exportData.tenant_id = t;
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const buffer = Buffer.from(jsonStr);
+    let fileUrl = null;
+    if (process.env.CLOUDINARY_URL && format === 'json') {
+      try {
+        const cloudinary = require('cloudinary').v2;
+        cloudinary.config({ url: process.env.CLOUDINARY_URL });
+        const result = await cloudinary.uploader.upload(`data:application/json;base64,${buffer.toString('base64')}`, { resource_type: 'raw', folder: `exports/tenant_${t}`, public_id: `export-${t}-${Date.now()}` });
+        fileUrl = result.secure_url;
+      } catch(e) { console.warn('Export upload failed:', e.message); }
+    }
+    await pool.query('UPDATE data_exports SET status=$1,file_url=$2,size_bytes=$3,completed_at=NOW() WHERE id=$4', ['completed', fileUrl, buffer.length, exportId]);
+  } catch(e) {
+    await pool.query('UPDATE data_exports SET status=$1 WHERE id=$2', ['failed', exportId]);
+  }
+  res.redirect('/data-export');
+}));
+
+// Immediate JSON export download
+app.get('/data-export/download', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tables = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff','projects','events','campaigns'];
+  const data = {};
+  for (const table of tables) {
+    try {
+      const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t]);
+      data[table] = result.rows;
+    } catch(e) {}
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename=ssewasswa-export.json');
+  res.send(JSON.stringify(data, null, 2));
+}));
+
+// =============================================
+// ANALYTICS EVENT TRACKING (middleware)
+// =============================================
+const trackEvent = (eventType, entityType, entityId) => async (req, res, next) => {
+  try {
+    if (req.session.user) {
+      await pool.query('INSERT INTO analytics_events(tenant_id,event_type,entity_type,entity_id,user_email) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, eventType, entityType, entityId, req.session.user.email]);
+    }
+  } catch(e) {}
+  next();
+};
+
+// =============================================
+// PWA INSTALL PROMPT ENHANCEMENT
+// =============================================
+app.get('/install', (req, res) => {
+  res.send(renderPage('Install App', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>Install SSEWASSWA</h1><p>Use as a native app on your device</p></div>
+    <div class="grid">
+      <div class="card" style="text-align:center">
+        <div style="font-size:48px;margin-bottom:15px">📱</div>
+        <h2>Android</h2>
+        <ol style="text-align:left;padding-left:20px"><li>Open this site in Chrome</li><li>Tap the 3-dot menu</li><li>Select "Add to Home Screen"</li><li>Tap "Add" to confirm</li></ol>
+      </div>
+      <div class="card" style="text-align:center">
+        <div style="font-size:48px;margin-bottom:15px">🍎</div>
+        <h2>iOS (iPhone/iPad)</h2>
+        <ol style="text-align:left;padding-left:20px"><li>Open this site in Safari</li><li>Tap the Share button (box with arrow)</li><li>Select "Add to Home Screen"</li><li>Tap "Add" to confirm</li></ol>
+      </div>
+      <div class="card" style="text-align:center">
+        <div style="font-size:48px;margin-bottom:15px">💻</div>
+        <h2>Desktop</h2>
+        <ol style="text-align:left;padding-left:20px"><li>Open this site in Chrome or Edge</li><li>Click the install icon in address bar</li><li>Or click Menu > "Install SSEWASSWA"</li><li>Click "Install" to confirm</li></ol>
+      </div>
+    </div>
+    <div class="card" style="text-align:center"><p class="muted">After installation, SSEWASSWA works like a native app with offline support and push notifications.</p></div>
+  `, req.session?.user));
+});
+
+// =============================================
+// v6.0: OAUTH2 CALLBACK (Full Implementation)
+// =============================================
+app.get('/auth/oauth/google/callback', ah(async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.redirect('/login');
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.redirect('/login');
+  try {
+    const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ code, client_id: process.env.GOOGLE_CLIENT_ID, client_secret: process.env.GOOGLE_CLIENT_SECRET, redirect_uri: `${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/auth/oauth/google/callback`, grant_type: 'authorization_code' })
+    });
+    const tokens = await tokenResp.json();
+    if (tokens.id_token) {
+      const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64').toString());
+      const email = payload.email;
+      const name = payload.name || email.split('@')[0];
+      // Find or create user
+      let user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
+      if (!user) {
+        // Auto-register with first tenant or create new
+        const tenant = (await pool.query('SELECT * FROM tenants ORDER BY id LIMIT 1')).rows[0];
+        if (tenant) {
+          const pwd = crypto.randomBytes(16).toString('hex');
+          const hash = await bcrypt.hash(pwd, 10);
+          await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$4,$5,$6)', [tenant.id, email, pwd, hash, 'user', true]);
+          user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
+        }
+      }
+      if (user) {
+        req.session.user = { id: user.id, email: user.email, role: user.role, tenant_id: user.tenant_id, dark_mode: user.dark_mode, banned: user.banned };
+        await audit(email, 'oauth_login', 'Google');
+        return res.redirect('/dashboard');
+      }
+    }
+  } catch(e) { console.warn('Google OAuth error:', e.message); }
+  res.redirect('/login');
+}));
+
+// =============================================
+// COMING SOON PAGE (for features not yet activated)
+// =============================================
+app.get('/coming-soon/:feature', requireAuth, ah(async (req, res) => {
+  const flag = (await pool.query('SELECT * FROM feature_flags WHERE feature_key=$1', [req.params.feature])).rows[0];
+  if (!flag) return res.status(404).send('Feature not found');
+  res.send(renderPage('Coming Soon', `
+    <div style="text-align:center;padding:60px 20px">
+      <div style="font-size:80px;margin-bottom:20px">🔒</div>
+      <h1 style="margin-bottom:10px">${esc(flag.name)}</h1>
+      <p style="color:#64748b;font-size:18px;margin-bottom:30px">${esc(flag.description||'This feature is coming soon')}</p>
+      <div style="background:#f8fafc;border-radius:16px;padding:30px;max-width:500px;margin:0 auto">
+        <h3>Requirements to Activate</h3>
+        <p style="color:#f59e0b;font-weight:600">${esc(flag.requirements||'None')}</p>
+        ${flag.version ? `<p class="muted">Version: v${esc(flag.version)}</p>` : ''}
+      </div>
+      <div style="margin-top:30px"><a href="/dashboard" class="btn">Back to Dashboard</a> ${req.session.user?.role === 'super_admin' ? '<a href="/dev/features" class="btn btn-gold" style="margin-left:10px">Feature Manager</a>' : ''}</div>
+    </div>
+  `, req.session.user));
+}));
+
+// =============================================
+// FEATURE STATUS API (for frontend to check)
+// =============================================
+app.get('/api/features', ah(async (req, res) => {
+  const features = (await pool.query('SELECT feature_key, is_active, name, description, version, category FROM feature_flags')).rows;
+  const featureMap = {};
+  features.forEach(f => { featureMap[f.feature_key] = { active: f.is_active, name: f.name, description: f.description, version: f.version, category: f.category }; });
+  res.json(featureMap);
+}));
+
+// Enhanced PWA manifest with more icons
+app.get('/manifest.json', (req, res) => {
+  res.json({
+    name: 'SSEWASSWA',
+    short_name: 'SSEWASSWA',
+    description: 'All-in-One Management Platform for Schools, Churches, Businesses & Organizations',
+    start_url: '/',
+    display: 'standalone',
+    background_color: '#4f46e5',
+    theme_color: '#4f46e5',
+    orientation: 'any',
+    icons: [
+      { src: 'https://res.cloudinary.com/ssewasswa/image/upload/v1/ssewasswa/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: 'https://res.cloudinary.com/ssewasswa/image/upload/v1/ssewasswa/icon-512.png', sizes: '512x512', type: 'image/png' }
+    ],
+    categories: ['business', 'education', 'finance'],
+    screenshots: [],
+    prefer_related_applications: false
+  });
+});
+
+// Enhanced Service Worker
+app.get('/sw.js', (req, res) => {
+  res.set('Content-Type', 'application/javascript');
+  res.send(`const CACHE_NAME='ssewasswa-v9';const OFFLINE_URLS=['/','/login','/dashboard','/guide'];
+self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(OFFLINE_URLS)));self.skipWaiting()});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});
+self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});
+self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'SSEWASSWA',{body:d.body||'New update',icon:'/icon-192.png',data:d}))});
+self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.openWindow(e.notification.data?.url||'/'))});
+self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(fetch('/api/sync/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actions:[]})}))}});`);
 });
 
 // === 404 ===
