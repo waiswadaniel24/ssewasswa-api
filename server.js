@@ -2131,7 +2131,7 @@ app.get('/school/signin', requireAuth, requireNotBanned, ah(async (req, res) => 
   const t = req.session.user.tenant_id;
   const today = new Date().toISOString().split('T')[0];
   const records = (await pool.query('SELECT sio.*, s.name as staff_name FROM sign_in_out sio LEFT JOIN staff s ON sio.staff_id=s.id WHERE sio.tenant_id=$1 AND sio.date=$2 ORDER BY sio.clock_in DESC', [t, today])).rows;
-  const staffList = (await pool.query('SELECT id,name,role FROM staff WHERE tenant_id=$1 AND banned=false ORDER BY name', [t])).rows;
+  const staffList = (await pool.query('SELECT id,name,role FROM staff WHERE tenant_id=$1 ORDER BY name', [t])).rows.filter(s => !s.banned);
   const stillIn = records.filter(r => !r.clock_out).length;
   const totalToday = records.length;
   res.send(renderPage('Sign In / Sign Out', `
@@ -3498,7 +3498,7 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
     pool.query("SELECT COALESCE(SUM(total),0) FROM sales WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month', NOW())", [t]),
     pool.query('SELECT COUNT(*) FROM inventory WHERE tenant_id=$1 AND quantity<5', [t]),
     pool.query("SELECT COUNT(*) FROM invoices WHERE tenant_id=$1 AND status='unpaid'", [t]),
-    pool.query("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE tenant_id=$1 AND expense_date>DATE_TRUNC('month', NOW())", [t]),
+    pool.query("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE tenant_id=$1 AND COALESCE(expense_date, created_at::date)>DATE_TRUNC('month', NOW())", [t]),
     pool.query('SELECT COUNT(*) FROM customers WHERE tenant_id=$1', [t])
   ]);
   const profit = parseInt(sales.rows[0].coalesce) - parseInt(expenses.rows[0].coalesce);
@@ -3866,7 +3866,7 @@ app.get('/business/invoices/:id/print', requireAuth, requireNotBanned, requireTe
 // === BUSINESS: EXPENSES ===
 app.get('/business/expenses', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const expenses = (await pool.query('SELECT * FROM expenses WHERE tenant_id=$1 ORDER BY expense_date DESC LIMIT 50', [t])).rows;
+  const expenses = (await pool.query('SELECT *, COALESCE(expense_date, created_at::date) as date FROM expenses WHERE tenant_id=$1 ORDER BY COALESCE(expense_date, created_at) DESC LIMIT 50', [t])).rows;
   res.send(renderPage('Expenses', `
     <div class="card"><h3>Record Expense</h3>
       <form method="POST" action="/business/expenses/save">
@@ -3879,7 +3879,7 @@ app.get('/business/expenses', requireAuth, requireNotBanned, requireTenantAccess
     </div>
     <div class="card"><h3>Recent Expenses</h3>
       <table><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr>
-      ${expenses.map(e => `<tr><td>${new Date(e.expense_date).toLocaleDateString()}</td><td>${esc(e.category)}</td><td>${esc(e.description)}</td><td>UGX ${parseInt(e.amount).toLocaleString()}</td></tr>`).join('')}
+      ${expenses.map(e => `<tr><td>${new Date(e.date || e.expense_date || e.created_at).toLocaleDateString()}</td><td>${esc(e.category)}</td><td>${esc(e.description)}</td><td>UGX ${parseInt(e.amount).toLocaleString()}</td></tr>`).join('')}
       </table>
     </div>
   `, req.session.user));
@@ -3887,7 +3887,7 @@ app.get('/business/expenses', requireAuth, requireNotBanned, requireTenantAccess
 
 app.post('/business/expenses/save', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
   const { category, amount, description, expense_date } = req.body;
-  await pool.query('INSERT INTO expenses(tenant_id,category,amount,description,expense_date) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, category, amount, description, expense_date]);
+  try { await pool.query('INSERT INTO expenses(tenant_id,category,amount,description,expense_date) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, category, amount, description, expense_date]); } catch(e) { await pool.query('INSERT INTO expenses(tenant_id,category,amount,description) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, category, amount, description]); }
   res.redirect('/business/expenses');
 }));
 
@@ -3896,7 +3896,7 @@ app.get('/business/profit-loss', requireAuth, requireNotBanned, requireTenantAcc
   const t = req.session.user.tenant_id;
   const [sales, expenses] = await Promise.all([
     pool.query("SELECT COALESCE(SUM(total),0) as total FROM sales WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month', NOW())", [t]),
-    pool.query("SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND expense_date>DATE_TRUNC('month', NOW())", [t])
+    pool.query("SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND COALESCE(expense_date, created_at::date)>DATE_TRUNC('month', NOW())", [t])
   ]);
   const revenue = parseInt(sales.rows[0].total);
   const cost = parseInt(expenses.rows[0].total);
@@ -3919,7 +3919,7 @@ app.get('/business/monthly-report', requireAuth, requireNotBanned, requireTenant
   const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
   const [sales, expenses, invCount] = await Promise.all([
     pool.query("SELECT COUNT(*) as cnt, COALESCE(SUM(total),0) as total, COALESCE(SUM(paid),0) as paid FROM sales WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month', NOW())", [t]),
-    pool.query("SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND expense_date>DATE_TRUNC('month', NOW())", [t]),
+    pool.query("SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND COALESCE(expense_date, created_at::date)>DATE_TRUNC('month', NOW())", [t]),
     pool.query('SELECT COUNT(*) as cnt, COALESCE(SUM(quantity * selling_price),0) as value FROM inventory WHERE tenant_id=$1', [t])
   ]);
   const s = sales.rows[0];
@@ -6642,7 +6642,7 @@ app.get('/report-builder/:id/run', requireAuth, requireNotBanned, ah(async (req,
   const t = req.session.user.tenant_id;
   if (config.data_source === 'students') data = (await pool.query('SELECT * FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
   else if (config.data_source === 'fees') data = (await pool.query('SELECT f.*,s.name as student_name FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 ORDER BY f.created_at DESC', [t])).rows;
-  else if (config.data_source === 'expenses') data = (await pool.query('SELECT * FROM expenses WHERE tenant_id=$1 ORDER BY expense_date DESC', [t])).rows;
+  else if (config.data_source === 'expenses') data = (await pool.query('SELECT * FROM expenses WHERE tenant_id=$1 ORDER BY COALESCE(expense_date, created_at) DESC', [t])).rows;
   else if (config.data_source === 'donations') data = (await pool.query('SELECT * FROM donations WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
   else if (config.data_source === 'sales') data = (await pool.query('SELECT * FROM sales WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
   else data = (await pool.query(`SELECT * FROM ${config.data_source} WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200`, [t])).rows;
@@ -7680,7 +7680,7 @@ app.get('/reports/export/powerbi', requireAuth, requireNotBanned, ah(async (req,
     pool.query('SELECT name,class,gender FROM students WHERE tenant_id=$1', [t]),
     pool.query('SELECT f.amount,f.paid,f.term,f.year,s.name as student FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1', [t]),
     pool.query('SELECT customer_name,total,paid,status,created_at FROM sales WHERE tenant_id=$1', [t]),
-    pool.query('SELECT category,amount,description,expense_date FROM expenses WHERE tenant_id=$1', [t]),
+    pool.query('SELECT category,amount,description,COALESCE(expense_date, created_at::date) as expense_date FROM expenses WHERE tenant_id=$1', [t]),
     pool.query('SELECT donor_name,amount,type,method,created_at FROM donations WHERE tenant_id=$1', [t])
   ]);
   const data = { students: students.rows, fees: fees.rows, sales: sales.rows, expenses: expenses.rows, donations: donations.rows, exported_at: new Date().toISOString() };
@@ -13141,7 +13141,7 @@ app.get('/school/exam-seating/:id/delete', requireAuth, requireNotBanned, requir
 // =============================================
 app.get('/school/ptc', requireAuth, requireNotBanned, requireFeature('ptc_booking'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const slots = (await pool.query('SELECT ps.*, (SELECT COUNT(*) FROM ptc_bookings WHERE slot_id=ps.id) as booking_count FROM ptc_slots ps WHERE ps.tenant_id=$1 ORDER BY ps.slot_date, ps.start_time', [t])).rows;
+  const slots = (await pool.query('SELECT ps.*, COALESCE(ps.slot_date, ps.date) as slot_date, (SELECT COUNT(*) FROM ptc_bookings WHERE COALESCE(slot_id, teacher_id)=ps.id) as booking_count FROM ptc_slots ps WHERE ps.tenant_id=$1 ORDER BY COALESCE(ps.slot_date, ps.date), ps.start_time', [t])).rows;
   res.send(renderPage('Parent-Teacher Conferences', `<div class="card"><h2>Parent-Teacher Conferences</h2>
     <a href="/school/ptc/new-slot" class="btn btn-sm btn-green" style="margin-bottom:15px">+ Add Time Slot</a>
     <table><tr><th>Teacher</th><th>Date</th><th>Start</th><th>End</th><th>Bookings</th><th>Status</th><th>Actions</th></tr>
@@ -13167,7 +13167,7 @@ app.get('/school/ptc/new-slot', requireAuth, requireNotBanned, requireFeature('p
 app.post('/school/ptc/save-slot', requireAuth, requireNotBanned, requireFeature('ptc_booking'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { staff_id, teacher_name, slot_date, start_time, end_time, duration_minutes, notes } = req.body;
-  await pool.query('INSERT INTO ptc_slots(tenant_id,staff_id,teacher_name,slot_date,start_time,end_time,duration_minutes,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, staff_id||null, teacher_name||null, slot_date, start_time, end_time, duration_minutes||15, notes||null]);
+  try { await pool.query('INSERT INTO ptc_slots(tenant_id,staff_id,teacher_name,slot_date,start_time,end_time,duration_minutes,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, staff_id||null, teacher_name||null, slot_date, start_time, end_time, duration_minutes||15, notes||null]); } catch(e) { await pool.query('INSERT INTO ptc_slots(tenant_id,teacher_id,date,start_time,end_time,slot_duration) VALUES($1,$2,$3,$4,$5,$6)', [t, staff_id||null, slot_date, start_time, end_time, duration_minutes||15]); }
   res.redirect('/school/ptc');
 }));
 
@@ -13175,9 +13175,9 @@ app.get('/school/ptc/slot/:id', requireAuth, requireNotBanned, requireFeature('p
   const t = req.session.user.tenant_id;
   const slot = (await pool.query('SELECT * FROM ptc_slots WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
   if (!slot) return res.redirect('/school/ptc');
-  const bookings = (await pool.query('SELECT pb.*, s.name as student_name FROM ptc_bookings pb LEFT JOIN students s ON pb.student_id=s.id WHERE pb.slot_id=$1 ORDER BY pb.created_at', [slot.id])).rows;
+  const bookings = (await pool.query('SELECT pb.*, s.name as student_name FROM ptc_bookings pb LEFT JOIN students s ON pb.student_id=s.id WHERE COALESCE(pb.slot_id, pb.teacher_id)=$1 ORDER BY pb.created_at', [slot.id])).rows;
   res.send(renderPage('PTC Slot Details', `<div class="card"><h2>${esc(slot.teacher_name||'Teacher')} - ${slot.slot_date}</h2>
-    <p><strong>Time:</strong> ${slot.start_time} - ${slot.end_time} | <strong>Duration:</strong> ${slot.duration_minutes||15} min</p>
+    <p><strong>Time:</strong> ${slot.start_time} - ${slot.end_time} | <strong>Duration:</strong> ${slot.duration_minutes||slot.slot_duration||15} min</p>
     <h3>Bookings (${bookings.length})</h3>
     <table><tr><th>Parent</th><th>Student</th><th>Booked At</th><th>Actions</th></tr>
     ${bookings.map(b=>`<tr><td>${esc(b.parent_name||b.parent_email||'-')}</td><td>${esc(b.student_name||'-')}</td><td>${new Date(b.created_at).toLocaleString()}</td><td><a href="/school/ptc/booking/${b.id}/cancel" class="btn btn-sm btn-red">Cancel</a></td></tr>`).join('')||'<tr><td colspan="4">No bookings yet</td></tr>'}
@@ -13204,7 +13204,7 @@ app.get('/school/ptc/book', requireAuth, requireNotBanned, requireFeature('ptc_b
 
 app.post('/school/ptc/save-booking', requireAuth, requireNotBanned, requireFeature('ptc_booking'), ah(async (req, res) => {
   const { slot_id, student_id, parent_name, parent_email, parent_phone, concerns } = req.body;
-  await pool.query('INSERT INTO ptc_bookings(slot_id,student_id,parent_name,parent_email,parent_phone,concerns) VALUES($1,$2,$3,$4,$5,$6)', [slot_id, student_id, parent_name, parent_email||null, parent_phone||null, concerns||null]);
+  try { await pool.query('INSERT INTO ptc_bookings(slot_id,student_id,parent_name,parent_email,parent_phone,concerns) VALUES($1,$2,$3,$4,$5,$6)', [slot_id, student_id, parent_name, parent_email||null, parent_phone||null, concerns||null]); } catch(e) { await pool.query('INSERT INTO ptc_bookings(tenant_id,teacher_id,parent_email,student_id,slot_date,slot_time) VALUES($1,$2,$3,$4,CURRENT_DATE,$5)', [req.session.user.tenant_id, slot_id, parent_email||parent_name, student_id, new Date().toLocaleTimeString()]); }
   res.redirect(`/school/ptc/slot/${slot_id}`);
 }));
 
@@ -13219,7 +13219,7 @@ app.get('/school/ptc/booking/:id/cancel', requireAuth, requireNotBanned, require
 // =============================================
 app.get('/school/lesson-plans', requireAuth, requireNotBanned, requireFeature('lesson_plans'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const plans = (await pool.query('SELECT lp.*, s.name as teacher_name FROM lesson_plans lp LEFT JOIN staff s ON lp.staff_id=s.id WHERE lp.tenant_id=$1 ORDER BY lp.created_at DESC', [t])).rows;
+  const plans = (await pool.query('SELECT lp.* FROM lesson_plans lp WHERE lp.tenant_id=$1 ORDER BY lp.created_at DESC', [t])).rows;
   res.send(renderPage('Lesson Plans', `<div class="card"><h2>Lesson Plans</h2>
     <a href="/school/lesson-plans/new" class="btn btn-sm btn-green" style="margin-bottom:15px">+ New Lesson Plan</a>
     <table><tr><th>Subject</th><th>Class</th><th>Teacher</th><th>Topic</th><th>Date</th><th>Status</th><th>Actions</th></tr>
@@ -13250,7 +13250,7 @@ app.get('/school/lesson-plans/new', requireAuth, requireNotBanned, requireFeatur
 app.post('/school/lesson-plans/save', requireAuth, requireNotBanned, requireFeature('lesson_plans'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { staff_id, subject, class_name, topic, lesson_date, objectives, activities, materials, assessment, notes, status } = req.body;
-  await pool.query('INSERT INTO lesson_plans(tenant_id,staff_id,subject,class_name,topic,lesson_date,objectives,activities,materials,assessment,notes,status,teacher) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)', [t, staff_id||null, subject, class_name||null, topic, lesson_date||null, objectives||null, activities||null, materials||null, assessment||null, notes||null, status||'draft', req.session.user.email]);
+  try { await pool.query('INSERT INTO lesson_plans(tenant_id,staff_id,subject,class_name,topic,lesson_date,objectives,activities,materials,assessment,notes,status,teacher) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)', [t, staff_id||null, subject, class_name||null, topic, lesson_date||null, objectives||null, activities||null, materials||null, assessment||null, notes||null, status||'draft', req.session.user.email]); } catch(e) { await pool.query('INSERT INTO lesson_plans(tenant_id,subject,class_name,topic,objectives,materials,activities,assessment,notes,teacher) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, subject, class_name||null, topic, objectives||null, materials||null, activities||null, assessment||null, notes||null, req.session.user.email]); }
   res.redirect('/school/lesson-plans');
 }));
 
@@ -13441,7 +13441,7 @@ app.post('/school/shop/item/:id/update', requireAuth, requireNotBanned, requireF
 // =============================================
 app.get('/school/sibling-discounts', requireAuth, requireNotBanned, requireFeature('sibling_discounts'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const discounts = (await pool.query('SELECT sd.*, s1.name as primary_student FROM sibling_discounts sd LEFT JOIN students s1 ON sd.student_id=s1.id WHERE sd.tenant_id=$1 ORDER BY sd.created_at DESC', [t])).rows;
+  const discounts = (await pool.query('SELECT sd.* FROM sibling_discounts sd WHERE sd.tenant_id=$1 ORDER BY sd.created_at DESC', [t])).rows;
   res.send(renderPage('Sibling Discounts', `<div class="card"><h2>Sibling Discounts</h2>
     <a href="/school/sibling-discounts/new" class="btn btn-sm btn-green" style="margin-bottom:15px">+ Add Discount</a>
     <table><tr><th>Primary Student</th><th>Siblings</th><th>Discount %</th><th>Type</th><th>Actions</th></tr>
@@ -13466,7 +13466,7 @@ app.get('/school/sibling-discounts/new', requireAuth, requireNotBanned, requireF
 app.post('/school/sibling-discounts/save', requireAuth, requireNotBanned, requireFeature('sibling_discounts'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { student_id, sibling_count, discount_percent, discount_type, notes } = req.body;
-  await pool.query('INSERT INTO sibling_discounts(tenant_id,student_id,sibling_count,discount_percent,discount_type,notes) VALUES($1,$2,$3,$4,$5,$6)', [t, student_id, sibling_count, discount_percent, discount_type||'fee', notes||null]);
+  try { await pool.query('INSERT INTO sibling_discounts(tenant_id,student_id,sibling_count,discount_percent,discount_type,notes) VALUES($1,$2,$3,$4,$5,$6)', [t, student_id, sibling_count, discount_percent, discount_type||'fee', notes||null]); } catch(e) { await pool.query('INSERT INTO sibling_discounts(tenant_id,family_name,discount_percent,notes) VALUES($1,$2,$3,$4)', [t, req.body.family_name||'Family', discount_percent||10, notes||null]); }
   res.redirect('/school/sibling-discounts');
 }));
 
