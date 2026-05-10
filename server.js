@@ -24,6 +24,8 @@ const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle } = require('docx');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const app = express();
 const pool = new Pool({
@@ -7719,8 +7721,6 @@ app.get('/upload', requireAuth, requireNotBanned, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 app.post('/upload/save', requireAuth, requireNotBanned, upload.single('file'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { title, description, category } = req.body;
