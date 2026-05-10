@@ -1,3 +1,5 @@
+// Suppress localStorage ExperimentalWarning from connect-pg-simple
+process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
@@ -1042,37 +1044,11 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 };
 
 // === AUTH ===
+// NOTE: The '/' route is now handled by launch-routes.js (public landing page)
+// This is a fallback that will be overridden when launch-routes is loaded
 app.get('/', (req, res) => {
   if (req.session.user) return res.redirect('/dashboard');
-  res.send(renderPage('SSEWASSWA Platform', `
-    <div class="hero" style="padding:80px 20px">
-      <h1 style="font-size:52px;margin-bottom:10px">SSEWASSWA</h1>
-      <p style="font-size:24px;opacity:0.95;margin-bottom:5px">All-in-One Management Platform</p>
-      <p style="font-size:16px;opacity:0.8;margin-bottom:30px">School \u2022 Church \u2022 Business \u2022 Organization \u2022 Individual</p>
-      <div style="display:flex;gap:15px;justify-content:center;flex-wrap:wrap">
-        <a href="/register" class="btn btn-gold" style="font-size:18px;padding:15px 30px">Start Free</a>
-        <a href="/login" class="btn" style="font-size:18px;padding:15px 30px;background:rgba(255,255,255,0.2)">Login</a>
-      </div>
-    </div>
-    <div class="stats" style="margin-top:30px">
-      <div class="stat-card" style="border-top:4px solid #4f46e5"><div class="stat-num">700+</div><div>Features</div></div>
-      <div class="stat-card" style="border-top:4px solid #059669"><div class="stat-num">100+</div><div>Routes</div></div>
-      <div class="stat-card" style="border-top:4px solid #f59e0b"><div class="stat-num">5</div><div>Portals</div></div>
-      <div class="stat-card" style="border-top:4px solid #ec4899"><div class="stat-num">Free</div><div>Plan Available</div></div>
-    </div>
-    <div class="grid" style="margin-top:30px">
-      <div class="card" style="border-left:5px solid #4f46e5"><h3>Schools</h3><p>Students, Fees, Exams, Attendance, Report Cards, Clinic (Doctor-Pharmacist-Lab), Transport, Library, Hostels, Meals, Admissions, Scholarships, and more from Kindergarten to University</p></div>
-      <div class="card" style="border-left:5px solid #059669"><h3>Churches</h3><p>Congregation, Tithes, Sermons, Prayer Requests, Choir, Sacraments, Cell Groups, Welfare & Benevolence, Building Fund, Membership Transfer</p></div>
-      <div class="card" style="border-left:5px solid #f59e0b"><h3>Business</h3><p>POS, Inventory, Invoices, Customers, P&L, Payroll, HR Leave, CRM, Balance Sheet, Procurement, Tax Records</p></div>
-      <div class="card" style="border-left:5px solid #ec4899"><h3>Organizations</h3><p>Members, Projects, Events, Meetings, Board Resolutions, Committees, Policy Documents, Partner/Donor Management</p></div>
-      <div class="card" style="border-left:5px solid #8b5cf6"><h3>Cross-Cutting</h3><p>Workflows, Chat, Tasks, Forums, Surveys, Certificates, Document Signing, QR Codes, Suggestion Box, Dark Mode</p></div>
-    </div>
-    <div class="card" style="text-align:center;margin-top:30px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white">
-      <h2>Role-Based Specialization</h2>
-      <p>Doctors prescribe medicine \u2192 Pharmacists see and dispense \u2192 Lab technicians verify and report results</p>
-      <p style="margin-top:10px">Students classified as Boarding/Day \u2022 Kindergarten through University \u2022 Academic Track Specialization</p>
-    </div>
-  `, null));
+  res.redirect('/p/home');
 });
 
 app.get('/login', (req, res) => {
@@ -1159,7 +1135,7 @@ app.post('/register', ah(async (req, res) => {
 
 app.get('/logout', (req, res) => {
   if (req.session.user) audit(req.session.user.email, 'logout', 'User logged out').catch(() => {});
-  req.session.destroy(() => res.redirect('/login'));
+  req.session.destroy(() => res.redirect('/'));
 });
 
 // === FORGOT PASSWORD ===
@@ -14487,6 +14463,15 @@ app.use((err, req, res, next) => {
 });
 
 // === START ===
+// === LAUNCH ROUTES (public site, scraping, entertainment, fundraising, etc.) ===
+try {
+  const launchRoutes = require('./launch-routes');
+  launchRoutes(app, pool, bcrypt, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, requireAuth, requireNotBanned, requireSuperAdmin);
+  console.log('[Launch] Public routes loaded');
+} catch (e) {
+  console.warn('[Launch] Failed to load launch routes:', e.message);
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`SSEWASSWA Platform LIVE on ${PORT}`);
