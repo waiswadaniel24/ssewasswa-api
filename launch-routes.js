@@ -766,6 +766,28 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
       ` : ''}
 
+      <!-- ADVERT CARDS SECTION -->
+      ${adverts.length > 0 ? `
+      <div style="background:white;padding:40px 20px">
+        <div style="max-width:1200px;margin:0 auto">
+          <h2 style="font-size:24px;font-weight:800;margin-bottom:20px;color:#1e293b">&#128227; Featured</h2>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
+            ${adverts.slice(0, 3).map(a => `
+              <div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:2px solid #f59e0b;position:relative">
+                <span style="position:absolute;top:10px;right:10px;background:#f59e0b;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">AD</span>
+                ${a.image_url ? `<img src="${esc(a.image_url)}" style="width:100%;max-height:200px;object-fit:cover" alt="${esc(a.title)}">` : ''}
+                <div style="padding:16px">
+                  <h3 style="margin:0 0 8px;font-size:18px;font-weight:700;color:#1e293b">${esc(a.title)}</h3>
+                  <p style="color:#64748b;font-size:14px;margin:0 0 12px">${esc(a.content || a.description || '')}</p>
+                  ${a.link_url ? `<a href="${esc(a.link_url)}" target="_blank" style="display:inline-block;padding:8px 20px;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border-radius:8px;font-weight:600;text-decoration:none;font-size:14px">Learn More</a>` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+      ` : ''}
+
       <!-- WHATSAPP SHARE SECTION -->
       <div style="background:linear-gradient(135deg,#25D366,#128C7E);padding:50px 20px;text-align:center">
         <h2 style="font-size:clamp(22px,4vw,36px);font-weight:900;color:white;margin-bottom:12px">Share SSEWASSWA on WhatsApp</h2>

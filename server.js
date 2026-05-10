@@ -1,5 +1,11 @@
 // Suppress localStorage ExperimentalWarning from connect-pg-simple
 process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
+// Also suppress connect-pg-simple localStorage warnings in console
+const originalWarn = console.warn;
+console.warn = function(...args) {
+  if (args[0] && typeof args[0] === 'string' && args[0].includes('localStorage')) return;
+  originalWarn.apply(console, args);
+};
 // Suppress experimental warnings in production
 if (process.env.NODE_ENV === 'production') {
   const originalEmit = process.emit;
@@ -949,7 +955,13 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('public_site', 'Public Website', 'Build a public-facing website with pages', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('fundraising', 'Fundraising', 'Launch campaigns and collect donations', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('entertainment_hub', 'Entertainment Hub', 'Videos, music, news and auto-scraped content', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('web_scraping', 'Web Scraping', 'Auto-import news and events from external sites', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('web_scraping', 'Web Scraping', 'Auto-import news and events from external sites', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`,
+  // ============ v12 BLOG & ADVERT ENHANCEMENTS ============
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS description TEXT`,
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS position TEXT DEFAULT 'homepage'`,
+  `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  `CREATE TABLE IF NOT EXISTS blog_posts (id SERIAL PRIMARY KEY, slug TEXT UNIQUE, title TEXT NOT NULL, content TEXT NOT NULL, excerpt TEXT, image_url TEXT, category TEXT DEFAULT 'news', author TEXT, is_published BOOLEAN DEFAULT false, published_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS auto_verified BOOLEAN DEFAULT false`
 ];
 
 (async () => {
@@ -1070,7 +1082,7 @@ ${process.env.GA_TRACKING_ID ? `
       <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">Logout</a>
-    ` : `<a href="/login">Login</a><a href="/register">Register</a>`}
+    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a>`}
   </div>
 </nav>
 <div class="container">${content}</div>
@@ -1166,7 +1178,10 @@ app.post('/register', ah(async (req, res) => {
 
 app.get('/logout', (req, res) => {
   if (req.session.user) audit(req.session.user.email, 'logout', 'User logged out').catch(() => {});
-  req.session.destroy(() => res.redirect('/login'));
+  req.session.destroy(() => {
+    res.clearCookie('connect.sid');
+    res.redirect('/login');
+  });
 });
 
 // === FORGOT PASSWORD ===
@@ -4709,8 +4724,9 @@ app.get('/p/:subdomain', ah(async (req, res, next) => {
 }));
 
 // === ENTERTAINMENT ===
-app.get('/entertainment', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
+app.get('/entertainment', ah(async (req, res) => {
+  const t = req.session.user?.tenant_id;
+  if (!t) return res.redirect('/p/entertainment');
   const [videos, music, games] = await Promise.all([
     pool.query('SELECT * FROM entertainment_videos WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10', [t]),
     pool.query('SELECT * FROM entertainment_music WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10', [t]),
@@ -4752,6 +4768,14 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
       <h1>DEVELOPER MASTER CONTROL</h1><p style="opacity:0.9">Full system control</p>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+      <a href="/dev/master" class="btn btn-sm">Dashboard</a>
+      <a href="/dev/adverts" class="btn btn-sm btn-gold">Adverts</a>
+      <a href="/dev/blog" class="btn btn-sm btn-green">Blog</a>
+      <a href="/dev/withdraw" class="btn btn-sm">Withdraw</a>
+      <a href="/dev/activity" class="btn btn-sm">Activity</a>
+      <a href="/dev/features" class="btn btn-sm">Features</a>
     </div>
     ${flashHtml}
     <div class="stats">
@@ -4840,6 +4864,243 @@ app.post('/dev/inject-revenue', requireAuth, requireSuperAdmin, ah(async (req, r
   await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [amount]);
   await audit(req.session.user.email, 'inject_revenue', `UGX ${amount} from ${source}`);
   res.redirect('/dev/master');
+}));
+
+// === DAILY ADVERTS ===
+app.get('/dev/adverts', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const adverts = (await pool.query('SELECT * FROM daily_adverts ORDER BY created_at DESC')).rows;
+  res.send(renderPage('Advert Management', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Daily Adverts</h1><p style="opacity:0.9">Manage platform advertisements</p>
+    </div>
+    <div class="card"><h3>Create Advert</h3>
+      <form method="POST" action="/dev/adverts/create">
+        <input name="title" placeholder="Advert Title" required>
+        <textarea name="description" placeholder="Description" rows="3"></textarea>
+        <input name="image_url" placeholder="Image URL (optional)">
+        <input name="link_url" placeholder="Link URL (where clicking goes)">
+        <select name="position"><option value="homepage">Homepage Banner</option><option value="sidebar">Sidebar</option><option value="footer">Footer</option></select>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1"><label>Start Date</label><input name="start_date" type="date" required></div>
+          <div style="flex:1"><label>End Date</label><input name="end_date" type="date"></div>
+        </div>
+        <button class="btn btn-gold">Create Advert</button>
+      </form>
+    </div>
+    <div class="card"><h3>All Adverts</h3>
+      <table><tr><th>ID</th><th>Title</th><th>Position</th><th>Active</th><th>Period</th><th>Actions</th></tr>
+      ${adverts.map(a => `<tr>
+        <td>${a.id}</td><td>${esc(a.title)}</td><td>${esc(a.position || 'homepage')}</td>
+        <td>${a.is_active ? '<span style="color:#059669">Yes</span>' : '<span style="color:#dc2626">No</span>'}</td>
+        <td>${new Date(a.start_date).toLocaleDateString()}${a.end_date ? ' - ' + new Date(a.end_date).toLocaleDateString() : ' - Ongoing'}</td>
+        <td>
+          <a href="/dev/adverts/toggle/${a.id}" class="btn btn-sm ${a.is_active ? 'btn-red' : 'btn-green'}">${a.is_active ? 'Deactivate' : 'Activate'}</a>
+          <a href="/dev/adverts/delete/${a.id}" class="btn btn-sm btn-red" onclick="return confirm('Delete this advert?')">Delete</a>
+        </td>
+      </tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/adverts/create', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { title, description, image_url, link_url, position, start_date, end_date } = req.body;
+  await pool.query('INSERT INTO daily_adverts(title,description,image_url,link_url,position,start_date,end_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+    [title, description, image_url, link_url, position, start_date, end_date || null, req.session.user.email]);
+  await audit(req.session.user.email, 'create_advert', `Created advert: ${title}`);
+  res.redirect('/dev/adverts');
+}));
+
+app.get('/dev/adverts/toggle/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('UPDATE daily_adverts SET is_active = NOT is_active WHERE id=$1', [req.params.id]);
+  res.redirect('/dev/adverts');
+}));
+
+app.get('/dev/adverts/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('DELETE FROM daily_adverts WHERE id=$1', [req.params.id]);
+  res.redirect('/dev/adverts');
+}));
+
+// === BLOG/NEWS ===
+app.get('/dev/blog', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const posts = (await pool.query('SELECT * FROM blog_posts ORDER BY created_at DESC')).rows;
+  res.send(renderPage('Blog Management', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Blog & News</h1><p style="opacity:0.9">Create content for SEO and engagement</p>
+    </div>
+    <div class="card"><h3>New Post</h3>
+      <form method="POST" action="/dev/blog/create">
+        <input name="title" placeholder="Post Title" required>
+        <input name="slug" placeholder="URL slug (e.g. my-first-post)" required>
+        <textarea name="excerpt" placeholder="Short excerpt (for SEO and previews)" rows="2"></textarea>
+        <textarea name="content" placeholder="Full post content (HTML allowed)" rows="8" required></textarea>
+        <input name="image_url" placeholder="Cover image URL">
+        <select name="category"><option value="news">News</option><option value="update">Update</option><option value="tutorial">Tutorial</option><option value="feature">Feature</option><option value="tips">Tips</option></select>
+        <label><input type="checkbox" name="is_published" value="true"> Publish immediately</label>
+        <button class="btn btn-green">Create Post</button>
+      </form>
+    </div>
+    <div class="card"><h3>All Posts</h3>
+      <table><tr><th>ID</th><th>Title</th><th>Category</th><th>Published</th><th>Date</th><th>Actions</th></tr>
+      ${posts.map(p => `<tr>
+        <td>${p.id}</td><td>${esc(p.title)}</td><td><span class="tag">${esc(p.category)}</span></td>
+        <td>${p.is_published ? '<span style="color:#059669">Yes</span>' : '<span style="color:#d97706">Draft</span>'}</td>
+        <td>${p.published_at ? new Date(p.published_at).toLocaleDateString() : new Date(p.created_at).toLocaleDateString()}</td>
+        <td>
+          <a href="/blog/${esc(p.slug)}" class="btn btn-sm">View</a>
+          <a href="/dev/blog/delete/${p.id}" class="btn btn-sm btn-red" onclick="return confirm('Delete this post?')">Delete</a>
+        </td>
+      </tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/blog/create', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { title, slug, content, excerpt, image_url, category, is_published } = req.body;
+  const published = is_published === 'true';
+  await pool.query('INSERT INTO blog_posts(slug,title,content,excerpt,image_url,category,author,is_published,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+    [slug, title, content, excerpt, image_url, category, req.session.user.email, published, published ? new Date() : null]);
+  await audit(req.session.user.email, 'create_blog_post', `Blog post: ${title}`);
+  res.redirect('/dev/blog');
+}));
+
+app.get('/dev/blog/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('DELETE FROM blog_posts WHERE id=$1', [req.params.id]);
+  res.redirect('/dev/blog');
+}));
+
+// Public blog listing (blog_posts table)
+app.get('/blog/posts', ah(async (req, res) => {
+  const posts = (await pool.query('SELECT * FROM blog_posts WHERE is_published=true ORDER BY published_at DESC LIMIT 20')).rows;
+  res.send(renderPageV3('SSEWASSWA Blog - News & Updates', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:16px;margin-bottom:25px;color:white;text-align:center">
+      <h1>Blog & News</h1><p style="opacity:0.9;margin-top:8px">Updates, tips, and insights from SSEWASSWA</p>
+    </div>
+    <div class="grid">
+      ${posts.map(p => `
+        <div class="card" style="cursor:pointer" onclick="location.href='/blog/posts/${esc(p.slug)}'">
+          ${p.image_url ? `<img src="${esc(p.image_url)}" style="width:100%;height:180px;object-fit:cover;border-radius:10px;margin-bottom:12px" alt="${esc(p.title)}">` : ''}
+          <span class="tag" style="margin-bottom:8px">${esc(p.category)}</span>
+          <h3 style="margin:8px 0">${esc(p.title)}</h3>
+          <p class="muted">${esc(p.excerpt || (p.content ? p.content.substring(0, 120) + '...' : ''))}</p>
+          <p class="muted" style="margin-top:8px">${p.published_at ? new Date(p.published_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
+        </div>
+      `).join('')}
+    </div>
+    ${posts.length === 0 ? '<div class="card" style="text-align:center;padding:40px"><h3>No posts yet</h3><p class="muted">Check back soon for updates!</p></div>' : ''}
+  `, null, { description: 'SSEWASSWA blog - news, updates, tips and insights for African institutions' }));
+}));
+
+// Public blog post detail (blog_posts table)
+app.get('/blog/posts/:slug', ah(async (req, res) => {
+  const post = (await pool.query('SELECT * FROM blog_posts WHERE slug=$1 AND is_published=true', [req.params.slug])).rows[0];
+  if (!post) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Post Not Found</h2><p class="muted">This blog post does not exist or is not published.</p><a href="/blog/posts" class="btn" style="margin-top:15px">Back to Blog</a></div>', null));
+  res.send(renderPageV3(post.title, `
+    <div style="max-width:800px;margin:0 auto">
+      <a href="/blog/posts" style="display:inline-block;margin-bottom:15px">&larr; Back to Blog</a>
+      ${post.image_url ? `<img src="${esc(post.image_url)}" style="width:100%;height:300px;object-fit:cover;border-radius:16px;margin-bottom:20px" alt="${esc(post.title)}">` : ''}
+      <span class="tag">${esc(post.category)}</span>
+      <h1 style="margin:10px 0;font-size:28px">${esc(post.title)}</h1>
+      <p class="muted">By ${esc(post.author || 'SSEWASSWA Team')} &middot; ${post.published_at ? new Date(post.published_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
+      <hr style="margin:20px 0;border-color:#e2e8f0">
+      <div style="line-height:1.8;font-size:16px">${post.content}</div>
+      <hr style="margin:30px 0;border-color:#e2e8f0">
+      <div style="text-align:center">
+        <p class="muted">Powered by SSEWASSWA - The Operating System for African Institutions</p>
+        <a href="/blog/posts" class="btn" style="margin-top:10px">More Articles</a>
+      </div>
+    </div>
+  `, null, { description: post.excerpt || post.title, keywords: post.category }));
+}));
+
+// === DEV WITHDRAWAL SYSTEM ===
+app.get('/dev/withdraw', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [wallet, withdrawals] = await Promise.all([
+    pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1'),
+    pool.query("SELECT * FROM developer_revenue WHERE source=$1 ORDER BY created_at DESC LIMIT 50", ['withdrawal'])
+  ]);
+  const balance = parseInt(wallet.rows[0]?.b || 0);
+  res.send(renderPage('Withdraw Funds', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Withdraw Funds</h1><p style="opacity:0.9">Available: UGX ${balance.toLocaleString()}</p>
+    </div>
+    <div class="card"><h3>Request Withdrawal</h3>
+      <form method="POST" action="/dev/withdraw/process">
+        <input name="amount" placeholder="Amount UGX" type="number" min="10000" required>
+        <input name="phone" placeholder="MTN/Airtel phone number" required>
+        <select name="network" required><option value="mtn">MTN Mobile Money</option><option value="airtel">Airtel Money</option></select>
+        <button class="btn" ${balance < 10000 ? 'disabled style="opacity:0.5"' : ''}>Withdraw</button>
+        ${balance < 10000 ? '<p class="muted" style="margin-top:8px">Minimum withdrawal: UGX 10,000</p>' : ''}
+      </form>
+    </div>
+    <div class="card"><h3>Withdrawal History</h3>
+      ${withdrawals.rows.length > 0 ? `
+        <table><tr><th>Amount</th><th>Phone</th><th>Network</th><th>Date</th><th>Status</th></tr>
+        ${withdrawals.rows.map(w => {
+          const meta = w.source === 'withdrawal' ? JSON.parse(w.details || '{}') : {};
+          return `<tr><td>UGX ${parseInt(w.amount).toLocaleString()}</td><td>${esc(meta.phone || 'N/A')}</td><td>${esc(meta.network || 'N/A')}</td><td>${new Date(w.created_at).toLocaleString()}</td><td>${w.amount < 0 ? '<span style="color:#d97706">Processing</span>' : '<span style="color:#059669">Completed</span>'}</td></tr>`;
+        }).join('')}
+        </table>
+      ` : '<p class="muted">No withdrawals yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/withdraw/process', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { amount, phone, network } = req.body;
+  const wallet = (await pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1')).rows[0];
+  const balance = parseInt(wallet?.b || 0);
+  const amt = parseInt(amount);
+  if (amt < 10000) { req.session.flash = { type: 'error', msg: 'Minimum withdrawal is UGX 10,000' }; return res.redirect('/dev/withdraw'); }
+  if (amt > balance) { req.session.flash = { type: 'error', msg: 'Insufficient balance' }; return res.redirect('/dev/withdraw'); }
+  await pool.query('UPDATE platform_wallet SET balance=balance-$1 WHERE id=1', [amt]);
+  await pool.query('INSERT INTO developer_revenue(amount,source,details) VALUES($1,$2,$3)', [-amt, 'withdrawal', JSON.stringify({ phone, network, status: 'processing', requested_by: req.session.user.email })]);
+  await audit(req.session.user.email, 'withdrawal_request', `UGX ${amt} to ${phone} (${network})`);
+  req.session.flash = { type: 'success', msg: `Withdrawal of UGX ${amt.toLocaleString()} requested to ${phone}` };
+  res.redirect('/dev/withdraw');
+}));
+
+// === DEV ACTIVITY LOG ===
+app.get('/dev/activity', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [logs, users, subs] = await Promise.all([
+    pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100'),
+    pool.query('SELECT u.email,u.role,u.created_at,t.name as tenant_name FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id ORDER BY u.created_at DESC LIMIT 50'),
+    pool.query('SELECT s.*,t.name as tenant_name FROM subscriptions s JOIN tenants t ON s.tenant_id=t.id ORDER BY s.created_at DESC LIMIT 30')
+  ]);
+  res.send(renderPage('Activity & Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Platform Activity</h1><p style="opacity:0.9">Monitor all system events</p>
+    </div>
+    <div class="tab-bar">
+      <a href="#logs" class="active" onclick="showTab('logs')">Audit Logs</a>
+      <a href="#users" onclick="showTab('users')">Recent Users</a>
+      <a href="#subs" onclick="showTab('subs')">Subscriptions</a>
+    </div>
+    <div id="tab-logs" class="card"><h3>Recent Actions</h3>
+      <table><tr><th>User</th><th>Action</th><th>Details</th><th>Time</th></tr>
+      ${logs.rows.map(l => `<tr><td>${esc(l.user_email||'')}</td><td>${esc(l.action)}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc(l.details||'')}</td><td>${l.created_at?new Date(l.created_at).toLocaleString():''}</td></tr>`).join('')}
+      </table>
+    </div>
+    <div id="tab-users" class="card" style="display:none"><h3>Recent User Signups</h3>
+      <table><tr><th>Email</th><th>Role</th><th>Tenant</th><th>Joined</th></tr>
+      ${users.rows.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.role)}</td><td>${esc(u.tenant_name||'N/A')}</td><td>${u.created_at?new Date(u.created_at).toLocaleString():''}</td></tr>`).join('')}
+      </table>
+    </div>
+    <div id="tab-subs" class="card" style="display:none"><h3>Subscriptions</h3>
+      <table><tr><th>Tenant</th><th>Plan</th><th>Amount</th><th>Status</th><th>Started</th></tr>
+      ${subs.rows.map(s => `<tr><td>${esc(s.tenant_name)}</td><td><span class="tag">${esc(s.plan)}</span></td><td>UGX ${parseInt(s.amount).toLocaleString()}</td><td>${esc(s.status)}</td><td>${s.started_at?new Date(s.started_at).toLocaleDateString():''}</td></tr>`).join('')}
+      </table>
+    </div>
+    <script>
+      function showTab(name) {
+        document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
+        document.getElementById('tab-' + name).style.display = 'block';
+        document.querySelectorAll('.tab-bar a').forEach(a => a.classList.remove('active'));
+        event.target.classList.add('active');
+      }
+    </script>
+  `, req.session.user));
 }));
 
 // === FUNDRAISING UPGRADE ===
@@ -4959,6 +5220,11 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
   }
   // Fallback: manual payment
   await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [t, plan, amount, 'active', expires]);
+  // Auto-verify tenant after subscription
+  if (amount > 0) {
+    await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [t]);
+    await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [t, 'active']);
+  }
   if (amount > 0) await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description) VALUES($1,$2,$3,$4,$5)', [t, amount, 'manual', 'pending', `${plan} plan subscription`]);
   await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan (manual)`);
   res.redirect('/billing');
@@ -4974,6 +5240,9 @@ app.get('/billing/callback', requireAuth, ah(async (req, res) => {
       const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
       const expires = new Date(Date.now() + 30*24*60*60*1000);
       await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires]);
+      // Auto-verify tenant after subscription payment
+      await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
+      await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [payment.tenant_id, 'active']);
       await audit(req.session.user.email, 'payment_received', `Flutterwave payment: ${tx_ref} for ${plan}`);
       await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan });
       await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
@@ -8217,7 +8486,7 @@ ${process.env.GA_TRACKING_ID ? `
       <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">Logout</a>
-    ` : `<a href="/login">Login</a><a href="/register">Register</a>`}
+    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a>`}
   </div>
 </nav>
 <div class="container">${content}</div>
@@ -14385,9 +14654,9 @@ app.get('/fundraising/:id/delete', requireAuth, requireNotBanned, ah(async (req,
 }));
 
 // ============================================================
-// === ENTERTAINMENT HUB ===
+// === ENTERTAINMENT HUB (Logged-in enhanced version) ===
 // ============================================================
-app.get('/entertainment', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/my-entertainment', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const [videos, music, scraped] = await Promise.all([
     pool.query('SELECT * FROM entertainment_videos WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t]),
