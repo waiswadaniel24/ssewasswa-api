@@ -1032,14 +1032,29 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 .tab-bar a.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
 @media(max-width:768px){.nav{flex-direction:column;gap:10px}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}}
 </style>
+<!-- CookieYes Consent Banner -->
+<script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/0e110963fc8230516a615baf/script.js"></script>
 ${process.env.GA_TRACKING_ID ? `
-<!-- Google Analytics -->
+<!-- Google Analytics (respects cookie consent) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=${esc(process.env.GA_TRACKING_ID)}"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
+  gtag('consent', 'default', {
+    'analytics_storage': 'denied'
+  });
   gtag('config', '${esc(process.env.GA_TRACKING_ID)}');
+</script>
+<script type="text/javascript">
+  document.addEventListener('cookieyes_consent_update', function(eventData) {
+    var consentData = eventData.detail;
+    if (consentData && consentData.accepted === 'yes') {
+      gtag('consent', 'update', {
+        'analytics_storage': 'granted'
+      });
+    }
+  });
 </script>
 ` : ''}
 </head><body>
@@ -8163,14 +8178,29 @@ table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:10px 12px;
 a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:768px){.nav{flex-direction:column;gap:10px}.stats,.grid{grid-template-columns:1fr}}
 </style>
+<!-- CookieYes Consent Banner -->
+<script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/0e110963fc8230516a615baf/script.js"></script>
 ${process.env.GA_TRACKING_ID ? `
-<!-- Google Analytics -->
+<!-- Google Analytics (respects cookie consent) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=${esc(process.env.GA_TRACKING_ID)}"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
+  gtag('consent', 'default', {
+    'analytics_storage': 'denied'
+  });
   gtag('config', '${esc(process.env.GA_TRACKING_ID)}');
+</script>
+<script type="text/javascript">
+  document.addEventListener('cookieyes_consent_update', function(eventData) {
+    var consentData = eventData.detail;
+    if (consentData && consentData.accepted === 'yes') {
+      gtag('consent', 'update', {
+        'analytics_storage': 'granted'
+      });
+    }
+  });
 </script>
 ` : ''}
 </head><body>
