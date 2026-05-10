@@ -160,7 +160,7 @@ const t = (key, lang) => (translations[lang || 'en'] && translations[lang || 'en
 const CURRENCY_SYMBOLS = { UGX: 'UGX', KES: 'KES', TZS: 'TZS', RWF: 'RWF', USD: '$' };
 const formatCurrency = (amount, currency) => `${CURRENCY_SYMBOLS[currency || 'UGX'] || currency || 'UGX'} ${Number(amount).toLocaleString()}`;
 
-// Flutterwave helper (v1.0)
+// Flutterwave helper (v1.0) - kept for Nigeria/Ghana/Kenya users
 const createFlutterwaveCheckout = async (tenantId, amount, email, plan, reference) => {
   const FLW_PK = process.env.FLW_PUBLIC_KEY;
   const FLW_SK = process.env.FLW_SECRET_KEY;
@@ -174,6 +174,178 @@ const createFlutterwaveCheckout = async (tenantId, amount, email, plan, referenc
     const data = await resp.json();
     return data?.data?.link || null;
   } catch (e) { console.warn('Flutterwave error:', e.message); return null; }
+};
+
+// ============================================================
+// v12.1: UGANDA PAYMENT PROVIDERS (MTN MoMo + Airtel Money + DPO)
+// ============================================================
+
+// MTN MoMo Collection API helper
+const MTN_MOMO_BASE = process.env.MTN_MOMO_BASE_URL || 'https://momodeveloper.mtn.com';
+const MTN_MOMO_PRIMARY_KEY = process.env.MTN_COLLECTION_PRIMARY_KEY || '';
+const MTN_MOMO_USER_ID = process.env.MTN_COLLECTION_USER_ID || '';
+const MTN_MOMO_API_KEY = process.env.MTN_COLLECTION_API_KEY || '';
+
+let mtnAccessToken = null;
+let mtnTokenExpiry = 0;
+
+const getMtnAccessToken = async () => {
+  if (mtnAccessToken && Date.now() < mtnTokenExpiry) return mtnAccessToken;
+  if (!MTN_MOMO_USER_ID || !MTN_MOMO_API_KEY) return null;
+  try {
+    const auth = Buffer.from(`${MTN_MOMO_USER_ID}:${MTN_MOMO_API_KEY}`).toString('base64');
+    const resp = await fetch(`${MTN_MOMO_BASE}/collection/token/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Ocp-Apim-Subscription-Key': MTN_MOMO_PRIMARY_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+    const data = await resp.json();
+    if (data.access_token) {
+      mtnAccessToken = data.access_token;
+      mtnTokenExpiry = Date.now() + ((data.expires_in || 3600) - 60) * 1000;
+      console.log('[MTN MoMo] Access token obtained');
+      return mtnAccessToken;
+    }
+    console.warn('[MTN MoMo] Token error:', JSON.stringify(data));
+    return null;
+  } catch (e) { console.warn('[MTN MoMo] Token failed:', e.message); return null; }
+};
+
+// Request MTN MoMo payment from customer
+const requestMtnPayment = async (phone, amount, reference, payerMessage, payeeNote) => {
+  const token = await getMtnAccessToken();
+  if (!token) return { success: false, error: 'MTN MoMo not configured' };
+  try {
+    // Format phone: ensure it starts with 256
+    let formattedPhone = phone.replace(/\s+/g, '').replace(/^\+/, '');
+    if (formattedPhone.startsWith('0')) formattedPhone = '256' + formattedPhone.substring(1);
+    if (!formattedPhone.startsWith('256')) formattedPhone = '256' + formattedPhone;
+
+    const resp = await fetch(`${MTN_MOMO_BASE}/collection/v1_0/requesttopay`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Reference-Id': reference,
+        'X-Target-Environment': process.env.MTN_MOMO_ENV || 'sandbox',
+        'Ocp-Apim-Subscription-Key': MTN_MOMO_PRIMARY_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        amount: String(amount),
+        currency: 'UGX',
+        externalId: reference,
+        payer: { partyIdType: 'MSISDN', partyId: formattedPhone },
+        payerMessage: payerMessage || 'SSEWASSWA Payment',
+        payeeNote: payeeNote || 'Payment via SSEWASSWA'
+      })
+    });
+    
+    if (resp.status === 202) {
+      console.log(`[MTN MoMo] Payment requested: ${reference} UGX ${amount} to ${formattedPhone}`);
+      return { success: true, reference, status: 'PENDING', phone: formattedPhone };
+    }
+    const errData = await resp.json();
+    console.warn('[MTN MoMo] Payment error:', JSON.stringify(errData));
+    return { success: false, error: errData.message || 'Payment request failed', status: resp.status };
+  } catch (e) { console.warn('[MTN MoMo] Payment failed:', e.message); return { success: false, error: e.message }; }
+};
+
+// Check MTN MoMo payment status
+const checkMtnPaymentStatus = async (reference) => {
+  const token = await getMtnAccessToken();
+  if (!token) return { success: false, error: 'MTN MoMo not configured' };
+  try {
+    const resp = await fetch(`${MTN_MOMO_BASE}/collection/v1_0/requesttopay/${reference}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Target-Environment': process.env.MTN_MOMO_ENV || 'sandbox',
+        'Ocp-Apim-Subscription-Key': MTN_MOMO_PRIMARY_KEY
+      }
+    });
+    const data = await resp.json();
+    return { success: true, ...data };
+  } catch (e) { return { success: false, error: e.message }; }
+};
+
+// Airtel Money API helper
+const AIRTEL_BASE = process.env.AIRTEL_MONEY_BASE_URL || 'https://openapiuat.airtel.africa';
+const AIRTEL_CLIENT_ID = process.env.AIRTEL_CLIENT_ID || '';
+const AIRTEL_CLIENT_SECRET = process.env.AIRTEL_CLIENT_SECRET || '';
+
+let airtelAccessToken = null;
+let airtelTokenExpiry = 0;
+
+const getAirtelAccessToken = async () => {
+  if (airtelAccessToken && Date.now() < airtelTokenExpiry) return airtelAccessToken;
+  if (!AIRTEL_CLIENT_ID || !AIRTEL_CLIENT_SECRET) return null;
+  try {
+    const resp = await fetch(`${AIRTEL_BASE}/auth/oauth2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: AIRTEL_CLIENT_ID, client_secret: AIRTEL_CLIENT_SECRET, grant_type: 'client_credentials' })
+    });
+    const data = await resp.json();
+    if (data.access_token) {
+      airtelAccessToken = data.access_token;
+      airtelTokenExpiry = Date.now() + ((data.expires_in || 3600) - 60) * 1000;
+      return airtelAccessToken;
+    }
+    return null;
+  } catch (e) { console.warn('[Airtel] Token failed:', e.message); return null; }
+};
+
+// Request Airtel Money payment
+const requestAirtelPayment = async (phone, amount, reference) => {
+  const token = await getAirtelAccessToken();
+  if (!token) return { success: false, error: 'Airtel Money not configured' };
+  try {
+    let formattedPhone = phone.replace(/\s+/g, '').replace(/^\+/, '');
+    if (formattedPhone.startsWith('0')) formattedPhone = '256' + formattedPhone.substring(1);
+
+    const resp = await fetch(`${AIRTEL_BASE}/merchant/v1/payments/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Country': 'UG',
+        'X-Currency': 'UGX',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        reference: reference,
+        subscriber: { country: 'UG', currency: 'UGX', msisdn: formattedPhone },
+        transaction: { amount: Number(amount), country: 'UG', currency: 'UGX', id: reference }
+      })
+    });
+    const data = await resp.json();
+    if (data.status?.code === 'DP00001' || data.status?.code === 'DP00000') {
+      return { success: true, reference, status: 'PENDING', phone: formattedPhone };
+    }
+    return { success: false, error: data.status?.message || 'Payment failed' };
+  } catch (e) { return { success: false, error: e.message }; }
+};
+
+// DPO (Direct Pay Online) helper for card payments - works in Uganda
+const DPO_COMPANY_TOKEN = process.env.DPO_COMPANY_TOKEN || '';
+const DPO_BASE = 'https://secure.3gdirectpay.com';
+
+const createDPOPayment = async (amount, email, reference, description) => {
+  if (!DPO_COMPANY_TOKEN) return null;
+  try {
+    const resp = await fetch(`${DPO_BASE}/API/v6/PayToken`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/xml' },
+      body: `<?xml version="1.0" encoding="utf-8"?><API3G><CompanyToken>${DPO_COMPANY_TOKEN}</CompanyToken><Request>createToken</Request><Transaction><PaymentAmount>${amount}</PaymentAmount><PaymentCurrency>UGX</PaymentCurrency><CompanyRef>${reference}</CompanyRef><RedirectURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing/callback?dpo=1</RedirectURL><BackURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing</BackURL><CompanyRefInternal>${reference}</CompanyRefInternal><customerEmail>${email}</customerEmail><customerFirstName>SSEWASSWA</customerFirstName><Description>${description}</Description></Transaction><Services><Service><ServiceType>1</ServiceType><ServiceDescription>${description}</ServiceDescription><ServiceAmount>${amount}</ServiceAmount></Service></Services></API3G>`
+    });
+    const text = await resp.text();
+    const tokenMatch = text.match(/<TransToken>([^<]+)<\/TransToken>/);
+    if (tokenMatch) {
+      return `https://secure.3gdirectpay.com/pay.asp?ID=${tokenMatch[1]}`;
+    }
+    return null;
+  } catch (e) { console.warn('[DPO] Error:', e.message); return null; }
 };
 
 // Cloudinary upload helper (v1.0)
@@ -1101,7 +1273,31 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS hero_image_url TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS welcome_message TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT`,
-  `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  // v15 FIX: Add sort_order columns to tables that were created without them
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`,
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`,
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS billing_cycle TEXT DEFAULT 'monthly'`,
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS features TEXT`,
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS max_users INTEGER DEFAULT 5`,
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS max_students INTEGER DEFAULT 100`,
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS display_name TEXT`,
+  `ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description TEXT`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS section_type TEXT DEFAULT 'hero'`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS subtitle TEXT`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS content TEXT`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS image_url TEXT`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS video_url TEXT`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS button_text TEXT`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS button_link TEXT`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS background_color TEXT DEFAULT '#4f46e5'`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS text_color TEXT DEFAULT 'white'`,
+  `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS is_visible BOOLEAN DEFAULT true`,
+  `ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`,
+  `ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS options JSONB`,
+  `ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS required BOOLEAN DEFAULT false`
 ];
 
 (async () => {
@@ -5305,7 +5501,7 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
 
 // === SUBSCRIPTION PLANS (Developer sets standard fees) ===
 app.get('/dev/plans', requireAuth, requireSuperAdmin, ah(async (req, res) => {
-  const plans = (await pool.query('SELECT * FROM subscription_plans ORDER BY sort_order, price')).rows;
+  const plans = (await pool.query('SELECT * FROM subscription_plans ORDER BY COALESCE(sort_order,0), price')).rows;
   const flash = req.session.flash; delete req.session.flash;
   const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
   res.send(renderPage('Subscription Plans', `
@@ -5558,7 +5754,7 @@ app.get('/uploads/delete/:id', requireAuth, ah(async (req, res) => {
 app.get('/homepage', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
-  const sections = (await pool.query('SELECT * FROM homepage_sections WHERE tenant_id=$1 ORDER BY sort_order, id', [t])).rows;
+  const sections = (await pool.query('SELECT * FROM homepage_sections WHERE tenant_id=$1 ORDER BY COALESCE(sort_order,0), id', [t])).rows;
   res.send(renderPage('Design Your Homepage', `
     <div class="hero" style="background:linear-gradient(135deg,${tenant.primary_color || '#4f46e5'},#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
       <h1>Design Your Homepage</h1><p style="opacity:0.9;margin-top:4px">Build a beautiful public page for your organization</p>
@@ -9403,7 +9599,7 @@ app.get('/relationships/:id/delete', requireAuth, requireNotBanned, ah(async (re
 // 3.6: CUSTOM FIELDS
 app.get('/custom-fields', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const fields = (await pool.query('SELECT * FROM custom_fields WHERE tenant_id=$1 ORDER BY entity_type,sort_order', [t])).rows;
+  const fields = (await pool.query('SELECT * FROM custom_fields WHERE tenant_id=$1 ORDER BY entity_type, COALESCE(sort_order,0)', [t])).rows;
   res.send(renderPage('Custom Fields', `
     <div class="hero"><h1>Custom Fields</h1><p>Add custom fields to any entity</p></div>
     <div class="card"><a href="/custom-fields/new" class="btn btn-sm" style="margin-bottom:15px">+ New Custom Field</a>
@@ -15956,74 +16152,384 @@ app.get('/api/v1/payment/verify/:ref', ah(async (req, res) => {
 }));
 
 // ============================================================
-// v12.0: FLUTTERWAVE INLINE CHECKOUT PAGE
+// v12.1: UGANDA PAYMENT CHECKOUT (MTN MoMo + Airtel Money + DPO Card)
 // ============================================================
 app.get('/pay/checkout', requireAuth, ah(async (req, res) => {
   const { amount, plan, description, type, item_id } = req.query;
   const amt = parseInt(amount) || 0;
   const ref = 'SSEW-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex');
-  const FLW_PK = process.env.FLW_PUBLIC_KEY;
   const t = req.session.user.tenant_id;
+  const hasMtn = !!(process.env.MTN_COLLECTION_USER_ID && process.env.MTN_COLLECTION_API_KEY);
+  const hasAirtel = !!(process.env.AIRTEL_CLIENT_ID && process.env.AIRTEL_CLIENT_SECRET);
+  const hasDpo = !!process.env.DPO_COMPANY_TOKEN;
+  const hasFlw = !!process.env.FLW_SECRET_KEY;
+  const hasAnyProvider = hasMtn || hasAirtel || hasDpo || hasFlw;
   
   // Record pending payment
   if (amt > 0) {
-    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference) VALUES($1,$2,$3,$4,$5,$6)', [t, amt, 'flutterwave', 'pending', description || `${plan || 'payment'} checkout`, ref]);
+    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference) VALUES($1,$2,$3,$4,$5,$6)', [t, amt, 'pending', 'pending', description || `${plan || 'payment'} checkout`, ref]);
   }
   
-  res.send(renderPage('Secure Checkout', `
+  res.send(renderPage('Secure Payment', `
     <div class="card" style="max-width:550px;margin:40px auto">
       <div style="text-align:center;margin-bottom:20px">
         <h2>Secure Payment</h2>
         <p style="font-size:28px;font-weight:800;color:#4f46e5;margin:10px 0">UGX ${amt.toLocaleString()}</p>
         <p class="muted">${esc(description || plan || 'Payment')}</p>
       </div>
-      ${FLW_PK ? `
-        <button id="payBtn" class="btn btn-green" style="width:100%;padding:16px;font-size:18px">Pay with Card / Mobile Money</button>
-        <p class="muted" style="text-align:center;margin-top:10px">Powered by Flutterwave - Visa, Mastercard, MTN MoMo, Airtel Money</p>
-        <script src="https://checkout.flutterwave.com/v3.js"></script>
-        <script>
-        document.getElementById('payBtn').addEventListener('click', function() {
-          FlutterwaveCheckout({
-            public_key: "${esc(FLW_PK)}",
-            tx_ref: "${esc(ref)}",
-            amount: ${amt},
-            currency: "UGX",
-            payment_options: "card,mobilemoneyuganda,ussd,banktransfer",
-            redirect_url: "${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}/billing/callback?inline=1",
-            customer: {
-              email: "${esc(req.session.user.email)}",
-              name: "${esc(req.session.user.name || req.session.user.email)}"
-            },
-            customizations: {
-              title: "SSEWASSWA Platform",
-              description: "${esc(description || plan || 'Subscription')}",
-              logo: "https://ssewasswa.onrender.com/icon.png"
-            },
-            meta: {
-              tenant_id: ${t},
-              plan: "${esc(plan || '')}",
-              type: "${esc(type || '')}",
-              item_id: "${esc(item_id || '')}"
-            }
+      ${hasAnyProvider ? `
+        <div class="tab-bar" style="margin-bottom:20px">
+          ${hasMtn ? '<a href="#" class="active" onclick="showPayTab(\'mtn\')">MTN MoMo</a>' : ''}
+          ${hasAirtel ? `<a href="#" ${!hasMtn?'class="active"':''} onclick="showPayTab('airtel')">Airtel Money</a>` : ''}
+          ${hasDpo ? `<a href="#" ${!hasMtn&&!hasAirtel?'class="active"':''} onclick="showPayTab('card')">Card Payment</a>` : ''}
+          ${hasFlw ? `<a href="#" ${!hasMtn&&!hasAirtel&&!hasDpo?'class="active"':''} onclick="showPayTab('flutterwave')">Flutterwave</a>` : ''}
+        </div>
+
+        <!-- MTN MoMo -->
+        <div id="pay-mtn" style="${hasMtn?'':'display:none'}">
+          <div style="text-align:center;margin-bottom:15px">
+            <div style="width:50px;height:50px;border-radius:12px;background:#FFC300;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#000">M</div>
+            <h3>MTN Mobile Money</h3>
+            <p class="muted">You will receive a payment prompt on your phone</p>
+          </div>
+          <form method="POST" action="/pay/mtn/initiate">
+            <input type="hidden" name="amount" value="${amt}">
+            <input type="hidden" name="reference" value="${esc(ref)}">
+            <input type="hidden" name="plan" value="${esc(plan||'')}">
+            <input type="hidden" name="description" value="${esc(description||'')}">
+            <input type="hidden" name="type" value="${esc(type||'')}">
+            <input type="hidden" name="item_id" value="${esc(item_id||'')}">
+            <input name="phone" placeholder="MTN Phone Number (077x/078x/039x)" required pattern="^(\\+256|0|256)?(77|78|39|76)\\d{7}$">
+            <button class="btn btn-green" style="width:100%;padding:16px;font-size:18px;background:linear-gradient(135deg,#FFC300,#FFDD00);color:#000">Pay UGX ${amt.toLocaleString()} with MTN MoMo</button>
+          </form>
+        </div>
+
+        <!-- Airtel Money -->
+        <div id="pay-airtel" style="display:none">
+          <div style="text-align:center;margin-bottom:15px">
+            <div style="width:50px;height:50px;border-radius:12px;background:#ED1C24;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:white">A</div>
+            <h3>Airtel Money</h3>
+            <p class="muted">You will receive a payment prompt on your phone</p>
+          </div>
+          <form method="POST" action="/pay/airtel/initiate">
+            <input type="hidden" name="amount" value="${amt}">
+            <input type="hidden" name="reference" value="${esc(ref)}">
+            <input type="hidden" name="plan" value="${esc(plan||'')}">
+            <input type="hidden" name="description" value="${esc(description||'')}">
+            <input type="hidden" name="type" value="${esc(type||'')}">
+            <input type="hidden" name="item_id" value="${esc(item_id||'')}">
+            <input name="phone" placeholder="Airtel Phone Number (070x/074x/020x)" required pattern="^(\\+256|0|256)?(70|74|20|75)\\d{7}$">
+            <button class="btn btn-red" style="width:100%;padding:16px;font-size:18px;background:linear-gradient(135deg,#ED1C24,#FF4D4D)">Pay UGX ${amt.toLocaleString()} with Airtel Money</button>
+          </form>
+        </div>
+
+        <!-- DPO Card Payment -->
+        <div id="pay-card" style="display:none">
+          <div style="text-align:center;margin-bottom:15px">
+            <div style="width:50px;height:50px;border-radius:12px;background:linear-gradient(135deg,#4f46e5,#7c3aed);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:20px;color:white">V/M</div>
+            <h3>Card Payment</h3>
+            <p class="muted">Visa, Mastercard via DPO Group</p>
+          </div>
+          <form method="POST" action="/pay/dpo/initiate">
+            <input type="hidden" name="amount" value="${amt}">
+            <input type="hidden" name="reference" value="${esc(ref)}">
+            <input type="hidden" name="plan" value="${esc(plan||'')}">
+            <input type="hidden" name="description" value="${esc(description||'')}">
+            <button class="btn" style="width:100%;padding:16px;font-size:18px">Pay UGX ${amt.toLocaleString()} with Card</button>
+          </form>
+        </div>
+
+        <!-- Flutterwave fallback -->
+        <div id="pay-flutterwave" style="display:none">
+          <button id="flwBtn" class="btn btn-green" style="width:100%;padding:16px;font-size:18px">Pay with Flutterwave</button>
+          <p class="muted" style="text-align:center;margin-top:10px">Card + Mobile Money (if available in your country)</p>
+          <script src="https://checkout.flutterwave.com/v3.js"></script>
+          <script>
+          document.getElementById('flwBtn').addEventListener('click', function() {
+            FlutterwaveCheckout({
+              public_key: "${esc(process.env.FLW_PUBLIC_KEY||'')}",
+              tx_ref: "${esc(ref)}",
+              amount: ${amt},
+              currency: "UGX",
+              payment_options: "card,mobilemoneyuganda,ussd",
+              redirect_url: "${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}/billing/callback",
+              customer: { email: "${esc(req.session.user.email)}" },
+              customizations: { title: "SSEWASSWA", description: "${esc(description || plan || 'Payment')}" }
+            });
           });
-        });
-        </script>
+          </script>
+        </div>
       ` : `
+        <!-- No payment provider configured - show manual payment instructions -->
         <div class="alert alert-info">
           <h3>Manual Payment</h3>
-          <p>Flutterwave is not configured. Please pay manually:</p>
-          <ol style="margin:10px 0;padding-left:20px">
-            <li>Send UGX ${amt.toLocaleString()} to <strong>0780000000</strong> (MTN MoMo)</li>
-            <li>Reference: <strong>${esc(ref)}</strong></li>
-            <li>Send screenshot to admin for verification</li>
-          </ol>
+          <p>Online payments are not yet configured. Pay manually:</p>
+          <div style="margin:15px 0;padding:15px;background:#f0fdf4;border-radius:10px;border:1px solid #059669">
+            <p style="font-weight:700;margin-bottom:8px">MTN MoMo:</p>
+            <p>Send <strong>UGX ${amt.toLocaleString()}</strong> to <strong>0780000000</strong></p>
+          </div>
+          <div style="margin:15px 0;padding:15px;background:#fef2f2;border-radius:10px;border:1px solid #dc2626">
+            <p style="font-weight:700;margin-bottom:8px">Airtel Money:</p>
+            <p>Send <strong>UGX ${amt.toLocaleString()}</strong> to <strong>0700000000</strong></p>
+          </div>
+          <p>Reference: <strong>${esc(ref)}</strong></p>
+          <p class="muted" style="margin-top:10px">Send screenshot to admin for verification</p>
         </div>
         <a href="/billing" class="btn" style="width:100%">Back to Billing</a>
       `}
       <div style="margin-top:20px;padding:15px;background:${req.session.user?.dark_mode ? '#334155' : '#f8fafc'};border-radius:10px">
         <p class="muted" style="font-size:12px">Reference: ${esc(ref)}</p>
-        <p class="muted" style="font-size:12px">Secure payment processed by Flutterwave. Your data is encrypted.</p>
+        <p class="muted" style="font-size:12px">Secure payment. Your data is encrypted.</p>
       </div>
+    </div>
+    <script>
+    function showPayTab(id) {
+      document.querySelectorAll('[id^="pay-"]').forEach(el => el.style.display = 'none');
+      document.getElementById('pay-' + id).style.display = 'block';
+      document.querySelectorAll('.tab-bar a').forEach(a => a.classList.remove('active'));
+      event.target.classList.add('active');
+      return false;
+    }
+    </script>
+  `, req.session.user));
+}));
+
+// MTN MoMo payment initiation
+app.post('/pay/mtn/initiate', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { phone, amount, reference, plan, description, type, item_id } = req.body;
+  const amt = parseInt(amount) || 0;
+  const ref = reference || 'MTN-' + Date.now();
+  
+  const result = await requestMtnPayment(phone, amt, ref, description || 'SSEWASSWA Payment', `${plan||'payment'}`);
+  
+  if (result.success) {
+    await pool.query('INSERT INTO momo_payments(tenant_id,phone,amount,reference,status,type,external_ref) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [t, result.phone, amt, description || plan, 'pending', 'mtn', ref]);
+    // Update the pending payment with method
+    await pool.query('UPDATE payments SET method=$1 WHERE reference=$2', ['mtn_momo', ref]);
+    
+    res.send(renderPage('MTN MoMo - Confirm Payment', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <div style="width:70px;height:70px;border-radius:50%;background:#FFC300;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:#000">M</div>
+        <h2>Check Your Phone!</h2>
+        <p style="font-size:18px;margin:15px 0">A payment prompt has been sent to <strong>${esc(result.phone)}</strong></p>
+        <div class="card" style="background:#f0fdf4;border:2px solid #059669">
+          <p>Amount: <strong>UGX ${amt.toLocaleString()}</strong></p>
+          <p>Reference: <strong>${esc(ref)}</strong></p>
+        </div>
+        <div class="alert alert-info" style="margin-top:15px">
+          <p>1. Open your MTN MoMo prompt</p>
+          <p>2. Enter your PIN to confirm</p>
+          <p>3. Wait for confirmation message</p>
+        </div>
+        <form method="GET" action="/pay/mtn/status">
+          <input type="hidden" name="ref" value="${esc(ref)}">
+          <button type="submit" class="btn btn-green" style="width:100%;margin-top:10px">Check Payment Status</button>
+        </form>
+        <p class="muted" style="margin-top:10px">Prompt expires in 2 minutes. If you missed it, go back and try again.</p>
+        <a href="/billing" class="btn btn-sm" style="margin-top:10px">Back to Billing</a>
+      </div>
+    `, req.session.user));
+  } else {
+    res.send(renderPage('Payment Failed', `
+      <div class="card" style="max-width:500px;margin:40px auto">
+        <div class="alert alert-error">
+          <h2>MTN MoMo Payment Failed</h2>
+          <p>${esc(result.error || 'Could not initiate payment. Please check your phone number and try again.')}</p>
+        </div>
+        <a href="/pay/checkout?amount=${amt}&plan=${esc(plan||'')}&description=${esc(description||'')}" class="btn">Try Again</a>
+        <a href="/billing" class="btn btn-sm" style="margin-top:8px">Back to Billing</a>
+      </div>
+    `, req.session.user));
+  }
+}));
+
+// Check MTN MoMo payment status
+app.get('/pay/mtn/status', requireAuth, ah(async (req, res) => {
+  const ref = req.query.ref;
+  if (!ref) return res.redirect('/billing');
+  
+  const result = await checkMtnPaymentStatus(ref);
+  const status = result.status || 'PENDING';
+  
+  if (status === 'SUCCESSFUL') {
+    // Update payment records
+    await pool.query('UPDATE payments SET status=$1,method=$2 WHERE reference=$3', ['completed', 'mtn_momo', ref]);
+    await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['completed', ref]);
+    const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
+    if (payment) {
+      const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('basic') ? 'basic' : '';
+      if (plan) {
+        const expires = new Date(Date.now() + 30*24*60*60*1000);
+        await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']);
+        await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
+      }
+      const devShare = Math.round(payment.amount * 0.9);
+      await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [payment.tenant_id, 'mtn_momo', devShare, `Payment via MTN MoMo: ${ref}`]);
+      await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, method: 'mtn_momo' });
+    }
+    res.send(renderPage('Payment Successful!', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <div style="width:70px;height:70px;border-radius:50%;background:#059669;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:36px;color:white">&#10003;</div>
+        <h2 style="color:#059669">Payment Successful!</h2>
+        <p>Your payment of UGX ${payment ? parseInt(payment.amount).toLocaleString() : '0'} has been confirmed.</p>
+        <a href="/billing" class="btn btn-green" style="margin-top:15px">Go to Billing</a>
+        <a href="/dashboard" class="btn btn-sm" style="margin-top:10px">Dashboard</a>
+      </div>
+    `, req.session.user));
+  } else if (status === 'FAILED' || status === 'REJECTED') {
+    await pool.query('UPDATE payments SET status=$1 WHERE reference=$2', ['failed', ref]);
+    await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['failed', ref]);
+    res.send(renderPage('Payment Failed', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <div style="width:70px;height:70px;border-radius:50%;background:#dc2626;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:36px;color:white">&#10007;</div>
+        <h2 style="color:#dc2626">Payment Failed</h2>
+        <p>The payment was not completed. This could be due to insufficient balance or the prompt was rejected.</p>
+        <a href="/billing" class="btn" style="margin-top:15px">Back to Billing</a>
+      </div>
+    `, req.session.user));
+  } else {
+    // Still pending
+    res.send(renderPage('Payment Pending', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <div style="width:70px;height:70px;border-radius:50%;background:#f59e0b;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:24px;color:white">...</div>
+        <h2 style="color:#f59e0b">Payment Pending</h2>
+        <p>Your payment is still being processed. Please confirm on your phone if you haven't already.</p>
+        <form method="GET" action="/pay/mtn/status">
+          <input type="hidden" name="ref" value="${esc(ref)}">
+          <button type="submit" class="btn btn-green" style="margin-top:15px">Check Again</button>
+        </form>
+        <p class="muted" style="margin-top:10px">Auto-checking in 10 seconds...</p>
+        <script>setTimeout(() => { window.location.href = '/pay/mtn/status?ref=${esc(ref)}'; }, 10000);</script>
+      </div>
+    `, req.session.user));
+  }
+}));
+
+// MTN MoMo webhook/callback
+app.post('/webhook/mtn', express.json(), ah(async (req, res) => {
+  const { event, data } = req.body || {};
+  console.log('[MTN MoMo] Webhook:', event, JSON.stringify(data || {}));
+  
+  if (event === 'TRANSFER.SUCCESS' || data?.status === 'SUCCESSFUL') {
+    const ref = data?.externalId || data?.financialTransactionId || data?.reference;
+    if (ref) {
+      await pool.query('UPDATE payments SET status=$1,method=$2 WHERE reference=$3 AND status=$4', ['completed', 'mtn_momo', ref, 'pending']);
+      await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['completed', ref]);
+      const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
+      if (payment) {
+        const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
+        const expires = new Date(Date.now() + 30*24*60*60*1000);
+        await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']);
+        await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
+        await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, method: 'mtn_momo' });
+        await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount });
+      }
+    }
+  } else if (event === 'TRANSFER.FAILED' || data?.status === 'FAILED') {
+    const ref = data?.externalId || data?.reference;
+    if (ref) {
+      await pool.query('UPDATE payments SET status=$1 WHERE reference=$2', ['failed', ref]);
+      await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['failed', ref]);
+    }
+  }
+  res.status(200).send('OK');
+}));
+
+// Airtel Money payment initiation
+app.post('/pay/airtel/initiate', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { phone, amount, reference, plan, description } = req.body;
+  const amt = parseInt(amount) || 0;
+  const ref = reference || 'AIRTEL-' + Date.now();
+  
+  const result = await requestAirtelPayment(phone, amt, ref);
+  
+  if (result.success) {
+    await pool.query('INSERT INTO momo_payments(tenant_id,phone,amount,reference,status,type,external_ref) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [t, result.phone, amt, description || plan, 'pending', 'airtel', ref]);
+    await pool.query('UPDATE payments SET method=$1 WHERE reference=$2', ['airtel_money', ref]);
+    
+    res.send(renderPage('Airtel Money - Confirm Payment', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <div style="width:70px;height:70px;border-radius:50%;background:#ED1C24;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:white">A</div>
+        <h2>Check Your Phone!</h2>
+        <p style="font-size:18px;margin:15px 0">A payment prompt has been sent to <strong>${esc(result.phone)}</strong></p>
+        <div class="card" style="background:#fef2f2;border:2px solid #dc2626">
+          <p>Amount: <strong>UGX ${amt.toLocaleString()}</strong></p>
+          <p>Reference: <strong>${esc(ref)}</strong></p>
+        </div>
+        <div class="alert alert-info" style="margin-top:15px">
+          <p>1. Open your Airtel Money prompt</p>
+          <p>2. Enter your PIN to confirm</p>
+          <p>3. Wait for confirmation message</p>
+        </div>
+        <form method="GET" action="/pay/airtel/status">
+          <input type="hidden" name="ref" value="${esc(ref)}">
+          <button type="submit" class="btn btn-red" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#ED1C24,#FF4D4D)">Check Payment Status</button>
+        </form>
+        <a href="/billing" class="btn btn-sm" style="margin-top:10px">Back to Billing</a>
+      </div>
+    `, req.session.user));
+  } else {
+    res.send(renderPage('Payment Failed', `
+      <div class="card" style="max-width:500px;margin:40px auto">
+        <div class="alert alert-error">
+          <h2>Airtel Money Payment Failed</h2>
+          <p>${esc(result.error || 'Could not initiate payment.')}</p>
+        </div>
+        <a href="/billing" class="btn">Back to Billing</a>
+      </div>
+    `, req.session.user));
+  }
+}));
+
+// Check Airtel Money payment status
+app.get('/pay/airtel/status', requireAuth, ah(async (req, res) => {
+  const ref = req.query.ref;
+  if (!ref) return res.redirect('/billing');
+  const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
+  const momo = (await pool.query('SELECT * FROM momo_payments WHERE external_ref=$1', [ref])).rows[0];
+  const status = momo?.status || payment?.status || 'pending';
+  
+  if (status === 'completed') {
+    res.send(renderPage('Payment Successful!', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <div style="width:70px;height:70px;border-radius:50%;background:#059669;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:36px;color:white">&#10003;</div>
+        <h2 style="color:#059669">Payment Successful!</h2>
+        <a href="/billing" class="btn btn-green" style="margin-top:15px">Go to Billing</a>
+      </div>
+    `, req.session.user));
+  } else {
+    res.send(renderPage('Payment Pending', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <div style="width:70px;height:70px;border-radius:50%;background:#f59e0b;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:24px;color:white">...</div>
+        <h2 style="color:#f59e0b">Payment Pending</h2>
+        <p>Please confirm on your phone.</p>
+        <form method="GET" action="/pay/airtel/status">
+          <input type="hidden" name="ref" value="${esc(ref)}">
+          <button type="submit" class="btn btn-red" style="margin-top:15px;background:linear-gradient(135deg,#ED1C24,#FF4D4D)">Check Again</button>
+        </form>
+        <script>setTimeout(() => { window.location.href = '/pay/airtel/status?ref=${esc(ref)}'; }, 10000);</script>
+      </div>
+    `, req.session.user));
+  }
+}));
+
+// DPO Card payment initiation
+app.post('/pay/dpo/initiate', requireAuth, ah(async (req, res) => {
+  const { amount, reference, plan, description } = req.body;
+  const amt = parseInt(amount) || 0;
+  const ref = reference || 'DPO-' + Date.now();
+  
+  const checkoutUrl = await createDPOPayment(amt, req.session.user.email, ref, description || plan || 'SSEWASSWA Payment');
+  if (checkoutUrl) {
+    await pool.query('UPDATE payments SET method=$1 WHERE reference=$2', ['dpo_card', ref]);
+    return res.redirect(checkoutUrl);
+  }
+  res.send(renderPage('Card Payment', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <div class="alert alert-info"><h2>Card Payments Coming Soon</h2><p>DPO is not yet configured for card payments. Please use MTN MoMo or Airtel Money.</p></div>
+      <a href="/billing" class="btn">Back to Billing</a>
     </div>
   `, req.session.user));
 }));
