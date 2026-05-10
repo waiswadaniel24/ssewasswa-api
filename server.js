@@ -8095,18 +8095,24 @@ const paginationHtml = (currentPage, totalCount, perPage, baseUrl) => {
 const renderPageV3 = (title, content, user, meta = {}) => {
   const dark = user?.dark_mode;
   const description = meta.description || `${title} - SSEWASSWA All-in-One Management Platform`;
-  const keywords = meta.keywords || 'school management, church management, business management, Uganda, SSEWASSWA';
+  const keywords = meta.keywords || 'school management, church management, business management, Uganda, SSEWASSWA, clinic management, SaaS Africa';
+  const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+  const canonicalUrl = meta.canonical || `${baseUrl}${meta.path || '/'}`;
   return `<!DOCTYPE html>
 <html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="${esc(description)}">
 <meta name="keywords" content="${esc(keywords)}">
+<link rel="canonical" href="${esc(canonicalUrl)}">
 <meta property="og:title" content="${esc(title)} | SSEWASSWA">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="SSEWASSWA">
-<meta name="twitter:card" content="summary">
+<meta property="og:url" content="${esc(canonicalUrl)}">
+<meta property="og:image" content="${baseUrl}/icon.png">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(title)}">
 <meta name="twitter:description" content="${esc(description)}">
+<meta name="twitter:image" content="${baseUrl}/icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#4f46e5">
 <title>${esc(title)} | SSEWASSWA</title>
