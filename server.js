@@ -8095,8 +8095,10 @@ const renderPageV3 = (title, content, user, meta = {}) => {
   const keywords = meta.keywords || 'school management, church management, business management, Uganda, SSEWASSWA, clinic management, SaaS Africa';
   const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
   const canonicalUrl = meta.canonical || `${baseUrl}${meta.path || '/'}`;
+  const googleVerification = process.env.GOOGLE_SITE_VERIFICATION || '';
   return `<!DOCTYPE html>
 <html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+${googleVerification ? `<meta name="google-site-verification" content="${esc(googleVerification)}">` : ''}
 <meta name="description" content="${esc(description)}">
 <meta name="keywords" content="${esc(keywords)}">
 <link rel="canonical" href="${esc(canonicalUrl)}">
