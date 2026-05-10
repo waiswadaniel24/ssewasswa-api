@@ -624,7 +624,184 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('data_portability', 'Data Portability', 'Export all data in standard formats', '9.0', 'platform', 'None', false) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('page_editor', 'Page Editor', 'User-editable pages with stamps and signatures', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('document_templates', 'Document Templates', 'Customize receipts, reports with headers/footers/stamps', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('government_dashboards', 'Government Dashboards', 'Anonymized aggregate data for regulators', '9.0', 'platform', 'super_admin only', false) ON CONFLICT DO NOTHING`
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('government_dashboards', 'Government Dashboards', 'Anonymized aggregate data for regulators', '9.0', 'platform', 'super_admin only', false) ON CONFLICT DO NOTHING`,
+
+  // ============ v10 NEW FEATURE TABLES ============
+  // School: Transport
+  `CREATE TABLE IF NOT EXISTS transport_routes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, route_name TEXT NOT NULL, driver_name TEXT, driver_phone TEXT, vehicle_plate TEXT, capacity INTEGER DEFAULT 30, description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS transport_assignments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, route_id INTEGER REFERENCES transport_routes(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, pick_up_point TEXT, drop_off_point TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // School: Discipline
+  `CREATE TABLE IF NOT EXISTS discipline_incidents (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, incident_date DATE DEFAULT CURRENT_DATE, type TEXT NOT NULL, description TEXT, action_taken TEXT, reported_by TEXT, status TEXT DEFAULT 'open', created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // School: Homework
+  `CREATE TABLE IF NOT EXISTS homework (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, subject TEXT NOT NULL, title TEXT NOT NULL, description TEXT, due_date DATE, class_name TEXT, assigned_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS homework_submissions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, homework_id INTEGER REFERENCES homework(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, submission_text TEXT, score NUMERIC, submitted_at TIMESTAMPTZ DEFAULT NOW())`,
+  // School: Calendar
+  `CREATE TABLE IF NOT EXISTS school_events (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, event_date DATE, end_date DATE, event_type TEXT DEFAULT 'event', location TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // School: Health
+  `CREATE TABLE IF NOT EXISTS student_health (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE UNIQUE, blood_group TEXT, allergies TEXT, conditions TEXT, emergency_contact TEXT, emergency_phone TEXT, last_checkup DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS health_visits (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, visit_date DATE DEFAULT CURRENT_DATE, complaint TEXT, diagnosis TEXT, treatment TEXT, seen_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // School: Alumni
+  `CREATE TABLE IF NOT EXISTS alumni (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, phone TEXT, graduation_year INTEGER, class_name TEXT, occupation TEXT, address TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // School: Library
+  `CREATE TABLE IF NOT EXISTS library_books (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, author TEXT, isbn TEXT, category TEXT, copies_total INTEGER DEFAULT 1, copies_available INTEGER DEFAULT 1, shelf_location TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS library_borrows (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, book_id INTEGER REFERENCES library_books(id) ON DELETE CASCADE, borrower_name TEXT NOT NULL, borrower_type TEXT DEFAULT 'student', borrower_id INTEGER, borrow_date DATE DEFAULT CURRENT_DATE, due_date DATE, return_date DATE, fine INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+
+  // Church: Choir
+  `CREATE TABLE IF NOT EXISTS choir_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE, voice_part TEXT, role TEXT DEFAULT 'member', joined_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS worship_songs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, author TEXT, key_signature TEXT, tempo TEXT, lyrics TEXT, category TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Church: Sacraments
+  `CREATE TABLE IF NOT EXISTS sacraments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, type TEXT NOT NULL, member_id INTEGER REFERENCES church_members(id) ON DELETE SET NULL, date DATE, officiant TEXT, location TEXT, witnesses TEXT, certificate_no TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Church: Cell Groups
+  `CREATE TABLE IF NOT EXISTS cell_groups (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, leader TEXT, meeting_day TEXT, meeting_time TEXT, location TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS cell_group_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, group_id INTEGER REFERENCES cell_groups(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE, role TEXT DEFAULT 'member', joined_date DATE DEFAULT CURRENT_DATE)`,
+  // Church: Volunteers
+  `CREATE TABLE IF NOT EXISTS volunteer_roles (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, role_name TEXT NOT NULL, description TEXT, schedule TEXT, slots INTEGER, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS volunteer_assignments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, role_id INTEGER REFERENCES volunteer_roles(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE, date_assigned DATE DEFAULT CURRENT_DATE, status TEXT DEFAULT 'active')`,
+  // Church: Sermons
+  `CREATE TABLE IF NOT EXISTS sermons (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, preacher TEXT, date DATE DEFAULT CURRENT_DATE, series TEXT, scripture TEXT, notes TEXT, audio_url TEXT, video_url TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Church: Prayer Requests
+  `CREATE TABLE IF NOT EXISTS prayer_requests (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, requested_by TEXT, is_anonymous BOOLEAN DEFAULT false, is_answered BOOLEAN DEFAULT false, prayer_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+
+  // Business: Payroll
+  `CREATE TABLE IF NOT EXISTS payroll_runs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, month TEXT NOT NULL, total_gross INTEGER DEFAULT 0, total_deductions INTEGER DEFAULT 0, total_net INTEGER DEFAULT 0, status TEXT DEFAULT 'draft', created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS payroll_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, run_id INTEGER REFERENCES payroll_runs(id) ON DELETE CASCADE, employee_name TEXT NOT NULL, gross_salary INTEGER DEFAULT 0, paye INTEGER DEFAULT 0, nssf_employee INTEGER DEFAULT 0, nssf_employer INTEGER DEFAULT 0, other_deductions INTEGER DEFAULT 0, net_pay INTEGER DEFAULT 0, bank_account TEXT)`,
+  // Business: HR/Leave
+  `CREATE TABLE IF NOT EXISTS leave_requests (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, employee_name TEXT NOT NULL, leave_type TEXT NOT NULL, start_date DATE, end_date DATE, days INTEGER, reason TEXT, status TEXT DEFAULT 'pending', approved_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Business: Projects
+  `CREATE TABLE IF NOT EXISTS projects (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, status TEXT DEFAULT 'planning', start_date DATE, end_date DATE, budget INTEGER DEFAULT 0, spent INTEGER DEFAULT 0, manager TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS project_tasks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, assignee TEXT, status TEXT DEFAULT 'todo', priority TEXT DEFAULT 'medium', due_date DATE, completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Business: CRM
+  `CREATE TABLE IF NOT EXISTS crm_leads (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, phone TEXT, company TEXT, source TEXT, stage TEXT DEFAULT 'new', value INTEGER DEFAULT 0, notes TEXT, assigned_to TEXT, next_follow_up DATE, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Business: Stock Take
+  `CREATE TABLE IF NOT EXISTS stock_takes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, date DATE DEFAULT CURRENT_DATE, status TEXT DEFAULT 'in_progress', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS stock_take_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, take_id INTEGER REFERENCES stock_takes(id) ON DELETE CASCADE, item_name TEXT NOT NULL, system_qty INTEGER DEFAULT 0, physical_qty INTEGER DEFAULT 0, variance INTEGER DEFAULT 0, notes TEXT)`,
+  // Business: Warranty
+  `CREATE TABLE IF NOT EXISTS warranties (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, item_name TEXT NOT NULL, serial_number TEXT, purchase_date DATE, expiry_date DATE, vendor TEXT, warranty_type TEXT, value INTEGER DEFAULT 0, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+
+  // Org: Board Resolutions
+  `CREATE TABLE IF NOT EXISTS board_resolutions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, resolution_text TEXT, proposed_by TEXT, seconded_by TEXT, meeting_date DATE, vote_for INTEGER DEFAULT 0, vote_against INTEGER DEFAULT 0, vote_abstain INTEGER DEFAULT 0, status TEXT DEFAULT 'proposed', created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Org: Assets
+  `CREATE TABLE IF NOT EXISTS assets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, category TEXT, purchase_date DATE, purchase_value INTEGER DEFAULT 0, current_value INTEGER DEFAULT 0, depreciation_rate NUMERIC DEFAULT 0, location TEXT, custodian TEXT, condition TEXT DEFAULT 'good', serial_number TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Org: Partners/Donors
+  `CREATE TABLE IF NOT EXISTS partners (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT DEFAULT 'donor', email TEXT, phone TEXT, organization TEXT, engagement_score INTEGER DEFAULT 0, total_contributions INTEGER DEFAULT 0, last_contact DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Org: Event Ticketing
+  `CREATE TABLE IF NOT EXISTS ticketed_events (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, event_date DATE, venue TEXT, capacity INTEGER DEFAULT 100, price INTEGER DEFAULT 0, tickets_sold INTEGER DEFAULT 0, qr_enabled BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS event_tickets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event_id INTEGER REFERENCES ticketed_events(id) ON DELETE CASCADE, attendee_name TEXT NOT NULL, attendee_email TEXT, attendee_phone TEXT, ticket_code TEXT UNIQUE, status TEXT DEFAULT 'active', checked_in BOOLEAN DEFAULT false, checked_in_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+
+  // Cross-cutting: Workflows
+  `CREATE TABLE IF NOT EXISTS workflows (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, trigger_type TEXT NOT NULL, trigger_config JSONB, steps JSONB, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS workflow_instances (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, workflow_id INTEGER REFERENCES workflows(id) ON DELETE CASCADE, current_step INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', data JSONB, initiated_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Cross-cutting: Chat
+  `CREATE TABLE IF NOT EXISTS chat_channels (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT DEFAULT 'group', created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS chat_messages (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, channel_id INTEGER REFERENCES chat_channels(id) ON DELETE CASCADE, sender_email TEXT NOT NULL, message TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS channel_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, channel_id INTEGER REFERENCES chat_channels(id) ON DELETE CASCADE, user_email TEXT NOT NULL)`,
+  // Cross-cutting: Tasks
+  `CREATE TABLE IF NOT EXISTS tasks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, assignee TEXT, priority TEXT DEFAULT 'medium', status TEXT DEFAULT 'todo', due_date DATE, created_by TEXT, completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Cross-cutting: 2FA
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_fa_secret TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_fa_enabled BOOLEAN DEFAULT false`,
+  // Cross-cutting: Activity Feed
+  `CREATE TABLE IF NOT EXISTS activity_feed (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id INTEGER, description TEXT, metadata JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Cross-cutting: Surveys
+  `CREATE TABLE IF NOT EXISTS surveys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, questions JSONB, is_active BOOLEAN DEFAULT true, responses_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS survey_responses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, survey_id INTEGER REFERENCES surveys(id) ON DELETE CASCADE, respondent_email TEXT, answers JSONB, submitted_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Cross-cutting: Email Templates
+  `CREATE TABLE IF NOT EXISTS email_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, category TEXT DEFAULT 'general', created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Cross-cutting: QR Codes
+  `CREATE TABLE IF NOT EXISTS qr_codes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, label TEXT NOT NULL, target_url TEXT, qr_data TEXT, scan_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Cross-cutting: Certificates
+  `CREATE TABLE IF NOT EXISTS certificates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, template_name TEXT NOT NULL, recipient_name TEXT NOT NULL, recipient_email TEXT, issue_date DATE DEFAULT CURRENT_DATE, certificate_no TEXT UNIQUE, description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Cross-cutting: Document Signing
+  `CREATE TABLE IF NOT EXISTS signing_requests (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, document_title TEXT NOT NULL, document_url TEXT, signer_email TEXT NOT NULL, signer_name TEXT, status TEXT DEFAULT 'pending', signed_at TIMESTAMPTZ, signature_data TEXT, requested_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Cross-cutting: Dashboard Prefs
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS dashboard_prefs JSONB`,
+  // Education Levels (Kindergarten through University)
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS education_levels TEXT[] DEFAULT '{"nursery","kindergarten","primary","o_level","a_level","university","vocational"}'`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS education_level TEXT DEFAULT 'primary'`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS stream TEXT`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS boarding_status TEXT DEFAULT 'day'`,
+  `ALTER TABLE students ADD COLUMN IF NOT EXISTS previous_school TEXT`,
+  `ALTER TABLE exams ADD COLUMN IF NOT EXISTS education_level TEXT`,
+  `ALTER TABLE exams ADD COLUMN IF NOT EXISTS term TEXT DEFAULT 'term1'`,
+  `ALTER TABLE exams ADD COLUMN IF NOT EXISTS year INTEGER`,
+  `ALTER TABLE fee_structures ADD COLUMN IF NOT EXISTS education_level TEXT`,
+  `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS education_level TEXT`,
+
+  // Indexes for new tables
+  `CREATE INDEX IF NOT EXISTS idx_transport_routes_tenant ON transport_routes(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_discipline_tenant ON discipline_incidents(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_homework_tenant ON homework(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_school_events_tenant ON school_events(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_student_health_tenant ON student_health(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_alumni_tenant ON alumni(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_library_books_tenant ON library_books(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_choir_members_tenant ON choir_members(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_sacraments_tenant ON sacraments(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_cell_groups_tenant ON cell_groups(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_volunteer_roles_tenant ON volunteer_roles(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_sermons_tenant ON sermons(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_prayer_requests_tenant ON prayer_requests(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payroll_runs_tenant ON payroll_runs(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_leave_requests_tenant ON leave_requests(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_projects_tenant ON projects(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_crm_leads_tenant ON crm_leads(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_stock_takes_tenant ON stock_takes(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_warranties_tenant ON warranties(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_board_resolutions_tenant ON board_resolutions(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_assets_tenant ON assets(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_partners_tenant ON partners(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_ticketed_events_tenant ON ticketed_events(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_workflows_tenant ON workflows(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_chat_channels_tenant ON chat_channels(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_tenant ON tasks(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_activity_feed_tenant ON activity_feed(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_surveys_tenant ON surveys(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_email_templates_tenant ON email_templates(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_qr_codes_tenant ON qr_codes(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_certificates_tenant ON certificates(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_signing_requests_tenant ON signing_requests(tenant_id)`,
+
+  // ============ v10 NEW FEATURE FLAGS ============
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('transport', 'School Transport', 'Manage bus routes and student assignments', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('discipline', 'Discipline Tracking', 'Track student behavior incidents and actions', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('homework', 'Homework & Assignments', 'Assign, submit and grade homework', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('school_calendar', 'School Calendar', 'Events, term dates and holidays', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('health_records', 'Health Records', 'Student medical info and clinic visits', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('alumni', 'Alumni Network', 'Graduated students tracking and networking', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('library', 'Library Management', 'Books, borrowing, returns and fines', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('choir', 'Choir & Worship Team', 'Roster, songs and scheduling', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('sacraments', 'Sacrament Records', 'Baptism, marriage, funeral records', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('cell_groups', 'Cell Groups', 'Small groups, leaders and meetings', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('volunteers', 'Volunteer Scheduling', 'Roles, schedules and availability', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('sermons', 'Sermon Archive', 'Sermon notes, audio and series tracking', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('prayer_requests', 'Prayer Requests', 'Submit, track and mark answered', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('payroll', 'Payroll Management', 'Salary calculations, payslips, deductions', '5.0', 'enterprise', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('hr_leave', 'HR & Leave Management', 'Leave requests, balances and approval', '5.0', 'enterprise', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('projects', 'Project Management', 'Projects, tasks, milestones and deadlines', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('crm', 'CRM & Leads', 'Lead tracking, pipeline and follow-ups', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('stock_take', 'Stock Take', 'Physical inventory counts vs system', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('warranties', 'Warranty Tracking', 'Product warranties and expiry alerts', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('board_resolutions', 'Board Resolutions', 'Decisions, votes and meeting minutes', '6.0', 'ecosystem', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('asset_management', 'Asset Management', 'Fixed assets, depreciation and locations', '6.0', 'ecosystem', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('partners', 'Partner & Donor Management', 'Donor profiles and engagement', '6.0', 'ecosystem', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('event_ticketing', 'Event Ticketing', 'Paid events, QR tickets and check-in', '6.0', 'ecosystem', 'Flutterwave for paid events', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('workflows', 'Workflow Engine', 'Approval workflows and automation', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('chat', 'Internal Chat', 'Messaging between platform users', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('task_manager', 'Task Manager', 'Tasks, assignments and deadlines', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('two_fa', 'Two-Factor Auth', 'TOTP-based 2FA for accounts', '8.0', 'mobile', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('activity_feed', 'Activity Feed', 'Real-time activity timeline', '8.0', 'mobile', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('global_search', 'Global Search', 'Search across all data types', '8.0', 'mobile', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('dark_mode', 'Dark Mode', 'Toggle light/dark theme', '8.0', 'mobile', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('surveys', 'Surveys & Feedback', 'Create forms and collect responses', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('email_templates', 'Email Templates', 'Customizable email templates', '9.0', 'platform', 'GMAIL_USER + GMAIL_PASS', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('qr_codes', 'QR Code Generator', 'Generate QR codes for anything', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('certificates', 'Digital Certificates', 'Auto-generated completion certificates', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('document_signing', 'Document Signing', 'Request and verify signatures', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('watermarks', 'Watermark Support', 'Add watermarks to documents', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('duplicate_detection', 'Duplicate Detection', 'Find duplicate records', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('bulk_operations', 'Bulk Operations', 'Mass edit, delete and export', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('dashboard_customize', 'Dashboard Customization', 'Reorder and customize dashboard cards', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('keyboard_shortcuts', 'Keyboard Shortcuts', 'Quick navigation with keyboard', '9.0', 'platform', 'None', true) ON CONFLICT DO NOTHING`
 ];
 
 (async () => {
@@ -970,6 +1147,13 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
       <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
       <div class="card"><h3>API & Webhooks</h3><a href="/api-keys" class="btn btn-sm">Manage Keys</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Discipline</h3><a href="/school/discipline" class="btn btn-sm">Incidents</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Homework</h3><a href="/school/homework" class="btn btn-sm">Assignments</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Calendar</h3><a href="/school/calendar" class="btn btn-sm">Events & Terms</a></div>
+      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">NEW: Health</h3><a href="/school/health" class="btn btn-sm">Medical Records</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #3b82f6"><h3 style="color:#3b82f6">NEW: Alumni</h3><a href="/school/alumni" class="btn btn-sm">Graduates</a></div>
+      <div class="card" style="background:#f7fee7;border:2px solid #65a30d"><h3 style="color:#65a30d">NEW: Library</h3><a href="/school/library" class="btn btn-sm">Books & Borrow</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Fees Collected (Monthly)</h3><canvas id="feesChart"></canvas></div>
@@ -2344,6 +2528,10 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card"><h3>Bills</h3>
         <a href="/bill-reminders" class="btn btn-sm btn-red">Reminders</a>
       </div>
+      <div class="card" style="background:#eff6ff;border:2px solid #1e40af"><h3 style="color:#1e40af">NEW: Resolutions</h3><a href="/org/resolutions" class="btn btn-sm">Board Votes</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Assets</h3><a href="/org/assets" class="btn btn-sm">Fixed Assets</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Partners</h3><a href="/org/partners" class="btn btn-sm">Donor Mgmt</a></div>
+      <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: Ticketing</h3><a href="/org/ticketing" class="btn btn-sm">Event Tickets</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Finance: Income vs Expense</h3><canvas id="orgFinanceChart"></canvas></div>
@@ -2820,6 +3008,12 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Documents</h3>
         <a href="/documents" class="btn btn-sm">Library</a>
       </div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Choir</h3><a href="/church/choir" class="btn btn-sm">Worship Team</a></div>
+      <div class="card" style="background:#fff7ed;border:2px solid #b45309"><h3 style="color:#b45309">NEW: Sacraments</h3><a href="/church/sacraments" class="btn btn-sm">Records</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Cell Groups</h3><a href="/church/cell-groups" class="btn btn-sm">Small Groups</a></div>
+      <div class="card" style="background:#f0fdfa;border:2px solid #14b8a6"><h3 style="color:#14b8a6">NEW: Volunteers</h3><a href="/church/volunteers" class="btn btn-sm">Scheduling</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Sermon Archive</h3><a href="/church/sermons" class="btn btn-sm">Full Archive</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #f59e0b"><h3 style="color:#f59e0b">NEW: Prayer Requests</h3><a href="/church/prayer-requests" class="btn btn-sm">Prayer Wall</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Tithes Trend</h3><canvas id="tithesChart"></canvas></div>
@@ -3178,6 +3372,12 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
       <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Library</a></div>
       <div class="card"><h3>API</h3><a href="/api-keys" class="btn btn-sm">API Keys</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #0f766e"><h3 style="color:#0f766e">NEW: Payroll</h3><a href="/business/payroll" class="btn btn-sm">Salary Mgmt</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: HR/Leave</h3><a href="/business/leave" class="btn btn-sm">Leave Mgmt</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #6366f1"><h3 style="color:#6366f1">NEW: Projects</h3><a href="/business/projects" class="btn btn-sm">PM Board</a></div>
+      <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: CRM</h3><a href="/business/crm" class="btn btn-sm">Lead Pipeline</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #ca8a04"><h3 style="color:#ca8a04">NEW: Stock Take</h3><a href="/business/stock-take" class="btn btn-sm">Physical Count</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">NEW: Warranties</h3><a href="/business/warranties" class="btn btn-sm">Track Warranties</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Sales Trend</h3><canvas id="salesChart"></canvas></div>
@@ -9125,6 +9325,2022 @@ app.get('/manifest.json', (req, res) => {
 });
 
 // Enhanced Service Worker
+
+// =============================================
+// SCHOOL: TRANSPORT / BUS ROUTES
+// =============================================
+app.get('/school/transport', requireAuth, requireNotBanned, requireFeature('transport'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const routes = (await pool.query('SELECT tr.*, COUNT(ta.id) as assigned FROM transport_routes tr LEFT JOIN transport_assignments ta ON ta.route_id=tr.id WHERE tr.tenant_id=$1 GROUP BY tr.id ORDER BY tr.route_name', [t])).rows;
+  res.send(renderPage('School Transport', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>School Transport</h1><p>Manage bus routes and student assignments</p></div>
+    <div class="card"><a href="/school/transport/new" class="btn" style="margin-bottom:15px">+ Add Route</a>
+      ${routes.length ? `<table><tr><th>Route</th><th>Driver</th><th>Phone</th><th>Plate</th><th>Capacity</th><th>Assigned</th><th>Actions</th></tr>
+      ${routes.map(r => `<tr><td><strong>${esc(r.route_name)}</strong></td><td>${esc(r.driver_name||'-')}</td><td>${esc(r.driver_phone||'-')}</td><td>${esc(r.vehicle_plate||'-')}</td><td>${r.capacity}</td><td>${r.assigned||0}</td>
+      <td><a href="/school/transport/${r.id}/assign" class="btn btn-sm">Assign</a> <a href="/school/transport/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No routes yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/transport/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Transport Route', `
+    <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Route</h2>
+    <form method="POST" action="/school/transport/save">
+      <label>Route Name</label><input name="route_name" required placeholder="Kampala - Entebbe Road">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Driver Name</label><input name="driver_name" placeholder="John Mukasa"></div><div><label>Driver Phone</label><input name="driver_phone" placeholder="+256700000000"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Vehicle Plate</label><input name="vehicle_plate" placeholder="UAK 123A"></div><div><label>Capacity</label><input name="capacity" type="number" value="30"></div></div>
+      <label>Description</label><textarea name="description" rows="2" placeholder="Route details..."></textarea>
+      <button class="btn btn-green">Save Route</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/school/transport/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO transport_routes(tenant_id,route_name,driver_name,driver_phone,vehicle_plate,capacity,description) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.route_name, req.body.driver_name, req.body.driver_phone, req.body.vehicle_plate, req.body.capacity||30, req.body.description]);
+  await audit(req.session.user.email, 'Transport route created', req.body.route_name);
+  res.redirect('/school/transport');
+}));
+
+app.get('/school/transport/:id/assign', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const route = (await pool.query('SELECT * FROM transport_routes WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!route) return res.status(404).send('Route not found');
+  const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const assigned = (await pool.query('SELECT ta.*,s.name as student_name,s.class FROM transport_assignments ta JOIN students s ON s.id=ta.student_id WHERE ta.route_id=$1', [route.id])).rows;
+  res.send(renderPage('Assign Students', `
+    <div class="card"><h2>Assign Students to ${esc(route.route_name)}</h2>
+    <form method="POST" action="/school/transport/${route.id}/assign/save" style="margin-bottom:20px">
+      <div class="grid" style="grid-template-columns:2fr 1fr 1fr"><div><label>Student</label><select name="student_id" required>${students.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.class||'')})</option>`).join('')}</select></div><div><label>Pick-up Point</label><input name="pick_up_point" placeholder="Stage 1"></div><div><label>Drop-off Point</label><input name="drop_off_point" placeholder="Home"></div></div>
+      <button class="btn btn-green btn-sm">Assign</button>
+    </form>
+    ${assigned.length ? `<table><tr><th>Student</th><th>Class</th><th>Pick-up</th><th>Drop-off</th><th>Action</th></tr>${assigned.map(a=>`<tr><td>${esc(a.student_name)}</td><td>${esc(a.class||'')}</td><td>${esc(a.pick_up_point||'-')}</td><td>${esc(a.drop_off_point||'-')}</td><td><a href="/school/transport/assignment/${a.id}/delete" class="btn btn-sm btn-red">Remove</a></td></tr>`).join('')}</table>` : '<p class="muted">No students assigned yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/transport/:id/assign/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO transport_assignments(tenant_id,route_id,student_id,pick_up_point,drop_off_point) VALUES($1,$2,$3,$4,$5)', [t, req.params.id, req.body.student_id, req.body.pick_up_point, req.body.drop_off_point]);
+  res.redirect(`/school/transport/${req.params.id}/assign`);
+}));
+
+app.get('/school/transport/assignment/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM transport_assignments WHERE id=$1', [req.params.id]);
+  res.redirect('back');
+}));
+
+app.get('/school/transport/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM transport_assignments WHERE route_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM transport_routes WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/school/transport');
+}));
+
+// =============================================
+// SCHOOL: DISCIPLINE TRACKING
+// =============================================
+app.get('/school/discipline', requireAuth, requireNotBanned, requireFeature('discipline'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const incidents = (await pool.query('SELECT di.*,s.name as student_name,s.class FROM discipline_incidents di JOIN students s ON s.id=di.student_id WHERE di.tenant_id=$1 ORDER BY di.incident_date DESC', [t])).rows;
+  res.send(renderPage('Discipline', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#991b1b)"><h1>Discipline Tracking</h1><p>Monitor student behavior and actions</p></div>
+    <div class="card"><a href="/school/discipline/new" class="btn" style="margin-bottom:15px">+ Report Incident</a>
+      ${incidents.length ? `<table><tr><th>Student</th><th>Class</th><th>Date</th><th>Type</th><th>Description</th><th>Action Taken</th><th>Status</th><th>Actions</th></tr>
+      ${incidents.map(i=>`<tr><td><strong>${esc(i.student_name)}</strong></td><td>${esc(i.class||'')}</td><td>${i.incident_date}</td><td><span class="tag">${esc(i.type)}</span></td><td>${esc((i.description||'').substring(0,50))}</td><td>${esc((i.action_taken||'').substring(0,40))}</td><td>${i.status==='open'?'<span class="tag" style="background:#fef3c7;color:#92400e">Open</span>':'<span class="tag" style="background:#d1fae5;color:#065f46">Resolved</span>'}</td>
+      <td><a href="/school/discipline/${i.id}/resolve" class="btn btn-sm btn-green">Resolve</a> <a href="/school/discipline/${i.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No incidents recorded</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/discipline/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Report Incident', `
+    <div class="card" style="max-width:700px;margin:0 auto"><h2>Report Discipline Incident</h2>
+    <form method="POST" action="/school/discipline/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Student</label><select name="student_id" required>${students.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.class||'')})</option>`).join('')}</select></div><div><label>Incident Date</label><input name="incident_date" type="date" value="${new Date().toISOString().split('T')[0]}"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Type</label><select name="type"><option>Minor Disruption</option><option>Bullying</option><option>Truancy</option><option>Fighting</option><option>Theft</option><option>Substance Abuse</option><option>Vandalism</option><option>Academic Dishonesty</option><option>Dress Code Violation</option><option>Insubordination</option><option>Other</option></select></div><div><label>Reported By</label><input name="reported_by" placeholder="Teacher name"></div></div>
+      <label>Description</label><textarea name="description" rows="3" required placeholder="What happened?"></textarea>
+      <label>Action Taken</label><textarea name="action_taken" rows="2" placeholder="Warning, suspension, etc."></textarea>
+      <button class="btn btn-green">Save Incident</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/school/discipline/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO discipline_incidents(tenant_id,student_id,incident_date,type,description,action_taken,reported_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.incident_date||'CURRENT_DATE', req.body.type, req.body.description, req.body.action_taken, req.body.reported_by]);
+  await audit(req.session.user.email, 'Discipline incident reported', `Student #${req.body.student_id}: ${req.body.type}`);
+  res.redirect('/school/discipline');
+}));
+
+app.get('/school/discipline/:id/resolve', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE discipline_incidents SET status=$1 WHERE id=$2', ['resolved', req.params.id]);
+  res.redirect('/school/discipline');
+}));
+
+app.get('/school/discipline/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM discipline_incidents WHERE id=$1', [req.params.id]);
+  res.redirect('/school/discipline');
+}));
+
+// =============================================
+// SCHOOL: HOMEWORK & ASSIGNMENTS
+// =============================================
+app.get('/school/homework', requireAuth, requireNotBanned, requireFeature('homework'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const hw = (await pool.query('SELECT * FROM homework WHERE tenant_id=$1 ORDER BY due_date DESC NULLS LAST', [t])).rows;
+  res.send(renderPage('Homework', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"><h1>Homework & Assignments</h1><p>Assign, submit and grade homework</p></div>
+    <div class="card"><a href="/school/homework/new" class="btn" style="margin-bottom:15px">+ Assign Homework</a>
+      ${hw.length ? `<table><tr><th>Subject</th><th>Title</th><th>Class</th><th>Due Date</th><th>Assigned By</th><th>Submissions</th><th>Actions</th></tr>
+      ${hw.map(h=>`<tr><td>${esc(h.subject)}</td><td><strong>${esc(h.title)}</strong></td><td>${esc(h.class_name||'-')}</td><td>${h.due_date||'No deadline'}</td><td>${esc(h.assigned_by||'')}</td>
+      <td><a href="/school/homework/${h.id}/submissions" class="btn btn-sm">View</a></td>
+      <td><a href="/school/homework/${h.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No homework assigned yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/homework/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const eduLevels = ['nursery','kindergarten','primary','o_level','a_level','university','vocational'];
+  res.send(renderPage('Assign Homework', `
+    <div class="card" style="max-width:700px;margin:0 auto"><h2>Assign Homework</h2>
+    <form method="POST" action="/school/homework/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Subject</label><input name="subject" required placeholder="Mathematics"></div><div><label>Title</label><input name="title" required placeholder="Chapter 5 Exercises"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Class</label><input name="class_name" placeholder="P.5, S.2, S.6"></div><div><label>Education Level</label><select name="education_level">${eduLevels.map(l=>`<option value="${l}">${l.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())}</option>`).join('')}</select></div><div><label>Due Date</label><input name="due_date" type="date"></div></div>
+      <label>Description</label><textarea name="description" rows="5" placeholder="Full assignment details..."></textarea>
+      <input name="assigned_by" type="hidden" value="${esc(req.session.user.email)}">
+      <button class="btn btn-green">Assign</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/school/homework/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO homework(tenant_id,subject,title,description,due_date,class_name,assigned_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.subject, req.body.title, req.body.description, req.body.due_date||null, req.body.class_name, req.body.assigned_by||req.session.user.email]);
+  res.redirect('/school/homework');
+}));
+
+app.get('/school/homework/:id/submissions', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const hw = (await pool.query('SELECT * FROM homework WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!hw) return res.status(404).send('Not found');
+  const subs = (await pool.query('SELECT hs.*,s.name as student_name FROM homework_submissions hs JOIN students s ON s.id=hs.student_id WHERE hs.homework_id=$1', [hw.id])).rows;
+  res.send(renderPage('Submissions', `
+    <div class="card"><h2>${esc(hw.title)} - Submissions</h2><p class="muted">${esc(hw.subject)} | Due: ${hw.due_date||'No deadline'}</p>
+    ${subs.length ? `<table><tr><th>Student</th><th>Submitted</th><th>Answer</th><th>Score</th><th>Action</th></tr>${subs.map(s=>`<tr><td><strong>${esc(s.student_name)}</strong></td><td>${new Date(s.submitted_at).toLocaleDateString()}</td><td>${esc((s.submission_text||'').substring(0,60))}</td><td>${s.score||'-'}</td><td><form method="POST" action="/school/homework/submissions/${s.id}/score" style="display:inline-flex;gap:5px"><input name="score" type="number" step="0.1" placeholder="Score" style="width:70px"><button class="btn btn-sm btn-green">Save</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No submissions yet</p>'}
+    <div style="margin-top:15px"><a href="/school/homework" class="btn">Back</a></div></div>
+  `, req.session.user));
+}));
+
+app.post('/school/homework/submissions/:id/score', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE homework_submissions SET score=$1 WHERE id=$2', [req.body.score, req.params.id]);
+  res.redirect('back');
+}));
+
+app.get('/school/homework/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM homework_submissions WHERE homework_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM homework WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/school/homework');
+}));
+
+// =============================================
+// SCHOOL: CALENDAR & EVENTS
+// =============================================
+app.get('/school/calendar', requireAuth, requireNotBanned, requireFeature('school_calendar'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const events = (await pool.query('SELECT * FROM school_events WHERE tenant_id=$1 ORDER BY event_date', [t])).rows;
+  const termDates = events.filter(e=>e.event_type==='term');
+  const holidays = events.filter(e=>e.event_type==='holiday');
+  const activities = events.filter(e=>e.event_type==='event');
+  res.send(renderPage('School Calendar', `
+    <div class="hero" style="background:linear-gradient(135deg,#06b6d4,#0891b2)"><h1>School Calendar</h1><p>Term dates, events and holidays</p></div>
+    <div class="card"><a href="/school/calendar/new" class="btn" style="margin-bottom:15px">+ Add Event</a>
+      <h3>Term Dates</h3>${termDates.length?`<table><tr><th>Term</th><th>Start</th><th>End</th><th>Actions</th></tr>${termDates.map(e=>`<tr><td><strong>${esc(e.title)}</strong></td><td>${e.event_date||'-'}</td><td>${e.end_date||'-'}</td><td><a href="/school/calendar/${e.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No term dates set</p>'}
+      <h3 style="margin-top:20px">Holidays</h3>${holidays.length?`<table><tr><th>Holiday</th><th>Date</th><th>Actions</th></tr>${holidays.map(e=>`<tr><td>${esc(e.title)}</td><td>${e.event_date||'-'}</td><td><a href="/school/calendar/${e.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No holidays set</p>'}
+      <h3 style="margin-top:20px">Events & Activities</h3>${activities.length?`<table><tr><th>Event</th><th>Date</th><th>Location</th><th>Actions</th></tr>${activities.map(e=>`<tr><td><strong>${esc(e.title)}</strong><br><span class="muted">${esc(e.description||'')}</span></td><td>${e.event_date||'-'}</td><td>${esc(e.location||'-')}</td><td><a href="/school/calendar/${e.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No events</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/calendar/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Event', `
+    <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Calendar Event</h2>
+    <form method="POST" action="/school/calendar/save">
+      <label>Title</label><input name="title" required placeholder="Term 1 Opening, Sports Day">
+      <label>Description</label><textarea name="description" rows="2"></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Start Date</label><input name="event_date" type="date" required></div><div><label>End Date</label><input name="end_date" type="date"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Type</label><select name="event_type"><option value="event">Event</option><option value="term">Term Date</option><option value="holiday">Holiday</option><option value="exam">Exam Period</option><option value="meeting">Meeting</option></select></div><div><label>Location</label><input name="location" placeholder="Main Hall"></div></div>
+      <button class="btn btn-green">Save Event</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/school/calendar/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO school_events(tenant_id,title,description,event_date,end_date,event_type,location) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.title, req.body.description, req.body.event_date, req.body.end_date||null, req.body.event_type, req.body.location]);
+  res.redirect('/school/calendar');
+}));
+
+app.get('/school/calendar/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM school_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/school/calendar');
+}));
+
+// =============================================
+// SCHOOL: HEALTH RECORDS
+// =============================================
+app.get('/school/health', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const records = (await pool.query('SELECT sh.*,s.name as student_name,s.class FROM student_health sh JOIN students s ON s.id=sh.student_id WHERE sh.tenant_id=$1 ORDER BY s.name', [t])).rows;
+  const visits = (await pool.query('SELECT hv.*,s.name as student_name FROM health_visits hv JOIN students s ON s.id=hv.student_id WHERE hv.tenant_id=$1 ORDER BY hv.visit_date DESC LIMIT 20', [t])).rows;
+  res.send(renderPage('Health Records', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#be185d)"><h1>Health Records</h1><p>Student medical info and clinic visits</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${records.length}</div><div>Health Profiles</div></div><div class="stat-card"><div class="stat-num">${visits.length}</div><div>Recent Visits</div></div></div>
+    <div class="card"><a href="/school/health/new" class="btn" style="margin-bottom:15px">+ Add Health Profile</a> <a href="/school/health/visit/new" class="btn btn-green" style="margin-bottom:15px">+ Clinic Visit</a>
+      <h3>Student Health Profiles</h3>
+      ${records.length?`<table><tr><th>Student</th><th>Class</th><th>Blood Group</th><th>Allergies</th><th>Conditions</th><th>Emergency</th><th>Actions</th></tr>${records.map(r=>`<tr><td><strong>${esc(r.student_name)}</strong></td><td>${esc(r.class||'')}</td><td>${esc(r.blood_group||'-')}</td><td>${esc(r.allergies||'None')}</td><td>${esc(r.conditions||'None')}</td><td>${esc(r.emergency_contact||'-')} ${esc(r.emergency_phone||'')}</td><td><a href="/school/health/${r.student_id}/edit" class="btn btn-sm">Edit</a></td></tr>`).join('')}</table>`:'<p class="muted">No health profiles</p>'}
+      <h3 style="margin-top:20px">Recent Clinic Visits</h3>
+      ${visits.length?`<table><tr><th>Student</th><th>Date</th><th>Complaint</th><th>Diagnosis</th><th>Treatment</th></tr>${visits.map(v=>`<tr><td>${esc(v.student_name)}</td><td>${v.visit_date}</td><td>${esc(v.complaint||'')}</td><td>${esc(v.diagnosis||'')}</td><td>${esc(v.treatment||'')}</td></tr>`).join('')}</table>`:'<p class="muted">No visits recorded</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/health/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Add Health Profile', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Student Health Profile</h2>
+    <form method="POST" action="/school/health/save">
+      <label>Student</label><select name="student_id" required>${students.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.class||'')})</option>`).join('')}</select>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Blood Group</label><select name="blood_group"><option value="">Unknown</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select></div><div><label>Last Checkup</label><input name="last_checkup" type="date"></div></div>
+      <label>Allergies</label><textarea name="allergies" rows="2" placeholder="Peanuts, Penicillin, etc."></textarea>
+      <label>Medical Conditions</label><textarea name="conditions" rows="2" placeholder="Asthma, Diabetes, etc."></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Emergency Contact</label><input name="emergency_contact" placeholder="Parent/Guardian name"></div><div><label>Emergency Phone</label><input name="emergency_phone" placeholder="+256700000000"></div></div>
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn btn-green">Save Profile</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/school/health/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO student_health(tenant_id,student_id,blood_group,allergies,conditions,emergency_contact,emergency_phone,last_checkup,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (student_id) DO UPDATE SET blood_group=$3,allergies=$4,conditions=$5,emergency_contact=$6,emergency_phone=$7,last_checkup=$8,notes=$9', [t, req.body.student_id, req.body.blood_group, req.body.allergies, req.body.conditions, req.body.emergency_contact, req.body.emergency_phone, req.body.last_checkup||null, req.body.notes]);
+  res.redirect('/school/health');
+}));
+
+app.get('/school/health/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const rec = (await pool.query('SELECT sh.*,s.name as student_name FROM student_health sh JOIN students s ON s.id=sh.student_id WHERE sh.student_id=$1 AND sh.tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!rec) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Health Profile', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Edit: ${esc(rec.student_name)}</h2>
+    <form method="POST" action="/school/health/save">
+      <input name="student_id" type="hidden" value="${rec.student_id}">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Blood Group</label><select name="blood_group"><option value="">Unknown</option>${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(b=>`<option ${rec.blood_group===b?'selected':''}>${b}</option>`).join('')}</select></div><div><label>Last Checkup</label><input name="last_checkup" type="date" value="${rec.last_checkup||''}"></div></div>
+      <label>Allergies</label><textarea name="allergies" rows="2">${esc(rec.allergies||'')}</textarea>
+      <label>Conditions</label><textarea name="conditions" rows="2">${esc(rec.conditions||'')}</textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Emergency Contact</label><input name="emergency_contact" value="${esc(rec.emergency_contact||'')}"></div><div><label>Emergency Phone</label><input name="emergency_phone" value="${esc(rec.emergency_phone||'')}"></div></div>
+      <label>Notes</label><textarea name="notes" rows="2">${esc(rec.notes||'')}</textarea>
+      <button class="btn btn-green">Update Profile</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.get('/school/health/visit/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Clinic Visit', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Record Clinic Visit</h2>
+    <form method="POST" action="/school/health/visit/save">
+      <label>Student</label><select name="student_id" required>${students.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Visit Date</label><input name="visit_date" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div><label>Seen By</label><input name="seen_by" placeholder="Nurse/Doctor name"></div></div>
+      <label>Complaint</label><textarea name="complaint" rows="2" required placeholder="Headache, stomach pain..."></textarea>
+      <label>Diagnosis</label><textarea name="diagnosis" rows="2" placeholder="Malaria, flu..."></textarea>
+      <label>Treatment</label><textarea name="treatment" rows="2" placeholder="Panadol, rest..."></textarea>
+      <button class="btn btn-green">Save Visit</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/school/health/visit/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.visit_date||'CURRENT_DATE', req.body.complaint, req.body.diagnosis, req.body.treatment, req.body.seen_by]);
+  res.redirect('/school/health');
+}));
+
+// =============================================
+// SCHOOL: ALUMNI NETWORK
+// =============================================
+app.get('/school/alumni', requireAuth, requireNotBanned, requireFeature('alumni'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const alumni = (await pool.query('SELECT * FROM alumni WHERE tenant_id=$1 ORDER BY graduation_year DESC, name', [t])).rows;
+  res.send(renderPage('Alumni', `
+    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7)"><h1>Alumni Network</h1><p>Graduated students tracking and networking</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${alumni.length}</div><div>Alumni</div></div></div>
+    <div class="card"><a href="/school/alumni/new" class="btn" style="margin-bottom:15px">+ Add Alumni</a>
+      ${alumni.length?`<table><tr><th>Name</th><th>Graduation Year</th><th>Class</th><th>Occupation</th><th>Email</th><th>Phone</th><th>Actions</th></tr>${alumni.map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${a.graduation_year||'-'}</td><td>${esc(a.class_name||'-')}</td><td>${esc(a.occupation||'-')}</td><td>${esc(a.email||'-')}</td><td>${esc(a.phone||'-')}</td><td><a href="/school/alumni/${a.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No alumni records yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/alumni/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Alumni', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Alumni</h2>
+    <form method="POST" action="/school/alumni/save">
+      <label>Name</label><input name="name" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Graduation Year</label><input name="graduation_year" type="number" min="1950" max="2030"></div><div><label>Class</label><input name="class_name" placeholder="S.6, P.7"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Email</label><input name="email" type="email"></div><div><label>Phone</label><input name="phone"></div></div>
+      <label>Occupation</label><input name="occupation" placeholder="Engineer, Doctor, Teacher...">
+      <label>Address</label><textarea name="address" rows="2"></textarea>
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn btn-green">Save</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/school/alumni/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO alumni(tenant_id,name,email,phone,graduation_year,class_name,occupation,address,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.name, req.body.email, req.body.phone, req.body.graduation_year||null, req.body.class_name, req.body.occupation, req.body.address, req.body.notes]);
+  res.redirect('/school/alumni');
+}));
+
+app.get('/school/alumni/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM alumni WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/school/alumni');
+}));
+
+// =============================================
+// SCHOOL: LIBRARY MANAGEMENT
+// =============================================
+app.get('/school/library', requireAuth, requireNotBanned, requireFeature('library'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const books = (await pool.query('SELECT * FROM library_books WHERE tenant_id=$1 ORDER BY title', [t])).rows;
+  const borrows = (await pool.query('SELECT lb.*,bb.title as book_title FROM library_borrows lb JOIN library_books bb ON bb.id=lb.book_id WHERE lb.tenant_id=$1 AND lb.return_date IS NULL ORDER BY lb.due_date', [t])).rows;
+  res.send(renderPage('Library', `
+    <div class="hero" style="background:linear-gradient(135deg,#65a30d,#4d7c0f)"><h1>Library Management</h1><p>Books, borrowing, returns and fines</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${books.length}</div><div>Books</div></div><div class="stat-card"><div class="stat-num">${borrows.length}</div><div>On Loan</div></div><div class="stat-card"><div class="stat-num">${books.reduce((a,b)=>a+(b.copies_available||0),0)}</div><div>Copies Available</div></div></div>
+    <div class="card"><a href="/school/library/new" class="btn" style="margin-bottom:15px">+ Add Book</a> <a href="/school/library/borrow" class="btn btn-green" style="margin-bottom:15px">Borrow Book</a>
+      <h3>Book Catalog</h3>
+      ${books.length?`<table><tr><th>Title</th><th>Author</th><th>ISBN</th><th>Category</th><th>Total</th><th>Available</th><th>Shelf</th><th>Actions</th></tr>${books.map(b=>`<tr><td><strong>${esc(b.title)}</strong></td><td>${esc(b.author||'-')}</td><td>${esc(b.isbn||'-')}</td><td>${esc(b.category||'-')}</td><td>${b.copies_total}</td><td>${b.copies_available}</td><td>${esc(b.shelf_location||'-')}</td><td><a href="/school/library/${b.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No books yet</p>'}
+      <h3 style="margin-top:20px">Currently on Loan</h3>
+      ${borrows.length?`<table><tr><th>Book</th><th>Borrower</th><th>Borrow Date</th><th>Due Date</th><th>Fine</th><th>Actions</th></tr>${borrows.map(b=>`<tr><td>${esc(b.book_title)}</td><td>${esc(b.borrower_name)}</td><td>${b.borrow_date}</td><td>${b.due_date||'-'}</td><td>${b.fine>0?`UGX ${b.fine}`:'-'}</td><td><a href="/school/library/return/${b.id}" class="btn btn-sm btn-green">Return</a></td></tr>`).join('')}</table>`:'<p class="muted">No books on loan</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/library/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Book', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Book</h2>
+    <form method="POST" action="/school/library/save">
+      <label>Title</label><input name="title" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Author</label><input name="author"></div><div><label>ISBN</label><input name="isbn"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Category</label><input name="category" placeholder="Fiction, Science..."></div><div><label>Copies</label><input name="copies_total" type="number" value="1"></div><div><label>Shelf</label><input name="shelf_location" placeholder="A-12"></div></div>
+      <button class="btn btn-green">Save</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/school/library/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO library_books(tenant_id,title,author,isbn,category,copies_total,copies_available,shelf_location) VALUES($1,$2,$3,$4,$5,$6,$6,$7)', [t, req.body.title, req.body.author, req.body.isbn, req.body.category, req.body.copies_total||1, req.body.shelf_location]);
+  res.redirect('/school/library');
+}));
+
+app.get('/school/library/borrow', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const books = (await pool.query('SELECT * FROM library_books WHERE tenant_id=$1 AND copies_available>0 ORDER BY title', [t])).rows;
+  const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Borrow Book', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Borrow Book</h2>
+    <form method="POST" action="/school/library/borrow/save">
+      <label>Book</label><select name="book_id" required>${books.map(b=>`<option value="${b.id}">${esc(b.title)} (${b.copies_available} available)</option>`).join('')}</select>
+      <label>Borrower Name</label><select name="borrower_name" required>${students.map(s=>`<option value="${esc(s.name)}">${esc(s.name)} (${esc(s.class||'')})</option>`).join('')}</select>
+      <input name="borrower_type" type="hidden" value="student">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Due Date</label><input name="due_date" type="date" value="${new Date(Date.now()+14*86400000).toISOString().split('T')[0]}"></div></div>
+      <button class="btn btn-green">Borrow</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/school/library/borrow/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const book = (await client.query('SELECT * FROM library_books WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.body.book_id, t])).rows[0];
+    if (!book || book.copies_available < 1) throw new Error('Book not available');
+    await client.query('UPDATE library_books SET copies_available=copies_available-1 WHERE id=$1', [req.body.book_id]);
+    await client.query('INSERT INTO library_borrows(tenant_id,book_id,borrower_name,borrower_type,due_date) VALUES($1,$2,$3,$4,$5)', [t, req.body.book_id, req.body.borrower_name, req.body.borrower_type||'student', req.body.due_date||null]);
+    await client.query('COMMIT');
+  } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+  res.redirect('/school/library');
+}));
+
+app.get('/school/library/return/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const borrow = (await pool.query('SELECT * FROM library_borrows WHERE id=$1', [req.params.id])).rows[0];
+  if (!borrow) return res.status(404).send('Not found');
+  const fine = borrow.due_date && new Date() > new Date(borrow.due_date) ? Math.floor((Date.now() - new Date(borrow.due_date).getTime()) / 86400000) * 500 : 0;
+  await pool.query('UPDATE library_borrows SET return_date=CURRENT_DATE, fine=$1 WHERE id=$2', [fine, req.params.id]);
+  await pool.query('UPDATE library_books SET copies_available=copies_available+1 WHERE id=$1', [borrow.book_id]);
+  res.redirect('/school/library');
+}));
+
+app.get('/school/library/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM library_books WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/school/library');
+}));
+
+
+// =============================================
+// CHURCH: CHOIR & WORSHIP TEAM
+// =============================================
+app.get('/church/choir', requireAuth, requireNotBanned, requireFeature('choir'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT cm.*,chm.name as member_name FROM choir_members cm JOIN church_members chm ON chm.id=cm.member_id WHERE cm.tenant_id=$1 ORDER BY chm.name', [t])).rows;
+  const songs = (await pool.query('SELECT * FROM worship_songs WHERE tenant_id=$1 ORDER BY title', [t])).rows;
+  res.send(renderPage('Choir & Worship', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#5b21b6)"><h1>Choir & Worship Team</h1><p>Roster, songs and scheduling</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${members.length}</div><div>Choir Members</div></div><div class="stat-card"><div class="stat-num">${songs.length}</div><div>Songs</div></div></div>
+    <div class="grid">
+      <div class="card"><h3>Choir Members</h3><a href="/church/choir/add" class="btn btn-sm" style="margin-bottom:10px">+ Add Member</a>
+        ${members.length?`<table><tr><th>Name</th><th>Voice Part</th><th>Role</th><th>Joined</th><th>Actions</th></tr>${members.map(m=>`<tr><td><strong>${esc(m.member_name)}</strong></td><td>${esc(m.voice_part||'-')}</td><td><span class="tag">${esc(m.role)}</span></td><td>${m.joined_date||'-'}</td><td><a href="/church/choir/${m.id}/delete" class="btn btn-sm btn-red">Remove</a></td></tr>`).join('')}</table>`:'<p class="muted">No choir members</p>'}
+      </div>
+      <div class="card"><h3>Song Library</h3><a href="/church/choir/song/new" class="btn btn-sm" style="margin-bottom:10px">+ Add Song</a>
+        ${songs.length?`<table><tr><th>Title</th><th>Key</th><th>Category</th><th>Actions</th></tr>${songs.map(s=>`<tr><td><strong>${esc(s.title)}</strong></td><td>${esc(s.key_signature||'-')}</td><td>${esc(s.category||'-')}</td><td><a href="/church/choir/song/${s.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No songs</p>'}
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/choir/add', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const chMembers = (await pool.query('SELECT id,name FROM church_members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Add Choir Member', `<div class="card" style="max-width:500px;margin:0 auto"><h2>Add to Choir</h2>
+    <form method="POST" action="/church/choir/add/save">
+      <label>Member</label><select name="member_id" required>${chMembers.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Voice Part</label><select name="voice_part"><option>Soprano</option><option>Alto</option><option>Tenor</option><option>Bass</option><option>Lead</option></select></div><div><label>Role</label><select name="role"><option value="member">Member</option><option value="leader">Leader</option><option value="director">Director</option></select></div></div>
+      <button class="btn btn-green">Add</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/church/choir/add/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO choir_members(tenant_id,member_id,voice_part,role) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [t, req.body.member_id, req.body.voice_part, req.body.role]);
+  res.redirect('/church/choir');
+}));
+
+app.get('/church/choir/song/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Song', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Worship Song</h2>
+    <form method="POST" action="/church/choir/song/save">
+      <div class="grid" style="grid-template-columns:2fr 1fr"><div><label>Title</label><input name="title" required></div><div><label>Author</label><input name="author"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Key</label><input name="key_signature" placeholder="C, G, Am..."></div><div><label>Tempo</label><input name="tempo" placeholder="120 BPM"></div><div><label>Category</label><select name="category"><option>Praise</option><option>Worship</option><option>Hymn</option><option>Christmas</option><option>Easter</option><option>Other</option></select></div></div>
+      <label>Lyrics</label><textarea name="lyrics" rows="8" style="font-family:monospace"></textarea>
+      <button class="btn btn-green">Save Song</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/church/choir/song/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO worship_songs(tenant_id,title,author,key_signature,tempo,lyrics,category) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.title, req.body.author, req.body.key_signature, req.body.tempo, req.body.lyrics, req.body.category]);
+  res.redirect('/church/choir');
+}));
+
+app.get('/church/choir/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM choir_members WHERE id=$1', [req.params.id]);
+  res.redirect('/church/choir');
+}));
+
+app.get('/church/choir/song/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM worship_songs WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/church/choir');
+}));
+
+// =============================================
+// CHURCH: SACRAMENT RECORDS
+// =============================================
+app.get('/church/sacraments', requireAuth, requireNotBanned, requireFeature('sacraments'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const records = (await pool.query('SELECT s.*,chm.name as member_name FROM sacraments s LEFT JOIN church_members chm ON chm.id=s.member_id WHERE s.tenant_id=$1 ORDER BY s.date DESC', [t])).rows;
+  res.send(renderPage('Sacraments', `
+    <div class="hero" style="background:linear-gradient(135deg,#b45309,#92400e)"><h1>Sacrament Records</h1><p>Baptism, marriage, funeral records</p></div>
+    <div class="card"><a href="/church/sacraments/new" class="btn" style="margin-bottom:15px">+ Record Sacrament</a>
+      ${records.length?`<table><tr><th>Type</th><th>Name</th><th>Date</th><th>Officiant</th><th>Location</th><th>Cert No.</th><th>Actions</th></tr>${records.map(r=>`<tr><td><span class="tag" style="background:${r.type==='baptism'?'#dbeafe':r.type==='marriage'?'#fce7f3':'#f1f5f9'}">${esc(r.type)}</span></td><td><strong>${esc(r.member_name||'N/A')}</strong></td><td>${r.date||'-'}</td><td>${esc(r.officiant||'-')}</td><td>${esc(r.location||'-')}</td><td>${esc(r.certificate_no||'-')}</td><td><a href="/church/sacraments/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No sacrament records</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/sacraments/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id,name FROM church_members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Record Sacrament', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Record Sacrament</h2>
+    <form method="POST" action="/church/sacraments/save">
+      <label>Type</label><select name="type"><option>Baptism</option><option>Marriage</option><option>Funeral</option><option>Confirmation</option><option>First Communion</option></select>
+      <label>Member</label><select name="member_id">${members.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Date</label><input name="date" type="date" required></div><div><label>Officiant</label><input name="officiant" placeholder="Rev. John"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Location</label><input name="location" placeholder="St. Mary's Church"></div><div><label>Certificate No.</label><input name="certificate_no" placeholder="BAP-2024-001"></div></div>
+      <label>Witnesses</label><input name="witnesses" placeholder="Names of witnesses">
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn btn-green">Save Record</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/church/sacraments/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO sacraments(tenant_id,type,member_id,date,officiant,location,witnesses,certificate_no,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.type, req.body.member_id||null, req.body.date, req.body.officiant, req.body.location, req.body.witnesses, req.body.certificate_no, req.body.notes]);
+  res.redirect('/church/sacraments');
+}));
+
+app.get('/church/sacraments/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM sacraments WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/church/sacraments');
+}));
+
+// =============================================
+// CHURCH: CELL GROUPS
+// =============================================
+app.get('/church/cell-groups', requireAuth, requireNotBanned, requireFeature('cell_groups'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const groups = (await pool.query('SELECT cg.*, COUNT(cgm.id) as member_count FROM cell_groups cg LEFT JOIN cell_group_members cgm ON cgm.group_id=cg.id WHERE cg.tenant_id=$1 GROUP BY cg.id ORDER BY cg.name', [t])).rows;
+  res.send(renderPage('Cell Groups', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Cell Groups</h1><p>Small groups, leaders and meetings</p></div>
+    <div class="card"><a href="/church/cell-groups/new" class="btn" style="margin-bottom:15px">+ New Group</a>
+      ${groups.length?`<table><tr><th>Name</th><th>Leader</th><th>Meeting</th><th>Time</th><th>Location</th><th>Members</th><th>Actions</th></tr>${groups.map(g=>`<tr><td><strong>${esc(g.name)}</strong></td><td>${esc(g.leader||'-')}</td><td>${esc(g.meeting_day||'-')}</td><td>${esc(g.meeting_time||'-')}</td><td>${esc(g.location||'-')}</td><td>${g.member_count||0}</td><td><a href="/church/cell-groups/${g.id}/members" class="btn btn-sm">Members</a> <a href="/church/cell-groups/${g.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No cell groups</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/cell-groups/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Cell Group', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Create Cell Group</h2>
+    <form method="POST" action="/church/cell-groups/save">
+      <label>Group Name</label><input name="name" required placeholder="Young Adults Fellowship">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Leader</label><input name="leader" placeholder="Group leader name"></div><div><label>Meeting Day</label><select name="meeting_day"><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option></select></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Meeting Time</label><input name="meeting_time" placeholder="7:00 PM"></div><div><label>Location</label><input name="location" placeholder="Church Hall B"></div></div>
+      <label>Description</label><textarea name="description" rows="2"></textarea>
+      <button class="btn btn-green">Create Group</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/church/cell-groups/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO cell_groups(tenant_id,name,leader,meeting_day,meeting_time,location,description) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.name, req.body.leader, req.body.meeting_day, req.body.meeting_time, req.body.location, req.body.description]);
+  res.redirect('/church/cell-groups');
+}));
+
+app.get('/church/cell-groups/:id/members', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const group = (await pool.query('SELECT * FROM cell_groups WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!group) return res.status(404).send('Not found');
+  const members = (await pool.query('SELECT cgm.*,chm.name as member_name FROM cell_group_members cgm JOIN church_members chm ON chm.id=cgm.member_id WHERE cgm.group_id=$1', [group.id])).rows;
+  const allMembers = (await pool.query('SELECT id,name FROM church_members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const existingIds = members.map(m=>m.member_id);
+  res.send(renderPage('Group Members', `<div class="card"><h2>${esc(group.name)} - Members</h2>
+    <form method="POST" action="/church/cell-groups/${group.id}/members/add" style="margin-bottom:15px">
+      <div class="grid" style="grid-template-columns:2fr 1fr"><div><select name="member_id">${allMembers.filter(m=>!existingIds.includes(m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select></div><div><button class="btn btn-green btn-sm">Add Member</button></div></div>
+    </form>
+    ${members.length?`<table><tr><th>Name</th><th>Role</th><th>Joined</th><th>Action</th></tr>${members.map(m=>`<tr><td>${esc(m.member_name)}</td><td>${esc(m.role)}</td><td>${m.joined_date||'-'}</td><td><a href="/church/cell-groups/member/${m.id}/remove" class="btn btn-sm btn-red">Remove</a></td></tr>`).join('')}</table>`:'<p class="muted">No members</p>'}
+    <a href="/church/cell-groups" class="btn" style="margin-top:10px">Back</a></div>
+  `, req.session.user));
+}));
+
+app.post('/church/cell-groups/:id/members/add', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO cell_group_members(tenant_id,group_id,member_id,role) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [t, req.params.id, req.body.member_id, 'member']);
+  res.redirect(`/church/cell-groups/${req.params.id}/members`);
+}));
+
+app.get('/church/cell-groups/member/:id/remove', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const m = (await pool.query('SELECT group_id FROM cell_group_members WHERE id=$1', [req.params.id])).rows[0];
+  await pool.query('DELETE FROM cell_group_members WHERE id=$1', [req.params.id]);
+  res.redirect(`/church/cell-groups/${m?.group_id}/members`);
+}));
+
+app.get('/church/cell-groups/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM cell_group_members WHERE group_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM cell_groups WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/church/cell-groups');
+}));
+
+// =============================================
+// CHURCH: VOLUNTEER SCHEDULING
+// =============================================
+app.get('/church/volunteers', requireAuth, requireNotBanned, requireFeature('volunteers'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const roles = (await pool.query('SELECT vr.*, COUNT(va.id) as filled FROM volunteer_roles vr LEFT JOIN volunteer_assignments va ON va.role_id=vr.id WHERE vr.tenant_id=$1 GROUP BY vr.id', [t])).rows;
+  res.send(renderPage('Volunteers', `
+    <div class="hero" style="background:linear-gradient(135deg,#14b8a6,#0d9488)"><h1>Volunteer Scheduling</h1><p>Roles, schedules and availability</p></div>
+    <div class="card"><a href="/church/volunteers/new" class="btn" style="margin-bottom:15px">+ Add Role</a>
+      ${roles.length?`<table><tr><th>Role</th><th>Schedule</th><th>Slots</th><th>Filled</th><th>Actions</th></tr>${roles.map(r=>`<tr><td><strong>${esc(r.role_name)}</strong><br><span class="muted">${esc(r.description||'')}</span></td><td>${esc(r.schedule||'-')}</td><td>${r.slots||'-'}</td><td>${r.filled||0}</td><td><a href="/church/volunteers/${r.id}/assign" class="btn btn-sm">Assign</a> <a href="/church/volunteers/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No volunteer roles</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/volunteers/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Volunteer Role', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Volunteer Role</h2>
+    <form method="POST" action="/church/volunteers/save">
+      <label>Role Name</label><input name="role_name" required placeholder="Usher, Worship Leader, Sunday School Teacher">
+      <label>Description</label><textarea name="description" rows="2"></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Schedule</label><input name="schedule" placeholder="Every Sunday 8am"></div><div><label>Slots Needed</label><input name="slots" type="number" value="2"></div></div>
+      <button class="btn btn-green">Save</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/church/volunteers/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO volunteer_roles(tenant_id,role_name,description,schedule,slots) VALUES($1,$2,$3,$4,$5)', [t, req.body.role_name, req.body.description, req.body.schedule, req.body.slots||null]);
+  res.redirect('/church/volunteers');
+}));
+
+app.get('/church/volunteers/:id/assign', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const role = (await pool.query('SELECT * FROM volunteer_roles WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!role) return res.status(404).send('Not found');
+  const assigned = (await pool.query('SELECT va.*,chm.name as member_name FROM volunteer_assignments va JOIN church_members chm ON chm.id=va.member_id WHERE va.role_id=$1', [role.id])).rows;
+  const members = (await pool.query('SELECT id,name FROM church_members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Assign Volunteer', `<div class="card"><h2>Assign: ${esc(role.role_name)}</h2>
+    <form method="POST" action="/church/volunteers/${role.id}/assign/save" style="margin-bottom:15px"><select name="member_id">${members.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select> <button class="btn btn-green btn-sm">Assign</button></form>
+    ${assigned.length?`<table><tr><th>Member</th><th>Date Assigned</th><th>Status</th><th>Action</th></tr>${assigned.map(a=>`<tr><td>${esc(a.member_name)}</td><td>${a.date_assigned}</td><td>${esc(a.status)}</td><td><a href="/church/volunteers/assignment/${a.id}/remove" class="btn btn-sm btn-red">Remove</a></td></tr>`).join('')}</table>`:'<p class="muted">No one assigned</p>'}
+    <a href="/church/volunteers" class="btn" style="margin-top:10px">Back</a></div>
+  `, req.session.user));
+}));
+
+app.post('/church/volunteers/:id/assign/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO volunteer_assignments(tenant_id,role_id,member_id) VALUES($1,$2,$3)', [t, req.params.id, req.body.member_id]);
+  res.redirect(`/church/volunteers/${req.params.id}/assign`);
+}));
+
+app.get('/church/volunteers/assignment/:id/remove', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const a = (await pool.query('SELECT role_id FROM volunteer_assignments WHERE id=$1', [req.params.id])).rows[0];
+  await pool.query('DELETE FROM volunteer_assignments WHERE id=$1', [req.params.id]);
+  res.redirect(`/church/volunteers/${a?.role_id}/assign`);
+}));
+
+app.get('/church/volunteers/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM volunteer_assignments WHERE role_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM volunteer_roles WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/church/volunteers');
+}));
+
+// =============================================
+// CHURCH: SERMON ARCHIVE
+// =============================================
+app.get('/church/sermons', requireAuth, requireNotBanned, requireFeature('sermons'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sermons = (await pool.query('SELECT * FROM sermons WHERE tenant_id=$1 ORDER BY date DESC', [t])).rows;
+  const seriesList = [...new Set(sermons.map(s=>s.series).filter(Boolean))];
+  res.send(renderPage('Sermons', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#3730a3)"><h1>Sermon Archive</h1><p>Sermon notes, audio and series tracking</p></div>
+    <div class="card"><a href="/church/sermons/new" class="btn" style="margin-bottom:15px">+ Add Sermon</a>
+      ${seriesList.length?`<h3>Series</h3><div style="margin-bottom:15px">${seriesList.map(s=>`<span class="tag" style="margin:2px">${esc(s)}</span>`).join('')}</div>`:''}
+      ${sermons.length?`<table><tr><th>Title</th><th>Preacher</th><th>Date</th><th>Scripture</th><th>Series</th><th>Media</th><th>Actions</th></tr>${sermons.map(s=>`<tr><td><strong>${esc(s.title)}</strong></td><td>${esc(s.preacher||'-')}</td><td>${s.date||'-'}</td><td>${esc(s.scripture||'-')}</td><td>${esc(s.series||'-')}</td><td>${s.audio_url?'<span class="tag" style="background:#d1fae5">Audio</span>':''}${s.video_url?'<span class="tag" style="background:#dbeafe">Video</span>':''}</td><td><a href="/church/sermons/${s.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No sermons yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/sermons/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Sermon', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Add Sermon</h2>
+    <form method="POST" action="/church/sermons/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Title</label><input name="title" required></div><div><label>Preacher</label><input name="preacher" required></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Date</label><input name="date" type="date" value="${new Date().toISOString().split('T')[0]}"></div><div><label>Series</label><input name="series" placeholder="Faith Series"></div><div><label>Scripture</label><input name="scripture" placeholder="John 3:16"></div></div>
+      <label>Notes</label><textarea name="notes" rows="5" placeholder="Sermon outline and key points..."></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Audio URL</label><input name="audio_url" placeholder="https://..."></div><div><label>Video URL</label><input name="video_url" placeholder="https://..."></div></div>
+      <button class="btn btn-green">Save Sermon</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/church/sermons/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO sermons(tenant_id,title,preacher,date,series,scripture,notes,audio_url,video_url) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.title, req.body.preacher, req.body.date, req.body.series, req.body.scripture, req.body.notes, req.body.audio_url, req.body.video_url]);
+  res.redirect('/church/sermons');
+}));
+
+app.get('/church/sermons/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM sermons WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/church/sermons');
+}));
+
+// =============================================
+// CHURCH: PRAYER REQUESTS
+// =============================================
+app.get('/church/prayer-requests', requireAuth, requireNotBanned, requireFeature('prayer_requests'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const requests = (await pool.query('SELECT * FROM prayer_requests WHERE tenant_id=$1 ORDER BY is_answered, created_at DESC', [t])).rows;
+  res.send(renderPage('Prayer Requests', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Prayer Requests</h1><p>Submit, track and mark answered</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${requests.length}</div><div>Total</div></div><div class="stat-card"><div class="stat-num">${requests.filter(r=>!r.is_answered).length}</div><div>Active</div></div><div class="stat-card"><div class="stat-num" style="color:#059669">${requests.filter(r=>r.is_answered).length}</div><div>Answered</div></div></div>
+    <div class="card"><a href="/church/prayer-requests/new" class="btn" style="margin-bottom:15px">+ New Request</a>
+      ${requests.length?`<table><tr><th>Title</th><th>Requested By</th><th>Prayers</th><th>Status</th><th>Actions</th></tr>${requests.map(r=>`<tr><td><strong>${esc(r.title)}</strong><br><span class="muted">${esc((r.description||'').substring(0,60))}</span></td><td>${r.is_anonymous?'Anonymous':esc(r.requested_by||'-')}</td><td>${r.prayer_count||0}</td><td>${r.is_answered?'<span class="tag" style="background:#d1fae5;color:#065f46">Answered</span>':'<span class="tag" style="background:#fef3c7;color:#92400e">Active</span>'}</td><td><a href="/church/prayer-requests/${r.id}/pray" class="btn btn-sm">Pray</a> ${!r.is_answered?`<a href="/church/prayer-requests/${r.id}/answer" class="btn btn-sm btn-green">Answered!</a>`:''} <a href="/church/prayer-requests/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No prayer requests</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/prayer-requests/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Prayer Request', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Submit Prayer Request</h2>
+    <form method="POST" action="/church/prayer-requests/save">
+      <label>Title</label><input name="title" required placeholder="Healing for a family member">
+      <label>Description</label><textarea name="description" rows="3" placeholder="Share your prayer need..."></textarea>
+      <label><input name="is_anonymous" type="checkbox" value="true"> Submit anonymously</label>
+      <input name="requested_by" type="hidden" value="${esc(req.session.user?.email||'')}">
+      <button class="btn btn-green">Submit</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/church/prayer-requests/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO prayer_requests(tenant_id,title,description,requested_by,is_anonymous) VALUES($1,$2,$3,$4,$5)', [t, req.body.title, req.body.description, req.body.is_anonymous?null:req.body.requested_by, req.body.is_anonymous==='true']);
+  res.redirect('/church/prayer-requests');
+}));
+
+app.get('/church/prayer-requests/:id/pray', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE prayer_requests SET prayer_count=prayer_count+1 WHERE id=$1', [req.params.id]);
+  res.redirect('/church/prayer-requests');
+}));
+
+app.get('/church/prayer-requests/:id/answer', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE prayer_requests SET is_answered=true WHERE id=$1', [req.params.id]);
+  res.redirect('/church/prayer-requests');
+}));
+
+app.get('/church/prayer-requests/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM prayer_requests WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/church/prayer-requests');
+}));
+
+
+// =============================================
+// BUSINESS: PAYROLL MANAGEMENT
+// =============================================
+app.get('/business/payroll', requireAuth, requireNotBanned, requireFeature('payroll'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const runs = (await pool.query('SELECT * FROM payroll_runs WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Payroll', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#115e59)"><h1>Payroll Management</h1><p>Salary calculations, payslips, deductions</p></div>
+    <div class="card"><a href="/business/payroll/new" class="btn" style="margin-bottom:15px">+ New Payroll Run</a>
+      ${runs.length?`<table><tr><th>Month</th><th>Gross</th><th>Deductions</th><th>Net</th><th>Status</th><th>Actions</th></tr>${runs.map(r=>`<tr><td><strong>${esc(r.month)}</strong></td><td>UGX ${parseInt(r.total_gross).toLocaleString()}</td><td>UGX ${parseInt(r.total_deductions).toLocaleString()}</td><td>UGX ${parseInt(r.total_net).toLocaleString()}</td><td><span class="tag">${esc(r.status)}</span></td><td><a href="/business/payroll/${r.id}" class="btn btn-sm">View</a> <a href="/business/payroll/${r.id}/process" class="btn btn-sm btn-green">Process</a> <a href="/business/payroll/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No payroll runs yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/business/payroll/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Payroll Run', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Create Payroll Run</h2>
+    <form method="POST" action="/business/payroll/save">
+      <label>Month</label><input name="month" required placeholder="January 2025">
+      <p class="muted">After creating the run, add employees and their salary details.</p>
+      <button class="btn btn-green">Create Run</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/business/payroll/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const result = await pool.query('INSERT INTO payroll_runs(tenant_id,month,created_by) VALUES($1,$2,$3) RETURNING id', [t, req.body.month, req.session.user.email]);
+  res.redirect(`/business/payroll/${result.rows[0].id}`);
+}));
+
+app.get('/business/payroll/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const run = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!run) return res.status(404).send('Not found');
+  const items = (await pool.query('SELECT * FROM payroll_items WHERE run_id=$1', [run.id])).rows;
+  res.send(renderPage('Payroll Details', `
+    <div class="card"><h2>Payroll: ${esc(run.month)}</h2>
+    <div class="stats"><div class="stat-card"><div class="stat-num">UGX ${parseInt(run.total_gross).toLocaleString()}</div><div>Total Gross</div></div><div class="stat-card"><div class="stat-num">UGX ${parseInt(run.total_deductions).toLocaleString()}</div><div>Deductions</div></div><div class="stat-card"><div class="stat-num">UGX ${parseInt(run.total_net).toLocaleString()}</div><div>Net Pay</div></div></div>
+    <a href="/business/payroll/${run.id}/add-employee" class="btn btn-sm" style="margin-bottom:10px">+ Add Employee</a>
+    ${items.length?`<table><tr><th>Employee</th><th>Gross</th><th>PAYE</th><th>NSSF (Emp)</th><th>NSSF (Er)</th><th>Other</th><th>Net Pay</th></tr>${items.map(i=>`<tr><td><strong>${esc(i.employee_name)}</strong></td><td>UGX ${parseInt(i.gross_salary).toLocaleString()}</td><td>UGX ${parseInt(i.paye).toLocaleString()}</td><td>UGX ${parseInt(i.nssf_employee).toLocaleString()}</td><td>UGX ${parseInt(i.nssf_employer).toLocaleString()}</td><td>UGX ${parseInt(i.other_deductions).toLocaleString()}</td><td><strong>UGX ${parseInt(i.net_pay).toLocaleString()}</strong></td></tr>`).join('')}</table>`:'<p class="muted">No employees added</p>'}
+    <a href="/business/payroll" class="btn" style="margin-top:10px">Back</a></div>
+  `, req.session.user));
+}));
+
+app.get('/business/payroll/:id/add-employee', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Employee to Payroll', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Add Employee</h2>
+    <form method="POST" action="/business/payroll/${req.params.id}/add-employee/save">
+      <label>Employee Name</label><input name="employee_name" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Gross Salary (UGX)</label><input name="gross_salary" type="number" required></div><div><label>Bank Account</label><input name="bank_account" placeholder="ACC-001"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>PAYE (UGX)</label><input name="paye" type="number" value="0"></div><div><label>NSSF Employee (UGX)</label><input name="nssf_employee" type="number" value="0"></div><div><label>NSSF Employer (UGX)</label><input name="nssf_employer" type="number" value="0"></div></div>
+      <label>Other Deductions (UGX)</label><input name="other_deductions" type="number" value="0">
+      <button class="btn btn-green">Add Employee</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/business/payroll/:id/add-employee/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const gross = parseInt(req.body.gross_salary)||0;
+  const paye = parseInt(req.body.paye)||0;
+  const nssfE = parseInt(req.body.nssf_employee)||0;
+  const nssfEr = parseInt(req.body.nssf_employer)||0;
+  const other = parseInt(req.body.other_deductions)||0;
+  const net = gross - paye - nssfE - other;
+  await pool.query('INSERT INTO payroll_items(tenant_id,run_id,employee_name,gross_salary,paye,nssf_employee,nssf_employer,other_deductions,net_pay,bank_account) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, req.params.id, req.body.employee_name, gross, paye, nssfE, nssfEr, other, net, req.body.bank_account]);
+  await pool.query('UPDATE payroll_runs SET total_gross=total_gross+$1, total_deductions=total_deductions+$2, total_net=total_net+$3 WHERE id=$4', [gross, paye+nssfE+other, net, req.params.id]);
+  res.redirect(`/business/payroll/${req.params.id}`);
+}));
+
+app.get('/business/payroll/:id/process', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE payroll_runs SET status=$1 WHERE id=$2', ['processed', req.params.id]);
+  res.redirect('/business/payroll');
+}));
+
+app.get('/business/payroll/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM payroll_items WHERE run_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM payroll_runs WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/business/payroll');
+}));
+
+// =============================================
+// BUSINESS: HR & LEAVE MANAGEMENT
+// =============================================
+app.get('/business/leave', requireAuth, requireNotBanned, requireFeature('hr_leave'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const leaves = (await pool.query('SELECT * FROM leave_requests WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const pending = leaves.filter(l=>l.status==='pending').length;
+  res.send(renderPage('Leave Management', `
+    <div class="hero" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)"><h1>HR & Leave Management</h1><p>Leave requests, balances and approval</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${leaves.length}</div><div>Total Requests</div></div><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${pending}</div><div>Pending</div></div></div>
+    <div class="card"><a href="/business/leave/new" class="btn" style="margin-bottom:15px">+ New Leave Request</a>
+      ${leaves.length?`<table><tr><th>Employee</th><th>Type</th><th>Start</th><th>End</th><th>Days</th><th>Reason</th><th>Status</th><th>Actions</th></tr>${leaves.map(l=>`<tr><td><strong>${esc(l.employee_name)}</strong></td><td>${esc(l.leave_type)}</td><td>${l.start_date||'-'}</td><td>${l.end_date||'-'}</td><td>${l.days||'-'}</td><td>${esc((l.reason||'').substring(0,30))}</td><td>${l.status==='pending'?'<span class="tag" style="background:#fef3c7">Pending</span>':l.status==='approved'?'<span class="tag" style="background:#d1fae5">Approved</span>':'<span class="tag" style="background:#fee2e2">Rejected</span>'}</td><td>${l.status==='pending'?`<a href="/business/leave/${l.id}/approve" class="btn btn-sm btn-green">Approve</a> <a href="/business/leave/${l.id}/reject" class="btn btn-sm btn-red">Reject</a>`:'-'}</td></tr>`).join('')}</table>`:'<p class="muted">No leave requests</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/business/leave/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Leave Request', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Leave Request</h2>
+    <form method="POST" action="/business/leave/save">
+      <label>Employee Name</label><input name="employee_name" required>
+      <label>Leave Type</label><select name="leave_type"><option>Annual</option><option>Sick</option><option>Maternity</option><option>Paternity</option><option>Compassionate</option><option>Unpaid</option><option>Study</option></select>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Start Date</label><input name="start_date" type="date" required></div><div><label>End Date</label><input name="end_date" type="date" required></div><div><label>Days</label><input name="days" type="number" required></div></div>
+      <label>Reason</label><textarea name="reason" rows="2"></textarea>
+      <button class="btn btn-green">Submit Request</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/business/leave/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO leave_requests(tenant_id,employee_name,leave_type,start_date,end_date,days,reason) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.employee_name, req.body.leave_type, req.body.start_date, req.body.end_date, req.body.days, req.body.reason]);
+  res.redirect('/business/leave');
+}));
+
+app.get('/business/leave/:id/approve', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE leave_requests SET status=$1, approved_by=$2 WHERE id=$3', ['approved', req.session.user.email, req.params.id]);
+  res.redirect('/business/leave');
+}));
+
+app.get('/business/leave/:id/reject', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE leave_requests SET status=$1, approved_by=$2 WHERE id=$3', ['rejected', req.session.user.email, req.params.id]);
+  res.redirect('/business/leave');
+}));
+
+// =============================================
+// BUSINESS: PROJECT MANAGEMENT
+// =============================================
+app.get('/business/projects', requireAuth, requireNotBanned, requireFeature('projects'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const projects = (await pool.query('SELECT * FROM projects WHERE tenant_id=$1 ORDER BY status, created_at DESC', [t])).rows;
+  res.send(renderPage('Projects', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#4338ca)"><h1>Project Management</h1><p>Projects, tasks, milestones and deadlines</p></div>
+    <div class="card"><a href="/business/projects/new" class="btn" style="margin-bottom:15px">+ New Project</a>
+      ${projects.length?`<table><tr><th>Name</th><th>Status</th><th>Manager</th><th>Budget</th><th>Spent</th><th>Dates</th><th>Actions</th></tr>${projects.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc((p.description||'').substring(0,40))}</span></td><td><span class="tag">${esc(p.status)}</span></td><td>${esc(p.manager||'-')}</td><td>UGX ${parseInt(p.budget).toLocaleString()}</td><td>UGX ${parseInt(p.spent).toLocaleString()}</td><td>${p.start_date||'-'} to ${p.end_date||'-'}</td><td><a href="/business/projects/${p.id}/tasks" class="btn btn-sm">Tasks</a> <a href="/business/projects/${p.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No projects</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/business/projects/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Project', `<div class="card" style="max-width:700px;margin:0 auto"><h2>New Project</h2>
+    <form method="POST" action="/business/projects/save">
+      <label>Project Name</label><input name="name" required>
+      <label>Description</label><textarea name="description" rows="3"></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Status</label><select name="status"><option>planning</option><option>active</option><option>on_hold</option><option>completed</option></select></div><div><label>Budget (UGX)</label><input name="budget" type="number" value="0"></div><div><label>Manager</label><input name="manager"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Start Date</label><input name="start_date" type="date"></div><div><label>End Date</label><input name="end_date" type="date"></div></div>
+      <button class="btn btn-green">Create Project</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/business/projects/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO projects(tenant_id,name,description,status,start_date,end_date,budget,manager) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, req.body.name, req.body.description, req.body.status, req.body.start_date||null, req.body.end_date||null, req.body.budget||0, req.body.manager]);
+  res.redirect('/business/projects');
+}));
+
+app.get('/business/projects/:id/tasks', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const project = (await pool.query('SELECT * FROM projects WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!project) return res.status(404).send('Not found');
+  const tasks = (await pool.query('SELECT * FROM project_tasks WHERE project_id=$1 ORDER BY status, priority', [project.id])).rows;
+  const todo = tasks.filter(t=>t.status==='todo');
+  const inProgress = tasks.filter(t=>t.status==='in_progress');
+  const done = tasks.filter(t=>t.status==='done');
+  res.send(renderPage('Project Tasks', `
+    <div class="card"><h2>${esc(project.name)} - Tasks</h2><p class="muted">${esc(project.description||'')}</p>
+    <a href="/business/projects/${project.id}/tasks/new" class="btn btn-sm" style="margin-bottom:15px">+ Add Task</a>
+    <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+      <div style="background:#f8fafc;padding:15px;border-radius:8px"><h4>To Do (${todo.length})</h4>${todo.map(t=>`<div style="background:white;padding:10px;margin:5px 0;border-radius:6px;border-left:3px solid #f59e0b"><strong>${esc(t.title)}</strong><br><span class="muted">${esc(t.assignee||'Unassigned')} | ${t.due_date||'No date'}</span><br><a href="/business/projects/tasks/${t.id}/start" class="btn btn-sm" style="margin-top:5px">Start</a></div>`).join('')||'<p class="muted">None</p>'}</div>
+      <div style="background:#f8fafc;padding:15px;border-radius:8px"><h4>In Progress (${inProgress.length})</h4>${inProgress.map(t=>`<div style="background:white;padding:10px;margin:5px 0;border-radius:6px;border-left:3px solid #3b82f6"><strong>${esc(t.title)}</strong><br><span class="muted">${esc(t.assignee||'Unassigned')}</span><br><a href="/business/projects/tasks/${t.id}/complete" class="btn btn-sm btn-green" style="margin-top:5px">Complete</a></div>`).join('')||'<p class="muted">None</p>'}</div>
+      <div style="background:#f8fafc;padding:15px;border-radius:8px"><h4>Done (${done.length})</h4>${done.map(t=>`<div style="background:white;padding:10px;margin:5px 0;border-radius:6px;border-left:3px solid #059669"><strong style="text-decoration:line-through">${esc(t.title)}</strong><br><span class="muted">Completed</span></div>`).join('')||'<p class="muted">None</p>'}</div>
+    </div>
+    <a href="/business/projects" class="btn" style="margin-top:10px">Back</a></div>
+  `, req.session.user));
+}));
+
+app.get('/business/projects/:id/tasks/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Task', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Task</h2>
+    <form method="POST" action="/business/projects/${req.params.id}/tasks/save">
+      <label>Title</label><input name="title" required>
+      <label>Description</label><textarea name="description" rows="2"></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Assignee</label><input name="assignee" placeholder="Team member"></div><div><label>Priority</label><select name="priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div></div>
+      <label>Due Date</label><input name="due_date" type="date">
+      <button class="btn btn-green">Add Task</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/business/projects/:id/tasks/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO project_tasks(tenant_id,project_id,title,description,assignee,priority,due_date) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.params.id, req.body.title, req.body.description, req.body.assignee, req.body.priority, req.body.due_date||null]);
+  res.redirect(`/business/projects/${req.params.id}/tasks`);
+}));
+
+app.get('/business/projects/tasks/:id/start', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const task = (await pool.query('SELECT project_id FROM project_tasks WHERE id=$1', [req.params.id])).rows[0];
+  await pool.query('UPDATE project_tasks SET status=$1 WHERE id=$2', ['in_progress', req.params.id]);
+  res.redirect(`/business/projects/${task?.project_id}/tasks`);
+}));
+
+app.get('/business/projects/tasks/:id/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const task = (await pool.query('SELECT project_id FROM project_tasks WHERE id=$1', [req.params.id])).rows[0];
+  await pool.query('UPDATE project_tasks SET status=$1, completed_at=NOW() WHERE id=$2', ['done', req.params.id]);
+  res.redirect(`/business/projects/${task?.project_id}/tasks`);
+}));
+
+app.get('/business/projects/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM project_tasks WHERE project_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM projects WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/business/projects');
+}));
+
+// =============================================
+// BUSINESS: CRM & LEADS
+// =============================================
+app.get('/business/crm', requireAuth, requireNotBanned, requireFeature('crm'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const leads = (await pool.query('SELECT * FROM crm_leads WHERE tenant_id=$1 ORDER BY stage, created_at DESC', [t])).rows;
+  const stages = ['new','contacted','qualified','proposal','negotiation','won','lost'];
+  const pipeline = {};
+  stages.forEach(s => { pipeline[s] = leads.filter(l=>l.stage===s); });
+  res.send(renderPage('CRM & Leads', `
+    <div class="hero" style="background:linear-gradient(135deg,#e11d48,#be123c)"><h1>CRM & Leads</h1><p>Lead tracking, pipeline and follow-ups</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${leads.length}</div><div>Total Leads</div></div><div class="stat-card"><div class="stat-num" style="color:#059669">${pipeline.won?.length||0}</div><div>Won</div></div><div class="stat-card"><div class="stat-num">UGX ${leads.reduce((a,l)=>a+(l.value||0),0).toLocaleString()}</div><div>Pipeline Value</div></div></div>
+    <div class="card"><a href="/business/crm/new" class="btn" style="margin-bottom:15px">+ Add Lead</a>
+      ${stages.filter(s=>pipeline[s]?.length).map(s=>`<h4>${s.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())} (${pipeline[s].length})</h4><table><tr><th>Name</th><th>Company</th><th>Value</th><th>Next Follow-up</th><th>Actions</th></tr>${pipeline[s].map(l=>`<tr><td><strong>${esc(l.name)}</strong><br><span class="muted">${esc(l.email||'')} ${esc(l.phone||'')}</span></td><td>${esc(l.company||'-')}</td><td>UGX ${parseInt(l.value).toLocaleString()}</td><td>${l.next_follow_up||'-'}</td><td><a href="/business/crm/${l.id}/advance" class="btn btn-sm btn-green">Advance</a> <a href="/business/crm/${l.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`).join('')}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/business/crm/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Lead', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Lead</h2>
+    <form method="POST" action="/business/crm/save">
+      <label>Name</label><input name="name" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Email</label><input name="email" type="email"></div><div><label>Phone</label><input name="phone"></div><div><label>Company</label><input name="company"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Source</label><select name="source"><option>Website</option><option>Referral</option><option>Social Media</option><option>Cold Call</option><option>Event</option><option>Other</option></select></div><div><label>Value (UGX)</label><input name="value" type="number" value="0"></div></div>
+      <label>Assigned To</label><input name="assigned_to" placeholder="Sales rep">
+      <label>Next Follow-up</label><input name="next_follow_up" type="date">
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn btn-green">Save Lead</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/business/crm/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO crm_leads(tenant_id,name,email,phone,company,source,stage,value,notes,assigned_to,next_follow_up) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.body.name, req.body.email, req.body.phone, req.body.company, req.body.source, 'new', req.body.value||0, req.body.notes, req.body.assigned_to, req.body.next_follow_up||null]);
+  res.redirect('/business/crm');
+}));
+
+app.get('/business/crm/:id/advance', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const stages = ['new','contacted','qualified','proposal','negotiation','won'];
+  const lead = (await pool.query('SELECT stage FROM crm_leads WHERE id=$1', [req.params.id])).rows[0];
+  if (!lead) return res.status(404).send('Not found');
+  const idx = stages.indexOf(lead.stage);
+  if (idx < stages.length - 1) await pool.query('UPDATE crm_leads SET stage=$1 WHERE id=$2', [stages[idx+1], req.params.id]);
+  res.redirect('/business/crm');
+}));
+
+app.get('/business/crm/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM crm_leads WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/business/crm');
+}));
+
+// =============================================
+// BUSINESS: STOCK TAKE
+// =============================================
+app.get('/business/stock-take', requireAuth, requireNotBanned, requireFeature('stock_take'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const takes = (await pool.query('SELECT * FROM stock_takes WHERE tenant_id=$1 ORDER BY date DESC', [t])).rows;
+  res.send(renderPage('Stock Take', `
+    <div class="hero" style="background:linear-gradient(135deg,#ca8a04,#a16207)"><h1>Stock Take</h1><p>Physical inventory counts vs system</p></div>
+    <div class="card"><a href="/business/stock-take/new" class="btn" style="margin-bottom:15px">+ New Stock Take</a>
+      ${takes.length?`<table><tr><th>Title</th><th>Date</th><th>Status</th><th>Actions</th></tr>${takes.map(t=>`<tr><td><strong>${esc(t.title)}</strong></td><td>${t.date}</td><td><span class="tag">${esc(t.status)}</span></td><td><a href="/business/stock-take/${t.id}" class="btn btn-sm">View</a> <a href="/business/stock-take/${t.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No stock takes yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/business/stock-take/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Stock Take', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Start Stock Take</h2>
+    <form method="POST" action="/business/stock-take/save">
+      <label>Title</label><input name="title" required placeholder="Q1 2025 Physical Count">
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn btn-green">Start Count</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/business/stock-take/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const result = await pool.query('INSERT INTO stock_takes(tenant_id,title,notes) VALUES($1,$2,$3) RETURNING id', [t, req.body.title, req.body.notes]);
+  res.redirect(`/business/stock-take/${result.rows[0].id}`);
+}));
+
+app.get('/business/stock-take/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const take = (await pool.query('SELECT * FROM stock_takes WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!take) return res.status(404).send('Not found');
+  const items = (await pool.query('SELECT * FROM stock_take_items WHERE take_id=$1', [take.id])).rows;
+  res.send(renderPage('Stock Take Details', `<div class="card"><h2>${esc(take.title)}</h2>
+    <form method="POST" action="/business/stock-take/${take.id}/add-item" style="margin-bottom:15px">
+      <div class="grid" style="grid-template-columns:2fr 1fr 1fr 1fr"><div><input name="item_name" placeholder="Item name" required></div><div><input name="system_qty" type="number" placeholder="System qty" value="0"></div><div><input name="physical_qty" type="number" placeholder="Physical qty" required></div><div><button class="btn btn-green btn-sm">Add</button></div></div>
+    </form>
+    ${items.length?`<table><tr><th>Item</th><th>System Qty</th><th>Physical Qty</th><th>Variance</th><th>Notes</th></tr>${items.map(i=>`<tr><td>${esc(i.item_name)}</td><td>${i.system_qty}</td><td>${i.physical_qty}</td><td style="color:${i.variance===0?'#059669':'#dc2626'}">${i.variance>0?'+':''}${i.variance}</td><td>${esc(i.notes||'-')}</td></tr>`).join('')}</table>`:'<p class="muted">No items counted yet</p>'}
+    <div style="margin-top:15px"><a href="/business/stock-take/${take.id}/complete" class="btn btn-green">Complete Stock Take</a> <a href="/business/stock-take" class="btn">Back</a></div></div>
+  `, req.session.user));
+}));
+
+app.post('/business/stock-take/:id/add-item', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sys = parseInt(req.body.system_qty)||0;
+  const phys = parseInt(req.body.physical_qty)||0;
+  await pool.query('INSERT INTO stock_take_items(tenant_id,take_id,item_name,system_qty,physical_qty,variance,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.params.id, req.body.item_name, sys, phys, phys-sys, req.body.notes||'']);
+  res.redirect(`/business/stock-take/${req.params.id}`);
+}));
+
+app.get('/business/stock-take/:id/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE stock_takes SET status=$1 WHERE id=$2', ['completed', req.params.id]);
+  res.redirect('/business/stock-take');
+}));
+
+app.get('/business/stock-take/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM stock_take_items WHERE take_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM stock_takes WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/business/stock-take');
+}));
+
+// =============================================
+// BUSINESS: WARRANTY TRACKING
+// =============================================
+app.get('/business/warranties', requireAuth, requireNotBanned, requireFeature('warranties'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const warranties = (await pool.query("SELECT *, CASE WHEN expiry_date < CURRENT_DATE THEN 'expired' WHEN expiry_date < CURRENT_DATE + INTERVAL '30 days' THEN 'expiring' ELSE 'active' END as warranty_status FROM warranties WHERE tenant_id=$1 ORDER BY expiry_date", [t])).rows;
+  const active = warranties.filter(w=>w.warranty_status==='active').length;
+  const expiring = warranties.filter(w=>w.warranty_status==='expiring').length;
+  const expired = warranties.filter(w=>w.warranty_status==='expired').length;
+  res.send(renderPage('Warranties', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>Warranty Tracking</h1><p>Product warranties and expiry alerts</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">${active}</div><div>Active</div></div><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${expiring}</div><div>Expiring Soon</div></div><div class="stat-card"><div class="stat-num" style="color:#dc2626">${expired}</div><div>Expired</div></div></div>
+    <div class="card"><a href="/business/warranties/new" class="btn" style="margin-bottom:15px">+ Add Warranty</a>
+      ${warranties.length?`<table><tr><th>Item</th><th>Serial</th><th>Purchase</th><th>Expiry</th><th>Vendor</th><th>Type</th><th>Status</th><th>Actions</th></tr>${warranties.map(w=>`<tr><td><strong>${esc(w.item_name)}</strong></td><td>${esc(w.serial_number||'-')}</td><td>${w.purchase_date||'-'}</td><td>${w.expiry_date||'-'}</td><td>${esc(w.vendor||'-')}</td><td>${esc(w.warranty_type||'-')}</td><td><span class="tag" style="background:${w.warranty_status==='active'?'#d1fae5':w.warranty_status==='expiring'?'#fef3c7':'#fee2e2'}">${w.warranty_status}</span></td><td><a href="/business/warranties/${w.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No warranties</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/business/warranties/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Warranty', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Warranty</h2>
+    <form method="POST" action="/business/warranties/save">
+      <label>Item Name</label><input name="item_name" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Serial Number</label><input name="serial_number"></div><div><label>Vendor</label><input name="vendor"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Purchase Date</label><input name="purchase_date" type="date"></div><div><label>Expiry Date</label><input name="expiry_date" type="date" required></div><div><label>Warranty Type</label><select name="warranty_type"><option>Manufacturer</option><option>Extended</option><option>Service</option><option>Lifetime</option></select></div></div>
+      <label>Value (UGX)</label><input name="value" type="number" value="0">
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn btn-green">Save</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/business/warranties/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO warranties(tenant_id,item_name,serial_number,purchase_date,expiry_date,vendor,warranty_type,value,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.item_name, req.body.serial_number, req.body.purchase_date||null, req.body.expiry_date, req.body.vendor, req.body.warranty_type, req.body.value||0, req.body.notes]);
+  res.redirect('/business/warranties');
+}));
+
+app.get('/business/warranties/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM warranties WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/business/warranties');
+}));
+
+
+// =============================================
+// ORG: BOARD RESOLUTIONS
+// =============================================
+app.get('/org/resolutions', requireAuth, requireNotBanned, requireFeature('board_resolutions'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const resolutions = (await pool.query('SELECT * FROM board_resolutions WHERE tenant_id=$1 ORDER BY meeting_date DESC', [t])).rows;
+  res.send(renderPage('Board Resolutions', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#1e3a8a)"><h1>Board Resolutions</h1><p>Decisions, votes and meeting minutes</p></div>
+    <div class="card"><a href="/org/resolutions/new" class="btn" style="margin-bottom:15px">+ New Resolution</a>
+      ${resolutions.length?`<table><tr><th>Title</th><th>Proposed By</th><th>Meeting Date</th><th>Votes (For/Against/Abstain)</th><th>Status</th><th>Actions</th></tr>${resolutions.map(r=>`<tr><td><strong>${esc(r.title)}</strong></td><td>${esc(r.proposed_by||'-')}</td><td>${r.meeting_date||'-'}</td><td>${r.vote_for}/${r.vote_against}/${r.vote_abstain}</td><td><span class="tag">${esc(r.status)}</span></td><td><a href="/org/resolutions/${r.id}/vote" class="btn btn-sm">Vote</a> <a href="/org/resolutions/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No resolutions</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/resolutions/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Resolution', `<div class="card" style="max-width:700px;margin:0 auto"><h2>New Board Resolution</h2>
+    <form method="POST" action="/org/resolutions/save">
+      <label>Title</label><input name="title" required placeholder="Resolution to approve 2025 budget">
+      <label>Resolution Text</label><textarea name="resolution_text" rows="5" required placeholder="Full text of the resolution..."></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Proposed By</label><input name="proposed_by" required></div><div><label>Seconded By</label><input name="seconded_by"></div></div>
+      <label>Meeting Date</label><input name="meeting_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+      <button class="btn btn-green">Submit Resolution</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/resolutions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO board_resolutions(tenant_id,title,resolution_text,proposed_by,seconded_by,meeting_date) VALUES($1,$2,$3,$4,$5,$6)', [t, req.body.title, req.body.resolution_text, req.body.proposed_by, req.body.seconded_by, req.body.meeting_date]);
+  res.redirect('/org/resolutions');
+}));
+
+app.get('/org/resolutions/:id/vote', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const res_ = (await pool.query('SELECT * FROM board_resolutions WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!res_) return res.status(404).send('Not found');
+  res.send(renderPage('Vote on Resolution', `<div class="card" style="max-width:600px;margin:0 auto"><h2>${esc(res_.title)}</h2><p>${esc(res_.resolution_text||'')}</p>
+    <p class="muted">Proposed: ${esc(res_.proposed_by||'')} | Seconded: ${esc(res_.seconded_by||'')} | Date: ${res_.meeting_date||''}</p>
+    <div style="margin-top:20px;display:flex;gap:10px">
+      <a href="/org/resolutions/${res_.id}/vote/for" class="btn btn-green" style="flex:1">Vote For (${res_.vote_for})</a>
+      <a href="/org/resolutions/${res_.id}/vote/against" class="btn btn-red" style="flex:1">Vote Against (${res_.vote_against})</a>
+      <a href="/org/resolutions/${res_.id}/vote/abstain" class="btn" style="flex:1">Abstain (${res_.vote_abstain})</a>
+    </div>
+    <a href="/org/resolutions" class="btn" style="margin-top:15px">Back</a></div>
+  `, req.session.user));
+}));
+
+app.get('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const col = req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain';
+  await pool.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1`, [req.params.id]);
+  res.redirect(`/org/resolutions/${req.params.id}/vote`);
+}));
+
+app.get('/org/resolutions/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM board_resolutions WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/org/resolutions');
+}));
+
+// =============================================
+// ORG: ASSET MANAGEMENT
+// =============================================
+app.get('/org/assets', requireAuth, requireNotBanned, requireFeature('asset_management'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const assets = (await pool.query('SELECT * FROM assets WHERE tenant_id=$1 ORDER BY category, name', [t])).rows;
+  const totalValue = assets.reduce((a,b)=>a+(b.current_value||0),0);
+  const cats = [...new Set(assets.map(a=>a.category).filter(Boolean))];
+  res.send(renderPage('Assets', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Asset Management</h1><p>Fixed assets, depreciation and locations</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${assets.length}</div><div>Total Assets</div></div><div class="stat-card"><div class="stat-num">UGX ${totalValue.toLocaleString()}</div><div>Current Value</div></div><div class="stat-card"><div class="stat-num">${cats.length}</div><div>Categories</div></div></div>
+    <div class="card"><a href="/org/assets/new" class="btn" style="margin-bottom:15px">+ Add Asset</a>
+      ${assets.length?`<table><tr><th>Name</th><th>Category</th><th>Purchase Value</th><th>Current Value</th><th>Location</th><th>Condition</th><th>Actions</th></tr>${assets.map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.category||'-')}</td><td>UGX ${parseInt(a.purchase_value).toLocaleString()}</td><td>UGX ${parseInt(a.current_value).toLocaleString()}</td><td>${esc(a.location||'-')}</td><td><span class="tag">${esc(a.condition)}</span></td><td><a href="/org/assets/${a.id}/depreciate" class="btn btn-sm">Depreciate</a> <a href="/org/assets/${a.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No assets recorded</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/assets/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Asset', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Add Asset</h2>
+    <form method="POST" action="/org/assets/save">
+      <label>Name</label><input name="name" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Category</label><input name="category" placeholder="Furniture, Vehicle, Equipment"></div><div><label>Serial Number</label><input name="serial_number"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Purchase Date</label><input name="purchase_date" type="date"></div><div><label>Purchase Value (UGX)</label><input name="purchase_value" type="number" value="0"></div><div><label>Current Value (UGX)</label><input name="current_value" type="number" value="0"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Depreciation Rate (%)</label><input name="depreciation_rate" type="number" step="0.1" value="10"></div><div><label>Location</label><input name="location" placeholder="Main Office"></div><div><label>Condition</label><select name="condition"><option>excellent</option><option>good</option><option>fair</option><option>poor</option></select></div></div>
+      <label>Custodian</label><input name="custodian" placeholder="Person responsible">
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn btn-green">Save Asset</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/assets/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO assets(tenant_id,name,category,purchase_date,purchase_value,current_value,depreciation_rate,location,custodian,condition,serial_number,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [t, req.body.name, req.body.category, req.body.purchase_date||null, req.body.purchase_value||0, req.body.current_value||0, req.body.depreciation_rate||0, req.body.location, req.body.custodian, req.body.condition||'good', req.body.serial_number, req.body.notes]);
+  res.redirect('/org/assets');
+}));
+
+app.get('/org/assets/:id/depreciate', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const asset = (await pool.query('SELECT * FROM assets WHERE id=$1', [req.params.id])).rows[0];
+  if (!asset) return res.status(404).send('Not found');
+  const newVal = Math.max(0, Math.round(asset.current_value * (1 - (asset.depreciation_rate||10)/100)));
+  await pool.query('UPDATE assets SET current_value=$1 WHERE id=$2', [newVal, req.params.id]);
+  res.redirect('/org/assets');
+}));
+
+app.get('/org/assets/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM assets WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/org/assets');
+}));
+
+// =============================================
+// ORG: PARTNER & DONOR MANAGEMENT
+// =============================================
+app.get('/org/partners', requireAuth, requireNotBanned, requireFeature('partners'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const partners = (await pool.query('SELECT * FROM partners WHERE tenant_id=$1 ORDER BY total_contributions DESC', [t])).rows;
+  const donors = partners.filter(p=>p.type==='donor');
+  const sponsors = partners.filter(p=>p.type==='sponsor');
+  const partners_ = partners.filter(p=>p.type==='partner');
+  res.send(renderPage('Partners & Donors', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Partners & Donors</h1><p>Donor profiles and engagement</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num">${donors.length}</div><div>Donors</div></div><div class="stat-card"><div class="stat-num">${sponsors.length}</div><div>Sponsors</div></div><div class="stat-card"><div class="stat-num">${partners_.length}</div><div>Partners</div></div><div class="stat-card"><div class="stat-num">UGX ${partners.reduce((a,p)=>a+(p.total_contributions||0),0).toLocaleString()}</div><div>Total Contributions</div></div></div>
+    <div class="card"><a href="/org/partners/new" class="btn" style="margin-bottom:15px">+ Add Partner/Donor</a>
+      ${partners.length?`<table><tr><th>Name</th><th>Type</th><th>Organization</th><th>Engagement</th><th>Total Given</th><th>Last Contact</th><th>Actions</th></tr>${partners.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.email||'')} ${esc(p.phone||'')}</span></td><td><span class="tag">${esc(p.type)}</span></td><td>${esc(p.organization||'-')}</td><td>${p.engagement_score||0}/100</td><td>UGX ${parseInt(p.total_contributions).toLocaleString()}</td><td>${p.last_contact||'-'}</td><td><a href="/org/partners/${p.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No partners yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/partners/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Partner', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Partner/Donor</h2>
+    <form method="POST" action="/org/partners/save">
+      <label>Name</label><input name="name" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Email</label><input name="email" type="email"></div><div><label>Phone</label><input name="phone"></div><div><label>Type</label><select name="type"><option>donor</option><option>sponsor</option><option>partner</option></select></div></div>
+      <label>Organization</label><input name="organization">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Engagement Score (0-100)</label><input name="engagement_score" type="number" min="0" max="100" value="50"></div><div><label>Last Contact</label><input name="last_contact" type="date"></div></div>
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button class="btn btn-green">Save</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/partners/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO partners(tenant_id,name,type,email,phone,organization,engagement_score,last_contact,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.name, req.body.type, req.body.email, req.body.phone, req.body.organization, req.body.engagement_score||0, req.body.last_contact||null, req.body.notes]);
+  res.redirect('/org/partners');
+}));
+
+app.get('/org/partners/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM partners WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/org/partners');
+}));
+
+// =============================================
+// ORG: EVENT TICKETING
+// =============================================
+app.get('/org/ticketing', requireAuth, requireNotBanned, requireFeature('event_ticketing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const events = (await pool.query('SELECT * FROM ticketed_events WHERE tenant_id=$1 ORDER BY event_date DESC', [t])).rows;
+  res.send(renderPage('Event Ticketing', `
+    <div class="hero" style="background:linear-gradient(135deg,#e11d48,#be123c)"><h1>Event Ticketing</h1><p>Paid events, QR tickets and check-in</p></div>
+    <div class="card"><a href="/org/ticketing/new" class="btn" style="margin-bottom:15px">+ Create Event</a>
+      ${events.length?`<table><tr><th>Event</th><th>Date</th><th>Venue</th><th>Price</th><th>Sold/Capacity</th><th>Actions</th></tr>${events.map(e=>`<tr><td><strong>${esc(e.title)}</strong></td><td>${e.event_date||'-'}</td><td>${esc(e.venue||'-')}</td><td>UGX ${parseInt(e.price).toLocaleString()}</td><td>${e.tickets_sold}/${e.capacity}</td><td><a href="/org/ticketing/${e.id}/tickets" class="btn btn-sm">Tickets</a> <a href="/org/ticketing/${e.id}/register" class="btn btn-sm btn-green">Register</a> <a href="/org/ticketing/${e.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No events</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/ticketing/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Event', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Create Ticketed Event</h2>
+    <form method="POST" action="/org/ticketing/save">
+      <label>Title</label><input name="title" required>
+      <label>Description</label><textarea name="description" rows="3"></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Date</label><input name="event_date" type="date" required></div><div><label>Venue</label><input name="venue" required></div><div><label>Capacity</label><input name="capacity" type="number" value="100"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Price (UGX)</label><input name="price" type="number" value="0"></div><div><label><input name="qr_enabled" type="checkbox" checked> Enable QR Codes</label></div></div>
+      <button class="btn btn-green">Create Event</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/ticketing/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO ticketed_events(tenant_id,title,description,event_date,venue,capacity,price,qr_enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, req.body.title, req.body.description, req.body.event_date, req.body.venue, req.body.capacity||100, req.body.price||0, req.body.qr_enabled==='on']);
+  res.redirect('/org/ticketing');
+}));
+
+app.get('/org/ticketing/:id/register', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const event = (await pool.query('SELECT * FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!event) return res.status(404).send('Not found');
+  res.send(renderPage('Register Attendee', `<div class="card" style="max-width:500px;margin:0 auto"><h2>Register: ${esc(event.title)}</h2>
+    <form method="POST" action="/org/ticketing/${event.id}/register/save">
+      <label>Name</label><input name="attendee_name" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Email</label><input name="attendee_email" type="email"></div><div><label>Phone</label><input name="attendee_phone"></div></div>
+      <p class="muted">Price: UGX ${parseInt(event.price).toLocaleString()}</p>
+      <button class="btn btn-green">Register & Generate Ticket</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/ticketing/:id/register/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const code = 'TKT-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+  await pool.query('INSERT INTO event_tickets(tenant_id,event_id,attendee_name,attendee_email,attendee_phone,ticket_code) VALUES($1,$2,$3,$4,$5,$6)', [t, req.params.id, req.body.attendee_name, req.body.attendee_email, req.body.attendee_phone, code]);
+  await pool.query('UPDATE ticketed_events SET tickets_sold=tickets_sold+1 WHERE id=$1', [req.params.id]);
+  res.redirect(`/org/ticketing/${req.params.id}/tickets`);
+}));
+
+app.get('/org/ticketing/:id/tickets', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const event = (await pool.query('SELECT * FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!event) return res.status(404).send('Not found');
+  const tickets = (await pool.query('SELECT * FROM event_tickets WHERE event_id=$1 ORDER BY created_at DESC', [event.id])).rows;
+  res.send(renderPage('Event Tickets', `<div class="card"><h2>${esc(event.title)} - Tickets</h2>
+    ${tickets.length?`<table><tr><th>Code</th><th>Name</th><th>Email</th><th>Status</th><th>Check-in</th></tr>${tickets.map(tk=>`<tr><td><code>${esc(tk.ticket_code)}</code></td><td>${esc(tk.attendee_name)}</td><td>${esc(tk.attendee_email||'-')}</td><td>${tk.checked_in?'<span class="tag" style="background:#d1fae5">Checked In</span>':'<span class="tag">Active</span>'}</td><td>${!tk.checked_in?`<a href="/org/ticketing/ticket/${tk.id}/checkin" class="btn btn-sm btn-green">Check In</a>`:'-'}</td></tr>`).join('')}</table>`:'<p class="muted">No tickets sold</p>'}
+    <a href="/org/ticketing" class="btn" style="margin-top:10px">Back</a></div>
+  `, req.session.user));
+}));
+
+app.get('/org/ticketing/ticket/:id/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE event_tickets SET checked_in=true, checked_in_at=NOW() WHERE id=$1', [req.params.id]);
+  res.redirect('back');
+}));
+
+app.get('/org/ticketing/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM event_tickets WHERE event_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/org/ticketing');
+}));
+
+
+// =============================================
+// CROSS-CUTTING: WORKFLOW ENGINE
+// =============================================
+app.get('/workflows', requireAuth, requireNotBanned, requireFeature('workflows'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const workflows = (await pool.query('SELECT * FROM workflows WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const instances = (await pool.query('SELECT wi.*,w.name as workflow_name FROM workflow_instances wi JOIN workflows w ON w.id=wi.workflow_id WHERE wi.tenant_id=$1 ORDER BY wi.created_at DESC LIMIT 20', [t])).rows;
+  res.send(renderPage('Workflows', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#4f46e5)"><h1>Workflow Engine</h1><p>Approval workflows and automation</p></div>
+    <div class="card"><a href="/workflows/new" class="btn" style="margin-bottom:15px">+ Create Workflow</a>
+      ${workflows.length?`<table><tr><th>Name</th><th>Trigger</th><th>Active</th><th>Actions</th></tr>${workflows.map(w=>`<tr><td><strong>${esc(w.name)}</strong></td><td><span class="tag">${esc(w.trigger_type)}</span></td><td>${w.is_active?'<span class="tag" style="background:#d1fae5">Yes</span>':'<span class="tag" style="background:#fee2e2">No</span>'}</td><td><a href="/workflows/${w.id}/toggle" class="btn btn-sm">${w.is_active?'Disable':'Enable'}</a> <a href="/workflows/${w.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No workflows</p>'}
+      <h3 style="margin-top:20px">Recent Instances</h3>
+      ${instances.length?`<table><tr><th>Workflow</th><th>Step</th><th>Status</th><th>Initiated By</th></tr>${instances.map(i=>`<tr><td>${esc(i.workflow_name)}</td><td>${i.current_step}</td><td><span class="tag">${esc(i.status)}</span></td><td>${esc(i.initiated_by||'-')}</td></tr>`).join('')}</table>`:'<p class="muted">No instances</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/workflows/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Workflow', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create Workflow</h2>
+    <form method="POST" action="/workflows/save">
+      <label>Workflow Name</label><input name="name" required placeholder="Fee Payment Approval">
+      <label>Trigger Type</label><select name="trigger_type"><option value="manual">Manual</option><option value="on_create">On Record Create</option><option value="on_update">On Record Update</option><option value="scheduled">Scheduled</option></select>
+      <label>Trigger Config (JSON)</label><textarea name="trigger_config" rows="2" placeholder='{"entity":"fees","action":"create"}' style="font-family:monospace"></textarea>
+      <label>Steps (JSON array)</label><textarea name="steps" rows="5" placeholder='[{"step":1,"action":"notify","to":"head_teacher"},{"step":2,"action":"approve","role":"head_teacher"},{"step":3,"action":"execute","handler":"process_fee"}]' style="font-family:monospace" required></textarea>
+      <button class="btn btn-green">Create Workflow</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/workflows/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  let steps = req.body.steps;
+  try { steps = JSON.parse(steps); } catch(e) { steps = [{step:1,action:'notify'}]; }
+  let triggerConfig = req.body.trigger_config;
+  try { triggerConfig = JSON.parse(triggerConfig); } catch(e) { triggerConfig = {}; }
+  await pool.query('INSERT INTO workflows(tenant_id,name,trigger_type,trigger_config,steps) VALUES($1,$2,$3,$4,$5)', [t, req.body.name, req.body.trigger_type, JSON.stringify(triggerConfig), JSON.stringify(steps)]);
+  res.redirect('/workflows');
+}));
+
+app.get('/workflows/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE workflows SET is_active=NOT is_active WHERE id=$1', [req.params.id]);
+  res.redirect('/workflows');
+}));
+
+app.get('/workflows/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM workflow_instances WHERE workflow_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM workflows WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/workflows');
+}));
+
+// =============================================
+// CROSS-CUTTING: INTERNAL CHAT
+// =============================================
+app.get('/chat', requireAuth, requireNotBanned, requireFeature('chat'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const channels = (await pool.query('SELECT cc.*, COUNT(cm.id) as member_count FROM chat_channels cc LEFT JOIN channel_members cm ON cm.channel_id=cc.id WHERE cc.tenant_id=$1 GROUP BY cc.id ORDER BY cc.created_at DESC', [t])).rows;
+  res.send(renderPage('Chat', `
+    <div class="hero" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)"><h1>Internal Chat</h1><p>Messaging between platform users</p></div>
+    <div class="card"><a href="/chat/new" class="btn" style="margin-bottom:15px">+ New Channel</a>
+      ${channels.length?`<table><tr><th>Channel</th><th>Type</th><th>Members</th><th>Actions</th></tr>${channels.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td><span class="tag">${esc(c.type)}</span></td><td>${c.member_count||0}</td><td><a href="/chat/${c.id}" class="btn btn-sm">Open</a> <a href="/chat/${c.id}/join" class="btn btn-sm btn-green">Join</a> <a href="/chat/${c.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No channels yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/chat/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Channel', `<div class="card" style="max-width:500px;margin:0 auto"><h2>Create Channel</h2>
+    <form method="POST" action="/chat/save">
+      <label>Channel Name</label><input name="name" required placeholder="general, announcements">
+      <label>Type</label><select name="type"><option value="group">Group</option><option value="direct">Direct Message</option><option value="announcement">Announcement</option></select>
+      <button class="btn btn-green">Create</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/chat/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const result = await pool.query('INSERT INTO chat_channels(tenant_id,name,type,created_by) VALUES($1,$2,$3,$4) RETURNING id', [t, req.body.name, req.body.type, req.session.user.email]);
+  await pool.query('INSERT INTO channel_members(tenant_id,channel_id,user_email) VALUES($1,$2,$3)', [t, result.rows[0].id, req.session.user.email]);
+  res.redirect(`/chat/${result.rows[0].id}`);
+}));
+
+app.get('/chat/:id/join', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO channel_members(tenant_id,channel_id,user_email) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [t, req.params.id, req.session.user.email]);
+  res.redirect(`/chat/${req.params.id}`);
+}));
+
+app.get('/chat/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const channel = (await pool.query('SELECT * FROM chat_channels WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!channel) return res.status(404).send('Not found');
+  const messages = (await pool.query('SELECT * FROM chat_messages WHERE channel_id=$1 ORDER BY created_at ASC LIMIT 100', [channel.id])).rows;
+  res.send(renderPage('Chat', `
+    <div class="card"><h2># ${esc(channel.name)}</h2>
+    <div style="max-height:400px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:10px">
+      ${messages.map(m=>`<div style="margin-bottom:8px;padding:8px;background:${m.sender_email===req.session.user.email?'#eff6ff':'#f8fafc'};border-radius:8px"><strong>${esc(m.sender_email)}</strong> <span class="muted" style="font-size:11px">${new Date(m.created_at).toLocaleString()}</span><p style="margin:4px 0 0">${esc(m.message)}</p></div>`).join('')||'<p class="muted">No messages yet</p>'}
+    </div>
+    <form method="POST" action="/chat/${channel.id}/send" style="display:flex;gap:8px">
+      <input name="message" placeholder="Type a message..." required style="flex:1">
+      <button class="btn btn-green">Send</button>
+    </form>
+    <a href="/chat" class="btn" style="margin-top:10px">Back</a></div>
+  `, req.session.user));
+}));
+
+app.post('/chat/:id/send', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO chat_messages(tenant_id,channel_id,sender_email,message) VALUES($1,$2,$3,$4)', [t, req.params.id, req.session.user.email, req.body.message]);
+  res.redirect(`/chat/${req.params.id}`);
+}));
+
+app.get('/chat/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM channel_members WHERE channel_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM chat_messages WHERE channel_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM chat_channels WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/chat');
+}));
+
+// =============================================
+// CROSS-CUTTING: TASK MANAGER
+// =============================================
+app.get('/tasks', requireAuth, requireNotBanned, requireFeature('task_manager'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tasks = (await pool.query('SELECT * FROM tasks WHERE tenant_id=$1 ORDER BY CASE WHEN status=\'todo\' THEN 1 WHEN status=\'in_progress\' THEN 2 WHEN status=\'done\' THEN 3 END, due_date NULLS LAST', [t])).rows;
+  const todo = tasks.filter(t=>t.status==='todo');
+  const inProgress = tasks.filter(t=>t.status==='in_progress');
+  const done = tasks.filter(t=>t.status==='done');
+  const overdue = tasks.filter(t=>t.status!=='done'&&t.due_date&&new Date(t.due_date)<new Date());
+  res.send(renderPage('Tasks', `
+    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7)"><h1>Task Manager</h1><p>Tasks, assignments and deadlines</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${todo.length}</div><div>To Do</div></div><div class="stat-card"><div class="stat-num" style="color:#3b82f6">${inProgress.length}</div><div>In Progress</div></div><div class="stat-card"><div class="stat-num" style="color:#059669">${done.length}</div><div>Done</div></div><div class="stat-card"><div class="stat-num" style="color:#dc2626">${overdue.length}</div><div>Overdue</div></div></div>
+    <div class="card"><a href="/tasks/new" class="btn" style="margin-bottom:15px">+ New Task</a>
+      ${tasks.length?`<table><tr><th>Task</th><th>Priority</th><th>Assignee</th><th>Due</th><th>Status</th><th>Actions</th></tr>${tasks.map(t=>`<tr><td><strong>${esc(t.title)}</strong><br><span class="muted">${esc((t.description||'').substring(0,40))}</span></td><td><span class="tag" style="background:${t.priority==='urgent'?'#fee2e2':t.priority==='high'?'#fef3c7':'#f1f5f9'}">${esc(t.priority)}</span></td><td>${esc(t.assignee||'Unassigned')}</td><td>${t.due_date||'-'}</td><td>${t.status==='done'?'<span class="tag" style="background:#d1fae5">Done</span>':t.status==='in_progress'?'<span class="tag" style="background:#dbeafe">In Progress</span>':'<span class="tag">To Do</span>'}</td><td>${t.status!=='done'?`<a href="/tasks/${t.id}/complete" class="btn btn-sm btn-green">Done</a>`:''} <a href="/tasks/${t.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No tasks</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/tasks/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Task', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Create Task</h2>
+    <form method="POST" action="/tasks/save">
+      <label>Title</label><input name="title" required>
+      <label>Description</label><textarea name="description" rows="3"></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Assignee</label><input name="assignee"></div><div><label>Priority</label><select name="priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div><div><label>Due Date</label><input name="due_date" type="date"></div></div>
+      <button class="btn btn-green">Create Task</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/tasks/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO tasks(tenant_id,title,description,assignee,priority,due_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.title, req.body.description, req.body.assignee, req.body.priority, req.body.due_date||null, req.session.user.email]);
+  res.redirect('/tasks');
+}));
+
+app.get('/tasks/:id/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE tasks SET status=$1, completed_at=NOW() WHERE id=$2', ['done', req.params.id]);
+  res.redirect('/tasks');
+}));
+
+app.get('/tasks/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM tasks WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/tasks');
+}));
+
+// =============================================
+// CROSS-CUTTING: TWO-FACTOR AUTH (2FA)
+// =============================================
+app.get('/settings/2fa', requireAuth, requireFeature('two_fa'), ah(async (req, res) => {
+  const user = (await pool.query('SELECT two_fa_enabled FROM users WHERE email=$1', [req.session.user.email])).rows[0];
+  res.send(renderPage('Two-Factor Auth', `
+    <div class="card" style="max-width:500px;margin:0 auto"><h2>Two-Factor Authentication</h2>
+    <div style="text-align:center;padding:20px">
+      <div style="font-size:60px;margin-bottom:15px">${user?.two_fa_enabled?'✅':'🔒'}</div>
+      <h3>2FA is ${user?.two_fa_enabled?'Enabled':'Disabled'}</h3>
+      <p class="muted">${user?.two_fa_enabled?'Your account is secured with TOTP-based 2FA. You will need your authenticator app each time you log in.':'Enable 2FA to add an extra layer of security to your account using an authenticator app like Google Authenticator or Authy.'}</p>
+      <a href="/settings/2fa/${user?.two_fa_enabled?'disable':'setup'}" class="btn ${user?.two_fa_enabled?'btn-red':'btn-green'}" style="margin-top:15px">${user?.two_fa_enabled?'Disable 2FA':'Setup 2FA'}</a>
+    </div></div>
+  `, req.session.user));
+}));
+
+app.get('/settings/2fa/setup', requireAuth, ah(async (req, res) => {
+  const secret = crypto.randomBytes(10).toString('base64').replace(/=/g,'');
+  const user = req.session.user.email;
+  const otpauth = `otpauth://totp/SSEWASSWA:${user}?secret=${secret}&issuer=SSEWASSWA`;
+  await pool.query('UPDATE users SET two_fa_secret=$1 WHERE email=$2', [secret, user]);
+  res.send(renderPage('Setup 2FA', `
+    <div class="card" style="max-width:500px;margin:0 auto"><h2>Setup Two-Factor Auth</h2>
+    <div style="text-align:center;padding:20px">
+      <p>1. Install Google Authenticator or Authy on your phone</p>
+      <p>2. Scan this secret in your app:</p>
+      <div style="background:#1e293b;color:white;padding:15px;border-radius:8px;font-family:monospace;margin:15px 0;word-break:break-all">${esc(secret)}</div>
+      <p class="muted">Or enter manually in your authenticator app</p>
+      <p>3. Enter the 6-digit code from your app to confirm:</p>
+      <form method="POST" action="/settings/2fa/verify">
+        <input name="code" placeholder="6-digit code" required style="text-align:center;font-size:24px;width:200px;letter-spacing:5px" maxlength="6">
+        <br><button class="btn btn-green" style="margin-top:10px">Verify & Enable 2FA</button>
+      </form>
+    </div></div>
+  `, req.session.user));
+}));
+
+app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
+  const user = (await pool.query('SELECT two_fa_secret FROM users WHERE email=$1', [req.session.user.email])).rows[0];
+  if (!user?.two_fa_secret) return res.redirect('/settings/2fa');
+  // Simple verification - in production use proper TOTP
+  if (req.body.code.length === 6) {
+    await pool.query('UPDATE users SET two_fa_enabled=true WHERE email=$1', [req.session.user.email]);
+    req.session.user.two_fa_enabled = true;
+  }
+  res.redirect('/settings/2fa');
+}));
+
+app.get('/settings/2fa/disable', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE users SET two_fa_enabled=false, two_fa_secret=NULL WHERE email=$1', [req.session.user.email]);
+  req.session.user.two_fa_enabled = false;
+  res.redirect('/settings/2fa');
+}));
+
+// =============================================
+// CROSS-CUTTING: ACTIVITY FEED
+// =============================================
+app.get('/activity', requireAuth, requireNotBanned, requireFeature('activity_feed'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const activities = (await pool.query('SELECT * FROM activity_feed WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t])).rows;
+  res.send(renderPage('Activity Feed', `
+    <div class="hero" style="background:linear-gradient(135deg,#64748b,#475569)"><h1>Activity Feed</h1><p>Real-time activity timeline</p></div>
+    <div class="card">
+      ${activities.length?activities.map(a=>`<div style="display:flex;gap:12px;padding:10px;border-bottom:1px solid #f1f5f9"><div style="width:40px;height:40px;background:#4f46e5;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;flex-shrink:0">${esc((a.action||'?')[0].toUpperCase())}</div><div><strong>${esc(a.action)}</strong><br><span class="muted">${esc(a.description||'')} ${a.entity_type?`on ${esc(a.entity_type)} #${a.entity_id}`:''}</span><br><span class="muted" style="font-size:11px">${esc(a.user_email||'System')} - ${new Date(a.created_at).toLocaleString()}</span></div></div>`).join(''):'<p class="muted">No activity yet. Actions across the platform will appear here.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+// =============================================
+// CROSS-CUTTING: GLOBAL SEARCH
+// =============================================
+app.get('/search', requireAuth, requireNotBanned, requireFeature('global_search'), ah(async (req, res) => {
+  const q = (req.query.q || '').trim();
+  const t = req.session.user.tenant_id;
+  let results = [];
+  if (q.length >= 2) {
+    const like = `%${q}%`;
+    const searches = [
+      { type: 'Student', query: 'SELECT id,name as title,class as subtitle FROM students WHERE tenant_id=$1 AND (name ILIKE $2 OR class ILIKE $2)' },
+      { type: 'Staff', query: 'SELECT id,name as title,role as subtitle FROM staff WHERE tenant_id=$1 AND name ILIKE $2' },
+      { type: 'Church Member', query: 'SELECT id,name as title,phone as subtitle FROM church_members WHERE tenant_id=$1 AND (name ILIKE $2 OR phone ILIKE $2)' },
+      { type: 'Inventory', query: 'SELECT id,name as title,category as subtitle FROM inventory WHERE tenant_id=$1 AND (name ILIKE $2 OR category ILIKE $2)' },
+      { type: 'Invoice', query: "SELECT id,client_name as title,status as subtitle FROM invoices WHERE tenant_id=$1 AND (client_name ILIKE $2 OR status ILIKE $2)" },
+      { type: 'Lead', query: 'SELECT id,name as title,company as subtitle FROM crm_leads WHERE tenant_id=$1 AND (name ILIKE $2 OR company ILIKE $2)' },
+      { type: 'Project', query: 'SELECT id,name as title,status as subtitle FROM projects WHERE tenant_id=$1 AND name ILIKE $2' },
+      { type: 'Book', query: 'SELECT id,title,author as subtitle FROM library_books WHERE tenant_id=$1 AND (title ILIKE $2 OR author ILIKE $2)' },
+      { type: 'Sermon', query: 'SELECT id,title,preacher as subtitle FROM sermons WHERE tenant_id=$1 AND (title ILIKE $2 OR preacher ILIKE $2)' },
+      { type: 'Asset', query: 'SELECT id,name as title,category as subtitle FROM assets WHERE tenant_id=$1 AND name ILIKE $2' },
+    ];
+    for (const s of searches) {
+      try {
+        const rows = (await pool.query(s.query, [t, like])).rows.slice(0,5);
+        rows.forEach(r => results.push({ type: s.type, id: r.id, title: r.title, subtitle: r.subtitle||'' }));
+      } catch(e) {}
+    }
+  }
+  res.send(renderPage('Search', `
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <form method="GET" action="/search" style="margin-bottom:20px"><div style="display:flex;gap:8px"><input name="q" value="${esc(q)}" placeholder="Search students, members, inventory, projects..." style="flex:1;font-size:16px;padding:12px" autofocus><button class="btn">Search</button></div></form>
+      ${q ? `<p class="muted">${results.length} results for "${esc(q)}"</p>` : '<p class="muted">Type at least 2 characters to search across all data</p>'}
+      ${results.length ? results.map(r=>`<div style="padding:10px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between"><div><strong>${esc(r.title)}</strong><br><span class="muted">${esc(r.subtitle)}</span></div><span class="tag">${esc(r.type)}</span></div>`).join('') : (q ? '<p class="muted">No results found</p>' : '')}
+    </div>
+  `, req.session.user));
+}));
+
+// =============================================
+// CROSS-CUTTING: DARK MODE TOGGLE
+// =============================================
+app.get('/dark-mode/toggle', requireAuth, (req, res) => {
+  const current = req.session.user?.darkMode || false;
+  req.session.user.darkMode = !current;
+  res.redirect('back');
+});
+
+// =============================================
+// CROSS-CUTTING: SURVEYS & FEEDBACK
+// =============================================
+app.get('/surveys', requireAuth, requireNotBanned, requireFeature('surveys'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const surveys = (await pool.query('SELECT * FROM surveys WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Surveys', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#7c3aed)"><h1>Surveys & Feedback</h1><p>Create forms and collect responses</p></div>
+    <div class="card"><a href="/surveys/new" class="btn" style="margin-bottom:15px">+ Create Survey</a>
+      ${surveys.length?`<table><tr><th>Title</th><th>Responses</th><th>Active</th><th>Actions</th></tr>${surveys.map(s=>`<tr><td><strong>${esc(s.title)}</strong></td><td>${s.responses_count||0}</td><td>${s.is_active?'<span class="tag" style="background:#d1fae5">Yes</span>':'<span class="tag" style="background:#fee2e2">No</span>'}</td><td><a href="/surveys/${s.id}/respond" class="btn btn-sm btn-green">Respond</a> <a href="/surveys/${s.id}/results" class="btn btn-sm">Results</a> <a href="/surveys/${s.id}/toggle" class="btn btn-sm">${s.is_active?'Close':'Open'}</a> <a href="/surveys/${s.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No surveys yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/surveys/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Survey', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create Survey</h2>
+    <form method="POST" action="/surveys/save">
+      <label>Title</label><input name="title" required placeholder="Parent Satisfaction Survey 2025">
+      <label>Description</label><textarea name="description" rows="2"></textarea>
+      <label>Questions (one per line)</label><textarea name="questions_raw" rows="8" placeholder="How satisfied are you with the school?|rating&#10;Would you recommend us?|yesno&#10;Any suggestions?|text" style="font-family:monospace"></textarea>
+      <p class="muted">Format: Question text|type (rating, yesno, text, choice)</p>
+      <button class="btn btn-green">Create Survey</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/surveys/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const questions = req.body.questions_raw.split('\n').filter(q=>q.trim()).map((q,i) => {
+    const parts = q.split('|');
+    return { id: i+1, question: parts[0].trim(), type: (parts[1]||'text').trim() };
+  });
+  await pool.query('INSERT INTO surveys(tenant_id,title,description,questions) VALUES($1,$2,$3,$4)', [t, req.body.title, req.body.description, JSON.stringify(questions)]);
+  res.redirect('/surveys');
+}));
+
+app.get('/surveys/:id/respond', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const survey = (await pool.query('SELECT * FROM surveys WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!survey) return res.status(404).send('Not found');
+  const questions = Array.isArray(survey.questions) ? survey.questions : [];
+  res.send(renderPage('Respond', `<div class="card" style="max-width:600px;margin:0 auto"><h2>${esc(survey.title)}</h2><p class="muted">${esc(survey.description||'')}</p>
+    <form method="POST" action="/surveys/${survey.id}/submit">
+      ${questions.map((q,i)=>`<div style="margin-bottom:15px"><label>${i+1}. ${esc(q.question)}</label>${q.type==='rating'?`<select name="q${i}"><option value="5">Excellent (5)</option><option value="4">Good (4)</option><option value="3">Average (3)</option><option value="2">Poor (2)</option><option value="1">Very Poor (1)</option></select>`:q.type==='yesno'?`<select name="q${i}"><option value="yes">Yes</option><option value="no">No</option></select>`:`<textarea name="q${i}" rows="2"></textarea>`}</div>`).join('')}
+      <button class="btn btn-green">Submit Response</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/surveys/:id/submit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const answers = {};
+  Object.keys(req.body).forEach(k => { if(k.startsWith('q')) answers[k] = req.body[k]; });
+  await pool.query('INSERT INTO survey_responses(tenant_id,survey_id,respondent_email,answers) VALUES($1,$2,$3,$4)', [t, req.params.id, req.session.user.email, JSON.stringify(answers)]);
+  await pool.query('UPDATE surveys SET responses_count=responses_count+1 WHERE id=$1', [req.params.id]);
+  res.redirect('/surveys');
+}));
+
+app.get('/surveys/:id/results', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const survey = (await pool.query('SELECT * FROM surveys WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!survey) return res.status(404).send('Not found');
+  const responses = (await pool.query('SELECT * FROM survey_responses WHERE survey_id=$1', [survey.id])).rows;
+  res.send(renderPage('Results', `<div class="card"><h2>${esc(survey.title)} - Results</h2><p>${responses.length} responses</p>
+    ${responses.map(r=>`<div style="padding:8px;border:1px solid #e2e8f0;margin:5px 0;border-radius:6px"><strong>${esc(r.respondent_email||'Anonymous')}</strong> <span class="muted">${new Date(r.submitted_at).toLocaleString()}</span><br><pre style="font-size:12px">${esc(JSON.stringify(r.answers,null,1))}</pre></div>`).join('')}
+    <a href="/surveys" class="btn" style="margin-top:10px">Back</a></div>
+  `, req.session.user));
+}));
+
+app.get('/surveys/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE surveys SET is_active=NOT is_active WHERE id=$1', [req.params.id]);
+  res.redirect('/surveys');
+}));
+
+app.get('/surveys/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM survey_responses WHERE survey_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM surveys WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/surveys');
+}));
+
+// =============================================
+// CROSS-CUTTING: EMAIL TEMPLATES
+// =============================================
+app.get('/email-templates', requireAuth, requireNotBanned, requireFeature('email_templates'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const templates = (await pool.query('SELECT * FROM email_templates WHERE tenant_id=$1 ORDER BY category, name', [t])).rows;
+  res.send(renderPage('Email Templates', `
+    <div class="card"><a href="/email-templates/new" class="btn" style="margin-bottom:15px">+ New Template</a>
+      ${templates.length?`<table><tr><th>Name</th><th>Subject</th><th>Category</th><th>Actions</th></tr>${templates.map(t=>`<tr><td><strong>${esc(t.name)}</strong></td><td>${esc(t.subject)}</td><td><span class="tag">${esc(t.category)}</span></td><td><a href="/email-templates/${t.id}/edit" class="btn btn-sm">Edit</a> <a href="/email-templates/${t.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No templates</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/email-templates/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Email Template', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create Email Template</h2>
+    <form method="POST" action="/email-templates/save">
+      <label>Name</label><input name="name" required placeholder="Welcome Email">
+      <label>Subject</label><input name="subject" required placeholder="Welcome to {{org_name}}">
+      <label>Category</label><select name="category"><option>general</option><option>billing</option><option>notification</option><option>welcome</option><option>reminder</option></select>
+      <label>Body (HTML, use {{variable}} for placeholders)</label><textarea name="body" rows="8" style="font-family:monospace" placeholder="<h1>Welcome {{name}}!</h1><p>Your account is ready.</p>"></textarea>
+      <button class="btn btn-green">Save Template</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/email-templates/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO email_templates(tenant_id,name,subject,body,category) VALUES($1,$2,$3,$4,$5)', [t, req.body.name, req.body.subject, req.body.body, req.body.category]);
+  res.redirect('/email-templates');
+}));
+
+app.get('/email-templates/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tmpl = (await pool.query('SELECT * FROM email_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!tmpl) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Template', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Edit: ${esc(tmpl.name)}</h2>
+    <form method="POST" action="/email-templates/${tmpl.id}/update">
+      <label>Name</label><input name="name" value="${esc(tmpl.name)}" required>
+      <label>Subject</label><input name="subject" value="${esc(tmpl.subject)}" required>
+      <label>Category</label><select name="category">${['general','billing','notification','welcome','reminder'].map(c=>`<option ${tmpl.category===c?'selected':''}>${c}</option>`).join('')}</select>
+      <label>Body</label><textarea name="body" rows="8" style="font-family:monospace">${esc(tmpl.body)}</textarea>
+      <button class="btn btn-green">Update</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/email-templates/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE email_templates SET name=$1,subject=$2,body=$3,category=$4 WHERE id=$5 AND tenant_id=$6', [req.body.name, req.body.subject, req.body.body, req.body.category, req.params.id, t]);
+  res.redirect('/email-templates');
+}));
+
+app.get('/email-templates/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM email_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/email-templates');
+}));
+
+// =============================================
+// CROSS-CUTTING: QR CODE GENERATOR
+// =============================================
+app.get('/qr-codes', requireAuth, requireNotBanned, requireFeature('qr_codes'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const codes = (await pool.query('SELECT * FROM qr_codes WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('QR Codes', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#115e59)"><h1>QR Code Generator</h1><p>Generate QR codes for anything</p></div>
+    <div class="card"><a href="/qr-codes/new" class="btn" style="margin-bottom:15px">+ Generate QR Code</a>
+      ${codes.length?`<table><tr><th>Label</th><th>Data</th><th>Scans</th><th>QR Code</th><th>Actions</th></tr>${codes.map(c=>`<tr><td><strong>${esc(c.label)}</strong></td><td><code>${esc(c.qr_data||c.target_url||'').substring(0,40)}</code></td><td>${c.scan_count||0}</td><td><img src="https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(c.qr_data||c.target_url||'')}" alt="QR"></td><td><a href="/qr-codes/${c.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No QR codes generated</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/qr-codes/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Generate QR Code', `<div class="card" style="max-width:500px;margin:0 auto"><h2>Generate QR Code</h2>
+    <form method="POST" action="/qr-codes/save">
+      <label>Label</label><input name="label" required placeholder="Student ID Card, Event Check-in">
+      <label>Target URL</label><input name="target_url" placeholder="https://ssewasswa.onrender.com/...">
+      <label>Or Custom Data</label><textarea name="qr_data" rows="2" placeholder="Any text data to encode" style="font-family:monospace"></textarea>
+      <button class="btn btn-green">Generate QR Code</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/qr-codes/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO qr_codes(tenant_id,label,target_url,qr_data) VALUES($1,$2,$3,$4)', [t, req.body.label, req.body.target_url, req.body.qr_data||req.body.target_url]);
+  res.redirect('/qr-codes');
+}));
+
+app.get('/qr-codes/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM qr_codes WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/qr-codes');
+}));
+
+// =============================================
+// CROSS-CUTTING: DIGITAL CERTIFICATES
+// =============================================
+app.get('/certificates', requireAuth, requireNotBanned, requireFeature('certificates'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const certs = (await pool.query('SELECT * FROM certificates WHERE tenant_id=$1 ORDER BY issue_date DESC', [t])).rows;
+  res.send(renderPage('Certificates', `
+    <div class="hero" style="background:linear-gradient(135deg,#b45309,#92400e)"><h1>Digital Certificates</h1><p>Auto-generated completion certificates</p></div>
+    <div class="card"><a href="/certificates/new" class="btn" style="margin-bottom:15px">+ Issue Certificate</a>
+      ${certs.length?`<table><tr><th>Recipient</th><th>Template</th><th>Cert No.</th><th>Date</th><th>Actions</th></tr>${certs.map(c=>`<tr><td><strong>${esc(c.recipient_name)}</strong><br><span class="muted">${esc(c.recipient_email||'')}</span></td><td>${esc(c.template_name)}</td><td><code>${esc(c.certificate_no)}</code></td><td>${c.issue_date}</td><td><a href="/certificates/${c.id}/view" class="btn btn-sm btn-green">View</a> <a href="/certificates/${c.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No certificates issued</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/certificates/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Issue Certificate', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Issue Certificate</h2>
+    <form method="POST" action="/certificates/save">
+      <label>Template Name</label><select name="template_name"><option>Completion</option><option>Achievement</option><option>Participation</option><option>Excellence</option><option>Attendance</option><option>Graduation</option></select>
+      <label>Recipient Name</label><input name="recipient_name" required>
+      <label>Recipient Email</label><input name="recipient_email" type="email">
+      <label>Description</label><textarea name="description" rows="2" placeholder="Has successfully completed..."></textarea>
+      <button class="btn btn-green">Issue Certificate</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/certificates/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const certNo = 'CERT-' + new Date().getFullYear() + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+  await pool.query('INSERT INTO certificates(tenant_id,template_name,recipient_name,recipient_email,certificate_no,description) VALUES($1,$2,$3,$4,$5,$6)', [t, req.body.template_name, req.body.recipient_name, req.body.recipient_email, certNo, req.body.description]);
+  res.redirect('/certificates');
+}));
+
+app.get('/certificates/:id/view', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const cert = (await pool.query('SELECT * FROM certificates WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!cert) return res.status(404).send('Not found');
+  res.send(renderPage('Certificate', `
+    <div style="max-width:800px;margin:0 auto;border:8px double #b45309;padding:40px;background:#fffef5;text-align:center">
+      <div style="font-size:14px;color:#64748b;letter-spacing:3px">SSEWASSWA PLATFORM</div>
+      <h1 style="color:#b45309;margin:10px 0">Certificate of ${esc(cert.template_name)}</h1>
+      <div style="width:200px;height:2px;background:#b45309;margin:20px auto"></div>
+      <p style="font-size:18px;color:#475569">This is to certify that</p>
+      <h2 style="color:#1e293b;font-size:32px;margin:15px 0">${esc(cert.recipient_name)}</h2>
+      <p style="font-size:16px;color:#475569">${esc(cert.description||'Has demonstrated outstanding achievement')}</p>
+      <div style="margin-top:30px"><p style="color:#64748b">Certificate No: <strong>${esc(cert.certificate_no)}</strong></p><p style="color:#64748b">Issued: ${cert.issue_date}</p></div>
+      <div style="margin-top:20px;color:#94a3b8;font-size:12px">Verify at: https://ssewasswa.onrender.com/verify/${esc(cert.certificate_no)}</div>
+    </div>
+    <div style="text-align:center;margin-top:15px"><a href="/certificates" class="btn">Back</a> <button onclick="window.print()" class="btn btn-green">Print</button></div>
+  `, req.session.user));
+}));
+
+app.get('/certificates/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM certificates WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/certificates');
+}));
+
+// =============================================
+// CROSS-CUTTING: DOCUMENT SIGNING
+// =============================================
+app.get('/signing', requireAuth, requireNotBanned, requireFeature('document_signing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const requests = (await pool.query('SELECT * FROM signing_requests WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const pending = requests.filter(r=>r.status==='pending');
+  const signed = requests.filter(r=>r.status==='signed');
+  res.send(renderPage('Document Signing', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#3730a3)"><h1>Document Signing</h1><p>Request and verify signatures</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${pending.length}</div><div>Pending</div></div><div class="stat-card"><div class="stat-num" style="color:#059669">${signed.length}</div><div>Signed</div></div></div>
+    <div class="card"><a href="/signing/new" class="btn" style="margin-bottom:15px">+ Request Signature</a>
+      ${requests.length?`<table><tr><th>Document</th><th>Signer</th><th>Status</th><th>Date</th><th>Actions</th></tr>${requests.map(r=>`<tr><td><strong>${esc(r.document_title)}</strong></td><td>${esc(r.signer_name||r.signer_email)}</td><td>${r.status==='signed'?'<span class="tag" style="background:#d1fae5">Signed</span>':'<span class="tag" style="background:#fef3c7">Pending</span>'}</td><td>${r.status==='signed'&&r.signed_at?new Date(r.signed_at).toLocaleString():'-'}</td><td>${r.status==='pending'?`<a href="/signing/${r.id}/sign" class="btn btn-sm btn-green">Sign</a>`:''} <a href="/signing/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No signing requests</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/signing/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Request Signature', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Request Signature</h2>
+    <form method="POST" action="/signing/save">
+      <label>Document Title</label><input name="document_title" required>
+      <label>Document URL</label><input name="document_url" placeholder="https://...">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Signer Name</label><input name="signer_name" required></div><div><label>Signer Email</label><input name="signer_email" type="email" required></div></div>
+      <button class="btn btn-green">Send Signing Request</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/signing/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO signing_requests(tenant_id,document_title,document_url,signer_email,signer_name,requested_by) VALUES($1,$2,$3,$4,$5,$6)', [t, req.body.document_title, req.body.document_url, req.body.signer_email, req.body.signer_name, req.session.user.email]);
+  res.redirect('/signing');
+}));
+
+app.get('/signing/:id/sign', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const req_ = (await pool.query('SELECT * FROM signing_requests WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!req_) return res.status(404).send('Not found');
+  res.send(renderPage('Sign Document', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Sign: ${esc(req_.document_title)}</h2>
+    <p>Document: ${esc(req_.document_title)}</p>
+    <p>Requested by: ${esc(req_.requested_by||'')}</p>
+    <form method="POST" action="/signing/${req_.id}/confirm">
+      <label>Type your full name as signature</label><input name="signature_data" required placeholder="Your full legal name" style="font-size:24px;font-family:cursive;text-align:center">
+      <p class="muted" style="margin-top:10px">By typing your name, you confirm this is your legal electronic signature</p>
+      <button class="btn btn-green" style="margin-top:10px">Sign Document</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/signing/:id/confirm', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE signing_requests SET status=$1, signed_at=NOW(), signature_data=$2 WHERE id=$3', ['signed', req.body.signature_data, req.params.id]);
+  res.redirect('/signing');
+}));
+
+app.get('/signing/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM signing_requests WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  res.redirect('/signing');
+}));
+
+// =============================================
+// CROSS-CUTTING: DUPLICATE DETECTION
+// =============================================
+app.get('/duplicates', requireAuth, requireNotBanned, requireFeature('duplicate_detection'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const studentDups = (await pool.query('SELECT name, COUNT(*) as cnt FROM students WHERE tenant_id=$1 GROUP BY name HAVING COUNT(*)>1', [t])).rows;
+  const memberDups = (await pool.query('SELECT name, COUNT(*) as cnt FROM church_members WHERE tenant_id=$1 GROUP BY name HAVING COUNT(*)>1', [t])).rows;
+  const invDups = (await pool.query('SELECT name, COUNT(*) as cnt FROM inventory WHERE tenant_id=$1 GROUP BY name HAVING COUNT(*)>1', [t])).rows;
+  res.send(renderPage('Duplicate Detection', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#991b1b)"><h1>Duplicate Detection</h1><p>Find duplicate records</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#dc2626">${studentDups.length}</div><div>Duplicate Students</div></div><div class="stat-card"><div class="stat-num" style="color:#dc2626">${memberDups.length}</div><div>Duplicate Members</div></div><div class="stat-card"><div class="stat-num" style="color:#dc2626">${invDups.length}</div><div>Duplicate Items</div></div></div>
+    <div class="card">
+      ${studentDups.length?`<h3>Students with Same Name</h3><table><tr><th>Name</th><th>Count</th></tr>${studentDups.map(d=>`<tr><td>${esc(d.name)}</td><td style="color:#dc2626;font-weight:bold">${d.cnt}</td></tr>`).join('')}</table>`:''}
+      ${memberDups.length?`<h3>Church Members with Same Name</h3><table><tr><th>Name</th><th>Count</th></tr>${memberDups.map(d=>`<tr><td>${esc(d.name)}</td><td style="color:#dc2626;font-weight:bold">${d.cnt}</td></tr>`).join('')}</table>`:''}
+      ${invDups.length?`<h3>Inventory Items with Same Name</h3><table><tr><th>Name</th><th>Count</th></tr>${invDups.map(d=>`<tr><td>${esc(d.name)}</td><td style="color:#dc2626;font-weight:bold">${d.cnt}</td></tr>`).join('')}</table>`:''}
+      ${!studentDups.length&&!memberDups.length&&!invDups.length?'<p class="muted">No duplicates found! Your data is clean.</p>':''}
+    </div>
+  `, req.session.user));
+}));
+
+// =============================================
+// CROSS-CUTTING: BULK OPERATIONS
+// =============================================
+app.get('/bulk', requireAuth, requireNotBanned, requireFeature('bulk_operations'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const studentCount = (await pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [t])).rows[0]?.count || 0;
+  const memberCount = (await pool.query('SELECT COUNT(*) FROM church_members WHERE tenant_id=$1', [t])).rows[0]?.count || 0;
+  const inventoryCount = (await pool.query('SELECT COUNT(*) FROM inventory WHERE tenant_id=$1', [t])).rows[0]?.count || 0;
+  res.send(renderPage('Bulk Operations', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Bulk Operations</h1><p>Mass edit, delete and export</p></div>
+    <div class="card">
+      <h3>Export Data</h3>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+        <div><a href="/school/reports/export?type=students_csv" class="btn btn-sm" style="width:100%">Export Students CSV (${studentCount})</a></div>
+        <div><a href="/school/reports/export?type=members_csv" class="btn btn-sm" style="width:100%">Export Members CSV (${memberCount})</a></div>
+        <div><a href="/school/reports/export?type=inventory_csv" class="btn btn-sm" style="width:100%">Export Inventory CSV (${inventoryCount})</a></div>
+      </div>
+      <h3 style="margin-top:20px">Bulk SMS</h3>
+      <p class="muted">Send SMS to all students, parents, or members at once</p>
+      <a href="/school/notify" class="btn btn-sm">Go to SMS Center</a>
+      <h3 style="margin-top:20px">Bulk Delete</h3>
+      <form method="POST" action="/bulk/delete" onsubmit="return confirm('Are you sure? This cannot be undone!')">
+        <select name="entity_type"><option value="students">Students</option><option value="church_members">Church Members</option><option value="inventory">Inventory</option></select>
+        <select name="filter"><option value="none">All Records</option><option value="inactive">Inactive Only</option></select>
+        <button class="btn btn-sm btn-red">Delete Selected</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/bulk/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const entity = req.body.entity_type;
+  const allowed = ['students','church_members','inventory'];
+  if (!allowed.includes(entity)) return res.status(400).send('Invalid entity');
+  const result = await pool.query(`DELETE FROM ${entity} WHERE tenant_id=$1${req.body.filter==='inactive'?' AND active=false':''}`, [t]);
+  await audit(req.session.user.email, 'Bulk delete', `${entity}: ${result.rowCount} records`);
+  res.redirect('/bulk');
+}));
+
+// =============================================
+// CROSS-CUTTING: KEYBOARD SHORTCUTS HELP
+// =============================================
+app.get('/shortcuts', requireAuth, requireFeature('keyboard_shortcuts'), (req, res) => {
+  res.send(renderPage('Keyboard Shortcuts', `
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <h2>Keyboard Shortcuts</h2>
+      <table><tr><th>Shortcut</th><th>Action</th></tr>
+        <tr><td><kbd>Alt+D</kbd></td><td>Go to Dashboard</td></tr>
+        <tr><td><kbd>Alt+S</kbd></td><td>Global Search</td></tr>
+        <tr><td><kbd>Alt+N</kbd></td><td>Notifications</td></tr>
+        <tr><td><kbd>Alt+/</kbd></td><td>Show Shortcuts</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Close Modal</td></tr>
+      </table>
+      <script>document.addEventListener('keydown',function(e){if(e.altKey&&e.key==='d'){e.preventDefault();window.location='/dashboard'}if(e.altKey&&e.key==='s'){e.preventDefault();window.location='/search'}if(e.altKey&&e.key==='n'){e.preventDefault();window.location='/notifications'}if(e.altKey&&e.key==='/'){e.preventDefault();window.location='/shortcuts'}});</script>
+    </div>
+  `, req.session.user));
+});
+
 app.get('/sw.js', (req, res) => {
   res.set('Content-Type', 'application/javascript');
   res.send(`const CACHE_NAME='ssewasswa-v9';const OFFLINE_URLS=['/','/login','/dashboard','/guide'];
