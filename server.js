@@ -928,7 +928,9 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('school_levels', 'School Levels Manager', 'Kindergarten through University level setup', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('hostel_management', 'Hostel Management', 'Dormitories, rooms and assignments', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('meal_management', 'Meal Management', 'Meal plans and boarding meal attendance', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('patient_queue', 'Patient Queue', 'Triage and queue management for clinic', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('patient_queue', 'Patient Queue', 'Triage and queue management for clinic', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('quotations', 'Quotations', 'Create and manage price quotations for customers', '3.0', 'business', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('deliveries', 'Deliveries', 'Track order dispatch and delivery status', '3.0', 'business', 'None', true) ON CONFLICT DO NOTHING`
 ];
 
 (async () => {
@@ -3535,6 +3537,8 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: CRM</h3><a href="/business/crm" class="btn btn-sm">Lead Pipeline</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #ca8a04"><h3 style="color:#ca8a04">NEW: Stock Take</h3><a href="/business/stock-take" class="btn btn-sm">Physical Count</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">NEW: Warranties</h3><a href="/business/warranties" class="btn btn-sm">Track Warranties</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Quotations</h3><a href="/business/quotations" class="btn btn-sm">Quotes</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Deliveries</h3><a href="/business/deliveries" class="btn btn-sm">Track Deliveries</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Sales Trend</h3><canvas id="salesChart"></canvas></div>
@@ -11505,7 +11509,13 @@ self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(fetch('/
     `CREATE TABLE IF NOT EXISTS suggestions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, type TEXT DEFAULT 'suggestion', title TEXT NOT NULL, description TEXT, submitted_by TEXT, is_anonymous BOOLEAN DEFAULT false, priority TEXT DEFAULT 'medium', assigned_to TEXT, response TEXT, status TEXT DEFAULT 'open', created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS login_history (id SERIAL PRIMARY KEY, user_email TEXT, ip_address TEXT, user_agent TEXT, success BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS requisitions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, items JSONB, total_estimate INTEGER DEFAULT 0, requested_by TEXT, department TEXT, priority TEXT DEFAULT 'normal', approved_by TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS sponsorships (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, partner_id INTEGER REFERENCES partners(id), student_id INTEGER REFERENCES students(id), amount INTEGER DEFAULT 0, frequency TEXT DEFAULT 'one_time', start_date DATE, end_date DATE, status TEXT DEFAULT 'active', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
+    `CREATE TABLE IF NOT EXISTS sponsorships (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, partner_id INTEGER REFERENCES partners(id), student_id INTEGER REFERENCES students(id), amount INTEGER DEFAULT 0, frequency TEXT DEFAULT 'one_time', start_date DATE, end_date DATE, status TEXT DEFAULT 'active', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS journal_entries (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, date DATE DEFAULT CURRENT_DATE, description TEXT, reference TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS livestream_links (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, service_name TEXT, platform TEXT, url TEXT NOT NULL, scheduled_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS meeting_agendas (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, meeting_id INTEGER REFERENCES meeting_minutes(id) ON DELETE CASCADE, item_text TEXT NOT NULL, order_no INTEGER DEFAULT 1, completed BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS incidents (id SERIAL PRIMARY KEY, service TEXT, title TEXT NOT NULL, status TEXT DEFAULT 'investigating', created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ)`,
+    `CREATE TABLE IF NOT EXISTS quotations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, quote_no TEXT, customer_name TEXT, customer_contact TEXT, items JSONB, total INTEGER DEFAULT 0, status TEXT DEFAULT 'draft', valid_until DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS deliveries (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, order_no TEXT, customer_name TEXT, customer_address TEXT, items JSONB, driver_name TEXT, vehicle TEXT, status TEXT DEFAULT 'pending', dispatched_at TIMESTAMPTZ, delivered_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
   ];
   for (const q of additionalMigrations) {
     try { await pool.query(q); } catch(e) { /* already exists OK */ }
@@ -12925,6 +12935,128 @@ app.get('/business/balance-sheet', requireAuth, requireNotBanned, requireFeature
     <a href="/business/chart-of-accounts" class="btn btn-sm">Manage Accounts</a>
     </div>
   `, req.session.user));
+}));
+
+// === BUSINESS: QUOTATIONS ===
+app.get('/business/quotations', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const quotations = (await pool.query('SELECT * FROM quotations WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Quotations', `<div class="card"><h2>Quotations</h2>
+    <a href="/business/quotations/new" class="btn btn-sm btn-green" style="margin-bottom:15px">+ New Quotation</a>
+    <table><tr><th>Quote #</th><th>Customer</th><th>Total (UGX)</th><th>Status</th><th>Valid Until</th><th>Actions</th></tr>
+    ${quotations.map(q=>`<tr><td>${esc(q.quote_no)}</td><td>${esc(q.customer_name)}</td><td>${parseInt(q.total||0).toLocaleString()}</td><td><span class="tag" style="background:${q.status==='accepted'?'#d1fae5;color:#065f46':q.status==='rejected'?'#fee2e2;color:#991b1b':'#e0e7ff;color:#3730a3'}">${esc(q.status)}</span></td><td>${q.valid_until||'-'}</td><td><a href="/business/quotations/${q.id}" class="btn btn-sm">View</a> <a href="/business/quotations/${q.id}/accept" class="btn btn-sm btn-green">Accept</a> <a href="/business/quotations/${q.id}/reject" class="btn btn-sm btn-red">Reject</a> <a href="/business/quotations/${q.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete?')">Del</a></td></tr>`).join('')||'<tr><td colspan="6">No quotations yet</td></tr>'}</table></div>`, req.session.user));
+}));
+
+app.get('/business/quotations/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Quotation', `<div class="card" style="max-width:650px;margin:40px auto"><h2>Create Quotation</h2>
+    <form method="POST" action="/business/quotations/save">
+      <input name="quote_no" placeholder="Quotation Number (e.g. QT-001)" required>
+      <input name="customer_name" placeholder="Customer Name" required>
+      <input name="customer_contact" placeholder="Customer Contact">
+      <input name="valid_until" type="date" placeholder="Valid Until">
+      <textarea name="items" rows="5" placeholder='Items JSON: [{"name":"Item 1","qty":2,"price":50000}]' required></textarea>
+      <input name="total" type="number" placeholder="Total Amount (UGX)" required>
+      <textarea name="notes" rows="3" placeholder="Notes or terms"></textarea>
+      <button class="btn btn-green" style="width:100%">Create Quotation</button>
+    </form></div>`, req.session.user));
+});
+
+app.post('/business/quotations/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { quote_no, customer_name, customer_contact, items, total, valid_until, notes } = req.body;
+  await pool.query('INSERT INTO quotations(tenant_id,quote_no,customer_name,customer_contact,items,total,valid_until,notes) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)', [t, quote_no, customer_name, customer_contact, items, total||0, valid_until||null, notes]);
+  await audit(req.session.user.email, 'create_quotation', `Quotation ${quote_no} for ${customer_name}`);
+  res.redirect('/business/quotations');
+}));
+
+app.get('/business/quotations/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const q = (await pool.query('SELECT * FROM quotations WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!q) return res.status(404).send('Not found');
+  const itemsList = Array.isArray(q.items) ? q.items : [];
+  res.send(renderPage('Quotation Detail', `<div class="card"><h2>Quotation: ${esc(q.quote_no)}</h2>
+    <p><strong>Customer:</strong> ${esc(q.customer_name)} ${q.customer_contact ? '| '+esc(q.customer_contact) : ''}</p>
+    <p><strong>Status:</strong> <span class="tag">${esc(q.status)}</span> | <strong>Valid Until:</strong> ${q.valid_until||'N/A'}</p>
+    ${itemsList.length ? `<table><tr><th>Item</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr>${itemsList.map(i=>`<tr><td>${esc(i.name||'')}</td><td>${i.qty||0}</td><td>${parseInt(i.price||0).toLocaleString()}</td><td>${((i.qty||0)*(i.price||0)).toLocaleString()}</td></tr>`).join('')}</table>` : ''}
+    <p style="margin-top:15px;font-size:18px"><strong>Total: UGX ${parseInt(q.total||0).toLocaleString()}</strong></p>
+    ${q.notes ? `<p class="muted">Notes: ${esc(q.notes)}</p>` : ''}
+    <div style="margin-top:15px"><a href="/business/quotations" class="btn btn-sm">Back</a> <a href="/business/quotations/${q.id}/accept" class="btn btn-sm btn-green">Accept</a> <a href="/business/quotations/${q.id}/reject" class="btn btn-sm btn-red">Reject</a></div></div>`, req.session.user));
+}));
+
+app.get('/business/quotations/:id/accept', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE quotations SET status=$1 WHERE id=$2 AND tenant_id=$3', ['accepted', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/business/quotations');
+}));
+
+app.get('/business/quotations/:id/reject', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE quotations SET status=$1 WHERE id=$2 AND tenant_id=$3', ['rejected', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/business/quotations');
+}));
+
+app.get('/business/quotations/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM quotations WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/business/quotations');
+}));
+
+// === BUSINESS: DELIVERIES ===
+app.get('/business/deliveries', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const deliveries = (await pool.query('SELECT * FROM deliveries WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Deliveries', `<div class="card"><h2>Deliveries</h2>
+    <a href="/business/deliveries/new" class="btn btn-sm btn-green" style="margin-bottom:15px">+ New Delivery</a>
+    <table><tr><th>Order #</th><th>Customer</th><th>Driver</th><th>Status</th><th>Dispatched</th><th>Delivered</th><th>Actions</th></tr>
+    ${deliveries.map(d=>`<tr><td>${esc(d.order_no)}</td><td>${esc(d.customer_name)}</td><td>${esc(d.driver_name||'-')}</td><td><span class="tag" style="background:${d.status==='delivered'?'#d1fae5;color:#065f46':d.status==='dispatched'?'#fef3c7;color:#92400e':'#e0e7ff;color:#3730a3'}">${esc(d.status)}</span></td><td>${d.dispatched_at?new Date(d.dispatched_at).toLocaleDateString():'-'}</td><td>${d.delivered_at?new Date(d.delivered_at).toLocaleDateString():'-'}</td><td><a href="/business/deliveries/${d.id}" class="btn btn-sm">View</a> <a href="/business/deliveries/${d.id}/dispatch" class="btn btn-sm">Dispatch</a> <a href="/business/deliveries/${d.id}/deliver" class="btn btn-sm btn-green">Deliver</a> <a href="/business/deliveries/${d.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete?')">Del</a></td></tr>`).join('')||'<tr><td colspan="7">No deliveries yet</td></tr>'}</table></div>`, req.session.user));
+}));
+
+app.get('/business/deliveries/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Delivery', `<div class="card" style="max-width:650px;margin:40px auto"><h2>Create Delivery</h2>
+    <form method="POST" action="/business/deliveries/save">
+      <input name="order_no" placeholder="Order Number (e.g. DL-001)" required>
+      <input name="customer_name" placeholder="Customer Name" required>
+      <input name="customer_address" placeholder="Delivery Address" required>
+      <textarea name="items" rows="4" placeholder='Items JSON: [{"name":"Item 1","qty":2}]' required></textarea>
+      <input name="driver_name" placeholder="Driver Name">
+      <input name="vehicle" placeholder="Vehicle / Plate Number">
+      <textarea name="notes" rows="3" placeholder="Delivery Notes"></textarea>
+      <button class="btn btn-green" style="width:100%">Create Delivery</button>
+    </form></div>`, req.session.user));
+});
+
+app.post('/business/deliveries/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { order_no, customer_name, customer_address, items, driver_name, vehicle, notes } = req.body;
+  await pool.query('INSERT INTO deliveries(tenant_id,order_no,customer_name,customer_address,items,driver_name,vehicle,notes) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)', [t, order_no, customer_name, customer_address, items, driver_name, vehicle, notes]);
+  await audit(req.session.user.email, 'create_delivery', `Delivery ${order_no} for ${customer_name}`);
+  res.redirect('/business/deliveries');
+}));
+
+app.get('/business/deliveries/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const d = (await pool.query('SELECT * FROM deliveries WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!d) return res.status(404).send('Not found');
+  const itemsList = Array.isArray(d.items) ? d.items : [];
+  res.send(renderPage('Delivery Detail', `<div class="card"><h2>Delivery: ${esc(d.order_no)}</h2>
+    <p><strong>Customer:</strong> ${esc(d.customer_name)} | <strong>Address:</strong> ${esc(d.customer_address||'')}</p>
+    <p><strong>Driver:</strong> ${esc(d.driver_name||'-')} | <strong>Vehicle:</strong> ${esc(d.vehicle||'-')}</p>
+    <p><strong>Status:</strong> <span class="tag">${esc(d.status)}</span></p>
+    ${itemsList.length ? `<table><tr><th>Item</th><th>Qty</th></tr>${itemsList.map(i=>`<tr><td>${esc(i.name||'')}</td><td>${i.qty||0}</td></tr>`).join('')}</table>` : ''}
+    ${d.notes ? `<p class="muted">Notes: ${esc(d.notes)}</p>` : ''}
+    <div style="margin-top:15px"><a href="/business/deliveries" class="btn btn-sm">Back</a> <a href="/business/deliveries/${d.id}/dispatch" class="btn btn-sm">Dispatch</a> <a href="/business/deliveries/${d.id}/deliver" class="btn btn-sm btn-green">Mark Delivered</a></div></div>`, req.session.user));
+}));
+
+app.get('/business/deliveries/:id/dispatch', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE deliveries SET status=$1, dispatched_at=NOW() WHERE id=$2 AND tenant_id=$3', ['dispatched', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/business/deliveries');
+}));
+
+app.get('/business/deliveries/:id/deliver', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE deliveries SET status=$1, delivered_at=NOW() WHERE id=$2 AND tenant_id=$3', ['delivered', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/business/deliveries');
+}));
+
+app.get('/business/deliveries/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM deliveries WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/business/deliveries');
 }));
 
 // COMMITTEES
