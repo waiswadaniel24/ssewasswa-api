@@ -18,6 +18,8 @@ services:
         value: https://ssewasswa.onrender.com
       - key: GOOGLE_SITE_VERIFICATION
         value: ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ
+      - key: GA_TRACKING_ID
+        sync: false
 
 databases:
   - name: ssewasswa-db

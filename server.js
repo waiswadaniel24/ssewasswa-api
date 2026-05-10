@@ -1,5 +1,13 @@
 // Suppress localStorage ExperimentalWarning from connect-pg-simple
 process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
+// Suppress experimental warnings in production
+if (process.env.NODE_ENV === 'production') {
+  const originalEmit = process.emit;
+  process.emit = function(event, data) {
+    if (event === 'warning' && data?.name === 'ExperimentalWarning') return false;
+    return originalEmit.apply(process, arguments);
+  };
+}
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
@@ -1132,7 +1140,7 @@ app.post('/register', ah(async (req, res) => {
 
 app.get('/logout', (req, res) => {
   if (req.session.user) audit(req.session.user.email, 'logout', 'User logged out').catch(() => {});
-  req.session.destroy(() => res.redirect('/'));
+  req.session.destroy(() => res.redirect('/login'));
 });
 
 // === FORGOT PASSWORD ===
@@ -8117,6 +8125,8 @@ ${googleVerification ? `<meta name="google-site-verification" content="${esc(goo
 <meta name="twitter:description" content="${esc(description)}">
 <meta name="twitter:image" content="${baseUrl}/icon.png">
 <link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
 <meta name="theme-color" content="#4f46e5">
 <title>${esc(title)} | SSEWASSWA</title>
 <style>
@@ -8159,6 +8169,15 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
   </div>
 </nav>
 <div class="container">${content}</div>
+${process.env.GA_TRACKING_ID ? `
+<script async src="https://www.googletagmanager.com/gtag/js?id=${esc(process.env.GA_TRACKING_ID)}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', '${esc(process.env.GA_TRACKING_ID)}');
+</script>
+` : ''}
 </body></html>`;
 };
 
