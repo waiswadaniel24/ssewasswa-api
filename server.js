@@ -1521,7 +1521,9 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#f7fee7;border:2px solid #65a30d"><h3 style="color:#65a30d">Subjects</h3><a href="/school/subjects" class="btn btn-sm">Subject Mgmt</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Scholarships</h3><a href="/school/scholarships" class="btn btn-sm">Bursaries</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">Visitors</h3><a href="/school/visitors" class="btn btn-sm">Gate Pass</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Student Portal</h3><a href="/student/login" class="btn btn-sm">Student Login</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Student Portal</h3><a href="/student/login" class="btn btn-sm">Student Login</a><a href="/school/students/generate-passwords" class="btn btn-sm btn-green" style="margin-top:8px">Gen Passwords</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Fee Reminders</h3><a href="/school/fee-reminders" class="btn btn-sm btn-red">Send Reminders</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Online Payments</h3><a href="/billing" class="btn btn-sm">Pay/Subscribe</a></div>
       <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
       <div class="card"><h3>Forums</h3><a href="/forums" class="btn btn-sm">Discussions</a></div>
       <div class="card"><h3>Login History</h3><a href="/login-history" class="btn btn-sm">Security</a></div>
@@ -3384,6 +3386,7 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Documents</h3>
         <a href="/documents" class="btn btn-sm">Library</a>
       </div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Member Portal</h3><a href="/church/login" class="btn btn-sm">Member Login</a><a href="/church/members/generate-passwords" class="btn btn-sm btn-green" style="margin-top:8px">Gen Passwords</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Choir</h3><a href="/church/choir" class="btn btn-sm">Worship Team</a></div>
       <div class="card" style="background:#fff7ed;border:2px solid #b45309"><h3 style="color:#b45309">NEW: Sacraments</h3><a href="/church/sacraments" class="btn btn-sm">Records</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Cell Groups</h3><a href="/church/cell-groups" class="btn btn-sm">Small Groups</a></div>
@@ -4489,50 +4492,7 @@ app.get('/parent/dashboard', ah(async (req, res) => {
   `, null));
 }));
 
-app.get('/parent/child/:id', ah(async (req, res) => {
-  if (!req.session.parent) return res.redirect('/parent/login');
-  const t = req.session.parent.tenant_id;
-  const student = (await pool.query('SELECT * FROM students WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
-  if (!student) return res.status(404).send('Student not found');
-  const [fees, marks, attendance] = await Promise.all([
-    pool.query('SELECT * FROM fees WHERE student_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [student.id, t]),
-    pool.query('SELECT m.*, e.name as exam_name FROM marks m JOIN exams e ON m.exam_id=e.id WHERE m.student_id=$1 ORDER BY e.created_at DESC', [student.id]),
-    pool.query('SELECT * FROM attendance WHERE student_id=$1 AND tenant_id=$2 ORDER BY date DESC LIMIT 30', [student.id, t])
-  ]);
-  const totalFees = fees.rows.reduce((a, f) => a + parseInt(f.amount), 0);
-  const totalPaid = fees.rows.reduce((a, f) => a + parseInt(f.paid), 0);
-  const presentDays = attendance.rows.filter(a => a.status === 'present').length;
-  res.send(renderPage(`${student.name}`, `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:30px">
-      <h1>${esc(student.name)}</h1><p>Adm# ${esc(student.admission_no)} | Class: ${esc(student.class)}</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">UGX ${totalFees.toLocaleString()}</div><div>Total Fees</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalPaid.toLocaleString()}</div><div>Paid</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:${totalFees-totalPaid>0?'#dc2626':'#059669'}">UGX ${(totalFees-totalPaid).toLocaleString()}</div><div>Balance</div></div>
-      <div class="stat-card"><div class="stat-num">${presentDays}</div><div>Days Present</div></div>
-    </div>
-    <div class="card"><h3>Fee Records</h3>
-      <table><tr><th>Term</th><th>Year</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Receipt</th></tr>
-      ${fees.rows.map(f => `<tr><td>${esc(f.term)}</td><td>${f.year||''}</td><td>UGX ${parseInt(f.amount).toLocaleString()}</td><td style="color:#059669">UGX ${parseInt(f.paid).toLocaleString()}</td><td style="color:${f.amount-f.paid>0?'#dc2626':'#059669'}">UGX ${(f.amount-f.paid).toLocaleString()}</td><td>${f.paid > 0 ? `<a href="/parent/fee/${f.id}/receipt" class="btn btn-sm">View Receipt</a>` : '-'}</td></tr>`).join('') || '<tr><td colspan="6">No fee records</td></tr>'}
-      </table>
-    </div>
-    <div class="card"><h3>Exam Results</h3>
-      <table><tr><th>Exam</th><th>Subject</th><th>Score</th><th>Grade</th></tr>
-      ${marks.rows.map(m => `<tr><td>${esc(m.exam_name)}</td><td>${esc(m.subject)}</td><td>${m.score}</td><td><span class="tag">${esc(m.grade)}</span></td></tr>`).join('') || '<tr><td colspan="4">No results yet</td></tr>'}
-      </table>
-    </div>
-    <div class="card"><h3>Recent Attendance</h3>
-      <table><tr><th>Date</th><th>Status</th></tr>
-      ${attendance.rows.map(a => `<tr><td>${new Date(a.date).toLocaleDateString()}</td><td style="color:${a.status==='present'?'#059669':'#dc2626'}">${a.status}</td></tr>`).join('') || '<tr><td colspan="2">No attendance records</td></tr>'}
-      </table>
-    </div>
-    <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap">
-      <a href="/parent/dashboard" class="btn btn-sm">Back to Dashboard</a>
-      <a href="/parent/child/${student.id}/report" class="btn btn-gold btn-sm">Download Report Card</a>
-    </div>
-  `, null));
-}));
+// Parent: Child detail (enhanced version moved to v12 section below with online fee payment)
 
 // Parent: View Fee Receipt
 app.get('/parent/fee/:id/receipt', ah(async (req, res) => {
@@ -6390,16 +6350,10 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
     await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan`);
     return res.redirect('/billing');
   }
-  // v1.0: Try Flutterwave checkout first
-  const ref = 'SSEW-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex');
-  const checkoutUrl = await createFlutterwaveCheckout(t, amount, req.session.user.email, plan, ref);
-  if (checkoutUrl) {
-    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference) VALUES($1,$2,$3,$4,$5,$6)', [t, amount, 'flutterwave', 'pending', `${plan} plan subscription`, ref]);
-    return res.redirect(checkoutUrl);
-  }
+  // v12: Use inline checkout page (Flutterwave inline JS + manual fallback)
+  if (amount > 0) return res.redirect(`/pay/checkout?amount=${amount}&plan=${plan}&description=${plan}+plan+subscription`);
   // Fallback: manual payment
   await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [t, plan, amount, 'active', expires]);
-  // Auto-verify tenant after subscription
   if (amount > 0) {
     await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [t]);
     await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [t, 'active']);
@@ -13939,59 +13893,8 @@ app.get('/school/tracks/:id/delete', requireAuth, requireNotBanned, requireFeatu
 // SCHOOL MISSING FEATURES: Student Portal, Admissions, Graduation, Subjects, etc.
 // =============================================
 
-// STUDENT SELF-SERVICE PORTAL
-app.get('/student/login', (req, res) => {
-  res.send(renderPage('Student Portal', `
-    <div class="card" style="max-width:450px;margin:40px auto">
-      <div style="text-align:center;margin-bottom:20px"><h2>Student Portal</h2><p class="muted">View your grades, attendance and homework</p></div>
-      <form method="POST" action="/student/login">
-        <input name="admission_no" placeholder="Admission Number" required>
-        <input name="name" placeholder="Your Full Name" required>
-        <button class="btn btn-green" style="width:100%">Login</button>
-      </form>
-    </div>
-  `, null));
-});
-
-app.post('/student/login', ah(async (req, res) => {
-  const { admission_no, name } = req.body;
-  const student = (await pool.query('SELECT s.*,t.id as tid,t.name as school_name,t.type FROM students s JOIN tenants t ON s.tenant_id=t.id WHERE s.admission_no=$1', [admission_no])).rows[0];
-  if (!student || student.name.toLowerCase() !== name.toLowerCase()) return res.send(renderPage('Student Portal', '<div class="card"><div class="alert alert-error">Invalid admission number or name</div><a href="/student/login" class="btn">Try Again</a></div>', null));
-  req.session.student = student;
-  res.redirect('/student/dashboard');
-}));
-
-app.get('/student/dashboard', ah(async (req, res) => {
-  const s = req.session.student;
-  if (!s) return res.redirect('/student/login');
-  const t = s.tenant_id;
-  const [fees, attendance, marks, hw] = await Promise.all([
-    pool.query('SELECT * FROM fees WHERE tenant_id=$1 AND student_id=$2', [t, s.id]),
-    pool.query("SELECT COUNT(*) as total, COUNT(CASE WHEN status='present' THEN 1 END) as present FROM attendance WHERE tenant_id=$1 AND student_id=$2", [t, s.id]),
-    pool.query('SELECT m.*,e.name as exam FROM marks m JOIN exams e ON m.exam_id=e.id WHERE m.student_id=$1', [s.id]),
-    pool.query('SELECT h.* FROM homework h WHERE h.tenant_id=$1 AND (h.class_name=$2 OR h.class_name IS NULL) ORDER BY h.due_date DESC LIMIT 10', [t, s.class||''])
-  ]);
-  const feeBalance = fees.rows.reduce((sum, f) => sum + (f.amount - f.paid), 0);
-  const attRate = attendance.rows[0]?.total > 0 ? Math.round(attendance.rows[0].present / attendance.rows[0].total * 100) : 0;
-  res.send(renderPage('My Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)"><h1>Welcome, ${esc(s.name)}</h1><p>${esc(s.class||'')} | Admission: ${esc(s.admission_no)}</p></div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${feeBalance.toLocaleString()}</div><div>Fee Balance</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#059669">${attRate}%</div><div>Attendance Rate</div></div>
-      <div class="stat-card"><div class="stat-num">${marks.rows.length}</div><div>Subjects Scored</div></div>
-      <div class="stat-card"><div class="stat-num">${hw.rows.length}</div><div>Pending Homework</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>My Results</h3><table><tr><th>Exam</th><th>Subject</th><th>Score</th><th>Grade</th></tr>
-      ${marks.rows.slice(0,20).map(m=>`<tr><td>${esc(m.exam)}</td><td>${esc(m.subject)}</td><td>${m.score||'-'}</td><td>${esc(m.grade||'-')}</td></tr>`).join('')||'<tr><td colspan="4">No results yet</td></tr>'}
-      </table></div>
-      <div class="card"><h3>Homework</h3>${hw.rows.map(h=>`<div style="padding:8px;border-bottom:1px solid #e2e8f0"><strong>${esc(h.title)}</strong><br><span class="muted">${esc(h.subject)} - Due: ${h.due_date||'No date'}</span></div>`).join('')||'<p class="muted">No homework</p>'}</div>
-    </div>
-    <div style="margin-top:20px"><a href="/student/logout" class="btn btn-red btn-sm">Logout</a></div>
-  `, null));
-}));
-
-app.get('/student/logout', (req, res) => { delete req.session.student; res.redirect('/student/login'); });
+// STUDENT SELF-SERVICE PORTAL (enhanced version moved to v12 section below)
+// Old routes removed - new password-based login, enhanced dashboard, timetable, fee payment at v12 section
 
 // ADMISSIONS WORKFLOW
 app.get('/school/admissions', requireAuth, requireNotBanned, requireFeature('admissions'), ah(async (req, res) => {
@@ -15996,6 +15899,740 @@ app.get('/entertainment/news', requireAuth, requireNotBanned, ah(async (req, res
     <a href="/entertainment/scrape-now" class="btn btn-green btn-sm" style="margin-bottom:15px">🔄 Import Latest</a>
     <div class="grid">${news.map(n=>`<div class="card" style="padding:18px"><h4>${esc((n.title||'').substring(0,80))}</h4><p class="muted">${esc((n.summary||'').substring(0,120))}</p><p><span class="tag">${esc(n.source||'')}</span> ${n.scraped_at?new Date(n.scraped_at).toLocaleDateString():''}</p>${n.url?`<a href="${esc(n.url)}" target="_blank" class="btn btn-sm" style="margin-top:8px">Read More →</a>`:''}</div>`).join('')||'<p class="muted">No news yet. Click "Import Latest" to fetch!</p>'}</div></div>`, req.session.user));
 }));
+
+// ============================================================
+// v12.0: FLUTTERWAVE WEBHOOK + PAYMENT VERIFICATION
+// ============================================================
+// Flutterwave webhook handler (POST) - for server-to-server payment confirmation
+app.post('/webhook/flutterwave', express.raw({ type: 'application/json' }), ah(async (req, res) => {
+  const secret = process.env.FLW_WEBHOOK_SECRET || process.env.FLW_SECRET_KEY;
+  const signature = req.headers['verif-hash'];
+  if (!secret || !signature || signature !== secret) {
+    return res.status(401).send('Invalid signature');
+  }
+  let payload;
+  try { payload = JSON.parse(req.body.toString()); } catch { return res.status(400).send('Invalid JSON'); }
+  
+  if (payload.event === 'charge.completed' && payload.data?.status === 'successful') {
+    const { tx_ref, amount, currency, id: flw_id, customer } = payload.data;
+    const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1 AND status=$2', [tx_ref, 'pending'])).rows[0];
+    if (payment) {
+      await pool.query('UPDATE payments SET status=$1, method=$2 WHERE reference=$3', ['completed', 'flutterwave', tx_ref]);
+      const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
+      const expires = new Date(Date.now() + 30*24*60*60*1000);
+      await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method,reference) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires, 'flutterwave', tx_ref]);
+      await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
+      // Add to developer revenue
+      const devShare = Math.round(payment.amount * 0.9);
+      await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [payment.tenant_id, 'subscription', devShare, `${plan} plan via Flutterwave`]);
+      await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan, flw_id });
+      await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
+      console.log(`[Flutterwave] Payment confirmed: ${tx_ref} - UGX ${amount}`);
+    }
+    // Also check MoMo payments
+    const momo = (await pool.query('SELECT * FROM momo_payments WHERE external_ref=$1 AND status!=$2', [tx_ref, 'completed'])).rows[0];
+    if (momo) {
+      await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['completed', tx_ref]);
+      await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference) VALUES($1,$2,$3,$4,$5,$6)', [momo.tenant_id, momo.amount, 'mobile_money', 'completed', momo.reference, tx_ref]);
+    }
+  }
+  res.status(200).send('OK');
+}));
+
+// Flutterwave payment verification endpoint
+app.get('/api/v1/payment/verify/:ref', ah(async (req, res) => {
+  const ref = req.params.ref;
+  if (!process.env.FLW_SECRET_KEY) return res.json({ verified: false, error: 'No Flutterwave key' });
+  try {
+    const resp = await fetch(`https://api.flutterwave.com/v3/transactions/${ref}/verify`, {
+      headers: { 'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}` }
+    });
+    const data = await resp.json();
+    if (data.status === 'success' && data.data?.status === 'successful') {
+      return res.json({ verified: true, amount: data.data.amount, currency: data.data.currency, ref: data.data.tx_ref });
+    }
+    return res.json({ verified: false, status: data.data?.status });
+  } catch (e) { return res.json({ verified: false, error: e.message }); }
+}));
+
+// ============================================================
+// v12.0: FLUTTERWAVE INLINE CHECKOUT PAGE
+// ============================================================
+app.get('/pay/checkout', requireAuth, ah(async (req, res) => {
+  const { amount, plan, description, type, item_id } = req.query;
+  const amt = parseInt(amount) || 0;
+  const ref = 'SSEW-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex');
+  const FLW_PK = process.env.FLW_PUBLIC_KEY;
+  const t = req.session.user.tenant_id;
+  
+  // Record pending payment
+  if (amt > 0) {
+    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference) VALUES($1,$2,$3,$4,$5,$6)', [t, amt, 'flutterwave', 'pending', description || `${plan || 'payment'} checkout`, ref]);
+  }
+  
+  res.send(renderPage('Secure Checkout', `
+    <div class="card" style="max-width:550px;margin:40px auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <h2>Secure Payment</h2>
+        <p style="font-size:28px;font-weight:800;color:#4f46e5;margin:10px 0">UGX ${amt.toLocaleString()}</p>
+        <p class="muted">${esc(description || plan || 'Payment')}</p>
+      </div>
+      ${FLW_PK ? `
+        <button id="payBtn" class="btn btn-green" style="width:100%;padding:16px;font-size:18px">Pay with Card / Mobile Money</button>
+        <p class="muted" style="text-align:center;margin-top:10px">Powered by Flutterwave - Visa, Mastercard, MTN MoMo, Airtel Money</p>
+        <script src="https://checkout.flutterwave.com/v3.js"></script>
+        <script>
+        document.getElementById('payBtn').addEventListener('click', function() {
+          FlutterwaveCheckout({
+            public_key: "${esc(FLW_PK)}",
+            tx_ref: "${esc(ref)}",
+            amount: ${amt},
+            currency: "UGX",
+            payment_options: "card,mobilemoneyuganda,ussd,banktransfer",
+            redirect_url: "${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}/billing/callback?inline=1",
+            customer: {
+              email: "${esc(req.session.user.email)}",
+              name: "${esc(req.session.user.name || req.session.user.email)}"
+            },
+            customizations: {
+              title: "SSEWASSWA Platform",
+              description: "${esc(description || plan || 'Subscription')}",
+              logo: "https://ssewasswa.onrender.com/icon.png"
+            },
+            meta: {
+              tenant_id: ${t},
+              plan: "${esc(plan || '')}",
+              type: "${esc(type || '')}",
+              item_id: "${esc(item_id || '')}"
+            }
+          });
+        });
+        </script>
+      ` : `
+        <div class="alert alert-info">
+          <h3>Manual Payment</h3>
+          <p>Flutterwave is not configured. Please pay manually:</p>
+          <ol style="margin:10px 0;padding-left:20px">
+            <li>Send UGX ${amt.toLocaleString()} to <strong>0780000000</strong> (MTN MoMo)</li>
+            <li>Reference: <strong>${esc(ref)}</strong></li>
+            <li>Send screenshot to admin for verification</li>
+          </ol>
+        </div>
+        <a href="/billing" class="btn" style="width:100%">Back to Billing</a>
+      `}
+      <div style="margin-top:20px;padding:15px;background:${req.session.user?.dark_mode ? '#334155' : '#f8fafc'};border-radius:10px">
+        <p class="muted" style="font-size:12px">Reference: ${esc(ref)}</p>
+        <p class="muted" style="font-size:12px">Secure payment processed by Flutterwave. Your data is encrypted.</p>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// v12.0: FEE PAYMENT VIA FLUTTERWAVE (from student/parent portal)
+// ============================================================
+app.get('/pay/fees/:fee_id', ah(async (req, res) => {
+  const feeId = req.params.fee_id;
+  const fee = (await pool.query('SELECT f.*, s.name as student_name, s.admission_no, t.name as school_name FROM fees f JOIN students s ON f.student_id=s.id JOIN tenants t ON f.tenant_id=t.id WHERE f.id=$1', [feeId])).rows[0];
+  if (!fee) return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Fee record not found</div><a href="/" class="btn">Home</a></div>', req.session.user));
+  const balance = fee.amount - fee.paid;
+  const ref = 'FEE-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
+  const FLW_PK = process.env.FLW_PUBLIC_KEY;
+  
+  if (balance <= 0) return res.redirect('/student/dashboard');
+  
+  res.send(renderPage('Pay School Fees', `
+    <div class="card" style="max-width:550px;margin:40px auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <h2>Pay School Fees</h2>
+        <p><strong>${esc(fee.student_name)}</strong> (${esc(fee.admission_no)})</p>
+        <p class="muted">${esc(fee.school_name)}</p>
+      </div>
+      <div class="card" style="background:#f8fafc;border:2px solid #e2e8f0">
+        <table>
+          <tr><td>Total Fees</td><td style="font-weight:700;text-align:right">UGX ${parseInt(fee.amount).toLocaleString()}</td></tr>
+          <tr><td>Already Paid</td><td style="color:#059669;font-weight:700;text-align:right">UGX ${parseInt(fee.paid).toLocaleString()}</td></tr>
+          <tr><td><strong>Balance Due</strong></td><td style="color:#dc2626;font-weight:800;font-size:20px;text-align:right">UGX ${balance.toLocaleString()}</td></tr>
+        </table>
+      </div>
+      <form method="GET" action="/pay/checkout" style="margin-top:15px">
+        <input type="hidden" name="amount" value="${balance}">
+        <input type="hidden" name="plan" value="fee_payment">
+        <input type="hidden" name="description" value="Fee payment for ${esc(fee.student_name)} (${esc(fee.admission_no)})">
+        <input type="hidden" name="type" value="fee">
+        <input type="hidden" name="item_id" value="${feeId}">
+        <button type="submit" class="btn btn-green" style="width:100%;padding:16px;font-size:18px">Pay UGX ${balance.toLocaleString()} Now</button>
+      </form>
+      <p class="muted" style="text-align:center;margin-top:10px">Card, MTN MoMo, Airtel Money accepted</p>
+    </div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// v12.0: ENHANCED STUDENT PORTAL (with password, timetable, report card download)
+// ============================================================
+// Migrate student_portal_sessions if not exists
+pool.query(`CREATE TABLE IF NOT EXISTS student_accounts (
+  id SERIAL PRIMARY KEY,
+  student_id INTEGER REFERENCES students(id) ON DELETE CASCADE UNIQUE,
+  password TEXT NOT NULL,
+  temp_password TEXT,
+  last_login TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`).catch(() => {});
+
+// Admin: Generate student passwords
+app.get('/school/students/generate-passwords', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id, name, admission_no FROM students WHERE tenant_id=$1', [t])).rows;
+  let created = 0;
+  for (const s of students) {
+    const exists = (await pool.query('SELECT id FROM student_accounts WHERE student_id=$1', [s.id])).rows[0];
+    if (!exists) {
+      const tempPass = 'STD' + crypto.randomBytes(4).toString('hex').toUpperCase();
+      const hash = await bcrypt.hash(tempPass, 10);
+      await pool.query('INSERT INTO student_accounts(student_id,password,temp_password) VALUES($1,$2,$3)', [s.id, hash, tempPass]);
+      created++;
+    }
+  }
+  await audit(req.session.user.email, 'student_passwords', `Generated passwords for ${created} students`);
+  res.send(renderPage('Student Passwords', `
+    <div class="card"><div class="alert alert-success"><h2>Passwords Generated!</h2><p>Created login credentials for ${created} students.</p></div>
+    <p class="muted">Students can now log in at <a href="/student/login">/student/login</a> using their Admission Number and the generated password.</p>
+    <a href="/school/students/passwords-list" class="btn btn-gold" style="margin-top:10px">View All Passwords</a>
+    <a href="/school/students" class="btn" style="margin-top:10px">Back to Students</a></div>
+  `, req.session.user));
+}));
+
+// Admin: View student passwords
+app.get('/school/students/passwords-list', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const accounts = (await pool.query('SELECT sa.*, s.name, s.admission_no, s.class FROM student_accounts sa JOIN students s ON sa.student_id=s.id WHERE s.tenant_id=$1 ORDER BY s.name', [t])).rows;
+  res.send(renderPage('Student Login Credentials', `
+    <div class="card"><h2>Student Login Credentials</h2>
+    <p class="muted" style="margin-bottom:15px">Students log in at <strong>/student/login</strong> with Admission Number + Password</p>
+    <a href="/school/students/generate-passwords" class="btn btn-green btn-sm" style="margin-bottom:15px">Generate New Passwords</a>
+    ${accounts.length ? `<table><tr><th>Name</th><th>Admission No</th><th>Class</th><th>Password</th><th>Last Login</th></tr>
+    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.admission_no)}</td><td>${esc(a.class||'')}</td><td style="font-family:monospace;font-weight:700">${esc(a.temp_password||'Set')}</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
+    </table>` : '<p class="muted">No student accounts yet. Click "Generate New Passwords" above.</p>'}</div>
+  `, req.session.user));
+}));
+
+// Enhanced student login (with password)
+app.post('/student/login', ah(async (req, res) => {
+  const { admission_no, name, password } = req.body;
+  const student = (await pool.query('SELECT s.*,t.id as tid,t.name as school_name,t.type FROM students s JOIN tenants t ON s.tenant_id=t.id WHERE s.admission_no=$1', [admission_no])).rows[0];
+  
+  // Check password-based login first
+  if (password && student) {
+    const account = (await pool.query('SELECT * FROM student_accounts WHERE student_id=$1', [student.id])).rows[0];
+    if (account && await bcrypt.compare(password, account.password)) {
+      req.session.student = student;
+      await pool.query('UPDATE student_accounts SET last_login=NOW() WHERE student_id=$1', [student.id]);
+      return res.redirect('/student/dashboard');
+    }
+  }
+  
+  // Fallback: name-based login (legacy)
+  if (!student || (name && student.name.toLowerCase() !== name.toLowerCase())) {
+    return res.send(renderPage('Student Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid admission number or password</div><a href="/student/login" class="btn">Try Again</a></div>', null));
+  }
+  req.session.student = student;
+  res.redirect('/student/dashboard');
+}));
+
+// Replace student login page with enhanced version
+app.get('/student/login', (req, res) => {
+  res.send(renderPage('Student Portal', `
+    <div class="card" style="max-width:450px;margin:40px auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);margin:0 auto 15px;display:flex;align-items:center;justify-content:center;font-size:28px;color:white">S</div>
+        <h2>Student Portal</h2>
+        <p class="muted">View your grades, attendance, timetable and pay fees</p>
+      </div>
+      <form method="POST" action="/student/login">
+        <input name="admission_no" placeholder="Admission Number" required>
+        <input name="password" type="password" placeholder="Password (ask school for yours)">
+        <details style="margin:8px 0"><summary style="cursor:pointer;color:#64748b;font-size:13px">Don't have a password? Login with name</summary>
+          <input name="name" placeholder="Your Full Name" style="margin-top:5px">
+        </details>
+        <button class="btn btn-green" style="width:100%">Login</button>
+      </form>
+      <p class="muted" style="text-align:center;margin-top:15px;font-size:12px">Ask your school admin for your login credentials</p>
+    </div>
+  `, null));
+});
+
+// Enhanced student dashboard (more comprehensive)
+app.get('/student/dashboard', ah(async (req, res) => {
+  const s = req.session.student;
+  if (!s) return res.redirect('/student/login');
+  const t = s.tenant_id;
+  const [fees, attendance, marks, hw, timetable, tenant] = await Promise.all([
+    pool.query('SELECT * FROM fees WHERE tenant_id=$1 AND student_id=$2', [t, s.id]),
+    pool.query("SELECT COUNT(*) as total, COUNT(CASE WHEN status='present' THEN 1 END) as present FROM attendance WHERE tenant_id=$1 AND student_id=$2", [t, s.id]),
+    pool.query('SELECT m.*,e.name as exam,e.term FROM marks m JOIN exams e ON m.exam_id=e.id WHERE m.student_id=$1 ORDER BY e.created_at DESC', [s.id]),
+    pool.query('SELECT h.* FROM homework h WHERE h.tenant_id=$1 AND (h.class_name=$2 OR h.class_name IS NULL) ORDER BY h.due_date DESC LIMIT 10', [t, s.class||'']),
+    pool.query('SELECT * FROM timetable WHERE tenant_id=$1 AND (class_name=$2 OR class_name IS NULL) ORDER BY day,start_time', [t, s.class||'']),
+    pool.query('SELECT name,logo_url FROM tenants WHERE id=$1', [t])
+  ]);
+  const feeBalance = fees.rows.reduce((sum, f) => sum + (f.amount - f.paid), 0);
+  const attRate = attendance.rows[0]?.total > 0 ? Math.round(attendance.rows[0].present / attendance.rows[0].total * 100) : 0;
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const today = days[new Date().getDay()];
+  const todayClasses = timetable.rows.filter(r => r.day === today);
+  
+  res.send(renderPage('My Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">
+      <div style="display:flex;align-items:center;gap:15px;justify-content:center;margin-bottom:10px">
+        ${tenant.rows[0]?.logo_url ? `<img src="${esc(tenant.rows[0].logo_url)}" style="height:40px;border-radius:8px">` : ''}
+        <div><h1>Welcome, ${esc(s.name)}</h1><p>${esc(s.class||'')} | Admission: ${esc(s.admission_no)} | ${esc(tenant.rows[0]?.name||'')}</p></div>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${feeBalance.toLocaleString()}</div><div>Fee Balance</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${attRate}%</div><div>Attendance Rate</div></div>
+      <div class="stat-card"><div class="stat-num">${marks.rows.length}</div><div>Subjects Scored</div></div>
+      <div class="stat-card"><div class="stat-num">${todayClasses.length}</div><div>Classes Today</div></div>
+    </div>
+    <div class="tab-bar">
+      <a href="#" class="active" onclick="showTab('overview')">Overview</a>
+      <a href="#" onclick="showTab('results')">Results</a>
+      <a href="#" onclick="showTab('timetable')">Timetable</a>
+      <a href="#" onclick="showTab('fees')">Fees</a>
+    </div>
+    <div id="tab-overview">
+      <div class="grid">
+        <div class="card"><h3>Today's Schedule (${today})</h3>
+          ${todayClasses.length ? `<table><tr><th>Time</th><th>Subject</th><th>Teacher</th><th>Room</th></tr>
+          ${todayClasses.map(c=>`<tr><td>${esc(c.start_time||'')} - ${esc(c.end_time||'')}</td><td>${esc(c.subject||'')}</td><td>${esc(c.teacher||'')}</td><td>${esc(c.room||'')}</td></tr>`).join('')}</table>` : '<p class="muted">No classes scheduled for today</p>'}
+        </div>
+        <div class="card"><h3>Homework</h3>
+          ${hw.rows.map(h=>`<div style="padding:10px;border-bottom:1px solid #e2e8f0"><strong>${esc(h.title)}</strong><br><span class="muted">${esc(h.subject||'')} - Due: ${h.due_date||'No date'}</span>${h.description?`<p style="margin-top:5px;font-size:13px">${esc(h.description.substring(0,100))}</p>`:''}</div>`).join('')||'<p class="muted">No homework assigned</p>'}
+        </div>
+      </div>
+    </div>
+    <div id="tab-results" style="display:none">
+      <div class="card"><h3>My Results</h3>
+        ${marks.rows.length ? `<table><tr><th>Exam</th><th>Term</th><th>Subject</th><th>Score</th><th>Grade</th></tr>
+        ${marks.rows.map(m=>`<tr><td>${esc(m.exam)}</td><td>${esc(m.term||'')}</td><td>${esc(m.subject)}</td><td style="font-weight:700">${m.score||'-'}</td><td><span class="tag">${esc(m.grade||'-')}</span></td></tr>`).join('')}</table>` : '<p class="muted">No results yet</p>'}
+      </div>
+      <div class="card"><a href="/student/report-card" class="btn btn-gold">Download My Report Card</a></div>
+    </div>
+    <div id="tab-timetable" style="display:none">
+      <div class="card"><h3>My Timetable</h3>
+        ${timetable.rows.length ? (() => {
+          const byDay = {};
+          timetable.rows.forEach(r => { if (!byDay[r.day]) byDay[r.day] = []; byDay[r.day].push(r); });
+          return days.filter(d => byDay[d]).map(d => `<h4 style="margin-top:15px">${d}</h4><table><tr><th>Time</th><th>Subject</th><th>Teacher</th><th>Room</th></tr>${byDay[d].map(c=>`<tr><td>${esc(c.start_time||'')}-${esc(c.end_time||'')}</td><td>${esc(c.subject||'')}</td><td>${esc(c.teacher||'')}</td><td>${esc(c.room||'')}</td></tr>`).join('')}</table>`).join('');
+        })() : '<p class="muted">No timetable available</p>'}
+      </div>
+    </div>
+    <div id="tab-fees" style="display:none">
+      <div class="card"><h3>Fee Statement</h3>
+        ${fees.rows.length ? `<table><tr><th>Description</th><th>Total</th><th>Paid</th><th>Balance</th><th>Action</th></tr>
+        ${fees.rows.map(f=>{
+          const bal = f.amount - f.paid;
+          return `<tr><td>${esc(f.description||'Tuition')}</td><td>UGX ${parseInt(f.amount).toLocaleString()}</td><td style="color:#059669">UGX ${parseInt(f.paid).toLocaleString()}</td><td style="color:${bal>0?'#dc2626':'#059669'}">UGX ${bal.toLocaleString()}</td><td>${bal>0?`<a href="/pay/fees/${f.id}" class="btn btn-sm btn-green">Pay Now</a>`:'<span class="tag" style="background:#d1fae5;color:#065f46">Cleared</span>'}</td></tr>`;
+        }).join('')}</table>` : '<p class="muted">No fee records</p>'}
+      </div>
+      <div class="card"><h3>Fee Summary</h3>
+        <div class="stats">
+          <div class="stat-card"><div class="stat-num">UGX ${fees.rows.reduce((s,f)=>s+parseInt(f.amount),0).toLocaleString()}</div><div>Total Fees</div></div>
+          <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${fees.rows.reduce((s,f)=>s+parseInt(f.paid),0).toLocaleString()}</div><div>Total Paid</div></div>
+          <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${feeBalance.toLocaleString()}</div><div>Balance</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:20px"><a href="/student/logout" class="btn btn-red btn-sm">Logout</a></div>
+    <script>
+    function showTab(id) {
+      document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
+      document.getElementById('tab-' + id).style.display = 'block';
+      document.querySelectorAll('.tab-bar a').forEach(a => a.classList.remove('active'));
+      event.target.classList.add('active');
+      return false;
+    }
+    </script>
+  `, null));
+}));
+
+// Student: Download report card
+app.get('/student/report-card', ah(async (req, res) => {
+  const s = req.session.student;
+  if (!s) return res.redirect('/student/login');
+  const t = s.tenant_id;
+  const latestExam = (await pool.query('SELECT id,name,term,year FROM exams WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 1', [t])).rows[0];
+  if (!latestExam) return res.send(renderPage('Report Card', '<div class="card"><div class="alert alert-info">No exams found yet</div><a href="/student/dashboard" class="btn">Back</a></div>', null));
+  
+  const marks = (await pool.query('SELECT subject,score,grade FROM marks WHERE exam_id=$1 AND student_id=$2', [latestExam.id, s.id])).rows;
+  const fee = (await pool.query('SELECT amount,paid FROM fees WHERE student_id=$1 AND tenant_id=$2 LIMIT 1', [s.id, t])).rows[0];
+  const tenant = (await pool.query('SELECT name,logo_url FROM tenants WHERE id=$1', [t])).rows[0];
+  const totalScore = marks.reduce((a, m) => a + (parseInt(m.score) || 0), 0);
+  const avgScore = marks.length > 0 ? Math.round(totalScore / marks.length) : 0;
+  
+  const doc = new Document({
+    sections: [{
+      children: [
+        new Paragraph({ children: [new TextRun({ text: tenant.name, bold: true, size: 36, color: '4F46E5' })], alignment: 'center' }),
+        new Paragraph({ children: [new TextRun({ text: 'STUDENT REPORT CARD', bold: true, size: 28 })], alignment: 'center' }),
+        new Paragraph({ text: `${latestExam.name} - ${latestExam.term} ${latestExam.year || ''}`, alignment: 'center' }),
+        new Paragraph({ text: '' }),
+        new Paragraph({ text: `Student Name: ${s.name}`, spacing: { after: 100 } }),
+        new Paragraph({ text: `Admission No: ${s.admission_no}` }),
+        new Paragraph({ text: `Class: ${s.class} ${s.stream || ''}` }),
+        new Paragraph({ text: '' }),
+        new Paragraph({ children: [new TextRun({ text: 'SUBJECT RESULTS', bold: true, size: 22, color: '4F46E5' })] }),
+        new Paragraph({ text: '' }),
+        ...marks.map(m => new Paragraph({ children: [
+          new TextRun({ text: m.subject, size: 20 }),
+          new TextRun({ text: `    ${m.score}/100    Grade: ${m.grade}`, bold: true, size: 20 })
+        ]})),
+        new Paragraph({ text: '' }),
+        new Paragraph({ children: [new TextRun({ text: `Total Score: ${totalScore}`, bold: true, size: 22 })] }),
+        new Paragraph({ children: [new TextRun({ text: `Average Score: ${avgScore}`, bold: true, size: 22, color: '059669' })] }),
+        ...(fee ? [
+          new Paragraph({ text: '' }),
+          new Paragraph({ children: [new TextRun({ text: 'FEE STATUS', bold: true, size: 22, color: '4F46E5' })] }),
+          new Paragraph({ text: `Total Fees: UGX ${parseInt(fee.amount).toLocaleString()}` }),
+          new Paragraph({ text: `Paid: UGX ${parseInt(fee.paid).toLocaleString()}` }),
+          new Paragraph({ text: `Balance: UGX ${(fee.amount - fee.paid).toLocaleString()}` }),
+        ] : []),
+        new Paragraph({ text: '' }),
+        new Paragraph({ text: '' }),
+        new Paragraph({ text: 'Class Teacher Comment: ________________________' }),
+        new Paragraph({ text: 'Head Teacher Comment: ________________________' }),
+        new Paragraph({ text: '' }),
+        new Paragraph({ text: `Date: ${new Date().toLocaleDateString()}` }),
+        new Paragraph({ children: [new TextRun({ text: 'Generated by SSEWASSWA Platform', italics: true, size: 16, color: '9CA3AF' })], alignment: 'center' }),
+      ]
+    }]
+  });
+  const buffer = await Packer.toBuffer(doc);
+  res.setHeader('Content-Disposition', `attachment; filename=ReportCard-${s.admission_no}.docx`);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.send(buffer);
+}));
+
+// Student logout
+app.get('/student/logout', (req, res) => { delete req.session.student; res.redirect('/student/login'); });
+
+// ============================================================
+// v12.0: CHURCH MEMBER SELF-SERVICE PORTAL
+// ============================================================
+pool.query(`CREATE TABLE IF NOT EXISTS church_accounts (
+  id SERIAL PRIMARY KEY,
+  member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE UNIQUE,
+  password TEXT NOT NULL,
+  temp_password TEXT,
+  last_login TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`).catch(() => {});
+
+app.get('/church/login', (req, res) => {
+  if (req.session.churchMember) return res.redirect('/church/portal');
+  res.send(renderPage('Church Member Portal', `
+    <div class="card" style="max-width:450px;margin:40px auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#059669,#10b981);margin:0 auto 15px;display:flex;align-items:center;justify-content:center;font-size:28px;color:white">C</div>
+        <h2>Church Member Portal</h2>
+        <p class="muted">View your contributions, sermons, and church info</p>
+      </div>
+      <form method="POST" action="/church/login">
+        <input name="phone" placeholder="Phone Number (+256...)" required>
+        <input name="password" type="password" placeholder="Password">
+        <details style="margin:8px 0"><summary style="cursor:pointer;color:#64748b;font-size:13px">No password? Use your name</summary>
+          <input name="name" placeholder="Your Full Name" style="margin-top:5px">
+        </details>
+        <button class="btn btn-green" style="width:100%">Login</button>
+      </form>
+    </div>
+  `, null));
+});
+
+app.post('/church/login', ah(async (req, res) => {
+  const { phone, name, password } = req.body;
+  const member = (await pool.query('SELECT cm.*, t.name as church_name, t.id as tid FROM church_members cm JOIN tenants t ON cm.tenant_id=t.id WHERE cm.phone=$1', [phone])).rows[0];
+  if (!member) return res.send(renderPage('Church Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">No member found with this phone number</div><a href="/church/login" class="btn">Try Again</a></div>', null));
+  
+  // Check password
+  if (password) {
+    const account = (await pool.query('SELECT * FROM church_accounts WHERE member_id=$1', [member.id])).rows[0];
+    if (account && await bcrypt.compare(password, account.password)) {
+      req.session.churchMember = member;
+      await pool.query('UPDATE church_accounts SET last_login=NOW() WHERE member_id=$1', [member.id]);
+      return res.redirect('/church/portal');
+    }
+  }
+  
+  // Fallback: name-based
+  if (name && member.name.toLowerCase() !== name.toLowerCase()) {
+    return res.send(renderPage('Church Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid name or password</div><a href="/church/login" class="btn">Try Again</a></div>', null));
+  }
+  req.session.churchMember = member;
+  res.redirect('/church/portal');
+}));
+
+app.get('/church/portal', ah(async (req, res) => {
+  const m = req.session.churchMember;
+  if (!m) return res.redirect('/church/login');
+  const t = m.tenant_id;
+  const [donations, sermons, attendance, schedule, welfare] = await Promise.all([
+    pool.query('SELECT * FROM donations WHERE tenant_id=$1 AND member_id=$2 ORDER BY created_at DESC LIMIT 20', [t, m.id]),
+    pool.query('SELECT * FROM sermons WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10', [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(CASE WHEN status='present' THEN 1 END) as present FROM church_attendance WHERE tenant_id=$1 AND member_id=$2", [t, m.id]),
+    pool.query('SELECT * FROM service_schedule WHERE tenant_id=$1 ORDER BY day,start_time', [t]),
+    pool.query('SELECT * FROM welfare_records WHERE tenant_id=$1 AND member_id=$2 ORDER BY created_at DESC LIMIT 5', [t, m.id])
+  ]);
+  const totalDonated = donations.rows.reduce((s, d) => s + parseInt(d.amount || 0), 0);
+  const attRate = attendance.rows[0]?.total > 0 ? Math.round(attendance.rows[0].present / attendance.rows[0].total * 100) : 0;
+  
+  res.send(renderPage('My Church Portal', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
+      <h1>Welcome, ${esc(m.name)}</h1><p>${esc(m.church_name)} | ${esc(m.role || 'Member')}</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalDonated.toLocaleString()}</div><div>Total Given</div></div>
+      <div class="stat-card"><div class="stat-num">${attRate}%</div><div>Attendance Rate</div></div>
+      <div class="stat-card"><div class="stat-num">${donations.rows.length}</div><div>Donations</div></div>
+      <div class="stat-card"><div class="stat-num">${sermons.rows.length}</div><div>Sermons</div></div>
+    </div>
+    <div class="tab-bar">
+      <a href="#" class="active" onclick="showTab('overview')">Overview</a>
+      <a href="#" onclick="showTab('donations')">My Donations</a>
+      <a href="#" onclick="showTab('sermons')">Sermons</a>
+      <a href="#" onclick="showTab('schedule')">Service Schedule</a>
+    </div>
+    <div id="tab-overview">
+      <div class="grid">
+        <div class="card"><h3>Recent Donations</h3>
+          ${donations.rows.slice(0,5).map(d=>`<div style="padding:8px;border-bottom:1px solid #e2e8f0"><strong>UGX ${parseInt(d.amount).toLocaleString()}</strong> - ${esc(d.type||'Donation')}<br><span class="muted">${d.created_at?new Date(d.created_at).toLocaleDateString():''}</span></div>`).join('')||'<p class="muted">No donations yet</p>'}
+        </div>
+        <div class="card"><h3>Welfare Support</h3>
+          ${welfare.rows.length ? welfare.rows.map(w=>`<div style="padding:8px;border-bottom:1px solid #e2e8f0"><strong>${esc(w.type)}</strong> - UGX ${parseInt(w.amount).toLocaleString()}<br><span class="muted">${esc(w.description||'')} - ${w.date?new Date(w.date).toLocaleDateString():''}</span></div>`).join('') : '<p class="muted">No welfare records</p>'}
+        </div>
+      </div>
+    </div>
+    <div id="tab-donations" style="display:none">
+      <div class="card"><h3>My Donation History</h3>
+        ${donations.rows.length ? `<table><tr><th>Date</th><th>Type</th><th>Amount</th><th>Method</th></tr>${donations.rows.map(d=>`<tr><td>${d.created_at?new Date(d.created_at).toLocaleDateString():'-'}</td><td>${esc(d.type||'Donation')}</td><td style="font-weight:700">UGX ${parseInt(d.amount).toLocaleString()}</td><td>${esc(d.method||'-')}</td></tr>`).join('')}</table>` : '<p class="muted">No donations yet</p>'}
+      </div>
+    </div>
+    <div id="tab-sermons" style="display:none">
+      <div class="card"><h3>Recent Sermons</h3>
+        ${sermons.rows.map(s=>`<div style="padding:12px;border-bottom:1px solid #e2e8f0"><h4>${esc(s.title)}</h4><p class="muted">${esc(s.preacher||'')} - ${s.date?new Date(s.date).toLocaleDateString():''}</p>${s.notes?`<p style="font-size:13px;margin-top:5px">${esc(s.notes.substring(0,200))}</p>`:''}</div>`).join('')||'<p class="muted">No sermons available</p>'}
+      </div>
+    </div>
+    <div id="tab-schedule" style="display:none">
+      <div class="card"><h3>Service Schedule</h3>
+        ${schedule.rows.length ? `<table><tr><th>Day</th><th>Time</th><th>Service</th><th>Venue</th></tr>${schedule.rows.map(s=>`<tr><td>${esc(s.day)}</td><td>${esc(s.start_time||'')} - ${esc(s.end_time||'')}</td><td>${esc(s.service_name||'')}</td><td>${esc(s.venue||'')}</td></tr>`).join('')}</table>` : '<p class="muted">No schedule available</p>'}
+      </div>
+    </div>
+    <div style="margin-top:20px"><a href="/church/logout" class="btn btn-red btn-sm">Logout</a></div>
+    <script>
+    function showTab(id) {
+      document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
+      document.getElementById('tab-' + id).style.display = 'block';
+      document.querySelectorAll('.tab-bar a').forEach(a => a.classList.remove('active'));
+      event.target.classList.add('active');
+      return false;
+    }
+    </script>
+  `, null));
+}));
+
+app.get('/church/logout', (req, res) => { delete req.session.churchMember; res.redirect('/church/login'); });
+
+// Admin: Generate church member passwords
+app.get('/church/members/generate-passwords', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id, name, phone FROM church_members WHERE tenant_id=$1', [t])).rows;
+  let created = 0;
+  for (const m of members) {
+    const exists = (await pool.query('SELECT id FROM church_accounts WHERE member_id=$1', [m.id])).rows[0];
+    if (!exists) {
+      const tempPass = 'CH' + crypto.randomBytes(4).toString('hex').toUpperCase();
+      const hash = await bcrypt.hash(tempPass, 10);
+      await pool.query('INSERT INTO church_accounts(member_id,password,temp_password) VALUES($1,$2,$3)', [m.id, hash, tempPass]);
+      created++;
+    }
+  }
+  await audit(req.session.user.email, 'church_passwords', `Generated passwords for ${created} members`);
+  res.send(renderPage('Church Member Passwords', `
+    <div class="card"><div class="alert alert-success"><h2>Passwords Generated!</h2><p>Created login credentials for ${created} members.</p></div>
+    <p class="muted">Members can log in at <a href="/church/login">/church/login</a> using their phone number and password.</p>
+    <a href="/church/members/passwords-list" class="btn btn-gold" style="margin-top:10px">View All Passwords</a>
+    <a href="/church/members" class="btn" style="margin-top:10px">Back to Members</a></div>
+  `, req.session.user));
+}));
+
+// Admin: View church member passwords
+app.get('/church/members/passwords-list', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const accounts = (await pool.query('SELECT ca.*, cm.name, cm.phone FROM church_accounts ca JOIN church_members cm ON ca.member_id=cm.id WHERE cm.tenant_id=$1 ORDER BY cm.name', [t])).rows;
+  res.send(renderPage('Church Member Login Credentials', `
+    <div class="card"><h2>Member Login Credentials</h2>
+    <p class="muted" style="margin-bottom:15px">Members log in at <strong>/church/login</strong> with Phone Number + Password</p>
+    <a href="/church/members/generate-passwords" class="btn btn-green btn-sm" style="margin-bottom:15px">Generate New Passwords</a>
+    ${accounts.length ? `<table><tr><th>Name</th><th>Phone</th><th>Password</th><th>Last Login</th></tr>
+    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.phone||'')}</td><td style="font-family:monospace;font-weight:700">${esc(a.temp_password||'Set')}</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
+    </table>` : '<p class="muted">No accounts yet.</p>'}</div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// v12.0: AUTOMATED FEE REMINDER SYSTEM
+// ============================================================
+app.get('/school/fee-reminders', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const overdueFees = (await pool.query('SELECT f.*, s.name as student_name, s.admission_no, s.guardian_phone, s.parent_email FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 AND (f.amount-f.paid)>0 ORDER BY (f.amount-f.paid) DESC', [t])).rows;
+  const reminderLog = (await pool.query("SELECT * FROM sms_logs WHERE tenant_id=$1 AND trigger_type='fee_reminder' ORDER BY created_at DESC LIMIT 20", [t])).rows;
+  const totalOverdue = overdueFees.reduce((s,f) => s + (f.amount - f.paid), 0);
+  
+  res.send(renderPage('Fee Reminders', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>Fee Reminders</h1><p>Send automated fee balance alerts to parents</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${overdueFees.length}</div><div>Students with Balance</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${totalOverdue.toLocaleString()}</div><div>Total Outstanding</div></div>
+      <div class="stat-card"><div class="stat-num">${reminderLog.length}</div><div>Reminders Sent</div></div>
+    </div>
+    <div class="card">
+      <h3>Send Fee Reminders</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:15px">
+        <form method="POST" action="/school/fee-reminders/send-sms" style="display:inline">
+          <button class="btn btn-green" onclick="return confirm('Send SMS reminders to all parents with outstanding balances? This will use SMS credits.')">Send SMS to All Parents</button>
+        </form>
+        <form method="POST" action="/school/fee-reminders/send-email" style="display:inline">
+          <button class="btn btn-sm" onclick="return confirm('Send email reminders?')">Send Email to All</button>
+        </form>
+      </div>
+      <p class="muted">SMS requires Africa's Talking API key. Emails are always free.</p>
+    </div>
+    <div class="card">
+      <h3>Students with Outstanding Balances</h3>
+      ${overdueFees.length ? `<table><tr><th>Student</th><th>Adm No</th><th>Total</th><th>Paid</th><th>Balance</th><th>Guardian Phone</th><th>Action</th></tr>
+      ${overdueFees.map(f=>{
+        const bal = f.amount - f.paid;
+        return `<tr><td>${esc(f.student_name)}</td><td>${esc(f.admission_no)}</td><td>UGX ${parseInt(f.amount).toLocaleString()}</td><td style="color:#059669">UGX ${parseInt(f.paid).toLocaleString()}</td><td style="color:#dc2626;font-weight:700">UGX ${bal.toLocaleString()}</td><td>${esc(f.guardian_phone||'-')}</td><td>${f.guardian_phone?`<a href="/school/fee-reminders/send-one/${f.id}" class="btn btn-sm btn-green">SMS</a>`:''}</td></tr>`;
+      }).join('')}</table>` : '<p class="muted">All fees cleared!</p>'}
+    </div>
+    <div class="card"><h3>Recent Reminders</h3>
+      ${reminderLog.length ? `<table><tr><th>Date</th><th>Phone</th><th>Message</th><th>Status</th></tr>
+      ${reminderLog.map(r=>`<tr><td>${new Date(r.created_at).toLocaleString()}</td><td>${esc(r.phone)}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc((r.message||'').substring(0,80))}</td><td><span class="tag">${esc(r.status||'sent')}</span></td></tr>`).join('')}</table>` : '<p class="muted">No reminders sent yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+// Send SMS to all parents with overdue fees
+app.post('/school/fee-reminders/send-sms', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const overdue = (await pool.query('SELECT f.*, s.name as student_name, s.guardian_phone FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 AND (f.amount-f.paid)>0 AND s.guardian_phone IS NOT NULL', [t])).rows;
+  let sent = 0, failed = 0;
+  for (const f of overdue) {
+    const bal = f.amount - f.paid;
+    const msg = `Dear Parent/Guardian, ${f.student_name} has a fee balance of UGX ${bal.toLocaleString()}. Please pay to avoid inconvenience. - School Admin`;
+    const ok = await sendSMS(f.guardian_phone, msg);
+    await logSMS(t, f.guardian_phone, msg, 'fee_reminder');
+    if (ok) sent++; else failed++;
+  }
+  await audit(req.session.user.email, 'fee_reminders', `Sent ${sent} SMS reminders (${failed} failed)`);
+  res.send(renderPage('Reminders Sent', `
+    <div class="card"><div class="alert alert-success"><h2>SMS Reminders Sent!</h2><p>Successfully sent: ${sent}</p><p>Failed: ${failed}</p></div>
+    <a href="/school/fee-reminders" class="btn">Back to Reminders</a></div>
+  `, req.session.user));
+}));
+
+// Send email reminders
+app.post('/school/fee-reminders/send-email', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const overdue = (await pool.query('SELECT f.*, s.name as student_name, s.parent_email FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 AND (f.amount-f.paid)>0 AND s.parent_email IS NOT NULL', [t])).rows;
+  let sent = 0;
+  for (const f of overdue) {
+    const bal = f.amount - f.paid;
+    const msg = `Dear Parent/Guardian,<br><br>Your child <strong>${f.student_name}</strong> has a fee balance of <strong>UGX ${bal.toLocaleString()}</strong>.<br><br>Please make payment at your earliest convenience.<br><br>Thank you,<br>School Administration`;
+    await sendEmail(f.parent_email, `Fee Balance Reminder - ${f.student_name}`, msg);
+    sent++;
+  }
+  await audit(req.session.user.email, 'fee_email_reminders', `Sent ${sent} email reminders`);
+  res.send(renderPage('Emails Sent', `
+    <div class="card"><div class="alert alert-success"><h2>Email Reminders Sent!</h2><p>${sent} emails sent.</p></div>
+    <a href="/school/fee-reminders" class="btn">Back to Reminders</a></div>
+  `, req.session.user));
+}));
+
+// Send SMS to one parent
+app.get('/school/fee-reminders/send-one/:fee_id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const f = (await pool.query('SELECT f.*, s.name as student_name, s.guardian_phone FROM fees f JOIN students s ON f.student_id=s.id WHERE f.id=$1', [req.params.fee_id])).rows[0];
+  if (f?.guardian_phone) {
+    const bal = f.amount - f.paid;
+    const msg = `Dear Parent/Guardian, ${f.student_name} has a fee balance of UGX ${bal.toLocaleString()}. Please pay to avoid inconvenience. - School Admin`;
+    await sendSMS(f.guardian_phone, msg);
+    await logSMS(req.session.user.tenant_id, f.guardian_phone, msg, 'fee_reminder');
+  }
+  res.redirect('/school/fee-reminders');
+}));
+
+// ============================================================
+// v12.0: ENHANCED PARENT PORTAL (with fee payment)
+// ============================================================
+app.get('/parent/child/:id', ah(async (req, res) => {
+  if (!req.session.parent) return res.redirect('/parent/login');
+  const student = (await pool.query('SELECT s.*, t.name as school_name, t.logo_url FROM students s JOIN tenants t ON s.tenant_id=t.id WHERE s.id=$1', [req.params.id])).rows[0];
+  if (!student) return res.redirect('/parent/dashboard');
+  const t = student.tenant_id;
+  const [fees, marks, attendance, hw] = await Promise.all([
+    pool.query('SELECT * FROM fees WHERE tenant_id=$1 AND student_id=$2', [t, student.id]),
+    pool.query('SELECT m.*, e.name as exam FROM marks m JOIN exams e ON m.exam_id=e.id WHERE m.student_id=$1 ORDER BY e.created_at DESC LIMIT 20', [student.id]),
+    pool.query("SELECT COUNT(*) as total, COUNT(CASE WHEN status='present' THEN 1 END) as present FROM attendance WHERE tenant_id=$1 AND student_id=$2", [t, student.id]),
+    pool.query('SELECT * FROM homework WHERE tenant_id=$1 AND (class_name=$2 OR class_name IS NULL) ORDER BY due_date DESC LIMIT 10', [t, student.class||''])
+  ]);
+  const feeBalance = fees.rows.reduce((s, f) => s + (f.amount - f.paid), 0);
+  const attRate = attendance.rows[0]?.total > 0 ? Math.round(attendance.rows[0].present / attendance.rows[0].total * 100) : 0;
+  
+  res.send(renderPage(`${student.name}`, `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
+      <div style="display:flex;align-items:center;gap:15px;justify-content:center">
+        ${student.logo_url ? `<img src="${esc(student.logo_url)}" style="height:40px;border-radius:8px">` : ''}
+        <div><h1>${esc(student.name)}</h1><p>${esc(student.class||'')} | ${esc(student.school_name)}</p></div>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${feeBalance.toLocaleString()}</div><div>Fee Balance</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${attRate}%</div><div>Attendance</div></div>
+      <div class="stat-card"><div class="stat-num">${marks.rows.length}</div><div>Scores</div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Fee Statement</h3>
+        ${fees.rows.length ? `<table><tr><th>Description</th><th>Total</th><th>Paid</th><th>Balance</th><th>Action</th></tr>
+        ${fees.rows.map(f=>{
+          const bal = f.amount - f.paid;
+          return `<tr><td>${esc(f.description||'Tuition')}</td><td>UGX ${parseInt(f.amount).toLocaleString()}</td><td style="color:#059669">UGX ${parseInt(f.paid).toLocaleString()}</td><td style="color:${bal>0?'#dc2626':'#059669'};font-weight:700">UGX ${bal.toLocaleString()}</td><td>${bal>0?`<a href="/pay/fees/${f.id}" class="btn btn-sm btn-green">Pay Now</a>`:'<span class="tag" style="background:#d1fae5;color:#065f46">Cleared</span>'}</td></tr>`;
+        }).join('')}</table>` : '<p class="muted">No fee records</p>'}
+      </div>
+      <div class="card"><h3>Recent Results</h3>
+        ${marks.rows.length ? `<table><tr><th>Exam</th><th>Subject</th><th>Score</th><th>Grade</th></tr>
+        ${marks.rows.map(m=>`<tr><td>${esc(m.exam)}</td><td>${esc(m.subject)}</td><td style="font-weight:700">${m.score||'-'}</td><td><span class="tag">${esc(m.grade||'-')}</span></td></tr>`).join('')}</table>` : '<p class="muted">No results yet</p>'}
+      </div>
+      <div class="card"><h3>Homework</h3>
+        ${hw.rows.map(h=>`<div style="padding:8px;border-bottom:1px solid #e2e8f0"><strong>${esc(h.title)}</strong><br><span class="muted">${esc(h.subject||'')} - Due: ${h.due_date||'No date'}</span></div>`).join('')||'<p class="muted">No homework</p>'}
+      </div>
+      <div class="card">
+        <h3>Quick Actions</h3>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <a href="/parent/child/${student.id}/report" class="btn btn-gold btn-sm">Download Report Card</a>
+          ${feeBalance > 0 ? `<a href="/pay/fees/${fees.rows.find(f=>(f.amount-f.paid)>0)?.id}" class="btn btn-green btn-sm">Pay Fees Online</a>` : ''}
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:20px"><a href="/parent/dashboard" class="btn btn-sm">Back to Children</a> <a href="/parent/logout" class="btn btn-red btn-sm">Logout</a></div>
+  `, null));
+}));
+
+// ============================================================
+// v12.0: ADD LINKS TO ALL DASHBOARDS
+// ============================================================ 
+// Add fee reminders and payment links to school dashboard
+app.get('/school/fee-reminders-link', requireAuth, ah(async (req, res) => { res.redirect('/school/fee-reminders'); }));
 
 // ============================================================
 // === ADD FEATURES TO ALL DASHBOARDS ===
