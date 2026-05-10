@@ -983,7 +983,70 @@ const migrations = [
   `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS author TEXT`,
   `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false`,
   `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ`,
-  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
+  `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+  // ============ v14 PLATFORM SETTINGS & EDUCATIONAL RESOURCES ============
+  `CREATE TABLE IF NOT EXISTS platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  `INSERT INTO platform_settings (key, value) VALUES ('site_name', 'SSEWASSWA') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('site_tagline', 'The Operating System for African Institutions') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('support_email', 'support@ssewasswa.onrender.com') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('support_phone', '') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('developer_phone', '') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('developer_email', 'waiswadaniel24@gmail.com') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('whatsapp_link', '') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('twitter_link', '') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('facebook_link', '') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('footer_text', 'All rights reserved.') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('ad_revenue_per_view', '50') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('premium_resource_price', '2000') ON CONFLICT (key) DO NOTHING`,
+  // Educational resources (books, past papers, study materials)
+  `CREATE TABLE IF NOT EXISTS educational_resources (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    category TEXT DEFAULT 'book',
+    subject TEXT,
+    class_level TEXT,
+    file_url TEXT,
+    file_type TEXT,
+    cover_image TEXT,
+    source TEXT,
+    author TEXT,
+    is_free BOOLEAN DEFAULT true,
+    price INTEGER DEFAULT 0,
+    download_count INTEGER DEFAULT 0,
+    view_count INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    scraped_from TEXT,
+    created_by TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'book'`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS subject TEXT`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS class_level TEXT`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS file_url TEXT`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS file_type TEXT`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS cover_image TEXT`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS source TEXT`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS author TEXT`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT true`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS price INTEGER DEFAULT 0`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS download_count INTEGER DEFAULT 0`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS view_count INTEGER DEFAULT 0`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS scraped_from TEXT`,
+  `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  // Developer content posts (public announcements, promotions, etc.)
+  `CREATE TABLE IF NOT EXISTS dev_posts (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    post_type TEXT DEFAULT 'announcement',
+    image_url TEXT,
+    link_url TEXT,
+    is_pinned BOOLEAN DEFAULT false,
+    is_published BOOLEAN DEFAULT true,
+    views INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`
 ];
 
 (async () => {
@@ -1023,6 +1086,18 @@ const migrations = [
     }
   }
 })();
+
+// === PLATFORM SETTINGS CACHE ===
+let platformSettings = { site_name: 'SSEWASSWA', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: 'waiswadaniel24@gmail.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000' };
+async function loadPlatformSettings() {
+  try {
+    const rows = (await pool.query('SELECT key, value FROM platform_settings')).rows;
+    for (const r of rows) { if (r.value !== null && r.value !== undefined) platformSettings[r.key] = r.value; }
+  } catch (e) { console.warn('Could not load platform settings:', e.message); }
+}
+loadPlatformSettings();
+// Refresh settings every 60 seconds
+setInterval(loadPlatformSettings, 60000);
 
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user) => {
@@ -1093,7 +1168,7 @@ ${process.env.GA_TRACKING_ID ? `
 ` : ''}
 </head><body>
 <nav class="nav">
-  <div><a href="/" style="font-size:20px;font-weight:800">SSEWASSWA</a></div>
+  <div><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
@@ -1105,17 +1180,29 @@ ${process.env.GA_TRACKING_ID ? `
       <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">Logout</a>
-    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a>`}
+    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
 </nav>
 <div class="container">${content}</div>
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
-    <div><strong style="font-size:16px">SSEWASSWA Platform</strong><p class="muted" style="margin-top:8px">The Operating System for African Institutions - Schools, Clinics, Churches & Businesses</p></div>
-    <div><strong>Need Help?</strong><p class="muted" style="margin-top:6px">Email: <a href="mailto:support@ssewasswa.onrender.com" style="color:#4f46e5">support@ssewasswa.onrender.com</a></p><p class="muted">Phone: <a href="tel:+256700000000" style="color:#4f46e5">+256 700 000 000</a></p><p class="muted"><a href="/help" style="color:#4f46e5">Help Center & FAQs</a></p></div>
-    <div><strong>Quick Links</strong><p class="muted" style="margin-top:6px"><a href="/blog" style="color:#4f46e5">Blog & News</a></p><p class="muted"><a href="/p/entertainment" style="color:#4f46e5">Entertainment</a></p><p class="muted"><a href="/p/fundraising" style="color:#4f46e5">Fundraising</a></p><p class="muted"><a href="/register" style="color:#4f46e5">Get Started</a></p></div>
+    <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
+    <div><strong>Need Help?</strong>
+      <p class="muted" style="margin-top:6px">Email: <a href="mailto:${esc(platformSettings.support_email)}" style="color:#4f46e5">${esc(platformSettings.support_email)}</a></p>
+      ${platformSettings.support_phone ? `<p class="muted">Phone: <a href="tel:${esc(platformSettings.support_phone)}" style="color:#4f46e5">${esc(platformSettings.support_phone)}</a></p>` : ''}
+      ${platformSettings.whatsapp_link ? `<p class="muted"><a href="${esc(platformSettings.whatsapp_link)}" target="_blank" style="color:#4f46e5">WhatsApp Us</a></p>` : ''}
+      <p class="muted"><a href="/help" style="color:#4f46e5">Help Center & FAQs</a></p>
+    </div>
+    <div><strong>Quick Links</strong>
+      <p class="muted" style="margin-top:6px"><a href="/blog" style="color:#4f46e5">Blog & News</a></p>
+      <p class="muted"><a href="/library" style="color:#4f46e5">Books & Papers</a></p>
+      <p class="muted"><a href="/p/entertainment" style="color:#4f46e5">Entertainment</a></p>
+      <p class="muted"><a href="/p/fundraising" style="color:#4f46e5">Fundraising</a></p>
+      ${platformSettings.facebook_link ? `<p class="muted"><a href="${esc(platformSettings.facebook_link)}" target="_blank" style="color:#4f46e5">Facebook</a></p>` : ''}
+      ${platformSettings.twitter_link ? `<p class="muted"><a href="${esc(platformSettings.twitter_link)}" target="_blank" style="color:#4f46e5">Twitter/X</a></p>` : ''}
+    </div>
   </div>
-  <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}"><p class="muted">&copy; ${new Date().getFullYear()} SSEWASSWA. All rights reserved.</p></div>
+  <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}"><p class="muted">&copy; ${new Date().getFullYear()} ${esc(platformSettings.site_name)}. ${esc(platformSettings.footer_text)}</p></div>
 </footer>
 </body></html>`;
 };
@@ -4830,9 +4917,12 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     <!-- DEV NAVIGATION -->
     <div class="dev-nav">
       <a href="/dev/master" style="background:#4f46e5;color:white">Dashboard</a>
-      <a href="/dev/withdraw" style="background:#059669;color:white">Withdraw Money</a>
+      <a href="/dev/settings" style="background:#ec4899;color:white">Settings</a>
+      <a href="/dev/withdraw" style="background:#059669;color:white">Withdraw</a>
       <a href="/dev/adverts" style="background:#f59e0b;color:white">Adverts</a>
-      <a href="/dev/blog" style="background:#8b5cf6;color:white">Blog & News</a>
+      <a href="/dev/blog" style="background:#8b5cf6;color:white">Blog</a>
+      <a href="/dev/posts" style="background:#f97316;color:white">Posts</a>
+      <a href="/dev/resources" style="background:#14b8a6;color:white">Books & Papers</a>
       <a href="/dev/activity" style="background:#0ea5e9;color:white">Activity</a>
       <a href="/dev/features" style="background:#64748b;color:white">Features</a>
     </div>
@@ -4873,9 +4963,21 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     <!-- QUICK ACTIONS - WHAT YOU CAN DO -->
     <h2 style="font-size:22px;margin-bottom:16px;margin-top:24px">Quick Actions</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:24px">
+      <a href="/dev/settings" class="quick-action">
+        <div class="icon" style="background:#fce7f3;color:#ec4899">&#9881;</div>
+        <div class="text"><h4>Platform Settings</h4><p>Edit your contacts, website name, social links</p></div>
+      </a>
       <a href="/dev/withdraw" class="quick-action">
         <div class="icon" style="background:#dcfce7;color:#059669">$</div>
         <div class="text"><h4>Withdraw Money</h4><p>Send earnings to your MTN/Airtel mobile money</p></div>
+      </a>
+      <a href="/dev/posts" class="quick-action">
+        <div class="icon" style="background:#ffedd5;color:#f97316">P</div>
+        <div class="text"><h4>Post to Public</h4><p>Announcements, promotions, updates</p></div>
+      </a>
+      <a href="/dev/resources" class="quick-action">
+        <div class="icon" style="background:#ccfbf1;color:#14b8a6">R</div>
+        <div class="text"><h4>Books & Past Papers</h4><p>Add/scrape educational resources for users</p></div>
       </a>
       <a href="/dev/adverts" class="quick-action">
         <div class="icon" style="background:#fef3c7;color:#d97706">A</div>
@@ -5286,6 +5388,325 @@ app.get('/help', ah(async (req, res) => {
       </div>
     </div>
   `, req.session.user));
+}));
+
+// === DEV SETTINGS — EDIT YOUR PLATFORM ===
+app.get('/dev/settings', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const flash = req.session.flash; delete req.session.flash;
+  const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+  const s = platformSettings;
+  res.send(renderPage('Platform Settings', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Platform Settings</h1><p style="opacity:0.9;margin-top:4px">Customize your platform — contacts, branding, social links</p>
+    </div>
+    ${flashHtml}
+
+    <form method="POST" action="/dev/settings/save">
+      <div class="dev-section">
+        <h2>Branding & Website</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><label>Website Name</label><input name="site_name" value="${esc(s.site_name)}" placeholder="e.g. SSEWASSWA"></div>
+          <div><label>Tagline</label><input name="site_tagline" value="${esc(s.site_tagline)}" placeholder="e.g. The Operating System for African Institutions"></div>
+        </div>
+        <label>Footer Text</label><input name="footer_text" value="${esc(s.footer_text)}" placeholder="e.g. All rights reserved.">
+      </div>
+
+      <div class="dev-section">
+        <h2>Contact Information (shown on all pages)</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><label>Support Email</label><input name="support_email" type="email" value="${esc(s.support_email)}" placeholder="e.g. support@ssewasswa.onrender.com"></div>
+          <div><label>Support Phone</label><input name="support_phone" value="${esc(s.support_phone)}" placeholder="e.g. +256 7XX XXX XXX"></div>
+          <div><label>Developer Email</label><input name="developer_email" type="email" value="${esc(s.developer_email)}" placeholder="Your personal email"></div>
+          <div><label>Developer Phone</label><input name="developer_phone" value="${esc(s.developer_phone)}" placeholder="Your personal phone"></div>
+        </div>
+      </div>
+
+      <div class="dev-section">
+        <h2>Social Links</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+          <div><label>WhatsApp Link</label><input name="whatsapp_link" value="${esc(s.whatsapp_link)}" placeholder="https://wa.me/2567XXXXXXXX"></div>
+          <div><label>Facebook Page</label><input name="facebook_link" value="${esc(s.facebook_link)}" placeholder="https://facebook.com/yourpage"></div>
+          <div><label>Twitter / X</label><input name="twitter_link" value="${esc(s.twitter_link)}" placeholder="https://twitter.com/yourhandle"></div>
+        </div>
+      </div>
+
+      <div class="dev-section">
+        <h2>Monetization Settings</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><label>Revenue per Ad View (UGX)</label><input name="ad_revenue_per_view" type="number" value="${esc(s.ad_revenue_per_view)}" placeholder="50"></div>
+          <div><label>Premium Resource Price (UGX)</label><input name="premium_resource_price" type="number" value="${esc(s.premium_resource_price)}" placeholder="2000"></div>
+        </div>
+      </div>
+
+      <button class="btn btn-gold" style="font-size:16px;padding:14px 40px;width:100%">Save All Settings</button>
+    </form>
+
+    <style>
+      .dev-section{background:white;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.05);border:1px solid #e2e8f0}
+      .dev-section h2{font-size:18px;margin-bottom:16px;color:#4f46e5}
+      .dev-section label{font-weight:600;font-size:13px;color:#64748b;display:block;margin-bottom:4px;margin-top:8px}
+    </style>
+  `, req.session.user));
+}));
+
+app.post('/dev/settings/save', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const fields = ['site_name', 'site_tagline', 'support_email', 'support_phone', 'developer_email', 'developer_phone', 'whatsapp_link', 'facebook_link', 'twitter_link', 'footer_text', 'ad_revenue_per_view', 'premium_resource_price'];
+  for (const key of fields) {
+    const val = req.body[key] || '';
+    await pool.query('INSERT INTO platform_settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()', [key, val]);
+  }
+  await loadPlatformSettings();
+  await audit(req.session.user.email, 'update_platform_settings', 'Updated platform settings');
+  req.session.flash = { type: 'success', msg: 'Settings saved successfully! Changes are live now.' };
+  res.redirect('/dev/settings');
+}));
+
+// === DEV POSTS — POST TO PUBLIC ===
+app.get('/dev/posts', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const posts = (await pool.query('SELECT * FROM dev_posts ORDER BY is_pinned DESC, created_at DESC')).rows;
+  const flash = req.session.flash; delete req.session.flash;
+  const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+  res.send(renderPage('Manage Posts', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Public Posts & Announcements</h1><p style="opacity:0.9;margin-top:4px">Post updates, promotions, and announcements visible to all users</p>
+    </div>
+    ${flashHtml}
+    <div class="card"><h3>Create New Post</h3>
+      <form method="POST" action="/dev/posts/create">
+        <input name="title" placeholder="Post title" required>
+        <select name="post_type"><option value="announcement">Announcement</option><option value="promotion">Promotion</option><option value="update">Update</option><option value="tip">Tip & Guide</option><option value="event">Event</option></select>
+        <textarea name="content" rows="5" placeholder="Write your post content here..." required></textarea>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <input name="image_url" placeholder="Image URL (optional)">
+          <input name="link_url" placeholder="Link URL (optional)">
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" name="is_pinned" value="true"> Pin this post</label>
+          <button class="btn btn-green" type="submit">Publish Post</button>
+        </div>
+      </form>
+    </div>
+    ${posts.length > 0 ? `<div class="card"><h3>All Posts (${posts.length})</h3>
+      <table><tr><th>Title</th><th>Type</th><th>Views</th><th>Pinned</th><th>Date</th><th>Actions</th></tr>
+      ${posts.map(p => `<tr>
+        <td><strong>${esc(p.title)}</strong></td>
+        <td><span class="tag">${esc(p.post_type)}</span></td>
+        <td>${p.views || 0}</td>
+        <td>${p.is_pinned ? '📌' : ''}</td>
+        <td>${new Date(p.created_at).toLocaleDateString()}</td>
+        <td>
+          <a href="/dev/posts/toggle/${p.id}" class="btn btn-sm">${p.is_pinned ? 'Unpin' : 'Pin'}</a>
+          <a href="/dev/posts/delete/${p.id}" class="btn btn-sm btn-red" onclick="return confirm('Delete this post?')">Delete</a>
+        </td>
+      </tr>`).join('')}
+      </table></div>` : '<div class="card" style="text-align:center;padding:30px"><p class="muted">No posts yet. Create your first post above!</p></div>'}
+  `, req.session.user));
+}));
+
+app.post('/dev/posts/create', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { title, content, post_type, image_url, link_url, is_pinned } = req.body;
+  await pool.query('INSERT INTO dev_posts(title,content,post_type,image_url,link_url,is_pinned) VALUES($1,$2,$3,$4,$5,$6)', [title, content, post_type || 'announcement', image_url || '', link_url || '', is_pinned === 'true']);
+  await audit(req.session.user.email, 'create_dev_post', `Post: ${title}`);
+  req.session.flash = { type: 'success', msg: 'Post published!' };
+  res.redirect('/dev/posts');
+}));
+
+app.get('/dev/posts/toggle/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('UPDATE dev_posts SET is_pinned = NOT is_pinned WHERE id=$1', [req.params.id]);
+  res.redirect('/dev/posts');
+}));
+
+app.get('/dev/posts/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('DELETE FROM dev_posts WHERE id=$1', [req.params.id]);
+  req.session.flash = { type: 'success', msg: 'Post deleted' };
+  res.redirect('/dev/posts');
+}));
+
+// === DEV RESOURCES — UPLOAD & SCRAPE BOOKS/PAPERS ===
+app.get('/dev/resources', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const resources = (await pool.query('SELECT * FROM educational_resources ORDER BY created_at DESC LIMIT 100')).rows;
+  const flash = req.session.flash; delete req.session.flash;
+  const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+  const totalViews = resources.reduce((sum, r) => sum + (r.view_count || 0), 0);
+  const totalDownloads = resources.reduce((sum, r) => sum + (r.download_count || 0), 0);
+  const totalRevenue = totalDownloads * parseInt(platformSettings.premium_resource_price || 2000);
+  res.send(renderPage('Educational Resources', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Books & Past Papers</h1><p style="opacity:0.9;margin-top:4px">Manage educational resources for users — earn from premium downloads</p>
+    </div>
+    ${flashHtml}
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+      <div class="stat-card"><div class="stat-num">${resources.length}</div><div class="muted">Total Resources</div></div>
+      <div class="stat-card"><div class="stat-num">${totalViews}</div><div class="muted">Total Views</div></div>
+      <div class="stat-card"><div class="stat-num">${totalDownloads}</div><div class="muted">Downloads</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${totalRevenue.toLocaleString()}</div><div class="muted">Est. Revenue</div></div>
+    </div>
+
+    <div class="card"><h3>Add Resource Manually</h3>
+      <form method="POST" action="/dev/resources/create" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>Title</label><input name="title" placeholder="e.g. UCE Mathematics Past Paper 2023" required></div>
+        <div><label>Category</label><select name="category"><option value="book">Book</option><option value="past_paper">Past Paper</option><option value="notes">Study Notes</option><option value="syllabus">Syllabus</option><option value="guide">Guide / Manual</option><option value="other">Other</option></select></div>
+        <div><label>Subject</label><input name="subject" placeholder="e.g. Mathematics, English"></div>
+        <div><label>Class Level</label><input name="class_level" placeholder="e.g. S1-S4, P1-P7, A-Level"></div>
+        <div><label>Author / Source</label><input name="author" placeholder="e.g. UNEB, NCDC"></div>
+        <div><label>File URL</label><input name="file_url" placeholder="Link to PDF/file" required></div>
+        <div><label>File Type</label><select name="file_type"><option value="pdf">PDF</option><option value="doc">Document</option><option value="epub">ePub</option><option value="video">Video</option><option value="link">Web Link</option></select></div>
+        <div><label>Cover Image URL</label><input name="cover_image" placeholder="Image URL (optional)"></div>
+        <div><label>Price (UGX, 0 = Free)</label><input name="price" type="number" value="0" min="0"></div>
+        <div style="grid-column:1/-1"><label>Description</label><textarea name="description" rows="2" placeholder="Brief description of this resource"></textarea></div>
+        <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Add Resource</button></div>
+      </form>
+    </div>
+
+    <div class="card"><h3>Scrape Educational Resources</h3>
+      <p class="muted" style="margin-bottom:12px">Search the web for free books, past papers, and study materials to add to your library</p>
+      <form method="POST" action="/dev/resources/scrape" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+        <div style="flex:2;min-width:200px"><label>Search Query</label><input name="query" placeholder="e.g. UCE past papers PDF, Uganda primary school books" required></div>
+        <div style="flex:1;min-width:120px"><label>Category</label><select name="category"><option value="past_paper">Past Paper</option><option value="book">Book</option><option value="notes">Notes</option><option value="syllabus">Syllabus</option></select></div>
+        <button class="btn btn-gold" type="submit">Search & Import</button>
+      </form>
+    </div>
+
+    ${resources.length > 0 ? `<div class="card"><h3>All Resources (${resources.length})</h3>
+      <table><tr><th>Title</th><th>Category</th><th>Subject</th><th>Price</th><th>Views</th><th>Downloads</th><th>Actions</th></tr>
+      ${resources.map(r => `<tr>
+        <td><strong>${esc((r.title||'').substring(0,50))}</strong></td>
+        <td><span class="tag">${esc(r.category||'book')}</span></td>
+        <td>${esc(r.subject||'-')}</td>
+        <td style="font-weight:700;color:${r.price > 0 ? '#d97706' : '#059669'}">${r.price > 0 ? 'UGX ' + parseInt(r.price).toLocaleString() : 'Free'}</td>
+        <td>${r.view_count || 0}</td>
+        <td>${r.download_count || 0}</td>
+        <td>
+          <a href="/dev/resources/toggle/${r.id}" class="btn btn-sm">${r.is_active ? 'Hide' : 'Show'}</a>
+          <a href="/dev/resources/delete/${r.id}" class="btn btn-sm btn-red" onclick="return confirm('Delete?')">Del</a>
+        </td>
+      </tr>`).join('')}
+      </table></div>` : ''}
+  `, req.session.user));
+}));
+
+app.post('/dev/resources/create', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { title, description, category, subject, class_level, file_url, file_type, cover_image, author, price } = req.body;
+  const isFree = !price || parseInt(price) === 0;
+  await pool.query('INSERT INTO educational_resources(title,description,category,subject,class_level,file_url,file_type,cover_image,source,author,is_free,price,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+    [title, description || '', category || 'book', subject || '', class_level || '', file_url, file_type || 'pdf', cover_image || '', 'manual', author || '', isFree, parseInt(price) || 0, req.session.user.email]);
+  await audit(req.session.user.email, 'add_resource', `${category}: ${title}`);
+  req.session.flash = { type: 'success', msg: 'Resource added!' };
+  res.redirect('/dev/resources');
+}));
+
+app.post('/dev/resources/scrape', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { query, category } = req.body;
+  let imported = 0;
+  try {
+    const ZAI = (await import('z-ai-web-dev-sdk')).default;
+    const zai = await ZAI.create();
+    const results = await zai.functions.invoke('web_search', { query: `${query} filetype:pdf OR site:*.go.ug OR site:uneb.ac.ug`, num: 15 });
+    for (const item of (results || [])) {
+      if (!item.name && !item.title) continue;
+      try {
+        await pool.query('INSERT INTO educational_resources(title,description,category,file_url,file_type,source,is_free,price,scraped_from,created_by) VALUES($1,$2,$3,$4,$5,$6,true,0,$7,$8) ON CONFLICT DO NOTHING',
+          [item.name || item.title, item.snippet || '', category || 'book', item.url || '', item.url && item.url.endsWith('.pdf') ? 'pdf' : 'link', item.host_name || 'web', item.url, req.session.user.email]);
+        imported++;
+      } catch (e) { /* skip duplicates */ }
+    }
+  } catch (e) {
+    console.warn('Scrape error:', e.message);
+  }
+  await audit(req.session.user.email, 'scrape_resources', `Imported ${imported} resources for "${query}"`);
+  req.session.flash = { type: imported > 0 ? 'success' : 'info', msg: imported > 0 ? `Imported ${imported} resource(s)!` : 'No new resources found. Try a different search.' };
+  res.redirect('/dev/resources');
+}));
+
+app.get('/dev/resources/toggle/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('UPDATE educational_resources SET is_active = NOT is_active WHERE id=$1', [req.params.id]);
+  res.redirect('/dev/resources');
+}));
+
+app.get('/dev/resources/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('DELETE FROM educational_resources WHERE id=$1', [req.params.id]);
+  res.redirect('/dev/resources');
+}));
+
+// === PUBLIC LIBRARY — BROWSE BOOKS & PAPERS ===
+app.get('/library', ah(async (req, res) => {
+  const filter = req.query.category || '';
+  const search = req.query.q || '';
+  let query = 'SELECT * FROM educational_resources WHERE is_active=true';
+  const params = [];
+  if (filter) { params.push(filter); query += ` AND category=$${params.length}`; }
+  if (search) { params.push(`%${search}%`); query += ` AND (title ILIKE $${params.length} OR subject ILIKE $${params.length} OR description ILIKE $${params.length})`; }
+  query += ' ORDER BY download_count DESC, view_count DESC, created_at DESC LIMIT 60';
+  const resources = (await pool.query(query, params)).rows;
+  // Track views
+  if (resources.length > 0) {
+    pool.query('UPDATE educational_resources SET view_count = view_count + 1 WHERE id = ANY($1)', [resources.map(r => r.id)]).catch(() => {});
+  }
+  // Get dev posts for the homepage feed
+  const devPosts = (await pool.query('SELECT * FROM dev_posts WHERE is_published=true ORDER BY is_pinned DESC, created_at DESC LIMIT 5')).rows;
+
+  res.send(renderPage('Library - Books & Past Papers', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:40px 20px;border-radius:16px;margin-bottom:20px;color:white;text-align:center">
+      <h1>Books & Past Papers Library</h1>
+      <p style="opacity:0.9;margin-top:8px">Free and premium educational resources for Ugandan students and institutions</p>
+    </div>
+
+    ${devPosts.length > 0 ? `<div class="card" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border-color:#93c5fd">
+      <h3 style="color:#1e40af">Latest from ${esc(platformSettings.site_name)}</h3>
+      ${devPosts.map(p => `<div style="padding:10px 0;border-bottom:1px solid #bfdbfe">
+        <strong>${p.is_pinned ? '📌 ' : ''}${esc(p.title)}</strong>
+        <span class="tag" style="margin-left:6px">${esc(p.post_type)}</span>
+        <p class="muted" style="margin-top:4px">${esc((p.content||'').substring(0,120))}${p.content && p.content.length > 120 ? '...' : ''}</p>
+        ${p.link_url ? `<a href="${esc(p.link_url)}" target="_blank" class="btn btn-sm" style="margin-top:4px">Read More</a>` : ''}
+      </div>`).join('')}
+    </div>` : ''}
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center">
+      <form method="GET" action="/library" style="display:flex;gap:8px;flex:1;min-width:250px">
+        <input name="q" value="${esc(search)}" placeholder="Search books, papers, notes..." style="flex:1;margin:0">
+        <button class="btn btn-sm" type="submit">Search</button>
+      </form>
+      <a href="/library" class="btn btn-sm ${!filter ? 'btn-green' : ''}">All</a>
+      <a href="/library?category=book" class="btn btn-sm ${filter==='book' ? 'btn-green' : ''}">Books</a>
+      <a href="/library?category=past_paper" class="btn btn-sm ${filter==='past_paper' ? 'btn-green' : ''}">Past Papers</a>
+      <a href="/library?category=notes" class="btn btn-sm ${filter==='notes' ? 'btn-green' : ''}">Notes</a>
+      <a href="/library?category=syllabus" class="btn btn-sm ${filter==='syllabus' ? 'btn-green' : ''}">Syllabus</a>
+      <a href="/library?category=guide" class="btn btn-sm ${filter==='guide' ? 'btn-green' : ''}">Guides</a>
+    </div>
+
+    ${resources.length > 0 ? `<div class="grid">
+      ${resources.map(r => `
+        <div class="card" style="padding:18px;position:relative">
+          ${r.cover_image ? `<img src="${esc(r.cover_image)}" style="width:100%;height:160px;object-fit:cover;border-radius:10px;margin-bottom:12px" alt="${esc(r.title)}">` : `<div style="width:100%;height:120px;background:linear-gradient(135deg,#e0e7ff,#c7d2fe);border-radius:10px;margin-bottom:12px;display:flex;align-items:center;justify-content:center;font-size:48px">${r.category === 'past_paper' ? '📄' : r.category === 'book' ? '📚' : r.category === 'notes' ? '📝' : r.category === 'syllabus' ? '📋' : '📖'}</div>`}
+          <span class="tag">${esc(r.category||'book')}</span>
+          ${r.subject ? `<span class="tag" style="background:#d1fae5;color:#065f46;margin-left:4px">${esc(r.subject)}</span>` : ''}
+          ${r.class_level ? `<span class="muted" style="margin-left:4px">${esc(r.class_level)}</span>` : ''}
+          <h4 style="margin:8px 0 4px;font-size:15px">${esc(r.title)}</h4>
+          <p class="muted" style="margin-bottom:8px">${esc((r.description||'').substring(0,80))}</p>
+          ${r.author ? `<p class="muted">By ${esc(r.author)}</p>` : ''}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+            <span style="font-weight:800;font-size:16px;color:${r.is_free !== false && r.price === 0 ? '#059669' : '#d97706'}">${r.is_free !== false && r.price === 0 ? 'Free' : 'UGX ' + parseInt(r.price || 0).toLocaleString()}</span>
+            <a href="${esc(r.file_url || '#')}" target="_blank" class="btn btn-sm ${r.is_free !== false && r.price === 0 ? 'btn-green' : 'btn-gold'}" onclick="fetch('/library/download/${r.id}')" rel="nofollow">${r.is_free !== false && r.price === 0 ? 'Download' : 'Get Access'}</a>
+          </div>
+          <div style="display:flex;gap:12px;margin-top:8px"><span class="muted">${r.view_count || 0} views</span><span class="muted">${r.download_count || 0} downloads</span></div>
+        </div>
+      `).join('')}
+    </div>` : '<div class="card" style="text-align:center;padding:40px"><h3>No resources yet</h3><p class="muted">Check back soon for books and past papers!</p></div>'}
+  `, req.session.user));
+}));
+
+app.get('/library/download/:id', ah(async (req, res) => {
+  try {
+    await pool.query('UPDATE educational_resources SET download_count = download_count + 1 WHERE id=$1', [req.params.id]);
+    // Track revenue for premium downloads
+    const r = (await pool.query('SELECT price, title FROM educational_resources WHERE id=$1', [req.params.id])).rows[0];
+    if (r && r.price > 0) {
+      await pool.query('INSERT INTO developer_revenue(amount,source,details) VALUES($1,$2,$3)', [r.price, 'Premium download', JSON.stringify({ resource_id: req.params.id, title: r.title })]);
+      await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [r.price]);
+    }
+  } catch (e) {}
+  res.status(200).send('OK');
 }));
 
 // === FUNDRAISING UPGRADE ===
@@ -8659,7 +9080,7 @@ ${process.env.GA_TRACKING_ID ? `
 ` : ''}
 </head><body>
 <nav class="nav">
-  <div><a href="/" style="font-size:20px;font-weight:800">SSEWASSWA</a></div>
+  <div><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
@@ -8672,17 +9093,29 @@ ${process.env.GA_TRACKING_ID ? `
       <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">Logout</a>
-    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a>`}
+    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
 </nav>
 <div class="container">${content}</div>
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
-    <div><strong style="font-size:16px">SSEWASSWA Platform</strong><p class="muted" style="margin-top:8px">The Operating System for African Institutions - Schools, Clinics, Churches & Businesses</p></div>
-    <div><strong>Need Help?</strong><p class="muted" style="margin-top:6px">Email: <a href="mailto:support@ssewasswa.onrender.com" style="color:#4f46e5">support@ssewasswa.onrender.com</a></p><p class="muted">Phone: <a href="tel:+256700000000" style="color:#4f46e5">+256 700 000 000</a></p><p class="muted"><a href="/help" style="color:#4f46e5">Help Center & FAQs</a></p></div>
-    <div><strong>Quick Links</strong><p class="muted" style="margin-top:6px"><a href="/blog" style="color:#4f46e5">Blog & News</a></p><p class="muted"><a href="/p/entertainment" style="color:#4f46e5">Entertainment</a></p><p class="muted"><a href="/p/fundraising" style="color:#4f46e5">Fundraising</a></p><p class="muted"><a href="/register" style="color:#4f46e5">Get Started</a></p></div>
+    <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
+    <div><strong>Need Help?</strong>
+      <p class="muted" style="margin-top:6px">Email: <a href="mailto:${esc(platformSettings.support_email)}" style="color:#4f46e5">${esc(platformSettings.support_email)}</a></p>
+      ${platformSettings.support_phone ? `<p class="muted">Phone: <a href="tel:${esc(platformSettings.support_phone)}" style="color:#4f46e5">${esc(platformSettings.support_phone)}</a></p>` : ''}
+      ${platformSettings.whatsapp_link ? `<p class="muted"><a href="${esc(platformSettings.whatsapp_link)}" target="_blank" style="color:#4f46e5">WhatsApp Us</a></p>` : ''}
+      <p class="muted"><a href="/help" style="color:#4f46e5">Help Center & FAQs</a></p>
+    </div>
+    <div><strong>Quick Links</strong>
+      <p class="muted" style="margin-top:6px"><a href="/blog" style="color:#4f46e5">Blog & News</a></p>
+      <p class="muted"><a href="/library" style="color:#4f46e5">Books & Papers</a></p>
+      <p class="muted"><a href="/p/entertainment" style="color:#4f46e5">Entertainment</a></p>
+      <p class="muted"><a href="/p/fundraising" style="color:#4f46e5">Fundraising</a></p>
+      ${platformSettings.facebook_link ? `<p class="muted"><a href="${esc(platformSettings.facebook_link)}" target="_blank" style="color:#4f46e5">Facebook</a></p>` : ''}
+      ${platformSettings.twitter_link ? `<p class="muted"><a href="${esc(platformSettings.twitter_link)}" target="_blank" style="color:#4f46e5">Twitter/X</a></p>` : ''}
+    </div>
   </div>
-  <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}"><p class="muted">&copy; ${new Date().getFullYear()} SSEWASSWA. All rights reserved.</p></div>
+  <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}"><p class="muted">&copy; ${new Date().getFullYear()} ${esc(platformSettings.site_name)}. ${esc(platformSettings.footer_text)}</p></div>
 </footer>
 </body></html>`;
 };
