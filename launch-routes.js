@@ -109,6 +109,85 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   })();
 
   // =========================================================================
+  // SECTION 1.5: SEO CONFIG & STRUCTURED DATA (defined early for use in routes)
+  // =========================================================================
+
+  const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+
+  // Structured data helper — returns JSON-LD script tags for the homepage
+  const getStructuredData = () => `
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "SSEWASSWA",
+      "url": "${BASE_URL}",
+      "logo": "${BASE_URL}/icon.png",
+      "description": "All-in-One Management Platform for Schools, Clinics, Churches and Businesses in Africa",
+      "foundingDate": "2024",
+      "foundingLocation": { "@type": "Place", "name": "Kampala, Uganda" },
+      "address": { "@type": "PostalAddress", "addressLocality": "Kampala", "addressCountry": "UG" },
+      "contactPoint": { "@type": "ContactPoint", "contactType": "customer service", "email": "waiswadaniel24@gmail.com", "availableLanguage": ["English"] },
+      "sameAs": []
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "SSEWASSWA Platform",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "offers": [
+        { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "UGX", "description": "Up to 50 records, 1 user" },
+        { "@type": "Offer", "name": "Basic", "price": "100000", "priceCurrency": "UGX", "description": "Up to 500 records, 5 users" },
+        { "@type": "Offer", "name": "Pro", "price": "200000", "priceCurrency": "UGX", "description": "Up to 50000 records, unlimited users" },
+        { "@type": "Offer", "name": "Enterprise", "price": "0", "priceCurrency": "UGX", "description": "Custom pricing, unlimited everything" }
+      ],
+      "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.8", "ratingCount": "127" }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Is SSEWASSWA really free to start?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes! Our Free plan includes up to 50 records, 1 user, basic reports, and 5 SMS per day. No credit card required. Upgrade when you need more capacity." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it work without internet?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes! SSEWASSWA has offline mode built in. You can enter data when disconnected, and everything syncs automatically when your connection returns." }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I pay?",
+          "acceptedAnswer": { "@type": "Answer", "text": "We accept Mobile Money (MTN MoMo, Airtel Money), bank transfers, and Flutterwave for card payments. All prices are in Uganda Shillings with no hidden fees." }
+        },
+        {
+          "@type": "Question",
+          "name": "Is my data secure?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Your data is encrypted, backed up daily, and stored securely. Each institution's data is completely isolated. We comply with Uganda's data protection regulations." }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I use SSEWASSWA on my phone?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes! SSEWASSWA is a Progressive Web App (PWA). Install it directly from your browser on any phone or tablet. Works on Android, iOS, and desktop." }
+        }
+      ]
+    }
+    </script>
+    <link rel="canonical" href="${BASE_URL}/" />
+    <meta property="og:url" content="${BASE_URL}/" />
+    <meta property="og:image" content="${BASE_URL}/icon.png" />
+    <meta name="twitter:image" content="${BASE_URL}/icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+  `;
+
+  // =========================================================================
   // SECTION 2: USER CLEANUP MIGRATION (runs on startup)
   // =========================================================================
 
@@ -1946,10 +2025,9 @@ async function syncOfflineData() {
   });
 
   // =========================================================================
-  // SECTION 17: SEO — robots.txt, sitemap.xml, structured data
+  // SECTION 17: SEO — robots.txt, sitemap.xml
   // =========================================================================
-
-  const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+  // NOTE: BASE_URL and getStructuredData() are defined in Section 1.5 above
 
   // robots.txt — tells search engines what to crawl
   app.get('/robots.txt', (req, res) => {
@@ -2050,87 +2128,6 @@ Sitemap: ${BASE_URL}/sitemap.xml
     // Replace with your actual Google verification string
     res.send('google-site-verification: NOT_SET');
   });
-
-  // =========================================================================
-  // SECTION 18: ENHANCED SEO META IN renderPage
-  // =========================================================================
-  // The renderPage function in server.js already includes og:title, og:description,
-  // twitter:card, and meta description. We enhance the landing page with JSON-LD
-  // structured data for Organization + SoftwareApplication + FAQ schemas.
-  // This is injected into the landing page via the content variable below.
-
-  // Structured data helper — returns JSON-LD script tags for the homepage
-  const getStructuredData = () => `
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "Organization",
-      "name": "SSEWASSWA",
-      "url": "${BASE_URL}",
-      "logo": "${BASE_URL}/icon.png",
-      "description": "All-in-One Management Platform for Schools, Clinics, Churches and Businesses in Africa",
-      "foundingDate": "2024",
-      "foundingLocation": { "@type": "Place", "name": "Kampala, Uganda" },
-      "address": { "@type": "PostalAddress", "addressLocality": "Kampala", "addressCountry": "UG" },
-      "contactPoint": { "@type": "ContactPoint", "contactType": "customer service", "email": "waiswadaniel24@gmail.com", "availableLanguage": ["English"] },
-      "sameAs": []
-    }
-    </script>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "SSEWASSWA Platform",
-      "applicationCategory": "BusinessApplication",
-      "operatingSystem": "Web",
-      "offers": [
-        { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "UGX", "description": "Up to 50 records, 1 user" },
-        { "@type": "Offer", "name": "Basic", "price": "100000", "priceCurrency": "UGX", "description": "Up to 500 records, 5 users" },
-        { "@type": "Offer", "name": "Pro", "price": "200000", "priceCurrency": "UGX", "description": "Up to 50000 records, unlimited users" },
-        { "@type": "Offer", "name": "Enterprise", "price": "0", "priceCurrency": "UGX", "description": "Custom pricing, unlimited everything" }
-      ],
-      "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.8", "ratingCount": "127" }
-    }
-    </script>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      "mainEntity": [
-        {
-          "@type": "Question",
-          "name": "Is SSEWASSWA really free to start?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Yes! Our Free plan includes up to 50 records, 1 user, basic reports, and 5 SMS per day. No credit card required. Upgrade when you need more capacity." }
-        },
-        {
-          "@type": "Question",
-          "name": "Does it work without internet?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Yes! SSEWASSWA has offline mode built in. You can enter data when disconnected, and everything syncs automatically when your connection returns." }
-        },
-        {
-          "@type": "Question",
-          "name": "How do I pay?",
-          "acceptedAnswer": { "@type": "Answer", "text": "We accept Mobile Money (MTN MoMo, Airtel Money), bank transfers, and Flutterwave for card payments. All prices are in Uganda Shillings with no hidden fees." }
-        },
-        {
-          "@type": "Question",
-          "name": "Is my data secure?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Your data is encrypted, backed up daily, and stored securely. Each institution's data is completely isolated. We comply with Uganda's data protection regulations." }
-        },
-        {
-          "@type": "Question",
-          "name": "Can I use SSEWASSWA on my phone?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Yes! SSEWASSWA is a Progressive Web App (PWA). Install it directly from your browser on any phone or tablet. Works on Android, iOS, and desktop." }
-        }
-      ]
-    }
-    </script>
-    <link rel="canonical" href="${BASE_URL}/" />
-    <meta property="og:url" content="${BASE_URL}/" />
-    <meta property="og:image" content="${BASE_URL}/icon.png" />
-    <meta name="twitter:image" content="${BASE_URL}/icon.png" />
-    <meta name="twitter:card" content="summary_large_image" />
-  `;
 
   // =========================================================================
   // LOG: Launch routes loaded
