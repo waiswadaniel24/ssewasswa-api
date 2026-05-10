@@ -1297,7 +1297,19 @@ const migrations = [
   `ALTER TABLE homepage_sections ADD COLUMN IF NOT EXISTS is_visible BOOLEAN DEFAULT true`,
   `ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`,
   `ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS options JSONB`,
-  `ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS required BOOLEAN DEFAULT false`
+  `ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS required BOOLEAN DEFAULT false`,
+  // v15 FIX: Gallery table column fixes
+  `ALTER TABLE photo_galleries ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'events'`,
+  `ALTER TABLE photo_galleries ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  `ALTER TABLE photo_galleries ADD COLUMN IF NOT EXISTS cover_url TEXT`,
+  `ALTER TABLE gallery_photos ADD COLUMN IF NOT EXISTS photo_url TEXT`,
+  `ALTER TABLE gallery_photos ADD COLUMN IF NOT EXISTS caption TEXT`,
+  `ALTER TABLE gallery_photos ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+  // Sync gallery_photos: copy url to photo_url if photo_url is empty
+  `UPDATE gallery_photos SET photo_url = url WHERE photo_url IS NULL AND url IS NOT NULL`,
+  // Documents table: add file_type and uploaded_by if missing
+  `ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_type TEXT`,
+  `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by TEXT`
 ];
 
 (async () => {
@@ -1698,7 +1710,9 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Barcodes</h3><a href="/barcode" class="btn btn-sm">Scan / Generate</a></div>
       <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
       <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
-      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a><a href="/documents/upload" class="btn btn-sm btn-green" style="margin-top:8px">Upload File</a></div>
+      <div class="card" style="background:#fff7ed;border:2px solid #f59e0b"><h3 style="color:#f59e0b">📷 Gallery</h3><a href="/school/gallery" class="btn btn-sm">Photo Gallery</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">📚 Books & Papers</h3><a href="/library" class="btn btn-sm">Browse Library</a></div>
       <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
       <div class="card"><h3>API & Webhooks</h3><a href="/api-keys" class="btn btn-sm">Manage Keys</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>
@@ -7035,37 +7049,80 @@ app.get('/bill-reminders/:id/delete', requireAuth, requireNotBanned, ah(async (r
 app.get('/documents', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const docs = (await pool.query('SELECT * FROM documents WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const filter = req.query.category || '';
+  const filtered = filter ? docs.filter(d => d.category === filter) : docs;
   res.send(renderPage('Document Library', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Document Library</h1><p style="opacity:0.9;margin-top:4px">Upload photos, PDFs, receipts, and documents directly from your device</p>
+    </div>
     <div class="card">
-      <h2>Document Library</h2>
-      <a href="/documents/upload" class="btn btn-sm" style="margin-bottom:15px">Upload Document</a>
-      <div class="grid">${docs.map(d=>`<div class="card"><h3>${esc(d.title)}</h3><p class="muted">${esc(d.description||'')}</p><span class="tag">${esc(d.category||'General')}</span><br><span class="muted">${d.file_type||'file'} - ${new Date(d.created_at).toLocaleDateString()}</span><br>${d.file_url?`<a href="${esc(d.file_url)}" target="_blank" class="btn btn-sm" style="margin-top:10px">View</a>`:''} <a href="/documents/${d.id}/delete" class="btn btn-sm btn-red" style="margin-top:10px">Delete</a></div>`).join('')}</div>
-      ${!docs.length?'<p class="muted">No documents uploaded</p>':''}
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:15px">
+        <h2 style="margin:0">Your Documents (${docs.length})</h2>
+        <a href="/documents/upload" class="btn btn-green btn-sm">+ Upload Document</a>
+      </div>
+      ${docs.length > 0 ? `<div style="margin-bottom:15px;display:flex;gap:6px;flex-wrap:wrap">
+        <a href="/documents" class="btn btn-sm ${!filter?'btn-green':''}" style="font-size:12px">All</a>
+        ${[...new Set(docs.map(d=>d.category))].filter(Boolean).map(c=>`<a href="/documents?category=${esc(c)}" class="btn btn-sm ${filter===c?'btn-green':''}" style="font-size:12px">${esc(c)}</a>`).join('')}
+      </div>` : ''}
+      <div class="grid">${filtered.map(d=>{
+        const isImage = d.file_type === 'photo' || (d.file_url && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(d.file_url));
+        const isPdf = d.file_type === 'PDF' || (d.file_url && /\.pdf$/i.test(d.file_url));
+        return `<div class="card" style="text-align:center">
+          ${isImage ? `<img src="${esc(d.file_url)}" style="max-width:100%;max-height:160px;border-radius:8px;margin-bottom:8px;object-fit:cover">` :
+            isPdf ? `<div style="width:60px;height:70px;background:#dc2626;color:white;border-radius:8px;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px">PDF</div>` :
+            `<div style="width:60px;height:70px;background:#4f46e5;color:white;border-radius:8px;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px">${esc((d.file_type||'FILE').substring(0,4))}</div>`}
+          <strong>${esc(d.title)}</strong><br>
+          <span class="tag" style="margin:4px 0">${esc(d.category||'General')}</span>
+          <span class="muted" style="font-size:12px;display:block;margin:4px 0">${new Date(d.created_at).toLocaleDateString()}</span>
+          ${d.file_url?`<a href="${esc(d.file_url)}" target="_blank" class="btn btn-sm" style="margin-top:6px">View</a>`:''} 
+          <a href="/documents/${d.id}/delete" class="btn btn-sm btn-red" style="margin-top:6px" onclick="return confirm('Delete this document?')">Delete</a>
+        </div>`;
+      }).join('')}</div>
+      ${!docs.length?'<div style="text-align:center;padding:40px"><p style="font-size:48px;margin-bottom:10px">📂</p><p class="muted">No documents yet. Upload your first document!</p><a href="/documents/upload" class="btn btn-green" style="margin-top:10px">Upload Document</a></div>':''}
     </div>
   `, req.session.user));
 }));
 
 app.get('/documents/upload', requireAuth, requireNotBanned, (req, res) => {
+  const hasCloudinary = !!process.env.CLOUDINARY_URL;
   res.send(renderPage('Upload Document', `
     <div class="card" style="max-width:600px;margin:40px auto">
       <h2>Upload Document</h2>
-      <form method="POST" action="/documents/save">
+      <form method="POST" action="/documents/save" enctype="multipart/form-data">
         <input name="title" placeholder="Document Title" required>
         <textarea name="description" placeholder="Description" rows="3"></textarea>
-        <select name="category"><option value="general">General</option><option value="policy">Policy</option><option value="financial">Financial</option><option value="legal">Legal</option><option value="academic">Academic</option><option value="church">Church</option></select>
-        <input name="file_url" type="url" placeholder="File URL (Google Drive, Dropbox, etc.)">
-        <input name="file_type" placeholder="File type (PDF, DOC, XLS, etc.)" value="PDF">
-        <button class="btn" style="width:100%">Save Document</button>
+        <select name="category"><option value="general">General</option><option value="policy">Policy</option><option value="financial">Financial</option><option value="legal">Legal</option><option value="academic">Academic</option><option value="church">Church</option><option value="receipt">Receipt</option><option value="photo">Photo</option></select>
+        <div style="margin:15px 0;padding:20px;border:2px dashed #4f46e5;border-radius:12px;text-align:center;background:${req.session.user?.dark_mode?'#1e293b':'#f8fafc'}">
+          <p style="font-size:32px;margin-bottom:8px">📎</p>
+          <p style="font-weight:600;margin-bottom:10px">Choose file from your device</p>
+          <input type="file" name="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" style="padding:8px;font-size:16px;width:100%">
+          ${hasCloudinary ? '<p style="color:#059669;font-size:12px;margin-top:8px">✓ Cloud upload enabled — your file will be stored securely in the cloud</p>' : '<p style="color:#d97706;font-size:12px;margin-top:8px">⚠ Cloud storage not configured — paste a URL below instead</p>'}
+        </div>
+        <div style="text-align:center;margin:10px 0;color:#94a3b8;font-size:13px">— OR —</div>
+        <input name="file_url" type="url" placeholder="Paste file URL (Google Drive, Dropbox, etc.)" style="margin-bottom:10px">
+        <input name="file_type" placeholder="File type (auto-detected from upload)" value="PDF">
+        <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Upload Document</button>
       </form>
-      <p class="muted" style="margin-top:10px">Tip: Upload your file to Google Drive or Dropbox first, then paste the sharing link here.</p>
     </div>
   `, req.session.user));
 });
 
-app.post('/documents/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/documents/save', requireAuth, requireNotBanned, upload.single('file'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { title, description, file_url, file_type, category } = req.body;
-  await pool.query('INSERT INTO documents(tenant_id,title,description,file_url,file_type,category,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, title, description, file_url, file_type, category, req.session.user.email]);
+  let fileUrl = file_url || '';
+  let fileType = file_type || 'document';
+  // If file uploaded via form, try Cloudinary
+  if (req.file) {
+    const b64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    const uploaded = await uploadToCloudinary(b64, `tenant_${t}/documents`);
+    if (uploaded) {
+      fileUrl = uploaded;
+      fileType = req.file.mimetype.startsWith('image') ? 'photo' : req.file.mimetype === 'application/pdf' ? 'PDF' : req.file.originalname.split('.').pop().toUpperCase();
+    }
+  }
+  if (!fileUrl) return res.send(renderPage('Upload Error', '<div class="card"><div class="alert alert-error">No file provided. Please upload a file or paste a URL.</div><a href="/documents/upload" class="btn">Try Again</a></div>', req.session.user));
+  await pool.query('INSERT INTO documents(tenant_id,title,description,file_url,file_type,category,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, title, description, fileUrl, fileType, category, req.session.user.email]);
   res.redirect('/documents');
 }));
 
@@ -15435,13 +15492,13 @@ app.get('/school/gallery/:id', requireAuth, requireNotBanned, requireFeature('ph
   const t = req.session.user.tenant_id;
   const gallery = (await pool.query('SELECT * FROM photo_galleries WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
   if (!gallery) return res.redirect('/school/gallery');
-  const photos = (await pool.query('SELECT * FROM gallery_photos WHERE gallery_id=$1 ORDER BY created_at', [gallery.id])).rows;
+  const photos = (await pool.query('SELECT *, COALESCE(photo_url, url) as display_url FROM gallery_photos WHERE gallery_id=$1 ORDER BY COALESCE(created_at,uploaded_at)', [gallery.id])).rows;
   res.send(renderPage(esc(gallery.title), `<div class="card"><h2>${esc(gallery.title)}</h2>
     <p class="muted">${esc(gallery.description||'')}</p>
     <a href="/school/gallery/${gallery.id}/upload" class="btn btn-sm btn-green" style="margin-bottom:15px">+ Upload Photo</a>
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
     ${photos.map(p=>`<div style="border-radius:8px;overflow:hidden;position:relative">
-      <img src="${esc(p.photo_url)}" style="width:100%;height:180px;object-fit:cover" alt="${esc(p.caption||'')}">
+      <img src="${esc(p.display_url)}" style="width:100%;height:180px;object-fit:cover" alt="${esc(p.caption||'')}" onerror="this.style.display='none'">
       ${p.caption?`<div style="padding:6px;font-size:12px;background:${req.session.user?.dark_mode?'#1e293b':'#f8fafc'}">${esc(p.caption)}</div>`:''}
       <a href="/school/gallery/photo/${p.id}/delete" style="position:absolute;top:5px;right:5px;background:rgba(220,38,38,0.8);color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:12px">X</a>
     </div>`).join('')||'<p class="muted">No photos yet. Upload some!</p>'}
@@ -15449,20 +15506,29 @@ app.get('/school/gallery/:id', requireAuth, requireNotBanned, requireFeature('ph
 }));
 
 app.get('/school/gallery/:id/upload', requireAuth, requireNotBanned, requireFeature('photo_gallery'), (req, res) => {
+  const hasCloudinary = !!process.env.CLOUDINARY_URL;
   res.send(renderPage('Upload Photo', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Upload Photo</h2>
     <form method="POST" action="/school/gallery/${req.params.id}/upload-save" enctype="multipart/form-data">
-      <input name="photo" type="file" accept="image/*" required>
+      <div style="margin:15px 0;padding:20px;border:2px dashed #059669;border-radius:12px;text-align:center;background:${req.session.user?.dark_mode?'#1e293b':'#f0fdf4'}">
+        <p style="font-size:32px;margin-bottom:8px">📷</p>
+        <p style="font-weight:600;margin-bottom:10px">Choose photo from your device</p>
+        <input name="photo" type="file" accept="image/*" style="padding:8px;font-size:16px;width:100%">
+        ${hasCloudinary ? '<p style="color:#059669;font-size:12px;margin-top:8px">Cloud upload enabled</p>' : '<p style="color:#d97706;font-size:12px;margin-top:8px">Paste a URL below if cloud not configured</p>'}
+      </div>
       <input name="caption" placeholder="Caption (optional)">
-      <input name="photo_url" placeholder="Or paste image URL">
-      <button class="btn btn-green" style="width:100%">Upload</button>
+      <div style="text-align:center;margin:10px 0;color:#94a3b8;font-size:13px">— OR paste URL —</div>
+      <input name="photo_url" placeholder="Image URL (https://...)">
+      <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Upload Photo</button>
     </form></div>`, req.session.user));
 });
 
 app.post('/school/gallery/:id/upload-save', requireAuth, requireNotBanned, requireFeature('photo_gallery'), upload.single('photo'), ah(async (req, res) => {
   const galleryId = req.params.id;
-  let photoUrl = req.body.photo_url;
+  let photoUrl = req.body.photo_url || '';
   if (req.file) {
-    try { const r = await cloudinary.uploader.upload(req.file.path, { folder: 'ssewasswa/gallery' }); photoUrl = r.secure_url; } catch(e) { console.error('Gallery upload error:', e.message); }
+    const b64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    const uploaded = await uploadToCloudinary(b64, 'ssewasswa/gallery');
+    if (uploaded) photoUrl = uploaded;
   }
   if (!photoUrl) return res.redirect(`/school/gallery/${galleryId}/upload`);
   await pool.query('INSERT INTO gallery_photos(gallery_id,photo_url,caption) VALUES($1,$2,$3)', [galleryId, photoUrl, req.body.caption||null]);
