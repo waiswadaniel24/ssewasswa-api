@@ -358,6 +358,30 @@ const migrations = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_fa_secret TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_fa_enabled BOOLEAN DEFAULT false`,
+  // Staff banned/approved columns (may be missing in older deployments)
+  `ALTER TABLE staff ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT false`,
+  `ALTER TABLE staff ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT true`,
+  // Expenses date column fix
+  `ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_date DATE DEFAULT CURRENT_DATE`,
+  // PTC tables - add missing columns for booking workflow
+  `ALTER TABLE ptc_slots ADD COLUMN IF NOT EXISTS staff_id INTEGER`,
+  `ALTER TABLE ptc_slots ADD COLUMN IF NOT EXISTS teacher_name TEXT`,
+  `ALTER TABLE ptc_slots ADD COLUMN IF NOT EXISTS slot_date DATE`,
+  `ALTER TABLE ptc_slots ADD COLUMN IF NOT EXISTS duration_minutes INTEGER DEFAULT 15`,
+  `ALTER TABLE ptc_slots ADD COLUMN IF NOT EXISTS notes TEXT`,
+  `ALTER TABLE ptc_slots ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'open'`,
+  `ALTER TABLE ptc_bookings ADD COLUMN IF NOT EXISTS slot_id INTEGER`,
+  `ALTER TABLE ptc_bookings ADD COLUMN IF NOT EXISTS parent_name TEXT`,
+  `ALTER TABLE ptc_bookings ADD COLUMN IF NOT EXISTS parent_phone TEXT`,
+  `ALTER TABLE ptc_bookings ADD COLUMN IF NOT EXISTS concerns TEXT`,
+  // Lesson plans - add missing columns
+  `ALTER TABLE lesson_plans ADD COLUMN IF NOT EXISTS staff_id INTEGER`,
+  `ALTER TABLE lesson_plans ADD COLUMN IF NOT EXISTS lesson_date DATE`,
+  `ALTER TABLE lesson_plans ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'draft'`,
+  // Sibling discounts - add missing columns
+  `ALTER TABLE sibling_discounts ADD COLUMN IF NOT EXISTS student_id INTEGER`,
+  `ALTER TABLE sibling_discounts ADD COLUMN IF NOT EXISTS sibling_count INTEGER`,
+  `ALTER TABLE sibling_discounts ADD COLUMN IF NOT EXISTS discount_type TEXT DEFAULT 'fee'`,
 
   // v11.0 - Billing/Subscriptions
   `CREATE TABLE IF NOT EXISTS subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plan TEXT DEFAULT 'free', amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX', status TEXT DEFAULT 'active', started_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, payment_method TEXT, reference TEXT)`,
