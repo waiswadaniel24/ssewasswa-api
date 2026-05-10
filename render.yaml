@@ -14,6 +14,8 @@ services:
           property: connectionString
       - key: SESSION_SECRET
         generateValue: true
+      - key: BASE_URL
+        value: https://ssewasswa.onrender.com
 
 databases:
   - name: ssewasswa-db
