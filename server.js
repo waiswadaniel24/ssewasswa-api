@@ -1044,12 +1044,9 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 };
 
 // === AUTH ===
-// NOTE: The '/' route is now handled by launch-routes.js (public landing page)
-// This is a fallback that will be overridden when launch-routes is loaded
-app.get('/', (req, res) => {
-  if (req.session.user) return res.redirect('/dashboard');
-  res.redirect('/p/home');
-});
+// NOTE: The '/' route is handled by launch-routes.js (public landing page)
+// Do NOT define a fallback here — Express uses first-match, so this would
+// intercept before launch-routes gets a chance to serve the landing page.
 
 app.get('/login', (req, res) => {
   res.send(renderPage('Login', `
@@ -14472,7 +14469,7 @@ app.use((err, req, res, next) => {
 // === LAUNCH ROUTES (public site, scraping, entertainment, fundraising, etc.) ===
 try {
   const launchRoutes = require('./launch-routes');
-  launchRoutes(app, pool, bcrypt, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, requireAuth, requireNotBanned, requireSuperAdmin);
+  launchRoutes(app, pool, bcrypt, ah, esc, renderPageV3, audit, notify, notifyAll, sendEmail, sendSMS, requireAuth, requireNotBanned, requireSuperAdmin);
   console.log('[Launch] Public routes loaded');
 } catch (e) {
   console.warn('[Launch] Failed to load launch routes:', e.message);
