@@ -963,6 +963,8 @@ const migrations = [
   `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS created_by TEXT`,
   `CREATE TABLE IF NOT EXISTS blog_posts (id SERIAL PRIMARY KEY, slug TEXT UNIQUE, title TEXT NOT NULL, content TEXT NOT NULL, excerpt TEXT, image_url TEXT, category TEXT DEFAULT 'news', author TEXT, is_published BOOLEAN DEFAULT false, published_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS auto_verified BOOLEAN DEFAULT false`,
+  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+  `ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
   // ============ v13 FIXES ============
   `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS source TEXT`,
   `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS details TEXT`,
@@ -1046,7 +1048,60 @@ const migrations = [
     is_published BOOLEAN DEFAULT true,
     views INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
-  )`
+  )`,
+  // ============ v15 SUBSCRIPTION PLANS, ROLES, UPLOADS, HOMEPAGE ============
+  `CREATE TABLE IF NOT EXISTS subscription_plans (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    description TEXT,
+    price INTEGER DEFAULT 0,
+    currency TEXT DEFAULT 'UGX',
+    billing_cycle TEXT DEFAULT 'monthly',
+    features TEXT,
+    max_users INTEGER DEFAULT 5,
+    max_students INTEGER DEFAULT 100,
+    is_active BOOLEAN DEFAULT true,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS tenant_uploads (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    file_type TEXT,
+    file_url TEXT NOT NULL,
+    category TEXT DEFAULT 'document',
+    description TEXT,
+    uploaded_by TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS homepage_sections (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    section_type TEXT DEFAULT 'hero',
+    title TEXT,
+    subtitle TEXT,
+    content TEXT,
+    image_url TEXT,
+    video_url TEXT,
+    button_text TEXT,
+    button_link TEXT,
+    background_color TEXT DEFAULT '#4f46e5',
+    text_color TEXT DEFAULT 'white',
+    sort_order INTEGER DEFAULT 0,
+    is_visible BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS stamp_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS signature_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS badge_text TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS primary_color TEXT DEFAULT '#4f46e5'`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS hero_image_url TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS welcome_message TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`
 ];
 
 (async () => {
@@ -1078,6 +1133,16 @@ const migrations = [
       const check = await pool.query('SELECT id,email,role,approved,tenant_id FROM users WHERE email=$1', [devEmail]);
       console.log('DB Ready. Dev user:', check.rows[0]?.email, 'role:', check.rows[0]?.role, 'approved:', check.rows[0]?.approved, 'tenant_id:', check.rows[0]?.tenant_id);
       await loadTranslations();
+      // Seed subscription plans
+      const planSeeds = [
+        ['free', 'Free Plan', 'Basic access for small organizations', 0, 'monthly', '1 admin, up to 100 students/members, basic reports', 2, 100, true, 0],
+        ['basic', 'Basic Plan', 'For growing schools, churches, and businesses', 50000, 'monthly', '5 admins, up to 500 students/members, advanced reports, public website, entertainment', 5, 500, true, 1],
+        ['pro', 'Professional Plan', 'Full features for established institutions', 150000, 'monthly', 'Unlimited admins, unlimited students, fundraising, CRM, payroll, AI insights, priority support', 20, 5000, true, 2],
+        ['enterprise', 'Enterprise Plan', 'Custom solutions for large organizations', 500000, 'monthly', 'Everything in Pro + custom domain, white-label, API access, dedicated support, SLA', 999, 99999, true, 3]
+      ];
+      for (const [name, display, desc, price, cycle, features, maxUsers, maxStudents, active, sort] of planSeeds) {
+        await pool.query('INSERT INTO subscription_plans(name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,is_active=EXCLUDED.is_active,sort_order=EXCLUDED.sort_order', [name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]);
+      }
       break;
     } catch (e) {
       console.error(`DB Init Error (attempt ${attempt}/3):`, e.message);
@@ -4855,7 +4920,10 @@ app.get('/entertainment', ah(async (req, res) => {
       <h1>Entertainment Hub</h1><p>Videos, Music, Games</p>
     </div>
     <div class="grid">
-      <div class="card"><h3>Videos</h3>${videos.rows.map(v => `<p><a href="${esc(v.url)}" target="_blank">${esc(v.title)}</a></p>`).join('') || '<p>No videos yet</p>'}</div>
+      <div class="card"><h3>Videos</h3>${videos.rows.map(v => {
+        const ytId = (v.url || '').match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1] || '';
+        return ytId ? `<div style="margin-bottom:16px"><h4>${esc(v.title)}</h4><iframe width="100%" height="220" src="https://www.youtube.com/embed/${ytId}" frameborder="0" allowfullscreen style="border-radius:12px;margin-top:8px"></iframe></div>` : `<p><a href="${esc(v.url)}" target="_blank">${esc(v.title)}</a></p>`;
+      }).join('') || '<p>No videos yet</p>'}</div>
       <div class="card"><h3>Music</h3>${music.rows.map(m => `<p>${esc(m.title)} - ${esc(m.artist)}</p>`).join('') || '<p>No music yet</p>'}</div>
       <div class="card"><h3>Top Scores</h3>${games.rows.map(g => `<p>${esc(g.player_name)}: ${g.score} - ${esc(g.name)}</p>`).join('') || '<p>No games yet</p>'}</div>
     </div>
@@ -4923,6 +4991,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/dev/blog" style="background:#8b5cf6;color:white">Blog</a>
       <a href="/dev/posts" style="background:#f97316;color:white">Posts</a>
       <a href="/dev/resources" style="background:#14b8a6;color:white">Books & Papers</a>
+      <a href="/dev/plans" style="background:#e11d48;color:white">Plans & Pricing</a>
       <a href="/dev/activity" style="background:#0ea5e9;color:white">Activity</a>
       <a href="/dev/features" style="background:#64748b;color:white">Features</a>
     </div>
@@ -5274,6 +5343,346 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
   res.redirect('/dev/master');
 }));
 
+// === SUBSCRIPTION PLANS (Developer sets standard fees) ===
+app.get('/dev/plans', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const plans = (await pool.query('SELECT * FROM subscription_plans ORDER BY sort_order, price')).rows;
+  const flash = req.session.flash; delete req.session.flash;
+  const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
+  res.send(renderPage('Subscription Plans', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Subscription Plans & Pricing</h1><p style="opacity:0.9;margin-top:4px">Set standard fees — users auto-get access after payment</p>
+    </div>
+    ${flashHtml}
+    <div class="card"><h3>Create New Plan</h3>
+      <form method="POST" action="/dev/plans/save" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>Plan Name (key)</label><input name="name" placeholder="e.g. premium" required></div>
+        <div><label>Display Name</label><input name="display_name" placeholder="e.g. Premium Plan" required></div>
+        <div><label>Price (UGX)</label><input name="price" type="number" value="0" min="0"></div>
+        <div><label>Billing Cycle</label><select name="billing_cycle"><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="one_time">One Time</option></select></div>
+        <div><label>Max Users</label><input name="max_users" type="number" value="5"></div>
+        <div><label>Max Students/Members</label><input name="max_students" type="number" value="100"></div>
+        <div style="grid-column:1/-1"><label>Features (comma-separated)</label><input name="features" placeholder="e.g. reports, public website, fundraising, CRM"></div>
+        <div style="grid-column:1/-1"><label>Description</label><textarea name="description" rows="2" placeholder="What this plan includes"></textarea></div>
+        <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Create Plan</button></div>
+      </form>
+    </div>
+    <div class="card"><h3>Current Plans (${plans.length})</h3>
+      <table><tr><th>Name</th><th>Price</th><th>Cycle</th><th>Max Users</th><th>Max Students</th><th>Features</th><th>Actions</th></tr>
+      ${plans.map(p => `<tr>
+        <td><strong>${esc(p.display_name || p.name)}</strong><br><span class="muted">${esc(p.name)}</span></td>
+        <td style="font-weight:700;font-size:16px;color:${p.price > 0 ? '#d97706' : '#059669'}">UGX ${parseInt(p.price).toLocaleString()}</td>
+        <td>${esc(p.billing_cycle || 'monthly')}</td>
+        <td>${p.max_users || '-'}</td>
+        <td>${p.max_students || '-'}</td>
+        <td style="max-width:200px;font-size:12px">${esc((p.features||'').substring(0,80))}</td>
+        <td>
+          <a href="/dev/plans/edit/${p.id}" class="btn btn-sm">Edit</a>
+          <a href="/dev/plans/delete/${p.id}" class="btn btn-sm btn-red" onclick="return confirm('Delete this plan?')">Del</a>
+        </td>
+      </tr>`).join('')}
+      </table>
+    </div>
+    <div class="card" style="background:#eff6ff">
+      <h3>How Auto-Access Works</h3>
+      <p class="muted">When a user pays for a subscription (via /billing), the system automatically:</p>
+      <ol style="padding-left:20px;line-height:2">
+        <li>Creates a subscription record with the plan they chose</li>
+        <li>Sets their tenant status to <strong>verified + approved</strong></li>
+        <li>Adds the payment to your <strong>developer revenue</strong></li>
+        <li>Updates the <strong>platform wallet</strong> balance</li>
+        <li>Grants them access to all features in their plan</li>
+      </ol>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/plans/save', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { name, display_name, description, price, billing_cycle, features, max_users, max_students } = req.body;
+  await pool.query('INSERT INTO subscription_plans(name,display_name,description,price,billing_cycle,features,max_users,max_students) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students',
+    [name, display_name || name, description || '', parseInt(price) || 0, billing_cycle || 'monthly', features || '', parseInt(max_users) || 5, parseInt(max_students) || 100]);
+  await audit(req.session.user.email, 'create_plan', `Plan: ${name} @ UGX ${price}`);
+  req.session.flash = { type: 'success', msg: 'Plan saved!' };
+  res.redirect('/dev/plans');
+}));
+
+app.get('/dev/plans/edit/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const plan = (await pool.query('SELECT * FROM subscription_plans WHERE id=$1', [req.params.id])).rows[0];
+  if (!plan) return res.redirect('/dev/plans');
+  res.send(renderPage('Edit Plan', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Edit Plan: ${esc(plan.display_name)}</h2>
+      <form method="POST" action="/dev/plans/update/${plan.id}" style="display:grid;gap:10px">
+        <label>Display Name</label><input name="display_name" value="${esc(plan.display_name || '')}">
+        <label>Price (UGX)</label><input name="price" type="number" value="${plan.price}">
+        <label>Billing Cycle</label><select name="billing_cycle"><option value="monthly" ${plan.billing_cycle==='monthly'?'selected':''}>Monthly</option><option value="yearly" ${plan.billing_cycle==='yearly'?'selected':''}>Yearly</option><option value="one_time" ${plan.billing_cycle==='one_time'?'selected':''}>One Time</option></select>
+        <label>Max Users</label><input name="max_users" type="number" value="${plan.max_users || 5}">
+        <label>Max Students/Members</label><input name="max_students" type="number" value="${plan.max_students || 100}">
+        <label>Features</label><input name="features" value="${esc(plan.features || '')}">
+        <label>Description</label><textarea name="description" rows="3">${esc(plan.description || '')}</textarea>
+        <div style="display:flex;gap:10px"><button class="btn btn-green" type="submit">Update</button><a href="/dev/plans" class="btn btn-red">Cancel</a></div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/plans/update/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { display_name, description, price, billing_cycle, features, max_users, max_students } = req.body;
+  await pool.query('UPDATE subscription_plans SET display_name=$1,description=$2,price=$3,billing_cycle=$4,features=$5,max_users=$6,max_students=$7 WHERE id=$8',
+    [display_name, description, parseInt(price) || 0, billing_cycle || 'monthly', features, parseInt(max_users) || 5, parseInt(max_students) || 100, req.params.id]);
+  req.session.flash = { type: 'success', msg: 'Plan updated!' };
+  res.redirect('/dev/plans');
+}));
+
+app.get('/dev/plans/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('DELETE FROM subscription_plans WHERE id=$1', [req.params.id]);
+  req.session.flash = { type: 'success', msg: 'Plan deleted' };
+  res.redirect('/dev/plans');
+}));
+
+// === TEAM MANAGEMENT — ADMIN/STAFF ACCESS ===
+app.get('/team', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [users, roles] = await Promise.all([
+    pool.query('SELECT u.id,u.email,u.role,u.approved,u.is_active,u.permissions,u.created_at FROM users u WHERE u.tenant_id=$1 ORDER BY u.created_at DESC', [t]),
+    pool.query('SELECT * FROM role_permissions WHERE tenant_id=$1', [t])
+  ]);
+  const isAdmin = req.session.user.role === 'admin' || req.session.user.role === 'super_admin';
+  res.send(renderPage('Team Management', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Team & Access Control</h1><p style="opacity:0.9;margin-top:4px">Manage who can access what in your organization</p>
+    </div>
+    ${isAdmin ? `<div class="card"><h3>Add Team Member</h3>
+      <form method="POST" action="/team/invite" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>Email</label><input name="email" type="email" placeholder="staff@example.com" required></div>
+        <div><label>Role</label>
+          <select name="role">
+            <option value="staff">Staff (Basic Access)</option>
+            <option value="teacher">Teacher (Student Management)</option>
+            <option value="accountant">Accountant (Finance)</option>
+            <option value="nurse">Nurse (Health Records)</option>
+            <option value="librarian">Librarian</option>
+            <option value="admin">Admin (Full Access)</option>
+          </select>
+        </div>
+        <div><label>Password (they can change later)</label><input name="password" type="password" placeholder="Temporary password" required></div>
+        <div><label>Permissions (optional)</label><input name="permissions" placeholder="e.g. students,fees,attendance,reports"></div>
+        <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Add Team Member</button></div>
+      </form>
+    </div>` : '<p class="muted">Only admins can add team members.</p>'}
+
+    <div class="card"><h3>Team Members (${users.rows.length})</h3>
+      <table><tr><th>Email</th><th>Role</th><th>Status</th><th>Permissions</th><th>Actions</th></tr>
+      ${users.rows.map(u => `<tr>
+        <td><strong>${esc(u.email)}</strong></td>
+        <td><span class="tag">${esc(u.role)}</span></td>
+        <td>${u.is_active !== false ? '<span style="color:#059669">Active</span>' : '<span style="color:#dc2626">Inactive</span>'}</td>
+        <td style="font-size:12px">${esc(u.permissions || 'all')}</td>
+        <td>
+          ${isAdmin && u.email !== req.session.user.email ? `
+            <a href="/team/toggle/${u.id}" class="btn btn-sm">${u.is_active !== false ? 'Deactivate' : 'Activate'}</a>
+            <a href="/team/role/${u.id}?role=admin" class="btn btn-sm">Make Admin</a>
+            <a href="/team/role/${u.id}?role=staff" class="btn btn-sm">Make Staff</a>
+          ` : ''}
+        </td>
+      </tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/team/invite', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  if (req.session.user.role !== 'admin' && req.session.user.role !== 'super_admin') return res.status(403).send('Only admins can add members');
+  const { email, role, password, permissions } = req.body;
+  const hash = await bcrypt.hash(password, 10);
+  try {
+    await pool.query('INSERT INTO users(tenant_id,email,password,role,approved,permissions,is_active) VALUES($1,$2,$3,$4,true,$5,true) ON CONFLICT(email) DO UPDATE SET role=EXCLUDED.role,permissions=EXCLUDED.permissions,is_active=true',
+      [t, email, hash, role || 'staff', permissions || '']);
+    await audit(req.session.user.email, 'add_team_member', `${email} as ${role}`);
+  } catch(e) { /* user may already exist */ }
+  res.redirect('/team');
+}));
+
+app.get('/team/toggle/:id', requireAuth, ah(async (req, res) => {
+  if (req.session.user.role !== 'admin' && req.session.user.role !== 'super_admin') return res.status(403).send('Admin only');
+  await pool.query('UPDATE users SET is_active = NOT is_active WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/team');
+}));
+
+app.get('/team/role/:id', requireAuth, ah(async (req, res) => {
+  if (req.session.user.role !== 'admin' && req.session.user.role !== 'super_admin') return res.status(403).send('Admin only');
+  const role = req.query.role || 'staff';
+  await pool.query('UPDATE users SET role=$1 WHERE id=$2 AND tenant_id=$3', [role, req.params.id, req.session.user.tenant_id]);
+  res.redirect('/team');
+}));
+
+// === TENANT UPLOADS — SIGNATURES, STAMPS, BADGES, LOGOS, DOCUMENTS ===
+app.get('/uploads', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const uploads = (await pool.query('SELECT * FROM tenant_uploads WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Uploads & Branding', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Uploads & Branding</h1><p style="opacity:0.9;margin-top:4px">Logos, signatures, stamps, badges, documents</p>
+    </div>
+
+    <div class="card"><h3>Organization Branding</h3>
+      <form method="POST" action="/uploads/branding" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>Organization Logo URL</label><input name="logo_url" value="${esc(tenant.logo_url || '')}" placeholder="https://... (paste image URL)"></div>
+        <div><label>Primary Color</label><input name="primary_color" type="color" value="${tenant.primary_color || '#4f46e5'}" style="height:44px"></div>
+        <div><label>Stamp/Seal URL</label><input name="stamp_url" value="${esc(tenant.stamp_url || '')}" placeholder="https://... (paste stamp image URL)"></div>
+        <div><label>Signature Image URL</label><input name="signature_url" value="${esc(tenant.signature_url || '')}" placeholder="https://... (paste signature image URL)"></div>
+        <div><label>Badge/Title Text</label><input name="badge_text" value="${esc(tenant.badge_text || '')}" placeholder="e.g. Official, Verified, Certified"></div>
+        <div><label>Welcome Message</label><input name="welcome_message" value="${esc(tenant.welcome_message || '')}" placeholder="Welcome to our organization!"></div>
+        <div style="grid-column:1/-1"><label>Hero/Banner Image URL</label><input name="hero_image_url" value="${esc(tenant.hero_image_url || '')}" placeholder="https://... (large banner image)"></div>
+        <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Save Branding</button></div>
+      </form>
+    </div>
+
+    <div class="card"><h3>Upload Document/File</h3>
+      <form method="POST" action="/uploads/save" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>File Name</label><input name="file_name" placeholder="e.g. Term 1 Report" required></div>
+        <div><label>Category</label><select name="category"><option value="document">Document</option><option value="signature">Signature</option><option value="stamp">Stamp/Seal</option><option value="logo">Logo</option><option value="badge">Badge/Certificate</option><option value="photo">Photo</option><option value="video">Video</option><option value="other">Other</option></select></div>
+        <div style="grid-column:1/-1"><label>File URL (paste link to file)</label><input name="file_url" placeholder="https://... (Google Drive, Dropbox, direct link)" required></div>
+        <div style="grid-column:1/-1"><label>Description</label><input name="description" placeholder="Brief description"></div>
+        <div style="grid-column:1/-1"><button class="btn" type="submit">Save Upload</button></div>
+      </form>
+      <p class="muted" style="margin-top:10px">Tip: Upload images to <a href="https://imgbb.com" target="_blank">imgbb.com</a> or <a href="https://imgur.com" target="_blank">imgur.com</a> for free, then paste the direct URL here.</p>
+    </div>
+
+    ${uploads.length > 0 ? `<div class="card"><h3>Uploaded Files (${uploads.length})</h3>
+      <div class="grid">
+      ${uploads.map(u => `<div class="card" style="padding:14px">
+        <span class="tag">${esc(u.category)}</span>
+        <h4 style="margin:8px 0 4px">${esc(u.file_name)}</h4>
+        <p class="muted">${esc(u.description || '')}</p>
+        <a href="${esc(u.file_url)}" target="_blank" class="btn btn-sm" style="margin-top:8px">View File</a>
+        <a href="/uploads/delete/${u.id}" class="btn btn-sm btn-red" style="margin-top:8px" onclick="return confirm('Delete?')">Delete</a>
+      </div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    ${tenant.logo_url || tenant.stamp_url || tenant.signature_url ? `<div class="card"><h3>Current Branding Preview</h3>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+        ${tenant.logo_url ? `<div style="text-align:center"><p class="muted">Logo</p><img src="${esc(tenant.logo_url)}" style="max-width:120px;max-height:120px;border-radius:10px"></div>` : ''}
+        ${tenant.stamp_url ? `<div style="text-align:center"><p class="muted">Stamp</p><img src="${esc(tenant.stamp_url)}" style="max-width:100px;max-height:100px;border-radius:10px;opacity:0.8"></div>` : ''}
+        ${tenant.signature_url ? `<div style="text-align:center"><p class="muted">Signature</p><img src="${esc(tenant.signature_url)}" style="max-width:200px;max-height:60px"></div>` : ''}
+        ${tenant.badge_text ? `<div style="text-align:center"><p class="muted">Badge</p><span style="display:inline-block;padding:6px 16px;background:${tenant.primary_color || '#4f46e5'};color:white;border-radius:20px;font-weight:700">${esc(tenant.badge_text)}</span></div>` : ''}
+      </div>
+    </div>` : ''}
+  `, req.session.user));
+}));
+
+app.post('/uploads/branding', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { logo_url, stamp_url, signature_url, badge_text, primary_color, hero_image_url, welcome_message } = req.body;
+  await pool.query('UPDATE tenants SET logo_url=$1,stamp_url=$2,signature_url=$3,badge_text=$4,primary_color=$5,hero_image_url=$6,welcome_message=$7 WHERE id=$8',
+    [logo_url || '', stamp_url || '', signature_url || '', badge_text || '', primary_color || '#4f46e5', hero_image_url || '', welcome_message || '', t]);
+  res.redirect('/uploads');
+}));
+
+app.post('/uploads/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { file_name, file_type, file_url, category, description } = req.body;
+  await pool.query('INSERT INTO tenant_uploads(tenant_id,file_name,file_type,file_url,category,description,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)',
+    [t, file_name, file_type || 'document', file_url, category || 'document', description || '', req.session.user.email]);
+  res.redirect('/uploads');
+}));
+
+app.get('/uploads/delete/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('DELETE FROM tenant_uploads WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/uploads');
+}));
+
+// === HOMEPAGE DESIGNER ===
+app.get('/homepage', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const sections = (await pool.query('SELECT * FROM homepage_sections WHERE tenant_id=$1 ORDER BY sort_order, id', [t])).rows;
+  res.send(renderPage('Design Your Homepage', `
+    <div class="hero" style="background:linear-gradient(135deg,${tenant.primary_color || '#4f46e5'},#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Design Your Homepage</h1><p style="opacity:0.9;margin-top:4px">Build a beautiful public page for your organization</p>
+    </div>
+
+    <div class="card"><h3>Add Section</h3>
+      <form method="POST" action="/homepage/save" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>Section Type</label>
+          <select name="section_type" id="sectionType" onchange="updateFields()">
+            <option value="hero">Hero Banner</option>
+            <option value="text">Text Block</option>
+            <option value="video">YouTube Video</option>
+            <option value="image">Image Gallery</option>
+            <option value="features">Features/Services Grid</option>
+            <option value="contact">Contact Section</option>
+            <option value="cta">Call-to-Action Button</option>
+            <option value="divider">Divider/Separator</option>
+          </select>
+        </div>
+        <div><label>Sort Order</label><input name="sort_order" type="number" value="${sections.length}"></div>
+        <div style="grid-column:1/-1"><label>Title</label><input name="title" placeholder="e.g. Welcome to Our School"></div>
+        <div style="grid-column:1/-1"><label>Subtitle</label><input name="subtitle" placeholder="e.g. Excellence in Education since 1995"></div>
+        <div style="grid-column:1/-1"><label>Content / Description</label><textarea name="content" rows="3" placeholder="Main text content for this section"></textarea></div>
+        <div><label>Image URL</label><input name="image_url" placeholder="https://..."></div>
+        <div><label>YouTube Video URL</label><input name="video_url" placeholder="https://youtube.com/watch?v=..."></div>
+        <div><label>Button Text</label><input name="button_text" placeholder="e.g. Enroll Now"></div>
+        <div><label>Button Link</label><input name="button_link" placeholder="/register or https://..."></div>
+        <div><label>Background Color</label><input name="background_color" type="color" value="#4f46e5" style="height:44px"></div>
+        <div><label>Text Color</label><select name="text_color"><option value="white">White</option><option value="black">Dark</option></select></div>
+        <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Add Section</button></div>
+      </form>
+    </div>
+
+    ${sections.length > 0 ? `<div class="card"><h3>Your Homepage Sections (${sections.length})</h3>
+      <table><tr><th>Order</th><th>Type</th><th>Title</th><th>Visible</th><th>Actions</th></tr>
+      ${sections.map(s => `<tr>
+        <td>${s.sort_order || 0}</td>
+        <td><span class="tag">${esc(s.section_type)}</span></td>
+        <td><strong>${esc(s.title || '-')}</strong></td>
+        <td>${s.is_visible ? 'Yes' : 'No'}</td>
+        <td>
+          <a href="/homepage/toggle/${s.id}" class="btn btn-sm">${s.is_visible ? 'Hide' : 'Show'}</a>
+          <a href="/homepage/up/${s.id}" class="btn btn-sm">Up</a>
+          <a href="/homepage/down/${s.id}" class="btn btn-sm">Down</a>
+          <a href="/homepage/delete/${s.id}" class="btn btn-sm btn-red" onclick="return confirm('Delete?')">Del</a>
+        </td>
+      </tr>`).join('')}
+      </table>
+    </div>
+
+    <div class="card" style="text-align:center">
+      <a href="/p/${esc(tenant.subdomain)}" target="_blank" class="btn btn-green" style="font-size:16px;padding:14px 30px">Preview Your Homepage</a>
+    </div>` : '<div class="card" style="text-align:center;padding:30px"><p class="muted">No sections yet. Add your first section above to build your homepage!</p></div>'}
+  `, req.session.user));
+}));
+
+app.post('/homepage/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { section_type, title, subtitle, content, image_url, video_url, button_text, button_link, background_color, text_color, sort_order } = req.body;
+  await pool.query('INSERT INTO homepage_sections(tenant_id,section_type,title,subtitle,content,image_url,video_url,button_text,button_link,background_color,text_color,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+    [t, section_type || 'hero', title || '', subtitle || '', content || '', image_url || '', video_url || '', button_text || '', button_link || '', background_color || '#4f46e5', text_color || 'white', parseInt(sort_order) || 0]);
+  res.redirect('/homepage');
+}));
+
+app.get('/homepage/toggle/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE homepage_sections SET is_visible = NOT is_visible WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/homepage');
+}));
+
+app.get('/homepage/up/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE homepage_sections SET sort_order = sort_order - 1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/homepage');
+}));
+
+app.get('/homepage/down/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE homepage_sections SET sort_order = sort_order + 1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/homepage');
+}));
+
+app.get('/homepage/delete/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('DELETE FROM homepage_sections WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/homepage');
+}));
+
 // === DAILY ADVERTS ===
 app.get('/dev/adverts', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const adverts = (await pool.query('SELECT * FROM daily_adverts ORDER BY created_at DESC')).rows;
@@ -5475,7 +5884,7 @@ app.get('/dev/activity', requireAuth, requireSuperAdmin, ah(async (req, res) => 
   const [logs, users, subs] = await Promise.all([
     pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100'),
     pool.query('SELECT u.email,u.role,u.created_at,t.name as tenant_name FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id ORDER BY u.created_at DESC LIMIT 50'),
-    pool.query('SELECT s.*,t.name as tenant_name FROM subscriptions s JOIN tenants t ON s.tenant_id=t.id ORDER BY s.created_at DESC LIMIT 30')
+    pool.query('SELECT s.*,t.name as tenant_name FROM subscriptions s JOIN tenants t ON s.tenant_id=t.id ORDER BY s.started_at DESC LIMIT 30')
   ]);
   res.send(renderPage('Activity & Analytics', `
     <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
@@ -5934,7 +6343,7 @@ app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res)
 app.get('/billing', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const [sub, payments] = await Promise.all([
-    pool.query('SELECT * FROM subscriptions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 1', [t]),
+    pool.query('SELECT * FROM subscriptions WHERE tenant_id=$1 ORDER BY started_at DESC LIMIT 1', [t]),
     pool.query('SELECT * FROM payments WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t])
   ]);
   const plan = sub.rows[0]?.plan || 'free';
@@ -15458,7 +15867,10 @@ app.get('/my-entertainment', requireAuth, requireNotBanned, ah(async (req, res) 
     <div class="tab-bar"><a href="/entertainment" class="active">All</a><a href="/entertainment/videos">Videos</a><a href="/entertainment/music">Music</a><a href="/entertainment/news">News & Events</a><a href="/entertainment/scrape-settings">Auto-Import</a></div>
     <div class="card"><h3>📺 Videos</h3>
     <a href="/entertainment/videos/new" class="btn btn-sm btn-green" style="margin-bottom:10px">+ Add Video</a>
-    <div class="grid">${videos.rows.map(v=>`<div class="card" style="padding:15px"><h4>${esc(v.title)}</h4><a href="${esc(v.url)}" target="_blank" class="btn btn-sm" style="margin-top:8px">▶ Play</a></div>`).join('')||'<p class="muted">No videos yet</p>'}</div></div>
+    <div class="grid">${videos.rows.map(v=>{
+      const ytId = (v.url||'').match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1]||'';
+      return ytId?`<div class="card" style="padding:15px"><h4>${esc(v.title)}</h4><iframe width="100%" height="200" src="https://www.youtube.com/embed/${ytId}" frameborder="0" allowfullscreen style="border-radius:10px;margin-top:8px"></iframe></div>`:`<div class="card" style="padding:15px"><h4>${esc(v.title)}</h4><a href="${esc(v.url)}" target="_blank" class="btn btn-sm" style="margin-top:8px">Open Link</a></div>`;
+    }).join('')||'<p class="muted">No videos yet</p>'}</div></div>
     <div class="card"><h3>🎵 Music</h3>
     <a href="/entertainment/music/new" class="btn btn-sm btn-green" style="margin-bottom:10px">+ Add Music</a>
     <div class="grid">${music.rows.map(m=>`<div class="card" style="padding:15px"><h4>${esc(m.title)}</h4>${m.artist?`<p class="muted">${esc(m.artist)}</p>`:''}</div>`).join('')||'<p class="muted">No music yet</p>'}</div></div>
