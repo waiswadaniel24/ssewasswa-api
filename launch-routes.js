@@ -846,6 +846,15 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
                 <a href="/terms" style="color:#94a3b8;text-decoration:none">Terms of Service</a>
               </div>
             </div>
+            <div>
+              <div style="font-weight:700;color:white;margin-bottom:12px">Contact &amp; Help</div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <a href="mailto:support@ssewasswa.onrender.com" style="color:#94a3b8;text-decoration:none">Email Support</a>
+                <a href="https://wa.me/256700000000" target="_blank" style="color:#94a3b8;text-decoration:none">WhatsApp Chat</a>
+                <a href="/guide" style="color:#94a3b8;text-decoration:none">User Guide</a>
+                <span style="color:#64748b;font-size:12px;margin-top:8px">Response time: within 24 hours</span>
+              </div>
+            </div>
           </div>
           <div style="border-top:1px solid #1e293b;padding-top:16px;text-align:center">
             &copy; ${new Date().getFullYear()} SSEWASSWA Platform. All rights reserved. Built with &#10084; in Uganda.

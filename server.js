@@ -1075,6 +1075,7 @@ ${process.env.GA_TRACKING_ID ? `
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
+      ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
       <a href="/notifications" title="Notifications">🔔</a>
       <a href="/dashboard">Dashboard</a>
       <a href="/search">Search</a>
@@ -4753,49 +4754,152 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   } catch (e) {
     console.warn('Audit logs query failed:', e.message);
   }
-  const [tCount, uCount, rev, wal, tenants, chartData] = await Promise.all([
+  const [tCount, uCount, rev, wal, tenants, chartData, revBreakdown, pendingSubs, adCount, blogCount, withdrawalHistory] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM tenants'),
     pool.query('SELECT COUNT(*) FROM users'),
     pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`),
     pool.query('SELECT COALESCE(balance,0) as b FROM platform_wallet WHERE id=1'),
     pool.query('SELECT id,name,type,COALESCE(wallet_balance,0) as wallet_balance,verified,subdomain,approved,banned,ban_reason FROM tenants ORDER BY id DESC LIMIT 50'),
-    pool.query(`SELECT DATE(created_at) as day, SUM(amount) as total FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY day ASC`)
+    pool.query(`SELECT DATE(created_at) as day, SUM(amount) as total FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY day ASC`),
+    pool.query(`SELECT source, COALESCE(SUM(amount),0) as total FROM developer_revenue WHERE amount > 0 AND created_at>NOW()-INTERVAL '30 days' GROUP BY source ORDER BY total DESC`),
+    pool.query('SELECT COUNT(*) FROM subscriptions WHERE status=$1', ['active']),
+    pool.query('SELECT COUNT(*) FROM daily_adverts WHERE is_active=true'),
+    pool.query('SELECT COUNT(*) FROM blog_posts'),
+    pool.query('SELECT * FROM developer_revenue WHERE amount < 0 ORDER BY created_at DESC LIMIT 10')
   ]);
   const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
   const chartLabels = chartData.rows.map(r => new Date(r.day).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })).join("','");
   const chartValues = chartData.rows.map(r => r.total).join(',');
+  const balance = parseInt(wal.rows[0]?.b || 0);
+  const totalRev = parseInt(rev.rows[0].t || 0);
   res.send(renderPage('Dev Master', `
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:20px;border-radius:16px;margin-bottom:20px;color:white">
-      <h1>DEVELOPER MASTER CONTROL</h1><p style="opacity:0.9">Full system control</p>
-    </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
-      <a href="/dev/master" class="btn btn-sm">Dashboard</a>
-      <a href="/dev/adverts" class="btn btn-sm btn-gold">Adverts</a>
-      <a href="/dev/blog" class="btn btn-sm btn-green">Blog</a>
-      <a href="/dev/withdraw" class="btn btn-sm">Withdraw</a>
-      <a href="/dev/activity" class="btn btn-sm">Activity</a>
-      <a href="/dev/features" class="btn btn-sm">Features</a>
+    <style>
+      .dev-nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+      .dev-nav a{padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:600;font-size:13px;transition:0.2s}
+      .dev-nav a:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.15)}
+      .dev-section{background:white;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.05);border:1px solid #e2e8f0}
+      .dev-section h2{font-size:20px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+      .money-card{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:24px;border-radius:16px;text-align:center}
+      .money-card .amount{font-size:36px;font-weight:900;margin:10px 0}
+      .money-card .label{font-size:14px;opacity:0.8}
+      .quick-action{display:flex;align-items:center;gap:12px;padding:14px 18px;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:8px;cursor:pointer;transition:0.2s;text-decoration:none;color:inherit}
+      .quick-action:hover{border-color:#4f46e5;background:#f8f7ff;transform:translateX(4px)}
+      .quick-action .icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px}
+      .quick-action .text h4{margin:0;font-size:15px}
+      .quick-action .text p{margin:2px 0 0;font-size:12px;color:#64748b}
+    </style>
+
+    <!-- HERO -->
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>SSEWASSWA Developer Hub</h1>
+      <p style="opacity:0.9;margin-top:4px">Your platform, your earnings, your control</p>
     </div>
     ${flashHtml}
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${tCount.rows[0].count}</div><div>Tenants</div></div>
-      <div class="stat-card"><div class="stat-num">${uCount.rows[0].count}</div><div>Users</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(rev.rows[0].t).toLocaleString()}</div><div>30-Day Rev</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(wal.rows[0]?.b || 0).toLocaleString()}</div><div>Ready Withdraw</div></div>
+
+    <!-- DEV NAVIGATION -->
+    <div class="dev-nav">
+      <a href="/dev/master" style="background:#4f46e5;color:white">Dashboard</a>
+      <a href="/dev/withdraw" style="background:#059669;color:white">Withdraw Money</a>
+      <a href="/dev/adverts" style="background:#f59e0b;color:white">Adverts</a>
+      <a href="/dev/blog" style="background:#8b5cf6;color:white">Blog & News</a>
+      <a href="/dev/activity" style="background:#0ea5e9;color:white">Activity</a>
+      <a href="/dev/features" style="background:#64748b;color:white">Features</a>
     </div>
-    <div class="card" style="margin-bottom:20px"><h3>30-Day Revenue</h3><canvas id="revChart"></canvas></div>
-    <div class="grid">
-      <div class="card"><h3>Revenue Controls</h3>
-        <form method="POST" action="/dev/inject-revenue">
-          <input name="amount" placeholder="Amount UGX" type="number" required>
-          <input name="source" placeholder="Source: Grant, Ads, Sub" required>
-          <button class="btn btn-gold">Inject Revenue</button>
-        </form>
+
+    <!-- MY MONEY SECTION -->
+    <h2 style="font-size:22px;margin-bottom:16px">My Earnings & Rewards</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+      <div class="money-card">
+        <div class="label">Available Balance</div>
+        <div class="amount">UGX ${balance.toLocaleString()}</div>
+        <a href="/dev/withdraw" style="display:inline-block;margin-top:8px;padding:8px 20px;background:rgba(255,255,255,0.2);color:white;border-radius:8px;font-weight:600;font-size:13px;text-decoration:none">Withdraw Now</a>
       </div>
-      <div class="card"><h3>Tenant Controls</h3>
-        <form method="POST" action="/dev/execute">
-          <select name="action" required><option value="">Select Action</option>
+      <div class="money-card" style="background:linear-gradient(135deg,#059669,#10b981)">
+        <div class="label">30-Day Revenue</div>
+        <div class="amount">UGX ${totalRev.toLocaleString()}</div>
+        <div class="label">From all sources</div>
+      </div>
+      <div class="money-card" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+        <div class="label">Active Subscribers</div>
+        <div class="amount">${pendingSubs.rows[0].count}</div>
+        <div class="label">Paying tenants</div>
+      </div>
+    </div>
+
+    <!-- REVENUE BREAKDOWN -->
+    <div class="dev-section">
+      <h2>Revenue Breakdown (30 Days)</h2>
+      ${revBreakdown.rows.length > 0 ? `
+        <table><tr><th>Source</th><th>Amount</th></tr>
+        ${revBreakdown.rows.map(r => `<tr><td><span class="tag">${esc(r.source)}</span></td><td style="font-weight:700">UGX ${parseInt(r.total).toLocaleString()}</td></tr>`).join('')}
+        </table>
+      ` : '<p class="muted">No revenue recorded in the last 30 days</p>'}
+    </div>
+
+    <!-- REVENUE CHART -->
+    <div class="dev-section"><h3>30-Day Revenue Trend</h3><canvas id="revChart"></canvas></div>
+
+    <!-- QUICK ACTIONS - WHAT YOU CAN DO -->
+    <h2 style="font-size:22px;margin-bottom:16px;margin-top:24px">Quick Actions</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:24px">
+      <a href="/dev/withdraw" class="quick-action">
+        <div class="icon" style="background:#dcfce7;color:#059669">$</div>
+        <div class="text"><h4>Withdraw Money</h4><p>Send earnings to your MTN/Airtel mobile money</p></div>
+      </a>
+      <a href="/dev/adverts" class="quick-action">
+        <div class="icon" style="background:#fef3c7;color:#d97706">A</div>
+        <div class="text"><h4>Manage Adverts</h4><p>${adCount.rows[0].count} active adverts on the platform</p></div>
+      </a>
+      <a href="/dev/blog" class="quick-action">
+        <div class="icon" style="background:#ede9fe;color:#7c3aed">B</div>
+        <div class="text"><h4>Write Blog Posts</h4><p>${blogCount.rows[0].count} posts - boost SEO and engagement</p></div>
+      </a>
+      <a href="/dev/activity" class="quick-action">
+        <div class="icon" style="background:#e0f2fe;color:#0ea5e9">L</div>
+        <div class="text"><h4>View Activity Logs</h4><p>Monitor signups, payments, and system events</p></div>
+      </a>
+      <a href="/dev/features" class="quick-action">
+        <div class="icon" style="background:#f1f5f9;color:#64748b">F</div>
+        <div class="text"><h4>Feature Flags</h4><p>Toggle platform features on/off</p></div>
+      </a>
+      <a href="/status/admin" class="quick-action">
+        <div class="icon" style="background:#fce7f3;color:#db2777">S</div>
+        <div class="text"><h4>Platform Status</h4><p>Update service status and incidents</p></div>
+      </a>
+    </div>
+
+    <!-- RECENT WITHDRAWALS -->
+    ${withdrawalHistory.rows.length > 0 ? `
+    <div class="dev-section">
+      <h2>Recent Withdrawals</h2>
+      <table><tr><th>Amount</th><th>Details</th><th>Date</th></tr>
+      ${withdrawalHistory.rows.map(w => {
+        let meta = {};
+        try { meta = JSON.parse(w.details || '{}'); } catch(e) {}
+        return `<tr><td style="color:#dc2626;font-weight:700">UGX ${Math.abs(parseInt(w.amount)).toLocaleString()}</td><td>${esc(meta.phone||'')} (${esc(meta.network||'')})</td><td>${new Date(w.created_at).toLocaleString()}</td></tr>`;
+      }).join('')}
+      </table>
+    </div>
+    ` : ''}
+
+    <!-- INJECT REVENUE -->
+    <div class="dev-section">
+      <h2>Record Revenue</h2>
+      <form method="POST" action="/dev/inject-revenue" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+        <div style="flex:1;min-width:150px"><label>Amount UGX</label><input name="amount" placeholder="e.g. 50000" type="number" required></div>
+        <div style="flex:1;min-width:150px"><label>Source</label><input name="source" placeholder="e.g. Subscription, Ads, Grant" required></div>
+        <button class="btn btn-gold">Record</button>
+      </form>
+    </div>
+
+    <!-- TENANT MANAGEMENT -->
+    <h2 style="font-size:22px;margin-bottom:16px;margin-top:24px">Tenant Management</h2>
+    <div class="dev-section">
+      <h3>Quick Tenant Action</h3>
+      <form method="POST" action="/dev/execute" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+        <div style="flex:1;min-width:150px"><label>Action</label>
+          <select name="action" required><option value="">Select</option>
             <option value="add_balance">Add Balance</option>
             <option value="verify_tenant">Verify Tenant</option>
             <option value="unverify_tenant">Unverify Tenant</option>
@@ -4806,34 +4910,42 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
             <option value="enable_fundraising">Enable Fundraising</option>
             <option value="delete_tenant">DELETE Tenant</option>
           </select>
-          <input name="target_id" placeholder="Tenant ID" type="number" required>
-          <input name="amount" placeholder="Amount UGX (if needed)" type="number">
-          <input name="reason" placeholder="Reason (for ban)" type="text">
-          <button class="btn btn-red">Execute</button>
-        </form>
-      </div>
+        </div>
+        <div style="min-width:100px"><label>Tenant ID</label><input name="target_id" placeholder="ID" type="number" required></div>
+        <div style="min-width:100px"><label>Amount</label><input name="amount" placeholder="UGX" type="number"></div>
+        <div style="min-width:100px"><label>Reason</label><input name="reason" placeholder="Reason" type="text"></div>
+        <button class="btn btn-red">Execute</button>
+      </form>
     </div>
-    <div class="card"><h3>All Tenants</h3>
+
+    <div class="dev-section">
+      <h3>All Tenants (${tCount.rows[0].count})</h3>
+      <div style="overflow-x:auto">
       <table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Verified</th><th>Status</th></tr>
       ${tenants.rows.map(t => `<tr>
         <td>${t.id}</td><td>${esc(t.name)}</td><td>${esc(t.type)}</td>
         <td>UGX ${parseInt(t.wallet_balance).toLocaleString()}</td>
-        <td>${t.verified ? 'Yes' : 'No'}</td>
+        <td>${t.verified ? '<span style="color:#059669">Yes</span>' : '<span style="color:#dc2626">No</span>'}</td>
         <td>${t.approved ? (t.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>') : '<span style="color:#d97706">Pending</span>'}</td>
       </tr>`).join('')}
       </table>
+      </div>
     </div>
-    <div class="card"><h3>Recent Audit Logs</h3>
+
+    <div class="dev-section">
+      <h3>Recent Audit Logs</h3>
       <table><tr><th>User</th><th>Action</th><th>Details</th><th>Time</th></tr>
-      ${logs.rows.map(l => `<tr><td>${esc(l.user_email || l.email || '')}</td><td>${esc(l.action || '')}</td><td>${esc(l.details || '')}</td><td>${l.created_at ? new Date(l.created_at).toLocaleString() : ''}</td></tr>`).join('')}
+      ${logs.rows.map(l => `<tr><td>${esc(l.user_email || l.email || '')}</td><td>${esc(l.action || '')}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.details || '')}</td><td>${l.created_at ? new Date(l.created_at).toLocaleString() : ''}</td></tr>`).join('')}
       </table>
+      <a href="/dev/activity" class="btn btn-sm" style="margin-top:10px">View All Activity</a>
     </div>
+
     <script>
       new Chart(document.getElementById('revChart'), {
         type: 'line',
         data: {
           labels: ['${chartLabels}'],
-          datasets: [{ label: 'UGX Revenue', data: [${chartValues}], borderColor: '#dc2626', tension: 0.3, fill: true, backgroundColor: 'rgba(220,38,38,0.1)' }]
+          datasets: [{ label: 'UGX Revenue', data: [${chartValues}], borderColor: '#4f46e5', tension: 0.3, fill: true, backgroundColor: 'rgba(79,70,229,0.1)' }]
         },
         options: { responsive: true, plugins: { legend: { display: false } } }
       });
@@ -8478,6 +8590,7 @@ ${process.env.GA_TRACKING_ID ? `
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
+      ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
       <a href="/notifications" title="Notifications">🔔</a>
       <a href="/dashboard">Dashboard</a>
       <a href="/search">Search</a>
