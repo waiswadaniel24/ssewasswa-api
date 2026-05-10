@@ -1031,7 +1031,18 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 .tab-bar a:hover{background:${dark ? '#334155' : '#f1f5f9'};text-decoration:none}
 .tab-bar a.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
 @media(max-width:768px){.nav{flex-direction:column;gap:10px}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}}
-</style></head><body>
+</style>
+${process.env.GA_TRACKING_ID ? `
+<!-- Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=${esc(process.env.GA_TRACKING_ID)}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', '${esc(process.env.GA_TRACKING_ID)}');
+</script>
+` : ''}
+</head><body>
 <nav class="nav">
   <div><a href="/" style="font-size:20px;font-weight:800">SSEWASSWA</a></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -8151,7 +8162,18 @@ table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:10px 12px;
 .muted{color:${dark ? '#94a3b8' : '#64748b'};font-size:13px}
 a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:768px){.nav{flex-direction:column;gap:10px}.stats,.grid{grid-template-columns:1fr}}
-</style></head><body>
+</style>
+${process.env.GA_TRACKING_ID ? `
+<!-- Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=${esc(process.env.GA_TRACKING_ID)}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', '${esc(process.env.GA_TRACKING_ID)}');
+</script>
+` : ''}
+</head><body>
 <nav class="nav">
   <div><a href="/" style="font-size:20px;font-weight:800">SSEWASSWA</a></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -8169,15 +8191,6 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
   </div>
 </nav>
 <div class="container">${content}</div>
-${process.env.GA_TRACKING_ID ? `
-<script async src="https://www.googletagmanager.com/gtag/js?id=${esc(process.env.GA_TRACKING_ID)}"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', '${esc(process.env.GA_TRACKING_ID)}');
-</script>
-` : ''}
 </body></html>`;
 };
 

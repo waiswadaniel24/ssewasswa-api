@@ -861,16 +861,6 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       })();
       </script>
       ${getStructuredData()}
-      <!-- Google Analytics -->
-      ${process.env.GA_TRACKING_ID ? `
-      <script async src="https://www.googletagmanager.com/gtag/js?id=${esc(process.env.GA_TRACKING_ID)}"></script>
-      <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){dataLayer.push(arguments);}
-        gtag('js', new Date());
-        gtag('config', '${esc(process.env.GA_TRACKING_ID)}');
-      </script>
-      ` : ''}
     `;
 
     res.send(renderPage('SSEWASSWA - The Operating System for African Institutions', content, null));
