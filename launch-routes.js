@@ -2125,8 +2125,13 @@ Sitemap: ${BASE_URL}/sitemap.xml
 
   // Google site verification route (placeholder — update with your actual verification code)
   app.get('/google:siteVerification.html', (req, res) => {
-    // Replace with your actual Google verification string
-    res.send('google-site-verification: NOT_SET');
+    const code = process.env.GOOGLE_SITE_VERIFICATION || 'NOT_SET';
+    res.send(`google-site-verification: google${code}.html`);
+  });
+
+  // Also handle the specific Google verification file for this account
+  app.get('/googleRvLisS63AfmVd_rvNfWXznr3ZjRa6kF7p9EiBoKY28s.html', (req, res) => {
+    res.send('google-site-verification: googleRvLisS63AfmVd_rvNfWXznr3ZjRa6kF7p9EiBoKY28s.html');
   });
 
   // =========================================================================

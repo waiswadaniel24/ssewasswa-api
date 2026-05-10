@@ -17,7 +17,7 @@ services:
       - key: BASE_URL
         value: https://ssewasswa.onrender.com
       - key: GOOGLE_SITE_VERIFICATION
-        sync: false
+        value: RvLisS63AfmVd_rvNfWXznr3ZjRa6kF7p9EiBoKY28s
 
 databases:
   - name: ssewasswa-db
