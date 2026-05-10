@@ -4649,9 +4649,13 @@ app.get('/search/results', requireAuth, ah(async (req, res) => {
 }));
 
 // === PUBLIC PROFILE PAGE ===
-app.get('/p/:subdomain', ah(async (req, res) => {
+app.get('/p/:subdomain', ah(async (req, res, next) => {
+  // Special subdomains handled by launch-routes (entertainment, fundraising, home)
+  const specialSubdomains = ['entertainment', 'fundraising', 'home', 'links'];
+  if (specialSubdomains.includes(req.params.subdomain)) return next();
+
   const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND verified=true', [req.params.subdomain])).rows[0];
-  if (!tenant) return res.status(404).send(renderPage('Not Found', '<div class="card"><h2>Organization not found</h2></div>', null));
+  if (!tenant) return next(); // Pass to next handler (launch-routes or 404)
   const events = (await pool.query('SELECT * FROM events WHERE tenant_id=$1 AND event_date>=CURRENT_DATE ORDER BY event_date LIMIT 5', [tenant.id])).rows;
   res.send(renderPage(tenant.name, `
     <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)">
@@ -8531,9 +8535,13 @@ app.get('/pages/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) 
 }));
 
 // Public custom page view
-app.get('/p/:slug', ah(async (req, res) => {
+app.get('/p/:slug', ah(async (req, res, next) => {
+  // Special slugs handled by launch-routes
+  const specialSlugs = ['entertainment', 'fundraising', 'home', 'links'];
+  if (specialSlugs.includes(req.params.slug)) return next();
+
   const page = (await pool.query('SELECT cp.*,t.name as tenant_name,t.primary_color FROM custom_pages cp JOIN tenants t ON cp.tenant_id=t.id WHERE cp.slug=$1 AND cp.is_published=true', [req.params.slug])).rows[0];
-  if (!page) return res.status(404).send(renderPage('404', '<div class="card"><h2>Page Not Found</h2><p>This page does not exist or is not published.</p><a href="/" class="btn">Go Home</a></div>', null));
+  if (!page) return next(); // Pass to next handler (launch-routes or 404)
   const stampPos = { 'bottom-right': 'bottom:20px;right:20px', 'bottom-left': 'bottom:20px;left:20px', 'top-right': 'top:20px;right:20px', 'top-left': 'top:20px;left:20px', 'center': 'top:50%;left:50%;transform:translate(-50%,-50%)' };
   const sigPos = { 'bottom-right': 'bottom:40px;right:40px', 'bottom-left': 'bottom:40px;left:40px' };
   res.send(renderPageV3(page.title, `
