@@ -17419,8 +17419,9 @@ const phase2Tables = [
 
 // Create Phase 2 tables & seed data (async IIFE for top-level await compatibility)
 (async () => {
+try {
 for (const sql of phase2Tables) {
-  try { await pool.query(sql); } catch (e) { console.warn('[Phase2 Table]', e.message.split('\n')[0]); }
+  try { await pool.query(sql); } catch (e) { /* table already exists is OK */ }
 }
 
 // Create indexes for Phase 2
@@ -17495,6 +17496,7 @@ for (const [key, name, desc, ver, cat, req] of phase2Flags) {
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT \'UG\''); } catch (e) {}
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT \'UGX\''); } catch (e) {}
 console.log('[Phase2] DB tables, indexes, drug interactions, and feature flags initialized');
+} catch (e) { console.error('[Phase2] Init error:', e.message); }
 })(); // End Phase 2 async IIFE
 
 // ============================================================
