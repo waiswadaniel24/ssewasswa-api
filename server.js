@@ -60,7 +60,21 @@ const CSRF_SECRET = process.env.CSRF_SECRET || process.env.SESSION_SECRET || 'cs
 const generateCSRFToken = () => crypto.randomBytes(32).toString('hex');
 const hashCSRFToken = (token) => crypto.createHmac('sha256', CSRF_SECRET).update(token).digest('hex');
 
-// Generate CSRF token and store in session
+// === SESSION (must come BEFORE CSRF so req.session is available) ===
+app.use(session({
+  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
+  secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  }
+}));
+
+// Generate CSRF token and store in session (AFTER session middleware)
 app.use((req, res, next) => {
   if (!req.session) return next();
   if (!req.session.csrfToken) {
@@ -100,20 +114,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// === SESSION ===
-app.use(session({
-  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
-  secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000
-  }
-}));
 
 // === RATE LIMIT ===
 app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50 }));
@@ -683,8 +683,8 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en'`,
   `CREATE TABLE IF NOT EXISTS translations (id SERIAL PRIMARY KEY, lang TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, UNIQUE(lang, key))`,
   // v11.0 - Platform status
-  `CREATE TABLE IF NOT EXISTS platform_status (id SERIAL PRIMARY KEY, service TEXT NOT NULL, status TEXT DEFAULT 'operational', message TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
-  `INSERT INTO platform_status (service, status) VALUES ('api', 'operational'), ('database', 'operational'), ('email', 'operational'), ('sms', 'operational') ON CONFLICT DO NOTHING`,
+  `CREATE TABLE IF NOT EXISTS platform_status (id SERIAL PRIMARY KEY, service TEXT NOT NULL UNIQUE, status TEXT DEFAULT 'operational', message TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  `INSERT INTO platform_status (service, status) VALUES ('api', 'operational'), ('database', 'operational'), ('email', 'operational'), ('sms', 'operational') ON CONFLICT (service) DO NOTHING`,
 
   // ============ v2.0 MIGRATIONS ============
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT`,
@@ -5639,7 +5639,7 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
   
   // Re-seed essential data
   try {
-    await pool.query("INSERT INTO platform_status (service, status) VALUES ('api', 'operational'), ('database', 'operational'), ('email', 'operational'), ('sms', 'operational') ON CONFLICT DO NOTHING");
+    await pool.query("INSERT INTO platform_status (service, status) VALUES ('api', 'operational'), ('database', 'operational'), ('email', 'operational'), ('sms', 'operational') ON CONFLICT (service) DO NOTHING");
   } catch(e) {}
   
   // Re-seed feature flags
