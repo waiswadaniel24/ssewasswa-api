@@ -27,6 +27,21 @@ const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthT
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// === SENTRY ERROR MONITORING (Phase 1 Security Fix) ===
+let Sentry = null;
+if (process.env.SENTRY_DSN) {
+  try {
+    Sentry = require('@sentry/node');
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV || 'development',
+      tracesSampleRate: 0.1,
+      profilesSampleRate: 0.1,
+    });
+    console.log('[Sentry] Error monitoring initialized');
+  } catch (e) { console.warn('[Sentry] Failed to initialize:', e.message); }
+}
+
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -39,6 +54,49 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
+
+// === CSRF PROTECTION (Phase 1 Security Fix) ===
+const CSRF_SECRET = process.env.CSRF_SECRET || process.env.SESSION_SECRET || 'csrf-ssewasswa-secret';
+const generateCSRFToken = () => crypto.randomBytes(32).toString('hex');
+const hashCSRFToken = (token) => crypto.createHmac('sha256', CSRF_SECRET).update(token).digest('hex');
+
+// Generate CSRF token and store in session
+app.use((req, res, next) => {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = generateCSRFToken();
+  }
+  res.locals = res.locals || {};
+  res.locals.csrfToken = req.session.csrfToken;
+  // Make csrfToken available on req for renderPage
+  req.csrfToken = req.session.csrfToken;
+  next();
+});
+
+// Validate CSRF token on all state-changing requests (except webhooks and API)
+// Phase 1: Enforce CSRF on auth routes only; log warnings for others (will enforce fully in Phase 2)
+const CSRF_ENFORCED_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/settings/password', '/settings/profile'];
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+    const path = req.path;
+    // Skip CSRF for webhook endpoints, API endpoints, USSD, opt-out, and payment callbacks
+    if (path.startsWith('/webhook') || path.startsWith('/api/') || path === '/ussd' || path === '/opt-out' || path.startsWith('/pay/') || path.startsWith('/momo/')) {
+      return next();
+    }
+    const token = req.body?._csrf || req.headers['x-csrf-token'] || req.query?._csrf;
+    // Enforce on critical paths, log warning on others
+    const isEnforced = CSRF_ENFORCED_PATHS.some(p => path === p || path.startsWith(p + '/'));
+    if (isEnforced) {
+      if (!token || hashCSRFToken(token) !== hashCSRFToken(req.session.csrfToken)) {
+        console.warn(`[CSRF BLOCKED] ${req.method} ${path} from IP: ${req.ip}`);
+        return res.status(403).send(renderPage('Security Error', '<div class="card"><div class="alert alert-error"><h2>Security Verification Failed</h2><p>Your session may have expired. Please go back and try again.</p></div><a href="javascript:history.back()" class="btn">Go Back</a> | <a href="/dashboard" class="btn">Dashboard</a></div>', req.session.user));
+      }
+    } else if (token && hashCSRFToken(token) !== hashCSRFToken(req.session.csrfToken)) {
+      // Log but don't block for non-critical paths during rollout
+      console.warn(`[CSRF WARNING] ${req.method} ${path} - token missing or invalid (not blocking yet)`);
+    }
+  }
+  next();
+});
 
 // === SESSION ===
 app.use(session({
@@ -1375,10 +1433,17 @@ loadPlatformSettings();
 setInterval(loadPlatformSettings, 60000);
 
 // === RENDER PAGE (with dark mode support) ===
-const renderPage = (title, content, user) => {
+const renderPage = (title, content, user, csrfTokenOrReq) => {
   const dark = user?.dark_mode;
   const siteName = platformSettings?.site_name || 'SSEWASSWA';
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
+  // Extract CSRF token from either a string or a request object
+  const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || null);
+  // Auto-inject CSRF token into all forms in the content
+  let safeContent = content || '';
+  if (csrfToken && safeContent.includes('<form')) {
+    safeContent = safeContent.replace(/<form([^>]*)>/g, `<form$1><input type="hidden" name="_csrf" value="${csrfToken}">`);
+  }
   return `<!DOCTYPE html>
 <html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} | ${esc(siteName)}</title>
@@ -1473,7 +1538,7 @@ ${process.env.GA_TRACKING_ID ? `
     ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
 </nav>
-<main id="main" role="main"><div class="container">${content}</div></main>
+<main id="main" role="main"><div class="container">${safeContent}</div></main>
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
     <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
@@ -1515,7 +1580,7 @@ app.get('/login', (req, res) => {
       <p style="text-align:center;margin-top:8px"><a href="/forgot-password" style="font-size:13px">Forgot Password?</a></p>
       <p style="text-align:center;margin-top:8px"><a href="/parent/login" style="font-size:13px">Parent Portal</a></p>
     </div>
-  `, null));
+  `, null, req));
 });
 
 app.post('/login', ah(async (req, res) => {
@@ -1531,8 +1596,33 @@ app.post('/login', ah(async (req, res) => {
     } else throw e;
   }
   const storedHash = u?.password_hash || u?.password;
-  if (!u || u.banned || !u.approved || !storedHash) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
-  if (!(await bcrypt.compare(password, storedHash))) return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
+  // Account lockout check (Phase 1 Security Fix)
+  const lockoutKey = `login_attempts_${email}`;
+  if (!app._loginAttempts) app._loginAttempts = {};
+  const attempts = app._loginAttempts[lockoutKey];
+  if (attempts && attempts.count >= 5 && Date.now() - attempts.lastAttempt < 15 * 60 * 1000) {
+    const remainingMin = Math.ceil((15 * 60 * 1000 - (Date.now() - attempts.lastAttempt)) / 60000);
+    return res.send(renderPage('Login', `<div class="alert alert-error"><h3>Account Temporarily Locked</h3><p>Too many failed login attempts. Please try again in ${remainingMin} minute(s).</p></div>`, null));
+  }
+  if (!u || u.banned || !u.approved || !storedHash) {
+    // Track failed attempt
+    if (!app._loginAttempts) app._loginAttempts = {};
+    if (!app._loginAttempts[lockoutKey]) app._loginAttempts[lockoutKey] = { count: 0, lastAttempt: 0 };
+    app._loginAttempts[lockoutKey].count++;
+    app._loginAttempts[lockoutKey].lastAttempt = Date.now();
+    return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
+  }
+  if (!(await bcrypt.compare(password, storedHash))) {
+    // Track failed attempt
+    if (!app._loginAttempts) app._loginAttempts = {};
+    if (!app._loginAttempts[lockoutKey]) app._loginAttempts[lockoutKey] = { count: 0, lastAttempt: 0 };
+    app._loginAttempts[lockoutKey].count++;
+    app._loginAttempts[lockoutKey].lastAttempt = Date.now();
+    await audit(email, 'login_failed', `Failed login attempt #${app._loginAttempts[lockoutKey].count} from IP: ${req.ip}`);
+    return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
+  }
+  // Clear lockout on successful login
+  if (app._loginAttempts && app._loginAttempts[lockoutKey]) delete app._loginAttempts[lockoutKey];
   req.session.user = u;
   await audit(email, 'login', 'User logged in');
   res.redirect('/dashboard');
@@ -1554,16 +1644,26 @@ app.get('/register', (req, res) => {
         </select>
         <input name="email" type="email" placeholder="Your Email" required>
         <input name="phone" placeholder="Phone +256..." required>
-        <input name="password" type="password" placeholder="Password (min 6)" minlength="6" required>
+        <input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number">
+        <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required>
         <button class="btn" style="width:100%">Register</button>
       </form>
     </div>
-  `, null));
+  `, null, req));
 });
 
 app.post('/register', ah(async (req, res) => {
-  const { org_name, type, email, phone, password } = req.body;
-  const hash = await bcrypt.hash(password, 10);
+  const { org_name, type, email, phone, password, confirm_password } = req.body;
+  // Password complexity validation (Phase 1 Security Fix)
+  const passwordErrors = [];
+  if (!password || password.length < 8) passwordErrors.push('Password must be at least 8 characters long');
+  if (password && !/[A-Z]/.test(password)) passwordErrors.push('Password must contain at least 1 uppercase letter');
+  if (password && !/[0-9]/.test(password)) passwordErrors.push('Password must contain at least 1 number');
+  if (password !== confirm_password) passwordErrors.push('Passwords do not match');
+  if (passwordErrors.length > 0) {
+    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="organization" ${type==='organization'?'selected':''}>Organization</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
+  }
+  const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
   const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,true) RETURNING id', [org_name, type, email, phone, subdomain]);
   // Try inserting with both password columns, fall back to just password
@@ -1604,7 +1704,7 @@ app.get('/forgot-password', (req, res) => {
       </form>
       <p style="text-align:center;margin-top:15px"><a href="/login">Back to Login</a></p>
     </div>
-  `, null));
+  `, null, req));
 });
 
 app.post('/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 3 }), ah(async (req, res) => {
@@ -4840,7 +4940,13 @@ app.get('/settings/password', requireAuth, (req, res) => {
 
 app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
-  if (new_password !== confirm_password) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Passwords do not match</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
+  // Password complexity validation (Phase 1 Security Fix)
+  const passwordErrors = [];
+  if (!new_password || new_password.length < 8) passwordErrors.push('New password must be at least 8 characters long');
+  if (new_password && !/[A-Z]/.test(new_password)) passwordErrors.push('New password must contain at least 1 uppercase letter');
+  if (new_password && !/[0-9]/.test(new_password)) passwordErrors.push('New password must contain at least 1 number');
+  if (new_password !== confirm_password) passwordErrors.push('Passwords do not match');
+  if (passwordErrors.length > 0) return res.send(renderPage('Change Password', `<div class="card"><div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>`, req.session.user, req));
   // Try getting both password columns, fall back to just password
   let u;
   try {
@@ -4851,8 +4957,8 @@ app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
     } else throw e;
   }
   const storedHash = u.password_hash || u.password;
-  if (!storedHash || !(await bcrypt.compare(current_password, storedHash))) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user));
-  const hash = await bcrypt.hash(new_password, 10);
+  if (!storedHash || !(await bcrypt.compare(current_password, storedHash))) return res.send(renderPage('Change Password', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>', req.session.user, req));
+  const hash = await bcrypt.hash(new_password, 12);
   // Try updating both columns, fall back to just password
   try {
     await pool.query('UPDATE users SET password=$1, password_hash=$1 WHERE id=$2', [hash, req.session.user.id]);
@@ -4862,7 +4968,7 @@ app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
     } else throw e;
   }
   await audit(req.session.user.email, 'password_change', 'Password changed');
-  res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Password changed successfully!</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
+  res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Password changed successfully!</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user, req));
 }));
 
 // === PROFILE SETTINGS ===
@@ -9891,7 +9997,7 @@ ${process.env.GA_TRACKING_ID ? `
     ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
 </nav>
-<main id="main" role="main"><div class="container">${content}</div></main>
+<main id="main" role="main"><div class="container">${safeContent}</div></main>
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
     <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
@@ -17241,6 +17347,8 @@ app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card">
 // === ERROR HANDLER ===
 app.use((err, req, res, next) => {
   console.error('Server Error:', err);
+  // Send to Sentry if configured
+  if (Sentry) Sentry.captureException(err);
   const msg = err.message || 'Something went wrong';
   res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, req.session.user));
 });
