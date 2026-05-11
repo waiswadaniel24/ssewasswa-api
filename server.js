@@ -455,7 +455,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, amount INTEGER NOT NULL, paid INTEGER DEFAULT 0, term TEXT, year INTEGER, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER, date DATE NOT NULL, status TEXT, UNIQUE(student_id, date))`,
   `CREATE TABLE IF NOT EXISTS exams (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, term TEXT, year INTEGER, created_at TIMESTAMP DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS marks (id SERIAL PRIMARY KEY, exam_id INTEGER REFERENCES exams(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, subject TEXT NOT NULL, score INTEGER, grade TEXT)`,
+  `CREATE TABLE IF NOT EXISTS marks (id SERIAL PRIMARY KEY, exam_id INTEGER REFERENCES exams(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, subject TEXT NOT NULL, score INTEGER, grade TEXT, UNIQUE(exam_id, student_id, subject))`,
   `CREATE TABLE IF NOT EXISTS members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, phone TEXT, role TEXT, joined_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS projects (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, budget INTEGER DEFAULT 0, spent INTEGER DEFAULT 0, status TEXT DEFAULT 'active', description TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS events (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, event_date DATE, budget INTEGER DEFAULT 0, description TEXT, venue TEXT, created_at TIMESTAMP DEFAULT NOW())`,
@@ -466,7 +466,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, invoice_no TEXT UNIQUE, customer_name TEXT, customer_contact TEXT, amount INTEGER NOT NULL, due_date DATE, status TEXT DEFAULT 'unpaid', created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS expenses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT, amount INTEGER NOT NULL, description TEXT, expense_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS audit_logs (id SERIAL PRIMARY KEY, user_email TEXT, action TEXT NOT NULL, details TEXT, created_at TIMESTAMP DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS developer_revenue (id SERIAL PRIMARY KEY, amount INTEGER NOT NULL, source TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS developer_revenue (id SERIAL PRIMARY KEY, tenant_id INTEGER, amount INTEGER NOT NULL, source TEXT, description TEXT, details TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS platform_wallet (id SERIAL PRIMARY KEY, balance INTEGER DEFAULT 0)`,
   `INSERT INTO platform_wallet (id, balance) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`,
   `CREATE TABLE IF NOT EXISTS entertainment_videos (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`,
@@ -641,7 +641,7 @@ const migrations = [
   // v11.0 - Webhooks
   `CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, url TEXT NOT NULL, events TEXT[], secret TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Church member attendance
-  `CREATE TABLE IF NOT EXISTS church_attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id), service_name TEXT, date DATE DEFAULT CURRENT_DATE, present BOOLEAN DEFAULT true)`,
+  `CREATE TABLE IF NOT EXISTS church_attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id), service_name TEXT, date DATE DEFAULT CURRENT_DATE, present BOOLEAN DEFAULT true, UNIQUE(tenant_id, member_id, service_name, date))`,
   // v11.0 - Tithe statements
   `ALTER TABLE donations ADD COLUMN IF NOT EXISTS donor_id INTEGER`,
   `ALTER TABLE donations ADD COLUMN IF NOT EXISTS is_tithe BOOLEAN DEFAULT false`,
@@ -673,7 +673,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, target INTEGER DEFAULT 0, raised INTEGER DEFAULT 0, start_date DATE, end_date DATE, status TEXT DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS campaign_pledges (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE, donor_name TEXT, amount INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, pledged_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Member roles/permissions
-  `CREATE TABLE IF NOT EXISTS role_permissions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, role_name TEXT NOT NULL, permissions JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS role_permissions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, role_name TEXT NOT NULL, permissions JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, role_name))`,
   // v11.0 - Theme builder
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS primary_color TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS secondary_color TEXT`,
@@ -702,7 +702,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS volunteer_hours (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, member_id INTEGER REFERENCES members(id), hours NUMERIC DEFAULT 0, activity TEXT, date DATE DEFAULT CURRENT_DATE, approved BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS event_tickets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event_id INTEGER REFERENCES events(id) ON DELETE CASCADE, ticket_type TEXT DEFAULT 'general', price INTEGER DEFAULT 0, quantity_sold INTEGER DEFAULT 0, quantity_total INTEGER DEFAULT 100)`,
   `CREATE TABLE IF NOT EXISTS ticket_sales (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event_id INTEGER REFERENCES events(id), ticket_type TEXT, buyer_name TEXT, buyer_phone TEXT, buyer_email TEXT, amount INTEGER, payment_method TEXT, payment_ref TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS chart_of_accounts (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, code TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, parent_id INTEGER, balance INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS chart_of_accounts (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, code TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, parent_id INTEGER, balance INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, code))`,
   `CREATE TABLE IF NOT EXISTS ledger_entries (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, account_id INTEGER REFERENCES chart_of_accounts(id), debit INTEGER DEFAULT 0, credit INTEGER DEFAULT 0, description TEXT, reference TEXT, entry_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `ALTER TABLE sermons ADD COLUMN IF NOT EXISTS video_url TEXT`,
   `ALTER TABLE sermons ADD COLUMN IF NOT EXISTS audio_url TEXT`,
@@ -725,7 +725,7 @@ const migrations = [
   // ============ v5.0 MIGRATIONS ============
   `CREATE TABLE IF NOT EXISTS investments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT, amount INTEGER DEFAULT 0, current_value INTEGER DEFAULT 0, start_date DATE, maturity_date DATE, interest_rate NUMERIC DEFAULT 0, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS debt_payoff (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, total_owed INTEGER DEFAULT 0, interest_rate NUMERIC DEFAULT 0, min_payment INTEGER DEFAULT 0, monthly_payment INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS momo_payments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, phone TEXT NOT NULL, amount INTEGER NOT NULL, reference TEXT, status TEXT DEFAULT 'pending', type TEXT DEFAULT 'mtn', external_ref TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS momo_payments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, phone TEXT NOT NULL, amount INTEGER NOT NULL, reference TEXT, status TEXT DEFAULT 'pending', type TEXT DEFAULT 'mtn', external_ref TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(reference))`,
   `ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS last_notified TIMESTAMPTZ`,
   `ALTER TABLE bill_reminders ADD COLUMN IF NOT EXISTS auto_notify BOOLEAN DEFAULT false`,
 
@@ -743,7 +743,7 @@ const migrations = [
 
   // ============ v8.0 MIGRATIONS ============
   `CREATE TABLE IF NOT EXISTS marketplace_plugins (id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT, category TEXT, price INTEGER DEFAULT 0, author TEXT, icon_url TEXT, config JSONB, active BOOLEAN DEFAULT true, downloads INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS tenant_plugins (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plugin_id INTEGER REFERENCES marketplace_plugins(id), status TEXT DEFAULT 'active', installed_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS tenant_plugins (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plugin_id INTEGER REFERENCES marketplace_plugins(id), status TEXT DEFAULT 'active', installed_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, plugin_id))`,
   `CREATE TABLE IF NOT EXISTS ad_impressions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, ad_type TEXT, impressions INTEGER DEFAULT 0, revenue INTEGER DEFAULT 0, date DATE DEFAULT CURRENT_DATE)`,
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT false`,
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS peer_to_peer BOOLEAN DEFAULT false`,
@@ -845,9 +845,9 @@ const migrations = [
   // Document Templates (receipts, reports, certificates with headers/footers/stamps/signatures)
   `CREATE TABLE IF NOT EXISTS document_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT NOT NULL, header_html TEXT, footer_html TEXT, stamp_url TEXT, stamp_position TEXT DEFAULT 'bottom-right', badge_text TEXT, badge_color TEXT DEFAULT '#4f46e5', signature_name TEXT, signature_image_url TEXT, signature_position TEXT DEFAULT 'bottom-left', logo_url TEXT, watermark_text TEXT, watermark_opacity NUMERIC DEFAULT 0.1, paper_size TEXT DEFAULT 'A4', margin_top INTEGER DEFAULT 20, margin_bottom INTEGER DEFAULT 20, margin_left INTEGER DEFAULT 15, margin_right INTEGER DEFAULT 15, css TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // USSD Sessions
-  `CREATE TABLE IF NOT EXISTS ussd_sessions (id SERIAL PRIMARY KEY, session_id TEXT NOT NULL, phone TEXT, tenant_id INTEGER, current_menu TEXT, data JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ)`,
+  `CREATE TABLE IF NOT EXISTS ussd_sessions (id SERIAL PRIMARY KEY, session_id TEXT NOT NULL, phone TEXT, tenant_id INTEGER, current_menu TEXT, data JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, UNIQUE(session_id))`,
   // Push Subscriptions
-  `CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, endpoint TEXT NOT NULL, keys JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, endpoint TEXT NOT NULL, keys JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(endpoint))`,
   // Offline Sync Queue
   `CREATE TABLE IF NOT EXISTS offline_sync_queue (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id INTEGER, data JSONB, synced BOOLEAN DEFAULT false, synced_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // Scheduled Reports
@@ -958,13 +958,13 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS library_borrows (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, book_id INTEGER REFERENCES library_books(id) ON DELETE CASCADE, borrower_name TEXT NOT NULL, borrower_type TEXT DEFAULT 'student', borrower_id INTEGER, borrow_date DATE DEFAULT CURRENT_DATE, due_date DATE, return_date DATE, fine INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
 
   // Church: Choir
-  `CREATE TABLE IF NOT EXISTS choir_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE, voice_part TEXT, role TEXT DEFAULT 'member', joined_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS choir_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE, voice_part TEXT, role TEXT DEFAULT 'member', joined_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, member_id))`,
   `CREATE TABLE IF NOT EXISTS worship_songs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, author TEXT, key_signature TEXT, tempo TEXT, lyrics TEXT, category TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // Church: Sacraments
   `CREATE TABLE IF NOT EXISTS sacraments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, type TEXT NOT NULL, member_id INTEGER REFERENCES church_members(id) ON DELETE SET NULL, date DATE, officiant TEXT, location TEXT, witnesses TEXT, certificate_no TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // Church: Cell Groups
   `CREATE TABLE IF NOT EXISTS cell_groups (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, leader TEXT, meeting_day TEXT, meeting_time TEXT, location TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS cell_group_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, group_id INTEGER REFERENCES cell_groups(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE, role TEXT DEFAULT 'member', joined_date DATE DEFAULT CURRENT_DATE)`,
+  `CREATE TABLE IF NOT EXISTS cell_group_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, group_id INTEGER REFERENCES cell_groups(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE, role TEXT DEFAULT 'member', joined_date DATE DEFAULT CURRENT_DATE, UNIQUE(tenant_id, group_id, member_id))`,
   // Church: Volunteers
   `CREATE TABLE IF NOT EXISTS volunteer_roles (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, role_name TEXT NOT NULL, description TEXT, schedule TEXT, slots INTEGER, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS volunteer_assignments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, role_id INTEGER REFERENCES volunteer_roles(id) ON DELETE CASCADE, member_id INTEGER REFERENCES church_members(id) ON DELETE CASCADE, date_assigned DATE DEFAULT CURRENT_DATE, status TEXT DEFAULT 'active')`,
@@ -1005,7 +1005,7 @@ const migrations = [
   // Cross-cutting: Chat
   `CREATE TABLE IF NOT EXISTS chat_channels (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT DEFAULT 'group', created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS chat_messages (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, channel_id INTEGER REFERENCES chat_channels(id) ON DELETE CASCADE, sender_email TEXT NOT NULL, message TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS channel_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, channel_id INTEGER REFERENCES chat_channels(id) ON DELETE CASCADE, user_email TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS channel_members (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, channel_id INTEGER REFERENCES chat_channels(id) ON DELETE CASCADE, user_email TEXT NOT NULL, UNIQUE(tenant_id, channel_id, user_email))`,
   // Cross-cutting: Tasks
   `CREATE TABLE IF NOT EXISTS tasks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, assignee TEXT, priority TEXT DEFAULT 'medium', status TEXT DEFAULT 'todo', due_date DATE, created_by TEXT, completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // Cross-cutting: 2FA
@@ -1080,11 +1080,11 @@ const migrations = [
   // Meal Plans
   `CREATE TABLE IF NOT EXISTS meal_plans (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, meals_per_day INTEGER DEFAULT 3, price INTEGER DEFAULT 0, includes_breakfast BOOLEAN DEFAULT true, includes_lunch BOOLEAN DEFAULT true, includes_dinner BOOLEAN DEFAULT true, includes_snacks BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // Meal Attendance
-  `CREATE TABLE IF NOT EXISTS meal_attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id), meal_date DATE DEFAULT CURRENT_DATE, meal_type TEXT, present BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS meal_attendance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id), meal_date DATE DEFAULT CURRENT_DATE, meal_type TEXT, present BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, student_id, meal_date, meal_type))`,
   // Student Specializations / Tracks
   `CREATE TABLE IF NOT EXISTS student_tracks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, track_name TEXT NOT NULL, level_code TEXT, subjects TEXT[], description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // Student Track Assignments
-  `CREATE TABLE IF NOT EXISTS student_track_assignments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, track_id INTEGER REFERENCES student_tracks(id) ON DELETE CASCADE, assigned_date DATE DEFAULT CURRENT_DATE, status TEXT DEFAULT 'active')`,
+  `CREATE TABLE IF NOT EXISTS student_track_assignments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, track_id INTEGER REFERENCES student_tracks(id) ON DELETE CASCADE, assigned_date DATE DEFAULT CURRENT_DATE, status TEXT DEFAULT 'active', UNIQUE(tenant_id, student_id, track_id))`,
 
   // Indexes for new tables
   `CREATE INDEX IF NOT EXISTS idx_transport_routes_tenant ON transport_routes(tenant_id)`,
@@ -1202,7 +1202,9 @@ const migrations = [
   `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
   `ALTER TABLE payments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
   // ============ v13 FIXES ============
+  `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS source TEXT`,
+  `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS details TEXT`,
   `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
   // daily_adverts: ensure all columns exist even if table was created with different schema
@@ -1256,7 +1258,8 @@ const migrations = [
     is_active BOOLEAN DEFAULT true,
     scraped_from TEXT,
     created_by TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(title, scraped_from)
   )`,
   `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'book'`,
   `ALTER TABLE educational_resources ADD COLUMN IF NOT EXISTS subject TEXT`,
@@ -1377,26 +1380,28 @@ const migrations = [
 ];
 
 // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
-// These are applied inside the async init block with error handling
+// These are applied inside the async init block with deduplication first
 const uniqueConstraintMigrations = [
-  `ALTER TABLE platform_status ADD CONSTRAINT platform_status_service_key UNIQUE (service)`,
-  `ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_tenant_role_key UNIQUE (tenant_id, role_name)`,
-  `ALTER TABLE chart_of_accounts ADD CONSTRAINT chart_of_accounts_tenant_code_key UNIQUE (tenant_id, code)`,
-  `ALTER TABLE tenant_plugins ADD CONSTRAINT tenant_plugins_tenant_plugin_key UNIQUE (tenant_id, plugin_id)`,
-  `ALTER TABLE ussd_sessions ADD CONSTRAINT ussd_sessions_session_id_key UNIQUE (session_id)`,
-  `ALTER TABLE push_subscriptions ADD CONSTRAINT push_subscriptions_endpoint_key UNIQUE (endpoint)`,
-  `ALTER TABLE choir_members ADD CONSTRAINT choir_members_tenant_member_key UNIQUE (tenant_id, member_id)`,
-  `ALTER TABLE cell_group_members ADD CONSTRAINT cell_group_members_tenant_group_member_key UNIQUE (tenant_id, group_id, member_id)`,
-  `ALTER TABLE channel_members ADD CONSTRAINT channel_members_tenant_channel_user_key UNIQUE (tenant_id, channel_id, user_email)`,
-  `ALTER TABLE student_track_assignments ADD CONSTRAINT student_track_assignments_tenant_student_track_key UNIQUE (tenant_id, student_id, track_id)`,
-  `ALTER TABLE policy_acknowledgments ADD CONSTRAINT policy_ack_policy_user_key UNIQUE (policy_id, user_email)`,
-  `ALTER TABLE graduation_students ADD CONSTRAINT graduation_students_grad_student_key UNIQUE (graduation_id, student_id)`,
-  `ALTER TABLE momo_payments ADD CONSTRAINT momo_payments_reference_key UNIQUE (reference)`,
-  `ALTER TABLE marks ADD CONSTRAINT marks_exam_student_subject_key UNIQUE (exam_id, student_id, subject)`,
-  `ALTER TABLE educational_resources ADD CONSTRAINT educational_resources_title_source_key UNIQUE (title, scraped_from)`,
-  `ALTER TABLE church_attendance ADD CONSTRAINT church_attendance_tenant_member_service_key UNIQUE (tenant_id, member_id, service_name, date)`,
-  `ALTER TABLE developer_revenue ADD CONSTRAINT developer_revenue_tenant_source_desc_key UNIQUE (tenant_id, source, description)`,
-  `ALTER TABLE meal_attendance ADD CONSTRAINT meal_attendance_tenant_student_meal_key UNIQUE (tenant_id, student_id, meal_date, meal_type)`,
+  { table: 'translations', constraint: 'translations_lang_key_key', columns: 'lang, key', dedup: `DELETE FROM translations a USING translations b WHERE a.id > b.id AND a.lang = b.lang AND a.key = b.key` },
+  { table: 'feature_flags', constraint: 'feature_flags_feature_key_key', columns: 'feature_key', dedup: `DELETE FROM feature_flags a USING feature_flags b WHERE a.id > b.id AND a.feature_key = b.feature_key` },
+  { table: 'platform_status', constraint: 'platform_status_service_key', columns: 'service', dedup: `DELETE FROM platform_status a USING platform_status b WHERE a.id > b.id AND a.service = b.service` },
+  { table: 'role_permissions', constraint: 'role_permissions_tenant_role_key', columns: 'tenant_id, role_name', dedup: `DELETE FROM role_permissions a USING role_permissions b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.role_name = b.role_name` },
+  { table: 'chart_of_accounts', constraint: 'chart_of_accounts_tenant_code_key', columns: 'tenant_id, code', dedup: `DELETE FROM chart_of_accounts a USING chart_of_accounts b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.code = b.code` },
+  { table: 'tenant_plugins', constraint: 'tenant_plugins_tenant_plugin_key', columns: 'tenant_id, plugin_id', dedup: `DELETE FROM tenant_plugins a USING tenant_plugins b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.plugin_id = b.plugin_id` },
+  { table: 'ussd_sessions', constraint: 'ussd_sessions_session_id_key', columns: 'session_id', dedup: `DELETE FROM ussd_sessions a USING ussd_sessions b WHERE a.id > b.id AND a.session_id = b.session_id` },
+  { table: 'push_subscriptions', constraint: 'push_subscriptions_endpoint_key', columns: 'endpoint', dedup: `DELETE FROM push_subscriptions a USING push_subscriptions b WHERE a.id > b.id AND a.endpoint = b.endpoint` },
+  { table: 'choir_members', constraint: 'choir_members_tenant_member_key', columns: 'tenant_id, member_id', dedup: `DELETE FROM choir_members a USING choir_members b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.member_id = b.member_id` },
+  { table: 'cell_group_members', constraint: 'cell_group_members_tenant_group_member_key', columns: 'tenant_id, group_id, member_id', dedup: `DELETE FROM cell_group_members a USING cell_group_members b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.group_id = b.group_id AND a.member_id = b.member_id` },
+  { table: 'channel_members', constraint: 'channel_members_tenant_channel_user_key', columns: 'tenant_id, channel_id, user_email', dedup: `DELETE FROM channel_members a USING channel_members b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.channel_id = b.channel_id AND a.user_email = b.user_email` },
+  { table: 'student_track_assignments', constraint: 'student_track_assignments_tenant_student_track_key', columns: 'tenant_id, student_id, track_id', dedup: `DELETE FROM student_track_assignments a USING student_track_assignments b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.student_id = b.student_id AND a.track_id = b.track_id` },
+  { table: 'policy_acknowledgments', constraint: 'policy_ack_policy_user_key', columns: 'policy_id, user_email', dedup: `DELETE FROM policy_acknowledgments a USING policy_acknowledgments b WHERE a.id > b.id AND a.policy_id = b.policy_id AND a.user_email = b.user_email` },
+  { table: 'graduation_students', constraint: 'graduation_students_grad_student_key', columns: 'graduation_id, student_id', dedup: `DELETE FROM graduation_students a USING graduation_students b WHERE a.id > b.id AND a.graduation_id = b.graduation_id AND a.student_id = b.student_id` },
+  { table: 'momo_payments', constraint: 'momo_payments_reference_key', columns: 'reference', dedup: `DELETE FROM momo_payments a USING momo_payments b WHERE a.id > b.id AND a.reference IS NOT NULL AND a.reference = b.reference` },
+  { table: 'marks', constraint: 'marks_exam_student_subject_key', columns: 'exam_id, student_id, subject', dedup: `DELETE FROM marks a USING marks b WHERE a.id > b.id AND a.exam_id = b.exam_id AND a.student_id = b.student_id AND a.subject = b.subject` },
+  { table: 'educational_resources', constraint: 'educational_resources_title_source_key', columns: 'title, scraped_from', dedup: `DELETE FROM educational_resources a USING educational_resources b WHERE a.id > b.id AND a.title = b.title AND a.scraped_from IS NOT NULL AND a.scraped_from = b.scraped_from` },
+  { table: 'church_attendance', constraint: 'church_attendance_tenant_member_service_key', columns: 'tenant_id, member_id, service_name, date', dedup: `DELETE FROM church_attendance a USING church_attendance b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.member_id = b.member_id AND a.service_name = b.service_name AND a.date = b.date` },
+  { table: 'developer_revenue', constraint: 'developer_revenue_tenant_source_desc_key', columns: 'tenant_id, source, description', dedup: `DELETE FROM developer_revenue a USING developer_revenue b WHERE a.id > b.id AND a.tenant_id IS NOT NULL AND a.tenant_id = b.tenant_id AND a.source = b.source AND a.description = b.description` },
+  { table: 'meal_attendance', constraint: 'meal_attendance_tenant_student_meal_key', columns: 'tenant_id, student_id, meal_date, meal_type', dedup: `DELETE FROM meal_attendance a USING meal_attendance b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.student_id = b.student_id AND a.meal_date = b.meal_date AND a.meal_type = b.meal_type` },
 ];
 
 (async () => {
@@ -1404,11 +1409,28 @@ const uniqueConstraintMigrations = [
     try {
       // Run each migration individually so one failure doesn't stop the rest
       for (const q of migrations) {
-        try { await pool.query(q); } catch (e) { /* column/index already exists is OK */ if (!e.message.includes('already exists') && !e.message.includes('does not exist')) console.warn('Migration warning:', e.message); }
+        try { await pool.query(q); } catch (e) { /* column/index/constraint already exists is OK, ON CONFLICT without constraint is OK */ if (!e.message.includes('already exists') && !e.message.includes('does not exist') && !e.message.includes('ON CONFLICT')) console.warn('Migration warning:', e.message); }
       }
       // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
-      for (const q of uniqueConstraintMigrations) {
-        try { await pool.query(q); } catch (e) { /* constraint already exists or duplicate data - OK */ }
+      // First deduplicate data, then add constraints
+      for (const uc of uniqueConstraintMigrations) {
+        try {
+          // Step 1: Remove duplicate rows keeping the earliest one
+          await pool.query(uc.dedup);
+          // Step 2: Add the UNIQUE constraint (may already exist from CREATE TABLE)
+          await pool.query(`ALTER TABLE ${uc.table} ADD CONSTRAINT ${uc.constraint} UNIQUE (${uc.columns})`);
+        } catch (e) {
+          // Constraint already exists is OK, column missing is OK, other errors are warnings
+          if (!e.message.includes('already exists') && !e.message.includes('does not exist')) {
+            // Silently skip - table may not exist yet or other minor issue
+          }
+        }
+      }
+      // Re-seed translations and feature_flags after UNIQUE constraints are added
+      // (The INSERTs in the migrations array may have failed if constraints were missing)
+      const reseedQueries = migrations.filter(q => q.includes('ON CONFLICT DO NOTHING') && (q.includes('translations') || q.includes('feature_flags')));
+      for (const q of reseedQueries) {
+        try { await pool.query(q); } catch (e) { /* ignore - already exists or constraint missing */ }
       }
       const devEmail = 'waiswadaniel24@gmail.com';
       const devPass = 'Daniel@2025';
@@ -13374,7 +13396,7 @@ self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(fetch('/
     `CREATE TABLE IF NOT EXISTS student_portal_sessions (id SERIAL PRIMARY KEY, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, token TEXT, device TEXT, last_active TIMESTAMPTZ DEFAULT NOW(), created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS admissions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, applicant_name TEXT NOT NULL, email TEXT, phone TEXT, dob DATE, gender TEXT, applied_level TEXT, applied_class TEXT, previous_school TEXT, guardian_name TEXT, guardian_phone TEXT, documents JSONB, status TEXT DEFAULT 'applied', reviewed_by TEXT, review_notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS graduations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, academic_year TEXT, term TEXT, level TEXT, class_name TEXT, student_count INTEGER DEFAULT 0, graduation_date DATE, venue TEXT, notes TEXT, status TEXT DEFAULT 'planned', created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS graduation_students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, graduation_id INTEGER REFERENCES graduations(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, honors TEXT, gpa NUMERIC, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS graduation_students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, graduation_id INTEGER REFERENCES graduations(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, honors TEXT, gpa NUMERIC, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(graduation_id, student_id))`,
     `CREATE TABLE IF NOT EXISTS subjects (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, code TEXT, category TEXT, education_level TEXT, is_compulsory BOOLEAN DEFAULT true, description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS class_subjects (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, class_name TEXT NOT NULL, subject_id INTEGER REFERENCES subjects(id) ON DELETE CASCADE, teacher_id INTEGER REFERENCES staff(id), education_level TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS exam_seating (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, exam_id INTEGER REFERENCES exams(id), subject TEXT, room TEXT, seat_start INTEGER, seat_end INTEGER, capacity INTEGER DEFAULT 30, created_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -13405,7 +13427,7 @@ self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(fetch('/
     `CREATE TABLE IF NOT EXISTS committees (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, purpose TEXT, chairperson TEXT, secretary TEXT, members JSONB, status TEXT DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS committee_meetings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, committee_id INTEGER REFERENCES committees(id) ON DELETE CASCADE, title TEXT, meeting_date DATE, agenda TEXT, minutes TEXT, attendees JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS policy_documents (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, category TEXT, content TEXT, version INTEGER DEFAULT 1, effective_date DATE, review_date DATE, approved_by TEXT, status TEXT DEFAULT 'draft', created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS policy_acknowledgments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, policy_id INTEGER REFERENCES policy_documents(id) ON DELETE CASCADE, user_email TEXT, acknowledged_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS policy_acknowledgments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, policy_id INTEGER REFERENCES policy_documents(id) ON DELETE CASCADE, user_email TEXT, acknowledged_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(policy_id, user_email))`,
     `CREATE TABLE IF NOT EXISTS forum_topics (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, category TEXT, author_email TEXT, content TEXT, pinned BOOLEAN DEFAULT false, locked BOOLEAN DEFAULT false, views INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS forum_replies (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, topic_id INTEGER REFERENCES forum_topics(id) ON DELETE CASCADE, author_email TEXT, content TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS suggestions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, type TEXT DEFAULT 'suggestion', title TEXT NOT NULL, description TEXT, submitted_by TEXT, is_anonymous BOOLEAN DEFAULT false, priority TEXT DEFAULT 'medium', assigned_to TEXT, response TEXT, status TEXT DEFAULT 'open', created_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -18968,4 +18990,4 @@ app.listen(PORT, () => {
   console.log(`Dev Master: waiswadaniel24@gmail.com / Daniel@2025`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
-// Deploy trigger 1778408077
+// Deploy trigger 1778408078
