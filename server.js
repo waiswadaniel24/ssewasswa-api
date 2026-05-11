@@ -1376,12 +1376,39 @@ const migrations = [
   `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by TEXT`
 ];
 
+// Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
+// These are applied inside the async init block with error handling
+const uniqueConstraintMigrations = [
+  `ALTER TABLE platform_status ADD CONSTRAINT platform_status_service_key UNIQUE (service)`,
+  `ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_tenant_role_key UNIQUE (tenant_id, role_name)`,
+  `ALTER TABLE chart_of_accounts ADD CONSTRAINT chart_of_accounts_tenant_code_key UNIQUE (tenant_id, code)`,
+  `ALTER TABLE tenant_plugins ADD CONSTRAINT tenant_plugins_tenant_plugin_key UNIQUE (tenant_id, plugin_id)`,
+  `ALTER TABLE ussd_sessions ADD CONSTRAINT ussd_sessions_session_id_key UNIQUE (session_id)`,
+  `ALTER TABLE push_subscriptions ADD CONSTRAINT push_subscriptions_endpoint_key UNIQUE (endpoint)`,
+  `ALTER TABLE choir_members ADD CONSTRAINT choir_members_tenant_member_key UNIQUE (tenant_id, member_id)`,
+  `ALTER TABLE cell_group_members ADD CONSTRAINT cell_group_members_tenant_group_member_key UNIQUE (tenant_id, group_id, member_id)`,
+  `ALTER TABLE channel_members ADD CONSTRAINT channel_members_tenant_channel_user_key UNIQUE (tenant_id, channel_id, user_email)`,
+  `ALTER TABLE student_track_assignments ADD CONSTRAINT student_track_assignments_tenant_student_track_key UNIQUE (tenant_id, student_id, track_id)`,
+  `ALTER TABLE policy_acknowledgments ADD CONSTRAINT policy_ack_policy_user_key UNIQUE (policy_id, user_email)`,
+  `ALTER TABLE graduation_students ADD CONSTRAINT graduation_students_grad_student_key UNIQUE (graduation_id, student_id)`,
+  `ALTER TABLE momo_payments ADD CONSTRAINT momo_payments_reference_key UNIQUE (reference)`,
+  `ALTER TABLE marks ADD CONSTRAINT marks_exam_student_subject_key UNIQUE (exam_id, student_id, subject)`,
+  `ALTER TABLE educational_resources ADD CONSTRAINT educational_resources_title_source_key UNIQUE (title, scraped_from)`,
+  `ALTER TABLE church_attendance ADD CONSTRAINT church_attendance_tenant_member_service_key UNIQUE (tenant_id, member_id, service_name, date)`,
+  `ALTER TABLE developer_revenue ADD CONSTRAINT developer_revenue_tenant_source_desc_key UNIQUE (tenant_id, source, description)`,
+  `ALTER TABLE meal_attendance ADD CONSTRAINT meal_attendance_tenant_student_meal_key UNIQUE (tenant_id, student_id, meal_date, meal_type)`,
+];
+
 (async () => {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       // Run each migration individually so one failure doesn't stop the rest
       for (const q of migrations) {
         try { await pool.query(q); } catch (e) { /* column/index already exists is OK */ if (!e.message.includes('already exists') && !e.message.includes('does not exist')) console.warn('Migration warning:', e.message); }
+      }
+      // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
+      for (const q of uniqueConstraintMigrations) {
+        try { await pool.query(q); } catch (e) { /* constraint already exists or duplicate data - OK */ }
       }
       const devEmail = 'waiswadaniel24@gmail.com';
       const devPass = 'Daniel@2025';
@@ -1684,7 +1711,7 @@ app.post('/register', ah(async (req, res) => {
   sendEmail(email, 'Welcome to SSEWASSWA!', welcomeHtml);
   queueEmail(tenant.rows[0].id, email, 'Welcome to SSEWASSWA!', welcomeHtml);
   // v1.0: Free subscription
-  await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [tenant.rows[0].id, 'free', 0, 'active']);
+  try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status) VALUES($1,$2,$3,$4)', [tenant.rows[0].id, 'free', 0, 'active']); } catch(e) { /* duplicate subscription OK */ }
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Account created! Check your email for a welcome message. You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
 }));
 
@@ -6683,14 +6710,14 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
   const amount = amounts[plan] || 0;
   const expires = new Date(Date.now() + 30*24*60*60*1000);
   if (plan === 'free') {
-    await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [t, plan, amount, 'active', expires]);
+    try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [t, plan, amount, 'active', expires]); } catch(e) {}
     await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan`);
     return res.redirect('/billing');
   }
   // v12: Use inline checkout page (Flutterwave inline JS + manual fallback)
   if (amount > 0) return res.redirect(`/pay/checkout?amount=${amount}&plan=${plan}&description=${plan}+plan+subscription`);
   // Fallback: manual payment
-  await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [t, plan, amount, 'active', expires]);
+  try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [t, plan, amount, 'active', expires]); } catch(e) {}
   if (amount > 0) {
     await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [t]);
     await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [t, 'active']);
@@ -6709,7 +6736,7 @@ app.get('/billing/callback', requireAuth, ah(async (req, res) => {
       await pool.query('UPDATE payments SET status=$1 WHERE reference=$2', ['completed', tx_ref]);
       const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
       const expires = new Date(Date.now() + 30*24*60*60*1000);
-      await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires]);
+      try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [payment.tenant_id, plan, payment.amount, 'active', expires]); } catch(e) {}
       // Auto-verify tenant after subscription payment
       await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
       await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [payment.tenant_id, 'active']);
@@ -9914,6 +9941,11 @@ const renderPageV3 = (title, content, user, meta = {}) => {
   const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
   const canonicalUrl = meta.canonical || `${baseUrl}${meta.path || '/'}`;
   const googleVerification = process.env.GOOGLE_SITE_VERIFICATION || '';
+  // Auto-inject CSRF token into all forms in the content
+  let safeContent = content || '';
+  if (meta.csrfToken && safeContent.includes('<form')) {
+    safeContent = safeContent.replace(/<form([^>]*)>/g, `<form$1><input type="hidden" name="_csrf" value="${meta.csrfToken}">`);
+  }
   return `<!DOCTYPE html>
 <html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${googleVerification ? `<meta name="google-site-verification" content="${esc(googleVerification)}">` : ''}
@@ -16307,11 +16339,11 @@ app.post('/webhook/flutterwave', express.raw({ type: 'application/json' }), ah(a
       await pool.query('UPDATE payments SET status=$1, method=$2 WHERE reference=$3', ['completed', 'flutterwave', tx_ref]);
       const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
       const expires = new Date(Date.now() + 30*24*60*60*1000);
-      await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method,reference) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires, 'flutterwave', tx_ref]);
+      try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method,reference) VALUES($1,$2,$3,$4,$5,$6,$7)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'flutterwave', tx_ref]); } catch(e) {}
       await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
       // Add to developer revenue
       const devShare = Math.round(payment.amount * 0.9);
-      await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [payment.tenant_id, 'subscription', devShare, `${plan} plan via Flutterwave`]);
+      try { await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, 'subscription', devShare, `${plan} plan via Flutterwave`]); } catch(e) {}
       await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan, flw_id });
       await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
       console.log(`[Flutterwave] Payment confirmed: ${tx_ref} - UGX ${amount}`);
@@ -16552,11 +16584,11 @@ app.get('/pay/mtn/status', requireAuth, ah(async (req, res) => {
       const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('basic') ? 'basic' : '';
       if (plan) {
         const expires = new Date(Date.now() + 30*24*60*60*1000);
-        await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']);
+        try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']); } catch(e) {}
         await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
       }
       const devShare = Math.round(payment.amount * 0.9);
-      await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [payment.tenant_id, 'mtn_momo', devShare, `Payment via MTN MoMo: ${ref}`]);
+      try { await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, 'mtn_momo', devShare, `Payment via MTN MoMo: ${ref}`]); } catch(e) {}
       await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, method: 'mtn_momo' });
     }
     res.send(renderPage('Payment Successful!', `
@@ -16611,7 +16643,7 @@ app.post('/webhook/mtn', express.json(), ah(async (req, res) => {
       if (payment) {
         const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
         const expires = new Date(Date.now() + 30*24*60*60*1000);
-        await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']);
+        try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']); } catch(e) {}
         await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
         await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, method: 'mtn_momo' });
         await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount });
