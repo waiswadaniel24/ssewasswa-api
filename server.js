@@ -62,6 +62,7 @@ const hashCSRFToken = (token) => crypto.createHmac('sha256', CSRF_SECRET).update
 
 // Generate CSRF token and store in session
 app.use((req, res, next) => {
+  if (!req.session) return next();
   if (!req.session.csrfToken) {
     req.session.csrfToken = generateCSRFToken();
   }
@@ -82,13 +83,15 @@ app.use((req, res, next) => {
     if (path.startsWith('/webhook') || path.startsWith('/api/') || path === '/ussd' || path === '/opt-out' || path.startsWith('/pay/') || path.startsWith('/momo/')) {
       return next();
     }
+    // Skip CSRF validation if session is not available yet
+    if (!req.session || !req.session.csrfToken) return next();
     const token = req.body?._csrf || req.headers['x-csrf-token'] || req.query?._csrf;
     // Enforce on critical paths, log warning on others
     const isEnforced = CSRF_ENFORCED_PATHS.some(p => path === p || path.startsWith(p + '/'));
     if (isEnforced) {
       if (!token || hashCSRFToken(token) !== hashCSRFToken(req.session.csrfToken)) {
         console.warn(`[CSRF BLOCKED] ${req.method} ${path} from IP: ${req.ip}`);
-        return res.status(403).send(renderPage('Security Error', '<div class="card"><div class="alert alert-error"><h2>Security Verification Failed</h2><p>Your session may have expired. Please go back and try again.</p></div><a href="javascript:history.back()" class="btn">Go Back</a> | <a href="/dashboard" class="btn">Dashboard</a></div>', req.session.user));
+        return res.status(403).send(renderPage('Security Error', '<div class="card"><div class="alert alert-error"><h2>Security Verification Failed</h2><p>Your session may have expired. Please go back and try again.</p></div><a href="javascript:history.back()" class="btn">Go Back</a> | <a href="/dashboard" class="btn">Dashboard</a></div>', req.session?.user || null));
       }
     } else if (token && hashCSRFToken(token) !== hashCSRFToken(req.session.csrfToken)) {
       // Log but don't block for non-critical paths during rollout
@@ -18915,7 +18918,7 @@ try {
 }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
-app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session.user)));
+app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
 // === ERROR HANDLER ===
 app.use((err, req, res, next) => {
@@ -18923,7 +18926,8 @@ app.use((err, req, res, next) => {
   // Send to Sentry if configured
   if (Sentry) Sentry.captureException(err);
   const msg = err.message || 'Something went wrong';
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, req.session.user));
+  const user = req.session?.user || null;
+  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
 });
 
 const PORT = process.env.PORT || 3000;
