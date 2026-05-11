@@ -17416,7 +17416,8 @@ const phase2Tables = [
   `CREATE TABLE IF NOT EXISTS tenant_country_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, country_code TEXT DEFAULT 'UG', currency TEXT DEFAULT 'UGX', timezone TEXT DEFAULT 'Africa/Kampala', language TEXT DEFAULT 'en', preferred_payment TEXT DEFAULT 'mtn_momo', flutterwave_enabled BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`
 ];
 
-// Create Phase 2 tables
+// Create Phase 2 tables & seed data (async IIFE for top-level await compatibility)
+(async () => {
 for (const sql of phase2Tables) {
   try { await pool.query(sql); } catch (e) { console.warn('[Phase2 Table]', e.message.split('\n')[0]); }
 }
@@ -17492,6 +17493,8 @@ for (const [key, name, desc, ver, cat, req] of phase2Flags) {
 // Add country_code column to tenants if missing
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT \'UG\''); } catch (e) {}
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT \'UGX\''); } catch (e) {}
+console.log('[Phase2] DB tables, indexes, drug interactions, and feature flags initialized');
+})(); // End Phase 2 async IIFE
 
 // ============================================================
 // v13.0: COUNTRY-AWARE PAYMENT API ENDPOINTS
