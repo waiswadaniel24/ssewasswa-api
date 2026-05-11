@@ -17328,6 +17328,1573 @@ app.get('/parent/child/:id', ah(async (req, res) => {
 app.get('/school/fee-reminders-link', requireAuth, ah(async (req, res) => { res.redirect('/school/fee-reminders'); }));
 
 // ============================================================
+// v13.0 PHASE 2: COUNTRY-AWARE PAYMENT GATEWAY + PATIENT EHR + BILLING + CDS
+// ============================================================
+
+// --- Country Payment Configuration ---
+const COUNTRY_PAYMENT_CONFIG = {
+  UG: { name: 'Uganda', currency: 'UGX', providers: ['mtn_momo', 'airtel_money', 'dpo_card'], phone_prefix: '256', flutterwave_supported: false },
+  KE: { name: 'Kenya', currency: 'KES', providers: ['mtn_momo', 'flutterwave'], phone_prefix: '254', flutterwave_supported: true },
+  NG: { name: 'Nigeria', currency: 'NGN', providers: ['flutterwave'], phone_prefix: '234', flutterwave_supported: true },
+  GH: { name: 'Ghana', currency: 'GHS', providers: ['mtn_momo', 'flutterwave'], phone_prefix: '233', flutterwave_supported: true },
+  TZ: { name: 'Tanzania', currency: 'TZS', providers: ['mtn_momo', 'airtel_money', 'flutterwave'], phone_prefix: '255', flutterwave_supported: true },
+  RW: { name: 'Rwanda', currency: 'RWF', providers: ['mtn_momo', 'flutterwave'], phone_prefix: '250', flutterwave_supported: true },
+  ZA: { name: 'South Africa', currency: 'ZAR', providers: ['flutterwave', 'dpo_card'], phone_prefix: '27', flutterwave_supported: true },
+  CD: { name: 'DRC', currency: 'CDF', providers: ['mtn_momo', 'airtel_money'], phone_prefix: '243', flutterwave_supported: false },
+  ZM: { name: 'Zambia', currency: 'ZMW', providers: ['airtel_money', 'mtn_momo'], phone_prefix: '260', flutterwave_supported: false },
+  MW: { name: 'Malawi', currency: 'MWK', providers: ['airtel_money'], phone_prefix: '265', flutterwave_supported: false }
+};
+
+// Detect country from phone number
+const detectCountryFromPhone = (phone) => {
+  const cleaned = phone.replace(/\s+/g, '').replace(/^\+/, '');
+  for (const [code, cfg] of Object.entries(COUNTRY_PAYMENT_CONFIG)) {
+    if (cleaned.startsWith(cfg.phone_prefix)) return code;
+  }
+  // Default Uganda prefixes
+  if (/^(256|0)(77|78|39|76|70|74|20|75)/.test(cleaned)) return 'UG';
+  if (/^(254|0)7/.test(cleaned)) return 'KE';
+  if (/^(234|0)(7|8|9)/.test(cleaned)) return 'NG';
+  if (/^(233|0)(2|5)/.test(cleaned)) return 'GH';
+  return 'UG'; // Default to Uganda
+};
+
+// Get tenant country (from tenant settings or default)
+const getTenantCountry = async (tenantId) => {
+  try {
+    const t = (await pool.query('SELECT country, phone FROM tenants WHERE id=$1', [tenantId])).rows[0];
+    if (t?.country && COUNTRY_PAYMENT_CONFIG[t.country]) return t.country;
+    if (t?.phone) return detectCountryFromPhone(t.phone);
+  } catch (e) {}
+  return 'UG';
+};
+
+// Get available payment providers for a country
+const getProvidersForCountry = (countryCode) => {
+  const cfg = COUNTRY_PAYMENT_CONFIG[countryCode] || COUNTRY_PAYMENT_CONFIG.UG;
+  return {
+    country: countryCode,
+    countryName: cfg.name,
+    currency: cfg.currency,
+    providers: cfg.providers.filter(p => {
+      if (p === 'mtn_momo') return !!(process.env.MTN_COLLECTION_USER_ID && process.env.MTN_COLLECTION_API_KEY);
+      if (p === 'airtel_money') return !!(process.env.AIRTEL_CLIENT_ID && process.env.AIRTEL_CLIENT_SECRET);
+      if (p === 'flutterwave') return cfg.flutterwave_supported && !!process.env.FLW_SECRET_KEY;
+      if (p === 'dpo_card') return !!process.env.DPO_COMPANY_TOKEN;
+      return false;
+    }),
+    allConfiguredProviders: cfg.providers,
+    flutterwaveSupported: cfg.flutterwave_supported
+  };
+};
+
+// --- Phase 2 DB Tables: Patient EHR, Billing, Insurance, Clinical Decision Support ---
+const phase2Tables = [
+  // Patient Allergies (part of EHR)
+  `CREATE TABLE IF NOT EXISTS patient_allergies (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, patient_type TEXT NOT NULL DEFAULT 'student', patient_id INTEGER NOT NULL, patient_name TEXT, allergen TEXT NOT NULL, reaction TEXT, severity TEXT DEFAULT 'moderate', onset_date DATE, verified_by TEXT, notes TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Patient Chronic Conditions
+  `CREATE TABLE IF NOT EXISTS patient_chronic_conditions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, patient_type TEXT NOT NULL DEFAULT 'student', patient_id INTEGER NOT NULL, patient_name TEXT, condition_name TEXT NOT NULL, icd_code TEXT, diagnosed_date DATE, treating_doctor TEXT, status TEXT DEFAULT 'active', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Patient Vitals (recorded during visits)
+  `CREATE TABLE IF NOT EXISTS patient_vitals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, patient_type TEXT NOT NULL DEFAULT 'student', patient_id INTEGER NOT NULL, patient_name TEXT, visit_id INTEGER, temperature NUMERIC, blood_pressure_systolic INTEGER, blood_pressure_diastolic INTEGER, heart_rate INTEGER, respiratory_rate INTEGER, weight NUMERIC, height NUMERIC, bmi NUMERIC, oxygen_saturation INTEGER, pain_level INTEGER DEFAULT 0, recorded_by TEXT, notes TEXT, recorded_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Patient Immunizations
+  `CREATE TABLE IF NOT EXISTS patient_immunizations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, patient_type TEXT NOT NULL DEFAULT 'student', patient_id INTEGER NOT NULL, patient_name TEXT, vaccine_name TEXT NOT NULL, dose_number INTEGER DEFAULT 1, administered_date DATE, administered_by TEXT, batch_number TEXT, next_dose_date DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Patient Medications History (ongoing medications outside prescriptions)
+  `CREATE TABLE IF NOT EXISTS patient_medications (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, patient_type TEXT NOT NULL DEFAULT 'student', patient_id INTEGER NOT NULL, patient_name TEXT, medication_name TEXT NOT NULL, dosage TEXT, frequency TEXT, start_date DATE, end_date DATE, prescribed_by TEXT, reason TEXT, is_active BOOLEAN DEFAULT true, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Patient Invoices (Billing)
+  `CREATE TABLE IF NOT EXISTS patient_invoices (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, patient_type TEXT NOT NULL DEFAULT 'student', patient_id INTEGER NOT NULL, patient_name TEXT, invoice_number TEXT NOT NULL, total_amount INTEGER DEFAULT 0, paid_amount INTEGER DEFAULT 0, discount INTEGER DEFAULT 0, insurance_cover INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', due_date DATE, notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Invoice Line Items
+  `CREATE TABLE IF NOT EXISTS invoice_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, invoice_id INTEGER REFERENCES patient_invoices(id) ON DELETE CASCADE, description TEXT NOT NULL, quantity INTEGER DEFAULT 1, unit_price INTEGER DEFAULT 0, total_price INTEGER DEFAULT 0, category TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Insurance Providers
+  `CREATE TABLE IF NOT EXISTS insurance_providers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, code TEXT, type TEXT DEFAULT 'private', contact_phone TEXT, contact_email TEXT, address TEXT, coverage_percentage INTEGER DEFAULT 80, requires_preauth BOOLEAN DEFAULT false, is_active BOOLEAN DEFAULT true, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Patient Insurance Enrollment
+  `CREATE TABLE IF NOT EXISTS patient_insurance (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, patient_type TEXT NOT NULL DEFAULT 'student', patient_id INTEGER NOT NULL, patient_name TEXT, provider_id INTEGER REFERENCES insurance_providers(id), policy_number TEXT, member_number TEXT, group_number TEXT, effective_date DATE, expiry_date DATE, coverage_percentage INTEGER, is_primary BOOLEAN DEFAULT true, is_active BOOLEAN DEFAULT true, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Insurance Claims
+  `CREATE TABLE IF NOT EXISTS insurance_claims (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, patient_type TEXT NOT NULL DEFAULT 'student', patient_id INTEGER NOT NULL, patient_name TEXT, provider_id INTEGER REFERENCES insurance_providers(id), invoice_id INTEGER REFERENCES patient_invoices(id), claim_number TEXT, amount_claimed INTEGER DEFAULT 0, amount_approved INTEGER DEFAULT 0, status TEXT DEFAULT 'submitted', rejection_reason TEXT, submitted_at TIMESTAMPTZ DEFAULT NOW(), processed_at TIMESTAMPTZ, notes TEXT)`,
+  // Drug Interactions Database (built-in knowledge base for CDS)
+  `CREATE TABLE IF NOT EXISTS drug_interactions (id SERIAL PRIMARY KEY, drug_a TEXT NOT NULL, drug_b TEXT NOT NULL, severity TEXT DEFAULT 'moderate', description TEXT, recommendation TEXT, evidence_level TEXT DEFAULT 'established', created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Tenant Country Settings
+  `CREATE TABLE IF NOT EXISTS tenant_country_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, country_code TEXT DEFAULT 'UG', currency TEXT DEFAULT 'UGX', timezone TEXT DEFAULT 'Africa/Kampala', language TEXT DEFAULT 'en', preferred_payment TEXT DEFAULT 'mtn_momo', flutterwave_enabled BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`
+];
+
+// Create Phase 2 tables
+for (const sql of phase2Tables) {
+  try { await pool.query(sql); } catch (e) { console.warn('[Phase2 Table]', e.message.split('\n')[0]); }
+}
+
+// Create indexes for Phase 2
+const phase2Indexes = [
+  `CREATE INDEX IF NOT EXISTS idx_patient_allergies_tenant ON patient_allergies(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_allergies_patient ON patient_allergies(patient_type, patient_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_chronic_tenant ON patient_chronic_conditions(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_vitals_tenant ON patient_vitals(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_immunizations_tenant ON patient_immunizations(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_medications_tenant ON patient_medications(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_invoices_tenant ON patient_invoices(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_insurance_providers_tenant ON insurance_providers(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_insurance_tenant ON patient_insurance(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_insurance_claims_tenant ON insurance_claims(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_drug_interactions_drugs ON drug_interactions(drug_a, drug_b)`,
+  `CREATE INDEX IF NOT EXISTS idx_tenant_country_settings ON tenant_country_settings(tenant_id)`
+];
+for (const sql of phase2Indexes) {
+  try { await pool.query(sql); } catch (e) {}
+}
+
+// Seed drug interactions database if empty
+const interactionCount = (await pool.query('SELECT COUNT(*) FROM drug_interactions')).rows[0].count;
+if (parseInt(interactionCount) === 0) {
+  const commonInteractions = [
+    ['Warfarin', 'Aspirin', 'high', 'Increased risk of bleeding - concurrent use significantly raises bleeding risk', 'Avoid combination unless specifically indicated with close INR monitoring', 'established'],
+    ['Warfarin', 'Ibuprofen', 'high', 'Increased anticoagulant effect and bleeding risk', 'Use paracetamol as alternative analgesic', 'established'],
+    ['Metformin', 'Cimetidine', 'moderate', 'Reduced renal clearance of metformin, increased lactic acidosis risk', 'Monitor renal function; consider alternative H2 blocker', 'established'],
+    ['Lisinopril', 'Potassium', 'moderate', 'Risk of hyperkalemia with ACE inhibitors and potassium supplements', 'Monitor serum potassium levels closely', 'established'],
+    ['Amlodipine', 'Simvastatin', 'moderate', 'Amlodipine increases simvastatin levels, risk of myopathy', 'Limit simvastatin to 20mg/day with amlodipine', 'established'],
+    ['Ciprofloxacin', 'Antacids', 'moderate', 'Reduced absorption of ciprofloxacin when taken with divalent cations', 'Take ciprofloxacin 2 hours before or 6 hours after antacids', 'established'],
+    ['Amoxicillin', 'Methotrexate', 'high', 'Amoxicillin reduces methotrexate clearance, increasing toxicity risk', 'Avoid combination; if required, monitor methotrexate levels', 'established'],
+    ['Diclofenac', 'Lisinopril', 'moderate', 'NSAIDs reduce antihypertensive effect and may impair renal function', 'Monitor blood pressure and renal function', 'established'],
+    ['Omeprazole', 'Clopidogrel', 'high', 'Omeprazole reduces antiplatelet effect of clopidogrel via CYP2C19 inhibition', 'Use pantoprazole instead as it has less CYP2C19 interaction', 'established'],
+    ['Metronidazole', 'Alcohol', 'high', 'Disulfiram-like reaction: severe nausea, vomiting, flushing, palpitations', 'Avoid alcohol during treatment and 48 hours after last dose', 'established'],
+    ['Co-trimoxazole', 'Warfarin', 'high', 'Enhanced anticoagulant effect through displacement and vitamin K reduction', 'Monitor INR closely; may need warfarin dose reduction', 'established'],
+    ['Cimetidine', 'Theophylline', 'moderate', 'Cimetidine inhibits theophylline metabolism, increasing serum levels', 'Monitor theophylline levels; consider alternative H2 blocker', 'established'],
+    ['Artemether/Lumefantrine', 'Metoprolol', 'moderate', 'Lumefantrine may inhibit CYP2D6, increasing metoprolol exposure', 'Monitor heart rate and blood pressure', 'probable'],
+    ['Artemether/Lumefantrine', 'Fluconazole', 'moderate', 'Potential QT prolongation when combined', 'Monitor ECG if co-administration necessary', 'probable'],
+    ['Sulfadoxine/Pyrimethamine', 'Co-trimoxazole', 'high', 'Additive antifolate effect - increased risk of megaloblastic anemia and pancytopenia', 'Avoid combination; both are antifolate drugs', 'established'],
+    ['Quinine', 'Digoxin', 'moderate', 'Quinine increases digoxin serum concentration', 'Monitor digoxin levels closely', 'established'],
+    ['Nifedipine', 'Phenytoin', 'moderate', 'Phenytoin induces nifedipine metabolism, reducing efficacy', 'May need higher nifedipine dose; monitor blood pressure', 'established'],
+    ['Rifampicin', 'Oral Contraceptives', 'high', 'Rifampicin induces metabolism of estrogen, reducing contraceptive efficacy', 'Use alternative non-hormonal contraception during and after treatment', 'established'],
+    ['Carbamazepine', 'Erythromycin', 'moderate', 'Erythromycin inhibits carbamazepine metabolism, risk of toxicity', 'Monitor carbamazepine levels; consider alternative antibiotic', 'established'],
+    ['Furosemide', 'Gentamicin', 'high', 'Additive ototoxicity and nephrotoxicity risk', 'Monitor renal function and hearing; use lowest effective doses', 'established']
+  ];
+  for (const [drugA, drugB, severity, desc, rec, evidence] of commonInteractions) {
+    try {
+      await pool.query('INSERT INTO drug_interactions(drug_a, drug_b, severity, description, recommendation, evidence_level) VALUES($1,$2,$3,$4,$5,$6)', [drugA, drugB, severity, desc, rec, evidence]);
+      // Also add reverse direction
+      await pool.query('INSERT INTO drug_interactions(drug_a, drug_b, severity, description, recommendation, evidence_level) VALUES($1,$2,$3,$4,$5,$6)', [drugB, drugA, severity, desc, rec, evidence]);
+    } catch (e) {}
+  }
+  console.log('[Phase2] Drug interaction database seeded with 20 common interactions');
+}
+
+// Add Phase 2 feature flags
+const phase2Flags = [
+  ['patient_ehr', 'Patient EHR', 'Longitudinal electronic health records with allergies, vitals, immunizations, chronic conditions', '4.0', 'clinical', 'clinic_workflow'],
+  ['patient_billing', 'Patient Billing', 'Invoice generation, insurance claims, NHIS support, payment tracking', '4.0', 'clinical', 'clinic_workflow'],
+  ['clinical_decision_support', 'Clinical Decision Support', 'Drug interaction warnings, allergy alerts, dosage checks', '4.0', 'clinical', 'clinic_workflow'],
+  ['country_payments', 'Country-Aware Payments', 'Multi-country payment gateway routing with Flutterwave, MoMo, Airtel', '4.0', 'payments', 'billing']
+];
+for (const [key, name, desc, ver, cat, req] of phase2Flags) {
+  try {
+    await pool.query('INSERT INTO feature_flags(feature_key, name, description, version, category, requirements, is_active) VALUES($1,$2,$3,$4,$5,$6,true) ON CONFLICT DO NOTHING', [key, name, desc, ver, cat, req]);
+  } catch (e) {}
+}
+
+// Add country_code column to tenants if missing
+try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT \'UG\''); } catch (e) {}
+try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT \'UGX\''); } catch (e) {}
+
+// ============================================================
+// v13.0: COUNTRY-AWARE PAYMENT API ENDPOINTS
+// ============================================================
+
+// Get available payment methods for a country
+app.get('/api/payment-methods/:country', ah(async (req, res) => {
+  const country = (req.params.country || 'UG').toUpperCase();
+  const providers = getProvidersForCountry(country);
+  res.json(providers);
+}));
+
+// Get payment methods for current tenant (auto-detect country)
+app.get('/api/payment-methods', requireAuth, ah(async (req, res) => {
+  const country = await getTenantCountry(req.session.user.tenant_id);
+  const providers = getProvidersForCountry(country);
+  res.json({ ...providers, detectedCountry: country });
+}));
+
+// Set tenant country preference
+app.post('/api/settings/country', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { country_code, currency, preferred_payment, flutterwave_enabled } = req.body;
+  const cc = (country_code || 'UG').toUpperCase();
+  const cfg = COUNTRY_PAYMENT_CONFIG[cc];
+  if (!cfg) return res.status(400).json({ error: 'Unsupported country code' });
+  
+  await pool.query('UPDATE tenants SET country=$1, currency=$2 WHERE id=$3', [cc, currency || cfg.currency, t]);
+  await pool.query(`INSERT INTO tenant_country_settings(tenant_id, country_code, currency, preferred_payment, flutterwave_enabled, updated_at) 
+    VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(tenant_id) DO UPDATE SET country_code=$2, currency=$3, preferred_payment=$4, flutterwave_enabled=$5, updated_at=NOW()`,
+    [t, cc, currency || cfg.currency, preferred_payment || cfg.providers[0], flutterwave_enabled !== undefined ? flutterwave_enabled : cfg.flutterwave_supported]);
+  
+  await logAudit(t, req.session.user.email, 'country_settings_updated', { country: cc, currency });
+  res.json({ success: true, country: cc, currency: currency || cfg.currency, availableProviders: cfg.providers });
+}));
+
+// Country-aware checkout (auto-selects payment methods based on tenant country)
+app.get('/pay/checkout-v2', requireAuth, ah(async (req, res) => {
+  const { amount, plan, description, type, item_id } = req.query;
+  const amt = parseInt(amount) || 0;
+  const t = req.session.user.tenant_id;
+  const country = await getTenantCountry(t);
+  const cfg = getProvidersForCountry(country);
+  const ref = 'SSEW-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex');
+  
+  if (amt > 0) {
+    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference) VALUES($1,$2,$3,$4,$5,$6)', [t, amt, 'pending', 'pending', description || `${plan || 'payment'} checkout`, ref]);
+  }
+
+  const providerButtons = cfg.providers.map(p => {
+    if (p === 'mtn_momo') return `<div id="pay-mtn_momo" class="pay-option">
+      <div style="text-align:center;margin-bottom:15px"><div style="width:50px;height:50px;border-radius:12px;background:#FFC300;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:#000">M</div><h3>MTN Mobile Money</h3><p class="muted">Pay with your MTN MoMo account</p></div>
+      <form method="POST" action="/pay/mtn/initiate"><input type="hidden" name="amount" value="${amt}"><input type="hidden" name="reference" value="${esc(ref)}"><input type="hidden" name="plan" value="${esc(plan||'')}"><input type="hidden" name="description" value="${esc(description||'')}"><input type="hidden" name="type" value="${esc(type||'')}"><input type="hidden" name="item_id" value="${esc(item_id||'')}"><input name="phone" placeholder="MTN Phone (077x/078x/039x)" required pattern="^(\\+256|0|256)?(77|78|39|76)\\d{7}$"><button class="btn btn-green" style="width:100%;padding:16px;font-size:18px;background:linear-gradient(135deg,#FFC300,#FFDD00);color:#000">Pay ${cfg.currency} ${amt.toLocaleString()} with MTN MoMo</button></form></div>`;
+    if (p === 'airtel_money') return `<div id="pay-airtel_money" class="pay-option" style="display:none"><div style="text-align:center;margin-bottom:15px"><div style="width:50px;height:50px;border-radius:12px;background:#ED1C24;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:white">A</div><h3>Airtel Money</h3><p class="muted">Pay with your Airtel Money account</p></div>
+      <form method="POST" action="/pay/airtel/initiate"><input type="hidden" name="amount" value="${amt}"><input type="hidden" name="reference" value="${esc(ref)}"><input type="hidden" name="plan" value="${esc(plan||'')}"><input type="hidden" name="description" value="${esc(description||'')}"><input type="hidden" name="type" value="${esc(type||'')}"><input type="hidden" name="item_id" value="${esc(item_id||'')}"><input name="phone" placeholder="Airtel Phone (070x/074x/020x)" required pattern="^(\\+256|0|256)?(70|74|20|75)\\d{7}$"><button class="btn btn-red" style="width:100%;padding:16px;font-size:18px;background:linear-gradient(135deg,#ED1C24,#FF4D4D)">Pay ${cfg.currency} ${amt.toLocaleString()} with Airtel Money</button></form></div>`;
+    if (p === 'flutterwave') return `<div id="pay-flutterwave" class="pay-option" style="display:none"><div style="text-align:center;margin-bottom:15px"><div style="width:50px;height:50px;border-radius:12px;background:linear-gradient(135deg,#00B140,#006633);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:18px;color:white;font-weight:800">FW</div><h3>Flutterwave</h3><p class="muted">Card + Mobile Money payment</p></div>
+      <button id="flwBtnV2" class="btn btn-green" style="width:100%;padding:16px;font-size:18px;background:linear-gradient(135deg,#00B140,#006633)">Pay ${cfg.currency} ${amt.toLocaleString()} with Flutterwave</button>
+      <script src="https://checkout.flutterwave.com/v3.js"></script><script>document.getElementById('flwBtnV2').addEventListener('click',function(){FlutterwaveCheckout({public_key:"${esc(process.env.FLW_PUBLIC_KEY||'')}",tx_ref:"${esc(ref)}",amount:${amt},currency:"${cfg.currency}",payment_options:"card,mobilemoney,ussd",redirect_url:"${esc(process.env.BASE_URL||'https://ssewasswa.onrender.com')}/billing/callback",customer:{email:"${esc(req.session.user.email)}"},customizations:{title:"SSEWASSWA",description:"${esc(description||plan||'Payment')}"}});});</script></div>`;
+    if (p === 'dpo_card') return `<div id="pay-dpo_card" class="pay-option" style="display:none"><div style="text-align:center;margin-bottom:15px"><div style="width:50px;height:50px;border-radius:12px;background:linear-gradient(135deg,#4f46e5,#7c3aed);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:20px;color:white">V/M</div><h3>Card Payment</h3><p class="muted">Visa, Mastercard via DPO Group</p></div>
+      <form method="POST" action="/pay/dpo/initiate"><input type="hidden" name="amount" value="${amt}"><input type="hidden" name="reference" value="${esc(ref)}"><input type="hidden" name="plan" value="${esc(plan||'')}"><input type="hidden" name="description" value="${esc(description||'')}"><button class="btn" style="width:100%;padding:16px;font-size:18px">Pay ${cfg.currency} ${amt.toLocaleString()} with Card</button></form></div>`;
+    return '';
+  });
+
+  const tabButtons = cfg.providers.map((p, i) => {
+    const labels = { mtn_momo: 'MTN MoMo', airtel_money: 'Airtel Money', flutterwave: 'Flutterwave', dpo_card: 'Card' };
+    return `<a href="#" ${i===0?'class="active"':''} onclick="showPayTab('${p}');return false;">${labels[p]||p}</a>`;
+  });
+
+  res.send(renderPage('Secure Payment', `
+    <div class="card" style="max-width:550px;margin:40px auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <h2>Secure Payment</h2>
+        <p style="font-size:28px;font-weight:800;color:#4f46e5;margin:10px 0">${cfg.currency} ${amt.toLocaleString()}</p>
+        <p class="muted">${esc(description || plan || 'Payment')}</p>
+        <span class="tag" style="margin-top:5px">${esc(cfg.countryName)} (${cfg.currency})</span>
+      </div>
+      ${cfg.providers.length > 1 ? `<div class="tab-bar" style="margin-bottom:20px">${tabButtons.join('')}</div>` : ''}
+      ${providerButtons.join('')}
+      ${cfg.providers.length === 0 ? `<div class="alert alert-info"><h3>Manual Payment</h3><p>Online payments not yet configured for ${esc(cfg.countryName)}. Contact admin for manual payment.</p><p>Reference: <strong>${esc(ref)}</strong></p></div>` : ''}
+      <div style="margin-top:20px;padding:15px;background:${req.session.user?.dark_mode ? '#334155' : '#f8fafc'};border-radius:10px">
+        <p class="muted" style="font-size:12px">Reference: ${esc(ref)} | Country: ${esc(cfg.countryName)}</p>
+        <p class="muted" style="font-size:12px">Secure payment. Your data is encrypted.</p>
+      </div>
+    </div>
+    <script>function showPayTab(id){document.querySelectorAll('.pay-option').forEach(el=>el.style.display='none');document.getElementById('pay-'+id).style.display='block';document.querySelectorAll('.tab-bar a').forEach(a=>a.classList.remove('active'));event.target.classList.add('active');}</script>
+  `, req.session.user));
+}));
+
+// ============================================================
+// v13.0: PATIENT EHR (ELECTRONIC HEALTH RECORDS)
+// ============================================================
+
+// Patient EHR Dashboard - longitudinal view
+app.get('/clinic/patient/:type/:id/ehr', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const patientType = type || 'student';
+  
+  // Get patient name
+  let patientName = 'Unknown Patient';
+  if (patientType === 'student') {
+    const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    patientName = s?.name || patientName;
+  }
+
+  const [allergies, chronic, vitals, immunizations, medications, consultations, prescriptions, labResults] = await Promise.all([
+    pool.query('SELECT * FROM patient_allergies WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true ORDER BY created_at DESC', [t, patientType, id]),
+    pool.query('SELECT * FROM patient_chronic_conditions WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 ORDER BY created_at DESC', [t, patientType, id]),
+    pool.query('SELECT * FROM patient_vitals WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 ORDER BY recorded_at DESC LIMIT 20', [t, patientType, id]),
+    pool.query('SELECT * FROM patient_immunizations WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 ORDER BY administered_date DESC', [t, patientType, id]),
+    pool.query('SELECT * FROM patient_medications WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true ORDER BY start_date DESC', [t, patientType, id]),
+    pool.query('SELECT c.*, cs.name as doctor_name FROM consultations c LEFT JOIN clinic_staff cs ON c.doctor_id=cs.id WHERE c.tenant_id=$1 AND c.patient_type=$2 AND c.patient_id=$3 ORDER BY c.created_at DESC LIMIT 20', [t, patientType, id]),
+    pool.query('SELECT p.*, cs.name as doctor_name FROM prescriptions p LEFT JOIN clinic_staff cs ON p.doctor_id=cs.id WHERE p.tenant_id=$1 AND p.patient_type=$2 AND p.patient_id=$3 ORDER BY p.created_at DESC LIMIT 20', [t, patientType, id]),
+    pool.query('SELECT lr.*, lr2.test_name FROM lab_results lr JOIN lab_requests lr2 ON lr.lab_request_id=lr2.id WHERE lr.tenant_id=$1 AND lr2.patient_type=$2 AND lr2.patient_id=$3 ORDER BY lr.reported_at DESC LIMIT 20', [t, patientType, id])
+  ]);
+
+  const lastVital = vitals.rows[0];
+  const bmiVal = lastVital?.weight && lastVital?.height ? (lastVital.weight / ((lastVital.height/100) ** 2)).toFixed(1) : null;
+
+  res.send(renderPage(`EHR: ${patientName}`, `
+    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
+      <h1>Patient Health Record</h1>
+      <p>${esc(patientName)} | ${patientType === 'student' ? 'Student' : 'Patient'} ID: ${id}</p>
+    </div>
+    
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${allergies.rows.length}</div><div>Allergies</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${chronic.rows.length}</div><div>Chronic Conditions</div></div>
+      <div class="stat-card"><div class="stat-num">${vitals.rows.length}</div><div>Vital Records</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#8b5cf6">${immunizations.rows.length}</div><div>Immunizations</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${medications.rows.length}</div><div>Active Medications</div></div>
+      <div class="stat-card"><div class="stat-num">${consultations.rows.length}</div><div>Visits</div></div>
+    </div>
+
+    ${lastVital ? `<div class="card" style="margin-bottom:15px;background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:2px solid #059669">
+      <h3>Latest Vitals</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        ${lastVital.temperature ? `<div><span class="muted">Temp:</span> <strong>${lastVital.temperature}°C</strong></div>` : ''}
+        ${lastVital.blood_pressure_systolic ? `<div><span class="muted">BP:</span> <strong>${lastVital.blood_pressure_systolic}/${lastVital.blood_pressure_diastolic} mmHg</strong></div>` : ''}
+        ${lastVital.heart_rate ? `<div><span class="muted">HR:</span> <strong>${lastVital.heart_rate} bpm</strong></div>` : ''}
+        ${lastVital.weight ? `<div><span class="muted">Weight:</span> <strong>${lastVital.weight} kg</strong></div>` : ''}
+        ${lastVital.height ? `<div><span class="muted">Height:</span> <strong>${lastVital.height} cm</strong></div>` : ''}
+        ${bmiVal ? `<div><span class="muted">BMI:</span> <strong>${bmiVal}</strong></div>` : ''}
+        ${lastVital.oxygen_saturation ? `<div><span class="muted">SpO2:</span> <strong>${lastVital.oxygen_saturation}%</strong></div>` : ''}
+        ${lastVital.pain_level ? `<div><span class="muted">Pain:</span> <strong>${lastVital.pain_level}/10</strong></div>` : ''}
+      </div>
+      <p class="muted" style="margin-top:8px">Recorded: ${new Date(lastVital.recorded_at).toLocaleString()}</p>
+    </div>` : ''}
+
+    <div class="grid">
+      <!-- Allergies Section -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3>Allergies</h3>
+          <a href="/clinic/patient/${patientType}/${id}/allergy/new" class="btn btn-sm btn-red">+ Add Allergy</a>
+        </div>
+        ${allergies.rows.length ? allergies.rows.map(a => `
+          <div style="padding:10px;border-left:4px solid ${a.severity==='severe'?'#dc2626':a.severity==='moderate'?'#f59e0b':'#059669'};margin-bottom:8px;background:${a.severity==='severe'?'#fef2f2':a.severity==='moderate'?'#fffbeb':'#f0fdf4'};border-radius:0 8px 8px 0">
+            <strong>${esc(a.allergen)}</strong> <span class="tag" style="background:${a.severity==='severe'?'#dc2626':a.severity==='moderate'?'#f59e0b':'#059669'};color:white">${esc(a.severity)}</span>
+            ${a.reaction ? `<br><span class="muted">Reaction: ${esc(a.reaction)}</span>` : ''}
+            ${a.verified_by ? `<br><span class="muted">Verified by: ${esc(a.verified_by)}</span>` : ''}
+          </div>
+        `).join('') : '<p class="muted">No allergies recorded</p>'}
+      </div>
+
+      <!-- Chronic Conditions Section -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3>Chronic Conditions</h3>
+          <a href="/clinic/patient/${patientType}/${id}/chronic/new" class="btn btn-sm" style="background:#f59e0b">+ Add Condition</a>
+        </div>
+        ${chronic.rows.length ? chronic.rows.map(c => `
+          <div style="padding:10px;border-left:4px solid ${c.status==='active'?'#f59e0b':'#059669'};margin-bottom:8px">
+            <strong>${esc(c.condition_name)}</strong> ${c.icd_code ? `<span class="tag">${esc(c.icd_code)}</span>` : ''}
+            ${c.status ? `<span class="tag" style="margin-left:5px">${esc(c.status)}</span>` : ''}
+            ${c.diagnosed_date ? `<br><span class="muted">Since: ${new Date(c.diagnosed_date).toLocaleDateString()}</span>` : ''}
+            ${c.treating_doctor ? `<br><span class="muted">Doctor: ${esc(c.treating_doctor)}</span>` : ''}
+          </div>
+        `).join('') : '<p class="muted">No chronic conditions</p>'}
+      </div>
+
+      <!-- Current Medications -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3>Current Medications</h3>
+          <a href="/clinic/patient/${patientType}/${id}/medication/new" class="btn btn-sm btn-green">+ Add Medication</a>
+        </div>
+        ${medications.rows.length ? `<table><tr><th>Medication</th><th>Dosage</th><th>Since</th><th></th></tr>
+          ${medications.rows.map(m => `<tr><td>${esc(m.medication_name)}</td><td>${esc(m.dosage||'')} ${esc(m.frequency||'')}</td><td>${m.start_date||'-'}</td><td><a href="/clinic/patient/${patientType}/${id}/medication/${m.id}/stop" class="btn btn-sm btn-red">Stop</a></td></tr>`).join('')}</table>` : '<p class="muted">No active medications</p>'}
+      </div>
+
+      <!-- Immunizations -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3>Immunizations</h3>
+          <a href="/clinic/patient/${patientType}/${id}/immunization/new" class="btn btn-sm" style="background:#8b5cf6">+ Add Immunization</a>
+        </div>
+        ${immunizations.rows.length ? `<table><tr><th>Vaccine</th><th>Dose</th><th>Date</th><th>Next</th></tr>
+          ${immunizations.rows.map(im => `<tr><td>${esc(im.vaccine_name)}</td><td>${im.dose_number||'-'}</td><td>${im.administered_date||'-'}</td><td>${im.next_dose_date||'-'}</td></tr>`).join('')}</table>` : '<p class="muted">No immunization records</p>'}
+      </div>
+
+      <!-- Vitals History -->
+      <div class="card" style="grid-column:span 2">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3>Vitals History</h3>
+          <a href="/clinic/patient/${patientType}/${id}/vitals/new" class="btn btn-sm btn-green">+ Record Vitals</a>
+        </div>
+        ${vitals.rows.length ? `<table><tr><th>Date</th><th>Temp</th><th>BP</th><th>HR</th><th>Weight</th><th>SpO2</th><th>Pain</th></tr>
+          ${vitals.rows.map(v => `<tr><td>${new Date(v.recorded_at).toLocaleDateString()}</td><td>${v.temperature||'-'}</td><td>${v.blood_pressure_systolic?v.blood_pressure_systolic+'/'+v.blood_pressure_diastolic:'-'}</td><td>${v.heart_rate||'-'}</td><td>${v.weight||'-'}</td><td>${v.oxygen_saturation||'-'}</td><td>${v.pain_level||'-'}</td></tr>`).join('')}</table>` : '<p class="muted">No vitals recorded</p>'}
+      </div>
+
+      <!-- Recent Consultations -->
+      <div class="card" style="grid-column:span 2">
+        <h3>Recent Consultations</h3>
+        ${consultations.rows.length ? consultations.rows.map(c => `
+          <div style="padding:12px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between"><strong>${new Date(c.created_at).toLocaleDateString()}</strong> <span class="tag">${esc(c.status)}</span></div>
+            ${c.chief_complaint ? `<p class="muted">Complaint: ${esc(c.chief_complaint)}</p>` : ''}
+            ${c.diagnosis ? `<p>Diagnosis: <strong>${esc(c.diagnosis)}</strong></p>` : ''}
+            ${c.treatment_plan ? `<p class="muted">Plan: ${esc(c.treatment_plan)}</p>` : ''}
+            ${c.doctor_name ? `<p class="muted">Doctor: ${esc(c.doctor_name)}</p>` : ''}
+          </div>
+        `).join('') : '<p class="muted">No consultation history</p>'}
+      </div>
+
+      <!-- Recent Prescriptions -->
+      <div class="card">
+        <h3>Recent Prescriptions</h3>
+        ${prescriptions.rows.length ? prescriptions.rows.map(p => `
+          <div style="padding:8px;border-bottom:1px solid #e2e8f0">
+            <strong>${new Date(p.created_at).toLocaleDateString()}</strong> <span class="tag">${esc(p.status)}</span>
+            ${p.diagnosis ? `<br><span class="muted">${esc(p.diagnosis)}</span>` : ''}
+            ${p.doctor_name ? `<br><span class="muted">Dr. ${esc(p.doctor_name)}</span>` : ''}
+          </div>
+        `).join('') : '<p class="muted">No prescriptions</p>'}
+      </div>
+
+      <!-- Lab Results -->
+      <div class="card">
+        <h3>Lab Results</h3>
+        ${labResults.rows.length ? labResults.rows.map(l => `
+          <div style="padding:8px;border-bottom:1px solid #e2e8f0">
+            <strong>${esc(l.test_name)}</strong> <span class="tag" style="${l.is_abnormal?'background:#dc2626;color:white':''}">${l.is_abnormal?'Abnormal':'Normal'}</span>
+            <br><span class="muted">${esc(l.result_value||'')} ${l.unit?'('+esc(l.unit)+')':''} | Ref: ${esc(l.reference_range||'N/A')}</span>
+          </div>
+        `).join('') : '<p class="muted">No lab results</p>'}
+      </div>
+    </div>
+
+    <div style="margin-top:15px">
+      <a href="/clinic" class="btn">Back to Clinic</a>
+      <a href="/clinic/patient/${patientType}/${id}/billing" class="btn btn-gold">View Billing</a>
+    </div>
+  `, req.session.user));
+}));
+
+// Add Allergy form
+app.get('/clinic/patient/:type/:id/allergy/new', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  res.send(renderPage('Add Allergy', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Add Allergy for ${esc(patientName)}</h2>
+      <form method="POST" action="/clinic/patient/${type}/${id}/allergy/save">
+        <label>Allergen <span style="color:red">*</span></label><input name="allergen" required placeholder="e.g. Penicillin, Peanuts, Latex">
+        <label>Reaction</label><input name="reaction" placeholder="e.g. Rash, Anaphylaxis, Nausea">
+        <label>Severity</label><select name="severity"><option value="mild">Mild</option><option value="moderate" selected>Moderate</option><option value="severe">Severe / Life-threatening</option></select>
+        <label>Onset Date</label><input type="date" name="onset_date">
+        <label>Verified By</label><input name="verified_by" placeholder="Doctor name">
+        <label>Notes</label><textarea name="notes" rows="2"></textarea>
+        <button class="btn btn-red" type="submit">Save Allergy</button>
+      </form>
+      <a href="/clinic/patient/${type}/${id}/ehr" class="btn btn-sm" style="margin-top:10px">Cancel</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/allergy/save', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const { allergen, reaction, severity, onset_date, verified_by, notes } = req.body;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  await pool.query('INSERT INTO patient_allergies(tenant_id,patient_type,patient_id,patient_name,allergen,reaction,severity,onset_date,verified_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [t, type, id, patientName, allergen, reaction || null, severity || 'moderate', onset_date || null, verified_by || null, notes || null]);
+  await logAudit(t, req.session.user.email, 'allergy_added', { patient: patientName, allergen });
+  res.redirect(`/clinic/patient/${type}/${id}/ehr`);
+}));
+
+// Add Chronic Condition form
+app.get('/clinic/patient/:type/:id/chronic/new', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  res.send(renderPage('Add Chronic Condition', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Add Chronic Condition for ${esc(patientName)}</h2>
+      <form method="POST" action="/clinic/patient/${type}/${id}/chronic/save">
+        <label>Condition Name <span style="color:red">*</span></label><input name="condition_name" required placeholder="e.g. Diabetes Type 2, Hypertension, Sickle Cell">
+        <label>ICD Code</label><input name="icd_code" placeholder="e.g. E11, I10, D57">
+        <label>Diagnosed Date</label><input type="date" name="diagnosed_date">
+        <label>Treating Doctor</label><input name="treating_doctor" placeholder="Doctor name">
+        <label>Status</label><select name="status"><option value="active">Active</option><option value="managed">Managed</option><option value="resolved">Resolved</option></select>
+        <label>Notes</label><textarea name="notes" rows="2"></textarea>
+        <button class="btn" style="background:#f59e0b" type="submit">Save Condition</button>
+      </form>
+      <a href="/clinic/patient/${type}/${id}/ehr" class="btn btn-sm" style="margin-top:10px">Cancel</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/chronic/save', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const { condition_name, icd_code, diagnosed_date, treating_doctor, status, notes } = req.body;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  await pool.query('INSERT INTO patient_chronic_conditions(tenant_id,patient_type,patient_id,patient_name,condition_name,icd_code,diagnosed_date,treating_doctor,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [t, type, id, patientName, condition_name, icd_code || null, diagnosed_date || null, treating_doctor || null, status || 'active', notes || null]);
+  await logAudit(t, req.session.user.email, 'chronic_condition_added', { patient: patientName, condition: condition_name });
+  res.redirect(`/clinic/patient/${type}/${id}/ehr`);
+}));
+
+// Record Vitals form
+app.get('/clinic/patient/:type/:id/vitals/new', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  res.send(renderPage('Record Vitals', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Record Vitals for ${esc(patientName)}</h2>
+      <form method="POST" action="/clinic/patient/${type}/${id}/vitals/save">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label>Temperature (°C)</label><input type="number" step="0.1" name="temperature" placeholder="36.5"></div>
+          <div><label>Heart Rate (bpm)</label><input type="number" name="heart_rate" placeholder="72"></div>
+          <div><label>BP Systolic</label><input type="number" name="blood_pressure_systolic" placeholder="120"></div>
+          <div><label>BP Diastolic</label><input type="number" name="blood_pressure_diastolic" placeholder="80"></div>
+          <div><label>Weight (kg)</label><input type="number" step="0.1" name="weight" placeholder="65"></div>
+          <div><label>Height (cm)</label><input type="number" step="0.1" name="height" placeholder="170"></div>
+          <div><label>Respiratory Rate</label><input type="number" name="respiratory_rate" placeholder="16"></div>
+          <div><label>Oxygen Saturation (%)</label><input type="number" name="oxygen_saturation" placeholder="98"></div>
+          <div><label>Pain Level (0-10)</label><input type="number" min="0" max="10" name="pain_level" placeholder="0"></div>
+        </div>
+        <label>Recorded By</label><input name="recorded_by" placeholder="Nurse/Doctor name">
+        <label>Notes</label><textarea name="notes" rows="2"></textarea>
+        <button class="btn btn-green" type="submit">Save Vitals</button>
+      </form>
+      <a href="/clinic/patient/${type}/${id}/ehr" class="btn btn-sm" style="margin-top:10px">Cancel</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/vitals/save', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const d = req.body;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  const bmi = d.weight && d.height ? (d.weight / ((d.height/100) ** 2)).toFixed(1) : null;
+  await pool.query('INSERT INTO patient_vitals(tenant_id,patient_type,patient_id,patient_name,temperature,blood_pressure_systolic,blood_pressure_diastolic,heart_rate,respiratory_rate,weight,height,bmi,oxygen_saturation,pain_level,recorded_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)',
+    [t, type, id, patientName, d.temperature||null, d.blood_pressure_systolic||null, d.blood_pressure_diastolic||null, d.heart_rate||null, d.respiratory_rate||null, d.weight||null, d.height||null, bmi, d.oxygen_saturation||null, d.pain_level||0, d.recorded_by||null, d.notes||null]);
+  await logAudit(t, req.session.user.email, 'vitals_recorded', { patient: patientName });
+  res.redirect(`/clinic/patient/${type}/${id}/ehr`);
+}));
+
+// Add Immunization
+app.get('/clinic/patient/:type/:id/immunization/new', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  res.send(renderPage('Add Immunization', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Add Immunization for ${esc(patientName)}</h2>
+      <form method="POST" action="/clinic/patient/${type}/${id}/immunization/save">
+        <label>Vaccine Name <span style="color:red">*</span></label><input name="vaccine_name" required placeholder="e.g. BCG, OPV, Measles, HPV, COVID-19">
+        <label>Dose Number</label><input type="number" name="dose_number" value="1" min="1">
+        <label>Date Administered</label><input type="date" name="administered_date">
+        <label>Administered By</label><input name="administered_by" placeholder="Health worker name">
+        <label>Batch Number</label><input name="batch_number" placeholder="Vaccine batch #">
+        <label>Next Dose Date</label><input type="date" name="next_dose_date">
+        <label>Notes</label><textarea name="notes" rows="2"></textarea>
+        <button class="btn" style="background:#8b5cf6;color:white" type="submit">Save Immunization</button>
+      </form>
+      <a href="/clinic/patient/${type}/${id}/ehr" class="btn btn-sm" style="margin-top:10px">Cancel</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/immunization/save', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const d = req.body;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  await pool.query('INSERT INTO patient_immunizations(tenant_id,patient_type,patient_id,patient_name,vaccine_name,dose_number,administered_date,administered_by,batch_number,next_dose_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+    [t, type, id, patientName, d.vaccine_name, d.dose_number||1, d.administered_date||null, d.administered_by||null, d.batch_number||null, d.next_dose_date||null, d.notes||null]);
+  await logAudit(t, req.session.user.email, 'immunization_added', { patient: patientName, vaccine: d.vaccine_name });
+  res.redirect(`/clinic/patient/${type}/${id}/ehr`);
+}));
+
+// Add Medication
+app.get('/clinic/patient/:type/:id/medication/new', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  res.send(renderPage('Add Medication', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Add Medication for ${esc(patientName)}</h2>
+      <form method="POST" action="/clinic/patient/${type}/${id}/medication/save">
+        <label>Medication Name <span style="color:red">*</span></label><input name="medication_name" required placeholder="e.g. Metformin, Amlodipine">
+        <label>Dosage</label><input name="dosage" placeholder="e.g. 500mg">
+        <label>Frequency</label><input name="frequency" placeholder="e.g. Twice daily">
+        <label>Start Date</label><input type="date" name="start_date">
+        <label>End Date</label><input type="date" name="end_date">
+        <label>Prescribed By</label><input name="prescribed_by" placeholder="Doctor name">
+        <label>Reason</label><input name="reason" placeholder="Why this medication">
+        <label>Notes</label><textarea name="notes" rows="2"></textarea>
+        <button class="btn btn-green" type="submit">Save Medication</button>
+      </form>
+      <a href="/clinic/patient/${type}/${id}/ehr" class="btn btn-sm" style="margin-top:10px">Cancel</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/medication/save', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const d = req.body;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  await pool.query('INSERT INTO patient_medications(tenant_id,patient_type,patient_id,patient_name,medication_name,dosage,frequency,start_date,end_date,prescribed_by,reason,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+    [t, type, id, patientName, d.medication_name, d.dosage||null, d.frequency||null, d.start_date||null, d.end_date||null, d.prescribed_by||null, d.reason||null, d.notes||null]);
+  await logAudit(t, req.session.user.email, 'medication_added', { patient: patientName, medication: d.medication_name });
+  res.redirect(`/clinic/patient/${type}/${id}/ehr`);
+}));
+
+// Stop Medication
+app.get('/clinic/patient/:type/:id/medication/:medId/stop', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id, medId } = req.params;
+  await pool.query('UPDATE patient_medications SET is_active=false, end_date=CURRENT_DATE WHERE id=$1 AND tenant_id=$2', [medId, t]);
+  await logAudit(t, req.session.user.email, 'medication_stopped', { medicationId: medId });
+  res.redirect(`/clinic/patient/${type}/${id}/ehr`);
+}));
+
+// ============================================================
+// v13.0: PATIENT BILLING & INSURANCE
+// ============================================================
+
+// Patient Billing Dashboard
+app.get('/clinic/patient/:type/:id/billing', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  
+  const [invoices, insurance, providers] = await Promise.all([
+    pool.query('SELECT * FROM patient_invoices WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 ORDER BY created_at DESC', [t, type, id]),
+    pool.query('SELECT pi.*, ip.name as provider_name FROM patient_insurance pi LEFT JOIN insurance_providers ip ON pi.provider_id=ip.id WHERE pi.tenant_id=$1 AND pi.patient_type=$2 AND pi.patient_id=$3 AND pi.is_active=true', [t, type, id]),
+    pool.query('SELECT * FROM insurance_providers WHERE tenant_id=$1 AND is_active=true', [t])
+  ]);
+  
+  const totalBilled = invoices.rows.reduce((s, i) => s + i.total_amount, 0);
+  const totalPaid = invoices.rows.reduce((s, i) => s + i.paid_amount, 0);
+  const balance = totalBilled - totalPaid;
+
+  res.send(renderPage(`Billing: ${patientName}`, `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)">
+      <h1>Patient Billing</h1>
+      <p>${esc(patientName)}</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${invoices.rows.length}</div><div>Invoices</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${(totalPaid/1000).toFixed(0)}k</div><div>Total Paid</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${(balance/1000).toFixed(0)}k</div><div>Outstanding</div></div>
+      <div class="stat-card"><div class="stat-num">${insurance.rows.length}</div><div>Insurance Plans</div></div>
+    </div>
+
+    <div class="grid">
+      <div class="card" style="grid-column:span 2">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3>Invoices</h3>
+          <a href="/clinic/patient/${type}/${id}/invoice/new" class="btn btn-sm btn-green">+ New Invoice</a>
+        </div>
+        ${invoices.rows.length ? `<table><tr><th>Invoice #</th><th>Date</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Actions</th></tr>
+          ${invoices.rows.map(inv => {
+            const bal = inv.total_amount - inv.paid_amount;
+            return `<tr><td>${esc(inv.invoice_number)}</td><td>${new Date(inv.created_at).toLocaleDateString()}</td><td>UGX ${parseInt(inv.total_amount).toLocaleString()}</td><td style="color:#059669">UGX ${parseInt(inv.paid_amount).toLocaleString()}</td><td style="color:${bal>0?'#dc2626':'#059669'};font-weight:700">UGX ${bal.toLocaleString()}</td><td><span class="tag" style="background:${inv.status==='paid'?'#d1fae5;color:#065f46':inv.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b'}">${esc(inv.status)}</span></td><td>${bal>0?`<a href="/clinic/patient/${type}/${id}/invoice/${inv.id}/pay" class="btn btn-sm btn-green">Pay</a>`:''} <a href="/clinic/patient/${type}/${id}/invoice/${inv.id}" class="btn btn-sm">View</a></td></tr>`;
+          }).join('')}</table>` : '<p class="muted">No invoices yet</p>'}
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3>Insurance</h3>
+          <a href="/clinic/patient/${type}/${id}/insurance/new" class="btn btn-sm" style="background:#4f46e5;color:white">+ Add Insurance</a>
+        </div>
+        ${insurance.rows.length ? insurance.rows.map(ins => `
+          <div style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px">
+            <strong>${esc(ins.provider_name||'Unknown')}</strong>
+            <br><span class="muted">Policy: ${esc(ins.policy_number||'N/A')}</span>
+            <br><span class="muted">Coverage: ${ins.coverage_percentage||'N/A'}%</span>
+            ${ins.is_primary ? ' <span class="tag" style="background:#4f46e5;color:white">Primary</span>' : ''}
+          </div>
+        `).join('') : '<p class="muted">No insurance on file</p>'}
+      </div>
+
+      <div class="card">
+        <h3>Quick Actions</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <a href="/clinic/patient/${type}/${id}/invoice/new" class="btn btn-green">Create Invoice</a>
+          <a href="/clinic/patient/${type}/${id}/insurance/new" class="btn" style="background:#4f46e5;color:white">Add Insurance</a>
+          <a href="/clinic/patient/${type}/${id}/claims" class="btn" style="background:#8b5cf6;color:white">View Claims</a>
+          <a href="/clinic/patient/${type}/${id}/ehr" class="btn">Back to EHR</a>
+        </div>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// Create Invoice
+app.get('/clinic/patient/:type/:id/invoice/new', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  const invCount = (await pool.query('SELECT COUNT(*) FROM patient_invoices WHERE tenant_id=$1', [t])).rows[0].count;
+  const invNum = 'INV-' + String(parseInt(invCount) + 1).padStart(4, '0');
+  
+  res.send(renderPage('Create Invoice', `
+    <div class="card" style="max-width:700px;margin:20px auto">
+      <h2>Create Invoice for ${esc(patientName)}</h2>
+      <form method="POST" action="/clinic/patient/${type}/${id}/invoice/save">
+        <label>Invoice Number</label><input name="invoice_number" value="${esc(invNum)}" required>
+        <label>Due Date</label><input type="date" name="due_date">
+        <label>Notes</label><textarea name="notes" rows="2" placeholder="Invoice notes"></textarea>
+        <h3 style="margin-top:15px">Line Items</h3>
+        <div id="line-items">
+          <div class="line-item" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:8px;margin-bottom:8px">
+            <input name="desc_1" placeholder="Description" required>
+            <input type="number" name="qty_1" placeholder="Qty" value="1">
+            <input type="number" name="price_1" placeholder="Unit Price">
+            <input type="number" name="total_1" placeholder="Total" readonly>
+            <button type="button" class="btn btn-sm btn-red" onclick="this.parentElement.remove();recalcTotal()">X</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm" onclick="addLineItem()">+ Add Line Item</button>
+        <div style="margin-top:15px;padding:10px;background:#f0fdf4;border-radius:8px">
+          <strong>Grand Total: UGX <span id="grandTotal">0</span></strong>
+        </div>
+        <button class="btn btn-green" type="submit" style="margin-top:10px">Create Invoice</button>
+      </form>
+      <script>
+      let lineCount=1;
+      function addLineItem(){lineCount++;const d=document.createElement('div');d.className='line-item';d.style.cssText='display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:8px;margin-bottom:8px';d.innerHTML='<input name=\"desc_'+lineCount+'\" placeholder=\"Description\" required><input type=\"number\" name=\"qty_'+lineCount+'\" placeholder=\"Qty\" value=\"1\"><input type=\"number\" name=\"price_'+lineCount+'\" placeholder=\"Unit Price\"><input type=\"number\" name=\"total_'+lineCount+'\" placeholder=\"Total\" readonly><button type=\"button\" class=\"btn btn-sm btn-red\" onclick=\"this.parentElement.remove();recalcTotal()\">X</button>';document.getElementById('line-items').appendChild(d);d.querySelectorAll('input[type=number]')[0].addEventListener('input',recalcLine);d.querySelectorAll('input[type=number]')[1].addEventListener('input',recalcLine);}
+      function recalcLine(e){const p=e.target.closest('.line-item');const qty=parseFloat(p.querySelectorAll('input')[1].value)||0;const price=parseFloat(p.querySelectorAll('input')[2].value)||0;p.querySelectorAll('input')[3].value=qty*price;recalcTotal();}
+      function recalcTotal(){let total=0;document.querySelectorAll('.line-item').forEach(li=>{total+=parseFloat(li.querySelectorAll('input')[3].value)||0;});document.getElementById('grandTotal').textContent=total.toLocaleString();}
+      document.querySelectorAll('.line-item input[type=number]').forEach(i=>i.addEventListener('input',recalcLine));
+      </script>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/invoice/save', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const { invoice_number, due_date, notes } = req.body;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  
+  // Parse line items
+  let totalAmount = 0;
+  const items = [];
+  let i = 1;
+  while (req.body[`desc_${i}`]) {
+    const desc = req.body[`desc_${i}`];
+    const qty = parseInt(req.body[`qty_${i}`]) || 1;
+    const price = parseInt(req.body[`price_${i}`]) || 0;
+    const lineTotal = qty * price;
+    totalAmount += lineTotal;
+    items.push({ desc, qty, price, total: lineTotal });
+    i++;
+  }
+  
+  const inv = await pool.query('INSERT INTO patient_invoices(tenant_id,patient_type,patient_id,patient_name,invoice_number,total_amount,status,due_date,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',
+    [t, type, id, patientName, invoice_number, totalAmount, totalAmount === 0 ? 'paid' : 'pending', due_date || null, notes || null, req.session.user.email]);
+  
+  for (const item of items) {
+    await pool.query('INSERT INTO invoice_items(tenant_id,invoice_id,description,quantity,unit_price,total_price) VALUES($1,$2,$3,$4,$5,$6)',
+      [t, inv.rows[0].id, item.desc, item.qty, item.price, item.total]);
+  }
+  
+  await logAudit(t, req.session.user.email, 'invoice_created', { patient: patientName, invoice: invoice_number, amount: totalAmount });
+  res.redirect(`/clinic/patient/${type}/${id}/billing`);
+}));
+
+// View Invoice Detail
+app.get('/clinic/patient/:type/:id/invoice/:invId', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id, invId } = req.params;
+  const [invoice, items] = await Promise.all([
+    pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [invId, t]),
+    pool.query('SELECT * FROM invoice_items WHERE invoice_id=$1', [invId])
+  ]);
+  if (!invoice.rows[0]) return res.redirect('/clinic');
+  const inv = invoice.rows[0];
+  const balance = inv.total_amount - inv.paid_amount;
+
+  res.send(renderPage(`Invoice ${inv.invoice_number}`, `
+    <div class="card" style="max-width:700px;margin:20px auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h2>Invoice ${esc(inv.invoice_number)}</h2>
+        <span class="tag" style="background:${inv.status==='paid'?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b'};font-size:14px;padding:6px 12px">${esc(inv.status)}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px">
+        <div><span class="muted">Patient:</span> <strong>${esc(inv.patient_name)}</strong></div>
+        <div><span class="muted">Date:</span> ${new Date(inv.created_at).toLocaleDateString()}</div>
+        <div><span class="muted">Due Date:</span> ${inv.due_date || 'N/A'}</div>
+        <div><span class="muted">Created By:</span> ${esc(inv.created_by||'N/A')}</div>
+      </div>
+      <table>
+        <tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
+        ${items.rows.map(it => `<tr><td>${esc(it.description)}</td><td>${it.quantity}</td><td>UGX ${parseInt(it.unit_price).toLocaleString()}</td><td>UGX ${parseInt(it.total_price).toLocaleString()}</td></tr>`).join('')}
+        <tr style="font-weight:700;border-top:2px solid #1e293b"><td colspan="3" style="text-align:right">Total:</td><td>UGX ${parseInt(inv.total_amount).toLocaleString()}</td></tr>
+        <tr style="color:#059669"><td colspan="3" style="text-align:right">Paid:</td><td>UGX ${parseInt(inv.paid_amount).toLocaleString()}</td></tr>
+        <tr style="color:#dc2626;font-weight:700"><td colspan="3" style="text-align:right">Balance:</td><td>UGX ${balance.toLocaleString()}</td></tr>
+      </table>
+      ${inv.notes ? `<div style="margin-top:10px;padding:10px;background:#f8fafc;border-radius:8px"><span class="muted">Notes:</span> ${esc(inv.notes)}</div>` : ''}
+      <div style="margin-top:15px;display:flex;gap:10px">
+        ${balance > 0 ? `<a href="/clinic/patient/${type}/${id}/invoice/${invId}/pay" class="btn btn-green">Record Payment</a>
+        <a href="/clinic/patient/${type}/${id}/invoice/${invId}/claim" class="btn" style="background:#8b5cf6;color:white">Submit Insurance Claim</a>` : ''}
+        <a href="/clinic/patient/${type}/${id}/billing" class="btn">Back to Billing</a>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// Record Payment on Invoice
+app.get('/clinic/patient/:type/:id/invoice/:invId/pay', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id, invId } = req.params;
+  const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [invId, t])).rows[0];
+  if (!inv) return res.redirect('/clinic');
+  const balance = inv.total_amount - inv.paid_amount;
+  const country = await getTenantCountry(t);
+  const cfg = getProvidersForCountry(country);
+  
+  res.send(renderPage('Record Payment', `
+    <div class="card" style="max-width:500px;margin:20px auto">
+      <h2>Record Payment</h2>
+      <p>Invoice: <strong>${esc(inv.invoice_number)}</strong></p>
+      <p>Balance: <strong style="color:#dc2626">UGX ${balance.toLocaleString()}</strong></p>
+      <div style="margin-top:15px">
+        <h3>Option 1: Manual Payment</h3>
+        <form method="POST" action="/clinic/patient/${type}/${id}/invoice/${invId}/pay-manual">
+          <label>Amount Paid</label><input type="number" name="amount" value="${balance}" max="${balance}" required>
+          <label>Payment Method</label><select name="method"><option value="cash">Cash</option><option value="mtn_momo">MTN MoMo</option><option value="airtel_money">Airtel Money</option><option value="bank_transfer">Bank Transfer</option><option value="insurance">Insurance</option></select>
+          <label>Reference</label><input name="reference" placeholder="Payment reference">
+          <button class="btn btn-green" type="submit">Record Payment</button>
+        </form>
+        <hr style="margin:20px 0">
+        <h3>Option 2: Online Payment</h3>
+        <a href="/pay/checkout-v2?amount=${balance}&description=Invoice%20${encodeURIComponent(inv.invoice_number)}&type=invoice&item_id=${invId}" class="btn" style="background:#4f46e5;color:white;width:100%;text-align:center">Pay Online (${cfg.currency} ${balance.toLocaleString()})</a>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/invoice/:invId/pay-manual', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id, invId } = req.params;
+  const { amount, method, reference } = req.body;
+  const amt = parseInt(amount) || 0;
+  
+  const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [invId, t])).rows[0];
+  if (!inv) return res.redirect('/clinic');
+  const newPaid = Math.min(inv.paid_amount + amt, inv.total_amount);
+  const newStatus = newPaid >= inv.total_amount ? 'paid' : 'partial';
+  
+  await pool.query('UPDATE patient_invoices SET paid_amount=$1, status=$2 WHERE id=$3', [newPaid, newStatus, invId]);
+  await logAudit(t, req.session.user.email, 'payment_recorded', { invoice: inv.invoice_number, amount: amt, method });
+  res.redirect(`/clinic/patient/${type}/${id}/billing`);
+}));
+
+// Insurance Provider Management
+app.get('/clinic/insurance', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const providers = (await pool.query('SELECT * FROM insurance_providers WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  
+  res.send(renderPage('Insurance Providers', `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+        <h2>Insurance Providers</h2>
+        <a href="/clinic/insurance/new" class="btn btn-green">+ Add Provider</a>
+      </div>
+      ${providers.length ? `<table><tr><th>Name</th><th>Code</th><th>Type</th><th>Coverage</th><th>Pre-Auth</th><th>Actions</th></tr>
+        ${providers.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.code||'')}</td><td><span class="tag">${esc(p.type)}</span></td><td>${p.coverage_percentage||0}%</td><td>${p.requires_preauth?'Yes':'No'}</td><td><a href="/clinic/insurance/${p.id}/edit" class="btn btn-sm">Edit</a></td></tr>`).join('')}</table>` : '<p class="muted">No insurance providers configured. Add providers like NHIS, UAP, Jubilee, etc.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/clinic/insurance/new', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  res.send(renderPage('Add Insurance Provider', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Add Insurance Provider</h2>
+      <form method="POST" action="/clinic/insurance/save">
+        <label>Provider Name <span style="color:red">*</span></label><input name="name" required placeholder="e.g. NHIS, UAP Insurance, Jubilee, ICEA Lion">
+        <label>Provider Code</label><input name="code" placeholder="e.g. NHIS, UAP, JUB">
+        <label>Type</label><select name="type"><option value="national">National (NHIS)</option><option value="private">Private Insurance</option><option value="community">Community-Based</option><option value="employer">Employer-Based</option></select>
+        <label>Coverage Percentage</label><input type="number" name="coverage_percentage" value="80" min="0" max="100">
+        <label>Requires Pre-Authorization</label><select name="requires_preauth"><option value="false">No</option><option value="true">Yes</option></select>
+        <label>Contact Phone</label><input name="contact_phone" placeholder="Provider phone">
+        <label>Contact Email</label><input name="contact_email" placeholder="Provider email">
+        <label>Address</label><textarea name="address" rows="2"></textarea>
+        <label>Notes</label><textarea name="notes" rows="2"></textarea>
+        <button class="btn btn-green" type="submit">Save Provider</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/insurance/save', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const d = req.body;
+  await pool.query('INSERT INTO insurance_providers(tenant_id,name,code,type,coverage_percentage,requires_preauth,contact_phone,contact_email,address,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [t, d.name, d.code||null, d.type||'private', d.coverage_percentage||80, d.requires_preauth==='true', d.contact_phone||null, d.contact_email||null, d.address||null, d.notes||null]);
+  await logAudit(t, req.session.user.email, 'insurance_provider_added', { name: d.name });
+  res.redirect('/clinic/insurance');
+}));
+
+// Add Patient Insurance
+app.get('/clinic/patient/:type/:id/insurance/new', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  const providers = (await pool.query('SELECT * FROM insurance_providers WHERE tenant_id=$1 AND is_active=true', [t])).rows;
+  
+  res.send(renderPage('Add Insurance', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Add Insurance for ${esc(patientName)}</h2>
+      ${providers.length ? `<form method="POST" action="/clinic/patient/${type}/${id}/insurance/save">
+        <label>Insurance Provider <span style="color:red">*</span></label><select name="provider_id" required><option value="">Select Provider</option>${providers.map(p => `<option value="${p.id}">${esc(p.name)} (${esc(p.type)}) - ${p.coverage_percentage}% coverage</option>`).join('')}</select>
+        <label>Policy Number</label><input name="policy_number" placeholder="Policy number">
+        <label>Member Number</label><input name="member_number" placeholder="Member/Subscriber number">
+        <label>Group Number</label><input name="group_number" placeholder="Group number (if applicable)">
+        <label>Effective Date</label><input type="date" name="effective_date">
+        <label>Expiry Date</label><input type="date" name="expiry_date">
+        <label>Coverage Override (%)</label><input type="number" name="coverage_percentage" placeholder="Leave blank to use provider default">
+        <label>Primary Insurance</label><select name="is_primary"><option value="true">Yes - Primary</option><option value="false">No - Secondary</option></select>
+        <label>Notes</label><textarea name="notes" rows="2"></textarea>
+        <button class="btn btn-green" type="submit">Save Insurance</button>
+      </form>` : `<div class="alert alert-info"><p>No insurance providers configured yet.</p><a href="/clinic/insurance/new" class="btn btn-sm btn-green">Add Provider First</a></div>`}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/insurance/save', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const d = req.body;
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  await pool.query('INSERT INTO patient_insurance(tenant_id,patient_type,patient_id,patient_name,provider_id,policy_number,member_number,group_number,effective_date,expiry_date,coverage_percentage,is_primary) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+    [t, type, id, patientName, d.provider_id, d.policy_number||null, d.member_number||null, d.group_number||null, d.effective_date||null, d.expiry_date||null, d.coverage_percentage||null, d.is_primary!=='false']);
+  await logAudit(t, req.session.user.email, 'patient_insurance_added', { patient: patientName });
+  res.redirect(`/clinic/patient/${type}/${id}/billing`);
+}));
+
+// Submit Insurance Claim
+app.get('/clinic/patient/:type/:id/invoice/:invId/claim', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id, invId } = req.params;
+  const [inv, insurance] = await Promise.all([
+    pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [invId, t]),
+    pool.query('SELECT pi.*, ip.name as provider_name, ip.coverage_percentage as provider_coverage, ip.requires_preauth FROM patient_insurance pi JOIN insurance_providers ip ON pi.provider_id=ip.id WHERE pi.tenant_id=$1 AND pi.patient_type=$2 AND pi.patient_id=$3 AND pi.is_active=true', [t, type, id])
+  ]);
+  if (!inv.rows[0]) return res.redirect('/clinic');
+  
+  res.send(renderPage('Submit Insurance Claim', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Submit Insurance Claim</h2>
+      <p>Invoice: <strong>${esc(inv.rows[0].invoice_number)}</strong> - UGX ${parseInt(inv.rows[0].total_amount).toLocaleString()}</p>
+      ${insurance.rows.length ? `<form method="POST" action="/clinic/patient/${type}/${id}/invoice/${invId}/claim-submit">
+        <label>Insurance Provider</label><select name="provider_id" required>${insurance.rows.map(ins => `<option value="${ins.provider_id}">${esc(ins.provider_name)} (${ins.coverage_percentage||ins.provider_coverage||80}%)</option>`).join('')}</select>
+        <label>Claim Amount</label><input type="number" name="amount_claimed" value="${inv.rows[0].total_amount - inv.rows[0].paid_amount}">
+        <label>Notes</label><textarea name="notes" rows="2" placeholder="Clinical justification for claim"></textarea>
+        <div class="alert alert-info" style="margin-top:10px"><p>The claim will be submitted with status "pending". Insurance provider will process it based on their schedule.</p></div>
+        <button class="btn" style="background:#8b5cf6;color:white" type="submit">Submit Claim</button>
+      </form>` : `<div class="alert alert-error"><p>No insurance on file for this patient. Add insurance first.</p><a href="/clinic/patient/${type}/${id}/insurance/new" class="btn btn-sm btn-green">Add Insurance</a></div>`}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/invoice/:invId/claim-submit', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id, invId } = req.params;
+  const { provider_id, amount_claimed, notes } = req.body;
+  const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [invId, t])).rows[0];
+  let patientName = 'Patient';
+  if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
+  
+  const claimCount = (await pool.query('SELECT COUNT(*) FROM insurance_claims WHERE tenant_id=$1', [t])).rows[0].count;
+  const claimNumber = 'CLM-' + String(parseInt(claimCount) + 1).padStart(5, '0');
+  
+  await pool.query('INSERT INTO insurance_claims(tenant_id,patient_type,patient_id,patient_name,provider_id,invoice_id,claim_number,amount_claimed,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [t, type, id, patientName, provider_id, invId, claimNumber, amount_claimed || 0, 'submitted', notes || null]);
+  
+  await logAudit(t, req.session.user.email, 'insurance_claim_submitted', { claim: claimNumber, amount: amount_claimed });
+  res.redirect(`/clinic/patient/${type}/${id}/billing`);
+}));
+
+// Claims Management
+app.get('/clinic/claims', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const claims = (await pool.query('SELECT ic.*, ip.name as provider_name FROM insurance_claims ic LEFT JOIN insurance_providers ip ON ic.provider_id=ip.id WHERE ic.tenant_id=$1 ORDER BY ic.submitted_at DESC', [t])).rows;
+  
+  res.send(renderPage('Insurance Claims', `
+    <div class="card">
+      <h2>Insurance Claims</h2>
+      ${claims.length ? `<table><tr><th>Claim #</th><th>Patient</th><th>Provider</th><th>Claimed</th><th>Approved</th><th>Status</th><th>Actions</th></tr>
+        ${claims.map(c => `<tr><td>${esc(c.claim_number)}</td><td>${esc(c.patient_name)}</td><td>${esc(c.provider_name||'')}</td><td>UGX ${parseInt(c.amount_claimed).toLocaleString()}</td><td>UGX ${parseInt(c.amount_approved).toLocaleString()}</td><td><span class="tag" style="background:${c.status==='approved'?'#d1fae5;color:#065f46':c.status==='rejected'?'#fee2e2;color:#991b1b':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td>${c.status==='submitted'?`<a href="/clinic/claims/${c.id}/approve" class="btn btn-sm btn-green">Approve</a> <a href="/clinic/claims/${c.id}/reject" class="btn btn-sm btn-red">Reject</a>`:''}</td></tr>`).join('')}</table>` : '<p class="muted">No claims yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const claim = (await pool.query('SELECT * FROM insurance_claims WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!claim) return res.redirect('/clinic/claims');
+  await pool.query('UPDATE insurance_claims SET status=$1, amount_approved=$2, processed_at=NOW() WHERE id=$3', ['approved', claim.amount_claimed, req.params.id]);
+  // Apply insurance payment to invoice
+  if (claim.invoice_id) {
+    const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1', [claim.invoice_id])).rows[0];
+    if (inv) {
+      const newPaid = Math.min(inv.paid_amount + claim.amount_claimed, inv.total_amount);
+      await pool.query('UPDATE patient_invoices SET paid_amount=$1, insurance_cover=$2, status=$3 WHERE id=$4', [newPaid, claim.amount_claimed, newPaid >= inv.total_amount ? 'paid' : 'partial', claim.invoice_id]);
+    }
+  }
+  await logAudit(t, req.session.user.email, 'claim_approved', { claimId: req.params.id });
+  res.redirect('/clinic/claims');
+}));
+
+app.get('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE insurance_claims SET status=$1, processed_at=NOW(), rejection_reason=$2 WHERE id=$3', ['rejected', 'Rejected by admin', req.params.id]);
+  await logAudit(t, req.session.user.email, 'claim_rejected', { claimId: req.params.id });
+  res.redirect('/clinic/claims');
+}));
+
+// ============================================================
+// v13.0: CLINICAL DECISION SUPPORT (CDS)
+// ============================================================
+
+// API: Check drug interactions for a list of medications
+app.get('/api/cds/interactions', requireAuth, ah(async (req, res) => {
+  const { medications } = req.query;
+  if (!medications) return res.json({ interactions: [] });
+  const meds = Array.isArray(medications) ? medications : [medications];
+  const interactions = [];
+  
+  for (let i = 0; i < meds.length; i++) {
+    for (let j = i + 1; j < meds.length; j++) {
+      const found = (await pool.query('SELECT * FROM drug_interactions WHERE (drug_a ILIKE $1 AND drug_b ILIKE $2) OR (drug_a ILIKE $2 AND drug_b ILIKE $1)',
+        [`%${meds[i]}%`, `%${meds[j]}%`])).rows;
+      interactions.push(...found.map(f => ({ drug_a: meds[i], drug_b: meds[j], ...f })));
+    }
+  }
+  res.json({ medications: meds, interactions, count: interactions.length });
+}));
+
+// API: Check patient allergies before prescribing
+app.get('/api/cds/allergy-check', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_type, patient_id, medication } = req.query;
+  if (!patient_id || !medication) return res.json({ alerts: [] });
+  
+  const allergies = (await pool.query('SELECT * FROM patient_allergies WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true', [t, patient_type || 'student', patient_id])).rows;
+  const alerts = [];
+  
+  for (const allergy of allergies) {
+    const allergenLower = allergy.allergen.toLowerCase();
+    const medLower = medication.toLowerCase();
+    // Check if medication name contains the allergen or vice versa
+    if (medLower.includes(allergenLower) || allergenLower.includes(medLower.split(' ')[0])) {
+      alerts.push({
+        type: 'allergy_alert',
+        severity: allergy.severity,
+        allergen: allergy.allergen,
+        reaction: allergy.reaction,
+        medication: medication,
+        message: `WARNING: Patient has a ${allergy.severity} allergy to ${allergy.allergen}. ${medication} may trigger a reaction (${allergy.reaction || 'unknown reaction'}).`,
+        recommendation: allergy.severity === 'severe' ? 'DO NOT prescribe this medication. Find an alternative.' : 'Use with caution. Consider alternative medication.'
+      });
+    }
+    // Common cross-reactivity checks
+    const crossReactivity = {
+      'penicillin': ['amoxicillin', 'ampicillin', 'amoxil', 'augmentin', 'penicillin', 'benzylpenicillin'],
+      'sulfa': ['sulfamethoxazole', 'co-trimoxazole', 'trimethoprim', 'sulfasalazine', 'septrin'],
+      'aspirin': ['ibuprofen', 'diclofenac', 'naproxen', 'indomethacin', 'mefenamic'],
+      'latex': ['avocado', 'banana', 'kiwi', 'chestnut']
+    };
+    for (const [allergenGroup, crossReactive] of Object.entries(crossReactivity)) {
+      if (allergenLower.includes(allergenGroup) || allergenGroup.includes(allergenLower)) {
+        if (crossReactive.some(cr => medLower.includes(cr))) {
+          alerts.push({
+            type: 'cross_reactivity_alert',
+            severity: allergy.severity,
+            allergen: allergy.allergen,
+            medication: medication,
+            message: `CROSS-REACTIVITY WARNING: ${medication} may cross-react with ${allergy.allergen} allergy (${allergy.reaction || 'unknown reaction'}).`,
+            recommendation: 'Consider alternative medication. Monitor closely if prescribed.'
+          });
+        }
+      }
+    }
+  }
+  res.json({ patient_type, patient_id, medication, alerts, allergy_count: allergies.length });
+}));
+
+// API: Dosage check
+app.get('/api/cds/dosage-check', requireAuth, ah(async (req, res) => {
+  const { medication, dosage, age, weight } = req.query;
+  if (!medication || !dosage) return res.json({ warnings: [] });
+  
+  const warnings = [];
+  const dosageStr = dosage.toLowerCase();
+  const dosageNum = parseFloat(dosageStr);
+  const ageNum = parseInt(age);
+  const weightNum = parseFloat(weight);
+  
+  // Common pediatric/geriatric dosage warnings
+  if (ageNum && ageNum < 12) {
+    warnings.push({ type: 'pediatric_dose', message: `Pediatric patient (age ${ageNum}). Verify weight-based dosing. Standard adult doses may be unsafe.`, severity: 'high' });
+  }
+  if (ageNum && ageNum > 65) {
+    warnings.push({ type: 'geriatric_dose', message: `Elderly patient (age ${ageNum}). Consider reduced dosing due to decreased renal/hepatic clearance.`, severity: 'moderate' });
+  }
+  
+  // Medication-specific dosage checks (Uganda/Africa common medications)
+  const dosageChecks = [
+    { med: 'paracetamol', maxDailyAdult: 4000, maxDailyPediatric: 60, unit: 'mg', weightBased: true, weightDose: 15 },
+    { med: 'amoxicillin', maxDailyAdult: 3000, maxDailyPediatric: 90, unit: 'mg', weightBased: true, weightDose: 25 },
+    { med: 'metformin', maxDaily: 2550, unit: 'mg', minAge: 10 },
+    { med: 'artemether', maxDailyAdult: 640, unit: 'mg', weightBased: true, weightDose: 3.2 },
+    { med: 'ciprofloxacin', maxDaily: 1500, unit: 'mg', minAge: 18, pedWarning: 'Avoid in children under 18 due to cartilage damage risk' },
+    { med: 'doxycycline', maxDaily: 200, unit: 'mg', minAge: 8, pedWarning: 'Avoid in children under 8 - causes dental discoloration' },
+    { med: 'chloroquine', maxDaily: 600, unit: 'mg base', weightBased: true, weightDose: 10 },
+    { med: 'ibuprofen', maxDailyAdult: 2400, maxDailyPediatric: 40, unit: 'mg', weightBased: true, weightDose: 10 },
+    { med: 'diclofenac', maxDaily: 150, unit: 'mg', minAge: 14 }
+  ];
+  
+  for (const check of dosageChecks) {
+    if (dosageStr.includes(check.med)) {
+      if (check.minAge && ageNum && ageNum < check.minAge) {
+        warnings.push({ type: 'age_restriction', message: check.pedWarning || `${check.med} is not recommended for patients under ${check.minAge} years.`, severity: 'high' });
+      }
+      if (check.maxDaily && dosageNum > check.maxDaily) {
+        warnings.push({ type: 'overdose', message: `Dose of ${dosage} exceeds maximum daily dose of ${check.maxDaily}${check.unit} for ${check.med}.`, severity: 'high' });
+      }
+      if (check.weightBased && weightNum && dosageNum) {
+        const expectedDose = weightNum * check.weightDose;
+        if (dosageNum > expectedDose * 1.5) {
+          warnings.push({ type: 'weight_dose_mismatch', message: `Dose of ${dosageNum}${check.unit} seems high for patient weight of ${weightNum}kg. Expected ~${expectedDose.toFixed(0)}${check.unit} based on ${check.weightDose}${check.unit}/kg.`, severity: 'moderate' });
+        }
+      }
+    }
+  }
+  
+  res.json({ medication, dosage, age: ageNum, weight: weightNum, warnings });
+}));
+
+// API: Full CDS check (combines all checks for prescribing)
+app.post('/api/cds/full-check', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_type, patient_id, medications, age, weight } = req.body;
+  
+  if (!medications || !medications.length) return res.json({ alerts: [], interactions: [], warnings: [] });
+  
+  const allAlerts = [];
+  const allInteractions = [];
+  const allWarnings = [];
+  
+  // Check interactions between all medications
+  for (let i = 0; i < medications.length; i++) {
+    for (let j = i + 1; j < medications.length; j++) {
+      const found = (await pool.query('SELECT * FROM drug_interactions WHERE (drug_a ILIKE $1 AND drug_b ILIKE $2) OR (drug_a ILIKE $2 AND drug_b ILIKE $1)',
+        [`%${medications[i].name}%`, `%${medications[j].name}%`])).rows;
+      for (const f of found) {
+        allInteractions.push({ drug_a: medications[i].name, drug_b: medications[j].name, ...f });
+      }
+    }
+  }
+  
+  // Check allergies for each medication
+  if (patient_id) {
+    const allergies = (await pool.query('SELECT * FROM patient_allergies WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true', [t, patient_type || 'student', patient_id])).rows;
+    for (const med of medications) {
+      for (const allergy of allergies) {
+        const allergenLower = allergy.allergen.toLowerCase();
+        const medLower = med.name.toLowerCase();
+        if (medLower.includes(allergenLower) || allergenLower.includes(medLower.split(' ')[0])) {
+          allAlerts.push({
+            type: 'allergy_alert', severity: allergy.severity, allergen: allergy.allergen, medication: med.name,
+            message: `ALLERGY ALERT: Patient has ${allergy.severity} allergy to ${allergy.allergen}. ${med.name} is contraindicated.`,
+            recommendation: allergy.severity === 'severe' ? 'DO NOT PRESCRIBE. Find alternative.' : 'Use with extreme caution.'
+          });
+        }
+        // Cross-reactivity
+        const crossReactivity = {
+          'penicillin': ['amoxicillin', 'ampicillin', 'amoxil', 'augmentin'],
+          'sulfa': ['sulfamethoxazole', 'co-trimoxazole', 'trimethoprim', 'septrin'],
+          'aspirin': ['ibuprofen', 'diclofenac', 'naproxen', 'mefenamic']
+        };
+        for (const [group, cross] of Object.entries(crossReactivity)) {
+          if (allergenLower.includes(group) && cross.some(c => medLower.includes(c))) {
+            allAlerts.push({ type: 'cross_reactivity', severity: 'high', allergen: allergy.allergen, medication: med.name, message: `Cross-reactivity: ${med.name} may react with ${allergy.allergen} allergy.` });
+          }
+        }
+      }
+    }
+    
+    // Check current medications for duplicate therapy
+    const currentMeds = (await pool.query('SELECT * FROM patient_medications WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true', [t, patient_type || 'student', patient_id])).rows;
+    for (const med of medications) {
+      const duplicate = currentMeds.find(cm => cm.medication_name.toLowerCase().includes(med.name.toLowerCase()) || med.name.toLowerCase().includes(cm.medication_name.toLowerCase()));
+      if (duplicate) {
+        allWarnings.push({ type: 'duplicate_therapy', medication: med.name, existing: duplicate.medication_name, message: `Patient is already on ${duplicate.medication_name} (${duplicate.dosage} ${duplicate.frequency}). Adding ${med.name} may be duplicate therapy.` });
+      }
+    }
+  }
+  
+  // Dosage checks
+  for (const med of medications) {
+    if (med.dosage && age) {
+      const ageNum = parseInt(age);
+      if (ageNum < 12) allWarnings.push({ type: 'pediatric', medication: med.name, message: `Pediatric dosing for ${med.name} - verify weight-based dose.` });
+      if (ageNum > 65) allWarnings.push({ type: 'geriatric', medication: med.name, message: `Elderly dosing for ${med.name} - consider dose reduction.` });
+    }
+  }
+  
+  res.json({
+    patient_type, patient_id, medications: medications.map(m => m.name),
+    alerts: allAlerts,
+    interactions: allInteractions,
+    warnings: allWarnings,
+    total_issues: allAlerts.length + allInteractions.length + allWarnings.length,
+    has_critical: allAlerts.some(a => a.severity === 'severe') || allInteractions.some(i => i.severity === 'high')
+  });
+}));
+
+// CDS Dashboard (UI for checking interactions)
+app.get('/clinic/cds', requireAuth, requireNotBanned, requireFeature('clinical_decision_support'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const interactions = (await pool.query('SELECT DISTINCT ON (drug_a, drug_b) * FROM drug_interactions ORDER BY drug_a, drug_b')).rows;
+  
+  res.send(renderPage('Clinical Decision Support', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
+      <h1>Clinical Decision Support</h1>
+      <p>Drug interactions, allergy alerts, and dosage warnings</p>
+    </div>
+    
+    <div class="grid">
+      <div class="card" style="grid-column:span 2">
+        <h3>Check Drug Interactions</h3>
+        <form onsubmit="checkInteractions(event)">
+          <label>Enter medications (one per line or comma-separated)</label>
+          <textarea id="medInput" rows="3" placeholder="e.g. Warfarin, Aspirin, Metformin" style="width:100%"></textarea>
+          <button class="btn btn-red" type="submit">Check Interactions</button>
+        </form>
+        <div id="interactionResults" style="margin-top:15px"></div>
+      </div>
+      
+      <div class="card">
+        <h3>Quick Tools</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <a href="/clinic/cds/allergy-check" class="btn" style="background:#f59e0b">Allergy Checker</a>
+          <a href="/clinic/cds/dosage" class="btn" style="background:#4f46e5;color:white">Dosage Calculator</a>
+          <a href="/clinic/cds/database" class="btn" style="background:#8b5cf6;color:white">Interaction Database</a>
+        </div>
+      </div>
+      
+      <div class="card" style="grid-column:span 2">
+        <h3>Interaction Database (${interactions.length} entries)</h3>
+        <table><tr><th>Drug A</th><th>Drug B</th><th>Severity</th><th>Description</th><th>Recommendation</th></tr>
+          ${interactions.slice(0, 30).map(i => `<tr><td>${esc(i.drug_a)}</td><td>${esc(i.drug_b)}</td><td><span class="tag" style="background:${i.severity==='high'?'#dc2626':i.severity==='moderate'?'#f59e0b':'#059669'};color:white">${esc(i.severity)}</span></td><td style="max-width:250px">${esc((i.description||'').substring(0,100))}</td><td style="max-width:200px">${esc((i.recommendation||'').substring(0,80))}</td></tr>`).join('')}
+        </table>
+        ${interactions.length > 30 ? '<p class="muted">Showing 30 of ' + interactions.length + ' interactions</p>' : ''}
+      </div>
+    </div>
+    
+    <script>
+    async function checkInteractions(e) {
+      e.preventDefault();
+      const meds = document.getElementById('medInput').value.split(/[,\n]+/).map(m=>m.trim()).filter(Boolean);
+      if (meds.length < 2) { alert('Enter at least 2 medications'); return; }
+      const params = meds.map(m=>'medications='+encodeURIComponent(m)).join('&');
+      const resp = await fetch('/api/cds/interactions?'+params);
+      const data = await resp.json();
+      let html = '';
+      if (data.interactions.length === 0) {
+        html = '<div class="alert alert-info"><p>No known interactions found between these medications.</p></div>';
+      } else {
+        html = '<div class="alert alert-error"><h4>Interactions Found: ' + data.interactions.length + '</h4>';
+        data.interactions.forEach(i => {
+          html += '<div style="padding:8px;border-left:4px solid ' + (i.severity==='high'?'#dc2626':'#f59e0b') + ';margin-bottom:8px"><strong>' + i.drug_a + ' + ' + i.drug_b + '</strong> <span class="tag" style="background:' + (i.severity==='high'?'#dc2626':'#f59e0b') + ';color:white">' + i.severity + '</span><br>' + (i.description||'') + '<br><em>' + (i.recommendation||'') + '</em></div>';
+        });
+        html += '</div>';
+      }
+      document.getElementById('interactionResults').innerHTML = html;
+    }
+    </script>
+  `, req.session.user));
+}));
+
+// Allergy Checker UI
+app.get('/clinic/cds/allergy-check', requireAuth, requireNotBanned, requireFeature('clinical_decision_support'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const patients = (await pool.query('SELECT id, name FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 500', [t])).rows;
+  
+  res.send(renderPage('Allergy Checker', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Allergy Checker</h2>
+      <p>Check if a medication is safe for a patient based on their recorded allergies.</p>
+      <form onsubmit="checkAllergy(event)">
+        <label>Patient</label><select name="patient_id" required><option value="">Select Patient</option>${patients.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+        <label>Medication</label><input name="medication" required placeholder="e.g. Amoxicillin, Co-trimoxazole">
+        <button class="btn" style="background:#f59e0b" type="submit">Check Allergies</button>
+      </form>
+      <div id="allergyResults" style="margin-top:15px"></div>
+    </div>
+    <script>
+    async function checkAllergy(e) {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const resp = await fetch('/api/cds/allergy-check?patient_type=student&patient_id='+f.get('patient_id')+'&medication='+encodeURIComponent(f.get('medication')));
+      const data = await resp.json();
+      let html = '';
+      if (data.alerts.length === 0) {
+        html = '<div class="alert alert-info"><p>No known allergies for this medication. Patient has '+data.allergy_count+' recorded allergies - none match.</p></div>';
+      } else {
+        html = '<div class="alert alert-error"><h4>Allergy Alert!</h4>';
+        data.alerts.forEach(a => {
+          html += '<div style="padding:10px;border-left:4px solid #dc2626;margin-bottom:8px;background:#fef2f2"><strong>'+a.type.replace(/_/g,' ').toUpperCase()+'</strong><br>'+a.message+'<br><em>'+a.recommendation+'</em></div>';
+        });
+        html += '</div>';
+      }
+      document.getElementById('allergyResults').innerHTML = html;
+    }
+    </script>
+  `, req.session.user));
+}));
+
+// Dosage Calculator UI
+app.get('/clinic/cds/dosage', requireAuth, requireNotBanned, requireFeature('clinical_decision_support'), ah(async (req, res) => {
+  res.send(renderPage('Dosage Checker', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Dosage Safety Checker</h2>
+      <p>Check if a medication dosage is appropriate for the patient's age and weight.</p>
+      <form onsubmit="checkDosage(event)">
+        <label>Medication Name</label><input name="medication" required placeholder="e.g. Paracetamol, Amoxicillin">
+        <label>Dosage</label><input name="dosage" required placeholder="e.g. 500mg">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label>Patient Age</label><input type="number" name="age" placeholder="Years"></div>
+          <div><label>Patient Weight (kg)</label><input type="number" step="0.1" name="weight" placeholder="kg"></div>
+        </div>
+        <button class="btn" style="background:#4f46e5;color:white" type="submit">Check Dosage</button>
+      </form>
+      <div id="dosageResults" style="margin-top:15px"></div>
+    </div>
+    <script>
+    async function checkDosage(e) {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const params = new URLSearchParams({medication:f.get('medication'),dosage:f.get('dosage'),age:f.get('age')||'',weight:f.get('weight')||''});
+      const resp = await fetch('/api/cds/dosage-check?'+params);
+      const data = await resp.json();
+      let html = '';
+      if (data.warnings.length === 0) {
+        html = '<div class="alert alert-info"><p>No dosage warnings for this medication at the given dose.</p></div>';
+      } else {
+        html = '<div class="alert alert-error"><h4>Dosage Warnings</h4>';
+        data.warnings.forEach(w => {
+          html += '<div style="padding:8px;border-left:4px solid '+(w.severity==='high'?'#dc2626':'#f59e0b')+';margin-bottom:8px"><strong>'+w.type.replace(/_/g,' ').toUpperCase()+'</strong><br>'+w.message+'</div>';
+        });
+        html += '</div>';
+      }
+      document.getElementById('dosageResults').innerHTML = html;
+    }
+    </script>
+  `, req.session.user));
+}));
+
+// Interaction Database Browser
+app.get('/clinic/cds/database', requireAuth, requireNotBanned, requireFeature('clinical_decision_support'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const search = req.query.search || '';
+  let interactions;
+  if (search) {
+    interactions = (await pool.query('SELECT * FROM drug_interactions WHERE drug_a ILIKE $1 OR drug_b ILIKE $1 ORDER BY severity DESC, drug_a', [`%${search}%`])).rows;
+  } else {
+    interactions = (await pool.query('SELECT * FROM drug_interactions ORDER BY severity DESC, drug_a, drug_b')).rows;
+  }
+  
+  res.send(renderPage('Drug Interaction Database', `
+    <div class="card">
+      <h2>Drug Interaction Database</h2>
+      <form method="GET" action="/clinic/cds/database" style="margin-bottom:15px">
+        <div style="display:flex;gap:10px"><input name="search" value="${esc(search)}" placeholder="Search drug name..." style="flex:1"><button class="btn btn-sm" type="submit">Search</button></div>
+      </form>
+      ${interactions.length ? `<table><tr><th>Drug A</th><th>Drug B</th><th>Severity</th><th>Description</th><th>Recommendation</th><th>Evidence</th></tr>
+        ${interactions.map(i => `<tr><td><strong>${esc(i.drug_a)}</strong></td><td><strong>${esc(i.drug_b)}</strong></td><td><span class="tag" style="background:${i.severity==='high'?'#dc2626':i.severity==='moderate'?'#f59e0b':'#059669'};color:white">${esc(i.severity)}</span></td><td style="max-width:300px">${esc(i.description||'')}</td><td style="max-width:200px">${esc(i.recommendation||'')}</td><td><span class="tag">${esc(i.evidence_level||'')}</span></td></tr>`).join('')}</table>` : '<p class="muted">No interactions found</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+// Add custom drug interaction
+app.get('/clinic/cds/interaction/new', requireAuth, requireNotBanned, requireFeature('clinical_decision_support'), ah(async (req, res) => {
+  res.send(renderPage('Add Drug Interaction', `
+    <div class="card" style="max-width:600px;margin:20px auto">
+      <h2>Add Drug Interaction</h2>
+      <form method="POST" action="/clinic/cds/interaction/save">
+        <label>Drug A <span style="color:red">*</span></label><input name="drug_a" required placeholder="e.g. Warfarin">
+        <label>Drug B <span style="color:red">*</span></label><input name="drug_b" required placeholder="e.g. Aspirin">
+        <label>Severity</label><select name="severity"><option value="moderate">Moderate</option><option value="high">High / Severe</option><option value="low">Low / Minor</option></select>
+        <label>Description</label><textarea name="description" rows="3" placeholder="What happens when these drugs interact?"></textarea>
+        <label>Recommendation</label><textarea name="recommendation" rows="2" placeholder="Clinical recommendation"></textarea>
+        <label>Evidence Level</label><select name="evidence_level"><option value="established">Established</option><option value="probable">Probable</option><option value="possible">Possible</option><option value="theoretical">Theoretical</option></select>
+        <button class="btn btn-red" type="submit">Save Interaction</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/cds/interaction/save', requireAuth, requireNotBanned, requireFeature('clinical_decision_support'), ah(async (req, res) => {
+  const d = req.body;
+  await pool.query('INSERT INTO drug_interactions(drug_a,drug_b,severity,description,recommendation,evidence_level) VALUES($1,$2,$3,$4,$5,$6)', [d.drug_a, d.drug_b, d.severity||'moderate', d.description||null, d.recommendation||null, d.evidence_level||'established']);
+  await pool.query('INSERT INTO drug_interactions(drug_a,drug_b,severity,description,recommendation,evidence_level) VALUES($1,$2,$3,$4,$5,$6)', [d.drug_b, d.drug_a, d.severity||'moderate', d.description||null, d.recommendation||null, d.evidence_level||'established']);
+  res.redirect('/clinic/cds/database');
+}));
+
+// Enhanced prescription save with CDS check integration
+app.post('/clinic/prescription/save-cds', requireAuth, requireNotBanned, requireFeature('clinical_decision_support'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { consultation_id, patient_type, patient_id, patient_name, doctor_id, diagnosis, notes, items } = req.body;
+  
+  // Run CDS checks first
+  const medications = items ? items.map(i => ({ name: i.medicine_name, dosage: i.dosage })) : [];
+  let cdsResult = { alerts: [], interactions: [], warnings: [], has_critical: false };
+  
+  if (medications.length > 0 && patient_id) {
+    try {
+      const cdsResp = await fetch(`http://localhost:${process.env.PORT || 3000}/api/cds/full-check`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Cookie': req.headers.cookie || '' },
+        body: JSON.stringify({ patient_type, patient_id, medications, age: null, weight: null })
+      });
+      cdsResult = await cdsResp.json();
+    } catch (e) { console.warn('[CDS] Check failed:', e.message); }
+  }
+  
+  res.json({ success: true, cds: cdsResult });
+}));
+
+// ============================================================
+// v13.0: ENHANCED CLINIC DASHBOARD WITH EHR/BILLING/CDS LINKS
+// ============================================================
+// Update the clinic dashboard to add links to new features
+app.get('/clinic/v2', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [staff, queue, prescriptions, labRequests] = await Promise.all([
+    pool.query('SELECT COUNT(*) as count FROM clinic_staff WHERE tenant_id=$1 AND is_active=true', [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(CASE WHEN status='waiting' THEN 1 END) as waiting FROM patient_queue WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COUNT(*) as count FROM prescriptions WHERE tenant_id=$1 AND status='pending'", [t]),
+    pool.query("SELECT COUNT(*) as count FROM lab_requests WHERE tenant_id=$1 AND status IN ('requested','in_progress')", [t])
+  ]);
+  
+  res.send(renderPage('Clinic Dashboard v2', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
+      <h1>Clinic Dashboard</h1>
+      <p>Complete healthcare management</p>
+    </div>
+    
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${staff.rows[0]?.count||0}</div><div>Active Staff</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${queue.rows[0]?.waiting||0}</div><div>Waiting</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#8b5cf6">${prescriptions.rows[0]?.count||0}</div><div>Pending Rx</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${labRequests.rows[0]?.count||0}</div><div>Pending Labs</div></div>
+    </div>
+    
+    <div class="grid">
+      <div class="card">
+        <h3>Workflow</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <a href="/clinic/queue" class="btn btn-green">Patient Queue</a>
+          <a href="/clinic/staff" class="btn">Staff Management</a>
+          <a href="/clinic/prescriptions" class="btn" style="background:#8b5cf6;color:white">Prescriptions</a>
+          <a href="/clinic/lab" class="btn" style="background:#f59e0b">Lab Requests</a>
+          <a href="/clinic/pharmacy/inventory" class="btn">Pharmacy</a>
+        </div>
+      </div>
+      
+      <div class="card">
+        <h3>Patient EHR</h3>
+        <p class="muted">Longitudinal health records with allergies, vitals, immunizations, and chronic conditions.</p>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+          <a href="/clinic/ehr-search" class="btn btn-green">Search Patient EHR</a>
+          <a href="/clinic/cds" class="btn btn-red">Clinical Decision Support</a>
+        </div>
+      </div>
+      
+      <div class="card">
+        <h3>Billing & Insurance</h3>
+        <p class="muted">Invoice patients, manage insurance, and submit claims including NHIS.</p>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+          <a href="/clinic/insurance" class="btn" style="background:#4f46e5;color:white">Insurance Providers</a>
+          <a href="/clinic/claims" class="btn" style="background:#8b5cf6;color:white">Insurance Claims</a>
+        </div>
+      </div>
+      
+      <div class="card">
+        <h3>Country Settings</h3>
+        <p class="muted">Configure payment methods based on your country.</p>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+          <a href="/settings/country" class="btn" style="background:#059669;color:white">Country & Payment Settings</a>
+          <a href="/api/payment-methods" class="btn btn-sm" target="_blank">View Available Providers (JSON)</a>
+        </div>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// Patient EHR Search
+app.get('/clinic/ehr-search', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const search = req.query.search || '';
+  let patients = [];
+  if (search) {
+    patients = (await pool.query('SELECT id, name, class FROM students WHERE tenant_id=$1 AND name ILIKE $2 ORDER BY name LIMIT 50', [t, `%${search}%`])).rows;
+  } else {
+    patients = (await pool.query('SELECT id, name, class FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 50', [t])).rows;
+  }
+  
+  res.send(renderPage('Patient EHR Search', `
+    <div class="card">
+      <h2>Search Patient Records</h2>
+      <form method="GET" action="/clinic/ehr-search" style="margin-bottom:15px">
+        <div style="display:flex;gap:10px"><input name="search" value="${esc(search)}" placeholder="Search by name..." style="flex:1"><button class="btn btn-sm btn-green" type="submit">Search</button></div>
+      </form>
+      <table><tr><th>Name</th><th>Class/Group</th><th>EHR</th><th>Billing</th></tr>
+        ${patients.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.class||'')}</td><td><a href="/clinic/patient/student/${p.id}/ehr" class="btn btn-sm btn-green">View EHR</a></td><td><a href="/clinic/patient/student/${p.id}/billing" class="btn btn-sm" style="background:#4f46e5;color:white">Billing</a></td></tr>`).join('')}
+      </table>
+      ${patients.length === 0 ? '<p class="muted">No patients found</p>' : ''}
+    </div>
+  `, req.session.user));
+}));
+
+// Country & Payment Settings UI
+app.get('/settings/country', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const settings = (await pool.query('SELECT * FROM tenant_country_settings WHERE tenant_id=$1', [t])).rows[0];
+  const currentCountry = settings?.country_code || tenant?.country || 'UG';
+  const currentCurrency = settings?.currency || tenant?.currency || 'UGX';
+  
+  const countryOptions = Object.entries(COUNTRY_PAYMENT_CONFIG).map(([code, cfg]) => 
+    `<option value="${code}" ${code===currentCountry?'selected':''}>${code} - ${cfg.name} (${cfg.currency}) ${cfg.flutterwave_supported?'[Flutterwave OK]':'[MoMo/Airtel]'}</option>`
+  ).join('');
+  
+  const cfg = getProvidersForCountry(currentCountry);
+  
+  res.send(renderPage('Country & Payment Settings', `
+    <div class="card" style="max-width:700px;margin:20px auto">
+      <h2>Country & Payment Settings</h2>
+      <p class="muted">Configure which payment providers are available based on your country. Flutterwave works in some countries but not Uganda.</p>
+      
+      <form method="POST" action="/api/settings/country">
+        <label>Country</label><select name="country_code">${countryOptions}</select>
+        <label>Currency</label><input name="currency" value="${esc(currentCurrency)}" readonly>
+        <label>Preferred Payment Method</label><select name="preferred_payment">
+          ${cfg.allConfiguredProviders.map(p => `<option value="${p}">${p === 'mtn_momo' ? 'MTN MoMo' : p === 'airtel_money' ? 'Airtel Money' : p === 'flutterwave' ? 'Flutterwave' : p === 'dpo_card' ? 'DPO Card' : p}</option>`).join('')}
+        </select>
+        <label>Enable Flutterwave (where available)</label><select name="flutterwave_enabled"><option value="true" ${cfg.flutterwaveSupported?'selected':''}>Yes (if supported in country)</option><option value="false">No</option></select>
+        
+        <div style="margin-top:15px;padding:15px;background:#f0fdf4;border-radius:10px;border:1px solid #059669">
+          <h4>Available Payment Providers for ${esc(cfg.countryName)}</h4>
+          <ul style="margin-top:8px">
+            ${cfg.providers.map(p => `<li><strong>${p === 'mtn_momo' ? 'MTN Mobile Money' : p === 'airtel_money' ? 'Airtel Money' : p === 'flutterwave' ? 'Flutterwave (Card + Mobile Money)' : p === 'dpo_card' ? 'DPO Card Payment' : p}</strong> - ${p === 'mtn_momo' || p === 'airtel_money' ? 'Mobile Money push payment' : p === 'flutterwave' ? 'Card, bank transfer, and mobile money' : 'Visa/Mastercard'}</li>`).join('')}
+            ${cfg.flutterwaveSupported ? '<li style="color:#059669">Flutterwave is available in this country</li>' : '<li style="color:#dc2626">Flutterwave is NOT available in this country - use MTN MoMo / Airtel Money instead</li>'}
+          </ul>
+        </div>
+        
+        <button class="btn btn-green" type="submit" style="margin-top:10px">Save Settings</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+// ============================================================
 // === ADD FEATURES TO ALL DASHBOARDS ===
 // ============================================================
 // NOTE: 404 and error handlers are moved AFTER launch routes (see below)
