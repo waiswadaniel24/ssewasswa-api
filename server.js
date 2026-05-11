@@ -1377,9 +1377,23 @@ setInterval(loadPlatformSettings, 60000);
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user) => {
   const dark = user?.dark_mode;
+  const siteName = platformSettings?.site_name || 'SSEWASSWA';
+  const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
   return `<!DOCTYPE html>
-<html${dark ? ' class="dark"' : ''}><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title>
+<html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)} | ${esc(siteName)}</title>
+<meta name="description" content="${esc(siteDesc)}">
+<meta name="keywords" content="SSEWASSWA, school management, Uganda, church management, business management, clinic, fees, attendance, SMS, POS, fundraising">
+<meta property="og:title" content="${esc(title)} | ${esc(siteName)}">
+<meta property="og:description" content="${esc(siteDesc)}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
+<meta property="og:site_name" content="${esc(siteName)}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${esc(title)} | ${esc(siteName)}">
+<meta name="twitter:description" content="${esc(siteDesc)}">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:${dark ? '#0f172a' : '#f8fafc'};color:${dark ? '#e2e8f0' : '#1e293b'};line-height:1.6;transition:background 0.3s,color 0.3s}
@@ -1442,7 +1456,8 @@ ${process.env.GA_TRACKING_ID ? `
 </script>
 ` : ''}
 </head><body>
-<nav class="nav">
+<a href="#main" style="position:absolute;top:-100px;left:0;background:#4f46e5;color:white;padding:8px;z-index:9999" onfocus="this.style.top=\"0\"" onblur="this.style.top=\"-100px\"">Skip to main content</a>
+<nav class="nav" role="navigation" aria-label="Main navigation">
   <div><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
@@ -1458,7 +1473,7 @@ ${process.env.GA_TRACKING_ID ? `
     ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
 </nav>
-<div class="container">${content}</div>
+<main id="main" role="main"><div class="container">${content}</div></main>
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
     <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
@@ -9876,7 +9891,7 @@ ${process.env.GA_TRACKING_ID ? `
     ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
 </nav>
-<div class="container">${content}</div>
+<main id="main" role="main"><div class="container">${content}</div></main>
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
     <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
