@@ -1402,6 +1402,12 @@ const uniqueConstraintMigrations = [
   { table: 'church_attendance', constraint: 'church_attendance_tenant_member_service_key', columns: 'tenant_id, member_id, service_name, date', dedup: `DELETE FROM church_attendance a USING church_attendance b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.member_id = b.member_id AND a.service_name = b.service_name AND a.date = b.date` },
   { table: 'developer_revenue', constraint: 'developer_revenue_tenant_source_desc_key', columns: 'tenant_id, source, description', dedup: `DELETE FROM developer_revenue a USING developer_revenue b WHERE a.id > b.id AND a.tenant_id IS NOT NULL AND a.tenant_id = b.tenant_id AND a.source = b.source AND a.description = b.description` },
   { table: 'meal_attendance', constraint: 'meal_attendance_tenant_student_meal_key', columns: 'tenant_id, student_id, meal_date, meal_type', dedup: `DELETE FROM meal_attendance a USING meal_attendance b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.student_id = b.student_id AND a.meal_date = b.meal_date AND a.meal_type = b.meal_type` },
+  { table: 'subscription_plans', constraint: 'subscription_plans_name_key', columns: 'name', dedup: `DELETE FROM subscription_plans a USING subscription_plans b WHERE a.id > b.id AND a.name = b.name` },
+  { table: 'student_health', constraint: 'student_health_student_id_key', columns: 'student_id', dedup: `DELETE FROM student_health a USING student_health b WHERE a.id > b.id AND a.student_id = b.student_id` },
+  { table: 'scraped_content', constraint: 'scraped_content_tenant_title_source_key', columns: 'tenant_id, title, source', dedup: `DELETE FROM scraped_content a USING scraped_content b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.title = b.title AND a.source = b.source` },
+  { table: 'plugin_registry', constraint: 'plugin_registry_tenant_plugin_key', columns: 'tenant_id, plugin_key', dedup: `DELETE FROM plugin_registry a USING plugin_registry b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.plugin_key = b.plugin_key` },
+  { table: 'sms_opt_outs', constraint: 'sms_opt_outs_tenant_phone_key', columns: 'tenant_id, phone', dedup: `DELETE FROM sms_opt_outs a USING sms_opt_outs b WHERE a.id > b.id AND a.tenant_id = b.tenant_id AND a.phone = b.phone` },
+  { table: 'parent_links', constraint: 'parent_links_student_email_key', columns: 'student_id, parent_email', dedup: `DELETE FROM parent_links a USING parent_links b WHERE a.id > b.id AND a.student_id = b.student_id AND a.parent_email = b.parent_email` },
 ];
 
 (async () => {
@@ -1426,9 +1432,9 @@ const uniqueConstraintMigrations = [
           }
         }
       }
-      // Re-seed translations and feature_flags after UNIQUE constraints are added
+      // Re-seed data after UNIQUE constraints are added
       // (The INSERTs in the migrations array may have failed if constraints were missing)
-      const reseedQueries = migrations.filter(q => q.includes('ON CONFLICT DO NOTHING') && (q.includes('translations') || q.includes('feature_flags')));
+      const reseedQueries = migrations.filter(q => q.includes('ON CONFLICT'));
       for (const q of reseedQueries) {
         try { await pool.query(q); } catch (e) { /* ignore - already exists or constraint missing */ }
       }
@@ -1462,7 +1468,14 @@ const uniqueConstraintMigrations = [
         ['enterprise', 'Enterprise Plan', 'Custom solutions for large organizations', 500000, 'monthly', 'Everything in Pro + custom domain, white-label, API access, dedicated support, SLA', 999, 99999, true, 3]
       ];
       for (const [name, display, desc, price, cycle, features, maxUsers, maxStudents, active, sort] of planSeeds) {
-        await pool.query('INSERT INTO subscription_plans(name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,is_active=EXCLUDED.is_active,sort_order=EXCLUDED.sort_order', [name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]);
+        try {
+          await pool.query('INSERT INTO subscription_plans(name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,is_active=EXCLUDED.is_active,sort_order=EXCLUDED.sort_order', [name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]);
+        } catch (planErr) {
+          // UNIQUE constraint on name may not exist yet on older DBs - try plain INSERT
+          if (planErr.message.includes('ON CONFLICT')) {
+            try { await pool.query('INSERT INTO subscription_plans(name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]); } catch(e2) { /* duplicate OK */ }
+          } else throw planErr;
+        }
       }
       break;
     } catch (e) {
@@ -18990,4 +19003,4 @@ app.listen(PORT, () => {
   console.log(`Dev Master: waiswadaniel24@gmail.com / Daniel@2025`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
-// Deploy trigger 1778408078
+// Deploy trigger 1778408079
