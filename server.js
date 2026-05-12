@@ -43,7 +43,7 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false, // TODO: Set rejectUnauthorized:true + provide CA cert for full MITM protection
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false, // rejectUnauthorized:true enforces proper SSL cert validation in production
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
@@ -140,6 +140,16 @@ app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20 }));
 app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
 app.use('/momo/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
 
+// Request timeout middleware
+app.use((req, res, next) => {
+  req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    if (!res.headersSent) {
+      res.status(504).send(renderPage('Timeout', '<div class="card"><div class="alert alert-error"><h2>Request Timeout</h2><p>The server took too long to respond. Please try again.</p></div></div>', req.session?.user || null));
+    }
+  });
+  next();
+});
+
 // === UTILS ===
 // === CORS ===
 const cors = require('cors');
@@ -153,6 +163,34 @@ if (ALLOWED_ORIGINS.length > 0) {
 // === UTILS ===
 const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const esc = s => String(s === null || s === undefined ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+
+// === INPUT VALIDATION ===
+const validateEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const validatePhone = (phone) => typeof phone === 'string' && /^(\+?\d{7,15})$/.test(phone.replace(/[\s\-()]/g, ''));
+const validateUUID = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+const validateAmount = (amount) => typeof amount === 'number' && amount > 0 && amount <= 100000000 && Number.isFinite(amount);
+const validateName = (name) => typeof name === 'string' && name.trim().length >= 1 && name.trim().length <= 200;
+const sanitizeInput = (input) => typeof input === 'string' ? input.trim().replace(/[<>'"]/g, '') : input;
+const validatePagination = (req) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(req.query.limit) || DEFAULT_PAGE_SIZE));
+  return { page, limit, offset: (page - 1) * limit };
+};
+
+// === STANDARD ERROR RESPONSE ===
+const errorResponse = (res, statusCode, message, user) => {
+  if (!res.headersSent) {
+    res.status(statusCode).json({ error: message, status: statusCode, timestamp: new Date().toISOString() });
+  }
+};
+
+// === STRUCTURED LOGGING ===
+const logger = {
+  info: (msg, meta = {}) => console.log(JSON.stringify({ level: 'info', msg, ts: new Date().toISOString(), ...meta })),
+  warn: (msg, meta = {}) => console.warn(JSON.stringify({ level: 'warn', msg, ts: new Date().toISOString(), ...meta })),
+  error: (msg, meta = {}) => console.error(JSON.stringify({ level: 'error', msg, ts: new Date().toISOString(), ...meta })),
+  debug: (msg, meta = {}) => process.env.NODE_ENV === 'development' && console.log(JSON.stringify({ level: 'debug', msg, ts: new Date().toISOString(), ...meta }))
+};
 
 // === SQL INJECTION PREVENTION: Table name allowlist ===
 const VALID_TABLES = new Set([
@@ -268,10 +306,24 @@ const notifyAll = (tenantId, title, message, type) => pool.query('INSERT INTO no
 
 // === v1.0 UTILITIES ===
 // Email helper
+let _emailTransporter = null;
+const getEmailTransporter = () => {
+  if (_emailTransporter) return _emailTransporter;
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) return null;
+  _emailTransporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
+    pool: true,
+    maxConnections: 5,
+    rateLimit: true,
+    rateDelta: 200
+  });
+  return _emailTransporter;
+};
 const sendEmail = async (to, subject, html) => {
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) return false;
+  const transporter = getEmailTransporter();
+  if (!transporter) return false;
   try {
-    const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS } });
     await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, html });
     return true;
   } catch (e) { console.warn('Email failed:', e.message); return false; }
@@ -339,7 +391,7 @@ const loadTranslations = async () => {
   try {
     const rows = (await pool.query('SELECT * FROM translations')).rows;
     rows.forEach(r => { if (!translations[r.lang]) translations[r.lang] = {}; translations[r.lang][r.key] = r.value; });
-  } catch (e) {}
+  } catch (e) { console.warn('[Caught]', e.message); }
 };
 const t = (key, lang) => (translations[lang || 'en'] && translations[lang || 'en'][key]) || key;
 const CURRENCY_SYMBOLS = { UGX: 'UGX', KES: 'KES', TZS: 'TZS', RWF: 'RWF', USD: '$' };
@@ -520,14 +572,16 @@ const xmlEscape = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g
 
 const createDPOPayment = async (amount, email, reference, description) => {
   if (!DPO_COMPANY_TOKEN) return null;
+  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) return null;
   try {
+    const safeAmount = xmlEscape(String(amount));
     const safeEmail = xmlEscape(email);
     const safeRef = xmlEscape(reference);
     const safeDesc = xmlEscape(description);
     const resp = await fetch(`${DPO_BASE}/API/v6/PayToken`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body: `<?xml version="1.0" encoding="utf-8"?><API3G><CompanyToken>${DPO_COMPANY_TOKEN}</CompanyToken><Request>createToken</Request><Transaction><PaymentAmount>${amount}</PaymentAmount><PaymentCurrency>UGX</PaymentCurrency><CompanyRef>${safeRef}</CompanyRef><RedirectURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing/callback?dpo=1</RedirectURL><BackURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing</BackURL><CompanyRefInternal>${safeRef}</CompanyRefInternal><customerEmail>${safeEmail}</customerEmail><customerFirstName>SSEWASSWA</customerFirstName><Description>${safeDesc}</Description></Transaction><Services><Service><ServiceType>1</ServiceType><ServiceDescription>${safeDesc}</ServiceDescription><ServiceAmount>${amount}</ServiceAmount></Service></Services></API3G>`
+      body: `<?xml version="1.0" encoding="utf-8"?><API3G><CompanyToken>${DPO_COMPANY_TOKEN}</CompanyToken><Request>createToken</Request><Transaction><PaymentAmount>${safeAmount}</PaymentAmount><PaymentCurrency>UGX</PaymentCurrency><CompanyRef>${safeRef}</CompanyRef><RedirectURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing/callback?dpo=1</RedirectURL><BackURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing</BackURL><CompanyRefInternal>${safeRef}</CompanyRefInternal><customerEmail>${safeEmail}</customerEmail><customerFirstName>SSEWASSWA</customerFirstName><Description>${safeDesc}</Description></Transaction><Services><Service><ServiceType>1</ServiceType><ServiceDescription>${safeDesc}</ServiceDescription><ServiceAmount>${safeAmount}</ServiceAmount></Service></Services></API3G>`
     });
     const text = await resp.text();
     const tokenMatch = text.match(/<TransToken>([^<]+)<\/TransToken>/);
@@ -2080,15 +2134,15 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       try {
         const fr = await fetch('/school/charts/fees'); const fd = await fr.json();
         new Chart(document.getElementById('feesChart'),{type:'bar',data:{labels:fd.labels,datasets:[{label:'Fees Collected UGX',data:fd.values,backgroundColor:'rgba(79,70,229,0.6)'}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
       try {
         const ar = await fetch('/school/charts/attendance'); const ad = await ar.json();
         new Chart(document.getElementById('attendanceChart'),{type:'line',data:{labels:ad.labels,datasets:[{label:'Present',data:ad.present,borderColor:'#059669',fill:false},{label:'Absent',data:ad.absent,borderColor:'#dc2626',fill:false}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
       try {
         const gr = await fetch('/school/charts/gender'); const gd = await gr.json();
         new Chart(document.getElementById('genderChart'),{type:'doughnut',data:{labels:gd.labels,datasets:[{data:gd.values,backgroundColor:['#4f46e5','#ec4899','#64748b']}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
     })();
     </script>
   `, req.session.user));
@@ -3489,11 +3543,11 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       try {
         const fr = await fetch('/org/charts/finance'); const fd = await fr.json();
         new Chart(document.getElementById('orgFinanceChart'),{type:'bar',data:{labels:fd.labels,datasets:[{label:'Income',data:fd.income,backgroundColor:'rgba(5,150,105,0.6)'},{label:'Expense',data:fd.expense,backgroundColor:'rgba(220,38,38,0.6)'}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
       try {
         const mr = await fetch('/org/charts/members'); const md = await mr.json();
         new Chart(document.getElementById('orgMemberChart'),{type:'line',data:{labels:md.labels,datasets:[{label:'Members',data:md.values,borderColor:'#7c3aed',fill:true,backgroundColor:'rgba(124,58,237,0.1)'}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
     })();
     </script>
   `, req.session.user));
@@ -3975,11 +4029,11 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       try {
         const tr = await fetch('/church/charts/tithes'); const td = await tr.json();
         new Chart(document.getElementById('tithesChart'),{type:'line',data:{labels:td.labels,datasets:[{label:'Tithes UGX',data:td.values,borderColor:'#d97706',fill:true,backgroundColor:'rgba(217,119,6,0.1)'}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
       try {
         const dr = await fetch('/church/charts/donations'); const dd = await dr.json();
         new Chart(document.getElementById('donationTypesChart'),{type:'pie',data:{labels:dd.labels,datasets:[{data:dd.values,backgroundColor:['#4f46e5','#059669','#d97706','#dc2626','#7c3aed','#0891b2']}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
     })();
     </script>
   `, req.session.user));
@@ -4350,11 +4404,11 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       try {
         const sr = await fetch('/business/charts/sales'); const sd = await sr.json();
         new Chart(document.getElementById('salesChart'),{type:'line',data:{labels:sd.labels,datasets:[{label:'Sales UGX',data:sd.values,borderColor:'#0891b2',fill:true,backgroundColor:'rgba(8,145,178,0.1)'}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
       try {
         const er = await fetch('/business/charts/expenses'); const ed = await er.json();
         new Chart(document.getElementById('expensesChart'),{type:'doughnut',data:{labels:ed.labels,datasets:[{data:ed.values,backgroundColor:['#4f46e5','#059669','#d97706','#dc2626','#7c3aed','#0891b2','#ec4899']}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
     })();
     </script>
   `, req.session.user));
@@ -4803,7 +4857,7 @@ app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res)
       try {
         const br = await fetch('/individual/charts/budget'); const bd = await br.json();
         new Chart(document.getElementById('budgetChart'),{type:'bar',data:{labels:bd.labels,datasets:[{label:'Planned',data:bd.planned,backgroundColor:'rgba(79,70,229,0.6)'},{label:'Actual',data:bd.actual,backgroundColor:'rgba(220,38,38,0.6)'}]},options:{responsive:true}});
-      }catch(e){}
+      }catch(e){console.error('[Chart Error]',e.message);}
     })();
     </script>
   `, req.session.user));
@@ -5026,7 +5080,7 @@ app.post('/parent/login', ah(async (req, res) => {
     for (const s of viaStudent) {
       if (!linkedStudents.find(ls => ls.id === s.id)) linkedStudents.push(s);
     }
-  } catch (e) {}
+  } catch (e) { console.warn('[Caught]', e.message); }
   // Also check guardian_name matching if phone provided
   if (phone) {
     try {
@@ -5034,7 +5088,7 @@ app.post('/parent/login', ah(async (req, res) => {
       for (const s of viaGuardian) {
         if (!linkedStudents.find(ls => ls.id === s.id)) linkedStudents.push(s);
       }
-    } catch (e) {}
+    } catch (e) { console.warn('[Caught]', e.message); }
   }
 
   if (linkedStudents.length === 0) {
@@ -5406,15 +5460,15 @@ app.get('/search/results', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const like = `%${q}%`;
   const results = [];
-  try { const r = (await pool.query('SELECT id,name,admission_no FROM students WHERE tenant_id=$1 AND (name ILIKE $2 OR admission_no ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Student', name: x.name, detail: x.admission_no, link: '/school/students' })); } catch(e){}
-  try { const r = (await pool.query('SELECT id,name,email FROM members WHERE tenant_id=$1 AND (name ILIKE $2 OR email ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Member', name: x.name, detail: x.email, link: '/org/members' })); } catch(e){}
-  try { const r = (await pool.query('SELECT id,name FROM projects WHERE tenant_id=$1 AND name ILIKE $2', [t, like])).rows; r.forEach(x => results.push({ type: 'Project', name: x.name, detail: '', link: '/org/projects' })); } catch(e){}
-  try { const r = (await pool.query('SELECT id,name FROM inventory WHERE tenant_id=$1 AND (name ILIKE $2 OR sku ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Product', name: x.name, detail: x.sku, link: '/business/inventory' })); } catch(e){}
-  try { const r = (await pool.query('SELECT id,name FROM events WHERE tenant_id=$1 AND name ILIKE $2', [t, like])).rows; r.forEach(x => results.push({ type: 'Event', name: x.name, detail: '', link: '/org/events' })); } catch(e){}
-  try { const r = (await pool.query('SELECT id,title FROM sermons WHERE tenant_id=$1 AND (title ILIKE $2 OR preacher ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Sermon', name: x.title, detail: '', link: '/church/sermons' })); } catch(e){}
-  try { const r = (await pool.query('SELECT id,name FROM customers WHERE tenant_id=$1 AND (name ILIKE $2 OR email ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Customer', name: x.name, detail: x.email, link: '/business/customers' })); } catch(e){}
-  try { const r = (await pool.query('SELECT id,title FROM goals WHERE tenant_id=$1 AND title ILIKE $2', [t, like])).rows; r.forEach(x => results.push({ type: 'Goal', name: x.title, detail: '', link: '/individual/goals' })); } catch(e){}
-  try { const r = (await pool.query('SELECT id,title FROM personal_notes WHERE tenant_id=$1 AND (title ILIKE $2 OR content ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Note', name: x.title, detail: '', link: '/individual/notes' })); } catch(e){}
+  try { const r = (await pool.query('SELECT id,name,admission_no FROM students WHERE tenant_id=$1 AND (name ILIKE $2 OR admission_no ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Student', name: x.name, detail: x.admission_no, link: '/school/students' })); } catch(e){console.warn('[Caught]',e.message);}
+  try { const r = (await pool.query('SELECT id,name,email FROM members WHERE tenant_id=$1 AND (name ILIKE $2 OR email ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Member', name: x.name, detail: x.email, link: '/org/members' })); } catch(e){console.warn('[Caught]',e.message);}
+  try { const r = (await pool.query('SELECT id,name FROM projects WHERE tenant_id=$1 AND name ILIKE $2', [t, like])).rows; r.forEach(x => results.push({ type: 'Project', name: x.name, detail: '', link: '/org/projects' })); } catch(e){console.warn('[Caught]',e.message);}
+  try { const r = (await pool.query('SELECT id,name FROM inventory WHERE tenant_id=$1 AND (name ILIKE $2 OR sku ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Product', name: x.name, detail: x.sku, link: '/business/inventory' })); } catch(e){console.warn('[Caught]',e.message);}
+  try { const r = (await pool.query('SELECT id,name FROM events WHERE tenant_id=$1 AND name ILIKE $2', [t, like])).rows; r.forEach(x => results.push({ type: 'Event', name: x.name, detail: '', link: '/org/events' })); } catch(e){console.warn('[Caught]',e.message);}
+  try { const r = (await pool.query('SELECT id,title FROM sermons WHERE tenant_id=$1 AND (title ILIKE $2 OR preacher ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Sermon', name: x.title, detail: '', link: '/church/sermons' })); } catch(e){console.warn('[Caught]',e.message);}
+  try { const r = (await pool.query('SELECT id,name FROM customers WHERE tenant_id=$1 AND (name ILIKE $2 OR email ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Customer', name: x.name, detail: x.email, link: '/business/customers' })); } catch(e){console.warn('[Caught]',e.message);}
+  try { const r = (await pool.query('SELECT id,title FROM goals WHERE tenant_id=$1 AND title ILIKE $2', [t, like])).rows; r.forEach(x => results.push({ type: 'Goal', name: x.title, detail: '', link: '/individual/goals' })); } catch(e){console.warn('[Caught]',e.message);}
+  try { const r = (await pool.query('SELECT id,title FROM personal_notes WHERE tenant_id=$1 AND (title ILIKE $2 OR content ILIKE $2)', [t, like])).rows; r.forEach(x => results.push({ type: 'Note', name: x.title, detail: '', link: '/individual/notes' })); } catch(e){console.warn('[Caught]',e.message);}
   res.send(renderPage(`Search: ${q}`, `
     <div class="card"><h3>Search Results for "${esc(q)}"</h3>
       <p class="muted">${results.length} results found</p>
@@ -6824,7 +6878,7 @@ app.get('/library/download/:id', ah(async (req, res) => {
       await pool.query('INSERT INTO developer_revenue(amount,source,details) VALUES($1,$2,$3)', [r.price, 'Premium download', JSON.stringify({ resource_id: req.params.id, title: r.title })]);
       await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [r.price]);
     }
-  } catch (e) {}
+  } catch (e) { console.warn('[Caught]', e.message); }
   res.status(200).send('OK');
 }));
 
@@ -6930,7 +6984,7 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
   const plan = req.params.plan;
   const amounts = { free: 0, basic: 50000, pro: 150000, enterprise: 500000 };
   const amount = amounts[plan] || 0;
-  const expires = new Date(Date.now() + 30*24*60*60*1000);
+  const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
   if (plan === 'free') {
     try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [t, plan, amount, 'active', expires]); } catch(e) { console.error('[Error]', e.message); }
     await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan`);
@@ -6953,19 +7007,28 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
 app.get('/billing/callback', requireAuth, ah(async (req, res) => {
   const { status, tx_ref, transaction_id } = req.query;
   if (status === 'successful' && tx_ref) {
-    const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [tx_ref])).rows[0];
-    if (payment && payment.status === 'pending') {
-      await pool.query('UPDATE payments SET status=$1 WHERE reference=$2', ['completed', tx_ref]);
-      // Try explicit plan from payment record first, fallback to description parsing
-      const plan = payment.plan || (payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('pro') ? 'pro' : 'basic');
-      const expires = new Date(Date.now() + 30*24*60*60*1000);
-      try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [payment.tenant_id, plan, payment.amount, 'active', expires]); } catch(e) { console.error('[Error]', e.message); }
-      // Auto-verify tenant after subscription payment
-      await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
-      await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [payment.tenant_id, 'active']);
-      await audit(req.session.user.email, 'payment_received', `Flutterwave payment: ${tx_ref} for ${plan}`);
-      await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan });
-      await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const payment = (await client.query('SELECT * FROM payments WHERE reference=$1 FOR UPDATE', [tx_ref])).rows[0];
+      if (payment && payment.status === 'pending') {
+        await client.query('UPDATE payments SET status=$1 WHERE reference=$2', ['completed', tx_ref]);
+        const plan = payment.plan || 'basic';
+        const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
+        try { await client.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [payment.tenant_id, plan, payment.amount, 'active', expires]); } catch(e) { logger.error('subscription_insert_error', { error: e.message, ref: tx_ref }); }
+        // Auto-verify tenant after subscription payment
+        await client.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
+        await client.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [payment.tenant_id, 'active']);
+        await audit(req.session.user.email, 'payment_received', `Flutterwave payment: ${tx_ref} for ${plan}`);
+        await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan });
+        await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
+      }
+      await client.query('COMMIT');
+    } catch(e) {
+      await client.query('ROLLBACK');
+      logger.error('payment_processing_error', { error: e.message, ref: tx_ref });
+    } finally {
+      client.release();
     }
   }
   res.redirect('/billing');
@@ -9561,6 +9624,9 @@ app.post('/api/v2/graphql', ah(async (req, res) => {
     if (apiKey) { tenantId = apiKey.tenant_id; await pool.query('UPDATE api_keys SET last_used=NOW() WHERE id=$1', [apiKey.id]); }
   }
   if (!tenantId) return res.status(401).json({ error: 'API key required' });
+  // Limit query complexity to prevent abuse
+  const queryDepth = (query.match(/\{/g) || []).length;
+  if (queryDepth > 5) return res.status(400).json({ error: 'Query too complex', errors: [{ message: 'Maximum query depth of 5 exceeded' }] });
   // Simple GraphQL resolver
   const result = { data: {} };
   try {
@@ -9581,13 +9647,10 @@ app.get('/auth/oauth/google', (req, res) => {
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=openid+email+profile`);
 });
 
-app.get('/auth/oauth/google/callback', ah(async (req, res) => {
-  res.status(501).send('Google OAuth is not yet configured. Contact support to enable this feature.');
-}));
-
 app.get('/auth/oauth/microsoft', (req, res) => {
   if (!process.env.MS_CLIENT_ID) return res.send(renderPage('OAuth', '<div class="card"><div class="alert alert-info"><h2>Microsoft OAuth</h2><p>Set MS_CLIENT_ID and MS_CLIENT_SECRET env vars to enable Microsoft login.</p></div><a href="/login" class="btn">Back to Login</a></div>', null));
-  res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${process.env.MS_CLIENT_ID}&response_type=code&scope=openid+email+profile`);
+  const state = crypto.randomBytes(16).toString('hex');
+  res.redirect(`https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${process.env.MS_CLIENT_ID}&response_type=code&scope=openid+email+profile&state=${state}`);
 });
 
 // === v7.0: AI REPORT COMMENTS ===
@@ -9632,7 +9695,7 @@ app.post('/school/ai-comments/generate', requireAuth, requireNotBanned, ah(async
 // === v7.0: FEE DEFAULT PREDICTION ===
 app.get('/school/fee-prediction', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const fees = (await pool.query('SELECT f.*,s.name as student_name,s.class FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1', [t])).rows;
+  const fees = (await pool.query('SELECT f.*,s.name as student_name,s.class FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 LIMIT 500', [t])).rows;
   const atRisk = fees.filter(f => { const paidRatio = parseInt(f.paid) / parseInt(f.amount); return paidRatio < 0.3; }).map(f => ({ ...f, risk: parseInt(f.paid) / parseInt(f.amount) < 0.1 ? 'Critical' : 'High' }));
   const onTrack = fees.filter(f => parseInt(f.paid) / parseInt(f.amount) >= 0.3);
   res.send(renderPage('Fee Default Prediction', `
@@ -9647,7 +9710,7 @@ app.get('/school/fee-prediction', requireAuth, requireNotBanned, ah(async (req, 
 // === v7.0: DROPOUT RISK ANALYSIS ===
 app.get('/school/dropout-risk', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const students = (await pool.query('SELECT * FROM students WHERE tenant_id=$1', [t])).rows;
+  const students = (await pool.query('SELECT * FROM students WHERE tenant_id=$1 LIMIT 500', [t])).rows;
   const studentIds = students.map(s => s.id);
   const allFees = (await pool.query('SELECT * FROM fees WHERE student_id = ANY($1)', [studentIds])).rows;
   const allAttendance = (await pool.query('SELECT * FROM attendance WHERE student_id = ANY($1)', [studentIds])).rows;
@@ -9683,7 +9746,7 @@ app.get('/school/dropout-risk', requireAuth, requireNotBanned, ah(async (req, re
 // === v7.0: DEMAND FORECASTING ===
 app.get('/business/forecast', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const items = (await pool.query('SELECT i.*,COALESCE(s.total_sold,0) as total_sold FROM inventory i LEFT JOIN (SELECT inventory_id,SUM(quantity) as total_sold FROM sale_items GROUP BY inventory_id) s ON i.id=s.inventory_id WHERE i.tenant_id=$1 ORDER BY i.name', [t])).rows;
+  const items = (await pool.query('SELECT i.*,COALESCE(s.total_sold,0) as total_sold FROM inventory i LEFT JOIN (SELECT inventory_id,SUM(quantity) as total_sold FROM sale_items GROUP BY inventory_id) s ON i.id=s.inventory_id WHERE i.tenant_id=$1 ORDER BY i.name LIMIT 500', [t])).rows;
   res.send(renderPage('Demand Forecast', `
     <div class="hero" style="background:linear-gradient(135deg,#3b82f6,#8b5cf6)"><h1>Demand Forecast</h1><p>Predict future inventory needs</p></div>
     <div class="card"><h2>Inventory Demand Analysis</h2>
@@ -11088,7 +11151,7 @@ app.get('/analytics', requireAuth, requireNotBanned, requireFeature('advanced_an
 // =============================================
 app.get('/scheduled-reports', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const reports = (await pool.query('SELECT * FROM scheduled_reports WHERE tenant_id=$1 ORDER BY next_run', [t])).rows;
+  const reports = (await pool.query('SELECT * FROM scheduled_reports WHERE tenant_id=$1 ORDER BY next_run LIMIT 100', [t])).rows;
   res.send(renderPage('Scheduled Reports', `
     <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Scheduled Reports</h1><p>Auto-send reports on schedule</p></div>
     <div class="card"><a href="/scheduled-reports/new" class="btn btn-sm" style="margin-bottom:15px">+ Schedule Report</a>
@@ -16804,7 +16867,7 @@ app.post('/webhook/flutterwave', express.raw({ type: 'application/json' }), ah(a
       if (payment) {
         await client.query('UPDATE payments SET status=$1, method=$2 WHERE reference=$3', ['completed', 'flutterwave', tx_ref]);
         const plan = payment.plan || (payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('pro') ? 'pro' : 'basic');
-        const expires = new Date(Date.now() + 30*24*60*60*1000);
+        const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
         try { await client.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method,reference) VALUES($1,$2,$3,$4,$5,$6,$7)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'flutterwave', tx_ref]); } catch(e) { console.error('[Error]', e.message); }
         await client.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
         const devShare = Math.round(payment.amount * 0.9);
@@ -17054,12 +17117,13 @@ app.get('/pay/mtn/status', requireAuth, ah(async (req, res) => {
     // Update payment records
     await pool.query('UPDATE payments SET status=$1,method=$2 WHERE reference=$3', ['completed', 'mtn_momo', ref]);
     await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['completed', ref]);
+    await audit('system', 'payment_status_change', `MoMo payment ${ref} status changed to completed`);
     const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
     if (payment) {
       // Try explicit plan from payment record first, fallback to description parsing
-      const plan = payment.plan || (payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('pro') ? 'pro' : payment.description?.includes('basic') ? 'basic' : '');
+      const plan = payment.plan || 'basic';
       if (plan) {
-        const expires = new Date(Date.now() + 30*24*60*60*1000);
+        const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
         try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']); } catch(e) { console.error('[Error]', e.message); }
         await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
       }
@@ -17079,6 +17143,7 @@ app.get('/pay/mtn/status', requireAuth, ah(async (req, res) => {
   } else if (status === 'FAILED' || status === 'REJECTED') {
     await pool.query('UPDATE payments SET status=$1 WHERE reference=$2', ['failed', ref]);
     await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['failed', ref]);
+    await audit('system', 'payment_status_change', `MoMo payment ${ref} status changed to ${status}`);
     res.send(renderPage('Payment Failed', `
       <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
         <div style="width:70px;height:70px;border-radius:50%;background:#dc2626;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:36px;color:white">&#10007;</div>
@@ -17119,7 +17184,7 @@ app.post('/webhook/mtn', express.json(), ah(async (req, res) => {
       if (payment) {
         // Try explicit plan from payment record first, fallback to description parsing
         const plan = payment.plan || (payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('pro') ? 'pro' : 'basic');
-        const expires = new Date(Date.now() + 30*24*60*60*1000);
+        const expires = new Date(Date.now() + SUBSCRIPTION_DURATION);
         try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']); } catch(e) { console.error('[Error]', e.message); }
         await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
         await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, method: 'mtn_momo' });
@@ -17290,22 +17355,23 @@ pool.query(`CREATE TABLE IF NOT EXISTS student_accounts (
 // Admin: Generate student passwords
 app.get('/school/students/generate-passwords', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const students = (await pool.query('SELECT id, name, admission_no FROM students WHERE tenant_id=$1', [t])).rows;
+  const students = (await pool.query('SELECT id, name, admission_no FROM students WHERE tenant_id=$1 LIMIT 1000', [t])).rows;
   let created = 0;
+  const generatedPasswords = [];
   for (const s of students) {
     const exists = (await pool.query('SELECT id FROM student_accounts WHERE student_id=$1', [s.id])).rows[0];
     if (!exists) {
       const tempPass = 'STD' + crypto.randomBytes(4).toString('hex').toUpperCase();
       const hash = await bcrypt.hash(tempPass, 10);
-      await pool.query('INSERT INTO student_accounts(student_id,password,temp_password) VALUES($1,$2,$3)', [s.id, hash, tempPass]);
-      // Clear temp_password after 24h via scheduled job or manual admin action
-      // For now, temp_password is only shown once below at creation time
+      await pool.query('INSERT INTO student_accounts(student_id,password,temp_password) VALUES($1,$2,$3)', [s.id, hash, null]);
+      generatedPasswords.push({ name: s.name, admission_no: s.admission_no, password: tempPass });
       created++;
     }
   }
   await audit(req.session.user.email, 'student_passwords', `Generated passwords for ${created} students`);
   res.send(renderPage('Student Passwords', `
-    <div class="card"><div class="alert alert-success"><h2>Passwords Generated!</h2><p>Created login credentials for ${created} students.</p></div>
+    <div class="card"><div class="alert alert-success"><h2>Passwords Generated!</h2><p>Created login credentials for ${created} students.</p><p class="muted" style="color:#dc2626;font-weight:700">Save these passwords now — they will NOT be shown again.</p></div>
+    ${generatedPasswords.length ? `<div class="card"><h3>Generated Passwords (save these!)</h3><table><tr><th>Name</th><th>Admission No</th><th>Password</th></tr>${generatedPasswords.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.admission_no)}</td><td style="font-family:monospace;font-weight:700;color:#dc2626">${esc(p.password)}</td></tr>`).join('')}</table></div>` : ''}
     <p class="muted">Students can now log in at <a href="/student/login">/student/login</a> using their Admission Number and the generated password.</p>
     <a href="/school/students/passwords-list" class="btn btn-gold" style="margin-top:10px">View All Passwords</a>
     <a href="/school/students" class="btn" style="margin-top:10px">Back to Students</a></div>
@@ -17321,7 +17387,7 @@ app.get('/school/students/passwords-list', requireAuth, requireNotBanned, ah(asy
     <p class="muted" style="margin-bottom:15px">Students log in at <strong>/student/login</strong> with Admission Number + Password</p>
     <a href="/school/students/generate-passwords" class="btn btn-green btn-sm" style="margin-bottom:15px">Generate New Passwords</a>
     ${accounts.length ? `<table><tr><th>Name</th><th>Admission No</th><th>Class</th><th>Password</th><th>Last Login</th></tr>
-    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.admission_no)}</td><td>${esc(a.class||'')}</td><td style="font-family:monospace;font-weight:700">${a.temp_password?'********':'Set'}</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
+    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.admission_no)}</td><td>${esc(a.class||'')}</td><td style="font-family:monospace;font-weight:700">Set</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
     </table>` : '<p class="muted">No student accounts yet. Click "Generate New Passwords" above.</p>'}</div>
   `, req.session.user));
 }));
@@ -17647,21 +17713,23 @@ app.get('/church/logout', (req, res) => { delete req.session.churchMember; res.r
 // Admin: Generate church member passwords
 app.get('/church/members/generate-passwords', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const members = (await pool.query('SELECT id, name, phone FROM church_members WHERE tenant_id=$1', [t])).rows;
+  const members = (await pool.query('SELECT id, name, phone FROM church_members WHERE tenant_id=$1 LIMIT 1000', [t])).rows;
   let created = 0;
+  const generatedPasswords = [];
   for (const m of members) {
     const exists = (await pool.query('SELECT id FROM church_accounts WHERE member_id=$1', [m.id])).rows[0];
     if (!exists) {
       const tempPass = 'CH' + crypto.randomBytes(4).toString('hex').toUpperCase();
       const hash = await bcrypt.hash(tempPass, 10);
-      await pool.query('INSERT INTO church_accounts(member_id,password,temp_password) VALUES($1,$2,$3)', [m.id, hash, tempPass]);
-      // temp_password shown only once at creation
+      await pool.query('INSERT INTO church_accounts(member_id,password,temp_password) VALUES($1,$2,$3)', [m.id, hash, null]);
+      generatedPasswords.push({ name: m.name, phone: m.phone, password: tempPass });
       created++;
     }
   }
   await audit(req.session.user.email, 'church_passwords', `Generated passwords for ${created} members`);
   res.send(renderPage('Church Member Passwords', `
-    <div class="card"><div class="alert alert-success"><h2>Passwords Generated!</h2><p>Created login credentials for ${created} members.</p></div>
+    <div class="card"><div class="alert alert-success"><h2>Passwords Generated!</h2><p>Created login credentials for ${created} members.</p><p class="muted" style="color:#dc2626;font-weight:700">Save these passwords now — they will NOT be shown again.</p></div>
+    ${generatedPasswords.length ? `<div class="card"><h3>Generated Passwords (save these!)</h3><table><tr><th>Name</th><th>Phone</th><th>Password</th></tr>${generatedPasswords.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.phone||'')}</td><td style="font-family:monospace;font-weight:700;color:#dc2626">${esc(p.password)}</td></tr>`).join('')}</table></div>` : ''}
     <p class="muted">Members can log in at <a href="/church/login">/church/login</a> using their phone number and password.</p>
     <a href="/church/members/passwords-list" class="btn btn-gold" style="margin-top:10px">View All Passwords</a>
     <a href="/church/members" class="btn" style="margin-top:10px">Back to Members</a></div>
@@ -17677,7 +17745,7 @@ app.get('/church/members/passwords-list', requireAuth, requireNotBanned, ah(asyn
     <p class="muted" style="margin-bottom:15px">Members log in at <strong>/church/login</strong> with Phone Number + Password</p>
     <a href="/church/members/generate-passwords" class="btn btn-green btn-sm" style="margin-bottom:15px">Generate New Passwords</a>
     ${accounts.length ? `<table><tr><th>Name</th><th>Phone</th><th>Password</th><th>Last Login</th></tr>
-    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.phone||'')}</td><td style="font-family:monospace;font-weight:700">${a.temp_password?'********':'Set'}</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
+    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.phone||'')}</td><td style="font-family:monospace;font-weight:700">Set</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
     </table>` : '<p class="muted">No accounts yet.</p>'}</div>
   `, req.session.user));
 }));
@@ -17874,7 +17942,7 @@ const getTenantCountry = async (tenantId) => {
     const t = (await pool.query('SELECT country, phone FROM tenants WHERE id=$1', [tenantId])).rows[0];
     if (t?.country && COUNTRY_PAYMENT_CONFIG[t.country]) return t.country;
     if (t?.phone) return detectCountryFromPhone(t.phone);
-  } catch (e) {}
+  } catch (e) { console.warn('[Caught]', e.message); }
   return 'UG';
 };
 
@@ -17948,8 +18016,27 @@ const phase2Indexes = [
   `CREATE INDEX IF NOT EXISTS idx_drug_interactions_drugs ON drug_interactions(drug_a, drug_b)`,
   `CREATE INDEX IF NOT EXISTS idx_tenant_country_settings ON tenant_country_settings(tenant_id)`
 ];
+// Round 3: Performance indexes
+const round3Indexes = [
+  `CREATE INDEX IF NOT EXISTS idx_students_tenant ON students(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_fees_student ON fees(student_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_fees_tenant ON fees(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_attendance_student ON attendance(student_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_attendance_tenant ON attendance(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_church_members_tenant ON church_members(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_status ON subscriptions(tenant_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_email)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payments_reference ON payments(reference)`,
+  `CREATE INDEX IF NOT EXISTS idx_sms_logs_tenant ON sms_logs(tenant_id)`,
+];
+for (const sql of round3Indexes) {
+  try { await pool.query(sql); } catch (e) { console.warn('[Index Error]', e.message); }
+}
+// Phase 2 indexes
 for (const sql of phase2Indexes) {
-  try { await pool.query(sql); } catch (e) {}
+  try { await pool.query(sql); } catch (e) { console.warn('[Index Error]', e.message); }
 }
 
 // Seed drug interactions database if empty
@@ -17982,7 +18069,7 @@ if (parseInt(interactionCount) === 0) {
       await pool.query('INSERT INTO drug_interactions(drug_a, drug_b, severity, description, recommendation, evidence_level) VALUES($1,$2,$3,$4,$5,$6)', [drugA, drugB, severity, desc, rec, evidence]);
       // Also add reverse direction
       await pool.query('INSERT INTO drug_interactions(drug_a, drug_b, severity, description, recommendation, evidence_level) VALUES($1,$2,$3,$4,$5,$6)', [drugB, drugA, severity, desc, rec, evidence]);
-    } catch (e) {}
+    } catch (e) { console.warn('[Caught]', e.message); }
   }
   console.log('[Phase2] Drug interaction database seeded with 20 common interactions');
 }
@@ -17997,12 +18084,12 @@ const phase2Flags = [
 for (const [key, name, desc, ver, cat, req] of phase2Flags) {
   try {
     await pool.query('INSERT INTO feature_flags(feature_key, name, description, version, category, requirements, is_active) VALUES($1,$2,$3,$4,$5,$6,true) ON CONFLICT DO NOTHING', [key, name, desc, ver, cat, req]);
-  } catch (e) {}
+  } catch (e) { console.warn('[Caught]', e.message); }
 }
 
 // Add country_code column to tenants if missing
-try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT \'UG\''); } catch (e) {}
-try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT \'UGX\''); } catch (e) {}
+try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT \'UG\''); } catch (e) { console.warn('[Caught]', e.message); }
+try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT \'UGX\''); } catch (e) { console.warn('[Caught]', e.message); }
 console.log('[Phase2] DB tables, indexes, drug interactions, and feature flags initialized');
 } catch (e) { console.error('[Phase2] Init error:', e.message); }
 })(); // End Phase 2 async IIFE

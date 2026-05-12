@@ -1895,6 +1895,9 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
   // Cleanup users
   app.post('/dev/cleanup-users', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).send('Reset endpoint is disabled in production');
+    }
     try {
       const delUsers = await pool.query("DELETE FROM users WHERE email != 'waiswadaniel24@gmail.com'");
       const delTenants = await pool.query("DELETE FROM tenants WHERE subdomain != 'dev-master' AND email != 'waiswadaniel24@gmail.com'");
