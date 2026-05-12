@@ -31,8 +31,45 @@ const rateLimit = require('express-rate-limit');
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle } = require('docx');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const http = require('http');
 
-// === SENTRY ERROR MONITORING (Phase 1 Security Fix) ===
+// === WEBSOCKET REAL-TIME NOTIFICATIONS ===
+const { WebSocketServer } = require('ws');
+const wsClients = new Map(); // tenant_id -> Set<ws>
+
+// Broadcast notification to all connected clients of a tenant
+const wsBroadcast = (tenantId, data) => {
+  const clients = wsClients.get(tenantId);
+  if (!clients) return;
+  const msg = JSON.stringify(data);
+  clients.forEach(ws => { if (ws.readyState === 1) ws.send(msg); });
+};
+
+// === REDIS CACHING LAYER ===
+let redisCache = null;
+try {
+  const IORedis = require('ioredis');
+  if (process.env.REDIS_URL) {
+    redisCache = new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: 3, retryDelayOnFailover: 100 });
+    redisCache.on('error', (err) => console.warn('[Redis Cache]', err.message));
+    console.log('[Redis Cache] Connected for query caching');
+  }
+} catch (e) { console.warn('[Redis Cache] Not available:', e.message); }
+
+const cacheGet = async (key) => {
+  if (!redisCache) return null;
+  try { const val = await redisCache.get(key); return val ? JSON.parse(val) : null; } catch { return null; }
+};
+const cacheSet = async (key, data, ttlSeconds) => {
+  if (!redisCache) return;
+  try { await redisCache.setex(key, ttlSeconds, JSON.stringify(data)); } catch {}
+};
+const cacheInvalidate = async (pattern) => {
+  if (!redisCache) return;
+  try { const keys = await redisCache.keys(pattern); if (keys.length) await redisCache.del(keys); } catch {}
+};
+
+// === SENTRY ERROR MONITORING ===
 let Sentry = null;
 if (process.env.SENTRY_DSN) {
   try {
@@ -42,8 +79,9 @@ if (process.env.SENTRY_DSN) {
       environment: process.env.NODE_ENV || 'development',
       tracesSampleRate: 0.1,
       profilesSampleRate: 0.1,
+      integrations: [Sentry.captureConsoleIntegration ? Sentry.captureConsoleIntegration({ levels: ['error', 'warn'] }) : undefined].filter(Boolean),
     });
-    console.log('[Sentry] Error monitoring initialized');
+    console.log('[Sentry] Error monitoring initialized with console capture');
   } catch (e) { console.warn('[Sentry] Failed to initialize:', e.message); }
 }
 
@@ -66,7 +104,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https://*.googleusercontent.com"],
-      connectSrc: ["'self'", "https://api.flutterwave.com", "https://momodeveloper.mtn.com", "https://openapiuat.airtel.africa", "https://secure.3gdirectpay.com", process.env.BASE_URL || 'https://ssewasswa.onrender.com'],
+      connectSrc: ["'self'", "ws:", "wss:", "https://api.flutterwave.com", "https://momodeveloper.mtn.com", "https://openapiuat.airtel.africa", "https://secure.3gdirectpay.com", process.env.BASE_URL || 'https://ssewasswa.onrender.com'],
       frameSrc: ["'self'", "https://checkout.flutterwave.com", "https://secure.3gdirectpay.com"],
     }
   },
@@ -308,8 +346,16 @@ const requireRole = (...roles) => (req, res, next) => {
   res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission to access this page.</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
 };
 const audit = (email, action, details) => pool.query('INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', [email, action, typeof details === 'object' ? JSON.stringify(details) : (details || '')]).catch(e => console.error('[Audit Error]', e.message));
-const notify = (tenantId, email, title, message, type) => pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type) VALUES($1,$2,$3,$4,$5)', [tenantId, email, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
-const notifyAll = (tenantId, title, message, type) => pool.query('INSERT INTO notifications(tenant_id,title,message,type) VALUES($1,$2,$3,$4)', [tenantId, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
+const notify = (tenantId, email, title, message, type) => {
+  pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type) VALUES($1,$2,$3,$4,$5)', [tenantId, email, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
+  // Real-time WebSocket push
+  wsBroadcast(tenantId, { type: 'notification', title, message, count: -1 });
+};
+const notifyAll = (tenantId, title, message, type) => {
+  pool.query('INSERT INTO notifications(tenant_id,title,message,type) VALUES($1,$2,$3,$4)', [tenantId, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
+  // Real-time WebSocket push to all tenant clients
+  wsBroadcast(tenantId, { type: 'notification', title, message, count: -1 });
+};
 
 // === v1.0 UTILITIES ===
 // Email helper
@@ -967,6 +1013,44 @@ const migrations = [
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'fees', 'Ebisasulo') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'attendance', 'Okujja') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'reports', 'Ebirowoozo') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'login', 'Yingira') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'register', 'Wandikira') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'logout', 'Woloka') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'notifications', 'Ebyogerwa') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'settings', 'Enteekateeka') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'profile', 'Omutindo') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'search', 'Noonya') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'save', 'Tereka') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'cancel', 'Sazaamu') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'delete', 'Sangula') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'edit', 'Kyusa') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'add', 'Yongera') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'members', 'Abamemba') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'inventory', 'Ebiryo') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'invoices', 'Empapula') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'payments', 'Ensasula') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'donations', 'Ebirabo') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'events', 'Ebikwatako') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'classes', 'Obuyigirize') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'exams', 'Ebiwandiiko') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'marks', 'Obudde') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'total', 'Ensengeka') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'name', 'Erinnya') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'email', 'Imeeli') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'phone', 'Namba ya simu') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'password', 'Kasita y'okusinga') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'amount', 'Omundu') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'date', 'Olunaku') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'description', 'Ekiwandiiko') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'status', 'Embeera') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'actions', 'Eby'okukola') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'no_data', 'Tewali data') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'success', 'Kyetuuse') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'error', 'Kiremya') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'loading', 'Kutegereza') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'help', 'Obuyambi') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'billing', 'Okusasula') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'upgrade', 'Simulisa') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('sw', 'welcome', 'Karibu') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('sw', 'dashboard', 'Dashibodi') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('sw', 'students', 'Wanafunzi') ON CONFLICT DO NOTHING`,
@@ -1815,6 +1899,12 @@ ${process.env.GA_TRACKING_ID ? `
       <a href="/settings/profile">Settings</a>
       <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
+      <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(req.csrfToken)}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer" title="Language">
+        <option value="en" ${(user.language||'en')==='en'?'selected':''}>EN</option>
+        <option value="lg" ${user.language==='lg'?'selected':''}>LG</option>
+        <option value="sw" ${user.language==='sw'?'selected':''}>SW</option>
+        <option value="fr" ${user.language==='fr'?'selected':''}>FR</option>
+      </select>
       <a href="/logout">Logout</a>
     ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
@@ -1843,7 +1933,7 @@ ${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;le
 </footer>
 <script>
 ${user ? `
-// Notification badge polling
+// Real-time WebSocket notifications (falls back to polling)
 (function(){
   var bell = document.querySelector('a[href="/notifications"][title="Notifications"]');
   if(!bell) return;
@@ -1852,13 +1942,17 @@ ${user ? `
   badge.style.cssText = 'display:none;position:absolute;top:-6px;right:-8px;background:#dc2626;color:white;font-size:10px;font-weight:700;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center';
   bell.style.position = 'relative';
   bell.appendChild(badge);
-  function fetchCount(){
-    fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){
-      if(d.count > 0){badge.textContent=d.count;badge.style.display='inline-block';}else{badge.style.display='none';}
-    }).catch(function(){});
-  }
-  fetchCount();
-  setInterval(fetchCount, 30000);
+  function updateBadge(count){if(count>0){badge.textContent=count>99?'99+':count;badge.style.display='inline-block';}else{badge.style.display='none';}}
+  // Try WebSocket first
+  try {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var ws = new WebSocket(proto + '//' + location.host + '/ws/notifications?sid=' + encodeURIComponent(document.cookie.match(/connect\\.sid=([^;]+)/) ? document.cookie.match(/connect\\.sid=([^;]+)/)[1] : ''));
+    ws.onopen = function(){ console.log('[WS] Connected'); fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); };
+    ws.onmessage = function(e){ var d=JSON.parse(e.data); if(d.type==='notification'){updateBadge(d.count);if(Notification.permission==='granted'){new Notification('SSEWASSWA',{body:d.title,icon:'/favicon.ico'});}else if(d.title){badge.style.animation='none';badge.offsetHeight;badge.style.animation='pulse 0.5s ease';}} };
+    ws.onclose = function(){ console.log('[WS] Closed, fallback to polling'); startPolling(); };
+    ws.onerror = function(){ ws.close(); };
+  } catch(e){ startPolling(); }
+  function startPolling(){ setInterval(function(){ fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); }, 30000); }
 })();
 ` : ''}
 ${user ? `
@@ -2133,12 +2227,20 @@ app.get('/dashboard', requireAuth, (req, res) => {
 // === SCHOOL PORTAL ===
 app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const [students, fees, exams, attendance] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [t]),
-    pool.query('SELECT COALESCE(SUM(amount-paid),0) FROM fees WHERE tenant_id=$1', [t]),
-    pool.query('SELECT COUNT(*) FROM exams WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COUNT(DISTINCT student_id) FROM attendance WHERE tenant_id=$1 AND date=CURRENT_DATE AND status='present'", [t])
-  ]);
+  const cacheKey = `dashboard:stats:school:${t}`;
+  const cached = await cacheGet(cacheKey);
+  let students, fees, exams, attendance;
+  if (cached) {
+    students = cached.students; fees = cached.fees; exams = cached.exams; attendance = cached.attendance;
+  } else {
+    [students, fees, exams, attendance] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [t]),
+      pool.query('SELECT COALESCE(SUM(amount-paid),0) FROM fees WHERE tenant_id=$1', [t]),
+      pool.query('SELECT COUNT(*) FROM exams WHERE tenant_id=$1', [t]),
+      pool.query("SELECT COUNT(DISTINCT student_id) FROM attendance WHERE tenant_id=$1 AND date=CURRENT_DATE AND status='present'", [t])
+    ]);
+    await cacheSet(cacheKey, { students, fees, exams, attendance }, 120); // cache 2 min
+  }
   res.send(renderPage('School Dashboard', `
     <div class="hero"><h1>School Portal</h1><p>Manage students, fees, exams, attendance, reports</p></div>
     <div class="stats">
@@ -5299,6 +5401,14 @@ app.get('/toggle-dark', requireAuth, ah(async (req, res) => {
   res.redirect('back');
 }));
 
+// === LANGUAGE SWITCH ===
+app.post('/settings/language', requireAuth, ah(async (req, res) => {
+  const lang = ['en', 'lg', 'sw', 'fr'].includes(req.body.language) ? req.body.language : 'en';
+  await pool.query('UPDATE users SET language=$1 WHERE id=$2', [lang, req.session.user.id]);
+  req.session.user.language = lang;
+  res.json({ success: true, language: lang });
+}));
+
 // === CHANGE PASSWORD ===
 app.get('/settings/password', requireAuth, (req, res) => {
   res.send(renderPage('Change Password', `
@@ -8155,34 +8265,166 @@ app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async 
 // === PUBLIC API DOCS ===
 app.get('/api-docs', (req, res) => {
   res.send(renderPage('API Documentation', `
-    <div class="hero"><h1>API Documentation</h1><p>RESTful API for SSEWASSWA Platform</p></div>
+    <div class="hero"><h1>API Documentation</h1><p>RESTful API for SSEWASSWA Platform &bull; OpenAPI 3.0</p></div>
+    <div class="card">
+      <h2>Quick Start</h2>
+      <p>Include your API key in the header: <code style="background:#f1f5f9;padding:2px 8px;border-radius:4px">Authorization: Bearer YOUR_API_KEY</code></p>
+      <p class="muted">Generate API keys from <strong>Settings &rarr; API Keys</strong> in your dashboard.</p>
+    </div>
+    <div class="card">
+      <h2>Base URL</h2>
+      <code style="background:#f1f5f9;padding:8px 14px;border-radius:8px;display:block;font-size:15px">${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/api/v1</code>
+    </div>
     <div class="card">
       <h2>Authentication</h2>
-      <p>Include your API key in the header: <code style="background:#f1f5f9;padding:2px 8px;border-radius:4px">Authorization: Bearer YOUR_API_KEY</code></p>
+      <table><tr><th>Header</th><th>Value</th></tr>
+        <tr><td><code>Authorization</code></td><td><code>Bearer sk_live_xxxxx</code></td></tr>
+        <tr><td><code>Content-Type</code></td><td><code>application/json</code></td></tr>
+      </table>
+      <p class="muted" style="margin-top:10px">All endpoints require a valid API key. Unauthorized requests return <code>401</code>.</p>
     </div>
     <div class="card">
       <h2>Endpoints</h2>
-      <table><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
-      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/students</td><td>List students</td></tr>
-      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/students</td><td>Create student</td></tr>
-      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/fees</td><td>List fees</td></tr>
-      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/fees/pay</td><td>Record payment</td></tr>
-      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/inventory</td><td>List inventory</td></tr>
-      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/sales</td><td>Create sale</td></tr>
-      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/members</td><td>List members</td></tr>
-      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/donations</td><td>Record donation</td></tr>
-      <tr><td><span class="tag" style="background:#d1fae5;color:#065f46">GET</span></td><td>/api/v1/invoices</td><td>List invoices</td></tr>
-      <tr><td><span class="tag" style="background:#dbeafe;color:#1e40af">POST</span></td><td>/api/v1/campaigns</td><td>Create campaign</td></tr>
-      </table>
+      <div style="display:flex;flex-direction:column;gap:12px">
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#d1fae5;color:#065f46;font-weight:700">GET</span>
+            <code>/api/v1/students</code>
+          </div>
+          <p style="margin:0;color:#475569">List all students. Supports <code>?page=1&limit=50</code> pagination.</p>
+          <details style="margin-top:8px"><summary style="cursor:pointer;color:#4f46e5;font-size:14px">Response Example</summary>
+            <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow-x:auto;margin-top:8px;font-size:13px">{"data": [{"id": 1, "admission_no": "S001", "name": "John Doe", "class": "S1", "stream": "A", "gender": "M"}]}</pre>
+          </details>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#dbeafe;color:#1e40af;font-weight:700">POST</span>
+            <code>/api/v1/students</code>
+          </div>
+          <p style="margin:0;color:#475569">Create a new student record.</p>
+          <details style="margin-top:8px"><summary style="cursor:pointer;color:#4f46e5;font-size:14px">Request Body</summary>
+            <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow-x:auto;margin-top:8px;font-size:13px">{"name": "John Doe", "admission_no": "S001", "class": "S1", "stream": "A", "gender": "M"}</pre>
+          </details>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#d1fae5;color:#065f46;font-weight:700">GET</span>
+            <code>/api/v1/students/export</code>
+          </div>
+          <p style="margin:0;color:#475569">Export all students as CSV file download.</p>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#dbeafe;color:#1e40af;font-weight:700">POST</span>
+            <code>/api/v1/students/import</code>
+          </div>
+          <p style="margin:0;color:#475569">Bulk import students from CSV (multipart/form-data with <code>csv_file</code> field).</p>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#d1fae5;color:#065f46;font-weight:700">GET</span>
+            <code>/api/v1/fees</code>
+          </div>
+          <p style="margin:0;color:#475569">List fee records with student names. Supports <code>?page=1&limit=50&class=S1</code> filtering.</p>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#dbeafe;color:#1e40af;font-weight:700">POST</span>
+            <code>/api/v1/fees/pay</code>
+          </div>
+          <p style="margin:0;color:#475569">Record a fee payment.</p>
+          <details style="margin-top:8px"><summary style="cursor:pointer;color:#4f46e5;font-size:14px">Request Body</summary>
+            <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow-x:auto;margin-top:8px;font-size:13px">{"fee_id": 1, "amount": 500000}</pre>
+          </details>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#d1fae5;color:#065f46;font-weight:700">GET</span>
+            <code>/api/v1/inventory</code>
+          </div>
+          <p style="margin:0;color:#475569">List all inventory items.</p>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#dbeafe;color:#1e40af;font-weight:700">POST</span>
+            <code>/api/v1/sales</code>
+          </div>
+          <p style="margin:0;color:#475569">Create a new sale with items.</p>
+          <details style="margin-top:8px"><summary style="cursor:pointer;color:#4f46e5;font-size:14px">Request Body</summary>
+            <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow-x:auto;margin-top:8px;font-size:13px">{"customer_name": "Jane", "total": 100000, "paid": 100000, "items": [{"inventory_id": 1, "quantity": 2, "price": 50000}]}</pre>
+          </details>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#d1fae5;color:#065f46;font-weight:700">GET</span>
+            <code>/api/v1/members</code>
+          </div>
+          <p style="margin:0;color:#475569">List all church members.</p>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#dbeafe;color:#1e40af;font-weight:700">POST</span>
+            <code>/api/v1/donations</code>
+          </div>
+          <p style="margin:0;color:#475569">Record a donation or tithe.</p>
+          <details style="margin-top:8px"><summary style="cursor:pointer;color:#4f46e5;font-size:14px">Request Body</summary>
+            <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow-x:auto;margin-top:8px;font-size:13px">{"donor_name": "Grace", "amount": 50000, "type": "tithe", "method": "mobile_money"}</pre>
+          </details>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#d1fae5;color:#065f46;font-weight:700">GET</span>
+            <code>/api/v1/invoices</code>
+          </div>
+          <p style="margin:0;color:#475569">List all invoices.</p>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="tag" style="background:#dbeafe;color:#1e40af;font-weight:700">POST</span>
+            <code>/api/v1/campaigns</code>
+          </div>
+          <p style="margin:0;color:#475569">Create a fundraising campaign.</p>
+        </div>
+
+      </div>
     </div>
     <div class="card">
       <h2>Webhook Events</h2>
-      <table><tr><th>Event</th><th>Trigger</th></tr>
-      <tr><td>payment</td><td>When a payment is recorded</td></tr>
-      <tr><td>student</td><td>When a student is created/updated</td></tr>
-      <tr><td>invoice</td><td>When an invoice status changes</td></tr>
-      <tr><td>member</td><td>When a member is added</td></tr>
+      <table><tr><th>Event</th><th>Trigger</th><th>Payload Fields</th></tr>
+        <tr><td>payment.received</td><td>Fee/payment recorded</td><td>amount, student_name, method</td></tr>
+        <tr><td>student.created</td><td>New student added</td><td>name, admission_no, class</td></tr>
+        <tr><td>invoice.status_changed</td><td>Invoice paid/overdue</td><td>invoice_id, status, amount</td></tr>
+        <tr><td>member.joined</td><td>New church member</td><td>name, phone, membership_type</td></tr>
+        <tr><td>donation.received</td><td>Donation/tithe recorded</td><td>amount, donor, type</td></tr>
       </table>
+    </div>
+    <div class="card">
+      <h2>Error Codes</h2>
+      <table><tr><th>Code</th><th>Meaning</th></tr>
+        <tr><td><code>400</code></td><td>Validation error (check request body)</td></tr>
+        <tr><td><code>401</code></td><td>Invalid or missing API key</td></tr>
+        <tr><td><code>403</code></td><td>Permission denied</td></tr>
+        <tr><td><code>404</code></td><td>Resource not found</td></tr>
+        <tr><td><code>429</code></td><td>Rate limited (max 100 req/min)</td></tr>
+        <tr><td><code>500</code></td><td>Internal server error</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h2>OpenAPI Spec</h2>
+      <p>Machine-readable API spec available at:</p>
+      <a href="/api/v1/openapi.json" target="_blank" class="btn" style="margin-top:8px;display:inline-block">View openapi.json</a>
     </div>
   `, req.session.user));
 });
@@ -8262,11 +8504,107 @@ app.post('/api/v1/campaigns', apiAuth, ah(async (req, res) => {
 }));
 
 // === STATUS PAGE ===
-// === HEALTH CHECK ENDPOINT (for monitoring / container orchestration) ===
+
+// === API: CSV EXPORT STUDENTS ===
+app.get('/api/v1/students/export', apiAuth, ah(async (req, res) => {
+  const students = (await pool.query('SELECT admission_no,name,class,stream,gender,guardian_name,guardian_phone FROM students WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
+  const headers = ['admission_no', 'name', 'class', 'stream', 'gender', 'guardian_name', 'guardian_phone'];
+  const csv = [headers.join(','), ...students.map(s => headers.map(h => `"${(s[h] || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=students_export.csv');
+  res.send(csv);
+}));
+
+// === API: CSV IMPORT STUDENTS ===
+app.post('/api/v1/students/import', apiAuth, upload.single('csv_file'), ah(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'CSV file required (field: csv_file)' });
+  const lines = req.file.buffer.toString('utf-8').trim().split('\n');
+  let imported = 0, errors = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    if (cols.length >= 2) {
+      try {
+        await pool.query('INSERT INTO students(tenant_id,admission_no,name,class,stream,gender,guardian_name,guardian_phone) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING',
+          [req.apiKey.tenant_id, cols[0], cols[1], cols[2] || '', cols[3] || '', cols[4] || '', cols[5] || '', cols[6] || '']);
+        imported++;
+      } catch { errors++; }
+    }
+  }
+  res.json({ imported, errors, total: lines.length - 1 });
+}));
+
+// === API: CSV EXPORT INVENTORY ===
+app.get('/api/v1/inventory/export', apiAuth, ah(async (req, res) => {
+  const items = (await pool.query('SELECT name,sku,quantity,unit_price,category FROM inventory WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
+  const headers = ['name', 'sku', 'quantity', 'unit_price', 'category'];
+  const csv = [headers.join(','), ...items.map(i => headers.map(h => `"${(i[h] || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=inventory_export.csv');
+  res.send(csv);
+}));
+
+// === API: CSV EXPORT MEMBERS ===
+app.get('/api/v1/members/export', apiAuth, ah(async (req, res) => {
+  const members = (await pool.query('SELECT name,phone,email,membership_type,status FROM church_members WHERE tenant_id=$1 ORDER BY name', [req.apiKey.tenant_id])).rows;
+  const headers = ['name', 'phone', 'email', 'membership_type', 'status'];
+  const csv = [headers.join(','), ...members.map(m => headers.map(h => `"${(m[h] || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=members_export.csv');
+  res.send(csv);
+}));
+
+// === OPENAPI 3.0 SPEC ===
+app.get('/api/v1/openapi.json', (req, res) => {
+  const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+  res.json({
+    openapi: '3.0.3', info: { title: 'SSEWASSWA Platform API', version: '9.0.0', description: 'Multi-tenant SaaS API for Schools, Churches, Businesses and Organizations in Africa.' },
+    servers: [{ url: baseUrl, description: 'Production' }], security: [{ BearerAuth: [] }],
+    components: {
+      securitySchemes: { BearerAuth: { type: 'http', scheme: 'bearer', description: 'API Key from dashboard Settings' } },
+      schemas: {
+        Student: { type: 'object', properties: { id: { type: 'integer' }, admission_no: { type: 'string' }, name: { type: 'string' }, class: { type: 'string' }, stream: { type: 'string' }, gender: { type: 'string' } } },
+        Fee: { type: 'object', properties: { id: { type: 'integer' }, student_id: { type: 'integer' }, student_name: { type: 'string' }, amount: { type: 'number' }, paid: { type: 'number' }, balance: { type: 'number' } } },
+        Error: { type: 'object', properties: { error: { type: 'string' }, status: { type: 'integer' } } }
+      }
+    },
+    paths: {
+      '/api/v1/students': { get: { summary: 'List students', parameters: [{ name: 'page', in: 'query', schema: { type: 'integer', default: 1 } }, { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } }], responses: { 200: { description: 'OK' } } }, post: { summary: 'Create student', responses: { 201: { description: 'Created' } } } },
+      '/api/v1/students/export': { get: { summary: 'Export students CSV', responses: { 200: { description: 'CSV file' } } } },
+      '/api/v1/students/import': { post: { summary: 'Import students CSV', responses: { 200: { description: 'Import results' } } } },
+      '/api/v1/fees': { get: { summary: 'List fees', responses: { 200: { description: 'OK' } } } },
+      '/api/v1/fees/pay': { post: { summary: 'Record payment', responses: { 200: { description: 'OK' } } } },
+      '/api/v1/inventory': { get: { summary: 'List inventory', responses: { 200: { description: 'OK' } } } },
+      '/api/v1/inventory/export': { get: { summary: 'Export inventory CSV', responses: { 200: { description: 'CSV file' } } } },
+      '/api/v1/sales': { post: { summary: 'Create sale', responses: { 200: { description: 'OK' } } } },
+      '/api/v1/members': { get: { summary: 'List members', responses: { 200: { description: 'OK' } } } },
+      '/api/v1/members/export': { get: { summary: 'Export members CSV', responses: { 200: { description: 'CSV file' } } } },
+      '/api/v1/donations': { post: { summary: 'Record donation', responses: { 200: { description: 'OK' } } } },
+      '/api/v1/invoices': { get: { summary: 'List invoices', responses: { 200: { description: 'OK' } } } },
+      '/api/v1/campaigns': { post: { summary: 'Create campaign', responses: { 200: { description: 'OK' } } } }
+    }
+  });
+});
+
+// === HEALTH CHECK ENDPOINT (enhanced with Redis, memory, WebSocket stats) ===
 app.get('/health', ah(async (req, res) => {
+  const start = Date.now();
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+    const dbMs = Date.now() - start;
+    let redisOk = false;
+    if (redisCache) { try { await redisCache.ping(); redisOk = true; } catch {} }
+    res.json({
+      status: 'ok',
+      uptime: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString(),
+      version: '9.0.0',
+      checks: {
+        database: { status: 'ok', latency_ms: dbMs },
+        redis: { status: redisOk ? 'ok' : 'unavailable' },
+        websocket: { status: 'ok', active_connections: Array.from(wsClients.values()).reduce((s, c) => s + c.size, 0) }
+      },
+      memory: { rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024), heap_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) }
+    });
   } catch (e) {
     res.status(503).json({ status: 'error', message: 'Database unreachable' });
   }
@@ -10130,18 +10468,17 @@ setInterval(checkBirthdays, 24 * 60 * 60 * 1000);
 // Also run once on startup (after 30s delay)
 setTimeout(checkBirthdays, 30000);
 
-// === v9.0: CACHE LAYER (In-Memory with Redis placeholder) ===
-const memoryCache = new Map();
-const cacheGet = (key) => { const entry = memoryCache.get(key); if (!entry) return null; if (Date.now() > entry.exp) { memoryCache.delete(key); return null; } return entry.data; };
-const cacheSet = (key, data, ttlMs = 60000) => { memoryCache.set(key, { data, exp: Date.now() + ttlMs }); };
+// === v9.0: CACHE MIDDLEWARE for API routes (uses Redis cacheGet/cacheSet) ===
+const memoryCache = new Map(); // Fallback when Redis is unavailable
+const cacheGetLocal = (key) => { const entry = memoryCache.get(key); if (!entry) return null; if (Date.now() > entry.exp) { memoryCache.delete(key); return null; } return entry.data; };
+const cacheSetLocal = (key, data, ttlMs = 60000) => { memoryCache.set(key, { data, exp: Date.now() + ttlMs }); };
 // Cache middleware for API routes
 const cacheMiddleware = (ttlMs = 30000) => (req, res, next) => {
   if (req.method !== 'GET') return next();
   const key = `cache:${req.originalUrl}:${req.session.user?.tenant_id || 'anon'}`;
-  const cached = cacheGet(key);
-  if (cached) return res.json(cached);
+  const getCached = async () => (await cacheGet(key)) || cacheGetLocal(key);
   const origJson = res.json.bind(res);
-  res.json = (data) => { cacheSet(key, data, ttlMs); origJson(data); };
+  res.json = (data) => { cacheSet(key, data, Math.ceil(ttlMs / 1000)); cacheSetLocal(key, data, ttlMs); origJson(data); };
   next();
 };
 
@@ -19739,8 +20076,44 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = http.createServer(app);
+
+// === ATTACH WEBSOCKET SERVER ===
+try {
+  const wss = new WebSocketServer({ server, path: '/ws/notifications' });
+  wss.on('connection', (ws, req) => {
+    // Parse session from cookie for auth
+    const cookieHeader = req.headers.cookie || '';
+    const sidMatch = cookieHeader.match(/connect\.sid=([^;]+)/);
+    if (!sidMatch) { ws.close(1008, 'No session'); return; }
+    const sessionId = decodeURIComponent(sidMatch[1]);
+    // Look up user from session store
+    pgSession.store.get(sessionId, async (err, session) => {
+      if (err || !session || !session.user) { ws.close(1008, 'Not authenticated'); return; }
+      const tenantId = session.user.tenant_id;
+      if (!wsClients.has(tenantId)) wsClients.set(tenantId, new Set());
+      wsClients.get(tenantId).add(ws);
+      ws.tenantId = tenantId;
+      console.log(`[WS] Client connected to tenant ${tenantId} (${wsClients.get(tenantId).size} total)`);
+      ws.on('close', () => {
+        const clients = wsClients.get(tenantId);
+        if (clients) { clients.delete(ws); if (clients.size === 0) wsClients.delete(tenantId); }
+        console.log(`[WS] Client disconnected from tenant ${tenantId}`);
+      });
+      ws.on('error', () => {});
+      // Send current unread count
+      try {
+        const count = (await pool.query('SELECT COUNT(*) FROM notifications WHERE tenant_id=$1 AND read=false', [tenantId])).rows[0].count;
+        ws.send(JSON.stringify({ type: 'notification', count: parseInt(count), title: null }));
+      } catch {}
+    });
+  });
+  console.log('[WS] WebSocket server initialized');
+} catch (e) { console.warn('[WS] Failed to initialize WebSocket:', e.message); }
+
+server.listen(PORT, () => {
   console.log(`SSEWASSWA Platform LIVE on ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`WebSocket: ws${process.env.NODE_ENV === 'production' ? 's' : ''}://localhost:${PORT}/ws/notifications`);
 });
 // Deploy trigger 1778408080
