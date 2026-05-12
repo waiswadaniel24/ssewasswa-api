@@ -923,7 +923,7 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('giving_trends', 'Giving Trends AI', 'AI-powered donation analysis', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('engagement_scoring', 'Engagement Scoring', 'Member engagement analysis', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('push_notifications', 'Push Notifications', 'Browser push notification support', '8.0', 'mobile', 'VAPID keys', false) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('offline_sync', 'Offline Sync', 'Work offline with auto-sync', '8.0', 'mobile', 'Service Worker', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('offline_sync', 'Offline Sync', 'Work offline with auto-sync', '8.0', 'mobile', 'Service Worker', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('deep_linking', 'Deep Linking', 'Short codes for mobile app links', '8.0', 'mobile', 'None', false) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('camera_integration', 'Camera Integration', 'Scan barcodes and documents via camera', '8.0', 'mobile', 'None', false) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('peer_fundraising', 'Peer-to-Peer Fundraising', 'Individual fundraising campaigns', '8.0', 'mobile', 'None', false) ON CONFLICT DO NOTHING`,
@@ -1477,6 +1477,15 @@ const uniqueConstraintMigrations = [
           } else throw planErr;
         }
       }
+      // Phase 3 flags
+      const phase3Flags = [
+        ['shop_catalog', 'Shop Catalog', 'Customer-facing product browsing with cart and checkout', '3.0', 'core', 'school_shop'],
+        ['recurring_donations', 'Recurring Donations', 'Schedule automatic recurring donations', '3.0', 'core', 'fundraising'],
+        ['mobile_ui', 'Mobile-Optimized UI', 'Hamburger nav, responsive tables, bottom navigation', '3.0', 'core', 'None']
+      ];
+      for (const [key, name, desc, ver, cat, req] of phase3Flags) {
+        try { await pool.query('INSERT INTO feature_flags(feature_key,name,description,version,category,requirements,is_active) VALUES($1,$2,$3,$4,$5,$6,true) ON CONFLICT(feature_key) DO NOTHING', [key, name, desc, ver, cat, req]); } catch(e) {}
+      }
       break;
     } catch (e) {
       console.error(`DB Init Error (attempt ${attempt}/3):`, e.message);
@@ -1559,7 +1568,7 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 .tab-bar a{flex:1;padding:12px;text-align:center;background:${dark ? '#1e293b' : 'white'};color:${dark ? '#94a3b8' : '#64748b'};font-weight:600;text-decoration:none;transition:0.2s}
 .tab-bar a:hover{background:${dark ? '#334155' : '#f1f5f9'};text-decoration:none}
 .tab-bar a.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
-@media(max-width:768px){.nav{flex-direction:column;gap:10px}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}}
+@media(max-width:768px){.nav{flex-direction:column;gap:10px;position:relative}.nav>div:last-child{display:none;flex-direction:column;width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:10px;border-radius:12px;margin-top:10px}.nav.open>div:last-child{display:flex}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}.hero{padding:30px 15px}.container{padding:0 12px}.card{padding:16px;margin-bottom:12px}.btn{padding:14px 20px;width:100%;text-align:center}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{padding:8px;font-size:13px}.stat-num{font-size:24px}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}}
 </style>
 <!-- CookieYes Consent Banner -->
 <script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/0e110963fc8230516a615baf/script.js"></script>
@@ -1589,7 +1598,7 @@ ${process.env.GA_TRACKING_ID ? `
 </head><body>
 <a href="#main" style="position:absolute;top:-100px;left:0;background:#4f46e5;color:white;padding:8px;z-index:9999" onfocus="this.style.top=\"0\"" onblur="this.style.top=\"-100px\"">Skip to main content</a>
 <nav class="nav" role="navigation" aria-label="Main navigation">
-  <div><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
+  <div style="display:flex;align-items:center;gap:12px"><button onclick="document.querySelector('.nav').classList.toggle('open')" style="display:none;background:none;border:none;color:white;font-size:24px;cursor:pointer;padding:4px" id="menuBtn">☰</button><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
@@ -1605,6 +1614,7 @@ ${process.env.GA_TRACKING_ID ? `
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
+${user ? `<nav class="bottom-nav" style="display:none;position:fixed;bottom:0;left:0;right:0;background:${dark ? '#1e293b' : 'white'};border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};padding:8px 0;z-index:1000;justify-content:space-around"><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🏠</span>Home</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔍</span>Search</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔔</span>Alerts</a><a href="/settings/profile" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">👤</span>Me</a></nav>` : ''}
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
     <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
@@ -11063,6 +11073,16 @@ app.post('/api/sync/push', requireAuth, ah(async (req, res) => {
       // Apply the action
       if (action.action === 'create' && action.entity_type === 'attendance' && action.data) {
         await pool.query('INSERT INTO attendance(tenant_id,student_id,date,status) VALUES($1,$2,$3,$4) ON CONFLICT(student_id,date) DO UPDATE SET status=$4', [t, action.data.student_id, action.data.date || new Date().toISOString().split('T')[0], action.data.status || 'present']);
+      } else if (action.action === 'create' && action.entity_type === 'marks' && action.data) {
+        await pool.query('INSERT INTO marks(tenant_id,student_id,subject,score,term,exam_type) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING', [t, action.data.student_id, action.data.subject, action.data.score, action.data.term||'Term 1', action.data.exam_type||'midterm']);
+      } else if (action.action === 'create' && action.entity_type === 'fees' && action.data) {
+        await pool.query('INSERT INTO fees(tenant_id,student_id,amount,payment_method,term) VALUES($1,$2,$3,$4,$5)', [t, action.data.student_id, action.data.amount, action.data.payment_method||'cash', action.data.term||'Term 1']);
+      } else if (action.action === 'create' && action.entity_type === 'shop_sales' && action.data) {
+        await pool.query('INSERT INTO school_shop_sales(tenant_id,item_id,quantity,total,buyer_type,buyer_name) VALUES($1,$2,$3,$4,$5,$6)', [t, action.data.item_id, action.data.quantity||1, action.data.total||0, action.data.buyer_type||'other', action.data.buyer_name||null]);
+      } else if (action.action === 'create' && action.entity_type === 'donations' && action.data) {
+        await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [action.data.campaign_id||null, action.data.donor_name||'Anonymous', action.data.amount||0, action.data.method||'cash', action.data.message||'']);
+      } else if (action.action === 'update' && action.entity_type === 'attendance' && action.data) {
+        await pool.query('UPDATE attendance SET status=$1 WHERE tenant_id=$2 AND student_id=$3 AND date=$4', [action.data.status, t, action.data.student_id, action.data.date]);
       }
       results.push({ id: action.id, status: 'synced' });
     } catch(e) {
@@ -11075,12 +11095,15 @@ app.post('/api/sync/push', requireAuth, ah(async (req, res) => {
 app.get('/api/sync/pull', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const since = req.query.since ? new Date(req.query.since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [students, fees, attendance] = await Promise.all([
+  const [students, fees, attendance, marks, shopSales, donations] = await Promise.all([
     pool.query('SELECT * FROM students WHERE tenant_id=$1 AND (created_at > $2 OR updated_at > $2) AND deleted_at IS NULL', [t, since]),
     pool.query('SELECT * FROM fees WHERE tenant_id=$1 AND created_at > $2', [t, since]),
-    pool.query('SELECT * FROM attendance WHERE tenant_id=$1 AND date > $2', [t, since])
+    pool.query('SELECT * FROM attendance WHERE tenant_id=$1 AND date > $2', [t, since]),
+    pool.query('SELECT * FROM marks WHERE tenant_id=$1 AND created_at > $2', [t, since]).catch(()=>({rows:[]})),
+    pool.query('SELECT * FROM school_shop_sales WHERE tenant_id=$1 AND created_at > $2', [t, since]).catch(()=>({rows:[]})),
+    pool.query('SELECT * FROM campaign_donations WHERE donated_at > $1', [since]).catch(()=>({rows:[]}))
   ]);
-  res.json({ since: since.toISOString(), students: students.rows, fees: fees.rows, attendance: attendance.rows });
+  res.json({ since: since.toISOString(), students: students.rows, fees: fees.rows, attendance: attendance.rows, marks: marks.rows, shop_sales: shopSales.rows, donations: donations.rows });
 }));
 
 // =============================================
@@ -13390,13 +13413,15 @@ app.get('/shortcuts', requireAuth, requireFeature('keyboard_shortcuts'), (req, r
 
 app.get('/sw.js', (req, res) => {
   res.set('Content-Type', 'application/javascript');
-  res.send(`const CACHE_NAME='ssewasswa-v9';const OFFLINE_URLS=['/','/login','/dashboard','/guide'];
+  res.send(`const CACHE_NAME='ssewasswa-v11';const OFFLINE_URLS=['/','/login','/dashboard','/guide','/shop/browse'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(OFFLINE_URLS)));self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});
 self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'SSEWASSWA',{body:d.body||'New update',icon:'/icon-192.png',data:d}))});
 self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.openWindow(e.notification.data?.url||'/'))});
-self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(fetch('/api/sync/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actions:[]})}))}});`);
+self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(getQueuedActions().then(actions=>{if(actions.length>0){return fetch('/api/sync/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actions:actions})}).then(r=>{if(r.ok)clearQueuedActions()}).catch(()=>{})}}))}});
+function getQueuedActions(){return new Promise(resolve=>{try{const data=localStorage.getItem('offline_sync_queue');resolve(data?JSON.parse(data):[])}catch(e){resolve([])}})}
+function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}catch(e){}}`);
 });
 
 
@@ -13457,7 +13482,12 @@ self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(fetch('/
     `CREATE TABLE IF NOT EXISTS fundraising_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, target INTEGER DEFAULT 0, deadline DATE, category TEXT DEFAULT 'general', organizer TEXT, contact_phone TEXT, status TEXT DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS campaign_donations (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, donor_name TEXT, amount INTEGER DEFAULT 0, method TEXT DEFAULT 'cash', message TEXT, donated_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS scraped_content (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, source TEXT, title TEXT, summary TEXT, url TEXT, category TEXT DEFAULT 'news', scraped_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, title, source))`,
-    `CREATE TABLE IF NOT EXISTS scrape_sources (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, url TEXT NOT NULL, category TEXT DEFAULT 'news', scrape_type TEXT DEFAULT 'rss', selector TEXT, max_items INTEGER DEFAULT 20, is_active BOOLEAN DEFAULT true, last_scraped_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`
+    `CREATE TABLE IF NOT EXISTS scrape_sources (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, url TEXT NOT NULL, category TEXT DEFAULT 'news', scrape_type TEXT DEFAULT 'rss', selector TEXT, max_items INTEGER DEFAULT 20, is_active BOOLEAN DEFAULT true, last_scraped_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS shop_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, order_no TEXT NOT NULL, buyer_email TEXT, buyer_name TEXT, buyer_phone TEXT, items JSONB NOT NULL, total INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', payment_method TEXT, payment_ref TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(order_no))`,
+    `CREATE TABLE IF NOT EXISTS recurring_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, donor_name TEXT NOT NULL, donor_email TEXT, donor_phone TEXT, amount INTEGER NOT NULL, currency TEXT DEFAULT 'UGX', schedule TEXT DEFAULT 'monthly', next_date DATE, last_processed DATE, campaign_id INTEGER REFERENCES fundraising_campaigns(id), payment_method TEXT, status TEXT DEFAULT 'active', total_donated INTEGER DEFAULT 0, donation_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS image_url TEXT`,
+    `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+    `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT 'each'`
   ];
   for (const q of additionalMigrations) {
     try { await pool.query(q); } catch(e) { /* already exists OK */ }
@@ -13493,7 +13523,10 @@ self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(fetch('/
     ['suggestions','Suggestion Box','Suggestions and complaints tracking','7.0','ai','None'],
     ['login_history','Login History','Track user login sessions and devices','8.0','mobile','None'],
     ['requisitions','Requisitions','Internal procurement requests','5.0','enterprise','None'],
-    ['sponsorships','Sponsorships','Link sponsors/donors to students','6.0','ecosystem','None']
+    ['sponsorships','Sponsorships','Link sponsors/donors to students','6.0','ecosystem','None'],
+    ['shop_catalog','Shop Catalog','Customer-facing product browsing with cart and checkout','3.0','core','school_shop'],
+    ['recurring_donations','Recurring Donations','Schedule automatic recurring donations','3.0','core','fundraising'],
+    ['mobile_ui','Mobile-Optimized UI','Hamburger nav, responsive tables, bottom navigation','3.0','core','None']
   ];
   for (const [key, name, desc, ver, cat, req] of additionalFlags) {
     try { await pool.query(`INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ($1,$2,$3,$4,$5,$6,true) ON CONFLICT DO NOTHING`, [key, name, desc, ver, cat, req]); } catch(e) {}
@@ -15460,6 +15493,112 @@ app.post('/school/shop/item/:id/update', requireAuth, requireNotBanned, requireF
 }));
 
 // =============================================
+// SHOP: CUSTOMER-FACING CATALOG & CART (Phase 3)
+// =============================================
+app.get('/shop/browse', ah(async (req, res) => {
+  const t = req.session.user?.tenant_id;
+  if (!t) {
+    // Public browsing - get first active tenant's shop or show all
+    const items = (await pool.query("SELECT * FROM school_shop_items WHERE is_active=true OR is_active IS NULL ORDER BY name")).rows;
+    return res.send(renderPage('Shop', `<div class="hero"><h1>🛒 Shop</h1><p>Browse products and place orders</p></div>
+      <div class="search-bar"><input type="text" id="searchInput" placeholder="Search items..." oninput="document.querySelectorAll('.shop-item').forEach(i=>i.style.display=i.dataset.name.toLowerCase().includes(this.value.toLowerCase())?'':'none')"></div>
+      <div class="grid">${items.map(i=>`<div class="card shop-item" data-name="${esc(i.name)}"><h3>${esc(i.name)}</h3>${i.image_url?`<img src="${esc(i.image_url)}" style="width:100%;height:150px;object-fit:cover;border-radius:8px;margin:8px 0">`:''}<p class="muted">${esc(i.category||'General')}</p><p><strong>UGX ${(i.price||0).toLocaleString()}</strong> ${esc(i.unit||'each')}</p><p class="muted">${i.stock>0?i.stock+' in stock':'<span style="color:#dc2626">Out of stock</span>'}</p><form method="POST" action="/shop/cart/add" style="margin-top:8px"><input type="hidden" name="item_id" value="${i.id}"><input type="hidden" name="name" value="${esc(i.name)}"><input type="hidden" name="price" value="${i.price||0}"><button class="btn btn-sm btn-green" ${i.stock<=0?'disabled':''}>Add to Cart</button></form></div>`).join('')||'<p class="muted">No items available</p>'}</div>`, null, req));
+  }
+  const search = req.query.q || '';
+  const category = req.query.cat || '';
+  let q = 'SELECT * FROM school_shop_items WHERE tenant_id=$1 AND (is_active=true OR is_active IS NULL)';
+  const params = [t];
+  if (search) { q += ' AND name ILIKE $2'; params.push('%'+search+'%'); }
+  if (category) { q += ' AND category=$'+(params.length+1); params.push(category); }
+  q += ' ORDER BY name';
+  const items = (await pool.query(q, params)).rows;
+  const categories = (await pool.query('SELECT DISTINCT category FROM school_shop_items WHERE tenant_id=$1 AND category IS NOT NULL', [t])).rows.map(r=>r.category);
+  const cart = req.session.cart || [];
+  const cartCount = cart.reduce((s,c)=>s+c.quantity,0);
+  res.send(renderPage('Shop', `<div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>🛒 Shop</h1><p>Browse products and place orders</p></div>
+    <div style="margin-bottom:15px"><a href="/shop/cart" class="btn btn-gold">🛍️ Cart (${cartCount})</a></div>
+    <div class="search-bar"><form method="GET" action="/shop/browse" style="display:flex;gap:10px;width:100%"><input name="q" placeholder="Search items..." value="${esc(search)}"><select name="cat" style="width:auto"><option value="">All Categories</option>${categories.map(c=>`<option value="${esc(c)}" ${category===c?'selected':''}>${esc(c)}</option>`).join('')}</select><button class="btn btn-sm">Search</button></form></div>
+    <div class="grid">${items.map(i=>`<div class="card shop-item" data-name="${esc(i.name)}"><h3>${esc(i.name)}</h3>${i.image_url?`<img src="${esc(i.image_url)}" style="width:100%;height:150px;object-fit:cover;border-radius:8px;margin:8px 0">`:''}<p class="muted">${esc(i.category||'General')}</p><p><strong>UGX ${(i.price||0).toLocaleString()}</strong> ${esc(i.unit||'each')}</p><p class="muted">${(i.stock_quantity||i.stock||0)>0?(i.stock_quantity||i.stock||0)+' in stock':'<span style="color:#dc2626">Out of stock</span>'}</p><form method="POST" action="/shop/cart/add" style="margin-top:8px"><input type="hidden" name="item_id" value="${i.id}"><input type="hidden" name="name" value="${esc(i.name)}"><input type="hidden" name="price" value="${i.price||0}"><button class="btn btn-sm btn-green" ${(i.stock_quantity||i.stock||0)<=0?'disabled':''}>Add to Cart</button></form></div>`).join('')||'<p class="muted">No items available</p>'}</div>`, req.session.user, req));
+}));
+
+app.get('/shop/cart', ah(async (req, res) => {
+  const cart = req.session.cart || [];
+  const total = cart.reduce((s,c)=>s+c.price*c.quantity,0);
+  res.send(renderPage('Shopping Cart', `<div class="card" style="max-width:700px;margin:0 auto"><h2>🛍️ Your Cart</h2>
+    ${cart.length===0?'<p class="muted" style="margin:20px 0">Your cart is empty</p><a href="/shop/browse" class="btn">Browse Shop</a>':`
+    <table><tr><th>Item</th><th>Price</th><th>Qty</th><th>Subtotal</th><th></th></tr>
+    ${cart.map((c,i)=>`<tr><td>${esc(c.name)}</td><td>UGX ${c.price.toLocaleString()}</td><td>${c.quantity}</td><td>UGX ${(c.price*c.quantity).toLocaleString()}</td><td><a href="/shop/cart/remove/${i}" class="btn btn-sm btn-red">✕</a></td></tr>`).join('')}
+    </table>
+    <div style="text-align:right;margin-top:15px;font-size:18px"><strong>Total: UGX ${total.toLocaleString()}</strong></div>
+    <a href="/shop/checkout" class="btn btn-green" style="margin-top:10px;width:100%">Proceed to Checkout</a>
+    <a href="/shop/browse" class="btn" style="margin-top:8px;width:100%">Continue Shopping</a>`}
+    </div>`, req.session.user||null, req));
+}));
+
+app.post('/shop/cart/add', ah(async (req, res) => {
+  if (!req.session.cart) req.session.cart = [];
+  const { item_id, name, price } = req.body;
+  const existing = req.session.cart.find(c=>c.itemId==item_id);
+  if (existing) { existing.quantity++; } else { req.session.cart.push({ itemId: item_id, name: name||'Item', price: parseInt(price)||0, quantity: 1 }); }
+  res.redirect('/shop/cart');
+}));
+
+app.post('/shop/cart/remove', ah(async (req, res) => {
+  const { item_id } = req.body;
+  if (req.session.cart) { req.session.cart = req.session.cart.filter(c=>c.itemId!=item_id); }
+  res.redirect('/shop/cart');
+}));
+
+app.get('/shop/cart/remove/:idx', ah(async (req, res) => {
+  const idx = parseInt(req.params.idx);
+  if (req.session.cart && idx>=0 && idx<req.session.cart.length) { req.session.cart.splice(idx,1); }
+  res.redirect('/shop/cart');
+}));
+
+app.get('/shop/checkout', requireAuth, requireNotBanned, requireFeature('shop_catalog'), ah(async (req, res) => {
+  const cart = req.session.cart || [];
+  if (cart.length===0) return res.redirect('/shop/browse');
+  const total = cart.reduce((s,c)=>s+c.price*c.quantity,0);
+  res.send(renderPage('Checkout', `<div class="card" style="max-width:600px;margin:0 auto"><h2>💳 Checkout</h2>
+    <div class="alert alert-info"><strong>Order Total: UGX ${total.toLocaleString()}</strong></div>
+    <table><tr><th>Item</th><th>Qty</th><th>Subtotal</th></tr>
+    ${cart.map(c=>`<tr><td>${esc(c.name)}</td><td>${c.quantity}</td><td>UGX ${(c.price*c.quantity).toLocaleString()}</td></tr>`).join('')}</table>
+    <form method="POST" action="/shop/order/place" style="margin-top:15px">
+      <input name="buyer_name" placeholder="Full Name" value="${esc(req.session.user?.email?.split('@')[0]||'')}" required>
+      <input name="buyer_email" type="email" placeholder="Email" value="${esc(req.session.user?.email||'')}" required>
+      <input name="buyer_phone" placeholder="Phone (e.g. +256 700 000000)">
+      <select name="payment_method"><option value="cash">Cash on Delivery</option><option value="momo">MTN MoMo</option><option value="airtel">Airtel Money</option><option value="bank">Bank Transfer</option></select>
+      <textarea name="notes" rows="2" placeholder="Order notes (optional)"></textarea>
+      <button class="btn btn-green" style="width:100%">Place Order</button>
+    </form></div>`, req.session.user, req));
+}));
+
+app.post('/shop/order/place', requireAuth, requireNotBanned, requireFeature('shop_catalog'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const cart = req.session.cart || [];
+  if (cart.length===0) return res.redirect('/shop/browse');
+  const { buyer_name, buyer_email, buyer_phone, payment_method, notes } = req.body;
+  const total = cart.reduce((s,c)=>s+c.price*c.quantity,0);
+  const orderNo = 'ORD-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
+  await pool.query('INSERT INTO shop_orders(tenant_id,order_no,buyer_email,buyer_name,buyer_phone,items,total,status,payment_method,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, orderNo, buyer_email||null, buyer_name||'', buyer_phone||null, JSON.stringify(cart), total, 'pending', payment_method||'cash', notes||null]);
+  // Deduct stock
+  for (const item of cart) {
+    try { await pool.query('UPDATE school_shop_items SET stock_quantity=GREATEST(stock_quantity-$1,0) WHERE id=$2', [item.quantity, item.itemId]); } catch(e) {}
+  }
+  req.session.cart = [];
+  res.send(renderPage('Order Placed!', `<div class="card" style="max-width:600px;margin:40px auto;text-align:center"><h2>✅ Order Placed!</h2><div class="alert alert-success"><p>Your order <strong>${esc(orderNo)}</strong> has been placed.</p><p>Total: <strong>UGX ${total.toLocaleString()}</strong></p></div><a href="/shop/orders" class="btn">View My Orders</a><a href="/shop/browse" class="btn btn-green" style="margin-left:10px">Continue Shopping</a></div>`, req.session.user, req));
+}));
+
+app.get('/shop/orders', requireAuth, requireNotBanned, requireFeature('shop_catalog'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const orders = (await pool.query('SELECT * FROM shop_orders WHERE tenant_id=$1 AND buyer_email=$2 ORDER BY created_at DESC', [t, req.session.user.email])).rows;
+  res.send(renderPage('My Orders', `<div class="card"><h2>📦 My Orders</h2>
+    ${orders.length===0?'<p class="muted">No orders yet</p>':`<table><tr><th>Order #</th><th>Date</th><th>Total</th><th>Status</th><th>Payment</th></tr>
+    ${orders.map(o=>`<tr><td><strong>${esc(o.order_no)}</strong></td><td>${new Date(o.created_at).toLocaleDateString()}</td><td>UGX ${(o.total||0).toLocaleString()}</td><td><span class="tag" style="background:${o.status==='pending'?'#fef3c7;color:#92400e':o.status==='completed'?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b'}">${esc(o.status)}</span></td><td>${esc(o.payment_method||'-')}</td></tr>`).join('')}</table>`}
+    <a href="/shop/browse" class="btn btn-green" style="margin-top:15px">Continue Shopping</a></div>`, req.session.user, req));
+}));
+
+// =============================================
 // SCHOOL: SIBLING DISCOUNTS
 // =============================================
 app.get('/school/sibling-discounts', requireAuth, requireNotBanned, requireFeature('sibling_discounts'), ah(async (req, res) => {
@@ -16208,6 +16347,85 @@ app.get('/fundraising/:id/close', requireAuth, requireNotBanned, ah(async (req, 
 app.get('/fundraising/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   res.redirect('/fundraising');
+}));
+
+// =============================================
+// RECURRING DONATIONS (Phase 3)
+// =============================================
+app.get('/donations/recurring', requireAuth, requireNotBanned, requireFeature('recurring_donations'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const donations = (await pool.query('SELECT rd.*, fc.title as campaign_title FROM recurring_donations rd LEFT JOIN fundraising_campaigns fc ON rd.campaign_id=fc.id WHERE rd.tenant_id=$1 ORDER BY rd.created_at DESC', [t])).rows;
+  const activeCount = donations.filter(d=>d.status==='active').length;
+  const totalDonated = donations.reduce((s,d)=>s+(d.total_donated||0),0);
+  res.send(renderPage('Recurring Donations', `<div class="hero" style="background:linear-gradient(135deg,#7c3aed,#ec4899)"><h1>🔄 Recurring Donations</h1><p>Schedule automatic recurring donations</p></div>
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#7c3aed">${activeCount}</div><div>Active Schedules</div></div><div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalDonated.toLocaleString()}</div><div>Total Donated</div></div><div class="stat-card"><div class="stat-num">${donations.length}</div><div>All Schedules</div></div></div>
+    <a href="/donations/recurring/new" class="btn btn-green" style="margin-bottom:15px">+ New Recurring Donation</a>
+    <table><tr><th>Donor</th><th>Amount</th><th>Schedule</th><th>Campaign</th><th>Next Date</th><th>Total Donated</th><th>Status</th><th>Actions</th></tr>
+    ${donations.map(d=>`<tr><td><strong>${esc(d.donor_name)}</strong>${d.donor_email?'<br><span class="muted">'+esc(d.donor_email)+'</span>':''}</td><td>UGX ${(d.amount||0).toLocaleString()}</td><td><span class="tag">${esc(d.schedule||'monthly')}</span></td><td>${esc(d.campaign_title||'-')}</td><td>${d.next_date?new Date(d.next_date).toLocaleDateString():'-'}</td><td>UGX ${(d.total_donated||0).toLocaleString()} (${d.donation_count||0}x)</td><td><span class="tag" style="background:${d.status==='active'?'#d1fae5;color:#065f46':d.status==='paused'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b'}">${esc(d.status)}</span></td><td>${d.status==='active'?`<a href="/donations/recurring/${d.id}/pause" class="btn btn-sm btn-gold">Pause</a> `:''}${d.status==='paused'?`<a href="/donations/recurring/${d.id}/resume" class="btn btn-sm btn-green">Resume</a> `:''}${d.status!=='cancelled'?`<a href="/donations/recurring/${d.id}/cancel" class="btn btn-sm btn-red" onclick="return confirm('Cancel this recurring donation?')">Cancel</a>`:''}</td></tr>`).join('')||'<tr><td colspan="8">No recurring donations yet</td></tr>'}
+    </table></div>`, req.session.user, req));
+}));
+
+app.get('/donations/recurring/new', requireAuth, requireNotBanned, requireFeature('recurring_donations'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const campaigns = (await pool.query('SELECT id,title FROM fundraising_campaigns WHERE tenant_id=$1 AND status=$2', [t, 'active'])).rows;
+  res.send(renderPage('New Recurring Donation', `<div class="card" style="max-width:600px;margin:0 auto"><h2>🔄 New Recurring Donation</h2>
+    <form method="POST" action="/donations/recurring/save">
+      <input name="donor_name" placeholder="Donor Name" required>
+      <input name="donor_email" type="email" placeholder="Donor Email">
+      <input name="donor_phone" placeholder="Donor Phone">
+      <input name="amount" type="number" placeholder="Amount per donation (UGX)" min="1" required>
+      <select name="schedule"><option value="weekly">Weekly</option><option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select>
+      <input name="next_date" type="date" placeholder="First donation date" required>
+      <select name="campaign_id"><option value="">No specific campaign</option>${campaigns.map(c=>`<option value="${c.id}">${esc(c.title)}</option>`).join('')}</select>
+      <select name="payment_method"><option value="cash">Cash</option><option value="momo">MTN MoMo</option><option value="airtel">Airtel Money</option><option value="bank">Bank Transfer</option><option value="card">Card</option></select>
+      <button class="btn btn-green" style="width:100%">Create Recurring Donation</button>
+    </form></div>`, req.session.user, req));
+}));
+
+app.post('/donations/recurring/save', requireAuth, requireNotBanned, requireFeature('recurring_donations'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { donor_name, donor_email, donor_phone, amount, schedule, next_date, campaign_id, payment_method } = req.body;
+  await pool.query('INSERT INTO recurring_donations(tenant_id,donor_name,donor_email,donor_phone,amount,schedule,next_date,campaign_id,payment_method,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, donor_name, donor_email||null, donor_phone||null, amount||0, schedule||'monthly', next_date||null, campaign_id||null, payment_method||'cash', 'active']);
+  res.redirect('/donations/recurring');
+}));
+
+app.get('/donations/recurring/:id/cancel', requireAuth, requireNotBanned, requireFeature('recurring_donations'), ah(async (req, res) => {
+  await pool.query('UPDATE recurring_donations SET status=$1 WHERE id=$2 AND tenant_id=$3', ['cancelled', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/donations/recurring');
+}));
+
+app.get('/donations/recurring/:id/pause', requireAuth, requireNotBanned, requireFeature('recurring_donations'), ah(async (req, res) => {
+  await pool.query('UPDATE recurring_donations SET status=$1 WHERE id=$2 AND tenant_id=$3', ['paused', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/donations/recurring');
+}));
+
+app.get('/donations/recurring/:id/resume', requireAuth, requireNotBanned, requireFeature('recurring_donations'), ah(async (req, res) => {
+  await pool.query('UPDATE recurring_donations SET status=$1 WHERE id=$2 AND tenant_id=$3', ['active', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/donations/recurring');
+}));
+
+app.post('/api/recurring-donations/process', ah(async (req, res) => {
+  // Process due recurring donations - called by cron/scheduler
+  const due = (await pool.query("SELECT * FROM recurring_donations WHERE next_date <= CURRENT_DATE AND status = 'active'")).rows;
+  let processed = 0, errors = 0;
+  for (const d of due) {
+    try {
+      // Record the donation
+      await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [d.campaign_id||null, d.donor_name, d.amount, d.payment_method||'cash', 'Recurring donation']);
+      // Calculate next date
+      let nextDate = new Date(d.next_date);
+      switch(d.schedule) {
+        case 'weekly': nextDate.setDate(nextDate.getDate()+7); break;
+        case 'monthly': nextDate.setMonth(nextDate.getMonth()+1); break;
+        case 'quarterly': nextDate.setMonth(nextDate.getMonth()+3); break;
+        case 'yearly': nextDate.setFullYear(nextDate.getFullYear()+1); break;
+        default: nextDate.setMonth(nextDate.getMonth()+1);
+      }
+      await pool.query('UPDATE recurring_donations SET last_processed=CURRENT_DATE, next_date=$1, total_donated=total_donated+$2, donation_count=donation_count+1 WHERE id=$3', [nextDate.toISOString().split('T')[0], d.amount, d.id]);
+      processed++;
+    } catch(e) { errors++; }
+  }
+  res.json({ processed, errors, total_due: due.length });
 }));
 
 // ============================================================
@@ -19003,4 +19221,4 @@ app.listen(PORT, () => {
   console.log(`Dev Master: waiswadaniel24@gmail.com / Daniel@2025`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
-// Deploy trigger 1778408079
+// Deploy trigger 1778408080
