@@ -1,5 +1,12 @@
 require('dotenv').config();
 
+// === ENV VAR NORMALIZATION ===
+// Map Render env var names to what the app expects
+if (!process.env.GOOGLE_CLIENT_ID && process.env.ClientID) process.env.GOOGLE_CLIENT_ID = process.env.ClientID;
+if (!process.env.GOOGLE_CLIENT_SECRET && process.env.Clientsecret) process.env.GOOGLE_CLIENT_SECRET = process.env.Clientsecret;
+if (!process.env.SESSION_SECRET && process.env.SESION_SECRET) process.env.SESSION_SECRET = process.env.SESION_SECRET;
+if (!process.env.SESSION_SECRET && process.env.SESSION_SECRE) process.env.SESSION_SECRET = process.env.SESSION_SECRE;
+
 // Suppress experimental warnings via env var instead of monkey-patching
 if (!process.env.NODE_NO_WARNINGS) process.env.NODE_NO_WARNINGS = '1';
 process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
