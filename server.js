@@ -8,6 +8,16 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
+
+// === CONSTANTS ===
+const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
+const LOGIN_LOCKOUT_WINDOW = 15 * 60 * 1000; // 15 minutes
+const LOGIN_MAX_ATTEMPTS = 5;
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
+const REQUEST_TIMEOUT_MS = 30 * 1000; // 30 seconds
+const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -33,7 +43,7 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
- ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false, // TODO: Set rejectUnauthorized:true + provide CA cert for full MITM protection
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
@@ -82,7 +92,7 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000
+    maxAge: SESSION_MAX_AGE
   }
 }));
 
@@ -189,6 +199,51 @@ const sanitizeHTML = (html) => {
     .replace(/<object[^>]*>[\s\S]*?<\/object>/gi, '')
     .replace(/<embed[^>]*>/gi, '');
 };
+// === INPUT VALIDATION ===
+const validate = (schema) => (req, res, next) => {
+  const errors = [];
+  for (const [field, rules] of Object.entries(schema)) {
+    const value = req.body[field] || req.params[field] || req.query[field];
+    if (rules.required && (!value || value.toString().trim() === '')) {
+      errors.push(`${field} is required`);
+      continue;
+    }
+    if (!value && !rules.required) continue;
+    const str = String(value);
+    if (rules.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)) {
+      errors.push(`${field} must be a valid email`);
+    }
+    if (rules.phone && !/^[\+]?[\d\s\-\(\)]{7,15}$/.test(str)) {
+      errors.push(`${field} must be a valid phone number`);
+    }
+    if (rules.numeric && isNaN(Number(str))) {
+      errors.push(`${field} must be a number`);
+    }
+    if (rules.integer && !Number.isInteger(Number(str))) {
+      errors.push(`${field} must be an integer`);
+    }
+    if (rules.min !== undefined && Number(str) < rules.min) {
+      errors.push(`${field} must be at least ${rules.min}`);
+    }
+    if (rules.max !== undefined && Number(str) > rules.max) {
+      errors.push(`${field} must be at most ${rules.max}`);
+    }
+    if (rules.maxLength && str.length > rules.maxLength) {
+      errors.push(`${field} must be at most ${rules.maxLength} characters`);
+    }
+    if (rules.minLength && str.length < rules.minLength) {
+      errors.push(`${field} must be at least ${rules.minLength} characters`);
+    }
+    if (rules.alpha && !/^[a-zA-Z\s\-']+$/.test(str)) {
+      errors.push(`${field} must contain only letters, spaces, hyphens, and apostrophes`);
+    }
+  }
+  if (errors.length > 0) {
+    return res.status(400).json({ error: 'Validation failed', details: errors });
+  }
+  next();
+};
+
 const requireAuth = (req, res, next) => req.session.user ? next() : res.redirect('/login');
 const requireNotBanned = (req, res, next) => req.session.user?.banned ? res.status(403).send('Account banned') : next();
 const requireTenantAccess = (req, res, next) => {
@@ -207,23 +262,21 @@ const requireRole = (...roles) => (req, res, next) => {
   if (roles.includes(u.role) || roles.includes('all')) return next();
   res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission to access this page.</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
 };
-const audit = (email, action, details) => pool.query('INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', [email, action, details]).catch(() => {});
-const logAudit = (tenantId, email, action, details) => pool.query('INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', [email, action, typeof details === 'object' ? JSON.stringify(details) : details]).catch(() => {});
-const notify = (tenantId, email, title, message, type) => pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type) VALUES($1,$2,$3,$4,$5)', [tenantId, email, title, message, type || 'info']).catch(() => {});
-const notifyAll = (tenantId, title, message, type) => pool.query('INSERT INTO notifications(tenant_id,title,message,type) VALUES($1,$2,$3,$4)', [tenantId, title, message, type || 'info']).catch(() => {});
+const audit = (email, action, details) => pool.query('INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', [email, action, typeof details === 'object' ? JSON.stringify(details) : (details || '')]).catch(e => console.error('[Audit Error]', e.message));
+const notify = (tenantId, email, title, message, type) => pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type) VALUES($1,$2,$3,$4,$5)', [tenantId, email, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
+const notifyAll = (tenantId, title, message, type) => pool.query('INSERT INTO notifications(tenant_id,title,message,type) VALUES($1,$2,$3,$4)', [tenantId, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
 
 // === v1.0 UTILITIES ===
 // Email helper
 const sendEmail = async (to, subject, html) => {
   if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) return false;
   try {
-    const nodemailer = require('nodemailer');
     const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS } });
     await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, html });
     return true;
   } catch (e) { console.warn('Email failed:', e.message); return false; }
 };
-const queueEmail = (tenantId, to, subject, body) => pool.query('INSERT INTO email_queue(tenant_id,to_email,subject,body) VALUES($1,$2,$3,$4)', [tenantId, to, subject, body]).catch(() => {});
+const queueEmail = (tenantId, to, subject, body) => pool.query('INSERT INTO email_queue(tenant_id,to_email,subject,body) VALUES($1,$2,$3,$4)', [tenantId, to, subject, body]).catch(e => console.error('[DB Error]', e.message));
 
 // SMS helper
 const sendSMS = async (phone, message) => {
@@ -234,7 +287,7 @@ const sendSMS = async (phone, message) => {
     return true;
   } catch (e) { console.warn('SMS failed:', e.message); return false; }
 };
-const logSMS = (tenantId, phone, message, triggerType) => pool.query('INSERT INTO sms_logs(tenant_id,phone,message,trigger_type) VALUES($1,$2,$3,$4)', [tenantId, phone, message, triggerType || 'manual']).catch(() => {});
+const logSMS = (tenantId, phone, message, triggerType) => pool.query('INSERT INTO sms_logs(tenant_id,phone,message,trigger_type) VALUES($1,$2,$3,$4)', [tenantId, phone, message, triggerType || 'manual']).catch(e => console.error('[DB Error]', e.message));
 
 // Webhook delivery
 const fireWebhook = async (tenantId, event, payload) => {
@@ -463,13 +516,18 @@ const requestAirtelPayment = async (phone, amount, reference) => {
 const DPO_COMPANY_TOKEN = process.env.DPO_COMPANY_TOKEN || '';
 const DPO_BASE = 'https://secure.3gdirectpay.com';
 
+const xmlEscape = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+
 const createDPOPayment = async (amount, email, reference, description) => {
   if (!DPO_COMPANY_TOKEN) return null;
   try {
+    const safeEmail = xmlEscape(email);
+    const safeRef = xmlEscape(reference);
+    const safeDesc = xmlEscape(description);
     const resp = await fetch(`${DPO_BASE}/API/v6/PayToken`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body: `<?xml version="1.0" encoding="utf-8"?><API3G><CompanyToken>${DPO_COMPANY_TOKEN}</CompanyToken><Request>createToken</Request><Transaction><PaymentAmount>${amount}</PaymentAmount><PaymentCurrency>UGX</PaymentCurrency><CompanyRef>${reference}</CompanyRef><RedirectURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing/callback?dpo=1</RedirectURL><BackURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing</BackURL><CompanyRefInternal>${reference}</CompanyRefInternal><customerEmail>${email}</customerEmail><customerFirstName>SSEWASSWA</customerFirstName><Description>${description}</Description></Transaction><Services><Service><ServiceType>1</ServiceType><ServiceDescription>${description}</ServiceDescription><ServiceAmount>${amount}</ServiceAmount></Service></Services></API3G>`
+      body: `<?xml version="1.0" encoding="utf-8"?><API3G><CompanyToken>${DPO_COMPANY_TOKEN}</CompanyToken><Request>createToken</Request><Transaction><PaymentAmount>${amount}</PaymentAmount><PaymentCurrency>UGX</PaymentCurrency><CompanyRef>${safeRef}</CompanyRef><RedirectURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing/callback?dpo=1</RedirectURL><BackURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing</BackURL><CompanyRefInternal>${safeRef}</CompanyRefInternal><customerEmail>${safeEmail}</customerEmail><customerFirstName>SSEWASSWA</customerFirstName><Description>${safeDesc}</Description></Transaction><Services><Service><ServiceType>1</ServiceType><ServiceDescription>${safeDesc}</ServiceDescription><ServiceAmount>${amount}</ServiceAmount></Service></Services></API3G>`
     });
     const text = await resp.text();
     const tokenMatch = text.match(/<TransToken>([^<]+)<\/TransToken>/);
@@ -535,6 +593,19 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS expenses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT, amount INTEGER NOT NULL, description TEXT, expense_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS audit_logs (id SERIAL PRIMARY KEY, user_email TEXT, action TEXT NOT NULL, details TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS login_attempts (email TEXT PRIMARY KEY, attempts INTEGER DEFAULT 1, last_attempt TIMESTAMPTZ DEFAULT NOW())`,
+  // === PERFORMANCE INDEXES (Round 3) ===
+  `CREATE INDEX IF NOT EXISTS idx_attendance_tenant_student ON attendance(tenant_id, student_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_fees_tenant_student ON fees(tenant_id, student_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_marks_exam_student ON marks(exam_id, student_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_marks_tenant ON marks(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_students_tenant_class ON students(tenant_id, class)`,
+  `CREATE INDEX IF NOT EXISTS idx_payments_tenant_status ON payments(tenant_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_payments_reference ON payments(reference)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_email)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_church_attendance_tenant_member ON church_attendance(tenant_id, member_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_email)`,
   `CREATE TABLE IF NOT EXISTS developer_revenue (id SERIAL PRIMARY KEY, tenant_id INTEGER, amount INTEGER NOT NULL, source TEXT, description TEXT, details TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS platform_wallet (id SERIAL PRIMARY KEY, balance INTEGER DEFAULT 0)`,
   `INSERT INTO platform_wallet (id, balance) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`,
@@ -706,7 +777,8 @@ const migrations = [
 
   // v11.0 - Billing/Subscriptions
   `CREATE TABLE IF NOT EXISTS subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plan TEXT DEFAULT 'free', amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX', status TEXT DEFAULT 'active', started_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, payment_method TEXT, reference TEXT)`,
-  `CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, amount INTEGER NOT NULL, method TEXT, reference TEXT, status TEXT DEFAULT 'pending', description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, amount INTEGER NOT NULL, method TEXT, reference TEXT, status TEXT DEFAULT 'pending', description TEXT, plan TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `ALTER TABLE payments ADD COLUMN IF NOT EXISTS plan TEXT`,
   // v11.0 - Webhooks
   `CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, url TEXT NOT NULL, events TEXT[], secret TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Church member attendance
@@ -1555,7 +1627,7 @@ const uniqueConstraintMigrations = [
         ['mobile_ui', 'Mobile-Optimized UI', 'Hamburger nav, responsive tables, bottom navigation', '3.0', 'core', 'None']
       ];
       for (const [key, name, desc, ver, cat, req] of phase3Flags) {
-        try { await pool.query('INSERT INTO feature_flags(feature_key,name,description,version,category,requirements,is_active) VALUES($1,$2,$3,$4,$5,$6,true) ON CONFLICT(feature_key) DO NOTHING', [key, name, desc, ver, cat, req]); } catch(e) {}
+        try { await pool.query('INSERT INTO feature_flags(feature_key,name,description,version,category,requirements,is_active) VALUES($1,$2,$3,$4,$5,$6,true) ON CONFLICT(feature_key) DO NOTHING', [key, name, desc, ver, cat, req]); } catch(e) { console.error('[Error]', e.message); }
       }
       break;
     } catch (e) {
@@ -1730,7 +1802,7 @@ app.get('/login', (req, res) => {
   `, null, req));
 });
 
-app.post('/login', ah(async (req, res) => {
+app.post('/login', validate({ email: { required: true, email: true }, password: { required: true } }), ah(async (req, res) => {
   const { email, password } = req.body;
   // Try to get user — handle both password and password_hash column names
   let u;
@@ -1792,7 +1864,7 @@ app.get('/register', (req, res) => {
   `, null, req));
 });
 
-app.post('/register', ah(async (req, res) => {
+app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 8 }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
   const { org_name, type, email, phone, password, confirm_password } = req.body;
   // Password complexity validation (Phase 1 Security Fix)
   const passwordErrors = [];
@@ -1825,7 +1897,7 @@ app.post('/register', ah(async (req, res) => {
 }));
 
 app.get('/logout', (req, res) => {
-  if (req.session.user) audit(req.session.user.email, 'logout', 'User logged out').catch(() => {});
+  if (req.session.user) audit(req.session.user.email, 'logout', 'User logged out').catch(e => console.error('[DB Error]', e.message));
   req.session.destroy(() => {
     res.clearCookie('connect.sid');
     res.redirect('/login');
@@ -1865,7 +1937,6 @@ app.post('/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 3 }), ah
   // Try to send email if Gmail is configured
   if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
     try {
-      const nodemailer = require('nodemailer');
       const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
@@ -2028,15 +2099,23 @@ app.get('/school/students', requireAuth, requireNotBanned, ah(async (req, res) =
   const t = req.session.user.tenant_id;
   const filter = req.query.class || '';
   const streamFilter = req.query.stream || '';
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
   let q = 'SELECT * FROM students WHERE tenant_id=$1';
+  let countQ = 'SELECT COUNT(*) FROM students WHERE tenant_id=$1';
   const params = [t];
+  const countParams = [t];
   let pi = 2;
-  if (filter) { q += ` AND class=$${pi++}`; params.push(filter); }
-  if (streamFilter) { q += ` AND stream=$${pi++}`; params.push(streamFilter); }
-  q += ' ORDER BY name';
+  if (filter) { q += ` AND class=$${pi}`; countQ += ` AND class=$${pi}`; params.push(filter); countParams.push(filter); pi++; }
+  if (streamFilter) { q += ` AND stream=$${pi}`; countQ += ` AND stream=$${pi}`; params.push(streamFilter); countParams.push(streamFilter); pi++; }
+  q += ` ORDER BY name LIMIT $${pi} OFFSET $${pi+1}`;
+  params.push(limit, offset);
   const students = (await pool.query(q, params)).rows;
+  const total = parseInt((await pool.query(countQ, countParams)).rows[0].count);
   const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
   const streams = (await pool.query('SELECT DISTINCT stream FROM students WHERE tenant_id=$1 AND stream IS NOT NULL ORDER BY stream', [t])).rows;
+  const paginationHtml = `<div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center"><span>Showing ${(offset+1)}-${Math.min(offset+limit, total)} of ${total}</span><div>${page > 1 ? `<a href="?page=${page-1}&class=${filter}&stream=${streamFilter}" class="btn">Previous</a>` : ''} ${offset+limit < total ? `<a href="?page=${page+1}&class=${filter}&stream=${streamFilter}" class="btn">Next</a>` : ''}</div></div>`;
   res.send(renderPage('Students', `
     <div class="card"><h3>Student Management</h3>
       <div style="display:flex;gap:10px;margin:15px 0;flex-wrap:wrap">
@@ -2058,6 +2137,7 @@ app.get('/school/students', requireAuth, requireNotBanned, ah(async (req, res) =
         <td><a href="/school/students/${s.id}/edit" class="btn btn-sm">Edit</a> <a href="/school/students/${s.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete ${esc(s.name)}?')">Del</a></td>
       </tr>`).join('') || '<tr><td colspan="6">No students yet</td></tr>'}
       </table>
+      ${paginationHtml}
     </div>
   `, req.session.user));
 }));
@@ -2078,7 +2158,7 @@ app.get('/school/students/new', requireAuth, requireNotBanned, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/school/students/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/school/students/save', requireAuth, requireNotBanned, validate({ name: { required: true, maxLength: 200 }, class: { maxLength: 50 }, stream: { maxLength: 50 }, guardian_name: { maxLength: 200 }, guardian_phone: { maxLength: 20 } }), ah(async (req, res) => {
   const { admission_no, name, class: cls, stream, guardian_name, guardian_phone } = req.body;
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO students(tenant_id,admission_no,name,class,stream,guardian_name,guardian_phone) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, admission_no, name, cls, stream, guardian_name, guardian_phone]);
@@ -2150,9 +2230,15 @@ app.post('/school/students/import/save', requireAuth, requireNotBanned, ah(async
 // === SCHOOL: FEES ===
 app.get('/school/fees', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const fees = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 ORDER BY f.created_at DESC', [t])).rows;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
+  const fees = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 ORDER BY f.created_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalResult = (await pool.query('SELECT COUNT(*) FROM fees WHERE tenant_id=$1', [t])).rows[0];
+  const total = parseInt(totalResult.count);
   const totalDue = fees.reduce((a, f) => a + (f.amount - f.paid), 0);
   const totalPaid = fees.reduce((a, f) => a + parseInt(f.paid), 0);
+  const paginationHtml = `<div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center"><span>Showing ${(offset+1)}-${Math.min(offset+limit, total)} of ${total}</span><div>${page > 1 ? `<a href="?page=${page-1}" class="btn">Previous</a>` : ''} ${offset+limit < total ? `<a href="?page=${page+1}" class="btn">Next</a>` : ''}</div></div>`;
   res.send(renderPage('Fee Management', `
     <div class="stats">
       <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${totalDue.toLocaleString()}</div><div>Total Due</div></div>
@@ -2172,6 +2258,7 @@ app.get('/school/fees', requireAuth, requireNotBanned, ah(async (req, res) => {
         <td>${esc(f.term)}</td><td>${f.year || ''}</td>
       </tr>`).join('') || '<tr><td colspan="7">No fees yet</td></tr>'}
       </table>
+      ${paginationHtml}
     </div>
   `, req.session.user));
 }));
@@ -2315,13 +2402,19 @@ app.get('/school/exams/:id/results', requireAuth, requireNotBanned, ah(async (re
   const t = req.session.user.tenant_id;
   const exam = (await pool.query('SELECT * FROM exams WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!exam) return res.status(404).send('Not found');
-  const marks = (await pool.query('SELECT m.*,s.name as student_name,s.admission_no FROM marks m JOIN students s ON m.student_id=s.id JOIN exams e ON m.exam_id=e.id WHERE e.tenant_id=$1 AND m.exam_id=$2 ORDER BY s.name,m.subject', [t, exam.id])).rows;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
+  const marks = (await pool.query('SELECT m.*,s.name as student_name,s.admission_no FROM marks m JOIN students s ON m.student_id=s.id JOIN exams e ON m.exam_id=e.id WHERE e.tenant_id=$1 AND m.exam_id=$2 ORDER BY s.name,m.subject LIMIT $3 OFFSET $4', [t, exam.id, limit, offset])).rows;
+  const total = parseInt((await pool.query('SELECT COUNT(*) FROM marks m JOIN exams e ON m.exam_id=e.id WHERE e.tenant_id=$1 AND m.exam_id=$2', [t, exam.id])).rows[0].count);
+  const paginationHtml = `<div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center"><span>Showing ${(offset+1)}-${Math.min(offset+limit, total)} of ${total}</span><div>${page > 1 ? `<a href="?page=${page-1}" class="btn">Previous</a>` : ''} ${offset+limit < total ? `<a href="?page=${page+1}" class="btn">Next</a>` : ''}</div></div>`;
   res.send(renderPage(`Results - ${exam.name}`, `
     <div class="card"><h3>Results: ${esc(exam.name)} (${esc(exam.term)} ${exam.year || ''})</h3>
       <a href="/school/exams/${exam.id}/marks" class="btn btn-sm" style="margin:10px 0">Enter More Marks</a>
       <table><tr><th>Adm#</th><th>Student</th><th>Subject</th><th>Score</th><th>Grade</th></tr>
       ${marks.map(m => `<tr><td>${esc(m.admission_no)}</td><td>${esc(m.student_name)}</td><td>${esc(m.subject)}</td><td>${m.score}</td><td><span class="tag">${esc(m.grade)}</span></td></tr>`).join('') || '<tr><td colspan="5">No marks yet</td></tr>'}
       </table>
+      ${paginationHtml}
     </div>
   `, req.session.user));
 }));
@@ -2330,13 +2423,22 @@ app.get('/school/exams/:id/results', requireAuth, requireNotBanned, ah(async (re
 app.get('/school/attendance', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const filterClass = req.query.class || '';
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
   let q = 'SELECT id,name,admission_no,class FROM students WHERE tenant_id=$1';
+  let countQ = 'SELECT COUNT(*) FROM students WHERE tenant_id=$1';
   const params = [t];
-  if (filterClass) { q += ' AND class=$2'; params.push(filterClass); }
-  q += ' ORDER BY name';
+  const countParams = [t];
+  let pi = 2;
+  if (filterClass) { q += ` AND class=$${pi}`; countQ += ` AND class=$${pi}`; params.push(filterClass); countParams.push(filterClass); pi++; }
+  q += ` ORDER BY name LIMIT $${pi} OFFSET $${pi+1}`;
+  params.push(limit, offset);
   const students = (await pool.query(q, params)).rows;
+  const total = parseInt((await pool.query(countQ, countParams)).rows[0].count);
   const classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t])).rows;
   const today = new Date().toISOString().split('T')[0];
+  const paginationHtml = `<div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center"><span>Showing ${(offset+1)}-${Math.min(offset+limit, total)} of ${total}</span><div>${page > 1 ? `<a href="?page=${page-1}&class=${filterClass}" class="btn">Previous</a>` : ''} ${offset+limit < total ? `<a href="?page=${page+1}&class=${filterClass}" class="btn">Next</a>` : ''}</div></div>`;
   res.send(renderPage('Student Attendance', `
     <div class="card"><h3>Mark Attendance - ${today}</h3>
       <form method="GET" action="/school/attendance" style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
@@ -2352,6 +2454,7 @@ app.get('/school/attendance', requireAuth, requireNotBanned, ah(async (req, res)
         </table>
         <button class="btn btn-green" style="margin-top:15px">Save Attendance</button>
       </form>
+      ${paginationHtml}
     </div>
   `, req.session.user));
 }));
@@ -2948,8 +3051,8 @@ app.get('/school/fees/:id/receipt', requireAuth, requireNotBanned, ah(async (req
   const tenant = (await pool.query('SELECT name,address,phone,email,logo_url FROM tenants WHERE id=$1', [t])).rows[0];
   const receiptNo = fee.receipt_no || ('RCP-' + fee.id + '-' + Date.now().toString(36).toUpperCase());
   if (!fee.receipt_no) {
-    try { await pool.query('UPDATE fees SET receipt_no=$1 WHERE id=$2', [receiptNo, fee.id]); } catch(e) {}
-    try { await pool.query('INSERT INTO fee_receipts(tenant_id,fee_id,receipt_no,student_id,amount,paid,method,received_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(receipt_no) DO NOTHING', [t, fee.id, receiptNo, fee.student_id, fee.amount, fee.paid, fee.payment_method||'cash', req.session.user.email]); } catch(e) {}
+    try { await pool.query('UPDATE fees SET receipt_no=$1 WHERE id=$2', [receiptNo, fee.id]); } catch(e) { console.error('[Error]', e.message); }
+    try { await pool.query('INSERT INTO fee_receipts(tenant_id,fee_id,receipt_no,student_id,amount,paid,method,received_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(receipt_no) DO NOTHING', [t, fee.id, receiptNo, fee.student_id, fee.amount, fee.paid, fee.payment_method||'cash', req.session.user.email]); } catch(e) { console.error('[Error]', e.message); }
   }
   res.send(renderPage('Fee Receipt', `
     <div class="card" style="max-width:700px;margin:20px auto;border:2px solid #4f46e5">
@@ -4073,7 +4176,12 @@ app.get('/church/schedule/:id/delete', requireAuth, requireNotBanned, ah(async (
 // === CHURCH: MEMBERS ===
 app.get('/church/members', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const members = (await pool.query('SELECT * FROM church_members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
+  const members = (await pool.query('SELECT * FROM church_members WHERE tenant_id=$1 ORDER BY name LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const total = parseInt((await pool.query('SELECT COUNT(*) FROM church_members WHERE tenant_id=$1', [t])).rows[0].count);
+  const paginationHtml = `<div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center"><span>Showing ${(offset+1)}-${Math.min(offset+limit, total)} of ${total}</span><div>${page > 1 ? `<a href="?page=${page-1}" class="btn">Previous</a>` : ''} ${offset+limit < total ? `<a href="?page=${page+1}" class="btn">Next</a>` : ''}</div></div>`;
   res.send(renderPage('Church Members', `
     <div class="card"><h3>Church Members</h3>
       <a href="/church/members/new" class="btn btn-sm" style="margin-bottom:15px">+ Add Member</a>
@@ -4082,6 +4190,7 @@ app.get('/church/members', requireAuth, requireNotBanned, ah(async (req, res) =>
         <td><a href="/church/members/${m.id}/edit" class="btn btn-sm">Edit</a> <a href="/church/members/${m.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
       </tr>`).join('') || '<tr><td colspan="6">No church members yet</td></tr>'}
       </table>
+      ${paginationHtml}
     </div>
   `, req.session.user));
 }));
@@ -5517,7 +5626,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <table><tr><th>Amount</th><th>Details</th><th>Date</th></tr>
       ${withdrawalHistory.rows.map(w => {
         let meta = {};
-        try { meta = JSON.parse(w.details || '{}'); } catch(e) {}
+        try { meta = JSON.parse(w.details || '{}'); } catch(e) { console.error('[Error]', e.message); }
         return `<tr><td style="color:#dc2626;font-weight:700">UGX ${Math.abs(parseInt(w.amount)).toLocaleString()}</td><td>${esc(meta.phone||'')} (${esc(meta.network||'')})</td><td>${new Date(w.created_at).toLocaleString()}</td></tr>`;
       }).join('')}
       </table>
@@ -5731,10 +5840,10 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
   }
   
   // Delete non-dev users
-  try { await pool.query('DELETE FROM users WHERE email != $1', [devEmail]); } catch(e) {}
+  try { await pool.query('DELETE FROM users WHERE email != $1', [devEmail]); } catch(e) { console.error('[Error]', e.message); }
   
   // Delete non-dev tenants
-  try { await pool.query('DELETE FROM tenants WHERE email != $1', [devEmail]); } catch(e) {}
+  try { await pool.query('DELETE FROM tenants WHERE email != $1', [devEmail]); } catch(e) { console.error('[Error]', e.message); }
   
   // Clean global tables (no tenant_id)
   const globalTables = [
@@ -5744,16 +5853,16 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
     'marketplace_plugins','plugin_registry','login_history'
   ];
   for (const table of globalTables) {
-    try { validateTable(table); await pool.query(`DELETE FROM ${table}`); } catch(e) {}
+    try { validateTable(table); await pool.query(`DELETE FROM ${table}`); } catch(e) { console.error('[Error]', e.message); }
   }
   
   // Reset platform wallet
-  try { await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1'); } catch(e) {}
+  try { await pool.query('UPDATE platform_wallet SET balance=0 WHERE id=1'); } catch(e) { console.error('[Error]', e.message); }
   
   // Re-seed essential data
   try {
     await pool.query("INSERT INTO platform_status (service, status) VALUES ('api', 'operational'), ('database', 'operational'), ('email', 'operational'), ('sms', 'operational') ON CONFLICT (service) DO NOTHING");
-  } catch(e) {}
+  } catch(e) { console.error('[Error]', e.message); }
   
   // Re-seed feature flags
   const flagSeeds = [
@@ -5770,7 +5879,7 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
   for (const [key, name, desc, ver, cat, reqs, active] of flagSeeds) {
     try {
       await pool.query('INSERT INTO feature_flags(feature_key,name,description,version,category,requirements,is_active) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [key, name, desc, ver, cat, reqs, active]);
-    } catch(e) {}
+    } catch(e) { console.error('[Error]', e.message); }
   }
   
   await audit(devEmail, 'database_cleanup', 'Erased all test data, kept dev account and platform settings');
@@ -6293,7 +6402,7 @@ app.get('/dev/withdraw', requireAuth, requireSuperAdmin, ah(async (req, res) => 
         <table><tr><th>Amount</th><th>Phone</th><th>Network</th><th>Date</th><th>Status</th></tr>
         ${withdrawals.rows.map(w => {
           let meta = {};
-          try { meta = w.source === 'withdrawal' ? JSON.parse(w.details || '{}') : {}; } catch(e) {}
+          try { meta = w.source === 'withdrawal' ? JSON.parse(w.details || '{}') : {}; } catch(e) { console.error('[Error]', e.message); }
           return `<tr><td style="font-weight:700;color:${w.amount < 0 ? '#dc2626' : '#059669'}">UGX ${Math.abs(parseInt(w.amount)).toLocaleString()}</td><td>${esc(meta.phone || 'N/A')}</td><td>${esc(meta.network || 'N/A')}</td><td>${new Date(w.created_at).toLocaleString()}</td><td>${w.amount < 0 ? '<span style="color:#d97706">Processing</span>' : '<span style="color:#059669">Completed</span>'}</td></tr>`;
         }).join('')}
         </table>
@@ -6651,7 +6760,7 @@ app.get('/library', ah(async (req, res) => {
   const resources = (await pool.query(query, params)).rows;
   // Track views
   if (resources.length > 0) {
-    pool.query('UPDATE educational_resources SET view_count = view_count + 1 WHERE id = ANY($1)', [resources.map(r => r.id)]).catch(() => {});
+    pool.query('UPDATE educational_resources SET view_count = view_count + 1 WHERE id = ANY($1)', [resources.map(r => r.id)]).catch(e => console.error('[DB Error]', e.message));
   }
   // Get dev posts for the homepage feed
   const devPosts = (await pool.query('SELECT * FROM dev_posts WHERE is_published=true ORDER BY is_pinned DESC, created_at DESC LIMIT 5')).rows;
@@ -6823,19 +6932,19 @@ app.get('/billing/subscribe/:plan', requireAuth, ah(async (req, res) => {
   const amount = amounts[plan] || 0;
   const expires = new Date(Date.now() + 30*24*60*60*1000);
   if (plan === 'free') {
-    try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [t, plan, amount, 'active', expires]); } catch(e) {}
+    try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [t, plan, amount, 'active', expires]); } catch(e) { console.error('[Error]', e.message); }
     await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan`);
     return res.redirect('/billing');
   }
   // v12: Use inline checkout page (Flutterwave inline JS + manual fallback)
   if (amount > 0) return res.redirect(`/pay/checkout?amount=${amount}&plan=${plan}&description=${plan}+plan+subscription`);
   // Fallback: manual payment
-  try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [t, plan, amount, 'active', expires]); } catch(e) {}
+  try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [t, plan, amount, 'active', expires]); } catch(e) { console.error('[Error]', e.message); }
   if (amount > 0) {
     await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [t]);
     await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [t, 'active']);
   }
-  if (amount > 0) await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description) VALUES($1,$2,$3,$4,$5)', [t, amount, 'manual', 'pending', `${plan} plan subscription`]);
+  if (amount > 0) await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,plan) VALUES($1,$2,$3,$4,$5,$6)', [t, amount, 'manual', 'pending', `${plan} plan subscription`, plan]);
   await audit(req.session.user.email, 'subscription_change', `Changed to ${plan} plan (manual)`);
   res.redirect('/billing');
 }));
@@ -6847,9 +6956,10 @@ app.get('/billing/callback', requireAuth, ah(async (req, res) => {
     const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [tx_ref])).rows[0];
     if (payment && payment.status === 'pending') {
       await pool.query('UPDATE payments SET status=$1 WHERE reference=$2', ['completed', tx_ref]);
-      const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
+      // Try explicit plan from payment record first, fallback to description parsing
+      const plan = payment.plan || (payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('pro') ? 'pro' : 'basic');
       const expires = new Date(Date.now() + 30*24*60*60*1000);
-      try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [payment.tenant_id, plan, payment.amount, 'active', expires]); } catch(e) {}
+      try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at) VALUES($1,$2,$3,$4,$5)', [payment.tenant_id, plan, payment.amount, 'active', expires]); } catch(e) { console.error('[Error]', e.message); }
       // Auto-verify tenant after subscription payment
       await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
       await pool.query('UPDATE subscriptions SET auto_verified=true WHERE tenant_id=$1 AND status=$2', [payment.tenant_id, 'active']);
@@ -8878,7 +8988,7 @@ app.post('/status/admin/update', requireAuth, requireSuperAdmin, ah(async (req, 
 
 app.post('/status/admin/incident', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const { service, title } = req.body;
-  try { await pool.query('INSERT INTO incidents(service,title,status) VALUES($1,$2,$3)', [service, title, 'investigating']); } catch(e) {}
+  try { await pool.query('INSERT INTO incidents(service,title,status) VALUES($1,$2,$3)', [service, title, 'investigating']); } catch(e) { console.error('[Error]', e.message); }
   res.redirect('/status/admin');
 }));
 
@@ -8926,7 +9036,7 @@ app.get('/school/fees/remind', requireAuth, requireNotBanned, ah(async (req, res
 try {
   const multer = require('multer');
   const uploadDir = require('path').join(__dirname, 'uploads');
-  try { require('fs').mkdirSync(uploadDir, { recursive: true }); } catch(e) {}
+  try { require('fs').mkdirSync(uploadDir, { recursive: true }); } catch(e) { console.error('[Error]', e.message); }
   const storage = multer.diskStorage({ destination: uploadDir, filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/[^a-zA-Z0-9._-]/g, '')) });
   const uploadMulter = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
   app.post('/upload/file', requireAuth, requireNotBanned, uploadMulter.single('file'), ah(async (req, res) => {
@@ -9472,8 +9582,7 @@ app.get('/auth/oauth/google', (req, res) => {
 });
 
 app.get('/auth/oauth/google/callback', ah(async (req, res) => {
-  // Placeholder: Exchange code for tokens, create/find user
-  res.redirect('/dashboard');
+  res.status(501).send('Google OAuth is not yet configured. Contact support to enable this feature.');
 }));
 
 app.get('/auth/oauth/microsoft', (req, res) => {
@@ -9539,17 +9648,22 @@ app.get('/school/fee-prediction', requireAuth, requireNotBanned, ah(async (req, 
 app.get('/school/dropout-risk', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT * FROM students WHERE tenant_id=$1', [t])).rows;
+  const studentIds = students.map(s => s.id);
+  const allFees = (await pool.query('SELECT * FROM fees WHERE student_id = ANY($1)', [studentIds])).rows;
+  const allAttendance = (await pool.query('SELECT * FROM attendance WHERE student_id = ANY($1)', [studentIds])).rows;
+  const feesByStudent = {};
+  allFees.forEach(f => { if (!feesByStudent[f.student_id]) feesByStudent[f.student_id] = []; feesByStudent[f.student_id].push(f); });
+  const attendanceByStudent = {};
+  allAttendance.forEach(a => { if (!attendanceByStudent[a.student_id]) attendanceByStudent[a.student_id] = []; attendanceByStudent[a.student_id].push(a); });
   const atRisk = [];
   for (const s of students) {
-    const [fees, attendance] = await Promise.all([
-      pool.query('SELECT * FROM fees WHERE student_id=$1', [s.id]),
-      pool.query('SELECT * FROM attendance WHERE student_id=$1', [s.id])
-    ]);
-    const totalFees = fees.rows.reduce((a,f) => a + parseInt(f.amount||0), 0);
-    const totalPaid = fees.rows.reduce((a,f) => a + parseInt(f.paid||0), 0);
+    const fees = feesByStudent[s.id] || [];
+    const attendance = attendanceByStudent[s.id] || [];
+    const totalFees = fees.reduce((a,f) => a + parseInt(f.amount||0), 0);
+    const totalPaid = fees.reduce((a,f) => a + parseInt(f.paid||0), 0);
     const feeRatio = totalFees > 0 ? totalPaid / totalFees : 1;
-    const presentDays = attendance.rows.filter(a => a.status === 'present').length;
-    const totalDays = attendance.rows.length || 1;
+    const presentDays = attendance.filter(a => a.status === 'present').length;
+    const totalDays = attendance.length || 1;
     const attendRatio = presentDays / totalDays;
     let risk = 'Low'; let score = 0;
     if (feeRatio < 0.2) { risk = 'Critical'; score += 3; } else if (feeRatio < 0.5) { risk = 'High'; score += 2; } else if (feeRatio < 0.8) { risk = 'Medium'; score += 1; }
@@ -9876,7 +9990,7 @@ const runAutoBackup = async () => {
             validateTable(table);
             const rows = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 AND deleted_at IS NULL`, [t.id])).rows;
             backupData[table] = rows;
-          } catch(e) {} // Table might not have tenant_id
+          } catch(e) { console.error('[Error]', e.message); } // Table might not have tenant_id
         }
         const backupJson = JSON.stringify(backupData);
         const buffer = Buffer.from(backupJson);
@@ -10016,7 +10130,7 @@ const softDelete = async (table, id, tenantId) => {
 const trackChange = async (tenantId, entityType, entityId, action, oldData, newData, changedBy) => {
   try {
     await pool.query('INSERT INTO version_history(tenant_id,entity_type,entity_id,action,old_data,new_data,changed_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [tenantId, entityType, entityId, action, JSON.stringify(oldData), JSON.stringify(newData), changedBy]);
-  } catch(e) {}
+  } catch(e) { console.error('[Error]', e.message); }
 };
 
 app.get('/history/:type/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -11309,7 +11423,7 @@ app.post('/data-export/create', requireAuth, ah(async (req, res) => {
         validateTable(table);
         const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 AND deleted_at IS NULL`, [t]);
         if (result.rows.length) exportData[table] = result.rows;
-      } catch(e) {} // Table may not have tenant_id
+      } catch(e) { console.error('[Error]', e.message); } // Table may not have tenant_id
     }
     exportData.exported_at = new Date().toISOString();
     exportData.tenant_id = t;
@@ -11341,7 +11455,7 @@ app.get('/data-export/download', requireAuth, ah(async (req, res) => {
       validateTable(table);
       const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t]);
       data[table] = result.rows;
-    } catch(e) {}
+    } catch(e) { console.error('[Error]', e.message); }
   }
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', 'attachment; filename=ssewasswa-export.json');
@@ -11356,7 +11470,7 @@ const trackEvent = (eventType, entityType, entityId) => async (req, res, next) =
     if (req.session.user) {
       await pool.query('INSERT INTO analytics_events(tenant_id,event_type,entity_type,entity_id,user_email) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, eventType, entityType, entityId, req.session.user.email]);
     }
-  } catch(e) {}
+  } catch(e) { console.error('[Error]', e.message); }
   next();
 };
 
@@ -13102,7 +13216,7 @@ app.get('/search', requireAuth, requireNotBanned, requireFeature('global_search'
       try {
         const rows = (await pool.query(s.query, [t, like])).rows.slice(0,5);
         rows.forEach(r => results.push({ type: s.type, id: r.id, title: r.title, subtitle: r.subtitle||'' }));
-      } catch(e) {}
+      } catch(e) { console.error('[Error]', e.message); }
     }
   }
   res.send(renderPage('Search', `
@@ -13614,7 +13728,7 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
     ['mobile_ui','Mobile-Optimized UI','Hamburger nav, responsive tables, bottom navigation','3.0','core','None']
   ];
   for (const [key, name, desc, ver, cat, req] of additionalFlags) {
-    try { await pool.query(`INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ($1,$2,$3,$4,$5,$6,true) ON CONFLICT DO NOTHING`, [key, name, desc, ver, cat, req]); } catch(e) {}
+    try { await pool.query(`INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ($1,$2,$3,$4,$5,$6,true) ON CONFLICT DO NOTHING`, [key, name, desc, ver, cat, req]); } catch(e) { console.error('[Error]', e.message); }
   }
   console.log('v11 additional tables and flags initialized');
 })();
@@ -15668,7 +15782,7 @@ app.post('/shop/order/place', requireAuth, requireNotBanned, requireFeature('sho
   await pool.query('INSERT INTO shop_orders(tenant_id,order_no,buyer_email,buyer_name,buyer_phone,items,total,status,payment_method,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, orderNo, buyer_email||null, buyer_name||'', buyer_phone||null, JSON.stringify(cart), total, 'pending', payment_method||'cash', notes||null]);
   // Deduct stock
   for (const item of cart) {
-    try { await pool.query('UPDATE school_shop_items SET stock_quantity=GREATEST(stock_quantity-$1,0) WHERE id=$2', [item.quantity, item.itemId]); } catch(e) {}
+    try { await pool.query('UPDATE school_shop_items SET stock_quantity=GREATEST(stock_quantity-$1,0) WHERE id=$2', [item.quantity, item.itemId]); } catch(e) { console.error('[Error]', e.message); }
   }
   req.session.cart = [];
   res.send(renderPage('Order Placed!', `<div class="card" style="max-width:600px;margin:40px auto;text-align:center"><h2>✅ Order Placed!</h2><div class="alert alert-success"><p>Your order <strong>${esc(orderNo)}</strong> has been placed.</p><p>Total: <strong>UGX ${total.toLocaleString()}</strong></p></div><a href="/shop/orders" class="btn">View My Orders</a><a href="/shop/browse" class="btn btn-green" style="margin-left:10px">Continue Shopping</a></div>`, req.session.user, req));
@@ -16622,7 +16736,7 @@ app.get('/entertainment/scrape-now', requireAuth, requireNotBanned, ah(async (re
           try {
             await pool.query('INSERT INTO scraped_content(tenant_id,source,title,summary,url,category,scraped_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT DO NOTHING', [t, src.name, item.name||item.title||'', item.snippet||'', item.url||'', src.category]);
             imported++;
-          } catch(e) {}
+          } catch(e) { console.error('[Error]', e.message); }
         }
       }
       await pool.query('UPDATE scrape_sources SET last_scraped_at=NOW() WHERE id=$1', [src.id]);
@@ -16639,7 +16753,7 @@ app.get('/entertainment/scrape-now', requireAuth, requireNotBanned, ah(async (re
             try {
               await pool.query('INSERT INTO scraped_content(tenant_id,source,title,summary,url,category,scraped_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT DO NOTHING', [t, name, item.name||item.title||'', item.snippet||'', item.url||'', 'news']);
               imported++;
-            } catch(e) {}
+            } catch(e) { console.error('[Error]', e.message); }
           }
         }
       } catch(e) { console.warn('Built-in scrape error:', name, e.message); }
@@ -16682,19 +16796,32 @@ app.post('/webhook/flutterwave', express.raw({ type: 'application/json' }), ah(a
   
   if (payload.event === 'charge.completed' && payload.data?.status === 'successful') {
     const { tx_ref, amount, currency, id: flw_id, customer } = payload.data;
-    const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1 AND status=$2', [tx_ref, 'pending'])).rows[0];
-    if (payment) {
-      await pool.query('UPDATE payments SET status=$1, method=$2 WHERE reference=$3', ['completed', 'flutterwave', tx_ref]);
-      const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
-      const expires = new Date(Date.now() + 30*24*60*60*1000);
-      try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method,reference) VALUES($1,$2,$3,$4,$5,$6,$7)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'flutterwave', tx_ref]); } catch(e) {}
-      await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
-      // Add to developer revenue
-      const devShare = Math.round(payment.amount * 0.9);
-      try { await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, 'subscription', devShare, `${plan} plan via Flutterwave`]); } catch(e) {}
-      await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan, flw_id });
-      await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
-      console.log(`[Flutterwave] Payment confirmed: ${tx_ref} - UGX ${amount}`);
+    // Use transaction to prevent race condition (double-crediting)
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const payment = (await client.query('SELECT * FROM payments WHERE reference=$1 AND status=$2 FOR UPDATE', [tx_ref, 'pending'])).rows[0];
+      if (payment) {
+        await client.query('UPDATE payments SET status=$1, method=$2 WHERE reference=$3', ['completed', 'flutterwave', tx_ref]);
+        const plan = payment.plan || (payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('pro') ? 'pro' : 'basic');
+        const expires = new Date(Date.now() + 30*24*60*60*1000);
+        try { await client.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method,reference) VALUES($1,$2,$3,$4,$5,$6,$7)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'flutterwave', tx_ref]); } catch(e) { console.error('[Error]', e.message); }
+        await client.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
+        const devShare = Math.round(payment.amount * 0.9);
+        try { await client.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, 'subscription', devShare, `${plan} plan via Flutterwave`]); } catch(e) { console.error('[Error]', e.message); }
+        await client.query('COMMIT');
+        await fireWebhook(payment.tenant_id, 'payment', { ref: tx_ref, amount: payment.amount, plan, flw_id });
+        await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount, plan });
+        await audit(payment.tenant_id ? 'system' : 'unknown', 'payment_completed', `Flutterwave: ${tx_ref} UGX ${amount}`);
+        console.log(`[Flutterwave] Payment confirmed: ${tx_ref} - UGX ${amount}`);
+      } else {
+        await client.query('COMMIT');
+      }
+    } catch (e) {
+      await client.query('ROLLBACK');
+      console.error('[Flutterwave] Payment processing error:', e.message);
+    } finally {
+      client.release();
     }
     // Also check MoMo payments
     const momo = (await pool.query('SELECT * FROM momo_payments WHERE external_ref=$1 AND status!=$2', [tx_ref, 'completed'])).rows[0];
@@ -16738,9 +16865,9 @@ app.get('/pay/checkout', requireAuth, ah(async (req, res) => {
   
   // Record pending payment
   if (amt > 0) {
-    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference) VALUES($1,$2,$3,$4,$5,$6)', [t, amt, 'pending', 'pending', description || `${plan || 'payment'} checkout`, ref]);
+    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference,plan) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, amt, 'pending', 'pending', description || `${plan || 'payment'} checkout`, ref, plan||null]);
   }
-  
+
   res.send(renderPage('Secure Payment', `
     <div class="card" style="max-width:550px;margin:40px auto">
       <div style="text-align:center;margin-bottom:20px">
@@ -16929,14 +17056,15 @@ app.get('/pay/mtn/status', requireAuth, ah(async (req, res) => {
     await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['completed', ref]);
     const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
     if (payment) {
-      const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('basic') ? 'basic' : '';
+      // Try explicit plan from payment record first, fallback to description parsing
+      const plan = payment.plan || (payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('pro') ? 'pro' : payment.description?.includes('basic') ? 'basic' : '');
       if (plan) {
         const expires = new Date(Date.now() + 30*24*60*60*1000);
-        try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']); } catch(e) {}
+        try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']); } catch(e) { console.error('[Error]', e.message); }
         await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
       }
       const devShare = Math.round(payment.amount * 0.9);
-      try { await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, 'mtn_momo', devShare, `Payment via MTN MoMo: ${ref}`]); } catch(e) {}
+      try { await pool.query('INSERT INTO developer_revenue(tenant_id,source,amount,description) VALUES($1,$2,$3,$4)', [payment.tenant_id, 'mtn_momo', devShare, `Payment via MTN MoMo: ${ref}`]); } catch(e) { console.error('[Error]', e.message); }
       await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, method: 'mtn_momo' });
     }
     res.send(renderPage('Payment Successful!', `
@@ -16989,9 +17117,10 @@ app.post('/webhook/mtn', express.json(), ah(async (req, res) => {
       await pool.query('UPDATE momo_payments SET status=$1 WHERE external_ref=$2', ['completed', ref]);
       const payment = (await pool.query('SELECT * FROM payments WHERE reference=$1', [ref])).rows[0];
       if (payment) {
-        const plan = payment.description?.includes('pro') ? 'pro' : payment.description?.includes('enterprise') ? 'enterprise' : 'basic';
+        // Try explicit plan from payment record first, fallback to description parsing
+        const plan = payment.plan || (payment.description?.includes('enterprise') ? 'enterprise' : payment.description?.includes('pro') ? 'pro' : 'basic');
         const expires = new Date(Date.now() + 30*24*60*60*1000);
-        try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']); } catch(e) {}
+        try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status,expires_at,payment_method) VALUES($1,$2,$3,$4,$5,$6)', [payment.tenant_id, plan, payment.amount, 'active', expires, 'mtn_momo']); } catch(e) { console.error('[Error]', e.message); }
         await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [payment.tenant_id]);
         await fireWebhook(payment.tenant_id, 'payment', { ref, amount: payment.amount, method: 'mtn_momo' });
         await evaluateAutomations(payment.tenant_id, 'fee.paid', { amount: payment.amount });
@@ -17156,7 +17285,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS student_accounts (
   temp_password TEXT,
   last_login TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
-)`).catch(() => {});
+)`).catch(e => console.error('[DB Error]', e.message));
 
 // Admin: Generate student passwords
 app.get('/school/students/generate-passwords', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -17169,6 +17298,8 @@ app.get('/school/students/generate-passwords', requireAuth, requireNotBanned, ah
       const tempPass = 'STD' + crypto.randomBytes(4).toString('hex').toUpperCase();
       const hash = await bcrypt.hash(tempPass, 10);
       await pool.query('INSERT INTO student_accounts(student_id,password,temp_password) VALUES($1,$2,$3)', [s.id, hash, tempPass]);
+      // Clear temp_password after 24h via scheduled job or manual admin action
+      // For now, temp_password is only shown once below at creation time
       created++;
     }
   }
@@ -17190,7 +17321,7 @@ app.get('/school/students/passwords-list', requireAuth, requireNotBanned, ah(asy
     <p class="muted" style="margin-bottom:15px">Students log in at <strong>/student/login</strong> with Admission Number + Password</p>
     <a href="/school/students/generate-passwords" class="btn btn-green btn-sm" style="margin-bottom:15px">Generate New Passwords</a>
     ${accounts.length ? `<table><tr><th>Name</th><th>Admission No</th><th>Class</th><th>Password</th><th>Last Login</th></tr>
-    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.admission_no)}</td><td>${esc(a.class||'')}</td><td style="font-family:monospace;font-weight:700">${esc(a.temp_password||'Set')}</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
+    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.admission_no)}</td><td>${esc(a.class||'')}</td><td style="font-family:monospace;font-weight:700">${a.temp_password?'********':'Set'}</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
     </table>` : '<p class="muted">No student accounts yet. Click "Generate New Passwords" above.</p>'}</div>
   `, req.session.user));
 }));
@@ -17401,7 +17532,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS church_accounts (
   temp_password TEXT,
   last_login TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
-)`).catch(() => {});
+)`).catch(e => console.error('[DB Error]', e.message));
 
 app.get('/church/login', (req, res) => {
   if (req.session.churchMember) return res.redirect('/church/portal');
@@ -17524,6 +17655,7 @@ app.get('/church/members/generate-passwords', requireAuth, requireNotBanned, ah(
       const tempPass = 'CH' + crypto.randomBytes(4).toString('hex').toUpperCase();
       const hash = await bcrypt.hash(tempPass, 10);
       await pool.query('INSERT INTO church_accounts(member_id,password,temp_password) VALUES($1,$2,$3)', [m.id, hash, tempPass]);
+      // temp_password shown only once at creation
       created++;
     }
   }
@@ -17545,7 +17677,7 @@ app.get('/church/members/passwords-list', requireAuth, requireNotBanned, ah(asyn
     <p class="muted" style="margin-bottom:15px">Members log in at <strong>/church/login</strong> with Phone Number + Password</p>
     <a href="/church/members/generate-passwords" class="btn btn-green btn-sm" style="margin-bottom:15px">Generate New Passwords</a>
     ${accounts.length ? `<table><tr><th>Name</th><th>Phone</th><th>Password</th><th>Last Login</th></tr>
-    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.phone||'')}</td><td style="font-family:monospace;font-weight:700">${esc(a.temp_password||'Set')}</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
+    ${accounts.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.phone||'')}</td><td style="font-family:monospace;font-weight:700">${a.temp_password?'********':'Set'}</td><td>${a.last_login?new Date(a.last_login).toLocaleString():'Never'}</td></tr>`).join('')}
     </table>` : '<p class="muted">No accounts yet.</p>'}</div>
   `, req.session.user));
 }));
@@ -17906,7 +18038,7 @@ app.post('/api/settings/country', requireAuth, ah(async (req, res) => {
     VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(tenant_id) DO UPDATE SET country_code=$2, currency=$3, preferred_payment=$4, flutterwave_enabled=$5, updated_at=NOW()`,
     [t, cc, currency || cfg.currency, preferred_payment || cfg.providers[0], flutterwave_enabled !== undefined ? flutterwave_enabled : cfg.flutterwave_supported]);
   
-  await logAudit(t, req.session.user.email, 'country_settings_updated', { country: cc, currency });
+  await audit(req.session.user.email, 'country_settings_updated', { country: cc, currency });
   res.json({ success: true, country: cc, currency: currency || cfg.currency, availableProviders: cfg.providers });
 }));
 
@@ -17920,7 +18052,7 @@ app.get('/pay/checkout-v2', requireAuth, ah(async (req, res) => {
   const ref = 'SSEW-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex');
   
   if (amt > 0) {
-    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference) VALUES($1,$2,$3,$4,$5,$6)', [t, amt, 'pending', 'pending', description || `${plan || 'payment'} checkout`, ref]);
+    await pool.query('INSERT INTO payments(tenant_id,amount,method,status,description,reference,plan) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, amt, 'pending', 'pending', description || `${plan || 'payment'} checkout`, ref, plan||null]);
   }
 
   const providerButtons = cfg.providers.map(p => {
@@ -18161,7 +18293,7 @@ app.post('/clinic/patient/:type/:id/allergy/save', requireAuth, requireNotBanned
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_allergies(tenant_id,patient_type,patient_id,patient_name,allergen,reaction,severity,onset_date,verified_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
     [t, type, id, patientName, allergen, reaction || null, severity || 'moderate', onset_date || null, verified_by || null, notes || null]);
-  await logAudit(t, req.session.user.email, 'allergy_added', { patient: patientName, allergen });
+  await audit(req.session.user.email, 'allergy_added', { patient: patientName, allergen });
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -18196,7 +18328,7 @@ app.post('/clinic/patient/:type/:id/chronic/save', requireAuth, requireNotBanned
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_chronic_conditions(tenant_id,patient_type,patient_id,patient_name,condition_name,icd_code,diagnosed_date,treating_doctor,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
     [t, type, id, patientName, condition_name, icd_code || null, diagnosed_date || null, treating_doctor || null, status || 'active', notes || null]);
-  await logAudit(t, req.session.user.email, 'chronic_condition_added', { patient: patientName, condition: condition_name });
+  await audit(req.session.user.email, 'chronic_condition_added', { patient: patientName, condition: condition_name });
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -18239,7 +18371,7 @@ app.post('/clinic/patient/:type/:id/vitals/save', requireAuth, requireNotBanned,
   const bmi = d.weight && d.height ? (d.weight / ((d.height/100) ** 2)).toFixed(1) : null;
   await pool.query('INSERT INTO patient_vitals(tenant_id,patient_type,patient_id,patient_name,temperature,blood_pressure_systolic,blood_pressure_diastolic,heart_rate,respiratory_rate,weight,height,bmi,oxygen_saturation,pain_level,recorded_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)',
     [t, type, id, patientName, d.temperature||null, d.blood_pressure_systolic||null, d.blood_pressure_diastolic||null, d.heart_rate||null, d.respiratory_rate||null, d.weight||null, d.height||null, bmi, d.oxygen_saturation||null, d.pain_level||0, d.recorded_by||null, d.notes||null]);
-  await logAudit(t, req.session.user.email, 'vitals_recorded', { patient: patientName });
+  await audit(req.session.user.email, 'vitals_recorded', { patient: patientName });
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -18275,7 +18407,7 @@ app.post('/clinic/patient/:type/:id/immunization/save', requireAuth, requireNotB
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_immunizations(tenant_id,patient_type,patient_id,patient_name,vaccine_name,dose_number,administered_date,administered_by,batch_number,next_dose_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
     [t, type, id, patientName, d.vaccine_name, d.dose_number||1, d.administered_date||null, d.administered_by||null, d.batch_number||null, d.next_dose_date||null, d.notes||null]);
-  await logAudit(t, req.session.user.email, 'immunization_added', { patient: patientName, vaccine: d.vaccine_name });
+  await audit(req.session.user.email, 'immunization_added', { patient: patientName, vaccine: d.vaccine_name });
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -18312,7 +18444,7 @@ app.post('/clinic/patient/:type/:id/medication/save', requireAuth, requireNotBan
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_medications(tenant_id,patient_type,patient_id,patient_name,medication_name,dosage,frequency,start_date,end_date,prescribed_by,reason,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
     [t, type, id, patientName, d.medication_name, d.dosage||null, d.frequency||null, d.start_date||null, d.end_date||null, d.prescribed_by||null, d.reason||null, d.notes||null]);
-  await logAudit(t, req.session.user.email, 'medication_added', { patient: patientName, medication: d.medication_name });
+  await audit(req.session.user.email, 'medication_added', { patient: patientName, medication: d.medication_name });
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -18321,7 +18453,7 @@ app.get('/clinic/patient/:type/:id/medication/:medId/stop', requireAuth, require
   const t = req.session.user.tenant_id;
   const { type, id, medId } = req.params;
   await pool.query('UPDATE patient_medications SET is_active=false, end_date=CURRENT_DATE WHERE id=$1 AND tenant_id=$2', [medId, t]);
-  await logAudit(t, req.session.user.email, 'medication_stopped', { medicationId: medId });
+  await audit(req.session.user.email, 'medication_stopped', { medicationId: medId });
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
 }));
 
@@ -18471,7 +18603,7 @@ app.post('/clinic/patient/:type/:id/invoice/save', requireAuth, requireNotBanned
       [t, inv.rows[0].id, item.desc, item.qty, item.price, item.total]);
   }
   
-  await logAudit(t, req.session.user.email, 'invoice_created', { patient: patientName, invoice: invoice_number, amount: totalAmount });
+  await audit(req.session.user.email, 'invoice_created', { patient: patientName, invoice: invoice_number, amount: totalAmount });
   res.redirect(`/clinic/patient/${type}/${id}/billing`);
 }));
 
@@ -18559,7 +18691,7 @@ app.post('/clinic/patient/:type/:id/invoice/:invId/pay-manual', requireAuth, req
   const newStatus = newPaid >= inv.total_amount ? 'paid' : 'partial';
   
   await pool.query('UPDATE patient_invoices SET paid_amount=$1, status=$2 WHERE id=$3', [newPaid, newStatus, invId]);
-  await logAudit(t, req.session.user.email, 'payment_recorded', { invoice: inv.invoice_number, amount: amt, method });
+  await audit(req.session.user.email, 'payment_recorded', { invoice: inv.invoice_number, amount: amt, method });
   res.redirect(`/clinic/patient/${type}/${id}/billing`);
 }));
 
@@ -18605,7 +18737,7 @@ app.post('/clinic/insurance/save', requireAuth, requireNotBanned, requireFeature
   const d = req.body;
   await pool.query('INSERT INTO insurance_providers(tenant_id,name,code,type,coverage_percentage,requires_preauth,contact_phone,contact_email,address,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
     [t, d.name, d.code||null, d.type||'private', d.coverage_percentage||80, d.requires_preauth==='true', d.contact_phone||null, d.contact_email||null, d.address||null, d.notes||null]);
-  await logAudit(t, req.session.user.email, 'insurance_provider_added', { name: d.name });
+  await audit(req.session.user.email, 'insurance_provider_added', { name: d.name });
   res.redirect('/clinic/insurance');
 }));
 
@@ -18644,7 +18776,7 @@ app.post('/clinic/patient/:type/:id/insurance/save', requireAuth, requireNotBann
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   await pool.query('INSERT INTO patient_insurance(tenant_id,patient_type,patient_id,patient_name,provider_id,policy_number,member_number,group_number,effective_date,expiry_date,coverage_percentage,is_primary) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
     [t, type, id, patientName, d.provider_id, d.policy_number||null, d.member_number||null, d.group_number||null, d.effective_date||null, d.expiry_date||null, d.coverage_percentage||null, d.is_primary!=='false']);
-  await logAudit(t, req.session.user.email, 'patient_insurance_added', { patient: patientName });
+  await audit(req.session.user.email, 'patient_insurance_added', { patient: patientName });
   res.redirect(`/clinic/patient/${type}/${id}/billing`);
 }));
 
@@ -18687,7 +18819,7 @@ app.post('/clinic/patient/:type/:id/invoice/:invId/claim-submit', requireAuth, r
   await pool.query('INSERT INTO insurance_claims(tenant_id,patient_type,patient_id,patient_name,provider_id,invoice_id,claim_number,amount_claimed,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
     [t, type, id, patientName, provider_id, invId, claimNumber, amount_claimed || 0, 'submitted', notes || null]);
   
-  await logAudit(t, req.session.user.email, 'insurance_claim_submitted', { claim: claimNumber, amount: amount_claimed });
+  await audit(req.session.user.email, 'insurance_claim_submitted', { claim: claimNumber, amount: amount_claimed });
   res.redirect(`/clinic/patient/${type}/${id}/billing`);
 }));
 
@@ -18718,14 +18850,14 @@ app.get('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeat
       await pool.query('UPDATE patient_invoices SET paid_amount=$1, insurance_cover=$2, status=$3 WHERE id=$4', [newPaid, claim.amount_claimed, newPaid >= inv.total_amount ? 'paid' : 'partial', claim.invoice_id]);
     }
   }
-  await logAudit(t, req.session.user.email, 'claim_approved', { claimId: req.params.id });
+  await audit(req.session.user.email, 'claim_approved', { claimId: req.params.id });
   res.redirect('/clinic/claims');
 }));
 
 app.get('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE insurance_claims SET status=$1, processed_at=NOW(), rejection_reason=$2 WHERE id=$3', ['rejected', 'Rejected by admin', req.params.id]);
-  await logAudit(t, req.session.user.email, 'claim_rejected', { claimId: req.params.id });
+  await audit(req.session.user.email, 'claim_rejected', { claimId: req.params.id });
   res.redirect('/clinic/claims');
 }));
 
@@ -18982,9 +19114,10 @@ app.get('/clinic/cds', requireAuth, requireNotBanned, requireFeature('clinical_d
       if (data.interactions.length === 0) {
         html = '<div class="alert alert-info"><p>No known interactions found between these medications.</p></div>';
       } else {
-        html = '<div class="alert alert-error"><h4>Interactions Found: ' + data.interactions.length + '</h4>';
+        const escH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        html = '<div class="alert alert-error"><h4>Interactions Found: ' + escH(data.interactions.length) + '</h4>';
         data.interactions.forEach(i => {
-          html += '<div style="padding:8px;border-left:4px solid ' + (i.severity==='high'?'#dc2626':'#f59e0b') + ';margin-bottom:8px"><strong>' + i.drug_a + ' + ' + i.drug_b + '</strong> <span class="tag" style="background:' + (i.severity==='high'?'#dc2626':'#f59e0b') + ';color:white">' + i.severity + '</span><br>' + (i.description||'') + '<br><em>' + (i.recommendation||'') + '</em></div>';
+          html += '<div style="padding:8px;border-left:4px solid ' + (i.severity==='high'?'#dc2626':'#f59e0b') + ';margin-bottom:8px"><strong>' + escH(i.drug_a) + ' + ' + escH(i.drug_b) + '</strong> <span class="tag" style="background:' + (i.severity==='high'?'#dc2626':'#f59e0b') + ';color:white">' + escH(i.severity) + '</span><br>' + escH(i.description||'') + '<br><em>' + escH(i.recommendation||'') + '</em></div>';
         });
         html += '</div>';
       }
@@ -19018,11 +19151,12 @@ app.get('/clinic/cds/allergy-check', requireAuth, requireNotBanned, requireFeatu
       const data = await resp.json();
       let html = '';
       if (data.alerts.length === 0) {
-        html = '<div class="alert alert-info"><p>No known allergies for this medication. Patient has '+data.allergy_count+' recorded allergies - none match.</p></div>';
+        html = '<div class="alert alert-info"><p>No known allergies for this medication. Patient has '+(data.allergy_count||0)+' recorded allergies - none match.</p></div>';
       } else {
+        const escH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         html = '<div class="alert alert-error"><h4>Allergy Alert!</h4>';
         data.alerts.forEach(a => {
-          html += '<div style="padding:10px;border-left:4px solid #dc2626;margin-bottom:8px;background:#fef2f2"><strong>'+a.type.replace(/_/g,' ').toUpperCase()+'</strong><br>'+a.message+'<br><em>'+a.recommendation+'</em></div>';
+          html += '<div style="padding:10px;border-left:4px solid #dc2626;margin-bottom:8px;background:#fef2f2"><strong>'+escH(a.type).replace(/_/g,' ').toUpperCase()+'</strong><br>'+escH(a.message)+'<br><em>'+escH(a.recommendation)+'</em></div>';
         });
         html += '</div>';
       }
@@ -19060,9 +19194,10 @@ app.get('/clinic/cds/dosage', requireAuth, requireNotBanned, requireFeature('cli
       if (data.warnings.length === 0) {
         html = '<div class="alert alert-info"><p>No dosage warnings for this medication at the given dose.</p></div>';
       } else {
+        const escH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         html = '<div class="alert alert-error"><h4>Dosage Warnings</h4>';
         data.warnings.forEach(w => {
-          html += '<div style="padding:8px;border-left:4px solid '+(w.severity==='high'?'#dc2626':'#f59e0b')+';margin-bottom:8px"><strong>'+w.type.replace(/_/g,' ').toUpperCase()+'</strong><br>'+w.message+'</div>';
+          html += '<div style="padding:8px;border-left:4px solid '+(w.severity==='high'?'#dc2626':'#f59e0b')+';margin-bottom:8px"><strong>'+escH(w.type).replace(/_/g,' ').toUpperCase()+'</strong><br>'+escH(w.message)+'</div>';
         });
         html += '</div>';
       }
@@ -19303,10 +19438,31 @@ app.use((err, req, res, next) => {
   res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
 });
 
+// === REQUEST TIMEOUT MIDDLEWARE ===
+app.use((req, res, next) => {
+  req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Request timeout' });
+    }
+  });
+  next();
+});
+
+// === CENTRALIZED ERROR HANDLER ===
+app.use((err, req, res, next) => {
+  console.error(`[Error] ${req.method} ${req.path}:`, err.message);
+  // Don't leak stack traces in production
+  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message;
+  if (req.accepts('json')) {
+    return res.status(500).json({ error: msg });
+  }
+  const user = req.session?.user || null;
+  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`SSEWASSWA Platform LIVE on ${PORT}`);
-  console.log('SSEWASSWA Platform v9.0 started on port', port);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 // Deploy trigger 1778408080
