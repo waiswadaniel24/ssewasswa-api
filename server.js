@@ -1693,7 +1693,7 @@ const uniqueConstraintMigrations = [
 })();
 
 // === PLATFORM SETTINGS CACHE ===
-let platformSettings = { site_name: 'SSEWASSWA', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: process.env.DEV_EMAIL || 'admin@ssewasswa.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000' };
+let platformSettings = { site_name: 'SSEWASSWA', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: process.env.DEV_EMAIL || 'admin@ssewasswa.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000', google_verification: '' };
 async function loadPlatformSettings() {
   try {
     const rows = (await pool.query('SELECT key, value FROM platform_settings')).rows;
@@ -1723,6 +1723,7 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
 <meta name="keywords" content="SSEWASSWA, school management, Uganda, church management, business management, clinic, fees, attendance, SMS, POS, fundraising">
 <meta property="og:title" content="${esc(title)} | ${esc(siteName)}">
 <meta property="og:description" content="${esc(siteDesc)}">
+${platformSettings.google_verification ? `<meta name="google-site-verification" content="${esc(platformSettings.google_verification)}">` : ''}
 <meta property="og:type" content="website">
 <meta property="og:url" content="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
 <meta property="og:site_name" content="${esc(siteName)}">
@@ -1832,6 +1833,27 @@ ${user ? `<nav class="bottom-nav" style="display:none;position:fixed;bottom:0;le
   </div>
   <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}"><p class="muted">&copy; ${new Date().getFullYear()} ${esc(platformSettings.site_name)}. ${esc(platformSettings.footer_text)}</p></div>
 </footer>
+<script>
+${user ? `
+// Notification badge polling
+(function(){
+  var bell = document.querySelector('a[href="/notifications"][title="Notifications"]');
+  if(!bell) return;
+  var badge = document.createElement('span');
+  badge.id = 'notif-badge';
+  badge.style.cssText = 'display:none;position:absolute;top:-6px;right:-8px;background:#dc2626;color:white;font-size:10px;font-weight:700;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center';
+  bell.style.position = 'relative';
+  bell.appendChild(badge);
+  function fetchCount(){
+    fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){
+      if(d.count > 0){badge.textContent=d.count;badge.style.display='inline-block';}else{badge.style.display='none';}
+    }).catch(function(){});
+  }
+  fetchCount();
+  setInterval(fetchCount, 30000);
+})();
+` : ''}
+</script>
 </body></html>`;
 };
 
@@ -6140,14 +6162,16 @@ app.get('/uploads', requireAuth, ah(async (req, res) => {
     </div>
 
     <div class="card"><h3>Upload Document/File</h3>
-      <form method="POST" action="/uploads/save" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div><label>File Name</label><input name="file_name" placeholder="e.g. Term 1 Report" required></div>
+      <p class="muted" style="margin-bottom:12px">Upload directly from your device or paste a URL</p>
+      <form method="POST" action="/uploads/save" enctype="multipart/form-data" id="uploadForm" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>File Name</label><input name="file_name" id="fileName" placeholder="e.g. Term 1 Report" required></div>
         <div><label>Category</label><select name="category"><option value="document">Document</option><option value="signature">Signature</option><option value="stamp">Stamp/Seal</option><option value="logo">Logo</option><option value="badge">Badge/Certificate</option><option value="photo">Photo</option><option value="video">Video</option><option value="other">Other</option></select></div>
-        <div style="grid-column:1/-1"><label>File URL (paste link to file)</label><input name="file_url" placeholder="https://... (Google Drive, Dropbox, direct link)" required></div>
+        <div style="grid-column:1/-1"><label>Choose File from Device</label><input type="file" name="file" id="fileInput" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.mp4,.mov,.avi,.mp3" style="padding:8px;font-size:14px;width:100%"></div>
+        <div style="grid-column:1/-1;position:relative"><label>Or Paste File URL</label><input name="file_url" id="fileUrl" placeholder="https://... (Google Drive, Dropbox, direct link)"></div>
         <div style="grid-column:1/-1"><label>Description</label><input name="description" placeholder="Brief description"></div>
         <div style="grid-column:1/-1"><button class="btn" type="submit">Save Upload</button></div>
       </form>
-      <p class="muted" style="margin-top:10px">Tip: Upload images to <a href="https://imgbb.com" target="_blank">imgbb.com</a> or <a href="https://imgur.com" target="_blank">imgur.com</a> for free, then paste the direct URL here.</p>
+      <p class="muted" style="margin-top:10px">Upload files directly from your device. Photos, documents, videos supported (max 10MB).</p>
     </div>
 
     ${uploads.length > 0 ? `<div class="card"><h3>Uploaded Files (${uploads.length})</h3>
@@ -6181,11 +6205,33 @@ app.post('/uploads/branding', requireAuth, ah(async (req, res) => {
   res.redirect('/uploads');
 }));
 
-app.post('/uploads/save', requireAuth, ah(async (req, res) => {
+app.post('/uploads/save', requireAuth, upload.single('file'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const { file_name, file_type, file_url, category, description } = req.body;
+  const { file_name, category, description } = req.body;
+  let file_url = req.body.file_url;
+  
+  // If a file was uploaded, try Cloudinary first, else base64 data URI
+  if (req.file && !file_url) {
+    const hasCloudinary = process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME;
+    if (hasCloudinary) {
+      const result = await uploadToCloudinary(req.file.buffer.toString('base64'), 'uploads');
+      file_url = result ? result.secure_url : null;
+    }
+    // If no Cloudinary, store as data URI (works for images, small files)
+    if (!file_url && req.file.size < 2 * 1024 * 1024) {
+      file_url = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    }
+    if (!file_url) {
+      return res.send(renderPage('Upload Failed', '<div class="card"><div class="alert alert-error"><h2>Upload Failed</h2><p>Cloud storage is not configured. Please paste a URL instead, or ask the admin to set up Cloudinary.</p></div><a href="/uploads" class="btn">Back to Uploads</a></div>', req.session.user));
+    }
+  }
+  
+  if (!file_url) {
+    return res.send(renderPage('Upload Failed', '<div class="card"><div class="alert alert-error">Please choose a file or paste a URL.</div><a href="/uploads" class="btn">Try Again</a></div>', req.session.user));
+  }
+  
   await pool.query('INSERT INTO tenant_uploads(tenant_id,file_name,file_type,file_url,category,description,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)',
-    [t, file_name, file_type || 'document', file_url, category || 'document', description || '', req.session.user.email]);
+    [t, file_name, category, file_url, category, description || '', req.session.user.email]);
   res.redirect('/uploads');
 }));
 
@@ -6542,13 +6588,21 @@ app.get('/help', ah(async (req, res) => {
         <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I accept payments?</summary><p class="muted" style="padding:8px 0">Go to Settings then Billing. You can set up mobile money (MTN/Airtel) and card payments.</p></details>
         <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I create a public website?</summary><p class="muted" style="padding:8px 0">From your Dashboard, go to Public Site. You can create pages, add events, and share your organization's link.</p></details>
         <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">Is SSEWASSWA free?</summary><p class="muted" style="padding:8px 0">Yes! SSEWASSWA has a free tier with core features. Premium features like fundraising and advanced reports are available on paid plans.</p></details>
-        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I contact support?</summary><p class="muted" style="padding:8px 0">Email us at <a href="mailto:support@ssewasswa.onrender.com">support@ssewasswa.onrender.com</a> or call <a href="tel:+256700000000">+256 700 000 000</a>.</p></details>
+        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I contact support?</summary><p class="muted" style="padding:8px 0">Email us at <a href="mailto:${esc(platformSettings.support_email)}">${esc(platformSettings.support_email)}</a>${platformSettings.support_phone ? ` or call <a href="tel:${esc(platformSettings.support_phone)}">${esc(platformSettings.support_phone)}</a>` : ''}.</p></details>
       </div>
       <div class="card"><h3>Contact Support</h3>
-        <p class="muted" style="margin-bottom:12px">We are here to help you succeed</p>
-        <div style="margin-bottom:12px"><strong>Email:</strong><br><a href="mailto:support@ssewasswa.onrender.com" style="color:#4f46e5;font-size:16px">support@ssewasswa.onrender.com</a></div>
-        <div style="margin-bottom:12px"><strong>Phone:</strong><br><a href="tel:+256700000000" style="color:#4f46e5;font-size:16px">+256 700 000 000</a></div>
-        <div style="margin-bottom:12px"><strong>Response Time:</strong><br><span class="muted">Usually within 24 hours</span></div>
+        <p class="muted" style="margin-bottom:12px">Send us a message and we will get back to you</p>
+        <form method="POST" action="/help/contact">
+          <input name="name" placeholder="Your Name" required>
+          <input name="email" type="email" placeholder="Your Email" required>
+          <input name="subject" placeholder="Subject" required>
+          <textarea name="message" rows="4" placeholder="Describe your issue or question..." required></textarea>
+          <button class="btn btn-green" type="submit" style="width:100%">Send Message</button>
+        </form>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0">
+          <p class="muted"><strong>Email:</strong> <a href="mailto:${esc(platformSettings.support_email)}" style="color:#4f46e5">${esc(platformSettings.support_email)}</a></p>
+          ${platformSettings.support_phone ? `<p class="muted"><strong>Phone:</strong> <a href="tel:${esc(platformSettings.support_phone)}" style="color:#4f46e5">${esc(platformSettings.support_phone)}</a></p>` : '<p class="muted"><strong>Phone:</strong> Set up in Dev Settings</p>'}
+        </div>
       </div>
       <div class="card"><h3>Platform Features</h3>
         <ul style="padding-left:20px;line-height:2">
@@ -6561,6 +6615,30 @@ app.get('/help', ah(async (req, res) => {
       </div>
     </div>
   `, req.session.user));
+}));
+
+app.post('/help/contact', ah(async (req, res) => {
+  const { name, email, subject, message } = req.body;
+  if (!name || !email || !subject || !message) {
+    return res.send(renderPage('Help Center', '<div class="card"><div class="alert alert-error">Please fill in all fields.</div><a href="/help" class="btn">Try Again</a></div>', null));
+  }
+  // Store in support_requests table
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS support_requests (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT DEFAULT 'open',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query('INSERT INTO support_requests(name,email,subject,message) VALUES($1,$2,$3,$4)', [name, email, subject, message]);
+  } catch(e) { console.error('[Support]', e.message); }
+  // Send email notification to admin
+  const adminEmail = platformSettings.developer_email || process.env.DEV_EMAIL || 'admin@ssewasswa.com';
+  await sendEmail(adminEmail, `Support: ${subject}`, `<h2>New Support Request</h2><p><strong>Name:</strong> ${esc(name)}</p><p><strong>Email:</strong> ${esc(email)}</p><p><strong>Subject:</strong> ${esc(subject)}</p><p><strong>Message:</strong></p><p>${esc(message)}</p>`);
+  res.send(renderPage('Message Sent', `<div class="card" style="max-width:500px;margin:40px auto"><div class="alert alert-success"><h2>Message Sent!</h2><p>Thank you ${esc(name)}, we have received your message. We will respond to ${esc(email)} within 24 hours.</p></div><a href="/help" class="btn">Back to Help Center</a></div>`, req.session?.user || null));
 }));
 
 // === DEV SETTINGS — EDIT YOUR PLATFORM ===
@@ -6604,6 +6682,28 @@ app.get('/dev/settings', requireAuth, requireSuperAdmin, ah(async (req, res) => 
       </div>
 
       <div class="dev-section">
+        <h2>SEO & Google Search</h2>
+        <p class="muted" style="margin-bottom:12px">Make your platform discoverable on Google</p>
+        <div style="display:grid;gap:12px">
+          <div>
+            <label>Google Site Verification Code</label>
+            <input name="google_verification" value="${esc(s.google_verification || '')}" placeholder="e.g. abc123xyz...">
+            <p class="muted" style="font-size:12px">Get this from <a href="https://search.google.com/search-console" target="_blank">Google Search Console</a></p>
+          </div>
+          <div style="padding:16px;background:#f0fdf4;border-radius:10px;border:1px solid #059669">
+            <h4 style="margin:0 0 8px;color:#059669">Quick Steps to Appear on Google</h4>
+            <ol style="margin:0;padding-left:20px;line-height:2;color:#475569;font-size:14px">
+              <li>Go to <a href="https://search.google.com/search-console" target="_blank" style="color:#4f46e5">Google Search Console</a></li>
+              <li>Add your site: <strong>${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}</strong></li>
+              <li>Verify ownership (use the meta tag code above)</li>
+              <li>Submit your sitemap: <a href="/sitemap.xml" target="_blank" style="color:#4f46e5">/sitemap.xml</a></li>
+              <li>Request indexing for your homepage</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      <div class="dev-section">
         <h2>Monetization Settings</h2>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div><label>Revenue per Ad View (UGX)</label><input name="ad_revenue_per_view" type="number" value="${esc(s.ad_revenue_per_view)}" placeholder="50"></div>
@@ -6623,7 +6723,7 @@ app.get('/dev/settings', requireAuth, requireSuperAdmin, ah(async (req, res) => 
 }));
 
 app.post('/dev/settings/save', requireAuth, requireSuperAdmin, ah(async (req, res) => {
-  const fields = ['site_name', 'site_tagline', 'support_email', 'support_phone', 'developer_email', 'developer_phone', 'whatsapp_link', 'facebook_link', 'twitter_link', 'footer_text', 'ad_revenue_per_view', 'premium_resource_price'];
+  const fields = ['site_name', 'site_tagline', 'support_email', 'support_phone', 'developer_email', 'developer_phone', 'whatsapp_link', 'facebook_link', 'twitter_link', 'footer_text', 'ad_revenue_per_view', 'premium_resource_price', 'google_verification'];
   for (const key of fields) {
     const val = req.body[key] || '';
     await pool.query('INSERT INTO platform_settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()', [key, val]);

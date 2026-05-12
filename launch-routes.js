@@ -12,6 +12,8 @@
 
 module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, requireAuth, requireNotBanned, requireSuperAdmin) {
 
+  const WHATSAPP_NUMBER = process.env.WHATSAPP_NUMBER || '256700000000';
+
   // =========================================================================
   // SECTION 1: LAUNCH MIGRATIONS
   // =========================================================================
@@ -850,7 +852,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <div style="font-weight:700;color:white;margin-bottom:12px">Contact &amp; Help</div>
               <div style="display:flex;flex-direction:column;gap:6px">
                 <a href="mailto:support@ssewasswa.onrender.com" style="color:#94a3b8;text-decoration:none">Email Support</a>
-                <a href="https://wa.me/256700000000" target="_blank" style="color:#94a3b8;text-decoration:none">WhatsApp Chat</a>
+                <a href="https://wa.me/${WHATSAPP_NUMBER}" target="_blank" style="color:#94a3b8;text-decoration:none">WhatsApp Chat</a>
                 <a href="/guide" style="color:#94a3b8;text-decoration:none">User Guide</a>
                 <span style="color:#64748b;font-size:12px;margin-top:8px">Response time: within 24 hours</span>
               </div>
@@ -921,21 +923,27 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `).join('');
 
-    const youTubeEmbeds = [
-      { q: 'Uganda music 2024', label: 'Ugandan Music' },
-      { q: 'Uganda comedy 2024', label: 'Ugandan Comedy' },
-      { q: 'Uganda sports highlights', label: 'Ugandan Sports' },
+    const youTubeLinks = [
+      { q: 'Uganda music 2024', label: 'Ugandan Music', emoji: '🎵' },
+      { q: 'Uganda comedy 2024', label: 'Ugandan Comedy', emoji: '😂' },
+      { q: 'Uganda sports highlights', label: 'Ugandan Sports', emoji: '⚽' },
+      { q: 'Uganda news today', label: 'Uganda News', emoji: '📺' },
+      { q: 'Uganda gospel music', label: 'Gospel Music', emoji: '🙏' },
+      { q: 'Uganda movies 2024', label: 'Ugandan Movies', emoji: '🎬' },
     ];
 
-    const embedHTML = youTubeEmbeds.map(e => `
-      <div style="background:white;border-radius:14px;padding:20px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-        <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;color:#1e293b">${esc(e.label)}</h3>
-        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px">
-          <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;border-radius:10px"
-            src="https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(e.q)}"
-            allowfullscreen loading="lazy" title="${esc(e.label)}"></iframe>
+    const embedHTML = youTubeLinks.map(e => `
+      <a href="https://www.youtube.com/results?search_query=${encodeURIComponent(e.q)}" target="_blank" rel="noopener" style="text-decoration:none">
+        <div style="background:white;border-radius:14px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0;transition:transform 0.2s,box-shadow 0.2s;cursor:pointer" onmouseover="this.style.transform='translateY(-4px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,0.12)'" onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 2px 12px rgba(0,0,0,0.06)'">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:32px">${e.emoji}</span>
+            <div>
+              <h3 style="font-size:16px;font-weight:700;margin:0;color:#1e293b">${esc(e.label)}</h3>
+              <p style="font-size:13px;color:#dc2626;margin-top:4px">Watch on YouTube →</p>
+            </div>
+          </div>
         </div>
-      </div>
+      </a>
     `).join('');
 
     const advertBanner = adverts.length > 0 ? `
