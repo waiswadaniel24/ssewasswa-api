@@ -1774,7 +1774,7 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 .tab-bar a{flex:1;padding:12px;text-align:center;background:${dark ? '#1e293b' : 'white'};color:${dark ? '#94a3b8' : '#64748b'};font-weight:600;text-decoration:none;transition:0.2s}
 .tab-bar a:hover{background:${dark ? '#334155' : '#f1f5f9'};text-decoration:none}
 .tab-bar a.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
-@media(max-width:768px){.nav{flex-direction:column;gap:10px;position:relative}.nav>div:last-child{display:none;flex-direction:column;width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:10px;border-radius:12px;margin-top:10px}.nav.open>div:last-child{display:flex}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}.hero{padding:30px 15px}.container{padding:0 12px}.card{padding:16px;margin-bottom:12px}.btn{padding:14px 20px;width:100%;text-align:center}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{padding:8px;font-size:13px}.stat-num{font-size:24px}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}}
+@media(max-width:768px){.nav{display:none!important}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}.hero{padding:30px 15px}.container{padding:0 12px}.card{padding:16px;margin-bottom:12px}.btn{padding:14px 20px;width:100%;text-align:center}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{padding:8px;font-size:13px}.stat-num{font-size:24px}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}}
 </style>
 <!-- CookieYes Consent Banner -->
 <script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/0e110963fc8230516a615baf/script.js"></script>
@@ -1805,7 +1805,7 @@ ${process.env.GA_TRACKING_ID ? `
 <a href="#main" style="position:absolute;top:-100px;left:0;background:#4f46e5;color:white;padding:8px;z-index:9999" onfocus="this.style.top=\"0\"" onblur="this.style.top=\"-100px\"">Skip to main content</a>
 <nav class="nav" role="navigation" aria-label="Main navigation">
   <div style="display:flex;align-items:center;gap:12px"><button onclick="document.querySelector('.nav').classList.toggle('open')" style="display:none;background:none;border:none;color:white;font-size:24px;cursor:pointer;padding:4px" id="menuBtn">☰</button><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
-  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+  <div class="nav-links" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
@@ -1820,7 +1820,7 @@ ${process.env.GA_TRACKING_ID ? `
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
-${user ? `<nav class="bottom-nav" style="display:none;position:fixed;bottom:0;left:0;right:0;background:${dark ? '#1e293b' : 'white'};border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};padding:8px 0;z-index:1000;justify-content:space-around"><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🏠</span>Home</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔍</span>Search</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔔</span>Alerts</a><a href="/settings/profile" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">👤</span>Me</a></nav>` : ''}
+${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? '#1e293b' : 'white'};border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};padding:8px 0;z-index:1000;justify-content:space-around"><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🏠</span>Home</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔍</span>Search</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔔</span>Alerts</a><a href="#" id="install-btn" style="display:none;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">&#128241;</span>Install</a><a href="/settings/profile" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">👤</span>Me</a></nav>` : ''}
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
     <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
@@ -1861,6 +1861,13 @@ ${user ? `
   setInterval(fetchCount, 30000);
 })();
 ` : ''}
+${user ? `
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();var b=document.getElementById('install-btn');if(b){b.style.display='flex';b.addEventListener('click',function(){e.prompt();e.userChoice.then(function(c){if(c.outcome==='accepted')b.style.display='none'});});}
+});
+` : ''}
+</script>
+<script>
+document.addEventListener('DOMContentLoaded',function(){var imgs=document.querySelectorAll('img:not([loading])');imgs.forEach(function(img){img.setAttribute('loading','lazy')});});
 </script>
 </body></html>`;
 };
@@ -1972,7 +1979,27 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   }
   await audit(email, 'register', `New ${type} account: ${org_name}`);
   // v1.0: Welcome email
-  const welcomeHtml = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto"><h2 style="color:#4f46e5">Welcome to SSEWASSWA! 🎉</h2><p>Hi ${esc(email.split('@')[0])},</p><p>Your <strong>${esc(org_name)}</strong> account has been created successfully on the SSEWASSWA platform.</p><p>Here's what you can do next:</p><ul><li>Set up your ${esc(type)} profile</li><li>Add members, students, or inventory</li><li>Configure billing and notifications</li></ul><p><a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/login" style="background:#4f46e5;color:white;padding:12px 24px;border-radius:8px;text-decoration:none">Login Now</a></p><p>Need help? Reply to this email or visit our <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/api-docs">API Docs</a>.</p></div>`;
+  const welcomeHtml = `<div style="font-family:'Segoe UI',system-ui,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
+  <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:40px 30px;text-align:center">
+    <h1 style="color:white;font-size:28px;margin:0">Welcome to SSEWASSWA!</h1>
+    <p style="color:rgba(255,255,255,0.9);font-size:16px;margin-top:8px">Your all-in-one management platform is ready</p>
+  </div>
+  <div style="padding:30px">
+    <p style="font-size:16px;color:#1e293b">Hi <strong>${esc(email.split('@')[0])}</strong>,</p>
+    <p style="font-size:15px;color:#475569;line-height:1.7">Your <strong>${esc(org_name)}</strong> account has been created successfully! Here is what you can do now:</p>
+    <div style="margin:24px 0;display:grid;gap:12px">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0"><span style="font-size:24px">&#9989;</span><span style="font-size:14px;color:#166534">Complete your profile setup</span></div>
+      <div style="display:flex;align-items:center;gap:12px;padding:14px;background:#eff6ff;border-radius:10px;border:1px solid #bfdbfe"><span style="font-size:24px">&#128101;</span><span style="font-size:14px;color:#1e40af">Add your team members</span></div>
+      <div style="display:flex;align-items:center;gap:12px;padding:14px;background:#fef3c7;border-radius:10px;border:1px solid #fde68a"><span style="font-size:24px">&#128176;</span><span style="font-size:14px;color:#92400e">Set up billing and payments</span></div>
+    </div>
+    <div style="text-align:center;margin:30px 0">
+      <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/login" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px">Login to Your Dashboard</a>
+    </div>
+    <p style="font-size:14px;color:#64748b;line-height:1.6">Need help? Visit our <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/help" style="color:#4f46e5;font-weight:600">Help Center</a> or reply to this email.</p>
+  </div>
+  <div style="background:#f1f5f9;padding:20px 30px;text-align:center;border-top:1px solid #e2e8f0">
+    <p style="font-size:13px;color:#94a3b8;margin:0">&copy; ${new Date().getFullYear()} SSEWASSWA Platform &bull; Built with &#10084; in Uganda</p>
+  </div></div>`;
   sendEmail(email, 'Welcome to SSEWASSWA!', welcomeHtml);
   queueEmail(tenant.rows[0].id, email, 'Welcome to SSEWASSWA!', welcomeHtml);
   // v1.0: Free subscription
@@ -2029,7 +2056,22 @@ app.post('/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 3 }), ah
         from: process.env.GMAIL_USER,
         to: email,
         subject: 'SSEWASSWA - Password Reset',
-        html: `<h2>Password Reset</h2><p>Click below to reset your password. This link expires in 1 hour.</p><a href="${resetUrl}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none">Reset Password</a><p style="margin-top:15px;color:#666">If you didn't request this, ignore this email.</p>`
+        html: `<div style="font-family:'Segoe UI',system-ui,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
+  <div style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:40px 30px;text-align:center">
+    <h1 style="color:white;font-size:28px;margin:0">Password Reset</h1>
+    <p style="color:rgba(255,255,255,0.9);font-size:16px;margin-top:8px">Securely reset your password</p>
+  </div>
+  <div style="padding:30px">
+    <p style="font-size:16px;color:#1e293b">Hi there,</p>
+    <p style="font-size:15px;color:#475569;line-height:1.7;margin-top:12px">We received a request to reset your password. Click the button below to create a new password. This link expires in <strong>1 hour</strong>.</p>
+    <div style="text-align:center;margin:30px 0">
+      <a href="${resetUrl}" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#dc2626,#ef4444);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px">Reset My Password</a>
+    </div>
+    <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin-top:20px;padding:16px;background:#fff7ed;border-radius:10px;border:1px solid #fed7aa">If you did not request this password reset, please ignore this email. Your password will remain unchanged. This link can only be used once.</p>
+  </div>
+  <div style="background:#f1f5f9;padding:20px 30px;text-align:center;border-top:1px solid #e2e8f0">
+    <p style="font-size:13px;color:#94a3b8;margin:0">&copy; ${new Date().getFullYear()} SSEWASSWA Platform</p>
+  </div></div>`
       });
     } catch (e) {
       console.warn('Email send failed:', e.message);
@@ -5568,7 +5610,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   } catch (e) {
     console.warn('Audit logs query failed:', e.message);
   }
-  const [tCount, uCount, rev, wal, tenants, chartData, revBreakdown, pendingSubs, adCount, blogCount, withdrawalHistory] = await Promise.all([
+  const [tCount, uCount, rev, wal, tenants, chartData, revBreakdown, pendingSubs, adCount, blogCount, withdrawalHistory, newUserGrowth, activeTenants, paymentStats] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM tenants'),
     pool.query('SELECT COUNT(*) FROM users'),
     pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM developer_revenue WHERE created_at>NOW()-INTERVAL '30 days'`),
@@ -5579,7 +5621,10 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     pool.query('SELECT COUNT(*) FROM subscriptions WHERE status=$1', ['active']),
     pool.query('SELECT COUNT(*) FROM daily_adverts WHERE is_active=true'),
     pool.query('SELECT COUNT(*) FROM blog_posts'),
-    pool.query('SELECT * FROM developer_revenue WHERE amount < 0 ORDER BY created_at DESC LIMIT 10')
+    pool.query('SELECT * FROM developer_revenue WHERE amount < 0 ORDER BY created_at DESC LIMIT 10'),
+    pool.query(`SELECT DATE(created_at) as day, COUNT(*) as count FROM users WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY DATE(created_at) ORDER BY day ASC`),
+    pool.query(`SELECT COUNT(DISTINCT tenant_id) as active FROM users WHERE created_at > NOW() - INTERVAL '7 days'`),
+    pool.query(`SELECT COUNT(*), COALESCE(SUM(amount),0) as total FROM payments WHERE created_at > NOW() - INTERVAL '30 days'`)
   ]);
   const flashHtml = flash ? `<div class="alert alert-${flash.type}">${esc(flash.msg)}</div>` : '';
   const chartLabels = chartData.rows.map(r => new Date(r.day).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })).join("','");
@@ -5645,6 +5690,29 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       </div>
     </div>
 
+    <!-- PLATFORM STATS -->
+    <div class="dev-section">
+      <h2>&#128202; Platform Overview</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px">
+        <div style="background:#f1f5f9;border-radius:12px;padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:900;color:#4f46e5">${uCount.rows[0].count}</div>
+          <div style="color:#64748b;font-size:13px">Total Users</div>
+        </div>
+        <div style="background:#f1f5f9;border-radius:12px;padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:900;color:#059669">${activeTenants.rows[0].active}</div>
+          <div style="color:#64748b;font-size:13px">Active Tenants (7d)</div>
+        </div>
+        <div style="background:#f1f5f9;border-radius:12px;padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:900;color:#d97706">${paymentStats.rows[0].count}</div>
+          <div style="color:#64748b;font-size:13px">Payments (30d)</div>
+        </div>
+        <div style="background:#f1f5f9;border-radius:12px;padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:900;color:#7c3aed">${blogCount.rows[0].count}</div>
+          <div style="color:#64748b;font-size:13px">Blog Posts</div>
+        </div>
+      </div>
+    </div>
+
     <!-- REVENUE BREAKDOWN -->
     <div class="dev-section">
       <h2>Revenue Breakdown (30 Days)</h2>
@@ -5657,6 +5725,11 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 
     <!-- REVENUE CHART -->
     <div class="dev-section"><h3>30-Day Revenue Trend</h3><canvas id="revChart"></canvas></div>
+
+    <!-- USER GROWTH CHART -->
+    <div class="dev-section"><h2>&#128200; User Growth (30 Days)</h2>
+      <canvas id="userGrowthChart" height="200"></canvas>
+    </div>
 
     <!-- QUICK ACTIONS - WHAT YOU CAN DO -->
     <h2 style="font-size:22px;margin-bottom:16px;margin-top:24px">Quick Actions</h2>
@@ -5783,6 +5856,16 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
         },
         options: { responsive: true, plugins: { legend: { display: false } } }
       });
+    </script>
+    <script>
+      const ugLabels = ${JSON.stringify(newUserGrowth.rows.map(r => new Date(r.day).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })))};
+      const ugData = ${JSON.stringify(newUserGrowth.rows.map(r => parseInt(r.count)))};
+      if (ugLabels.length > 0) {
+        new Chart(document.getElementById('userGrowthChart'), {
+          type: 'line', data: { labels: ugLabels, datasets: [{ label: 'New Users', data: ugData, borderColor: '#059669', backgroundColor: 'rgba(5,150,105,0.1)', fill: true, tension: 0.3 }] },
+          options: { responsive: true, plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } }
+        });
+      }
     </script>
   `, req.session.user));
 }));

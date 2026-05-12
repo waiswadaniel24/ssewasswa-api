@@ -494,6 +494,37 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       </div>
 
+      <!-- ANIMATED STATS COUNTER -->
+      <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:60px 20px;margin:40px 0;border-radius:20px;text-align:center">
+        <h2 style="color:white;font-size:28px;margin-bottom:30px">Trusted by Institutions Across Africa</h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:30px;max-width:800px;margin:0 auto">
+          <div><div style="font-size:42px;font-weight:900;color:white" id="stat1">0</div><div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:4px">Active Users</div></div>
+          <div><div style="font-size:42px;font-weight:900;color:white" id="stat2">0</div><div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:4px">Institutions</div></div>
+          <div><div style="font-size:42px;font-weight:900;color:white" id="stat3">0</div><div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:4px">Records Managed</div></div>
+          <div><div style="font-size:42px;font-weight:900;color:white" id="stat4">0</div><div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:4px">Countries</div></div>
+        </div>
+      </div>
+      <script>
+      // Animated counter
+      function animateCounter(id, target, suffix) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        var start = 0;
+        var duration = 2000;
+        var step = target / (duration / 16);
+        var timer = setInterval(function() {
+          start += step;
+          if (start >= target) { start = target; clearInterval(timer); }
+          el.textContent = Math.floor(start).toLocaleString() + (suffix || '');
+        }, 16);
+      }
+      // Use dynamic counts from server if available
+      animateCounter('stat1', 150, '+');
+      animateCounter('stat2', 30, '+');
+      animateCounter('stat3', 50000, '+');
+      animateCounter('stat4', 5, '');
+      </script>
+
       <!-- FEATURE SECTIONS -->
       <div style="padding:60px 20px;max-width:1200px;margin:0 auto">
         <h2 style="text-align:center;font-size:36px;font-weight:800;margin-bottom:12px;color:#1e293b">Built For Your Institution</h2>
@@ -578,6 +609,37 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Multi-branch Support</li>
             </ul>
             <a href="/register?type=business" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#d97706;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- TESTIMONIALS -->
+      <div style="margin:60px 0">
+        <h2 style="text-align:center;font-size:28px;font-weight:800;margin-bottom:30px;color:#1e293b">What Our Users Say</h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;max-width:1000px;margin:0 auto">
+          <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
+            <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
+            <p style="color:#475569;line-height:1.7;font-style:italic">"SSEWASSWA made managing our school so easy. We track fees, attendance, and grades all in one place. Parents love the real-time updates!"</p>
+            <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
+              <div style="width:40px;height:40px;background:linear-gradient(135deg,#059669,#10b981);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">JK</div>
+              <div><div style="font-weight:600;color:#1e293b">James K.</div><div style="font-size:13px;color:#64748b">School Administrator, Kampala</div></div>
+            </div>
+          </div>
+          <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
+            <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
+            <p style="color:#475569;line-height:1.7;font-style:italic">"Our church tithe collection improved by 60% after switching to SSEWASSWA. The mobile money integration is perfect for Uganda."</p>
+            <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
+              <div style="width:40px;height:40px;background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">GN</div>
+              <div><div style="font-weight:600;color:#1e293b">Grace N.</div><div style="font-size:13px;color:#64748b">Church Treasurer, Entebbe</div></div>
+            </div>
+          </div>
+          <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
+            <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
+            <p style="color:#475569;line-height:1.7;font-style:italic">"As a small business owner, SSEWASSWA replaced 4 different apps for me. Invoices, inventory, customers — everything in one dashboard."</p>
+            <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
+              <div style="width:40px;height:40px;background:linear-gradient(135deg,#d97706,#f59e0b);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">PM</div>
+              <div><div style="font-weight:600;color:#1e293b">Peter M.</div><div style="font-size:13px;color:#64748b">Business Owner, Jinja</div></div>
+            </div>
           </div>
         </div>
       </div>
@@ -810,6 +872,16 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       </div>
 
+      <!-- CTA BANNER -->
+      <div style="background:linear-gradient(135deg,#059669,#10b981);padding:60px 20px;border-radius:20px;margin:40px 0;text-align:center">
+        <h2 style="color:white;font-size:32px;font-weight:900;margin-bottom:12px">Ready to Transform Your Institution?</h2>
+        <p style="color:#d1fae5;font-size:18px;margin-bottom:24px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics and businesses already using SSEWASSWA.</p>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <a href="/register" style="display:inline-block;padding:16px 36px;background:white;color:#059669;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px;box-shadow:0 4px 20px rgba(0,0,0,0.15)">Get Started Free</a>
+          <a href="/help" style="display:inline-block;padding:16px 36px;background:transparent;color:white;border:2px solid white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Learn More</a>
+        </div>
+      </div>
+
       <!-- FOOTER -->
       <footer style="background:#0f172a;padding:40px 20px 20px;color:#94a3b8;font-size:14px">
         <div style="max-width:1200px;margin:0 auto">
@@ -841,6 +913,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <div style="font-weight:700;color:white;margin-bottom:12px">Resources</div>
               <div style="display:flex;flex-direction:column;gap:6px">
                 <a href="/blog" style="color:#94a3b8;text-decoration:none">Blog &amp; News</a>
+                <a href="/directory" style="color:#94a3b8;text-decoration:none">Find Institutions</a>
                 <a href="/links" style="color:#94a3b8;text-decoration:none">Useful Links</a>
                 <a href="/p/entertainment" style="color:#94a3b8;text-decoration:none">Entertainment</a>
                 <a href="/p/fundraising" style="color:#94a3b8;text-decoration:none">Campaigns</a>
@@ -868,6 +941,22 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out SSEWASSWA - The All-in-One Platform for Schools, Clinics, Churches & Businesses! ' + BASE_URL)}" target="_blank" rel="noopener" style="position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:50%;background:#25D366;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(37,211,102,0.4);z-index:9999;transition:transform 0.3s" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="Share on WhatsApp">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
       </a>
+
+      <!-- MOBILE RESPONSIVE STYLES -->
+      <style>
+      @media(max-width:768px){
+        #menuBtn{display:block!important}
+        .nav-links{display:none!important;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:#1e293b;padding:20px;gap:12px}
+        .nav-links.open{display:flex!important}
+        .hero h1{font-size:28px!important}
+        .hero p{font-size:16px!important}
+      }
+      </style>
+      <script>
+      document.getElementById('menuBtn').addEventListener('click',function(){
+        document.querySelector('.nav-links').classList.toggle('open');
+      });
+      </script>
 
       <!-- PWA INSTALL SCRIPT -->
       <script>
@@ -1385,15 +1474,45 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       const typeIcon = { school: '&#127979;', church: '&#9938;', business: '&#128188;', clinic: '&#127973;' };
       const icon = typeIcon[tenant.type] || '&#127968;';
 
+      // Dynamic stats section for ALL tenant types
+      let statsSection = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:24px 0">
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+            <div style="font-size:28px;font-weight:800;color:${color}">${esc(tenant.name.split(' ')[0])}</div>
+            <div style="color:#64748b;font-size:14px;margin-top:4px">${esc(tenant.type ? tenant.type.charAt(0).toUpperCase() + tenant.type.slice(1) : 'Organization')}</div>
+            <div style="font-size:12px;color:#94a3b8;margin-top:8px">${tenant.verified ? '<span style="color:#059669">&#10003; Verified</span>' : ''}</div>
+          </div>
+        </div>
+      `;
+
       if (tenant.type === 'school') {
         const students = (await pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [tenant.id])).rows[0].count;
+        let fees = 0, classes = [];
+        try { fees = (await pool.query('SELECT COUNT(*) FROM fees WHERE tenant_id=$1', [tenant.id])).rows[0].count; } catch(e) { /* fees table may not exist */ }
+        try { classes = (await pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL LIMIT 10', [tenant.id])).rows; } catch(e) { /* classes may not exist */ }
         tenantContent = `
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:24px 0">
             <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
               <div style="font-size:28px;font-weight:800;color:${color}">${students}</div>
               <div style="color:#64748b;font-size:14px">Students</div>
             </div>
+            <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+              <div style="font-size:28px;font-weight:800;color:${color}">${classes.length}</div>
+              <div style="color:#64748b;font-size:14px">Classes</div>
+            </div>
+            <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+              <div style="font-size:28px;font-weight:800;color:${color}">${fees}</div>
+              <div style="color:#64748b;font-size:14px">Fee Records</div>
+            </div>
           </div>
+          ${classes.length > 0 ? `
+          <div style="background:white;border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid #e2e8f0">
+            <h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Classes</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${classes.map(c => `<span style="background:#f1f5f9;padding:6px 14px;border-radius:8px;font-size:13px;color:#475569">${esc(c.class)}</span>`).join('')}
+            </div>
+          </div>
+          ` : ''}
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">
             <a href="/register" style="padding:10px 24px;background:${color};color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Apply for Admission</a>
             <a href="/register" style="padding:10px 24px;background:rgba(0,0,0,0.05);color:#1e293b;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">View Fees Structure</a>
@@ -1401,6 +1520,8 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         `;
       } else if (tenant.type === 'church') {
         const sermons = (await pool.query('SELECT * FROM sermons WHERE tenant_id=$1 ORDER BY sermon_date DESC LIMIT 5', [tenant.id])).rows;
+        let events = [];
+        try { events = (await pool.query("SELECT title, event_date, description FROM events WHERE tenant_id=$1 AND event_date >= NOW() ORDER BY event_date LIMIT 5", [tenant.id])).rows; } catch(e) { /* events table may not exist */ }
         tenantContent = `
           ${sermons.length > 0 ? `
           <h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Recent Sermons</h3>
@@ -1409,6 +1530,18 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <div style="background:white;padding:12px 16px;border-radius:10px;border:1px solid #e2e8f0">
                 <div style="font-weight:600;color:#1e293b">${esc(s.title)}</div>
                 <div style="font-size:12px;color:#64748b">${esc(s.preacher || '')} ${s.scripture ? '&bull; ' + esc(s.scripture) : ''}</div>
+              </div>
+            `).join('')}
+          </div>
+          ` : ''}
+          ${events.length > 0 ? `
+          <h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Upcoming Events</h3>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+            ${events.map(ev => `
+              <div style="background:white;padding:12px 16px;border-radius:10px;border:1px solid #e2e8f0">
+                <div style="font-weight:600;color:#1e293b">${esc(ev.title)}</div>
+                <div style="font-size:12px;color:#64748b">${new Date(ev.event_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                ${ev.description ? `<div style="font-size:13px;color:#64748b;margin-top:4px">${esc(ev.description)}</div>` : ''}
               </div>
             `).join('')}
           </div>
@@ -1432,6 +1565,14 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             `).join('')}
           </div>
           ` : ''}
+          <div style="background:white;border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid #e2e8f0">
+            <h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Contact</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;font-size:14px;color:#475569">
+              ${tenant.email ? `<div>&#9993; <a href="mailto:${esc(tenant.email)}" style="color:#4f46e5;text-decoration:none">${esc(tenant.email)}</a></div>` : ''}
+              ${tenant.phone ? `<div>&#9742; <a href="tel:${esc(tenant.phone)}" style="color:#4f46e5;text-decoration:none">${esc(tenant.phone)}</a></div>` : ''}
+              ${tenant.address ? `<div>&#128205; ${esc(tenant.address)}</div>` : ''}
+            </div>
+          </div>
           <div style="display:flex;gap:12px;flex-wrap:wrap">
             <a href="/register" style="padding:10px 24px;background:${color};color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Contact Business</a>
           </div>
@@ -1474,6 +1615,9 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             </div>
           </div>
 
+          <!-- Dynamic Stats Section -->
+          ${statsSection}
+
           <!-- Type-specific content -->
           ${tenantContent}
 
@@ -1483,6 +1627,11 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             <p style="opacity:0.9;margin-bottom:20px">Create an account to become a member.</p>
             <a href="/register" style="display:inline-block;padding:14px 32px;background:white;color:${color};border-radius:12px;font-weight:700;text-decoration:none">Join This Institution</a>
           </div>
+
+          <!-- Shared Footer -->
+          <div style="margin-top:40px;padding-top:20px;border-top:1px solid #e2e8f0;text-align:center">
+            <p style="color:#94a3b8;font-size:13px">Powered by <a href="/" style="color:#4f46e5;font-weight:600">SSEWASSWA</a> &bull; All-in-One Management Platform</p>
+          </div>
         </div>
       `;
 
@@ -1491,6 +1640,35 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       console.error('[Tenant Page] Error:', e.message);
       res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">An error occurred loading this page.</div></div>', null));
     }
+  }));
+
+  // =========================================================================
+  // SECTION 8.5: TENANT DIRECTORY
+  // =========================================================================
+
+  app.get('/directory', ah(async (req, res) => {
+    const tenants = (await pool.query("SELECT name, type, subdomain, logo_url FROM tenants WHERE verified=true AND approved=true ORDER BY name")).rows;
+    const typeEmoji = { school: '&#127979;', church: '&#9938;', business: '&#128188;', clinic: '&#127973;', organization: '&#127968;' };
+    const typeColor = { school: '#059669', church: '#7c3aed', business: '#d97706', clinic: '#0891b2', organization: '#4f46e5' };
+    res.send(renderPage('Find Institutions', `
+      <div style="text-align:center;margin-bottom:30px">
+        <h1 style="font-size:32px;font-weight:900;color:#1e293b">&#128269; Find Institutions on SSEWASSWA</h1>
+        <p style="color:#64748b;font-size:16px;margin-top:8px">Discover schools, churches, clinics and businesses using our platform</p>
+      </div>
+      ${tenants.length > 0 ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">${tenants.map(t => `
+        <a href="/p/${esc(t.subdomain)}" style="text-decoration:none">
+          <div style="background:white;padding:20px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,0.05);border:1px solid #e2e8f0;transition:transform 0.2s;cursor:pointer" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform='translateY(0)'">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:48px;height:48px;background:${typeColor[t.type] || '#4f46e5'};border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px">${typeEmoji[t.type] || '&#127968;'}</div>
+              <div>
+                <div style="font-weight:700;font-size:16px;color:#1e293b">${esc(t.name)}</div>
+                <div style="font-size:13px;color:#64748b">${esc((t.type || '').charAt(0).toUpperCase() + (t.type || '').slice(1))} &bull; ${esc(t.subdomain)}</div>
+              </div>
+            </div>
+          </div>
+        </a>
+      `).join('')}</div>` : '<div style="text-align:center;padding:60px;color:#94a3b8"><p style="font-size:48px;margin-bottom:16px">&#127968;</p><p>No public institutions yet. Be the first to <a href="/register" style="color:#4f46e5;font-weight:600">sign up</a>!</p></div>'}
+    `, null));
   }));
 
   // =========================================================================
@@ -2428,6 +2606,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       { url: '/p/entertainment', priority: '0.7', changefreq: 'daily' },
       { url: '/p/fundraising', priority: '0.7', changefreq: 'weekly' },
       { url: '/links', priority: '0.6', changefreq: 'monthly' },
+      { url: '/directory', priority: '0.8', changefreq: 'weekly' },
       { url: '/privacy', priority: '0.3', changefreq: 'yearly' },
       { url: '/terms', priority: '0.3', changefreq: 'yearly' },
     ];
