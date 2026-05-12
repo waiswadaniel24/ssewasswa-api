@@ -1,0 +1,18 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">require('dotenv').config();\nconst { Pool } = require('pg');\n\nconst pool = new Pool({\n  connectionString: process.env.DATABASE_URL,\n  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false\n});\n\nasync function migrate() {\n  const client = await pool.connect();\n  try {\n    console.log('Running standalone migrations (server.js handles most)...');\n\n    // Only migrations that server.js might NOT handle\n    await client.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_url TEXT`);\n    await client.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_email TEXT`);\n    await client.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS favicon_url TEXT`);\n    await client.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_css TEXT`);\n\n    // Fix audit_logs column if needed\n    try {\n      await client.query(`ALTER TABLE audit_logs RENAME COLUMN user TO user_email`);\n    } catch (e) { /* column already named correctly */ }\n\n    console.log('Standalone migrations complete');\n  } catch (e) {\n    console.error('Migration failed:', e.message);\n  } finally {\n    client.release();\n    await pool.end();\n  }\n}\n\nmigrate();\n</pre></body></html>",
+    "title": "",
+    "url": "https://raw.githubusercontent.com/ssewasswa/ssewasswa-api/main/migrate.js",
+    "usage": {
+      "tokens": 291
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 291
+    }
+  },
+  "status": 20000
+}
