@@ -1425,6 +1425,7 @@ const migrations = [
   `INSERT INTO platform_settings (key, value) VALUES ('site_tagline', 'The Operating System for African Institutions') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('support_email', 'support@ssewasswa.onrender.com') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('support_phone', '') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('google_verification', 'ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
   `INSERT INTO platform_settings (key, value) VALUES ('developer_phone', '') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('developer_email', $1) ON CONFLICT (key) DO NOTHING`, [process.env.DEV_EMAIL || 'admin@ssewasswa.com'],
   `INSERT INTO platform_settings (key, value) VALUES ('whatsapp_link', '') ON CONFLICT (key) DO NOTHING`,
@@ -1693,7 +1694,7 @@ const uniqueConstraintMigrations = [
 })();
 
 // === PLATFORM SETTINGS CACHE ===
-let platformSettings = { site_name: 'SSEWASSWA', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: process.env.DEV_EMAIL || 'admin@ssewasswa.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000', google_verification: '' };
+let platformSettings = { site_name: 'SSEWASSWA', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: process.env.DEV_EMAIL || 'admin@ssewasswa.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000', google_verification: 'ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ' };
 async function loadPlatformSettings() {
   try {
     const rows = (await pool.query('SELECT key, value FROM platform_settings')).rows;
