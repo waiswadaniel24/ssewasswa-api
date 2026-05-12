@@ -19,6 +19,7 @@
     "bullmq": "^5.7.0",
     "cloudinary": "^2.2.0",
     "connect-pg-simple": "^9.0.1",
+    "cors": "^2.8.5",
     "docx": "^8.5.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

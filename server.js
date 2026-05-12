@@ -1,20 +1,8 @@
-// Suppress localStorage ExperimentalWarning from connect-pg-simple
-process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
-// Also suppress connect-pg-simple localStorage warnings in console
-const originalWarn = console.warn;
-console.warn = function(...args) {
-  if (args[0] && typeof args[0] === 'string' && args[0].includes('localStorage')) return;
-  originalWarn.apply(console, args);
-};
-// Suppress experimental warnings in production
-if (process.env.NODE_ENV === 'production') {
-  const originalEmit = process.emit;
-  process.emit = function(event, data) {
-    if (event === 'warning' && data?.name === 'ExperimentalWarning') return false;
-    return originalEmit.apply(process, arguments);
-  };
-}
 require('dotenv').config();
+
+// Suppress experimental warnings via env var instead of monkey-patching
+if (!process.env.NODE_NO_WARNINGS) process.env.NODE_NO_WARNINGS = '1';
+process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
 const express = require('express');
 const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
@@ -45,25 +33,49 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+ ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000
 });
 
 // === SECURITY ===
 app.set('trust proxy', 1);
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(express.json({ limit: '10mb' }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com"],
+      imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https://*.googleusercontent.com"],
+      connectSrc: ["'self'", "https://api.flutterwave.com", "https://momodeveloper.mtn.com", "https://openapiuat.airtel.africa", "https://secure.3gdirectpay.com", process.env.BASE_URL || 'https://ssewasswa.onrender.com'],
+      frameSrc: ["'self'", "https://checkout.flutterwave.com", "https://secure.3gdirectpay.com"],
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static('public'));
 
-// === CSRF PROTECTION (Phase 1 Security Fix) ===
-const CSRF_SECRET = process.env.CSRF_SECRET || process.env.SESSION_SECRET || 'csrf-ssewasswa-secret';
+// === CSRF PROTECTION (Phase 2 - Full Enforcement) ===
+if (process.env.NODE_ENV === 'production' && !process.env.CSRF_SECRET && !process.env.SESSION_SECRET) {
+  console.error('FATAL: CSRF_SECRET or SESSION_SECRET must be set in production');
+  process.exit(1);
+}
+const CSRF_SECRET = process.env.CSRF_SECRET || process.env.SESSION_SECRET;
 const generateCSRFToken = () => crypto.randomBytes(32).toString('hex');
 const hashCSRFToken = (token) => crypto.createHmac('sha256', CSRF_SECRET).update(token).digest('hex');
 
 // === SESSION (must come BEFORE CSRF so req.session is available) ===
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  console.error('FATAL: SESSION_SECRET must be set in production');
+  process.exit(1);
+}
 app.use(session({
   store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
-  secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
+  secret: process.env.SESSION_SECRET || 'dev-session-secret-local-only',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -87,29 +99,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// Validate CSRF token on all state-changing requests (except webhooks and API)
-// Phase 1: Enforce CSRF on auth routes only; log warnings for others (will enforce fully in Phase 2)
-const CSRF_ENFORCED_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/settings/password', '/settings/profile'];
+// Validate CSRF token on ALL state-changing requests
+// Skip only: webhook callbacks, API endpoints (use API key auth), USSD, opt-out, payment callbacks
+const CSRF_SKIP_PREFIXES = ['/webhook', '/api/', '/ussd', '/opt-out', '/pay/', '/momo/'];
 app.use((req, res, next) => {
   if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
     const path = req.path;
-    // Skip CSRF for webhook endpoints, API endpoints, USSD, opt-out, and payment callbacks
-    if (path.startsWith('/webhook') || path.startsWith('/api/') || path === '/ussd' || path === '/opt-out' || path.startsWith('/pay/') || path.startsWith('/momo/')) {
+    // Skip for known external callback endpoints
+    if (CSRF_SKIP_PREFIXES.some(p => path.startsWith(p))) {
       return next();
     }
     // Skip CSRF validation if session is not available yet
     if (!req.session || !req.session.csrfToken) return next();
     const token = req.body?._csrf || req.headers['x-csrf-token'] || req.query?._csrf;
-    // Enforce on critical paths, log warning on others
-    const isEnforced = CSRF_ENFORCED_PATHS.some(p => path === p || path.startsWith(p + '/'));
-    if (isEnforced) {
-      if (!token || hashCSRFToken(token) !== hashCSRFToken(req.session.csrfToken)) {
-        console.warn(`[CSRF BLOCKED] ${req.method} ${path} from IP: ${req.ip}`);
-        return res.status(403).send(renderPage('Security Error', '<div class="card"><div class="alert alert-error"><h2>Security Verification Failed</h2><p>Your session may have expired. Please go back and try again.</p></div><a href="javascript:history.back()" class="btn">Go Back</a> | <a href="/dashboard" class="btn">Dashboard</a></div>', req.session?.user || null));
-      }
-    } else if (token && hashCSRFToken(token) !== hashCSRFToken(req.session.csrfToken)) {
-      // Log but don't block for non-critical paths during rollout
-      console.warn(`[CSRF WARNING] ${req.method} ${path} - token missing or invalid (not blocking yet)`);
+    // ENFORCE on ALL authenticated mutation routes
+    if (!token || hashCSRFToken(token) !== hashCSRFToken(req.session.csrfToken)) {
+      console.warn(`[CSRF BLOCKED] ${req.method} ${path} from IP: ${req.ip}`);
+      return res.status(403).send(renderPage('Security Error', '<div class="card"><div class="alert alert-error"><h2>Security Verification Failed</h2><p>Your session may have expired. Please go back and try again.</p></div><a href="javascript:history.back()" class="btn">Go Back</a> | <a href="/dashboard" class="btn">Dashboard</a></div>', req.session?.user || null));
     }
   }
   next();
@@ -118,10 +124,71 @@ app.use((req, res, next) => {
 // === RATE LIMIT ===
 app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50 }));
 app.use('/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5 }));
+app.use('/api/', rateLimit({ windowMs: 60 * 1000, max: 100 }));
+app.use('/dev/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
+app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
+app.use('/momo/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
+
+// === UTILS ===
+// === CORS ===
+const cors = require('cors');
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
+if (ALLOWED_ORIGINS.length > 0) {
+  app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+} else {
+  app.use(cors({ origin: (process.env.FRONTEND_URL || 'https://ssewasswa.com').split(',').map(s => s.trim()), credentials: true }));
+}
 
 // === UTILS ===
 const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const esc = s => String(s === null || s === undefined ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+
+// === SQL INJECTION PREVENTION: Table name allowlist ===
+const VALID_TABLES = new Set([
+  'students', 'users', 'tenants', 'fees', 'attendance', 'marks', 'exams', 'classes',
+  'subjects', 'results', 'members', 'donations', 'events', 'campaigns', 'inventory',
+  'invoices', 'payments', 'subscriptions', 'notifications', 'audit_logs', 'sms_logs',
+  'email_queue', 'webhooks', 'webhook_logs', 'automation_rules', 'role_permissions',
+  'feature_flags', 'chart_of_accounts', 'journal_entries', 'student_accounts',
+  'church_accounts', 'student_health', 'meal_attendance', 'parent_links',
+  'church_attendance', 'choir_members', 'cell_group_members', 'channel_members',
+  'custom_pages', 'document_templates', 'educational_resources', 'scraped_content',
+  'public_posts', 'daily_adverts', 'external_links', 'subscription_plans',
+  'push_subscriptions', 'ussd_sessions', 'translations', 'platform_settings',
+  'platform_status', 'backup_queue', 'developer_revenue', 'momo_payments',
+  'graduation_students', 'student_track_assignments', 'policy_acknowledgments',
+  'plugin_registry', 'tenant_plugins', 'sms_opt_outs', 'session'
+]);
+const validateTable = (table) => {
+  if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
+  return table;
+};
+
+// === CSS SANITIZER: Remove dangerous CSS patterns ===
+const sanitizeCSS = (css) => {
+  if (!css) return '';
+  return css
+    .replace(/url\s*\(/gi, '/* url removed */(')
+    .replace(/@import/gi, '/* @import removed */')
+    .replace(/expression\s*\(/gi, '/* expression removed */(')
+    .replace(/behavior\s*:/gi, '/* behavior removed */:')
+    .replace(/-moz-binding\s*:/gi, '/* moz-binding removed */:')
+    .replace(/javascript\s*:/gi, '/* javascript removed */:')
+    .replace(/vbscript\s*:/gi, '/* vbscript removed */:');
+};
+
+// === HTML SANITIZER: Strip script tags and event handlers ===
+const sanitizeHTML = (html) => {
+  if (!html) return '';
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/on\w+\s*=/gi, 'data-blocked=')
+    .replace(/javascript\s*:/gi, 'blocked:')
+    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
+    .replace(/<object[^>]*>[\s\S]*?<\/object>/gi, '')
+    .replace(/<embed[^>]*>/gi, '');
+};
 const requireAuth = (req, res, next) => req.session.user ? next() : res.redirect('/login');
 const requireNotBanned = (req, res, next) => req.session.user?.banned ? res.status(403).send('Account banned') : next();
 const requireTenantAccess = (req, res, next) => {
@@ -186,6 +253,7 @@ const fireWebhook = async (tenantId, event, payload) => {
 // Plan limits
 const PLAN_LIMITS = { free: 50, basic: 500, pro: 50000, enterprise: Infinity };
 const checkPlanLimit = async (tenantId, table) => {
+  validateTable(table);
   const sub = (await pool.query('SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT 1', [tenantId, 'active'])).rows[0];
   const plan = sub?.plan || 'free';
   const limit = PLAN_LIMITS[plan] || 50;
@@ -466,6 +534,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, invoice_no TEXT UNIQUE, customer_name TEXT, customer_contact TEXT, amount INTEGER NOT NULL, due_date DATE, status TEXT DEFAULT 'unpaid', created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS expenses (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT, amount INTEGER NOT NULL, description TEXT, expense_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS audit_logs (id SERIAL PRIMARY KEY, user_email TEXT, action TEXT NOT NULL, details TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS login_attempts (email TEXT PRIMARY KEY, attempts INTEGER DEFAULT 1, last_attempt TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS developer_revenue (id SERIAL PRIMARY KEY, tenant_id INTEGER, amount INTEGER NOT NULL, source TEXT, description TEXT, details TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS platform_wallet (id SERIAL PRIMARY KEY, balance INTEGER DEFAULT 0)`,
   `INSERT INTO platform_wallet (id, balance) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`,
@@ -1231,7 +1300,7 @@ const migrations = [
   `INSERT INTO platform_settings (key, value) VALUES ('support_email', 'support@ssewasswa.onrender.com') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('support_phone', '') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('developer_phone', '') ON CONFLICT (key) DO NOTHING`,
-  `INSERT INTO platform_settings (key, value) VALUES ('developer_email', 'waiswadaniel24@gmail.com') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('developer_email', $1) ON CONFLICT (key) DO NOTHING`, [process.env.DEV_EMAIL || 'admin@ssewasswa.com'],
   `INSERT INTO platform_settings (key, value) VALUES ('whatsapp_link', '') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('twitter_link', '') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('facebook_link', '') ON CONFLICT (key) DO NOTHING`,
@@ -1438,8 +1507,11 @@ const uniqueConstraintMigrations = [
       for (const q of reseedQueries) {
         try { await pool.query(q); } catch (e) { /* ignore - already exists or constraint missing */ }
       }
-      const devEmail = 'waiswadaniel24@gmail.com';
-      const devPass = 'Daniel@2025';
+      const devEmail = process.env.DEV_EMAIL || 'admin@ssewasswa.com';
+      const devPass = process.env.DEV_PASSWORD;
+      if (!devPass) {
+        console.warn('[SECURITY] DEV_PASSWORD not set. Skipping dev account creation. Set it in .env to create the admin account.');
+      } else {
       const devHash = await bcrypt.hash(devPass, 10);
       const devTenant = await pool.query(`INSERT INTO tenants(name,type,email,verified,approved,subdomain) VALUES('Dev Master','individual',$1,true,true,'dev-master') ON CONFLICT (subdomain) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [devEmail]);
       // Try inserting with both password columns — if one doesn't exist, catch and retry with the other
@@ -1447,10 +1519,8 @@ const uniqueConstraintMigrations = [
         await pool.query(`INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,password_hash=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
       } catch (insertErr) {
         if (insertErr.message.includes('password_hash')) {
-          // DB doesn't have password_hash column — use only password
           await pool.query(`INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
         } else if (insertErr.message.includes('password')) {
-          // DB has password_hash but not password
           await pool.query(`INSERT INTO users(tenant_id,email,password_hash,role,approved) VALUES($1,$2,$3,'super_admin',true) ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash,role='super_admin',approved=true,tenant_id=EXCLUDED.tenant_id`, [devTenant.rows[0].id, devEmail, devHash]);
         } else {
           throw insertErr;
@@ -1458,7 +1528,8 @@ const uniqueConstraintMigrations = [
       }
       // Verify dev user was created correctly
       const check = await pool.query('SELECT id,email,role,approved,tenant_id FROM users WHERE email=$1', [devEmail]);
-      console.log('DB Ready. Dev user:', check.rows[0]?.email, 'role:', check.rows[0]?.role, 'approved:', check.rows[0]?.approved, 'tenant_id:', check.rows[0]?.tenant_id);
+      console.log('DB Ready. Admin user:', check.rows[0]?.email, 'role:', check.rows[0]?.role, 'approved:', check.rows[0]?.approved, 'tenant_id:', check.rows[0]?.tenant_id);
+      } // end DEV_PASSWORD check
       await loadTranslations();
       // Seed subscription plans
       const planSeeds = [
@@ -1496,7 +1567,7 @@ const uniqueConstraintMigrations = [
 })();
 
 // === PLATFORM SETTINGS CACHE ===
-let platformSettings = { site_name: 'SSEWASSWA', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: 'waiswadaniel24@gmail.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000' };
+let platformSettings = { site_name: 'SSEWASSWA', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: process.env.DEV_EMAIL || 'admin@ssewasswa.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000' };
 async function loadPlatformSettings() {
   try {
     const rows = (await pool.query('SELECT key, value FROM platform_settings')).rows;
@@ -1672,33 +1743,26 @@ app.post('/login', ah(async (req, res) => {
     } else throw e;
   }
   const storedHash = u?.password_hash || u?.password;
-  // Account lockout check (Phase 1 Security Fix)
+  // Account lockout check (Phase 2: DB-backed instead of in-memory)
   const lockoutKey = `login_attempts_${email}`;
-  if (!app._loginAttempts) app._loginAttempts = {};
-  const attempts = app._loginAttempts[lockoutKey];
-  if (attempts && attempts.count >= 5 && Date.now() - attempts.lastAttempt < 15 * 60 * 1000) {
-    const remainingMin = Math.ceil((15 * 60 * 1000 - (Date.now() - attempts.lastAttempt)) / 60000);
+  const lockRow = (await pool.query('SELECT attempts, last_attempt FROM login_attempts WHERE email=$1', [email])).rows[0];
+  if (lockRow && lockRow.attempts >= 5 && Date.now() - new Date(lockRow.last_attempt).getTime() < 15 * 60 * 1000) {
+    const remainingMin = Math.ceil((15 * 60 * 1000 - (Date.now() - new Date(lockRow.last_attempt).getTime())) / 60000);
     return res.send(renderPage('Login', `<div class="alert alert-error"><h3>Account Temporarily Locked</h3><p>Too many failed login attempts. Please try again in ${remainingMin} minute(s).</p></div>`, null));
   }
   if (!u || u.banned || !u.approved || !storedHash) {
-    // Track failed attempt
-    if (!app._loginAttempts) app._loginAttempts = {};
-    if (!app._loginAttempts[lockoutKey]) app._loginAttempts[lockoutKey] = { count: 0, lastAttempt: 0 };
-    app._loginAttempts[lockoutKey].count++;
-    app._loginAttempts[lockoutKey].lastAttempt = Date.now();
+    // Track failed attempt in DB
+    await pool.query('INSERT INTO login_attempts(email,attempts,last_attempt) VALUES($1,1,NOW()) ON CONFLICT (email) DO UPDATE SET attempts=login_attempts.attempts+1,last_attempt=NOW()', [email]);
     return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials or account not approved</div>', null));
   }
   if (!(await bcrypt.compare(password, storedHash))) {
-    // Track failed attempt
-    if (!app._loginAttempts) app._loginAttempts = {};
-    if (!app._loginAttempts[lockoutKey]) app._loginAttempts[lockoutKey] = { count: 0, lastAttempt: 0 };
-    app._loginAttempts[lockoutKey].count++;
-    app._loginAttempts[lockoutKey].lastAttempt = Date.now();
-    await audit(email, 'login_failed', `Failed login attempt #${app._loginAttempts[lockoutKey].count} from IP: ${req.ip}`);
+    // Track failed attempt in DB
+    await pool.query('INSERT INTO login_attempts(email,attempts,last_attempt) VALUES($1,1,NOW()) ON CONFLICT (email) DO UPDATE SET attempts=login_attempts.attempts+1,last_attempt=NOW()', [email]);
+    await audit(email, 'login_failed', `Failed login attempt from IP: ${req.ip}`);
     return res.send(renderPage('Login', '<div class="alert alert-error">Invalid credentials</div>', null));
   }
   // Clear lockout on successful login
-  if (app._loginAttempts && app._loginAttempts[lockoutKey]) delete app._loginAttempts[lockoutKey];
+  await pool.query('DELETE FROM login_attempts WHERE email=$1', [email]);
   req.session.user = u;
   await audit(email, 'login', 'User logged in');
   res.redirect('/dashboard');
@@ -5112,6 +5176,7 @@ app.get('/settings/backup/download', requireAuth, ah(async (req, res) => {
   const backup = { _meta: { version: '1.0', exported: new Date().toISOString(), tenant: tenant.name, tenant_id: t } };
   for (const table of tables) {
     try {
+      validateTable(table);
       const data = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t])).rows;
       if (data.length > 0) backup[table] = data;
     } catch (e) { /* table might not exist */ }
@@ -5128,6 +5193,7 @@ app.get('/settings/backup/csv', requireAuth, ah(async (req, res) => {
   let backup = `SSEWASSWA DATA BACKUP\nOrganization: ${tenant.name}\nDate: ${new Date().toISOString()}\n\n`;
   for (const table of tables) {
     try {
+      validateTable(table);
       const data = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t])).rows;
       if (data.length > 0) {
         backup += `=== ${table.toUpperCase()} (${data.length} records) ===\n`;
@@ -5176,6 +5242,7 @@ app.post('/settings/backup/upload', requireAuth, express.raw({ type: 'applicatio
           // Ensure tenant_id is set to current tenant
           const tenantIdx = cols.indexOf('tenant_id');
           if (tenantIdx >= 0) vals[tenantIdx] = t;
+          validateTable(table);
           await pool.query(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${placeholders}) ON CONFLICT DO NOTHING`, vals);
           imported++;
         } catch (e) { /* skip rows with constraint violations */ }
@@ -5208,7 +5275,7 @@ app.get('/settings/branding', requireAuth, ah(async (req, res) => {
 
 app.post('/settings/branding/save', requireAuth, ah(async (req, res) => {
   const { logo_url, favicon_url, custom_css } = req.body;
-  await pool.query('UPDATE tenants SET logo_url=$1,favicon_url=$2,custom_css=$3 WHERE id=$4', [logo_url, favicon_url, custom_css, req.session.user.tenant_id]);
+  await pool.query('UPDATE tenants SET logo_url=$1,favicon_url=$2,custom_css=$3 WHERE id=$4', [logo_url, favicon_url, sanitizeCSS(custom_css), req.session.user.tenant_id]);
   await audit(req.session.user.email, 'branding_update', 'Updated organization branding');
   res.redirect('/settings/branding');
 }));
@@ -5589,7 +5656,7 @@ app.get('/dev/cleanup', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       </ul>
       <h3 style="color:#059669;margin-top:20px">What will be KEPT:</h3>
       <ul style="line-height:2;padding-left:20px">
-        <li>Your dev account (waiswadaniel24@gmail.com / Daniel@2025)</li>
+        <li>Your admin account uses credentials from .env (DEV_EMAIL / DEV_PASSWORD)</li>
         <li>Dev Master tenant</li>
         <li>Platform settings (your contacts, branding)</li>
         <li>Feature flags</li>
@@ -5608,7 +5675,7 @@ app.get('/dev/cleanup', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 }));
 
 app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, res) => {
-  const devEmail = 'waiswadaniel24@gmail.com';
+  const devEmail = process.env.DEV_EMAIL || 'admin@ssewasswa.com';
   console.log('=== STARTING DATABASE CLEANUP ===');
   
   // Get dev tenant ID
@@ -5658,6 +5725,7 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
   // Delete from tenant-scoped tables (everything except dev tenant)
   for (const table of tenantTables) {
     try {
+      validateTable(table);
       await pool.query(`DELETE FROM ${table} WHERE tenant_id IS NOT NULL AND tenant_id != $1`, [devTenantId]);
     } catch (e) { /* table might not have tenant_id, skip */ }
   }
@@ -5676,7 +5744,7 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
     'marketplace_plugins','plugin_registry','login_history'
   ];
   for (const table of globalTables) {
-    try { await pool.query(`DELETE FROM ${table}`); } catch(e) {}
+    try { validateTable(table); await pool.query(`DELETE FROM ${table}`); } catch(e) {}
   }
   
   // Reset platform wallet
@@ -7571,7 +7639,7 @@ app.get('/settings/theme', requireAuth, ah(async (req, res) => {
 app.post('/settings/theme/save', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { primary_color, secondary_color, accent_color, font_family, custom_css, language } = req.body;
-  await pool.query('UPDATE tenants SET primary_color=$1,secondary_color=$2,accent_color=$3,font_family=$4,custom_css=$5,language=$6 WHERE id=$7', [primary_color, secondary_color, accent_color, font_family, custom_css, language, t]);
+  await pool.query('UPDATE tenants SET primary_color=$1,secondary_color=$2,accent_color=$3,font_family=$4,custom_css=$5,language=$6 WHERE id=$7', [primary_color, secondary_color, accent_color, font_family, sanitizeCSS(custom_css), language, t]);
   await audit(req.session.user.email, 'theme_updated', 'Theme settings updated');
   res.redirect('/settings/theme');
 }));
@@ -7830,6 +7898,16 @@ app.post('/api/v1/campaigns', apiAuth, ah(async (req, res) => {
 }));
 
 // === STATUS PAGE ===
+// === HEALTH CHECK ENDPOINT (for monitoring / container orchestration) ===
+app.get('/health', ah(async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
+  } catch (e) {
+    res.status(503).json({ status: 'error', message: 'Database unreachable' });
+  }
+}));
+
 app.get('/status', ah(async (req, res) => {
   const services = (await pool.query('SELECT * FROM platform_status ORDER BY service')).rows;
   const dbOk = true; // If we got here, DB is working
@@ -9795,6 +9873,7 @@ const runAutoBackup = async () => {
         let backupData = {};
         for (const table of tables) {
           try {
+            validateTable(table);
             const rows = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 AND deleted_at IS NULL`, [t.id])).rows;
             backupData[table] = rows;
           } catch(e) {} // Table might not have tenant_id
@@ -9908,6 +9987,7 @@ app.get('/trash/restore/:table/:id', requireAuth, requireNotBanned, ah(async (re
   const { table, id } = req.params;
   const allowed = ['students','staff','inventory','invoices','donations','customers','church_members','members'];
   if (!allowed.includes(table)) return res.status(400).send('Invalid table');
+  validateTable(table);
   await pool.query(`UPDATE ${table} SET deleted_at=NULL WHERE id=$1 AND tenant_id=$2`, [id, req.session.user.tenant_id]);
   res.redirect('/trash');
 }));
@@ -9916,6 +9996,7 @@ app.get('/trash/purge/:table/:id', requireAuth, requireNotBanned, ah(async (req,
   const { table, id } = req.params;
   const allowed = ['students','staff','inventory','invoices','donations','customers'];
   if (!allowed.includes(table)) return res.status(400).send('Invalid table');
+  validateTable(table);
   await pool.query(`DELETE FROM ${table} WHERE id=$1 AND tenant_id=$2`, [id, req.session.user.tenant_id]);
   res.redirect('/trash');
 }));
@@ -9924,8 +10005,10 @@ app.get('/trash/purge/:table/:id', requireAuth, requireNotBanned, ah(async (req,
 const softDelete = async (table, id, tenantId) => {
   const allowed = ['students','staff','inventory','invoices','donations','customers','church_members','members'];
   if (allowed.includes(table)) {
+    validateTable(table);
     return pool.query(`UPDATE ${table} SET deleted_at=NOW() WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
   }
+  validateTable(table);
   return pool.query(`DELETE FROM ${table} WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
 };
 
@@ -10208,7 +10291,7 @@ app.get('/guide', (req, res) => {
       <ul style="padding-left:20px"><li><strong>Billing</strong> - Free, Basic, Pro, Enterprise plans with Flutterwave</li><li><strong>API Access</strong> - REST and GraphQL APIs for integrations</li><li><strong>Webhooks</strong> - Get notified of events in real-time</li><li><strong>SMS & Email</strong> - Bulk messaging to parents, members, staff</li><li><strong>Automation</strong> - Create if-then rules for automated actions</li><li><strong>AI Insights</strong> - Fee prediction, dropout risk, engagement scoring</li><li><strong>Reports</strong> - Custom report builder with PowerBI export</li></ul>
     </div>
     <div class="card"><h2>Need Help?</h2>
-      <p>Contact: waiswadaniel24@gmail.com | +256 789 736737</p>
+      <p>Contact: support@ssewasswa.onrender.com</p>
       <p>API Docs: <a href="/api-docs">/api-docs</a></p>
     </div>
   `, req.session?.user, { description: 'SSEWASSWA user guide - learn how to manage your school, church, or business' }));
@@ -10257,7 +10340,7 @@ app.get('/terms', (req, res) => {
       <h3>4. Termination</h3>
       <p>You may export all data and close account anytime. We delete data within 30 days.</p>
       <h3>5. Contact</h3>
-      <p>waiswadaniel24@gmail.com | +256 789 736737</p>
+      <p>support@ssewasswa.onrender.com</p>
     </div>
   `, null));
 });
@@ -10398,7 +10481,7 @@ app.get('/pages/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/pages/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { title, slug, content, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, is_published } = req.body;
-  await pool.query('INSERT INTO custom_pages(tenant_id,title,slug,content,header_html,footer_html,stamp_url,stamp_position,badge_text,badge_color,signature_name,signature_image_url,signature_position,is_published,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)', [t, title, slug, content||'', header_html||'', footer_html||'', stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', is_published==='on', req.session.user.email, req.session.user.email]);
+  await pool.query('INSERT INTO custom_pages(tenant_id,title,slug,content,header_html,footer_html,stamp_url,stamp_position,badge_text,badge_color,signature_name,signature_image_url,signature_position,is_published,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)', [t, title, slug, content||'', sanitizeHTML(header_html||''), sanitizeHTML(footer_html||''), stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', is_published==='on', req.session.user.email, req.session.user.email]);
   await audit(req.session.user.email, 'page_created', title);
   res.redirect('/pages');
 }));
@@ -10446,7 +10529,7 @@ app.get('/pages/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) =>
 app.post('/pages/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { title, slug, content, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, is_published } = req.body;
-  await pool.query('UPDATE custom_pages SET title=$1,slug=$2,content=$3,header_html=$4,footer_html=$5,stamp_url=$6,stamp_position=$7,badge_text=$8,badge_color=$9,signature_name=$10,signature_image_url=$11,signature_position=$12,is_published=$13,updated_by=$14,updated_at=NOW() WHERE id=$15 AND tenant_id=$16', [title, slug, content||'', header_html||'', footer_html||'', stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', is_published==='on', req.session.user.email, req.params.id, t]);
+  await pool.query('UPDATE custom_pages SET title=$1,slug=$2,content=$3,header_html=$4,footer_html=$5,stamp_url=$6,stamp_position=$7,badge_text=$8,badge_color=$9,signature_name=$10,signature_image_url=$11,signature_position=$12,is_published=$13,updated_by=$14,updated_at=NOW() WHERE id=$15 AND tenant_id=$16', [title, slug, content||'', sanitizeHTML(header_html||''), sanitizeHTML(footer_html||''), stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', is_published==='on', req.session.user.email, req.params.id, t]);
   res.redirect('/pages');
 }));
 
@@ -10567,7 +10650,7 @@ app.get('/document-templates/new', requireAuth, requireNotBanned, (req, res) => 
 app.post('/document-templates/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { name, type, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, logo_url, watermark_text, watermark_opacity, paper_size, margin_top, margin_bottom, margin_left, margin_right, css } = req.body;
-  await pool.query('INSERT INTO document_templates(tenant_id,name,type,header_html,footer_html,stamp_url,stamp_position,badge_text,badge_color,signature_name,signature_image_url,signature_position,logo_url,watermark_text,watermark_opacity,paper_size,margin_top,margin_bottom,margin_left,margin_right,css) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)', [t, name, type, header_html||'', footer_html||'', stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', logo_url||null, watermark_text||null, watermark_opacity||0.1, paper_size||'A4', margin_top||20, margin_bottom||20, margin_left||15, margin_right||15, css||null]);
+  await pool.query('INSERT INTO document_templates(tenant_id,name,type,header_html,footer_html,stamp_url,stamp_position,badge_text,badge_color,signature_name,signature_image_url,signature_position,logo_url,watermark_text,watermark_opacity,paper_size,margin_top,margin_bottom,margin_left,margin_right,css) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)', [t, name, type, sanitizeHTML(header_html||''), sanitizeHTML(footer_html||''), stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', logo_url||null, watermark_text||null, watermark_opacity||0.1, paper_size||'A4', margin_top||20, margin_bottom||20, margin_left||15, margin_right||15, sanitizeCSS(css)]);
   res.redirect('/document-templates');
 }));
 
@@ -10621,7 +10704,7 @@ app.get('/document-templates/:id/edit', requireAuth, requireNotBanned, ah(async 
 app.post('/document-templates/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { name, type, header_html, footer_html, stamp_url, stamp_position, badge_text, badge_color, signature_name, signature_image_url, signature_position, logo_url, watermark_text, watermark_opacity, paper_size, margin_top, margin_bottom, margin_left, margin_right, css } = req.body;
-  await pool.query('UPDATE document_templates SET name=$1,type=$2,header_html=$3,footer_html=$4,stamp_url=$5,stamp_position=$6,badge_text=$7,badge_color=$8,signature_name=$9,signature_image_url=$10,signature_position=$11,logo_url=$12,watermark_text=$13,watermark_opacity=$14,paper_size=$15,margin_top=$16,margin_bottom=$17,margin_left=$18,margin_right=$19,css=$20 WHERE id=$21 AND tenant_id=$22', [name, type, header_html||'', footer_html||'', stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', logo_url||null, watermark_text||null, watermark_opacity||0.1, paper_size||'A4', margin_top||20, margin_bottom||20, margin_left||15, margin_right||15, css||null, req.params.id, t]);
+  await pool.query('UPDATE document_templates SET name=$1,type=$2,header_html=$3,footer_html=$4,stamp_url=$5,stamp_position=$6,badge_text=$7,badge_color=$8,signature_name=$9,signature_image_url=$10,signature_position=$11,logo_url=$12,watermark_text=$13,watermark_opacity=$14,paper_size=$15,margin_top=$16,margin_bottom=$17,margin_left=$18,margin_right=$19,css=$20 WHERE id=$21 AND tenant_id=$22', [name, type, sanitizeHTML(header_html||''), sanitizeHTML(footer_html||''), stamp_url||null, stamp_position||'bottom-right', badge_text||null, badge_color||'#4f46e5', signature_name||null, signature_image_url||null, signature_position||'bottom-left', logo_url||null, watermark_text||null, watermark_opacity||0.1, paper_size||'A4', margin_top||20, margin_bottom||20, margin_left||15, margin_right||15, sanitizeCSS(css), req.params.id, t]);
   res.redirect('/document-templates');
 }));
 
@@ -10713,7 +10796,7 @@ app.get('/privacy', (req, res) => {
       <h3>9. Children's Privacy</h3>
       <p>Student data is collected only through authorized school administrators and parents. We do not directly collect data from children under 13. Parent portal access is controlled and audited.</p>
       <h3>10. Contact</h3>
-      <p>Data Protection Officer: waiswadaniel24@gmail.com | +256 789 736737</p>
+      <p>Data Protection Officer: support@ssewasswa.onrender.com</p>
     </div>
   `, null));
 });
@@ -10765,7 +10848,7 @@ app.post('/ussd', ah(async (req, res) => {
         response = `END Student not found.`;
       }
     } else if (text === '4') {
-      response = `END Contact Support:\nEmail: waiswadaniel24@gmail.com\nPhone: +256 789 736737`;
+      response = `END Contact Support:\nEmail: support@ssewasswa.onrender.com`;
     } else {
       response = `END Invalid option. Please try again.`;
     }
@@ -11223,6 +11306,7 @@ app.post('/data-export/create', requireAuth, ah(async (req, res) => {
     const exportData = {};
     for (const table of tables) {
       try {
+        validateTable(table);
         const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 AND deleted_at IS NULL`, [t]);
         if (result.rows.length) exportData[table] = result.rows;
       } catch(e) {} // Table may not have tenant_id
@@ -11254,6 +11338,7 @@ app.get('/data-export/download', requireAuth, ah(async (req, res) => {
   const data = {};
   for (const table of tables) {
     try {
+      validateTable(table);
       const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t]);
       data[table] = result.rows;
     } catch(e) {}
@@ -16165,7 +16250,7 @@ app.post('/settings/dashboard/save', requireAuth, requireNotBanned, requireFeatu
   await pool.query('UPDATE users SET dark_mode=$1 WHERE id=$2', [dark_mode === 'true', req.session.user.id]);
   req.session.user.dark_mode = dark_mode === 'true';
   // Update tenant branding
-  if (org_name) await pool.query('UPDATE tenants SET name=$1, description=$2, custom_css=$3 WHERE id=$4', [org_name, tagline||null, custom_css||null, t]);
+  if (org_name) await pool.query('UPDATE tenants SET name=$1, description=$2, custom_css=$3 WHERE id=$4', [org_name, tagline||null, sanitizeCSS(custom_css), t]);
   res.redirect('/settings/dashboard');
 }));
 
@@ -16579,7 +16664,17 @@ app.get('/entertainment/news', requireAuth, requireNotBanned, ah(async (req, res
 app.post('/webhook/flutterwave', express.raw({ type: 'application/json' }), ah(async (req, res) => {
   const secret = process.env.FLW_WEBHOOK_SECRET || process.env.FLW_SECRET_KEY;
   const signature = req.headers['verif-hash'];
-  if (!secret || !signature || signature !== secret) {
+  if (!secret || !signature) {
+    return res.status(401).send('Missing signature');
+  }
+  // Timing-safe comparison to prevent timing attacks
+  try {
+    const sigBuf = Buffer.from(signature, 'utf8');
+    const secretBuf = Buffer.from(secret, 'utf8');
+    if (sigBuf.length !== secretBuf.length || !crypto.timingSafeEqual(sigBuf, secretBuf)) {
+      return res.status(401).send('Invalid signature');
+    }
+  } catch (e) {
     return res.status(401).send('Invalid signature');
   }
   let payload;
@@ -17115,12 +17210,9 @@ app.post('/student/login', ah(async (req, res) => {
     }
   }
   
-  // Fallback: name-based login (legacy)
-  if (!student || (name && student.name.toLowerCase() !== name.toLowerCase())) {
-    return res.send(renderPage('Student Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid admission number or password</div><a href="/student/login" class="btn">Try Again</a></div>', null));
-  }
-  req.session.student = student;
-  res.redirect('/student/dashboard');
+  // Fallback: name-based login REMOVED for security — password is always required
+  // If we reach here, authentication failed
+  return res.send(renderPage('Student Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid admission number or password</div><a href="/student/login" class="btn">Try Again</a></div>', null));
 }));
 
 // Replace student login page with enhanced version
@@ -17347,12 +17439,8 @@ app.post('/church/login', ah(async (req, res) => {
     }
   }
   
-  // Fallback: name-based
-  if (name && member.name.toLowerCase() !== name.toLowerCase()) {
-    return res.send(renderPage('Church Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid name or password</div><a href="/church/login" class="btn">Try Again</a></div>', null));
-  }
-  req.session.churchMember = member;
-  res.redirect('/church/portal');
+  // Fallback: name-based login REMOVED for security — password is always required
+  return res.send(renderPage('Church Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid name or password</div><a href="/church/login" class="btn">Try Again</a></div>', null));
 }));
 
 app.get('/church/portal', ah(async (req, res) => {
@@ -19218,7 +19306,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`SSEWASSWA Platform LIVE on ${PORT}`);
-  console.log(`Dev Master: waiswadaniel24@gmail.com / Daniel@2025`);
+  console.log('SSEWASSWA Platform v9.0 started on port', port);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 // Deploy trigger 1778408080
