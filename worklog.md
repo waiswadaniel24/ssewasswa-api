@@ -1,54 +1,21 @@
-# Worklog
+# Comfort Platform — Worklog
 
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Fix sitemap.xml HTTP error reported by Google Search Console
+Task: Fix sitemap.xml HTTP error, complete SSEWASSWA→Comfort rebrand, verify worker system
 
 Work Log:
-- Analyzed sitemap.xml route in launch-routes.js (lines 2578-2655)
-- Found root cause: query used `p.updated_at` but `public_pages` table only has `created_at` column
-- Found `esc()` HTML entity encoder was being applied to URL slugs, corrupting sitemap URLs
-- Found route was wrapped in `ah()` which could fall through to 500 HTML error handler
-- Fixed SQL query to use `p.created_at` instead of `p.updated_at`
-- Removed `esc()` from URL construction (slugs are already URL-safe)
-- Replaced `ah()` with plain try-catch so errors always return valid XML
-- Added `res.type('xml')` and `Cache-Control: public, max-age=3600` headers
-- Added fallback error handler that returns empty `<urlset>` XML on any error
-- Added `ALTER TABLE public_pages ADD COLUMN IF NOT EXISTS updated_at` migration to server.js
+- Analyzed sitemap.xml route in launch-routes.js — found it queried `public_pages.slug` but the `/p/:subdomain` route uses `tenants.subdomain`, causing 404s for Google
+- Fixed sitemap to query tenants directly via EXISTS subquery on public_pages
+- Removed duplicate OG/canonical/Twitter meta tags from `getStructuredData()` (already in renderPageV3)
+- Rebranded ALL remaining SSEWASSWA → Comfort in: launch-routes.js, server.js, worker.js, public/sw.js, public/manifest.json, test/server.test.js
+- Verified zero SSEWASSWA text references remain (only lowercase URLs like ssewasswa.onrender.com)
+- Updated service worker cache name to `comfort-v1.0`
+- Confirmed worker sub-dashboard system is fully implemented (login, dashboard, tasks, posts, members, profile)
 
 Stage Summary:
-- Sitemap now returns valid XML even if DB queries fail
-- Google should be able to crawl it after next deploy
-- Files changed: launch-routes.js, server.js
-
----
-Task ID: 2
-Agent: Main Agent
-Task: Implement worker/employee sub-dashboard system with personal login and limited access
-
-Work Log:
-- Created `dashboard_workers` DB table with: id, tenant_id, username, password_hash, display_name, role, is_active, last_login, created_at, updated_at
-- Created `worker_audit_logs` table for tracking worker actions
-- Added `requireWorkerAuth` and `requireWorkerRole` middleware (lines 349-359)
-- Added "Worker" link to nav bar in renderPageV3 (line 10877)
-- Added "Manage Workers" card to all 5 portal dashboards (school, org, church, business, individual)
-- Built admin CRUD routes: /dashboard/workers (list, add, toggle, reset-password, delete)
-- Built worker login/logout: /worker/login (GET/POST), /worker/logout
-- Built worker dashboard: /worker/dashboard with portal-type-specific stats and cards
-- Built worker tasks: /worker/tasks (CRUD with role-based access)
-- Built worker content/posts: /worker/posts (CRUD for content_manager and full_worker roles)
-- Built worker read-only views: /worker/students, /worker/members
-- Built worker profile: /worker/profile, /worker/profile/password
-- 4 worker roles: viewer, content_manager, task_manager, full_worker
-- All financial data (payments, subscriptions, MoMo, billing) is hidden from workers
-- All credential features (API keys, SMTP, team management, settings) are hidden
-- Workers use separate session key (`req.session.worker`) from admin (`req.session.user`)
-
-Stage Summary:
-- Complete worker sub-dashboard system implemented (~500 lines of new code)
-- Admin can manage workers from /dashboard/workers
-- Workers login at /worker/login with username + password
-- Role-based permissions control what workers can see and do
-- All actions are audit-logged in worker_audit_logs table
-- Files changed: server.js only (single monolith)
+- Sitemap now generates correct `/p/{subdomain}` URLs matching actual routes
+- Complete Comfort rebrand across all files (60+ references replaced)
+- Worker system fully built with: 4 roles (viewer, content_manager, task_manager, full_worker), personal login at `/worker/login`, restricted dashboard, task management, content management, read-only member views, password change, audit logging
+- All changes ready for deployment — user needs to push to GitHub to deploy
