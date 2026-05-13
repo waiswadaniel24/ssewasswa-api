@@ -1,21 +1,58 @@
 # Comfort Platform — Worklog
 
----
-Task ID: 1
-Agent: Main Agent
-Task: Fix sitemap.xml HTTP error, complete SSEWASSWA→Comfort rebrand, verify worker system
+## Session Summary (May 13-14, 2026)
 
-Work Log:
-- Analyzed sitemap.xml route in launch-routes.js — found it queried `public_pages.slug` but the `/p/:subdomain` route uses `tenants.subdomain`, causing 404s for Google
-- Fixed sitemap to query tenants directly via EXISTS subquery on public_pages
-- Removed duplicate OG/canonical/Twitter meta tags from `getStructuredData()` (already in renderPageV3)
-- Rebranded ALL remaining SSEWASSWA → Comfort in: launch-routes.js, server.js, worker.js, public/sw.js, public/manifest.json, test/server.test.js
-- Verified zero SSEWASSWA text references remain (only lowercase URLs like ssewasswa.onrender.com)
-- Updated service worker cache name to `comfort-v1.0`
-- Confirmed worker sub-dashboard system is fully implemented (login, dashboard, tasks, posts, members, profile)
+### Commits Pushed (latest: 0f0574b)
+1. **Security** — hide raw DB errors in blog route, user-friendly messages
+2. **Sitemap fix** — correct blog URLs (/blog/posts), query blog_posts table, use slugs
+3. **SEO** — canonical URLs fixed in renderPageV3, robots meta tag added
+4. **robots.txt** — static file in public/, proper Allow/Disallow rules
+5. **Duplicate tenant cleanup** — auto-delete on startup (keeps newest)
+6. **Git security** — removed .env with OAuth secrets from git history
+7. **5 Features activated** (see below)
 
-Stage Summary:
-- Sitemap now generates correct `/p/{subdomain}` URLs matching actual routes
-- Complete Comfort rebrand across all files (60+ references replaced)
-- Worker system fully built with: 4 roles (viewer, content_manager, task_manager, full_worker), personal login at `/worker/login`, restricted dashboard, task management, content management, read-only member views, password change, audit logging
-- All changes ready for deployment — user needs to push to GitHub to deploy
+### 5 Major Features Added
+1. **Payroll & HR** (feature flag: payroll=true, hr_leave=true)
+   - Staff salary field added via ALTER TABLE migration
+   - Staff Salary Setup page: /business/payroll/setup
+   - Auto Uganda PAYE: 0% (≤410K), 10%, 20%, 30%, 40% (>1.62M)
+   - Auto NSSF: 5% employee (cap 16K), 10% employer (cap 32K)
+   - Staff dropdown in payroll (linked to staff table)
+   - Leave management active
+
+2. **Mobile Money** (feature flag: momo_payments=true)
+   - MTN MoMo production API routes active
+   - Fee payment flow: /pay/fees/:fee_id
+   - Student portal "Pay Now" buttons active
+   - Payment verification API: /api/v1/payment/verify/:ref
+
+3. **Student Self-Service Portal** (already built, now promoted)
+   - Login: /student/login (admission_no + password)
+   - Dashboard: fees, attendance, marks, timetable
+   - Report card download (DOCX)
+   - Admin: /school/students/generate-passwords
+
+4. **Push Notifications** (feature flag: push_notifications=true)
+   - web-push library (v3.6.7) installed
+   - VAPID key auto-generation on startup
+   - Real push delivery: POST /push/send
+   - Auto-cleanup of expired subscriptions
+   - Service worker push + notificationclick handlers
+   - Auto-subscribe on dashboard load via window.__VAPID_KEY
+
+5. **Dashboard Analytics** (feature flag: advanced_analytics=true)
+   - SVG bar chart: Fee Collection (last 6 months)
+   - SVG donut chart: Today's Attendance percentage
+   - Server-rendered SVG (no external library)
+   - Hover effects on bars
+
+### Pending Tasks
+- [ ] Google Search Console: resubmit sitemap, request indexing (wait for robots.txt cache to refresh)
+- [ ] Delete REDIS_URL from Render Environment
+- [ ] Set VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY in Render env (persist push keys)
+- [ ] Add real blog content for SEO
+
+## Key URLs
+- Site: https://ssewasswa.onrender.com
+- GitHub: https://github.com/ssewasswa/ssewasswa-api
+- Render: https://dashboard.render.com
