@@ -49,8 +49,10 @@ const wsBroadcast = (tenantId, data) => {
 let redisCache = null;
 try {
   const IORedis = require('ioredis');
-  if (process.env.REDIS_URL) {
-    redisCache = new IORedis(process.env.REDIS_URL, {
+  const redisUrl = process.env.REDIS_URL;
+  // Only connect if REDIS_URL is set AND looks valid (must start with redis://)
+  if (redisUrl && redisUrl.startsWith('redis://')) {
+    redisCache = new IORedis(redisUrl, {
       maxRetriesPerRequest: 3,
       retryDelayOnFailover: 100,
       retryStrategy: () => null,
@@ -1123,6 +1125,8 @@ const migrations = [
   `ALTER TABLE marks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
   // 3.10 Version history
   `CREATE TABLE IF NOT EXISTS version_history (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, action TEXT NOT NULL, old_data JSONB, new_data JSONB, changed_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // 3.9.5 Ensure audit_logs has user_email column
+  `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_email TEXT`,
   // 3.11 DB Indexes for 10x faster queries
   `CREATE INDEX IF NOT EXISTS idx_students_tenant ON students(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_students_class ON students(class)`,
@@ -20660,6 +20664,7 @@ try {
     if (!sidMatch) { ws.close(1008, 'No session'); return; }
     const sessionId = decodeURIComponent(sidMatch[1]);
     // Look up user from session store
+    if (!pgSession || !pgSession.store) { ws.close(1008, 'Session store not available'); return; }
     pgSession.store.get(sessionId, async (err, session) => {
       if (err || !session || !session.user) { ws.close(1008, 'Not authenticated'); return; }
       const tenantId = session.user.tenant_id;
