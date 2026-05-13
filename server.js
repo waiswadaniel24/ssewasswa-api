@@ -33,6 +33,30 @@ const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const http = require('http');
 
+// === VAPID KEY SETUP (web-push) ===
+let VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY;
+if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+  try {
+    const webpush = require('web-push');
+    const vapidKeys = webpush.generateVAPIDKeys();
+    VAPID_PUBLIC_KEY = vapidKeys.publicKey;
+    VAPID_PRIVATE_KEY = vapidKeys.privateKey;
+    webpush.setVapidDetails('mailto:admin@comfort.ug', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    console.log('[Push] Generated VAPID keys (set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY in env to persist)');
+  } catch (e) {
+    console.warn('[Push] web-push not available:', e.message);
+  }
+} else {
+  try {
+    const webpush = require('web-push');
+    VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+    VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+    webpush.setVapidDetails('mailto:admin@comfort.ug', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+  } catch (e) {
+    console.warn('[Push] web-push not available:', e.message);
+  }
+}
+
 // === WEBSOCKET REAL-TIME NOTIFICATIONS ===
 const { WebSocketServer } = require('ws');
 const wsClients = new Map(); // tenant_id -> Set<ws>
@@ -345,6 +369,19 @@ const requireRole = (...roles) => (req, res, next) => {
   if (roles.includes(u.role) || roles.includes('all')) return next();
   res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission to access this page.</div><a href="/dashboard" class="btn">Back to Dashboard</a></div>', req.session.user));
 };
+
+// === WORKER AUTH MIDDLEWARE ===
+const requireWorkerAuth = (req, res, next) => {
+  if (req.session.worker) return next();
+  res.redirect('/worker/login');
+};
+const requireWorkerRole = (...roles) => (req, res, next) => {
+  const w = req.session.worker;
+  if (!w) return res.redirect('/worker/login');
+  if (w.role === 'full_worker' || roles.includes(w.role)) return next();
+  res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">You do not have permission for this action.</div><a href="/worker/dashboard" class="btn">Back to Dashboard</a></div>', null));
+};
+
 const audit = (email, action, details) => pool.query('INSERT INTO audit_logs(user_email,action,details) VALUES($1,$2,$3)', [email, action, typeof details === 'object' ? JSON.stringify(details) : (details || '')]).catch(e => console.error('[Audit Error]', e.message));
 const notify = (tenantId, email, title, message, type) => {
   pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type) VALUES($1,$2,$3,$4,$5)', [tenantId, email, title, message, type || 'info']).catch(e => console.error('[DB Error]', e.message));
@@ -400,7 +437,7 @@ const fireWebhook = async (tenantId, event, payload) => {
   for (const hook of hooks) {
     try {
       const sig = crypto.createHmac('sha256', hook.secret || '').update(JSON.stringify(payload)).digest('hex');
-      const resp = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SSEWASSWA-Sig': sig, 'X-SSEWASSWA-Event': event }, body: JSON.stringify(payload) });
+      const resp = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Comfort-Sig': sig, 'X-Comfort-Event': event }, body: JSON.stringify(payload) });
       await pool.query('INSERT INTO webhook_logs(tenant_id,event,payload,status,response) VALUES($1,$2,$3,$4,$5)', [tenantId, event, JSON.stringify(payload), resp.status, '']);
     } catch (e) {
       await pool.query('INSERT INTO webhook_logs(tenant_id,event,payload,status,response) VALUES($1,$2,$3,$4,$5)', [tenantId, event, JSON.stringify(payload), 0, e.message]);
@@ -528,8 +565,8 @@ const requestMtnPayment = async (phone, amount, reference, payerMessage, payeeNo
         currency: 'UGX',
         externalId: reference,
         payer: { partyIdType: 'MSISDN', partyId: formattedPhone },
-        payerMessage: payerMessage || 'SSEWASSWA Payment',
-        payeeNote: payeeNote || 'Payment via SSEWASSWA'
+        payerMessage: payerMessage || 'Comfort Payment',
+        payeeNote: payeeNote || 'Payment via Comfort'
       })
     });
     
@@ -634,7 +671,7 @@ const createDPOPayment = async (amount, email, reference, description) => {
     const resp = await fetch(`${DPO_BASE}/API/v6/PayToken`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body: `<?xml version="1.0" encoding="utf-8"?><API3G><CompanyToken>${DPO_COMPANY_TOKEN}</CompanyToken><Request>createToken</Request><Transaction><PaymentAmount>${safeAmount}</PaymentAmount><PaymentCurrency>UGX</PaymentCurrency><CompanyRef>${safeRef}</CompanyRef><RedirectURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing/callback?dpo=1</RedirectURL><BackURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing</BackURL><CompanyRefInternal>${safeRef}</CompanyRefInternal><customerEmail>${safeEmail}</customerEmail><customerFirstName>SSEWASSWA</customerFirstName><Description>${safeDesc}</Description></Transaction><Services><Service><ServiceType>1</ServiceType><ServiceDescription>${safeDesc}</ServiceDescription><ServiceAmount>${safeAmount}</ServiceAmount></Service></Services></API3G>`
+      body: `<?xml version="1.0" encoding="utf-8"?><API3G><CompanyToken>${DPO_COMPANY_TOKEN}</CompanyToken><Request>createToken</Request><Transaction><PaymentAmount>${safeAmount}</PaymentAmount><PaymentCurrency>UGX</PaymentCurrency><CompanyRef>${safeRef}</CompanyRef><RedirectURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing/callback?dpo=1</RedirectURL><BackURL>${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/billing</BackURL><CompanyRefInternal>${safeRef}</CompanyRefInternal><customerEmail>${safeEmail}</customerEmail><customerFirstName>Comfort</customerFirstName><Description>${safeDesc}</Description></Transaction><Services><Service><ServiceType>1</ServiceType><ServiceDescription>${safeDesc}</ServiceDescription><ServiceAmount>${safeAmount}</ServiceAmount></Service></Services></API3G>`
     });
     const text = await resp.text();
     const tokenMatch = text.match(/<TransToken>([^<]+)<\/TransToken>/);
@@ -1192,9 +1229,9 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('local_languages', 'Local Languages', 'Luganda, Swahili, French translations', '4.0', 'uganda', 'Translations seeded', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('uneb_integration', 'UNEB Integration', 'Uganda National Examinations Board', '4.0', 'uganda', 'UNEB API credentials', false) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('nira_verification', 'NIRA Verification', 'National ID verification', '4.0', 'uganda', 'NIRA API credentials', false) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('advanced_analytics', 'Advanced Analytics', 'Detailed analytics dashboard with charts', '5.0', 'enterprise', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('advanced_analytics', 'Detailed analytics dashboard with charts', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('scheduled_reports', 'Scheduled Reports', 'Auto-send reports on schedule', '5.0', 'enterprise', 'GMAIL_USER + GMAIL_PASS env vars', false) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('momo_payments', 'Mobile Money', 'MTN MoMo and Airtel Money integration', '5.0', 'enterprise', 'MoMo API credentials', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('momo_payments', 'Mobile Money', 'MTN MoMo and Airtel Money integration', '5.0', 'enterprise', 'MoMo API credentials', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('multi_currency', 'Multi-Currency', 'UGX, KES, TZS, RWF, USD support', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('automation_engine', 'Automation Engine', 'If-then rules for automated actions', '6.0', 'ecosystem', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('oauth2', 'OAuth2 Login', 'Google and Microsoft OAuth', '6.0', 'ecosystem', 'GOOGLE_CLIENT_ID or MS_CLIENT_ID', false) ON CONFLICT DO NOTHING`,
@@ -1208,7 +1245,7 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('churn_prediction', 'Churn Prediction', 'Identify members at risk of leaving', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('giving_trends', 'Giving Trends AI', 'AI-powered donation analysis', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('engagement_scoring', 'Engagement Scoring', 'Member engagement analysis', '7.0', 'ai', 'None', true) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('push_notifications', 'Push Notifications', 'Browser push notification support', '8.0', 'mobile', 'VAPID keys', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('push_notifications', 'Push Notifications', 'Browser push notification support', '8.0', 'mobile', 'VAPID keys', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('offline_sync', 'Offline Sync', 'Work offline with auto-sync', '8.0', 'mobile', 'Service Worker', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('deep_linking', 'Deep Linking', 'Short codes for mobile app links', '8.0', 'mobile', 'None', false) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('camera_integration', 'Camera Integration', 'Scan barcodes and documents via camera', '8.0', 'mobile', 'None', false) ON CONFLICT DO NOTHING`,
@@ -1436,8 +1473,8 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('volunteers', 'Volunteer Scheduling', 'Roles, schedules and availability', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('sermons', 'Sermon Archive', 'Sermon notes, audio and series tracking', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('prayer_requests', 'Prayer Requests', 'Submit, track and mark answered', '4.0', 'uganda', 'None', true) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('payroll', 'Payroll Management', 'Salary calculations, payslips, deductions', '5.0', 'enterprise', 'None', false) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('hr_leave', 'HR & Leave Management', 'Leave requests, balances and approval', '5.0', 'enterprise', 'None', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('payroll', 'Payroll Management', 'Salary calculations, payslips, deductions', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('hr_leave', 'HR & Leave Management', 'Leave requests, balances and approval', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('projects', 'Project Management', 'Projects, tasks, milestones and deadlines', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('crm', 'CRM & Leads', 'Lead tracking, pipeline and follow-ups', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('stock_take', 'Stock Take', 'Physical inventory counts vs system', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
@@ -1512,7 +1549,7 @@ const migrations = [
   `ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
   // ============ v14 PLATFORM SETTINGS & EDUCATIONAL RESOURCES ============
   `CREATE TABLE IF NOT EXISTS platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
-  `INSERT INTO platform_settings (key, value) VALUES ('site_name', 'SSEWASSWA') ON CONFLICT (key) DO NOTHING`,
+  `INSERT INTO platform_settings (key, value) VALUES ('site_name', 'Comfort') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('site_tagline', 'The Operating System for African Institutions') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('support_email', 'support@ssewasswa.onrender.com') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('support_phone', '') ON CONFLICT (key) DO NOTHING`,
@@ -1785,7 +1822,7 @@ const uniqueConstraintMigrations = [
 })();
 
 // === PLATFORM SETTINGS CACHE ===
-let platformSettings = { site_name: 'SSEWASSWA', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: process.env.DEV_EMAIL || 'admin@ssewasswa.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000', google_verification: 'ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ' };
+let platformSettings = { site_name: 'Comfort', site_tagline: 'The Operating System for African Institutions', support_email: 'support@ssewasswa.onrender.com', support_phone: '', developer_phone: '', developer_email: process.env.DEV_EMAIL || 'admin@ssewasswa.com', whatsapp_link: '', twitter_link: '', facebook_link: '', footer_text: 'All rights reserved.', ad_revenue_per_view: '50', premium_resource_price: '2000', google_verification: 'ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ' };
 async function loadPlatformSettings() {
   try {
     const rows = (await pool.query('SELECT key, value FROM platform_settings')).rows;
@@ -1799,7 +1836,7 @@ setInterval(loadPlatformSettings, 60000);
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user, csrfTokenOrReq) => {
   const dark = user?.dark_mode;
-  const siteName = platformSettings?.site_name || 'SSEWASSWA';
+  const siteName = platformSettings?.site_name || 'Comfort';
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
   // Extract CSRF token from either a string or a request object
   const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || null);
@@ -1812,7 +1849,7 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
 <html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} | ${esc(siteName)}</title>
 <meta name="description" content="${esc(siteDesc)}">
-<meta name="keywords" content="SSEWASSWA, school management, Uganda, church management, business management, clinic, fees, attendance, SMS, POS, fundraising">
+<meta name="keywords" content="Comfort, school management, Uganda, church management, business management, clinic, fees, attendance, SMS, POS, fundraising">
 <meta property="og:title" content="${esc(title)} | ${esc(siteName)}">
 <meta property="og:description" content="${esc(siteDesc)}">
 ${platformSettings.google_verification ? `<meta name="google-site-verification" content="${esc(platformSettings.google_verification)}">` : ''}
@@ -1885,6 +1922,17 @@ ${process.env.GA_TRACKING_ID ? `
   });
 </script>
 ` : ''}
+<script>window.__VAPID_KEY = '${VAPID_PUBLIC_KEY || ''}';
+// Service Worker registration + Push notification subscription
+if ('serviceWorker' in navigator && window.__VAPID_KEY) {
+  function urlBase64ToUint8Array(b){const d=atob(b.replace(/-/g,'+').replace(/_/g,'/'));const a=new Uint8Array(d.length);for(let i=0;i<d.length;i++)a[i]=d.charCodeAt(i);return a}
+  navigator.serviceWorker.register('/sw.js').then(function(reg){
+    reg.pushManager.getSubscription().then(function(sub){
+      if(!sub){reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(window.__VAPID_KEY)}).then(function(s){fetch('/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({endpoint:s.endpoint,keys:s.keys})}).catch(function(){})}).catch(function(){})}
+    });
+  });
+}
+</script>
 </head><body>
 <a href="#main" style="position:absolute;top:-100px;left:0;background:#4f46e5;color:white;padding:8px;z-index:9999" onfocus="this.style.top=\"0\"" onblur="this.style.top=\"-100px\"">Skip to main content</a>
 <nav class="nav" role="navigation" aria-label="Main navigation">
@@ -1948,7 +1996,7 @@ ${user ? `
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var ws = new WebSocket(proto + '//' + location.host + '/ws/notifications?sid=' + encodeURIComponent(document.cookie.match(/connect\\.sid=([^;]+)/) ? document.cookie.match(/connect\\.sid=([^;]+)/)[1] : ''));
     ws.onopen = function(){ console.log('[WS] Connected'); fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); };
-    ws.onmessage = function(e){ var d=JSON.parse(e.data); if(d.type==='notification'){updateBadge(d.count);if(Notification.permission==='granted'){new Notification('SSEWASSWA',{body:d.title,icon:'/favicon.ico'});}else if(d.title){badge.style.animation='none';badge.offsetHeight;badge.style.animation='pulse 0.5s ease';}} };
+    ws.onmessage = function(e){ var d=JSON.parse(e.data); if(d.type==='notification'){updateBadge(d.count);if(Notification.permission==='granted'){new Notification('Comfort',{body:d.title,icon:'/favicon.ico'});}else if(d.title){badge.style.animation='none';badge.offsetHeight;badge.style.animation='pulse 0.5s ease';}} };
     ws.onclose = function(){ console.log('[WS] Closed, fallback to polling'); startPolling(); };
     ws.onerror = function(){ ws.close(); };
   } catch(e){ startPolling(); }
@@ -2075,7 +2123,7 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   // v1.0: Welcome email
   const welcomeHtml = `<div style="font-family:'Segoe UI',system-ui,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
   <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:40px 30px;text-align:center">
-    <h1 style="color:white;font-size:28px;margin:0">Welcome to SSEWASSWA!</h1>
+    <h1 style="color:white;font-size:28px;margin:0">Welcome to Comfort!</h1>
     <p style="color:rgba(255,255,255,0.9);font-size:16px;margin-top:8px">Your all-in-one management platform is ready</p>
   </div>
   <div style="padding:30px">
@@ -2092,10 +2140,10 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
     <p style="font-size:14px;color:#64748b;line-height:1.6">Need help? Visit our <a href="${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/help" style="color:#4f46e5;font-weight:600">Help Center</a> or reply to this email.</p>
   </div>
   <div style="background:#f1f5f9;padding:20px 30px;text-align:center;border-top:1px solid #e2e8f0">
-    <p style="font-size:13px;color:#94a3b8;margin:0">&copy; ${new Date().getFullYear()} SSEWASSWA Platform &bull; Built with &#10084; in Uganda</p>
+    <p style="font-size:13px;color:#94a3b8;margin:0">&copy; ${new Date().getFullYear()} Comfort Platform &bull; Built with &#10084; in Uganda</p>
   </div></div>`;
-  sendEmail(email, 'Welcome to SSEWASSWA!', welcomeHtml);
-  queueEmail(tenant.rows[0].id, email, 'Welcome to SSEWASSWA!', welcomeHtml);
+  sendEmail(email, 'Welcome to Comfort!', welcomeHtml);
+  queueEmail(tenant.rows[0].id, email, 'Welcome to Comfort!', welcomeHtml);
   // v1.0: Free subscription
   try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status) VALUES($1,$2,$3,$4)', [tenant.rows[0].id, 'free', 0, 'active']); } catch(e) { /* duplicate subscription OK */ }
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Account created! Check your email for a welcome message. You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
@@ -2149,7 +2197,7 @@ app.post('/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 3 }), ah
       await transporter.sendMail({
         from: process.env.GMAIL_USER,
         to: email,
-        subject: 'SSEWASSWA - Password Reset',
+        subject: 'Comfort - Password Reset',
         html: `<div style="font-family:'Segoe UI',system-ui,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0">
   <div style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:40px 30px;text-align:center">
     <h1 style="color:white;font-size:28px;margin:0">Password Reset</h1>
@@ -2164,7 +2212,7 @@ app.post('/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 3 }), ah
     <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin-top:20px;padding:16px;background:#fff7ed;border-radius:10px;border:1px solid #fed7aa">If you did not request this password reset, please ignore this email. Your password will remain unchanged. This link can only be used once.</p>
   </div>
   <div style="background:#f1f5f9;padding:20px 30px;text-align:center;border-top:1px solid #e2e8f0">
-    <p style="font-size:13px;color:#94a3b8;margin:0">&copy; ${new Date().getFullYear()} SSEWASSWA Platform</p>
+    <p style="font-size:13px;color:#94a3b8;margin:0">&copy; ${new Date().getFullYear()} Comfort Platform</p>
   </div></div>`
       });
     } catch (e) {
@@ -2241,6 +2289,46 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
     ]);
     await cacheSet(cacheKey, { students, fees, exams, attendance }, 120); // cache 2 min
   }
+  // --- Inline SVG Charts Data ---
+  const feeChartRows = (await pool.query("SELECT TO_CHAR(created_at, 'Mon') as month, COALESCE(SUM(amount),0) as total FROM fees WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '6 months' GROUP BY month ORDER BY MIN(created_at)", [t])).rows;
+  const attTotal = parseInt((await pool.query("SELECT COUNT(*)::int as total FROM attendance WHERE tenant_id=$1 AND date = CURRENT_DATE", [t])).rows[0].total) || 1;
+  const attPresent = parseInt((await pool.query("SELECT COUNT(*)::int as present FROM attendance WHERE tenant_id=$1 AND date = CURRENT_DATE AND status = 'present'", [t])).rows[0].present) || 0;
+  const attPct = Math.round((attPresent / attTotal) * 100);
+  // Build fee bar chart SVG
+  const fmtUGX = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : n.toString();
+  const maxFee = Math.max(...feeChartRows.map(r => parseFloat(r.total || 0)), 1);
+  const cH = 135, cTop = 38, bW = 40, gX = 25, sX = 70;
+  let feeSvg = '<svg viewBox="0 0 500 220" style="width:100%;max-width:500px" aria-label="Fee collection bar chart">'
+    + '<defs><linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#059669"/><stop offset="100%" stop-color="#10b981"/></linearGradient></defs>'
+    + '<text x="250" y="22" text-anchor="middle" font-weight="600" font-size="14" fill="#1e293b">Fee Collection (Last 6 Months)</text>'
+    + '<line x1="50" y1="' + cTop + '" x2="50" y2="' + (cTop + cH) + '" stroke="#cbd5e1"/>';
+  for (let i = 0; i <= 4; i++) {
+    const y = cTop + cH * i / 4;
+    const val = maxFee * (1 - i / 4);
+    feeSvg += '<line x1="50" y1="' + y + '" x2="460" y2="' + y + '" stroke="#e2e8f0" stroke-width="0.5"/>';
+    feeSvg += '<text x="45" y="' + (y + 4) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + fmtUGX(val) + '</text>';
+  }
+  feeChartRows.forEach((r, i) => {
+    const val = parseFloat(r.total || 0);
+    const barH = Math.max(2, (val / maxFee) * cH);
+    const x = sX + i * (bW + gX);
+    const y = cTop + cH - barH;
+    feeSvg += '<rect class="chart-bar" x="' + x + '" y="' + y + '" width="' + bW + '" height="' + barH + '" fill="url(#barGrad)" rx="4"><title>' + esc(r.month) + ': UGX ' + parseInt(val).toLocaleString() + '</title></rect>';
+    feeSvg += '<text x="' + (x + bW / 2) + '" y="' + (cTop + cH + 16) + '" text-anchor="middle" font-size="11" fill="#64748b">' + esc(r.month) + '</text>';
+  });
+  feeSvg += '</svg>';
+  // Build attendance donut SVG
+  const circ = 2 * Math.PI * 70;
+  const presentArc = (attPresent / attTotal) * circ;
+  const absentArc = circ - presentArc;
+  let donutSvg = '<svg viewBox="0 0 200 200" width="200" height="200" aria-label="Attendance donut chart">'
+    + '<circle cx="100" cy="100" r="70" fill="none" stroke="#e2e8f0" stroke-width="25"/>'
+    + '<circle cx="100" cy="100" r="70" fill="none" stroke="#10b981" stroke-width="25" '
+    + 'stroke-dasharray="' + presentArc.toFixed(2) + ' ' + absentArc.toFixed(2) + '" '
+    + 'transform="rotate(-90 100 100)"/>'
+    + '<text x="100" y="100" text-anchor="middle" font-size="24" font-weight="700" fill="#1e293b">' + attPct + '%</text>'
+    + '<text x="100" y="118" text-anchor="middle" font-size="11" fill="#64748b">Present</text>'
+    + '</svg>';
   res.send(renderPage('School Dashboard', `
     <div class="hero"><h1>School Portal</h1><p>Manage students, fees, exams, attendance, reports</p></div>
     <div class="stats">
@@ -2288,6 +2376,7 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Scholarships</h3><a href="/school/scholarships" class="btn btn-sm">Bursaries</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">Visitors</h3><a href="/school/visitors" class="btn btn-sm">Gate Pass</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Student Portal</h3><a href="/student/login" class="btn btn-sm">Student Login</a><a href="/school/students/generate-passwords" class="btn btn-sm btn-green" style="margin-top:8px">Gen Passwords</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Fee Reminders</h3><a href="/school/fee-reminders" class="btn btn-sm btn-red">Send Reminders</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Online Payments</h3><a href="/billing" class="btn btn-sm">Pay/Subscribe</a></div>
       <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
@@ -2299,6 +2388,18 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card"><h3>Policies</h3><a href="/policies" class="btn btn-sm">Policy Docs</a></div>
       <div class="card"><h3>Committees</h3><a href="/committees" class="btn btn-sm">Manage</a></div>
     </div>
+    <h2 style="margin:28px 0 12px;font-size:18px;color:#1e293b">&#x1f4ca; Analytics Overview</h2>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px">
+      <div class="card">${feeSvg}</div>
+      <div class="card" style="display:flex;flex-direction:column;align-items:center">
+        <h3>Today's Attendance</h3>
+        ${donutSvg}
+        <p class="muted" style="margin-top:8px">${attPresent} of ${attTotal} students present</p>
+      </div>
+    </div>
+    <script>
+    document.querySelectorAll('.chart-bar').forEach(function(b){b.style.transition='opacity 0.2s';b.addEventListener('mouseenter',function(){b.style.opacity='0.7'});b.addEventListener('mouseleave',function(){b.style.opacity='1'})});
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Fees Collected (Monthly)</h3><canvas id="feesChart"></canvas></div>
     <div class="card"><h3>Attendance Trend (Last 7 Days)</h3><canvas id="attendanceChart"></canvas></div>
@@ -3708,6 +3809,7 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Assets</h3><a href="/org/assets" class="btn btn-sm">Fixed Assets</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Partners</h3><a href="/org/partners" class="btn btn-sm">Donor Mgmt</a></div>
       <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: Ticketing</h3><a href="/org/ticketing" class="btn btn-sm">Event Tickets</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Finance: Income vs Expense</h3><canvas id="orgFinanceChart"></canvas></div>
@@ -4194,6 +4296,7 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
       <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Tithes Trend</h3><canvas id="tithesChart"></canvas></div>
@@ -4569,6 +4672,7 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">🌐 Public Site</h3><a href="/public-site" class="btn btn-sm">Website Builder</a></div>
       <div class="card" style="background:#d1fae5;border:2px solid #059669"><h3 style="color:#059669">🎯 Fundraising</h3><a href="/fundraising" class="btn btn-sm">Campaigns</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">🎬 Entertainment</h3><a href="/entertainment" class="btn btn-sm">Hub</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Sales Trend</h3><canvas id="salesChart"></canvas></div>
@@ -5023,6 +5127,7 @@ app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res)
       <div class="card"><h3>Income</h3><a href="/income" class="btn btn-sm btn-green">Income Tracking</a></div>
       <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
       <div class="card"><h3>Billing</h3><a href="/billing" class="btn btn-sm btn-gold">Subscriptions</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <div class="card"><h3>Budget: Planned vs Actual</h3><canvas id="budgetChart"></canvas></div>
@@ -5535,7 +5640,7 @@ app.get('/settings/backup/csv', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
   const tables = ['students', 'fees', 'exams', 'marks', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'invoices', 'expenses', 'attendance', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'customers', 'budget_items', 'goals', 'personal_notes'];
-  let backup = `SSEWASSWA DATA BACKUP\nOrganization: ${tenant.name}\nDate: ${new Date().toISOString()}\n\n`;
+  let backup = `Comfort DATA BACKUP\nOrganization: ${tenant.name}\nDate: ${new Date().toISOString()}\n\n`;
   for (const table of tables) {
     try {
       validateTable(table);
@@ -5761,7 +5866,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 
     <!-- HERO -->
     <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
-      <h1>SSEWASSWA Developer Hub</h1>
+      <h1>Comfort Developer Hub</h1>
       <p style="opacity:0.9;margin-top:4px">Your platform, your earnings, your control</p>
     </div>
     ${flashHtml}
@@ -6637,9 +6742,9 @@ app.get('/dev/blog/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, r
 // Public blog listing (blog_posts table)
 app.get('/blog/posts', ah(async (req, res) => {
   const posts = (await pool.query('SELECT * FROM blog_posts WHERE is_published=true ORDER BY published_at DESC LIMIT 20')).rows;
-  res.send(renderPageV3('SSEWASSWA Blog - News & Updates', `
+  res.send(renderPageV3('Comfort Blog - News & Updates', `
     <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:16px;margin-bottom:25px;color:white;text-align:center">
-      <h1>Blog & News</h1><p style="opacity:0.9;margin-top:8px">Updates, tips, and insights from SSEWASSWA</p>
+      <h1>Blog & News</h1><p style="opacity:0.9;margin-top:8px">Updates, tips, and insights from Comfort</p>
     </div>
     <div class="grid">
       ${posts.map(p => `
@@ -6653,7 +6758,7 @@ app.get('/blog/posts', ah(async (req, res) => {
       `).join('')}
     </div>
     ${posts.length === 0 ? '<div class="card" style="text-align:center;padding:40px"><h3>No posts yet</h3><p class="muted">Check back soon for updates!</p></div>' : ''}
-  `, null, { description: 'SSEWASSWA blog - news, updates, tips and insights for African institutions' }));
+  `, null, { description: 'Comfort blog - news, updates, tips and insights for African institutions' }));
 }));
 
 // Public blog post detail (blog_posts table)
@@ -6666,12 +6771,12 @@ app.get('/blog/posts/:slug', ah(async (req, res) => {
       ${post.image_url ? `<img src="${esc(post.image_url)}" style="width:100%;height:300px;object-fit:cover;border-radius:16px;margin-bottom:20px" alt="${esc(post.title)}">` : ''}
       <span class="tag">${esc(post.category)}</span>
       <h1 style="margin:10px 0;font-size:28px">${esc(post.title)}</h1>
-      <p class="muted">By ${esc(post.author || 'SSEWASSWA Team')} &middot; ${post.published_at ? new Date(post.published_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
+      <p class="muted">By ${esc(post.author || 'Comfort Team')} &middot; ${post.published_at ? new Date(post.published_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
       <hr style="margin:20px 0;border-color:#e2e8f0">
       <div style="line-height:1.8;font-size:16px">${post.content}</div>
       <hr style="margin:30px 0;border-color:#e2e8f0">
       <div style="text-align:center">
-        <p class="muted">Powered by SSEWASSWA - The Operating System for African Institutions</p>
+        <p class="muted">Powered by Comfort - The Operating System for African Institutions</p>
         <a href="/blog/posts" class="btn" style="margin-top:10px">More Articles</a>
       </div>
     </div>
@@ -6772,11 +6877,11 @@ app.get('/dev/activity', requireAuth, requireSuperAdmin, ah(async (req, res) => 
 app.get('/help', ah(async (req, res) => {
   res.send(renderPage('Help Center', `
     <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:40px 20px;border-radius:16px;margin-bottom:20px;color:white;text-align:center">
-      <h1>Help Center</h1><p style="opacity:0.9;margin-top:8px">Find answers, get support, and learn how to use SSEWASSWA</p>
+      <h1>Help Center</h1><p style="opacity:0.9;margin-top:8px">Find answers, get support, and learn how to use Comfort</p>
     </div>
     <div class="grid">
       <div class="card"><h3>Getting Started</h3>
-        <p class="muted" style="margin-bottom:10px">New to SSEWASSWA? Here is how to begin:</p>
+        <p class="muted" style="margin-bottom:10px">New to Comfort? Here is how to begin:</p>
         <ul style="padding-left:20px;line-height:2">
           <li><a href="/register">Create your account</a> - Sign up with your email</li>
           <li><a href="/login">Log in</a> - Access your dashboard</li>
@@ -6788,7 +6893,7 @@ app.get('/help', ah(async (req, res) => {
         <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I add students or members?</summary><p class="muted" style="padding:8px 0">Log in, go to your Dashboard, then use the relevant section (Students for schools, Members for churches, Patients for clinics).</p></details>
         <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I accept payments?</summary><p class="muted" style="padding:8px 0">Go to Settings then Billing. You can set up mobile money (MTN/Airtel) and card payments.</p></details>
         <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I create a public website?</summary><p class="muted" style="padding:8px 0">From your Dashboard, go to Public Site. You can create pages, add events, and share your organization's link.</p></details>
-        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">Is SSEWASSWA free?</summary><p class="muted" style="padding:8px 0">Yes! SSEWASSWA has a free tier with core features. Premium features like fundraising and advanced reports are available on paid plans.</p></details>
+        <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">Is Comfort free?</summary><p class="muted" style="padding:8px 0">Yes! Comfort has a free tier with core features. Premium features like fundraising and advanced reports are available on paid plans.</p></details>
         <details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600;padding:8px 0">How do I contact support?</summary><p class="muted" style="padding:8px 0">Email us at <a href="mailto:${esc(platformSettings.support_email)}">${esc(platformSettings.support_email)}</a>${platformSettings.support_phone ? ` or call <a href="tel:${esc(platformSettings.support_phone)}">${esc(platformSettings.support_phone)}</a>` : ''}.</p></details>
       </div>
       <div class="card"><h3>Contact Support</h3>
@@ -6857,7 +6962,7 @@ app.get('/dev/settings', requireAuth, requireSuperAdmin, ah(async (req, res) => 
       <div class="dev-section">
         <h2>Branding & Website</h2>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div><label>Website Name</label><input name="site_name" value="${esc(s.site_name)}" placeholder="e.g. SSEWASSWA"></div>
+          <div><label>Website Name</label><input name="site_name" value="${esc(s.site_name)}" placeholder="e.g. Comfort"></div>
           <div><label>Tagline</label><input name="site_tagline" value="${esc(s.site_tagline)}" placeholder="e.g. The Operating System for African Institutions"></div>
         </div>
         <label>Footer Text</label><input name="footer_text" value="${esc(s.footer_text)}" placeholder="e.g. All rights reserved.">
@@ -8238,7 +8343,7 @@ app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async 
   const receiptNo = 'RCP-' + fee.id + '-' + Date.now().toString(36).toUpperCase();
   const doc = new Document({
     sections: [{ properties: {}, children: [
-      new Paragraph({ children: [new TextRun({ text: tenant?.name || 'SSEWASSWA', bold: true, size: 32 })], alignment: 'center' }),
+      new Paragraph({ children: [new TextRun({ text: tenant?.name || 'Comfort', bold: true, size: 32 })], alignment: 'center' }),
       new Paragraph({ children: [new TextRun({ text: 'FEE RECEIPT', bold: true, size: 24 })], alignment: 'center' }),
       new Paragraph({ children: [new TextRun({ text: `Receipt No: ${receiptNo}` })] }),
       new Paragraph({ children: [new TextRun({ text: `Date: ${new Date().toLocaleDateString()}` })] }),
@@ -8265,7 +8370,7 @@ app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async 
 // === PUBLIC API DOCS ===
 app.get('/api-docs', (req, res) => {
   res.send(renderPage('API Documentation', `
-    <div class="hero"><h1>API Documentation</h1><p>RESTful API for SSEWASSWA Platform &bull; OpenAPI 3.0</p></div>
+    <div class="hero"><h1>API Documentation</h1><p>RESTful API for Comfort Platform &bull; OpenAPI 3.0</p></div>
     <div class="card">
       <h2>Quick Start</h2>
       <p>Include your API key in the header: <code style="background:#f1f5f9;padding:2px 8px;border-radius:4px">Authorization: Bearer YOUR_API_KEY</code></p>
@@ -8557,7 +8662,7 @@ app.get('/api/v1/members/export', apiAuth, ah(async (req, res) => {
 app.get('/api/v1/openapi.json', (req, res) => {
   const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
   res.json({
-    openapi: '3.0.3', info: { title: 'SSEWASSWA Platform API', version: '9.0.0', description: 'Multi-tenant SaaS API for Schools, Churches, Businesses and Organizations in Africa.' },
+    openapi: '3.0.3', info: { title: 'Comfort Platform API', version: '9.0.0', description: 'Multi-tenant SaaS API for Schools, Churches, Businesses and Organizations in Africa.' },
     servers: [{ url: baseUrl, description: 'Production' }], security: [{ BearerAuth: [] }],
     components: {
       securitySchemes: { BearerAuth: { type: 'http', scheme: 'bearer', description: 'API Key from dashboard Settings' } },
@@ -9329,7 +9434,7 @@ app.get('/marketplace', requireAuth, requireNotBanned, ah(async (req, res) => {
   const installed = (await pool.query('SELECT plugin_id FROM tenant_plugins WHERE tenant_id=$1 AND status=$2', [t, 'active'])).rows.map(r=>r.plugin_id);
   res.send(renderPage('Plugin Marketplace', `
     <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Marketplace</h1><p>Extend your platform with plugins</p></div>
-    <div class="grid">${plugins.map(p=>`<div class="card"><h3>${esc(p.name)}</h3><p class="muted">${esc(p.description||'')}</p><span class="tag">${esc(p.category||'General')}</span><br><span class="muted">By ${esc(p.author||'SSEWASSWA')} | ${p.downloads} downloads</span><br>${installed.includes(p.id)?'<span class="tag" style="background:#d1fae5;color:#065f46;margin-top:10px">Installed</span>':`<a href="/marketplace/${p.id}/install" class="btn btn-sm btn-green" style="margin-top:10px">Install${p.price>0?' - UGX '+Number(p.price).toLocaleString():' - Free'}</a>`}</div>`).join('')}</div>
+    <div class="grid">${plugins.map(p=>`<div class="card"><h3>${esc(p.name)}</h3><p class="muted">${esc(p.description||'')}</p><span class="tag">${esc(p.category||'General')}</span><br><span class="muted">By ${esc(p.author||'Comfort')} | ${p.downloads} downloads</span><br>${installed.includes(p.id)?'<span class="tag" style="background:#d1fae5;color:#065f46;margin-top:10px">Installed</span>':`<a href="/marketplace/${p.id}/install" class="btn btn-sm btn-green" style="margin-top:10px">Install${p.price>0?' - UGX '+Number(p.price).toLocaleString():' - Free'}</a>`}</div>`).join('')}</div>
   `, req.session.user));
 }));
 
@@ -9546,7 +9651,7 @@ app.get('/compliance/export', requireAuth, requireNotBanned, ah(async (req, res)
 // ============================================================
 app.get('/manifest.json', (req, res) => {
   res.json({
-    name: 'SSEWASSWA Platform', short_name: 'SSEWASSWA', start_url: '/', display: 'standalone',
+    name: 'Comfort Platform', short_name: 'Comfort', start_url: '/', display: 'standalone',
     background_color: '#4f46e5', theme_color: '#4f46e5',
     icons: [{ src: '/favicon.ico', sizes: '48x48', type: 'image/x-icon' }]
   });
@@ -9618,7 +9723,7 @@ app.get('/school/fees/remind', requireAuth, requireNotBanned, ah(async (req, res
   let sent = 0;
   for (const fee of fees) {
     const balance = parseInt(fee.amount) - parseInt(fee.paid);
-    if (fee.guardian_phone) { const ok = await sendSMS(fee.guardian_phone, `Fee reminder: ${fee.student_name} has balance of UGX ${balance.toLocaleString()}. Please clear. - SSEWASSWA`); if (ok) sent++; }
+    if (fee.guardian_phone) { const ok = await sendSMS(fee.guardian_phone, `Fee reminder: ${fee.student_name} has balance of UGX ${balance.toLocaleString()}. Please clear. - Comfort`); if (ok) sent++; }
     if (fee.parent_email) { await sendEmail(fee.parent_email, `Fee Balance Reminder - ${fee.student_name}`, `<p>Dear Parent,</p><p>Your child <strong>${esc(fee.student_name)}</strong> has an outstanding fee balance of <strong>UGX ${balance.toLocaleString()}</strong>.</p><p>Please clear the balance at your earliest convenience.</p>`); sent++; }
   }
   res.send(renderPage('Fee Reminders', `<div class="card"><div class="alert alert-success"><h2>Reminders Sent</h2><p>${sent} reminders sent to parents with outstanding balances.</p></div><a href="/school/fees" class="btn">Back to Fees</a></div>`, req.session.user));
@@ -9753,7 +9858,7 @@ app.get('/church/donations/:id/tax-receipt', requireAuth, requireNotBanned, ah(a
   if (!donation) return res.status(404).send('Donation not found');
   const receiptNo = 'TXR-' + donation.id + '-' + Date.now().toString(36).toUpperCase();
   const doc = new Document({ sections: [{ properties: {}, children: [
-    new Paragraph({ children: [new TextRun({ text: donation.tenant_name || 'SSEWASSWA', bold: true, size: 32 })], alignment: 'center' }),
+    new Paragraph({ children: [new TextRun({ text: donation.tenant_name || 'Comfort', bold: true, size: 32 })], alignment: 'center' }),
     new Paragraph({ children: [new TextRun({ text: 'DONATION TAX RECEIPT', bold: true, size: 24 })], alignment: 'center' }),
     new Paragraph({ children: [new TextRun({ text: `Receipt No: ${receiptNo}` })] }),
     new Paragraph({ children: [new TextRun({ text: `Date: ${new Date(donation.created_at).toLocaleDateString()}` })] }),
@@ -10769,8 +10874,8 @@ const paginationHtml = (currentPage, totalCount, perPage, baseUrl) => {
 // 3.14: SEO META TAGS (enhance renderPage)
 const renderPageV3 = (title, content, user, meta = {}) => {
   const dark = user?.dark_mode;
-  const description = meta.description || `${title} - SSEWASSWA All-in-One Management Platform`;
-  const keywords = meta.keywords || 'school management, church management, business management, Uganda, SSEWASSWA, clinic management, SaaS Africa';
+  const description = meta.description || `${title} - Comfort All-in-One Management Platform`;
+  const keywords = meta.keywords || 'school management, church management, business management, Uganda, Comfort, clinic management, SaaS Africa';
   const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
   const canonicalUrl = meta.canonical || `${baseUrl}${meta.path || '/'}`;
   const googleVerification = process.env.GOOGLE_SITE_VERIFICATION || '';
@@ -10785,10 +10890,10 @@ ${googleVerification ? `<meta name="google-site-verification" content="${esc(goo
 <meta name="description" content="${esc(description)}">
 <meta name="keywords" content="${esc(keywords)}">
 <link rel="canonical" href="${esc(canonicalUrl)}">
-<meta property="og:title" content="${esc(title)} | SSEWASSWA">
+<meta property="og:title" content="${esc(title)} | Comfort">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="SSEWASSWA">
+<meta property="og:site_name" content="Comfort">
 <meta property="og:url" content="${esc(canonicalUrl)}">
 <meta property="og:image" content="${baseUrl}/icon.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -10799,7 +10904,7 @@ ${googleVerification ? `<meta name="google-site-verification" content="${esc(goo
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
 <meta name="theme-color" content="#4f46e5">
-<title>${esc(title)} | SSEWASSWA</title>
+<title>${esc(title)} | Comfort</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:${dark ? '#0f172a' : '#f8fafc'};color:${dark ? '#e2e8f0' : '#1e293b'};line-height:1.6;transition:background 0.3s,color 0.3s}
@@ -10861,6 +10966,7 @@ ${process.env.GA_TRACKING_ID ? `
       <a href="/settings/profile">Settings</a>
       <a href="/guide" style="font-size:12px">Guide</a>
       <a href="/parent/login" style="font-size:12px">Parent</a>
+      <a href="/worker/login" style="font-size:12px">Worker</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">Logout</a>
     ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
@@ -10913,7 +11019,7 @@ app.get('/setup', requireAuth, ah(async (req, res) => {
     await pool.query('UPDATE tenants SET setup_complete=true WHERE id=$1', [t]);
   }
   res.send(renderPage('Setup Checklist', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Welcome to SSEWASSWA!</h1><p>Let's get you set up in minutes</p></div>
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Welcome to Comfort!</h1><p>Let's get you set up in minutes</p></div>
     <div class="card" style="max-width:600px;margin:0 auto">
       <h2>Setup Progress</h2>
       <div style="background:#e2e8f0;border-radius:12px;height:20px;margin:15px 0"><div style="background:linear-gradient(90deg,#059669,#10b981);height:20px;border-radius:12px;width:${(doneCount/steps.length*100).toFixed(0)}%"></div></div>
@@ -10929,11 +11035,11 @@ app.get('/c/:subdomain', ah(async (req, res) => {
   const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.subdomain])).rows[0];
   if (!tenant) return res.status(404).send(renderPage('404', '<div class="card"><h2>Not Found</h2><p>This organization does not exist.</p></div>', null));
   res.send(renderPageV3(tenant.name, `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>${esc(tenant.name)}</h1><p>${esc(tenant.type)} - ${esc(tenant.description || 'Powered by SSEWASSWA')}</p></div>
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>${esc(tenant.name)}</h1><p>${esc(tenant.type)} - ${esc(tenant.description || 'Powered by Comfort')}</p></div>
     ${tenant.type === 'church' ? `<div class="grid"><div class="card"><h3>Service Times</h3><a href="/church/schedule" class="btn btn-sm">View Schedule</a></div><div class="card"><h3>Donate</h3><a href="/donate/${tenant.id}" class="btn btn-sm btn-gold">Give Online</a></div><div class="card"><h3>Prayer Requests</h3><a href="/church/prayers" class="btn btn-sm">Submit Request</a></div></div>` : ''}
     ${tenant.type === 'school' ? `<div class="grid"><div class="card"><h3>Student Portal</h3><a href="/parent/login" class="btn btn-sm">Parent Login</a></div><div class="card"><h3>School Info</h3><p class="muted">Contact: ${esc(tenant.email||'-')}</p></div></div>` : ''}
     ${tenant.type === 'business' ? `<div class="grid"><div class="card"><h3>Products</h3><a href="/business/inventory" class="btn btn-sm">Browse</a></div><div class="card"><h3>Contact</h3><p class="muted">${esc(tenant.phone||tenant.email||'-')}</p></div></div>` : ''}
-  `, null, { description: `${tenant.name} - ${tenant.type} powered by SSEWASSWA` }));
+  `, null, { description: `${tenant.name} - ${tenant.type} powered by Comfort` }));
 }));
 
 // 3.18: GRANT SCRAPER
@@ -10979,7 +11085,7 @@ app.get('/entertainment/compress', requireAuth, requireNotBanned, (req, res) => 
 // 3.20: USER GUIDE
 app.get('/guide', (req, res) => {
   res.send(renderPageV3('User Guide', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>SSEWASSWA User Guide</h1><p>Everything you need to know</p></div>
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Comfort User Guide</h1><p>Everything you need to know</p></div>
     <div class="card"><h2>Getting Started</h2>
       <ol style="padding-left:20px"><li><strong>Create an account</strong> - Register your school, church, business, or organization</li><li><strong>Set up your profile</strong> - Go to Settings > Branding to add your logo and colors</li><li><strong>Add your people</strong> - Students, members, staff, or inventory</li><li><strong>Start recording</strong> - Track fees, attendance, donations, sales, and more</li></ol>
     </div>
@@ -10999,7 +11105,7 @@ app.get('/guide', (req, res) => {
       <p>Contact: support@ssewasswa.onrender.com</p>
       <p>API Docs: <a href="/api-docs">/api-docs</a></p>
     </div>
-  `, req.session?.user, { description: 'SSEWASSWA user guide - learn how to manage your school, church, or business' }));
+  `, req.session?.user, { description: 'Comfort user guide - learn how to manage your school, church, or business' }));
 });
 
 // 3.12: PAGINATED STUDENT LIST (override existing route with pagination)
@@ -11281,8 +11387,8 @@ app.get('/p/:slug', ah(async (req, res, next) => {
       ${page.signature_name ? `<div style="position:absolute;${sigPos[page.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center;margin:20px"><p style="font-family:cursive;font-size:18px;margin:0">${esc(page.signature_name)}</p>${page.signature_image_url ? `<img src="${esc(page.signature_image_url)}" style="width:150px;height:auto" alt="Signature">` : ''}<div style="width:200px;border-top:1px solid #333;margin-top:5px"></div></div>` : ''}
       ${page.footer_html || ''}
     </div>
-    <p class="muted" style="text-align:center;margin-top:15px">Powered by SSEWASSWA</p>
-  `, null, { description: page.title + ' - ' + (page.tenant_name || 'SSEWASSWA') }));
+    <p class="muted" style="text-align:center;margin-top:15px">Powered by Comfort</p>
+  `, null, { description: page.title + ' - ' + (page.tenant_name || 'Comfort') }));
 }));
 
 // =============================================
@@ -11320,7 +11426,7 @@ app.get('/document-templates/new', requireAuth, requireNotBanned, (req, res) => 
         <h3>Header</h3>
         <textarea name="header_html" rows="4" placeholder="<div style='display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #4f46e5;padding-bottom:10px'><div><h1>School Name</h1><p>Motto: Excellence</p></div><div><img src='logo.png' width='80'></div></div>" style="font-family:monospace"></textarea>
         <h3>Footer</h3>
-        <textarea name="footer_html" rows="4" placeholder="<div style='border-top:1px solid #ccc;padding-top:10px;text-align:center;font-size:12px;color:#666'>Generated by SSEWASSWA | Date: {{date}}</div>" style="font-family:monospace"></textarea>
+        <textarea name="footer_html" rows="4" placeholder="<div style='border-top:1px solid #ccc;padding-top:10px;text-align:center;font-size:12px;color:#666'>Generated by Comfort | Date: {{date}}</div>" style="font-family:monospace"></textarea>
         <h3>Stamp</h3>
         <div class="grid" style="grid-template-columns:2fr 1fr">
           <div><label>Stamp Image URL</label><input name="stamp_url" placeholder="https://res.cloudinary.com/.../stamp.png"></div>
@@ -11436,7 +11542,7 @@ app.get('/document-templates/:id/preview', requireAuth, requireNotBanned, ah(asy
       </div>
       ${tmpl.stamp_url ? `<div style="position:absolute;${stampPos[tmpl.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(tmpl.stamp_url)}" style="width:100px;height:auto" alt="Stamp"></div>` : ''}
       ${tmpl.signature_name ? `<div style="position:absolute;${sigPos[tmpl.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center"><p style="font-family:cursive;font-size:16px;margin:0">${esc(tmpl.signature_name)}</p>${tmpl.signature_image_url ? `<img src="${esc(tmpl.signature_image_url)}" style="width:120px;height:auto" alt="Signature">` : ''}<div style="width:150px;border-top:1px solid #333;margin-top:3px"></div></div>` : ''}
-      ${tmpl.footer_html || `<div style="border-top:1px solid #ccc;padding-top:10px;margin-top:40px;text-align:center;font-size:11px;color:#999">Generated by SSEWASSWA on ${new Date().toLocaleDateString()} | ${esc(tenant?.name||'')}</div>`}
+      ${tmpl.footer_html || `<div style="border-top:1px solid #ccc;padding-top:10px;margin-top:40px;text-align:center;font-size:11px;color:#999">Generated by Comfort on ${new Date().toLocaleDateString()} | ${esc(tenant?.name||'')}</div>`}
     </div>
   </body></html>`);
 }));
@@ -11469,7 +11575,7 @@ app.get('/school/fees/:id/receipt-styled', requireAuth, requireNotBanned, ah(asy
       <table style="width:100%;border-collapse:collapse"><tr style="background:#f8f9fa"><th style="border:1px solid #ddd;padding:10px">Description</th><th style="border:1px solid #ddd;padding:10px;text-align:right">Amount</th></tr><tr><td style="border:1px solid #ddd;padding:10px">Total Fees</td><td style="border:1px solid #ddd;padding:10px;text-align:right">UGX ${parseInt(fee.amount).toLocaleString()}</td></tr><tr><td style="border:1px solid #ddd;padding:10px">Amount Paid</td><td style="border:1px solid #ddd;padding:10px;text-align:right;color:#059669">UGX ${parseInt(fee.paid).toLocaleString()}</td></tr><tr style="font-weight:700"><td style="border:1px solid #ddd;padding:10px">Balance</td><td style="border:1px solid #ddd;padding:10px;text-align:right;${balance>0?'color:#dc2626':'color:#059669'}">UGX ${balance.toLocaleString()}</td></tr></table></div>
       ${tmpl?.stamp_url ? `<div style="position:absolute;${stampPos[tmpl.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(tmpl.stamp_url)}" style="width:100px;height:auto" alt="Stamp"></div>` : ''}
       ${tmpl?.signature_name ? `<div style="position:absolute;${sigPos[tmpl.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center"><p style="font-family:cursive;font-size:16px;margin:0">${esc(tmpl.signature_name)}</p>${tmpl.signature_image_url ? `<img src="${esc(tmpl.signature_image_url)}" style="width:120px;height:auto" alt="Signature">` : ''}<div style="width:150px;border-top:1px solid #333;margin-top:3px"></div></div>` : ''}
-      ${tmpl?.footer_html || `<div style="border-top:1px solid #ccc;padding-top:10px;margin-top:60px;text-align:center;font-size:11px;color:#999">Generated by SSEWASSWA | ${esc(tenant?.name||'')}</div>`}
+      ${tmpl?.footer_html || `<div style="border-top:1px solid #ccc;padding-top:10px;margin-top:60px;text-align:center;font-size:11px;color:#999">Generated by Comfort | ${esc(tenant?.name||'')}</div>`}
     </div>
   </body></html>`);
 }));
@@ -11485,7 +11591,7 @@ app.get('/privacy', (req, res) => {
       <h3>1. Data We Collect</h3>
       <p>We collect information you provide directly: names, emails, phone numbers, financial records, attendance data, and organizational information. We also collect usage data including page views, feature usage, and device information for analytics.</p>
       <h3>2. How We Use Your Data</h3>
-      <p>Your data is used exclusively to provide the SSEWASSWA platform services. We process fees, generate reports, send notifications, and improve our services based on usage patterns. We never sell your data to third parties.</p>
+      <p>Your data is used exclusively to provide the Comfort platform services. We process fees, generate reports, send notifications, and improve our services based on usage patterns. We never sell your data to third parties.</p>
       <h3>3. Data Storage and Security</h3>
       <p>All data is encrypted in transit (SSL/TLS) and at rest. Passwords are hashed using bcrypt. Each organization's data is isolated by tenant_id with strict access controls. We perform automated daily backups stored securely on Cloudinary.</p>
       <h3>4. Data Sharing</h3>
@@ -11514,7 +11620,7 @@ app.post('/ussd', ah(async (req, res) => {
   let response = '';
   try {
     if (!text || text === '') {
-      response = `CON Welcome to SSEWASSWA\n1. Check Student Balance\n2. View Results\n3. Report Attendance\n4. Contact Support`;
+      response = `CON Welcome to Comfort\n1. Check Student Balance\n2. View Results\n3. Report Attendance\n4. Contact Support`;
     } else if (text === '1') {
       response = `CON Enter Student Admission Number:`;
     } else if (text.startsWith('1*')) {
@@ -11736,7 +11842,7 @@ app.get('/scheduled-reports/:id/run', requireAuth, requireNotBanned, ah(async (r
   // Send via email
   const recipients = report.recipients.split(',').map(r => r.trim());
   for (const email of recipients) {
-    await queueEmail(t, email, `SSEWASSWA Report: ${report.name}`, `<h2>${report.name}</h2><p>Report generated on ${new Date().toLocaleString()}</p><pre>${JSON.stringify(data, null, 2).substring(0, 5000)}</pre>`);
+    await queueEmail(t, email, `Comfort Report: ${report.name}`, `<h2>${report.name}</h2><p>Report generated on ${new Date().toLocaleString()}</p><pre>${JSON.stringify(data, null, 2).substring(0, 5000)}</pre>`);
   }
   await pool.query('UPDATE scheduled_reports SET last_run=NOW(), next_run=CASE WHEN frequency=$1 THEN NOW() + INTERVAL \'1 day\' WHEN frequency=$2 THEN NOW() + INTERVAL \'7 days\' ELSE NOW() + INTERVAL \'30 days\' END WHERE id=$3', ['daily', 'weekly', report.id]);
   res.send(renderPage('Report Sent', '<div class="card"><div class="alert alert-success"><h2>Report Sent!</h2><p>The report has been emailed to all recipients.</p></div><a href="/scheduled-reports" class="btn">Back</a></div>', req.session.user));
@@ -11766,7 +11872,7 @@ app.post('/momo/mtm/initiate', requireAuth, requireNotBanned, ah(async (req, res
       const authResp = await fetch('https://sandbox.momodeveloper.mtn.com/collection/token/', { method: 'POST', headers: { 'Authorization': 'Basic ' + Buffer.from(process.env.MTN_MOMO_USER_ID + ':' + process.env.MTN_MOMO_API_KEY).toString('base64'), 'Ocp-Apim-Subscription-Key': process.env.MTN_MOMO_SUB_KEY || '' } });
       const authData = await authResp.json();
       if (authData.access_token) {
-        const payResp = await fetch('https://sandbox.momodeveloper.mtn.com/collection/v1_0/requesttopay', { method: 'POST', headers: { 'Authorization': 'Bearer ' + authData.access_token, 'X-Reference-Id': momoRef, 'X-Target-Environment': 'sandbox', 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': process.env.MTN_MOMO_SUB_KEY || '' }, body: JSON.stringify({ amount: String(amount), currency: 'UGX', externalId: reference || momoRef, payer: { partyIdType: 'MSISDN', partyId: phone }, payerMessage: 'SSEWASSWA Payment', payeeNote: reference || 'Payment' }) });
+        const payResp = await fetch('https://sandbox.momodeveloper.mtn.com/collection/v1_0/requesttopay', { method: 'POST', headers: { 'Authorization': 'Bearer ' + authData.access_token, 'X-Reference-Id': momoRef, 'X-Target-Environment': 'sandbox', 'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': process.env.MTN_MOMO_SUB_KEY || '' }, body: JSON.stringify({ amount: String(amount), currency: 'UGX', externalId: reference || momoRef, payer: { partyIdType: 'MSISDN', partyId: phone }, payerMessage: 'Comfort Payment', payeeNote: reference || 'Payment' }) });
         await pool.query('INSERT INTO momo_payments(tenant_id,phone,amount,reference,status,type,external_ref) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, phone, amount, reference||momoRef, payResp.ok ? 'pending' : 'failed', 'mtn', momoRef]);
         return res.json({ success: payResp.ok, reference: momoRef, status: payResp.ok ? 'pending' : 'failed' });
       }
@@ -11809,7 +11915,7 @@ const retryFailedWebhooks = async () => {
       if (!hook) continue;
       const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : log.payload;
       const sig = crypto.createHmac('sha256', hook.secret || '').update(JSON.stringify(payload)).digest('hex');
-      const resp = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SSEWASSWA-Sig': sig, 'X-SSEWASSWA-Event': log.event, 'X-SSEWASSWA-Retry': 'true' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10000) });
+      const resp = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Comfort-Sig': sig, 'X-Comfort-Event': log.event, 'X-Comfort-Retry': 'true' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10000) });
       await pool.query('UPDATE webhook_logs SET status=$1, response=$2 WHERE id=$3', [resp.status, 'retry-ok', log.id]);
     } catch(e) {
       await pool.query('UPDATE webhook_logs SET response=$1 WHERE id=$2', ['retry-failed:' + e.message, log.id]);
@@ -11836,15 +11942,31 @@ app.post('/push/unsubscribe', requireAuth, ah(async (req, res) => {
 }));
 
 app.post('/push/send', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { title, message } = req.body;
   const t = req.session.user.tenant_id;
-  const { title, body, url } = req.body;
-  const subs = (await pool.query('SELECT * FROM push_subscriptions WHERE tenant_id=$1', [t])).rows;
-  // In production, use web-push library with VAPID keys
-  // For now, store as notification
-  for (const sub of subs) {
-    await notify(t, sub.user_email, title || 'New Notification', body || '', 'push');
+  try {
+    const webpush = require('web-push');
+    const subs = (await pool.query('SELECT * FROM push_subscriptions WHERE tenant_id=$1', [t])).rows;
+    let sent = 0, failed = 0;
+    for (const sub of subs) {
+      try {
+        await webpush.sendNotification({
+          endpoint: sub.endpoint,
+          keys: typeof sub.keys === 'string' ? JSON.parse(sub.keys) : sub.keys
+        }, JSON.stringify({ title: title || 'Comfort', body: message || 'New notification', icon: '/icon.png' }));
+        sent++;
+      } catch (e) {
+        // Remove invalid subscriptions
+        if (e.statusCode === 404 || e.statusCode === 410) {
+          await pool.query('DELETE FROM push_subscriptions WHERE endpoint=$1', [sub.endpoint]);
+        }
+        failed++;
+      }
+    }
+    res.json({ sent, failed, total: subs.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
-  res.json({ success: true, sent: subs.length, message: 'Push notifications queued. Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY env vars for live push.' });
 }));
 
 // =============================================
@@ -11922,7 +12044,7 @@ app.get('/settings/white-label', requireAuth, ah(async (req, res) => {
     <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)"><h1>White Label Configuration</h1><p>Customize your platform identity</p></div>
     <div class="card" style="max-width:700px;margin:0 auto">
       <form method="POST" action="/settings/white-label/save">
-        <label>App Name</label><input name="app_name" value="${esc(tenant?.app_name||'')}" placeholder="Your App Name (replaces SSEWASSWA)">
+        <label>App Name</label><input name="app_name" value="${esc(tenant?.app_name||'')}" placeholder="Your App Name (replaces Comfort)">
         <label>Custom Domain</label><input name="custom_domain" value="${esc(tenant?.custom_domain||'')}" placeholder="app.yourdomain.com">
         <label>Support Email</label><input name="support_email" value="${esc(tenant?.support_email||'')}" placeholder="support@yourdomain.com">
         <label>Support Phone</label><input name="support_phone" value="${esc(tenant?.support_phone||'')}" placeholder="+256 700 000000">
@@ -12070,7 +12192,7 @@ const trackEvent = (eventType, entityType, entityId) => async (req, res, next) =
 // =============================================
 app.get('/install', (req, res) => {
   res.send(renderPage('Install App', `
-    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>Install SSEWASSWA</h1><p>Use as a native app on your device</p></div>
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>Install Comfort</h1><p>Use as a native app on your device</p></div>
     <div class="grid">
       <div class="card" style="text-align:center">
         <div style="font-size:48px;margin-bottom:15px">📱</div>
@@ -12085,10 +12207,10 @@ app.get('/install', (req, res) => {
       <div class="card" style="text-align:center">
         <div style="font-size:48px;margin-bottom:15px">💻</div>
         <h2>Desktop</h2>
-        <ol style="text-align:left;padding-left:20px"><li>Open this site in Chrome or Edge</li><li>Click the install icon in address bar</li><li>Or click Menu > "Install SSEWASSWA"</li><li>Click "Install" to confirm</li></ol>
+        <ol style="text-align:left;padding-left:20px"><li>Open this site in Chrome or Edge</li><li>Click the install icon in address bar</li><li>Or click Menu > "Install Comfort"</li><li>Click "Install" to confirm</li></ol>
       </div>
     </div>
-    <div class="card" style="text-align:center"><p class="muted">After installation, SSEWASSWA works like a native app with offline support and push notifications.</p></div>
+    <div class="card" style="text-align:center"><p class="muted">After installation, Comfort works like a native app with offline support and push notifications.</p></div>
   `, req.session?.user));
 });
 
@@ -12166,8 +12288,8 @@ app.get('/api/features', ah(async (req, res) => {
 // Enhanced PWA manifest with more icons
 app.get('/manifest.json', (req, res) => {
   res.json({
-    name: 'SSEWASSWA',
-    short_name: 'SSEWASSWA',
+    name: 'Comfort',
+    short_name: 'Comfort',
     description: 'All-in-One Management Platform for Schools, Churches, Businesses & Organizations',
     start_url: '/',
     display: 'standalone',
@@ -12942,6 +13064,46 @@ app.get('/church/prayer-requests/:id/delete', requireAuth, requireNotBanned, ah(
 
 
 // =============================================
+// BUSINESS: STAFF SALARY SETUP
+// =============================================
+app.get('/business/payroll/setup', requireAuth, requireNotBanned, requireFeature('payroll'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const staffList = (await pool.query('SELECT id, name, role, email, phone, salary FROM staff WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Staff Salary Setup', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#115e59)"><h1>Staff Salary Setup</h1><p>Set and manage monthly salaries for payroll</p></div>
+    <div class="card">
+      <form method="POST" action="/business/payroll/setup/save">
+        ${staffList.length ? `
+        <table>
+          <tr><th>Staff Name</th><th>Role</th><th>Email</th><th>Phone</th><th>Monthly Salary (UGX)</th></tr>
+          ${staffList.map(s => `<tr>
+            <td><strong>${esc(s.name)}</strong></td>
+            <td>${esc(s.role || '-')}</td>
+            <td>${esc(s.email || '-')}</td>
+            <td>${esc(s.phone || '-')}</td>
+            <td><input name="salary_${s.id}" type="number" value="${parseInt(s.salary || 0)}" style="width:160px" placeholder="0"></td>
+          </tr>`).join('')}
+        </table>
+        <button class="btn btn-green" style="margin-top:15px">Save All Salaries</button>
+        ` : '<p class="muted">No staff members found. Add staff first.</p>'}
+      </form>
+      <a href="/business/payroll" class="btn" style="margin-top:10px">Back to Payroll</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/business/payroll/setup/save', requireAuth, requireNotBanned, requireFeature('payroll'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const staffList = (await pool.query('SELECT id FROM staff WHERE tenant_id=$1', [t])).rows;
+  for (const s of staffList) {
+    const val = parseInt(req.body['salary_' + s.id]) || 0;
+    await pool.query('UPDATE staff SET salary=$1 WHERE id=$2 AND tenant_id=$3', [val, s.id, t]);
+  }
+  await audit(req.session.user.email, 'staff_salaries_updated', { updated: staffList.length });
+  res.redirect('/business/payroll/setup');
+}));
+
+// =============================================
 // BUSINESS: PAYROLL MANAGEMENT
 // =============================================
 app.get('/business/payroll', requireAuth, requireNotBanned, requireFeature('payroll'), ah(async (req, res) => {
@@ -12949,7 +13111,7 @@ app.get('/business/payroll', requireAuth, requireNotBanned, requireFeature('payr
   const runs = (await pool.query('SELECT * FROM payroll_runs WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
   res.send(renderPage('Payroll', `
     <div class="hero" style="background:linear-gradient(135deg,#0f766e,#115e59)"><h1>Payroll Management</h1><p>Salary calculations, payslips, deductions</p></div>
-    <div class="card"><a href="/business/payroll/new" class="btn" style="margin-bottom:15px">+ New Payroll Run</a>
+    <div class="card"><a href="/business/payroll/new" class="btn" style="margin-bottom:15px">+ New Payroll Run</a> <a href="/business/payroll/setup" class="btn" style="margin-bottom:15px">Staff Salary Setup</a>
       ${runs.length?`<table><tr><th>Month</th><th>Gross</th><th>Deductions</th><th>Net</th><th>Status</th><th>Actions</th></tr>${runs.map(r=>`<tr><td><strong>${esc(r.month)}</strong></td><td>UGX ${parseInt(r.total_gross).toLocaleString()}</td><td>UGX ${parseInt(r.total_deductions).toLocaleString()}</td><td>UGX ${parseInt(r.total_net).toLocaleString()}</td><td><span class="tag">${esc(r.status)}</span></td><td><a href="/business/payroll/${r.id}" class="btn btn-sm">View</a> <a href="/business/payroll/${r.id}/process" class="btn btn-sm btn-green">Process</a> <a href="/business/payroll/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No payroll runs yet</p>'}
     </div>
   `, req.session.user));
@@ -12985,17 +13147,50 @@ app.get('/business/payroll/:id', requireAuth, requireNotBanned, ah(async (req, r
   `, req.session.user));
 }));
 
-app.get('/business/payroll/:id/add-employee', requireAuth, requireNotBanned, (req, res) => {
+app.get('/business/payroll/:id/add-employee', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const staffList = (await pool.query('SELECT id, name, role, salary FROM staff WHERE tenant_id=$1 ORDER BY name', [t])).rows;
   res.send(renderPage('Add Employee to Payroll', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Add Employee</h2>
     <form method="POST" action="/business/payroll/${req.params.id}/add-employee/save">
-      <label>Employee Name</label><input name="employee_name" required>
-      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Gross Salary (UGX)</label><input name="gross_salary" type="number" required></div><div><label>Bank Account</label><input name="bank_account" placeholder="ACC-001"></div></div>
-      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>PAYE (UGX)</label><input name="paye" type="number" value="0"></div><div><label>NSSF Employee (UGX)</label><input name="nssf_employee" type="number" value="0"></div><div><label>NSSF Employer (UGX)</label><input name="nssf_employer" type="number" value="0"></div></div>
-      <label>Other Deductions (UGX)</label><input name="other_deductions" type="number" value="0">
+      <label>Select Staff Member</label><select name="staff_id" id="staffSelect" required><option value="">-- Choose staff --</option>${staffList.map(s => `<option value="${s.id}" data-salary="${parseInt(s.salary||0)}">${esc(s.name)} (${esc(s.role||'Staff')})</option>`).join('')}</select>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Gross Salary (UGX)</label><input name="gross_salary" id="grossSalary" type="number" required placeholder="Enter gross salary"></div><div><label>Bank Account</label><input name="bank_account" placeholder="ACC-001"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>PAYE (UGX)</label><input name="paye" id="payeInput" type="number" value="0" readonly style="background:#f3f4f6"></div><div><label>NSSF Employee (UGX)</label><input name="nssf_employee" id="nssfEmpInput" type="number" value="0" readonly style="background:#f3f4f6"></div><div><label>NSSF Employer (UGX)</label><input name="nssf_employer" id="nssfErInput" type="number" value="0" readonly style="background:#f3f4f6"></div></div>
+      <label>Other Deductions (UGX)</label><input name="other_deductions" id="otherDedInput" type="number" value="0">
+      <label style="font-weight:700;font-size:1.1em">Net Pay (UGX)</label><input id="netPayInput" type="number" value="0" readonly style="background:#d1fae5;font-size:1.1em;font-weight:700">
       <button class="btn btn-green">Add Employee</button>
     </form></div>
+    <script>
+    function calcPayroll() {
+      var g = parseInt(document.getElementById('grossSalary').value) || 0;
+      var other = parseInt(document.getElementById('otherDedInput').value) || 0;
+      // Uganda PAYE
+      var paye = 0;
+      if (g > 410000) {
+        if (g > 1620000) { paye = (g - 1620000) * 0.40; g = 1620000; }
+        if (g > 1220000) { paye += (g - 1220000) * 0.30; g = 1220000; }
+        if (g > 820000) { paye += (g - 820000) * 0.20; g = 820000; }
+        if (g > 410000) { paye += (g - 410000) * 0.10; g = 410000; }
+      }
+      g = parseInt(document.getElementById('grossSalary').value) || 0;
+      // NSSF Employee: 5% of gross, capped at 16000
+      var nssfEmp = Math.min(Math.round(g * 0.05), 16000);
+      // NSSF Employer: 10% of gross, capped at 32000
+      var nssfEr = Math.min(Math.round(g * 0.10), 32000);
+      var net = g - paye - nssfEmp - other;
+      document.getElementById('payeInput').value = paye;
+      document.getElementById('nssfEmpInput').value = nssfEmp;
+      document.getElementById('nssfErInput').value = nssfEr;
+      document.getElementById('netPayInput').value = net;
+    }
+    document.getElementById('staffSelect').addEventListener('change', function() {
+      var opt = this.options[this.selectedIndex];
+      if (opt.value) { document.getElementById('grossSalary').value = opt.getAttribute('data-salary'); calcPayroll(); }
+    });
+    document.getElementById('grossSalary').addEventListener('input', calcPayroll);
+    document.getElementById('otherDedInput').addEventListener('input', calcPayroll);
+    </script>
   `, req.session.user));
-});
+}));
 
 app.post('/business/payroll/:id/add-employee/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
@@ -13005,7 +13200,13 @@ app.post('/business/payroll/:id/add-employee/save', requireAuth, requireNotBanne
   const nssfEr = parseInt(req.body.nssf_employer)||0;
   const other = parseInt(req.body.other_deductions)||0;
   const net = gross - paye - nssfE - other;
-  await pool.query('INSERT INTO payroll_items(tenant_id,run_id,employee_name,gross_salary,paye,nssf_employee,nssf_employer,other_deductions,net_pay,bank_account) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, req.params.id, req.body.employee_name, gross, paye, nssfE, nssfEr, other, net, req.body.bank_account]);
+  // Look up staff name from staff_id if provided, otherwise fall back to employee_name
+  let empName = req.body.employee_name || 'Unknown';
+  if (req.body.staff_id) {
+    const staffRow = (await pool.query('SELECT name FROM staff WHERE id=$1 AND tenant_id=$2', [req.body.staff_id, t])).rows[0];
+    if (staffRow) empName = staffRow.name;
+  }
+  await pool.query('INSERT INTO payroll_items(tenant_id,run_id,employee_name,gross_salary,paye,nssf_employee,nssf_employer,other_deductions,net_pay,bank_account) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, req.params.id, empName, gross, paye, nssfE, nssfEr, other, net, req.body.bank_account]);
   await pool.query('UPDATE payroll_runs SET total_gross=total_gross+$1, total_deductions=total_deductions+$2, total_net=total_net+$3 WHERE id=$4', [gross, paye+nssfE+other, net, req.params.id]);
   res.redirect(`/business/payroll/${req.params.id}`);
 }));
@@ -13733,7 +13934,7 @@ app.get('/settings/2fa', requireAuth, requireFeature('two_fa'), ah(async (req, r
 app.get('/settings/2fa/setup', requireAuth, ah(async (req, res) => {
   const secret = crypto.randomBytes(10).toString('base64').replace(/=/g,'');
   const user = req.session.user.email;
-  const otpauth = `otpauth://totp/SSEWASSWA:${user}?secret=${secret}&issuer=SSEWASSWA`;
+  const otpauth = `otpauth://totp/Comfort:${user}?secret=${secret}&issuer=Comfort`;
   await pool.query('UPDATE users SET two_fa_secret=$1 WHERE email=$2', [secret, user]);
   res.send(renderPage('Setup 2FA', `
     <div class="card" style="max-width:500px;margin:0 auto"><h2>Setup Two-Factor Auth</h2>
@@ -14043,7 +14244,7 @@ app.get('/certificates/:id/view', requireAuth, requireNotBanned, ah(async (req, 
   if (!cert) return res.status(404).send('Not found');
   res.send(renderPage('Certificate', `
     <div style="max-width:800px;margin:0 auto;border:8px double #b45309;padding:40px;background:#fffef5;text-align:center">
-      <div style="font-size:14px;color:#64748b;letter-spacing:3px">SSEWASSWA PLATFORM</div>
+      <div style="font-size:14px;color:#64748b;letter-spacing:3px">Comfort PLATFORM</div>
       <h1 style="color:#b45309;margin:10px 0">Certificate of ${esc(cert.template_name)}</h1>
       <div style="width:200px;height:2px;background:#b45309;margin:20px auto"></div>
       <p style="font-size:18px;color:#475569">This is to certify that</p>
@@ -14207,7 +14408,7 @@ app.get('/sw.js', (req, res) => {
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(OFFLINE_URLS)));self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});
-self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'SSEWASSWA',{body:d.body||'New update',icon:'/icon-192.png',data:d}))});
+self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'Comfort',{body:d.body||'New update',icon:'/icon-192.png',data:d}))});
 self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.openWindow(e.notification.data?.url||'/'))});
 self.addEventListener('sync',e=>{if(e.tag==='offline-sync'){e.waitUntil(getQueuedActions().then(actions=>{if(actions.length>0){return fetch('/api/sync/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actions:actions})}).then(r=>{if(r.ok)clearQueuedActions()}).catch(()=>{})}}))}});
 function getQueuedActions(){return new Promise(resolve=>{try{const data=localStorage.getItem('offline_sync_queue');resolve(data?JSON.parse(data):[])}catch(e){resolve([])}})}
@@ -14275,9 +14476,35 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
     `CREATE TABLE IF NOT EXISTS scrape_sources (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, url TEXT NOT NULL, category TEXT DEFAULT 'news', scrape_type TEXT DEFAULT 'rss', selector TEXT, max_items INTEGER DEFAULT 20, is_active BOOLEAN DEFAULT true, last_scraped_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS shop_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, order_no TEXT NOT NULL, buyer_email TEXT, buyer_name TEXT, buyer_phone TEXT, items JSONB NOT NULL, total INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', payment_method TEXT, payment_ref TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(order_no))`,
     `CREATE TABLE IF NOT EXISTS recurring_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, donor_name TEXT NOT NULL, donor_email TEXT, donor_phone TEXT, amount INTEGER NOT NULL, currency TEXT DEFAULT 'UGX', schedule TEXT DEFAULT 'monthly', next_date DATE, last_processed DATE, campaign_id INTEGER REFERENCES fundraising_campaigns(id), payment_method TEXT, status TEXT DEFAULT 'active', total_donated INTEGER DEFAULT 0, donation_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `ALTER TABLE public_pages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
     `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS image_url TEXT`,
     `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
-    `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT 'each'`
+    `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT 'each'`,
+    // Worker sub-dashboard system
+    `CREATE TABLE IF NOT EXISTS dashboard_workers (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      username TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer','content_manager','task_manager','full_worker')),
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      last_login TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, username)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_dashboard_workers_tenant ON dashboard_workers(tenant_id)`,
+    `CREATE TABLE IF NOT EXISTS worker_audit_logs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      worker_id INTEGER NOT NULL REFERENCES dashboard_workers(id) ON DELETE CASCADE,
+      worker_username TEXT NOT NULL,
+      action TEXT NOT NULL,
+      details TEXT,
+      ip_address TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`
   ];
   for (const q of additionalMigrations) {
     try { await pool.query(q); } catch(e) { /* already exists OK */ }
@@ -16999,10 +17226,10 @@ app.get('/public-site/preview', requireAuth, requireNotBanned, ah(async (req, re
   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
   const pages = (await pool.query("SELECT * FROM public_pages WHERE tenant_id=$1 AND is_published=true ORDER BY page_order", [t])).rows;
   const homePage = pages.find(p => p.page_type === 'home') || pages[0];
-  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(tenant.name||'SSEWASSWA')} - Public Site</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b}.pub-nav{background:#4f46e5;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}.pub-nav a{color:white;text-decoration:none;padding:8px 16px;border-radius:6px}.pub-hero{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:100px 30px;text-align:center}.pub-content{max-width:900px;margin:40px auto;padding:0 20px}.pub-footer{background:#1e293b;color:white;padding:30px;text-align:center;margin-top:60px}h1{font-size:48px;margin-bottom:15px}h2{font-size:28px;margin-bottom:10px}p{line-height:1.8;margin-bottom:15px}.pub-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin:20px 0}.pub-card{background:white;border-radius:12px;padding:25px;box-shadow:0 2px 12px rgba(0,0,0,0.08);border:1px solid #e2e8f0}</style></head><body>
-    <nav class="pub-nav"><div style="font-size:22px;font-weight:800">${esc(tenant.name||'SSEWASSWA')}</div><div>${pages.map(p=>`<a href="/s/${esc(p.slug)}">${esc(p.title)}</a>`).join('')}</div></nav>
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(tenant.name||'Comfort')} - Public Site</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b}.pub-nav{background:#4f46e5;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}.pub-nav a{color:white;text-decoration:none;padding:8px 16px;border-radius:6px}.pub-hero{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:100px 30px;text-align:center}.pub-content{max-width:900px;margin:40px auto;padding:0 20px}.pub-footer{background:#1e293b;color:white;padding:30px;text-align:center;margin-top:60px}h1{font-size:48px;margin-bottom:15px}h2{font-size:28px;margin-bottom:10px}p{line-height:1.8;margin-bottom:15px}.pub-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin:20px 0}.pub-card{background:white;border-radius:12px;padding:25px;box-shadow:0 2px 12px rgba(0,0,0,0.08);border:1px solid #e2e8f0}</style></head><body>
+    <nav class="pub-nav"><div style="font-size:22px;font-weight:800">${esc(tenant.name||'Comfort')}</div><div>${pages.map(p=>`<a href="/s/${esc(p.slug)}">${esc(p.title)}</a>`).join('')}</div></nav>
     ${homePage?`<div class="pub-hero"><h1>${esc(homePage.hero_title||homePage.title)}</h1><p style="font-size:20px;opacity:0.9">${esc(homePage.hero_subtitle||'')}</p></div><div class="pub-content">${homePage.content||'<p>Welcome to our site!</p>'}</div>`:'<div class="pub-hero"><h1>Welcome</h1><p>Your public website starts here</p></div>'}
-    <div class="pub-footer"><p>&copy; ${new Date().getFullYear()} ${esc(tenant.name||'SSEWASSWA')}. Powered by SSEWASSWA Platform.</p></div></body></html>`);
+    <div class="pub-footer"><p>&copy; ${new Date().getFullYear()} ${esc(tenant.name||'Comfort')}. Powered by Comfort Platform.</p></div></body></html>`);
 }));
 
 app.get('/public-site/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -17543,7 +17770,7 @@ app.get('/pay/checkout', requireAuth, ah(async (req, res) => {
               payment_options: "card,mobilemoneyuganda,ussd",
               redirect_url: "${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}/billing/callback",
               customer: { email: "${esc(req.session.user.email)}" },
-              customizations: { title: "SSEWASSWA", description: "${esc(description || plan || 'Payment')}" }
+              customizations: { title: "Comfort", description: "${esc(description || plan || 'Payment')}" }
             });
           });
           </script>
@@ -17590,7 +17817,7 @@ app.post('/pay/mtn/initiate', requireAuth, ah(async (req, res) => {
   const amt = parseInt(amount) || 0;
   const ref = reference || 'MTN-' + Date.now();
   
-  const result = await requestMtnPayment(phone, amt, ref, description || 'SSEWASSWA Payment', `${plan||'payment'}`);
+  const result = await requestMtnPayment(phone, amt, ref, description || 'Comfort Payment', `${plan||'payment'}`);
   
   if (result.success) {
     await pool.query('INSERT INTO momo_payments(tenant_id,phone,amount,reference,status,type,external_ref) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [t, result.phone, amt, description || plan, 'pending', 'mtn', ref]);
@@ -17814,7 +18041,7 @@ app.post('/pay/dpo/initiate', requireAuth, ah(async (req, res) => {
   const amt = parseInt(amount) || 0;
   const ref = reference || 'DPO-' + Date.now();
   
-  const checkoutUrl = await createDPOPayment(amt, req.session.user.email, ref, description || plan || 'SSEWASSWA Payment');
+  const checkoutUrl = await createDPOPayment(amt, req.session.user.email, ref, description || plan || 'Comfort Payment');
   if (checkoutUrl) {
     await pool.query('UPDATE payments SET method=$1 WHERE reference=$2', ['dpo_card', ref]);
     return res.redirect(checkoutUrl);
@@ -18103,7 +18330,7 @@ app.get('/student/report-card', ah(async (req, res) => {
         new Paragraph({ text: 'Head Teacher Comment: ________________________' }),
         new Paragraph({ text: '' }),
         new Paragraph({ text: `Date: ${new Date().toLocaleDateString()}` }),
-        new Paragraph({ children: [new TextRun({ text: 'Generated by SSEWASSWA Platform', italics: true, size: 16, color: '9CA3AF' })], alignment: 'center' }),
+        new Paragraph({ children: [new TextRun({ text: 'Generated by Comfort Platform', italics: true, size: 16, color: '9CA3AF' })], alignment: 'center' }),
       ]
     }]
   });
@@ -18618,6 +18845,7 @@ for (const [key, name, desc, ver, cat, req] of phase2Flags) {
 // Add country_code column to tenants if missing
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT \'UG\''); } catch (e) { console.warn('[Caught]', e.message); }
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT \'UGX\''); } catch (e) { console.warn('[Caught]', e.message); }
+try { await pool.query('ALTER TABLE staff ADD COLUMN IF NOT EXISTS salary INTEGER DEFAULT 0'); } catch (e) { console.warn('[Caught]', e.message); }
 console.log('[Phase2] DB tables, indexes, drug interactions, and feature flags initialized');
 } catch (e) { console.error('[Phase2] Init error:', e.message); }
 })(); // End Phase 2 async IIFE
@@ -18678,7 +18906,7 @@ app.get('/pay/checkout-v2', requireAuth, ah(async (req, res) => {
       <form method="POST" action="/pay/airtel/initiate"><input type="hidden" name="amount" value="${amt}"><input type="hidden" name="reference" value="${esc(ref)}"><input type="hidden" name="plan" value="${esc(plan||'')}"><input type="hidden" name="description" value="${esc(description||'')}"><input type="hidden" name="type" value="${esc(type||'')}"><input type="hidden" name="item_id" value="${esc(item_id||'')}"><input name="phone" placeholder="Airtel Phone (070x/074x/020x)" required pattern="^(\\+256|0|256)?(70|74|20|75)\\d{7}$"><button class="btn btn-red" style="width:100%;padding:16px;font-size:18px;background:linear-gradient(135deg,#ED1C24,#FF4D4D)">Pay ${cfg.currency} ${amt.toLocaleString()} with Airtel Money</button></form></div>`;
     if (p === 'flutterwave') return `<div id="pay-flutterwave" class="pay-option" style="display:none"><div style="text-align:center;margin-bottom:15px"><div style="width:50px;height:50px;border-radius:12px;background:linear-gradient(135deg,#00B140,#006633);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:18px;color:white;font-weight:800">FW</div><h3>Flutterwave</h3><p class="muted">Card + Mobile Money payment</p></div>
       <button id="flwBtnV2" class="btn btn-green" style="width:100%;padding:16px;font-size:18px;background:linear-gradient(135deg,#00B140,#006633)">Pay ${cfg.currency} ${amt.toLocaleString()} with Flutterwave</button>
-      <script src="https://checkout.flutterwave.com/v3.js"></script><script>document.getElementById('flwBtnV2').addEventListener('click',function(){FlutterwaveCheckout({public_key:"${esc(process.env.FLW_PUBLIC_KEY||'')}",tx_ref:"${esc(ref)}",amount:${amt},currency:"${cfg.currency}",payment_options:"card,mobilemoney,ussd",redirect_url:"${esc(process.env.BASE_URL||'https://ssewasswa.onrender.com')}/billing/callback",customer:{email:"${esc(req.session.user.email)}"},customizations:{title:"SSEWASSWA",description:"${esc(description||plan||'Payment')}"}});});</script></div>`;
+      <script src="https://checkout.flutterwave.com/v3.js"></script><script>document.getElementById('flwBtnV2').addEventListener('click',function(){FlutterwaveCheckout({public_key:"${esc(process.env.FLW_PUBLIC_KEY||'')}",tx_ref:"${esc(ref)}",amount:${amt},currency:"${cfg.currency}",payment_options:"card,mobilemoney,ussd",redirect_url:"${esc(process.env.BASE_URL||'https://ssewasswa.onrender.com')}/billing/callback",customer:{email:"${esc(req.session.user.email)}"},customizations:{title:"Comfort",description:"${esc(description||plan||'Payment')}"}});});</script></div>`;
     if (p === 'dpo_card') return `<div id="pay-dpo_card" class="pay-option" style="display:none"><div style="text-align:center;margin-bottom:15px"><div style="width:50px;height:50px;border-radius:12px;background:linear-gradient(135deg,#4f46e5,#7c3aed);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:20px;color:white">V/M</div><h3>Card Payment</h3><p class="muted">Visa, Mastercard via DPO Group</p></div>
       <form method="POST" action="/pay/dpo/initiate"><input type="hidden" name="amount" value="${amt}"><input type="hidden" name="reference" value="${esc(ref)}"><input type="hidden" name="plan" value="${esc(plan||'')}"><input type="hidden" name="description" value="${esc(description||'')}"><button class="btn" style="width:100%;padding:16px;font-size:18px">Pay ${cfg.currency} ${amt.toLocaleString()} with Card</button></form></div>`;
     return '';
@@ -20031,6 +20259,496 @@ app.get('/settings/country', requireAuth, ah(async (req, res) => {
 // ============================================================
 // NOTE: 404 and error handlers are moved AFTER launch routes (see below)
 
+// ============================================================
+// v13.0: WORKER/EMPLOYEE SUB-DASHBOARD SYSTEM
+// ============================================================
+// Workers get personal login (username + password), limited dashboard access
+// No financial data, no credentials, no admin settings visible
+
+// --- ADMIN: Worker Management Routes ---
+app.get('/dashboard/workers', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const isAdmin = req.session.user.role === 'admin' || req.session.user.role === 'super_admin';
+  const workers = (await pool.query('SELECT id, username, display_name, role, is_active, last_login, created_at FROM dashboard_workers WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const roleLabels = { viewer: 'Viewer (Read Only)', content_manager: 'Content Manager', task_manager: 'Task Manager', full_worker: 'Full Worker' };
+  res.send(renderPage('Manage Workers', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#06b6d4);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Worker Management</h1><p style="opacity:0.9;margin-top:4px">Add employees with limited access to help run your dashboard</p>
+    </div>
+    ${isAdmin ? `<div class="card"><h3>Add New Worker</h3>
+      <form method="POST" action="/dashboard/workers/add" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>Username</label><input name="username" placeholder="e.g. john" required></div>
+        <div><label>Display Name</label><input name="display_name" placeholder="e.g. John Secretary" required></div>
+        <div><label>Password (min 6 chars)</label><input name="password" type="password" placeholder="Temporary password" required minlength="6"></div>
+        <div><label>Role</label>
+          <select name="role">
+            <option value="viewer">Viewer (Read Only)</option>
+            <option value="content_manager">Content Manager</option>
+            <option value="task_manager">Task Manager</option>
+            <option value="full_worker">Full Worker (All Access)</option>
+          </select>
+        </div>
+        <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Add Worker</button></div>
+      </form>
+    </div>` : ''}
+    <div class="card"><h3>Workers (${workers.length})</h3>
+      ${workers.length ? `<table><tr><th>Username</th><th>Name</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr>
+      ${workers.map(w => `<tr>
+        <td><strong>${esc(w.username)}</strong></td>
+        <td>${esc(w.display_name)}</td>
+        <td><span class="tag">${roleLabels[w.role] || w.role}</span></td>
+        <td>${w.is_active ? '<span style="color:#059669">Active</span>' : '<span style="color:#dc2626">Inactive</span>'}</td>
+        <td style="font-size:12px">${w.last_login ? new Date(w.last_login).toLocaleString() : 'Never'}</td>
+        <td>
+          ${isAdmin ? `
+            <a href="/dashboard/workers/${w.id}/toggle" class="btn btn-sm">${w.is_active ? 'Deactivate' : 'Activate'}</a>
+            <a href="/dashboard/workers/${w.id}/reset-password" class="btn btn-sm">Reset Password</a>
+            <a href="/dashboard/workers/${w.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete this worker?')">Delete</a>
+          ` : ''}
+        </td>
+      </tr>`).join('')}
+      </table>` : '<p class="muted">No workers added yet. Use the form above to add your first worker.</p>'}
+    </div>
+    <div class="card"><h3>Role Permissions</h3>
+      <table><tr><th>Feature</th><th>Viewer</th><th>Content Manager</th><th>Task Manager</th><th>Full Worker</th></tr>
+      <tr><td>View Dashboard Stats</td><td style="color:#059669">Yes</td><td style="color:#059669">Yes</td><td style="color:#059669">Yes</td><td style="color:#059669">Yes</td></tr>
+      <tr><td>View Members/Students</td><td style="color:#059669">Yes (read-only)</td><td style="color:#059669">Yes (read-only)</td><td style="color:#059669">Yes (read-only)</td><td style="color:#059669">Yes (read-only)</td></tr>
+      <tr><td>Manage Tasks</td><td style="color:#dc2626">No</td><td style="color:#dc2626">No</td><td style="color:#059669">Yes</td><td style="color:#059669">Yes</td></tr>
+      <tr><td>Manage Content/Posts</td><td style="color:#dc2626">No</td><td style="color:#059669">Yes</td><td style="color:#dc2626">No</td><td style="color:#059669">Yes</td></tr>
+      <tr><td>Financial Data</td><td style="color:#dc2626">Hidden</td><td style="color:#dc2626">Hidden</td><td style="color:#dc2626">Hidden</td><td style="color:#dc2626">Hidden</td></tr>
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dashboard/workers/add', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Only admins can add workers');
+  const t = u.tenant_id;
+  const { username, password, display_name, role } = req.body;
+  if (!username || !password || !display_name) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">All fields are required</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  }
+  if (password.length < 6) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 6 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  }
+  const validRoles = ['viewer','content_manager','task_manager','full_worker'];
+  if (!validRoles.includes(role)) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Invalid role selected</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  }
+  const hash = await bcrypt.hash(password, 12);
+  try {
+    await pool.query('INSERT INTO dashboard_workers(tenant_id, username, password_hash, display_name, role) VALUES($1,$2,$3,$4,$5)', [t, username.toLowerCase().trim(), hash, display_name.trim(), role]);
+    await audit(u.email, 'add_worker', `Added worker "${username}" with role ${role}`);
+  } catch (e) {
+    if (e.message.includes('unique') || e.message.includes('duplicate')) {
+      return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">This username already exists for your organization. Choose a different one.</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+    }
+    throw e;
+  }
+  res.redirect('/dashboard/workers');
+}));
+
+app.get('/dashboard/workers/:id/toggle', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin only');
+  await pool.query('UPDATE dashboard_workers SET is_active = NOT is_active, updated_at = NOW() WHERE id = $1 AND tenant_id = $2', [req.params.id, u.tenant_id]);
+  res.redirect('/dashboard/workers');
+}));
+
+app.get('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin only');
+  const t = u.tenant_id;
+  const worker = (await pool.query('SELECT id, username, display_name FROM dashboard_workers WHERE id = $1 AND tenant_id = $2', [req.params.id, t])).rows[0];
+  if (!worker) return res.redirect('/dashboard/workers');
+  if (req.method === 'POST') {
+    const { new_password } = req.body;
+    if (!new_password || new_password.length < 6) {
+      return res.send(renderPage('Reset Worker Password', '<div class="card"><div class="alert alert-error">Password must be at least 6 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+    }
+    const hash = await bcrypt.hash(new_password, 12);
+    await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [hash, req.params.id, t]);
+    await audit(u.email, 'reset_worker_password', `Reset password for worker "${worker.username}"`);
+    res.redirect('/dashboard/workers');
+  }
+  res.send(renderPage('Reset Worker Password', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h3>Reset Password for ${esc(worker.display_name)} (@${esc(worker.username)})</h3>
+      <form method="POST">
+        <label>New Password (min 6 chars)</label>
+        <input name="new_password" type="password" required minlength="6" placeholder="Enter new password">
+        <button class="btn btn-green" type="submit" style="margin-top:10px">Reset Password</button>
+        <a href="/dashboard/workers" class="btn" style="margin-left:10px">Cancel</a>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin only');
+  const t = u.tenant_id;
+  const { new_password } = req.body;
+  if (!new_password || new_password.length < 6) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 6 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  }
+  const hash = await bcrypt.hash(new_password, 12);
+  await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [hash, req.params.id, t]);
+  const worker = (await pool.query('SELECT username FROM dashboard_workers WHERE id = $1', [req.params.id])).rows[0];
+  await audit(u.email, 'reset_worker_password', `Reset password for worker "${worker?.username}"`);
+  res.redirect('/dashboard/workers');
+}));
+
+app.get('/dashboard/workers/:id/delete', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin only');
+  const worker = (await pool.query('SELECT username FROM dashboard_workers WHERE id = $1 AND tenant_id = $2', [req.params.id, u.tenant_id])).rows[0];
+  if (worker) {
+    await pool.query('DELETE FROM dashboard_workers WHERE id = $1 AND tenant_id = $2', [req.params.id, u.tenant_id]);
+    await audit(u.email, 'delete_worker', `Deleted worker "${worker.username}"`);
+  }
+  res.redirect('/dashboard/workers');
+}));
+
+// --- WORKER: Login/Logout ---
+app.get('/worker/login', (req, res) => {
+  if (req.session.worker) return res.redirect('/worker/dashboard');
+  res.send(renderPage('Worker Portal', `
+    <div class="card" style="max-width:450px;margin:40px auto">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#0891b2,#06b6d4);margin:0 auto 15px;display:flex;align-items:center;justify-content:center;font-size:28px;color:white">W</div>
+        <h2>Worker Portal</h2>
+        <p class="muted">Login to help manage your organization's dashboard</p>
+      </div>
+      <form method="POST" action="/worker/login">
+        <input name="username" placeholder="Username" required autocomplete="username">
+        <input name="password" type="password" placeholder="Password" required autocomplete="current-password">
+        <button class="btn btn-green" style="width:100%">Login</button>
+      </form>
+      <p class="muted" style="text-align:center;margin-top:15px;font-size:12px">Ask your admin for your username and password</p>
+      <p style="text-align:center;margin-top:8px"><a href="/" style="font-size:12px;color:#64748b">Back to Home</a></p>
+    </div>
+  `, null));
+});
+
+app.post('/worker/login', ah(async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.send(renderPage('Worker Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Please enter both username and password</div><a href="/worker/login" class="btn">Try Again</a></div>', null));
+  }
+  const worker = (await pool.query(
+    'SELECT w.*, t.name as tenant_name, t.type as tenant_type, t.logo_url FROM dashboard_workers w JOIN tenants t ON w.tenant_id = t.id WHERE w.username = $1 AND w.is_active = true',
+    [username.toLowerCase().trim()]
+  )).rows[0];
+
+  if (!worker || !(await bcrypt.compare(password, worker.password_hash))) {
+    return res.send(renderPage('Worker Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid username or password</div><a href="/worker/login" class="btn">Try Again</a></div>', null));
+  }
+
+  req.session.worker = {
+    id: worker.id,
+    tenant_id: worker.tenant_id,
+    username: worker.username,
+    display_name: worker.display_name,
+    role: worker.role,
+    tenant_type: worker.tenant_type,
+    tenant_name: worker.tenant_name,
+    tenant_logo: worker.logo_url,
+    dark_mode: false
+  };
+  await pool.query('UPDATE dashboard_workers SET last_login = NOW() WHERE id = $1', [worker.id]);
+  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, ip_address) VALUES($1,$2,$3,$4,$5)',
+    [worker.tenant_id, worker.id, worker.username, 'login', req.ip]);
+  res.redirect('/worker/dashboard');
+}));
+
+app.get('/worker/logout', (req, res) => {
+  if (req.session.worker) {
+    const w = req.session.worker;
+    pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, ip_address) VALUES($1,$2,$3,$4,$5)',
+      [w.tenant_id, w.id, w.username, 'logout', req.ip]).catch(() => {});
+  }
+  delete req.session.worker;
+  res.redirect('/worker/login');
+});
+
+// --- WORKER: Dashboard ---
+app.get('/worker/dashboard', requireWorkerAuth, ah(async (req, res) => {
+  const w = req.session.worker;
+  const t = w.tenant_id;
+  const tenantType = w.tenant_type;
+  let statsCards = '';
+  let actionCards = '';
+
+  if (tenantType === 'school') {
+    const [students, attendance] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM students WHERE tenant_id=$1', [t]),
+      pool.query("SELECT COUNT(DISTINCT student_id) FROM attendance WHERE tenant_id=$1 AND date=CURRENT_DATE AND status='present'", [t])
+    ]);
+    statsCards = `
+      <div class="stat-card"><div class="stat-num">${students.rows[0].count}</div><div>Students</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${attendance.rows[0].count}</div><div>Present Today</div></div>`;
+    actionCards = `
+      <div class="card"><h3>Students</h3><a href="/worker/students" class="btn btn-sm">View Students</a></div>
+      <div class="card"><h3>Attendance</h3><a href="/school/attendance" class="btn btn-sm">View Attendance</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
+      ${['task_manager','full_worker'].includes(w.role) ? '<div class="card"><h3>Tasks</h3><a href="/worker/tasks" class="btn btn-sm">Manage Tasks</a></div>' : ''}
+      ${['content_manager','full_worker'].includes(w.role) ? '<div class="card"><h3>Content</h3><a href="/worker/posts" class="btn btn-sm">Manage Posts</a></div>' : ''}`;
+  } else if (tenantType === 'church') {
+    const [members, sermons] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM church_members WHERE tenant_id=$1', [t]),
+      pool.query('SELECT COUNT(*) FROM sermons WHERE tenant_id=$1', [t])
+    ]);
+    statsCards = `
+      <div class="stat-card"><div class="stat-num">${members.rows[0].count}</div><div>Members</div></div>
+      <div class="stat-card"><div class="stat-num">${sermons.rows[0].count}</div><div>Sermons</div></div>`;
+    actionCards = `
+      <div class="card"><h3>Members</h3><a href="/worker/members" class="btn btn-sm">View Members</a></div>
+      <div class="card"><h3>Sermons</h3><a href="/church/sermons" class="btn btn-sm">Sermon Archive</a></div>
+      <div class="card"><h3>Events</h3><a href="/events" class="btn btn-sm">View Events</a></div>
+      ${['task_manager','full_worker'].includes(w.role) ? '<div class="card"><h3>Tasks</h3><a href="/worker/tasks" class="btn btn-sm">Manage Tasks</a></div>' : ''}
+      ${['content_manager','full_worker'].includes(w.role) ? '<div class="card"><h3>Content</h3><a href="/worker/posts" class="btn btn-sm">Manage Posts</a></div>' : ''}`;
+  } else if (tenantType === 'business') {
+    const [customers, products] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM customers WHERE tenant_id=$1', [t]),
+      pool.query('SELECT COUNT(*) FROM products WHERE tenant_id=$1', [t])
+    ]);
+    statsCards = `
+      <div class="stat-card"><div class="stat-num">${customers.rows[0].count}</div><div>Customers</div></div>
+      <div class="stat-card"><div class="stat-num">${products.rows[0].count}</div><div>Products</div></div>`;
+    actionCards = `
+      <div class="card"><h3>Customers</h3><a href="/worker/members" class="btn btn-sm">View Customers</a></div>
+      <div class="card"><h3>Inventory</h3><a href="/business/inventory" class="btn btn-sm">View Products</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
+      ${['task_manager','full_worker'].includes(w.role) ? '<div class="card"><h3>Tasks</h3><a href="/worker/tasks" class="btn btn-sm">Manage Tasks</a></div>' : ''}
+      ${['content_manager','full_worker'].includes(w.role) ? '<div class="card"><h3>Content</h3><a href="/worker/posts" class="btn btn-sm">Manage Posts</a></div>' : ''}`;
+  } else {
+    const [members, events] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM org_members WHERE tenant_id=$1', [t]),
+      pool.query('SELECT COUNT(*) FROM events WHERE tenant_id=$1 AND event_date >= CURRENT_DATE', [t])
+    ]);
+    statsCards = `
+      <div class="stat-card"><div class="stat-num">${members.rows[0].count}</div><div>Members</div></div>
+      <div class="stat-card"><div class="stat-num">${events.rows[0].count}</div><div>Upcoming Events</div></div>`;
+    actionCards = `
+      <div class="card"><h3>Members</h3><a href="/worker/members" class="btn btn-sm">View Members</a></div>
+      <div class="card"><h3>Events</h3><a href="/events" class="btn btn-sm">View Events</a></div>
+      <div class="card"><h3>Documents</h3><a href="/documents" class="btn btn-sm">Document Library</a></div>
+      ${['task_manager','full_worker'].includes(w.role) ? '<div class="card"><h3>Tasks</h3><a href="/worker/tasks" class="btn btn-sm">Manage Tasks</a></div>' : ''}
+      ${['content_manager','full_worker'].includes(w.role) ? '<div class="card"><h3>Content</h3><a href="/worker/posts" class="btn btn-sm">Manage Posts</a></div>' : ''}`;
+  }
+
+  const roleLabel = { viewer: 'Viewer', content_manager: 'Content Manager', task_manager: 'Task Manager', full_worker: 'Full Worker' };
+
+  res.send(renderPage('Worker Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">
+      <div style="display:flex;align-items:center;gap:15px;justify-content:center;margin-bottom:10px">
+        ${w.tenant_logo ? `<img src="${esc(w.tenant_logo)}" style="height:40px;border-radius:8px" alt="Logo">` : ''}
+        <div><h1>Welcome, ${esc(w.display_name)}</h1><p>${esc(w.tenant_name)} &mdash; Worker Portal</p></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:4px">Role: ${roleLabel[w.role] || w.role} | Financial data is hidden for security</p>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-bottom:15px">
+      <a href="/worker/profile" class="btn btn-sm">My Profile</a>
+      <a href="/worker/logout" class="btn btn-sm btn-red">Logout</a>
+    </div>
+    <div class="stats">${statsCards}</div>
+    <div class="grid">${actionCards}</div>
+  `, req.session.user));
+}));
+
+// --- WORKER: Tasks Management ---
+app.get('/worker/tasks', requireWorkerAuth, ah(async (req, res) => {
+  const w = req.session.worker;
+  const isEditor = ['task_manager','full_worker'].includes(w.role);
+  const tasks = (await pool.query('SELECT * FROM tasks WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [w.tenant_id])).rows;
+  const priorityColors = { high: '#dc2626', medium: '#f59e0b', low: '#059669' };
+  const statusColors = { todo: '#64748b', 'in_progress': '#3b82f6', done: '#059669' };
+  res.send(renderPage('Tasks', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:18px;border-radius:12px;margin-bottom:20px;color:white">
+      <h1>Task Management</h1><p class="muted">Track and manage organizational tasks</p>
+    </div>
+    ${isEditor ? `<div class="card"><h3>Add New Task</h3>
+      <form method="POST" action="/worker/tasks/save">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <input name="title" placeholder="Task Title" required>
+          <select name="priority"><option value="low">Low Priority</option><option value="medium" selected>Medium Priority</option><option value="high">High Priority</option></select>
+          <textarea name="description" placeholder="Description (optional)" style="grid-column:1/-1" rows="2"></textarea>
+          <input name="due_date" type="date" placeholder="Due Date (optional)">
+          <input name="assignee" placeholder="Assigned To (optional)">
+          <div style="grid-column:1/-1"><button class="btn btn-green" type="submit">Add Task</button></div>
+        </div>
+      </form>
+    </div>` : ''}
+    <div class="card"><h3>All Tasks (${tasks.length})</h3>
+      ${tasks.length ? `<table><tr><th>Title</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Due Date</th>${isEditor ? '<th>Actions</th>' : ''}</tr>
+      ${tasks.map(task => `<tr>
+        <td><strong>${esc(task.title)}</strong>${task.description ? `<br><span class="muted" style="font-size:12px">${esc(task.description).substring(0,80)}</span>` : ''}</td>
+        <td><span style="color:${priorityColors[task.priority] || '#64748b'};font-weight:600">${esc(task.priority)}</span></td>
+        <td><span style="color:${statusColors[task.status] || '#64748b'}">${esc(task.status)}</span></td>
+        <td>${esc(task.assignee || '-')}</td>
+        <td style="font-size:12px">${task.due_date ? new Date(task.due_date).toLocaleDateString() : '-'}</td>
+        ${isEditor ? `<td>
+          ${task.status !== 'done' ? `<a href="/worker/tasks/${task.id}/complete" class="btn btn-sm btn-green">Done</a>` : '<span style="color:#059669">Completed</span>'}
+          <a href="/worker/tasks/${task.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete this task?')">Delete</a>
+        </td>` : ''}
+      </tr>`).join('')}
+      </table>` : '<p class="muted">No tasks yet.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/worker/tasks/save', requireWorkerAuth, requireWorkerRole('task_manager','full_worker'), ah(async (req, res) => {
+  const w = req.session.worker;
+  const { title, description, priority, due_date, assignee } = req.body;
+  if (!title) return res.redirect('/worker/tasks');
+  await pool.query('INSERT INTO tasks(tenant_id, title, description, priority, status, due_date, assignee, created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+    [w.tenant_id, title, description || '', priority || 'medium', 'todo', due_date || null, assignee || '', w.username]);
+  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, details, ip_address) VALUES($1,$2,$3,$4,$5,$6)',
+    [w.tenant_id, w.id, w.username, 'create_task', `Created task: ${title}`, req.ip]);
+  res.redirect('/worker/tasks');
+}));
+
+app.get('/worker/tasks/:id/complete', requireWorkerAuth, requireWorkerRole('task_manager','full_worker'), ah(async (req, res) => {
+  const w = req.session.worker;
+  await pool.query("UPDATE tasks SET status = 'done', completed_at = NOW() WHERE id = $1 AND tenant_id = $2", [req.params.id, w.tenant_id]);
+  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, details, ip_address) VALUES($1,$2,$3,$4,$5,$6)',
+    [w.tenant_id, w.id, w.username, 'complete_task', `Completed task #${req.params.id}`, req.ip]);
+  res.redirect('/worker/tasks');
+}));
+
+app.get('/worker/tasks/:id/delete', requireWorkerAuth, requireWorkerRole('task_manager','full_worker'), ah(async (req, res) => {
+  const w = req.session.worker;
+  await pool.query('DELETE FROM tasks WHERE id = $1 AND tenant_id = $2', [req.params.id, w.tenant_id]);
+  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, details, ip_address) VALUES($1,$2,$3,$4,$5,$6)',
+    [w.tenant_id, w.id, w.username, 'delete_task', `Deleted task #${req.params.id}`, req.ip]);
+  res.redirect('/worker/tasks');
+}));
+
+// --- WORKER: Posts/Content Management ---
+app.get('/worker/posts', requireWorkerAuth, requireWorkerRole('content_manager','full_worker'), ah(async (req, res) => {
+  const w = req.session.worker;
+  const posts = (await pool.query('SELECT * FROM public_posts WHERE tenant_id IS NULL ORDER BY created_at DESC LIMIT 50', [])).rows;
+  res.send(renderPage('Manage Content', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#a855f7);padding:18px;border-radius:12px;margin-bottom:20px;color:white">
+      <h1>Content Management</h1><p class="muted">Create and manage public posts and news</p>
+    </div>
+    <div class="card"><h3>Create New Post</h3>
+      <form method="POST" action="/worker/posts/save">
+        <input name="title" placeholder="Post Title" required>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <select name="category"><option value="news">News</option><option value="announcement">Announcement</option><option value="event">Event</option><option value="general">General</option></select>
+          <input name="tags" placeholder="Tags (comma-separated, optional)">
+        </div>
+        <textarea name="content" placeholder="Post content..." rows="6" style="margin-top:10px"></textarea>
+        <div style="margin-top:10px"><button class="btn btn-green" type="submit">Publish Post</button></div>
+      </form>
+    </div>
+    <div class="card"><h3>Recent Posts (${posts.length})</h3>
+      ${posts.length ? posts.map(p => `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <div><strong>${esc(p.title)}</strong><br><span class="muted" style="font-size:12px">${esc(p.category)} | ${new Date(p.created_at).toLocaleDateString()}</span></div>
+          <span style="font-size:12px">${p.published !== false ? '<span style="color:#059669">Published</span>' : '<span style="color:#f59e0b">Draft</span>'}</span>
+        </div>
+        ${p.content ? `<p style="margin-top:8px;font-size:14px;color:#475569">${esc(p.content).substring(0,150)}${p.content.length > 150 ? '...' : ''}</p>` : ''}
+      </div>`).join('') : '<p class="muted">No posts yet. Create your first post above.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/worker/posts/save', requireWorkerAuth, requireWorkerRole('content_manager','full_worker'), ah(async (req, res) => {
+  const w = req.session.worker;
+  const { title, content, category, tags } = req.body;
+  if (!title) return res.redirect('/worker/posts');
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0,80) + '-' + Date.now().toString(36);
+  await pool.query('INSERT INTO public_posts(title, content, category, tags, slug, published, created_by) VALUES($1,$2,$3,$4,$5,true,$6)',
+    [title, content || '', category || 'news', tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : null, slug, w.username]);
+  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, details, ip_address) VALUES($1,$2,$3,$4,$5,$6)',
+    [w.tenant_id, w.id, w.username, 'create_post', `Created post: ${title}`, req.ip]);
+  res.redirect('/worker/posts');
+}));
+
+// --- WORKER: Read-Only Member/Student View ---
+app.get('/worker/students', requireWorkerAuth, ah(async (req, res) => {
+  const w = req.session.worker;
+  const students = (await pool.query('SELECT id, name, admission_no, class, stream, gender, guardian_phone FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 200', [w.tenant_id])).rows;
+  res.send(renderPage('Students (Read-Only)', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:18px;border-radius:12px;margin-bottom:20px;color:white">
+      <h1>Student Records</h1><p class="muted">Read-only view | ${students.length} students</p>
+    </div>
+    <div class="card">
+      ${students.length ? `<table><tr><th>Name</th><th>Admission No</th><th>Class</th><th>Stream</th><th>Gender</th><th>Guardian Phone</th></tr>
+      ${students.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.admission_no || '-')}</td><td>${esc(s.class || '-')}</td><td>${esc(s.stream || '-')}</td><td>${esc(s.gender || '-')}</td><td>${esc(s.guardian_phone || '-')}</td></tr>`).join('')}
+      </table>` : '<p class="muted">No students found.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/worker/members', requireWorkerAuth, ah(async (req, res) => {
+  const w = req.session.worker;
+  const tenantType = w.tenant_type;
+  let rows = [];
+  if (tenantType === 'church') {
+    rows = (await pool.query('SELECT id, name, phone, email, role, status FROM church_members WHERE tenant_id=$1 ORDER BY name LIMIT 200', [w.tenant_id])).rows;
+  } else if (tenantType === 'business') {
+    rows = (await pool.query('SELECT id, name, email, phone, address FROM customers WHERE tenant_id=$1 ORDER BY name LIMIT 200', [w.tenant_id])).rows;
+  } else {
+    rows = (await pool.query('SELECT id, name, email, phone, role FROM org_members WHERE tenant_id=$1 ORDER BY name LIMIT 200', [w.tenant_id])).rows;
+  }
+  const memberLabel = tenantType === 'business' ? 'Customers' : 'Members';
+  res.send(renderPage(`${memberLabel} (Read-Only)`, `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:18px;border-radius:12px;margin-bottom:20px;color:white">
+      <h1>${memberLabel} Directory</h1><p class="muted">Read-only view | ${rows.length} ${memberLabel.toLowerCase()}</p>
+    </div>
+    <div class="card">
+      ${rows.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th>${tenantType === 'church' ? '<th>Role</th>' : ''}</tr>
+      ${rows.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.email || '-')}</td><td>${esc(r.phone || '-')}</td>${tenantType === 'church' ? `<td>${esc(r.role || '-')}</td>` : ''}</tr>`).join('')}
+      </table>` : `<p class="muted">No ${memberLabel.toLowerCase()} found.</p>`}
+    </div>
+  `, req.session.user));
+}));
+
+// --- WORKER: Profile & Change Password ---
+app.get('/worker/profile', requireWorkerAuth, ah(async (req, res) => {
+  const w = req.session.worker;
+  res.send(renderPage('My Profile', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Worker Profile</h2>
+      <table style="margin:15px 0">
+        <tr><td><strong>Username:</strong></td><td>${esc(w.username)}</td></tr>
+        <tr><td><strong>Display Name:</strong></td><td>${esc(w.display_name)}</td></tr>
+        <tr><td><strong>Role:</strong></td><td>${esc(w.role)}</td></tr>
+        <tr><td><strong>Organization:</strong></td><td>${esc(w.tenant_name)}</td></tr>
+      </table>
+      <h3 style="margin-top:20px">Change Password</h3>
+      <form method="POST" action="/worker/profile/password">
+        <input name="current_password" type="password" placeholder="Current Password" required>
+        <input name="new_password" type="password" placeholder="New Password (min 6 chars)" required minlength="6">
+        <button class="btn btn-green" type="submit" style="margin-top:10px">Update Password</button>
+      </form>
+      <a href="/worker/dashboard" class="btn" style="margin-top:10px;display:inline-block">Back to Dashboard</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/worker/profile/password', requireWorkerAuth, ah(async (req, res) => {
+  const w = req.session.worker;
+  const { current_password, new_password } = req.body;
+  const worker = (await pool.query('SELECT password_hash FROM dashboard_workers WHERE id = $1', [w.id])).rows[0];
+  if (!worker || !(await bcrypt.compare(current_password, worker.password_hash))) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
+  }
+  if (new_password.length < 6) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">New password must be at least 6 characters</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
+  }
+  const hash = await bcrypt.hash(new_password, 12);
+  await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, w.id]);
+  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, ip_address) VALUES($1,$2,$3,$4,$5)',
+    [w.tenant_id, w.id, w.username, 'change_password', 'Worker changed their own password', req.ip]);
+  res.redirect('/worker/profile');
+}));
+
 // === LAUNCH ROUTES (public site, scraping, entertainment, fundraising, etc.) ===
 try {
   const launchRoutes = require('./launch-routes');
@@ -20112,7 +20830,7 @@ try {
 } catch (e) { console.warn('[WS] Failed to initialize WebSocket:', e.message); }
 
 server.listen(PORT, () => {
-  console.log(`SSEWASSWA Platform LIVE on ${PORT}`);
+  console.log(`Comfort Platform LIVE on ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`WebSocket: ws${process.env.NODE_ENV === 'production' ? 's' : ''}://localhost:${PORT}/ws/notifications`);
 });

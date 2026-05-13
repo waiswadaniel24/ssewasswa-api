@@ -1,4 +1,4 @@
-const CACHE = 'ssewasswa-v9.0';
+const CACHE = 'comfort-v1.0';
 const urlsToCache = ['/', '/offline', '/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -76,3 +76,28 @@ async function syncOfflineData() {
     console.warn('Sync error:', e.message);
   }
 }
+
+// Push notification event handler
+self.addEventListener('push', event => {
+  let data = { title: 'Comfort', body: 'You have a new notification', icon: '/icon.png' };
+  try { data = event.data.json(); } catch(e) {}
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: data.icon || '/icon.png',
+      badge: '/icon.png',
+      vibrate: [200, 100, 200]
+    })
+  );
+});
+
+// Handle notification click
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      if (clients.length > 0) { clients[0].focus(); clients[0].navigate(event.notification.data?.url || '/'); }
+      else { self.clients.openWindow('/'); }
+    })
+  );
+});
