@@ -69,21 +69,28 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     )`,
     `CREATE TABLE IF NOT EXISTS subscription_plans (
       id SERIAL PRIMARY KEY,
-      plan_key TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
+      name TEXT NOT NULL UNIQUE,
+      display_name TEXT,
+      description TEXT,
       price INTEGER NOT NULL DEFAULT 0,
       currency TEXT DEFAULT 'UGX',
-      record_limit INTEGER DEFAULT 50,
+      billing_cycle TEXT DEFAULT 'monthly',
+      features TEXT,
+      max_users INTEGER DEFAULT 5,
+      max_students INTEGER DEFAULT 100,
       is_active BOOLEAN DEFAULT true,
+      sort_order INTEGER DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // Seed subscription plans
-    `INSERT INTO subscription_plans (plan_key, name, price, currency, record_limit) VALUES
-      ('free', 'Free', 0, 'UGX', 50),
-      ('basic', 'Basic', 100000, 'UGX', 500),
-      ('pro', 'Pro', 200000, 'UGX', 50000),
-      ('enterprise', 'Enterprise', 0, 'UGX', 999999999)
-    ON CONFLICT (plan_key) DO NOTHING`,
+    // Seed subscription plans (matches server.js schema)
+    `INSERT INTO subscription_plans (name, display_name, description, price, currency, billing_cycle, features, max_users, max_students, is_active, sort_order) VALUES
+      ('free', 'Free Plan', 'Basic access for small organizations', 0, 'UGX', 'monthly', '1 admin, up to 100 students/members, basic reports', 2, 100, true, 0),
+      ('basic', 'Basic Plan', 'For growing schools, churches, and businesses', 50000, 'UGX', 'monthly', '5 admins, up to 500 students/members, advanced reports', 5, 500, true, 1),
+      ('pro', 'Professional Plan', 'Full features for established institutions', 150000, 'UGX', 'monthly', 'Unlimited admins, unlimited students, all features', 20, 5000, true, 2),
+      ('enterprise', 'Enterprise Plan', 'Custom solutions for large organizations', 500000, 'UGX', 'monthly', 'Everything in Pro + custom domain, white-label, API', 999, 99999, true, 3)
+    ON CONFLICT (name) DO NOTHING`,
+    // Drop legacy plan_key column if it exists from older schema
+    `ALTER TABLE subscription_plans DROP COLUMN IF EXISTS plan_key`,
     // Seed external links
     `INSERT INTO external_links (title, url, category, description, sort_order) VALUES
       ('New Vision', 'https://www.newvision.co.ug', 'news', 'Uganda''s leading newspaper', 1),
@@ -112,7 +119,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       try {
         await pool.query(sql);
       } catch (e) {
-        console.warn('[Launch] Migration warning:', e.message);
+        if (!e.message.includes('already exists') && !e.message.includes('does not exist') && !e.message.includes('ON CONFLICT') && !e.message.includes('duplicate')) console.warn('[Launch] Migration warning:', e.message);
       }
     }
     console.log('[Launch] Migrations complete');
