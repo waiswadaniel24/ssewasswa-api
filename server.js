@@ -121,7 +121,9 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false, // rejectUnauthorized:false required for Render/Heroku managed PostgreSQL (self-signed CA)
+  // Always use rejectUnauthorized:false — Render/Heroku/Neon managed PostgreSQL uses self-signed CA certs.
+  // Using NODE_ENV check breaks when Render doesn't set NODE_ENV=production by default.
+  ssl: { rejectUnauthorized: false },
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
@@ -155,6 +157,15 @@ if (process.env.NODE_ENV === 'production' && !process.env.CSRF_SECRET && !proces
 const CSRF_SECRET = process.env.CSRF_SECRET || process.env.SESSION_SECRET;
 const generateCSRFToken = () => crypto.randomBytes(32).toString('hex');
 const hashCSRFToken = (token) => crypto.createHmac('sha256', CSRF_SECRET).update(token).digest('hex');
+
+// === HEALTH CHECK (before session middleware — avoids DB connection on ping) ===
+app.get('/ping', (req, res) => {
+  res.set('Content-Type', 'text/plain');
+  res.status(200).send('pong');
+});
+app.head('/ping', (req, res) => {
+  res.status(200).end();
+});
 
 // === SESSION (must come BEFORE CSRF so req.session is available) ===
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -22305,7 +22316,7 @@ app.get('/assets/edit/:id', requireAuth, requireNotBanned, ah(async (req, res) =
   '<label>Purchase Price</label><input type="number" name="purchase_price" step="0.01" min="0" value="' + (a.purchase_price || '') + '">' +
   '<button type="submit" class="btn btn-green">Update</button> <a href="/assets" class="btn" style="background:#999;color:#fff">Cancel</a>' +
   '</form></div>', req.session.user));
-});
+}));
 
 app.post('/assets/update/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('UPDATE assets SET name=$1,category=$2,serial_number=$3,location=$4,status=$5,assigned_to=$6,purchase_date=$7,purchase_price=$8 WHERE id=$9 AND tenant_id=$10', [req.body.name, req.body.category, req.body.serial_number||null, req.body.location||null, req.body.status, req.body.assigned_to||null, req.body.purchase_date||null, parseFloat(req.body.purchase_price)||0, req.params.id, req.session.user.tenant_id]);
@@ -22621,7 +22632,7 @@ app.get('/bookings/new', requireAuth, requireNotBanned, (req, res) => {
       <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Start Time *</label><input name="start_time" type="datetime-local" required></div><div><label>End Time *</label><input name="end_time" type="datetime-local" required></div></div>
       <button type="submit" class="btn btn-green">Book Room</button> <a href="/bookings" class="btn" style="background:#999;color:#fff">Cancel</a>
     </form></div>`, req.session.user));
-}));
+});
 
 app.post('/bookings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
@@ -23153,6 +23164,8 @@ app.use((req, res, next) => {
 // === CENTRALIZED ERROR HANDLER ===
 app.use((err, req, res, next) => {
   console.error(`[Error] ${req.method} ${req.path}:`, err.message);
+  // Guard against double-response (headers already sent)
+  if (res.headersSent) return;
   // Don't leak stack traces in production
   const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message;
   if (req.accepts('json')) {
