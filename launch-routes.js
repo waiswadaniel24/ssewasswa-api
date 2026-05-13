@@ -397,6 +397,15 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   }
 
   // =========================================================================
+  // DIAGNOSTIC: Test if launch-routes routing works at all
+  // =========================================================================
+
+  app.get('/ping', (req, res) => {
+    console.log('[PING] Route hit!');
+    res.send('pong');
+  });
+
+  // =========================================================================
   // SECTION 5: PUBLIC LANDING PAGE (replaces /)
   // =========================================================================
 

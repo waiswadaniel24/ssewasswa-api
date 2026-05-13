@@ -20568,6 +20568,12 @@ app.post('/worker/profile/password', requireWorkerAuth, ah(async (req, res) => {
   res.redirect('/worker/profile');
 }));
 
+// === REQUEST DIAGNOSTIC ===
+app.use((req, res, next) => {
+  console.log(`[REQ] ${req.method} ${req.path} from ${req.ip}`);
+  next();
+});
+
 // === LAUNCH ROUTES (public site, scraping, entertainment, fundraising, etc.) ===
 try {
   const launchRoutes = require('./launch-routes');
