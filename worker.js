@@ -1,11 +1,25 @@
-const { Worker } = require('bullmq');
+require('dotenv').config();
+const { Worker, Queue } = require('bullmq');
 const IORedis = require('ioredis');
 const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
-require('dotenv').config();
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const redis = new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+const redisUrl = process.env.REDIS_URL;
+if (!redisUrl) {
+  console.log('No REDIS_URL set. Workers require Redis. Exiting.');
+  process.exit(0);
+}
+
+const redis = new IORedis(redisUrl, { maxRetriesPerRequest: null });
+
+const emailQueue = new Queue('email', { connection: redis });
+const smsQueue = new Queue('sms', { connection: redis });
+const backupQueue = new Queue('backup', { connection: redis });
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -19,21 +33,21 @@ new Worker('email', async job => {
 
 // SMS Worker
 new Worker('sms', async job => {
-  console.log('SMS:', job.data.phone, job.data.message);
-  // Add Africa's Talking or other SMS API here
+  console.log('SMS Worker:', job.data.phone, job.data.message);
+  // Add Africa's Talking or other SMS provider here
 }, { connection: redis });
 
 // Backup Worker
 new Worker('backup', async job => {
-  const tables = ['tenants', 'users', 'students', 'fees', 'marks'];
+  const tables = ['tenants', 'users', 'students', 'marks', 'fees', 'attendance', 'exams'];
   for (const table of tables) {
     try {
-      const data = (await pool.query(`SELECT * FROM ${table} LIMIT 1000`)).rows;
+      const data = (await pool.query(`SELECT * FROM ${table} LIMIT 10000`)).rows;
       console.log(`Backed up ${table}: ${data.length} rows`);
     } catch (e) {
-      console.warn(`Backup skipped ${table}:`, e.message);
+      console.warn(`Skip ${table}: ${e.message}`);
     }
   }
 }, { connection: redis });
 
-console.log('Comfort Workers Running');
+console.log('Comfort Workers v1.0 Running');
