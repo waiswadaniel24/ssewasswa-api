@@ -168,12 +168,13 @@ app.head('/ping', (req, res) => {
 });
 
 // === SESSION (must come BEFORE CSRF so req.session is available) ===
+let pgSessionStore; // reference to the PGStore instance (needed by WebSocket auth)
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   console.error('FATAL: SESSION_SECRET must be set in production');
   process.exit(1);
 }
 app.use(session({
-  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: true }),
+  store: (pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true })),
   secret: process.env.SESSION_SECRET || 'dev-session-secret-local-only',
   resave: false,
   saveUninitialized: false,
@@ -23196,7 +23197,7 @@ try {
     if (!sidMatch) { ws.close(1008, 'No session'); return; }
     const sessionId = decodeURIComponent(sidMatch[1]);
     // Look up user from session store
-    pgSession.store.get(sessionId, async (err, session) => {
+    pgSessionStore.get(sessionId, async (err, session) => {
       if (err || !session || !session.user) { ws.close(1008, 'Not authenticated'); return; }
       const tenantId = session.user.tenant_id;
       if (!wsClients.has(tenantId)) wsClients.set(tenantId, new Set());
