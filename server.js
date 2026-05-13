@@ -6649,7 +6649,7 @@ app.get('/dev/blog', requireAuth, requireSuperAdmin, ah(async (req, res) => {
         <textarea name="content" placeholder="Full post content (HTML allowed)" rows="8" required></textarea>
         <input name="image_url" placeholder="Cover image URL">
         <select name="category"><option value="news">News</option><option value="update">Update</option><option value="tutorial">Tutorial</option><option value="feature">Feature</option><option value="tips">Tips</option></select>
-        <label><input type="checkbox" name="is_published" value="true"> Publish immediately</label>
+        <label><input type="checkbox" name="is_published" value="true" checked> Publish immediately</label>
         <button class="btn btn-green">Create Post</button>
       </form>
     </div>
@@ -6661,6 +6661,7 @@ app.get('/dev/blog', requireAuth, requireSuperAdmin, ah(async (req, res) => {
         <td>${p.published_at ? new Date(p.published_at).toLocaleDateString() : new Date(p.created_at).toLocaleDateString()}</td>
         <td>
           <a href="/blog/${esc(p.slug)}" class="btn btn-sm">View</a>
+          ${!p.is_published ? `<a href="/dev/blog/publish/${p.id}" class="btn btn-sm btn-green" onclick="return confirm('Publish this post?')">Publish</a>` : ''}
           <a href="/dev/blog/delete/${p.id}" class="btn btn-sm btn-red" onclick="return confirm('Delete this post?')">Delete</a>
         </td>
       </tr>`).join('')}
@@ -6685,6 +6686,11 @@ app.post('/dev/blog/create', requireAuth, requireSuperAdmin, ah(async (req, res)
 
 app.get('/dev/blog/delete/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   await pool.query('DELETE FROM blog_posts WHERE id=$1', [req.params.id]);
+  res.redirect('/dev/blog');
+}));
+
+app.get('/dev/blog/publish/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query('UPDATE blog_posts SET is_published=true, published_at=NOW() WHERE id=$1', [req.params.id]);
   res.redirect('/dev/blog');
 }));
 
