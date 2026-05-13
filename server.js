@@ -2081,6 +2081,8 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   } catch (e) {
     if (e.message.includes('password_hash')) {
       await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
+    } else if (e.message.includes('users_email_unique') || e.message.includes('duplicate key')) {
+      return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Email Already Registered</h3><p>An account with <strong>${esc(email)}</strong> already exists. <a href="/login">Login here</a> instead.</p></div>`, null));
     } else throw e;
   }
   await audit(email, 'register', `New ${type} account: ${org_name}`);
@@ -20602,12 +20604,12 @@ app.use((req, res, next) => {
 app.use((err, req, res, next) => {
   console.error(`[Error] ${req.method} ${req.path}:`, err.message, err.stack);
   // Don't leak stack traces in production
-  const msg = err.message; // Show actual error for debugging
+  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message;
   if (req.accepts('json')) {
-    return res.status(500).json({ error: msg, stack: err.stack });
+    return res.status(500).json({ error: msg });
   }
   const user = req.session?.user || null;
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p><pre style="font-size:11px;margin-top:10px;white-space:pre-wrap">${esc(err.stack || '')}</pre></div><a href="/" class="btn">Go Home</a></div>`, user));
+  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
 });
 
 const PORT = process.env.PORT || 3000;
