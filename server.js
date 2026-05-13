@@ -20563,7 +20563,7 @@ app.post('/worker/profile/password', requireWorkerAuth, ah(async (req, res) => {
   }
   const hash = await bcrypt.hash(new_password, 12);
   await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, w.id]);
-  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, ip_address) VALUES($1,$2,$3,$4,$5)',
+  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, details, ip_address) VALUES($1,$2,$3,$4,$5,$6)',
     [w.tenant_id, w.id, w.username, 'change_password', 'Worker changed their own password', req.ip]);
   res.redirect('/worker/profile');
 }));
@@ -20580,35 +20580,16 @@ try {
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
-// === ERROR HANDLER ===
+// === ERROR HANDLER (production-safe, no stack traces leaked) ===
 app.use((err, req, res, next) => {
-  console.error('Server Error:', err);
-  // Send to Sentry if configured
+  console.error(`[Error] ${req.method} ${req.path}:`, err.message);
+  if (process.env.NODE_ENV !== 'production') console.error(err.stack);
   if (Sentry) Sentry.captureException(err);
-  const msg = err.message || 'Something went wrong';
+  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred. Please try again.' : err.message;
   const user = req.session?.user || null;
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
-});
-
-// === REQUEST TIMEOUT MIDDLEWARE ===
-app.use((req, res, next) => {
-  req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-    if (!res.headersSent) {
-      res.status(504).json({ error: 'Request timeout' });
-    }
-  });
-  next();
-});
-
-// === CENTRALIZED ERROR HANDLER ===
-app.use((err, req, res, next) => {
-  console.error(`[Error] ${req.method} ${req.path}:`, err.message, err.stack);
-  // Don't leak stack traces in production
-  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message;
-  if (req.accepts('json')) {
+  if (req.accepts('json') && !req.accepts('html')) {
     return res.status(500).json({ error: msg });
   }
-  const user = req.session?.user || null;
   res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
 });
 
