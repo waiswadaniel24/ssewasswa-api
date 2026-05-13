@@ -1273,6 +1273,10 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('nira_verification', 'NIRA Verification', 'National ID verification', '4.0', 'uganda', 'NIRA API credentials', false) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('advanced_analytics', 'Advanced Analytics', 'Detailed analytics dashboard with charts', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('scheduled_reports', 'Scheduled Reports', 'Auto-send reports on schedule', '5.0', 'enterprise', 'GMAIL_USER + GMAIL_PASS env vars', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('online_exams', 'Online Exams & Quizzes', 'Create, publish, and auto-grade assessments', '6.0', 'ecosystem', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('whatsapp_integration', 'WhatsApp Integration', 'Send messages via WhatsApp Business API', '6.0', 'ecosystem', 'WhatsApp Business API credentials', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('multi_branch', 'Multi-Branch Management', 'Manage multiple branches and stock transfers', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('enhanced_clinic', 'Enhanced Clinic Portal', 'Full patient management, consultations, prescriptions, reports', '6.0', 'ecosystem', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('momo_payments', 'Mobile Money', 'MTN MoMo and Airtel Money integration', '5.0', 'enterprise', 'MoMo API credentials', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('multi_currency', 'Multi-Currency', 'UGX, KES, TZS, RWF, USD support', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('automation_engine', 'Automation Engine', 'If-then rules for automated actions', '6.0', 'ecosystem', 'None', true) ON CONFLICT DO NOTHING`,
@@ -2510,6 +2514,11 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Fee Reminders</h3><a href="/school/fee-reminders" class="btn btn-sm btn-red">Send Reminders</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Online Payments</h3><a href="/billing" class="btn btn-sm">Pay/Subscribe</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: Online Exams</h3><a href="/exams" class="btn btn-sm">Quizzes & Tests</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Clinic v2</h3><a href="/clinic-enhanced" class="btn btn-sm">Enhanced Clinic</a></div>
       <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
       <div class="card"><h3>Forums</h3><a href="/forums" class="btn btn-sm">Discussions</a></div>
       <div class="card"><h3>Login History</h3><a href="/login-history" class="btn btn-sm">Security</a></div>
@@ -6260,6 +6269,12 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/dev/plans" style="background:#e11d48;color:white">Plans & Pricing</a>
       <a href="/dev/activity" style="background:#0ea5e9;color:white">Activity</a>
       <a href="/dev/features" style="background:#64748b;color:white">Features</a>
+      <a href="/dev/portals" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white">Portal Switcher</a>
+      <a href="/exams" style="background:#3b82f6;color:white">Exams</a>
+      <a href="/whatsapp" style="background:#22c55e;color:white">WhatsApp</a>
+      <a href="/scheduled-reports" style="background:#f59e0b;color:white">Reports</a>
+      <a href="/branches" style="background:#8b5cf6;color:white">Branches</a>
+      <a href="/clinic-enhanced" style="background:#ef4444;color:white">Clinic</a>
     </div>
 
     <!-- MY MONEY SECTION -->
@@ -12028,6 +12043,8 @@ app.get('/terms', (req, res) => {
 // Feature flag check middleware
 const requireFeature = (featureKey) => async (req, res, next) => {
   try {
+    // Super admin / developer bypasses all feature gates
+    if (req.session.user?.role === 'super_admin') return next();
     const flag = (await pool.query('SELECT * FROM feature_flags WHERE feature_key=$1', [featureKey])).rows[0];
     if (flag?.is_active) return next();
     return res.send(renderPage('Coming Soon', `
@@ -23358,6 +23375,28 @@ app.get('/dev/restore-session', requireAuth, requireSuperAdmin, ah(async (req, r
   req.session.save(() => { res.redirect('/dashboard'); });
 }));
 
+// === FLOATING DEV BAR (shown when impersonating) ===
+app.use(requireAuth, (req, res, next) => {
+  if (req.session.user?.role === 'super_admin' && req.session._original_tenant) {
+    const orig = req.session._original_tenant;
+    const origRender = res.send.bind(res);
+    res.send = function(html) {
+      if (typeof html === 'string' && html.includes('</body>')) {
+        const bar = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:linear-gradient(135deg,#dc2626,#ef4444);color:white;padding:8px 16px;font-size:13px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 10px rgba(0,0,0,0.3)">
+          <span><strong>DEV MODE</strong> — Impersonating: ${esc(req.session.user.tenant_name || '')} (${esc(req.session.user.tenant_type || '')}) | Original: ${esc(orig.name)} (${esc(orig.type)})</span>
+          <div style="display:flex;gap:8px">
+            <a href="/dev/portals" style="color:white;text-decoration:none;padding:4px 12px;background:rgba(255,255,255,0.2);border-radius:6px;font-weight:600">Switch Portal</a>
+            <a href="/dev/restore-session" style="color:white;text-decoration:none;padding:4px 12px;background:rgba(255,255,255,0.3);border-radius:6px;font-weight:600">Exit Dev Mode</a>
+          </div>
+        </div><div style="height:36px"></div>`;
+        html = html.replace('</body>', bar + '</body>');
+      }
+      origRender(html);
+    };
+  }
+  next();
+});
+
 // ============================================================
 // FEATURE 1: ONLINE EXAMS & QUIZZES
 // ============================================================
@@ -24052,7 +24091,7 @@ app.post('/branches/select', requireAuth, requireNotBanned, ah(async (req, res) 
 // ============================================================
 // FEATURE 5: ENHANCED CLINIC PORTAL
 // ============================================================
-app.get('/clinic', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patientCount = (await pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tid])).rows[0].count;
   const todayAppts = (await pool.query("SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=CURRENT_DATE", [tid])).rows[0].count;
@@ -24068,17 +24107,17 @@ app.get('/clinic', requireAuth, requireNotBanned, ah(async (req, res) => {
     <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#ef4444">${pendingQueue}</div><div style="color:#64748b">In Queue</div></div>
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
-    <a href="/clinic/patients" class="btn" style="padding:16px;text-align:center;display:block">Patients</a>
-    <a href="/clinic/patients/new" class="btn btn-green" style="padding:16px;text-align:center;display:block">+ New Patient</a>
-    <a href="/clinic/appointments" class="btn" style="padding:16px;text-align:center;display:block">Appointments</a>
-    <a href="/clinic/queue" class="btn" style="background:#f59e0b;color:white;padding:16px;text-align:center;display:block">Queue</a>
-    <a href="/clinic/prescriptions" class="btn" style="padding:16px;text-align:center;display:block">Prescriptions</a>
-    <a href="/clinic/reports" class="btn" style="padding:16px;text-align:center;display:block">Reports</a>
+    <a href="/clinic-enhanced/patients" class="btn" style="padding:16px;text-align:center;display:block">Patients</a>
+    <a href="/clinic-enhanced/patients/new" class="btn btn-green" style="padding:16px;text-align:center;display:block">+ New Patient</a>
+    <a href="/clinic-enhanced/appointments" class="btn" style="padding:16px;text-align:center;display:block">Appointments</a>
+    <a href="/clinic-enhanced/queue" class="btn" style="background:#f59e0b;color:white;padding:16px;text-align:center;display:block">Queue</a>
+    <a href="/clinic-enhanced/prescriptions" class="btn" style="padding:16px;text-align:center;display:block">Prescriptions</a>
+    <a href="/clinic-enhanced/reports" class="btn" style="padding:16px;text-align:center;display:block">Reports</a>
   </div>`;
   res.send(renderPage('Clinic Dashboard', html, req.session.user));
 }));
 
-app.get('/clinic/patients', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const search = req.query.search || '';
   const rows = search
@@ -24086,33 +24125,33 @@ app.get('/clinic/patients', requireAuth, requireNotBanned, ah(async (req, res) =
     : (await pool.query('SELECT * FROM clinic_patients WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100', [tid])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>Patients</h1>
-    <a href="/clinic/patients/new" class="btn" style="background:white;color:#ef4444;margin-top:8px;display:inline-block">+ Register Patient</a>
+    <a href="/clinic-enhanced/patients/new" class="btn" style="background:white;color:#ef4444;margin-top:8px;display:inline-block">+ Register Patient</a>
   </div>
   <div class="card" style="margin-bottom:16px"><form method="GET" style="display:flex;gap:8px">
     <input name="search" value="${esc(search)}" placeholder="Search by name, ID, or phone..." style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:8px">
     <button class="btn" type="submit">Search</button>
-    ${search ? '<a href="/clinic/patients" class="btn" style="background:#94a3b8;color:white">Clear</a>' : ''}
+    ${search ? '<a href="/clinic-enhanced/patients" class="btn" style="background:#94a3b8;color:white">Clear</a>' : ''}
   </form></div>
   <div class="card"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0;text-align:left">
     <th>ID</th><th>Name</th><th>Gender</th><th>Phone</th><th>Blood</th><th>Registered</th><th>Actions</th>
   </tr></thead><tbody>${rows.map(p => `<tr style="border-bottom:1px solid #f1f5f9">
     <td><code>${esc(p.patient_id)}</code></td>
-    <td><a href="/clinic/patients/${p.id}" style="color:#ef4444;font-weight:600">${esc(p.full_name)}</a></td>
+    <td><a href="/clinic-enhanced/patients/${p.id}" style="color:#ef4444;font-weight:600">${esc(p.full_name)}</a></td>
     <td>${esc(p.gender||'-')}</td><td>${esc(p.phone||'-')}</td><td>${esc(p.blood_type||'-')}</td>
     <td>${p.created_at.toISOString().slice(0,10)}</td>
-    <td><a href="/clinic/patients/${p.id}" class="btn btn-sm">View</a> <a href="/clinic/consultations/new/${p.id}" class="btn btn-sm btn-green">Consult</a></td>
+    <td><a href="/clinic-enhanced/patients/${p.id}" class="btn btn-sm">View</a> <a href="/clinic-enhanced/consultations/new/${p.id}" class="btn btn-sm btn-green">Consult</a></td>
   </tr>`).join('')}</tbody></table>
   ${rows.length === 0 ? '<p style="color:#94a3b8;text-align:center;padding:20px">No patients found.</p>' : ''}
   </div>
-  <div style="margin-top:12px"><a href="/clinic" class="btn">&larr; Dashboard</a></div>`;
+  <div style="margin-top:12px"><a href="/clinic-enhanced" class="btn">&larr; Dashboard</a></div>`;
   res.send(renderPage('Patients', html, req.session.user));
 }));
 
-app.get('/clinic/patients/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>Register New Patient</h1>
   </div>
-  <div class="card"><form method="POST" action="/clinic/patients/save" style="display:grid;gap:10px;max-width:600px">
+  <div class="card"><form method="POST" action="/clinic-enhanced/patients/save" style="display:grid;gap:10px;max-width:600px">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div><label>Patient ID *</label><input name="patient_id" placeholder="PT-XXXX" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
       <div><label>Full Name *</label><input name="full_name" required style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
@@ -24141,12 +24180,12 @@ app.get('/clinic/patients/new', requireAuth, requireNotBanned, ah(async (req, re
     </div>
     <input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}">
     <button class="btn btn-green" type="submit">Register Patient</button>
-    <a href="/clinic/patients" class="btn" style="background:#94a3b8;color:white">Cancel</a>
+    <a href="/clinic-enhanced/patients" class="btn" style="background:#94a3b8;color:white">Cancel</a>
   </form></div>`;
   res.send(renderPage('Register Patient', html, req.session.user));
 }));
 
-app.post('/clinic/patients/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, full_name, date_of_birth, gender, phone, address, blood_type, allergies, emergency_contact, emergency_phone, insurance_provider, insurance_number } = req.body;
   const pid = patient_id || 'PT-' + Date.now().toString(36).toUpperCase();
@@ -24155,10 +24194,10 @@ app.post('/clinic/patients/save', requireAuth, requireNotBanned, ah(async (req, 
     [tid, pid, full_name, date_of_birth||null, gender, phone, address, blood_type, allergies, emergency_contact, emergency_phone, insurance_provider, insurance_number]
   );
   audit(req.session.user.email, 'patient_registered', 'Patient: ' + full_name + ' (' + pid + ')');
-  res.redirect('/clinic/patients');
+  res.redirect('/clinic-enhanced/patients');
 }));
 
-app.get('/clinic/patients/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT * FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
@@ -24181,8 +24220,8 @@ app.get('/clinic/patients/:id', requireAuth, requireNotBanned, ah(async (req, re
       <p><strong>Appointments:</strong> ${appointments.length}</p>
       <p><strong>Consultations:</strong> ${consultations.length}</p>
       <div style="margin-top:12px">
-        <a href="/clinic/appointments/new?patient_id=${patient.id}" class="btn btn-sm">Book Appointment</a>
-        <a href="/clinic/consultations/new/${patient.id}" class="btn btn-sm btn-green">New Consultation</a>
+        <a href="/clinic-enhanced/appointments/new?patient_id=${patient.id}" class="btn btn-sm">Book Appointment</a>
+        <a href="/clinic-enhanced/consultations/new/${patient.id}" class="btn btn-sm btn-green">New Consultation</a>
       </div>
     </div>
   </div>
@@ -24194,11 +24233,11 @@ app.get('/clinic/patients/:id', requireAuth, requireNotBanned, ah(async (req, re
       '</div>').join('')}
     ${consultations.length === 0 ? '<p style="color:#94a3b8">No consultations yet.</p>' : ''}
   </div>
-  <div style="margin-top:12px"><a href="/clinic/patients" class="btn">&larr; All Patients</a></div>`;
+  <div style="margin-top:12px"><a href="/clinic-enhanced/patients" class="btn">&larr; All Patients</a></div>`;
   res.send(renderPage('Patient: ' + patient.full_name, html, req.session.user));
 }));
 
-app.get('/clinic/appointments', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const rows = (await pool.query(`
     SELECT a.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -24207,7 +24246,7 @@ app.get('/clinic/appointments', requireAuth, requireNotBanned, ah(async (req, re
   `, [tid])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>Appointments</h1>
-    <a href="/clinic/appointments/new" class="btn" style="background:white;color:#ef4444;margin-top:8px;display:inline-block">+ Book Appointment</a>
+    <a href="/clinic-enhanced/appointments/new" class="btn" style="background:white;color:#ef4444;margin-top:8px;display:inline-block">+ Book Appointment</a>
   </div>
   <div class="card"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0;text-align:left">
     <th>Patient</th><th>Date</th><th>Time</th><th>Doctor</th><th>Dept</th><th>Status</th>
@@ -24218,17 +24257,17 @@ app.get('/clinic/appointments', requireAuth, requireNotBanned, ah(async (req, re
   </tr>`).join('')}</tbody></table>
   ${rows.length === 0 ? '<p style="color:#94a3b8;text-align:center;padding:20px">No appointments.</p>' : ''}
   </div>
-  <div style="margin-top:12px"><a href="/clinic" class="btn">&larr; Dashboard</a></div>`;
+  <div style="margin-top:12px"><a href="/clinic-enhanced" class="btn">&larr; Dashboard</a></div>`;
   res.send(renderPage('Appointments', html, req.session.user));
 }));
 
-app.get('/clinic/appointments/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patients = (await pool.query('SELECT id, full_name, patient_id FROM clinic_patients WHERE tenant_id=$1 ORDER BY full_name LIMIT 200', [tid])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>Book Appointment</h1>
   </div>
-  <div class="card"><form method="POST" action="/clinic/appointments/save" style="display:grid;gap:10px;max-width:500px">
+  <div class="card"><form method="POST" action="/clinic-enhanced/appointments/save" style="display:grid;gap:10px;max-width:500px">
     <div><label>Patient *</label><select name="patient_id" required style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px">
       <option value="">Select patient...</option>
       ${patients.map(p => '<option value="' + p.id + '"' + (req.query.patient_id == p.id ? ' selected' : '') + '>' + esc(p.full_name) + ' (' + esc(p.patient_id) + ')</option>').join('')}
@@ -24244,12 +24283,12 @@ app.get('/clinic/appointments/new', requireAuth, requireNotBanned, ah(async (req
     <div><label>Reason</label><textarea name="reason" rows="2" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></textarea></div>
     <input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}">
     <button class="btn btn-green" type="submit">Book Appointment</button>
-    <a href="/clinic/appointments" class="btn" style="background:#94a3b8;color:white">Cancel</a>
+    <a href="/clinic-enhanced/appointments" class="btn" style="background:#94a3b8;color:white">Cancel</a>
   </form></div>`;
   res.send(renderPage('Book Appointment', html, req.session.user));
 }));
 
-app.post('/clinic/appointments/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, appointment_date, appointment_time, doctor_name, department, reason } = req.body;
   await pool.query(
@@ -24257,10 +24296,10 @@ app.post('/clinic/appointments/save', requireAuth, requireNotBanned, ah(async (r
     [tid, parseInt(patient_id), appointment_date, appointment_time||null, doctor_name, department, reason]
   );
   audit(req.session.user.email, 'appointment_booked', 'Date: ' + appointment_date);
-  res.redirect('/clinic/appointments');
+  res.redirect('/clinic-enhanced/appointments');
 }));
 
-app.get('/clinic/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const queue = (await pool.query(`
     SELECT a.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -24271,7 +24310,7 @@ app.get('/clinic/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
   const html = `<div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>Today's Queue</h1><p>${queue.length} patient(s) today</p>
   </div>
-  <form method="POST" action="/clinic/queue/update">
+  <form method="POST" action="/clinic-enhanced/queue/update">
     <input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}">
     <div class="card"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0;text-align:left">
       <th>#</th><th>Patient</th><th>Time</th><th>Doctor</th><th>Reason</th><th>Status</th><th>Action</th>
@@ -24290,11 +24329,11 @@ app.get('/clinic/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
     ${queue.length > 0 ? '<button class="btn btn-green" type="submit" style="margin-top:12px">Update Status</button>' : ''}
     </div>
   </form>
-  <div style="margin-top:12px"><a href="/clinic" class="btn">&larr; Dashboard</a></div>`;
+  <div style="margin-top:12px"><a href="/clinic-enhanced" class="btn">&larr; Dashboard</a></div>`;
   res.send(renderPage('Clinic Queue', html, req.session.user));
 }));
 
-app.post('/clinic/queue/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   for (const [key, value] of Object.entries(req.body)) {
     if (key.startsWith('status_')) {
@@ -24302,17 +24341,17 @@ app.post('/clinic/queue/update', requireAuth, requireNotBanned, ah(async (req, r
       await pool.query('UPDATE clinic_appointments SET status=$1 WHERE id=$2 AND tenant_id=$3', [value, id, tid]);
     }
   }
-  res.redirect('/clinic/queue');
+  res.redirect('/clinic-enhanced/queue');
 }));
 
-app.get('/clinic/consultations/new/:patientId', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT id, full_name, patient_id FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.patientId, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>New Consultation &mdash; ${esc(patient.full_name)}</h1>
   </div>
-  <div class="card"><form method="POST" action="/clinic/consultations/save" style="display:grid;gap:10px;max-width:600px">
+  <div class="card"><form method="POST" action="/clinic-enhanced/consultations/save" style="display:grid;gap:10px;max-width:600px">
     <input type="hidden" name="patient_id" value="${patient.id}">
     <div><label>Doctor Name</label><input name="doctor_name" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
     <div><label>Chief Complaint *</label><textarea name="chief_complaint" required rows="2" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></textarea></div>
@@ -24327,12 +24366,12 @@ app.get('/clinic/consultations/new/:patientId', requireAuth, requireNotBanned, a
     <div><label>Notes</label><textarea name="notes" rows="2" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></textarea></div>
     <input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}">
     <button class="btn btn-green" type="submit">Save Consultation</button>
-    <a href="/clinic/patients/${patient.id}" class="btn" style="background:#94a3b8;color:white">Cancel</a>
+    <a href="/clinic-enhanced/patients/${patient.id}" class="btn" style="background:#94a3b8;color:white">Cancel</a>
   </form></div>`;
   res.send(renderPage('New Consultation', html, req.session.user));
 }));
 
-app.post('/clinic/consultations/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, appointment_id, doctor_name, chief_complaint, history, examination, diagnosis, weight, temperature, blood_pressure, notes } = req.body;
   await pool.query(
@@ -24341,10 +24380,10 @@ app.post('/clinic/consultations/save', requireAuth, requireNotBanned, ah(async (
   );
   if (appointment_id) { await pool.query("UPDATE clinic_appointments SET status='completed' WHERE id=$1", [parseInt(appointment_id)]); }
   audit(req.session.user.email, 'consultation_saved', 'Patient ID: ' + patient_id);
-  res.redirect('/clinic/patients/' + patient_id);
+  res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
 
-app.get('/clinic/prescriptions', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const rows = (await pool.query(`
     SELECT pr.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -24359,11 +24398,11 @@ app.get('/clinic/prescriptions', requireAuth, requireNotBanned, ah(async (req, r
   </tr></thead><tbody>${rows.map(r => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + esc(r.patient_name||'N/A') + '</td><td>' + esc(r.prescribed_by||'N/A') + '</td><td><span style="color:' + (r.status==='active'?'#22c55e':'#94a3b8') + '">' + r.status + '</span></td><td>' + r.created_at.toISOString().slice(0,10) + '</td></tr>').join('')}</tbody></table>
   ${rows.length === 0 ? '<p style="color:#94a3b8;text-align:center;padding:20px">No prescriptions.</p>' : ''}
   </div>
-  <div style="margin-top:12px"><a href="/clinic" class="btn">&larr; Dashboard</a></div>`;
+  <div style="margin-top:12px"><a href="/clinic-enhanced" class="btn">&larr; Dashboard</a></div>`;
   res.send(renderPage('Prescriptions', html, req.session.user));
 }));
 
-app.post('/clinic/prescriptions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { consultation_id, patient_id, prescribed_by, notes } = req.body;
   const result = await pool.query(
@@ -24382,10 +24421,10 @@ app.post('/clinic/prescriptions/save', requireAuth, requireNotBanned, ah(async (
     }
   }
   audit(req.session.user.email, 'prescription_saved', 'Rx ID: ' + rxId);
-  res.redirect('/clinic/patients/' + patient_id);
+  res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
 
-app.get('/clinic/reports', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const totalPatients = (await pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tid])).rows[0].count;
   const totalAppts = (await pool.query('SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1', [tid])).rows[0].count;
@@ -24414,7 +24453,7 @@ app.get('/clinic/reports', requireAuth, requireNotBanned, ah(async (req, res) =>
       ${byMonth.length === 0 ? '<p style="color:#94a3b8">No data yet.</p>' : ''}
     </div>
   </div>
-  <div style="margin-top:12px"><a href="/clinic" class="btn">&larr; Dashboard</a></div>`;
+  <div style="margin-top:12px"><a href="/clinic-enhanced" class="btn">&larr; Dashboard</a></div>`;
   res.send(renderPage('Clinic Reports', html, req.session.user));
 }));
 
