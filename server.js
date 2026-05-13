@@ -23,7 +23,7 @@ const LOGIN_LOCKOUT_WINDOW = 15 * 60 * 1000; // 15 minutes
 const LOGIN_MAX_ATTEMPTS = 5;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
-const REQUEST_TIMEOUT_MS = 30 * 1000; // 30 seconds
+const REQUEST_TIMEOUT_MS = 120 * 1000; // 120 seconds (Render free tier cold starts)
 const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
 const crypto = require('crypto');
 const helmet = require('helmet');
@@ -51,17 +51,20 @@ try {
   const IORedis = require('ioredis');
   if (process.env.REDIS_URL) {
     redisCache = new IORedis(process.env.REDIS_URL, {
-      maxRetriesPerRequest: 1,
+      maxRetriesPerRequest: 3,
       retryDelayOnFailover: 100,
-      retryStrategy(times) { return null; }, // Stop reconnecting after first failure
-      enableOfflineQueue: false,
+      retryStrategy: () => null,
       lazyConnect: true
     });
-    redisCache.on('error', () => {}); // Suppress connection errors silently
-    redisCache.connect().then(() => console.log('[Redis Cache] Connected for query caching')).catch(() => {
-      console.log('[Redis Cache] Connection failed, running without cache');
-      redisCache = null;
+    redisCache.on('error', (err) => {
+      console.warn('[Redis Cache]', err.message);
+      // If Redis host is unreachable, disable caching to prevent flood
+      if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED') {
+        redisCache = null;
+      }
     });
+    redisCache.connect().catch(() => { redisCache = null; });
+    console.log('[Redis Cache] Configured (lazy connect)');
   }
 } catch (e) { console.warn('[Redis Cache] Not available:', e.message); }
 
@@ -97,7 +100,7 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false, // rejectUnauthorized:false allows self-signed certs (free Render PostgreSQL)
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false, // Allow Render's self-signed internal SSL certs
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
@@ -109,7 +112,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://cdn-cookieyes.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https://*.googleusercontent.com"],
@@ -117,83 +120,11 @@ app.use(helmet({
       frameSrc: ["'self'", "https://checkout.flutterwave.com", "https://secure.3gdirectpay.com"],
     }
   },
-  crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: false
+  crossOriginEmbedderPolicy: false
 }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static('public', { index: false }));
-
-// === PUBLIC XML/TXT ROUTES (before session so they don't set cookies) ===
-app.get('/robots.txt', (req, res) => {
-  res.set('Content-Type', 'text/plain');
-  res.set('Cache-Control', 'public, max-age=86400');
-  res.send(`User-agent: *
-Allow: /
-Allow: /register
-Allow: /login
-Allow: /p/
-Allow: /links
-Allow: /manifest.json
-Disallow: /dashboard
-Disallow: /portal/
-Disallow: /school/
-Disallow: /clinic/
-Disallow: /church/
-Disallow: /business/
-Disallow: /dev/
-Disallow: /admin/
-Disallow: /worker/
-Disallow: /api/
-Disallow: /billing/
-Disallow: /settings/
-Disallow: /notifications
-Disallow: /search
-Disallow: /toggle-dark
-
-Sitemap: ${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/sitemap.xml`);
-});
-
-app.get('/sitemap.xml', async (req, res) => {
-  try {
-    const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
-    let staticPages = [
-      { url: '/', freq: 'daily', priority: '1.0' },
-      { url: '/register', freq: 'monthly', priority: '0.9' },
-      { url: '/login', freq: 'monthly', priority: '0.8' },
-      { url: '/blog', freq: 'daily', priority: '0.9' },
-      { url: '/p/entertainment', freq: 'daily', priority: '0.7' },
-      { url: '/p/fundraising', freq: 'weekly', priority: '0.7' },
-      { url: '/links', freq: 'monthly', priority: '0.6' },
-      { url: '/directory', freq: 'weekly', priority: '0.8' },
-      { url: '/privacy', freq: 'yearly', priority: '0.3' },
-      { url: '/terms', freq: 'yearly', priority: '0.3' }
-    ];
-    // Dynamically fetch blog posts for sitemap
-    let blogPages = [];
-    try {
-      const posts = await pool.query("SELECT slug, updated_at FROM public_posts WHERE published=true ORDER BY updated_at DESC LIMIT 50");
-      blogPages = posts.rows.map(p => ({ url: '/blog/' + (p.slug || p.id), freq: 'weekly', priority: '0.6' }));
-    } catch {}
-    const today = new Date().toISOString().split('T')[0];
-    const allPages = [...staticPages, ...blogPages];
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">
-${allPages.map(p => `  <url>
-    <loc>${BASE_URL}${p.url}</loc>
-    <lastmod>${today}</lastmod>
-    <changefreq>${p.freq}</changefreq>
-    <priority>${p.priority}</priority>
-  </url>`).join('\n')}
-</urlset>`;
-    res.set('Content-Type', 'application/xml');
-    res.set('Cache-Control', 'public, max-age=3600');
-    res.send(xml);
-  } catch (e) {
-    res.status(500).set('Content-Type', 'application/xml').send('<error>Failed to generate sitemap</error>');
-  }
-});
 
 // === CSRF PROTECTION (Phase 2 - Full Enforcement) ===
 if (process.env.NODE_ENV === 'production' && !process.env.CSRF_SECRET && !process.env.SESSION_SECRET) {
@@ -2139,19 +2070,24 @@ app.get('/register', (req, res) => {
         </select>
         <input name="email" type="email" placeholder="Your Email" required>
         <input name="phone" placeholder="Phone +256..." required>
-        <input name="password" type="password" placeholder="Create a Password" required>
-        <input name="confirm_password" type="password" placeholder="Confirm Password" required>
+        <input name="password" type="password" placeholder="Password" required>
+        <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required>
         <button class="btn" style="width:100%">Register</button>
       </form>
     </div>
   `, null, req));
 });
 
-app.post('/register', validate({ email: { required: true, email: true }, password: { required: true }, org_name: { required: true, maxLength: 200 }, type: { required: true } }), ah(async (req, res) => {
+app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 8 }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
   const { org_name, type, email, phone, password, confirm_password } = req.body;
-  // Simple password validation - just check passwords match
-  if (password !== confirm_password) {
-    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Passwords do not match</h3><p>Please make sure both passwords are the same.</p></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="organization" ${type==='organization'?'selected':''}>Organization</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Create a Password" required><input name="confirm_password" type="password" placeholder="Confirm Password" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
+  // Password complexity validation (Phase 1 Security Fix)
+  const passwordErrors = [];
+  if (!password || password.length < 8) passwordErrors.push('Password must be at least 8 characters long');
+  if (password && !/[A-Z]/.test(password)) passwordErrors.push('Password must contain at least 1 uppercase letter');
+  if (password && !/[0-9]/.test(password)) passwordErrors.push('Password must contain at least 1 number');
+  if (password !== confirm_password) passwordErrors.push('Passwords do not match');
+  if (passwordErrors.length > 0) {
+    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="organization" ${type==='organization'?'selected':''}>Organization</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
   }
   const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
@@ -2162,8 +2098,6 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   } catch (e) {
     if (e.message.includes('password_hash')) {
       await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
-    } else if (e.message.includes('users_email_unique') || e.message.includes('duplicate key')) {
-      return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Email Already Registered</h3><p>An account with <strong>${esc(email)}</strong> already exists. <a href="/login">Login here</a> instead.</p></div>`, null));
     } else throw e;
   }
   await audit(email, 'register', `New ${type} account: ${org_name}`);
@@ -20644,7 +20578,7 @@ app.post('/worker/profile/password', requireWorkerAuth, ah(async (req, res) => {
   }
   const hash = await bcrypt.hash(new_password, 12);
   await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, w.id]);
-  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, details, ip_address) VALUES($1,$2,$3,$4,$5,$6)',
+  await pool.query('INSERT INTO worker_audit_logs(tenant_id, worker_id, worker_username, action, ip_address) VALUES($1,$2,$3,$4,$5)',
     [w.tenant_id, w.id, w.username, 'change_password', 'Worker changed their own password', req.ip]);
   res.redirect('/worker/profile');
 }));
@@ -20656,21 +20590,40 @@ try {
   console.log('[Launch] Public routes loaded');
 } catch (e) {
   console.warn('[Launch] Failed to load launch routes:', e.message);
+  console.warn('[Launch] Stack:', e.stack?.split('\n').slice(0,5).join('\n'));
+}
+
+// === FALLBACK PUBLIC ROUTES (if launch-routes failed to load) ===
+if (!app._launchRoutesLoaded) {
+  console.log('[Launch] Registering fallback public routes...');
+  app.get('/blog', (req, res) => {
+    res.send(renderPageV3('Blog & News - Comfort', `
+      <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:16px;margin-bottom:25px;color:white;text-align:center">
+        <h1>Blog & News</h1><p style="opacity:0.9;margin-top:8px">Insights, tips, and updates from Comfort</p>
+      </div>
+      <div class="card" style="text-align:center;padding:60px">
+        <div style="font-size:48px;margin-bottom:16px">&#128240;</div>
+        <h2>Coming Soon</h2>
+        <p class="muted" style="margin-top:8px">Check back soon for articles and updates!</p>
+        <a href="/" class="btn" style="margin-top:20px;display:inline-block">Back Home</a>
+      </div>
+    `, null));
+  });
 }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
-// === ERROR HANDLER (production-safe, no stack traces leaked) ===
+// === CENTRALIZED ERROR HANDLER (single, production-safe) ===
 app.use((err, req, res, next) => {
   console.error(`[Error] ${req.method} ${req.path}:`, err.message);
-  if (process.env.NODE_ENV !== 'production') console.error(err.stack);
   if (Sentry) Sentry.captureException(err);
-  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred. Please try again.' : err.message;
-  const user = req.session?.user || null;
-  if (req.accepts('json') && !req.accepts('html')) {
+  // Don't leak stack traces in production
+  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message;
+  if (req.accepts('json')) {
     return res.status(500).json({ error: msg });
   }
+  const user = req.session?.user || null;
   res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
 });
 

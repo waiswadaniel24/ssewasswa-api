@@ -2559,6 +2559,8 @@ Allow: /login
 Allow: /p/
 Allow: /links
 Allow: /manifest.json
+Allow: /sitemap.xml
+Allow: /robots.txt
 Disallow: /dashboard
 Disallow: /portal/
 Disallow: /school/
@@ -2661,12 +2663,14 @@ Sitemap: ${BASE_URL}/sitemap.xml
 
       res.type('xml');
       res.set('Cache-Control', 'public, max-age=3600');
+      res.set('Content-Length', Buffer.byteLength(xml));
       res.send(xml);
     } catch (err) {
       // Always return valid XML — never fall through to the 500 HTML error handler
+      const fallbackXml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>';
       res.type('xml');
-      res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>`);
+      res.set('Content-Length', Buffer.byteLength(fallbackXml));
+      res.status(200).send(fallbackXml);
     }
   });
 
