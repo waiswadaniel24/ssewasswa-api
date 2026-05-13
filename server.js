@@ -163,6 +163,8 @@ app.use((req, res, next) => {
   res.locals.csrfToken = req.session.csrfToken;
   // Make csrfToken available on req for renderPage
   req.csrfToken = req.session.csrfToken;
+  // Also store globally so renderPage can auto-inject it even without req being passed
+  global.__csrfToken = req.session.csrfToken;
   next();
 });
 
@@ -1835,8 +1837,8 @@ const renderPage = (title, content, user, csrfTokenOrReq, pagePath) => {
   const dark = user?.dark_mode;
   const siteName = platformSettings?.site_name || 'Comfort';
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
-  // Extract CSRF token from either a string or a request object
-  const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || null);
+  // Extract CSRF token from either a string or a request object, or fall back to global
+  const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || global.__csrfToken || null);
   // Canonical URL: use provided pagePath, or extract from request object, or default to /
   const canonicalPath = pagePath || (typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.originalUrl) || '/';
   const canonicalUrl = `${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}${canonicalPath}`;
