@@ -88,7 +88,7 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false, // rejectUnauthorized:true enforces proper SSL cert validation in production
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false, // rejectUnauthorized:false allows self-signed certs (free Render PostgreSQL)
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
