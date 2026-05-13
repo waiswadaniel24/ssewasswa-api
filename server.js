@@ -1202,6 +1202,7 @@ const migrations = [
   // ============ FULL v3→v9 FEATURE SYSTEM MIGRATIONS ============
   // Feature Activation System (Coming Soon toggle)
   `CREATE TABLE IF NOT EXISTS feature_flags (id SERIAL PRIMARY KEY, feature_key TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT, version TEXT, category TEXT, requirements TEXT, is_active BOOLEAN DEFAULT false, activated_by TEXT, activated_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS min_plan TEXT DEFAULT 'free'`,
   // Custom Pages (user-editable with stamps/headers/footers)
   `CREATE TABLE IF NOT EXISTS custom_pages (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, slug TEXT NOT NULL, content TEXT, header_html TEXT, footer_html TEXT, stamp_url TEXT, stamp_position TEXT DEFAULT 'bottom-right', badge_text TEXT, badge_color TEXT DEFAULT '#4f46e5', signature_name TEXT, signature_image_url TEXT, signature_position TEXT DEFAULT 'bottom-left', is_published BOOLEAN DEFAULT false, created_by TEXT, updated_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, slug))`,
   // Document Templates (receipts, reports, certificates with headers/footers/stamps/signatures)
@@ -1305,6 +1306,10 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('page_editor', 'Page Editor', 'User-editable pages with stamps and signatures', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('document_templates', 'Document Templates', 'Customize receipts, reports with headers/footers/stamps', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('government_dashboards', 'Government Dashboards', 'Anonymized aggregate data for regulators', '9.0', 'platform', 'super_admin only', false) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active, min_plan) VALUES ('inventory_management', 'Inventory & Stock Management', 'Full inventory tracking with categories, suppliers, purchase orders, low-stock alerts', '11.0', 'enterprise', 'None', true, 'basic') ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active, min_plan) VALUES ('parent_portal', 'Parent/Student Self-Service Portal', 'Parents and students can view grades, attendance, fees, and communicate online', '11.0', 'enterprise', 'None', true, 'basic') ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active, min_plan) VALUES ('advanced_analytics_v2', 'Advanced Analytics Dashboard', 'Visual charts and KPIs for schools, businesses, churches, and clinics', '11.0', 'enterprise', 'None', true, 'pro') ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active, min_plan) VALUES ('receipt_builder', 'Document & Receipt Builder', 'Customizable receipt/invoice templates with headers, footers, and auto-numbering', '11.0', 'core', 'None', true, 'basic') ON CONFLICT DO NOTHING`,
 
   // ============ v10 NEW FEATURE TABLES ============
   // School: Transport
@@ -1753,7 +1758,13 @@ const migrations = [
   // ============ v15 AUTOMATED FEE REMINDERS ============
   `CREATE TABLE IF NOT EXISTS fee_reminder_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER UNIQUE, auto_notify BOOLEAN DEFAULT false, frequency TEXT DEFAULT 'weekly', days_before INTEGER DEFAULT 7, enabled_channels TEXT[] DEFAULT '{sms,email}', last_run TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
   `ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS trigger_type TEXT`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('auto_fee_reminders', 'Automated Fee Reminders', 'Hourly auto SMS/email reminders for outstanding fees', '3.0', 'core', 'Worker process running', true) ON CONFLICT DO NOTHING`
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('auto_fee_reminders', 'Automated Fee Reminders', 'Hourly auto SMS/email reminders for outstanding fees', '3.0', 'core', 'Worker process running', true) ON CONFLICT DO NOTHING`,
+  // Rename notifications.read → is_read for Notification Center feature
+  `ALTER TABLE notifications RENAME COLUMN read TO is_read`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active, min_plan) VALUES ('notification_center', 'Notification Center', 'In-app notification bell with history, mark-read, and preferences', '11.0', 'core', 'None', true, 'free') ON CONFLICT DO NOTHING`,
+  // ============ v11 DOCUMENT & RECEIPT BUILDER ============
+  `CREATE TABLE IF NOT EXISTS document_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, template_type TEXT DEFAULT 'receipt', header_text TEXT, footer_text TEXT, logo_url TEXT, background_color TEXT DEFAULT '#ffffff', text_color TEXT DEFAULT '#1e293b', show_logo BOOLEAN DEFAULT true, show_stamp BOOLEAN DEFAULT false, stamp_text TEXT, auto_number_prefix TEXT, next_number INTEGER DEFAULT 1, is_default BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS generated_documents (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, template_id INTEGER REFERENCES document_templates(id) ON DELETE SET NULL, doc_number TEXT, doc_type TEXT, title TEXT, content JSONB, recipient_name TEXT, recipient_email TEXT, amount NUMERIC DEFAULT 0, status TEXT DEFAULT 'draft', generated_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
 ];
 
 // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
@@ -1814,6 +1825,131 @@ const uniqueConstraintMigrations = [
       const reseedQueries = migrations.filter(q => q.includes('ON CONFLICT'));
       for (const q of reseedQueries) {
         try { await pool.query(q); } catch (e) { /* ignore - already exists or constraint missing */ }
+      }
+      // Seed default min_plan requirements for features
+      const planDefaults = [
+        ['advanced_analytics', 'basic'],
+        ['online_exams', 'basic'],
+        ['whatsapp_integration', 'pro'],
+        ['scheduled_reports', 'pro'],
+        ['multi_branch', 'pro'],
+        ['enhanced_clinic', 'basic'],
+        ['momo_payments', 'basic'],
+        ['multi_currency', 'basic'],
+        ['automation_engine', 'pro'],
+        ['oauth2', 'pro'],
+        ['graphql_api', 'enterprise'],
+        ['webhook_retry', 'pro'],
+        ['plugin_marketplace', 'enterprise'],
+        ['ai_comments', 'pro'],
+        ['fee_prediction', 'pro'],
+        ['dropout_risk', 'pro'],
+        ['demand_forecast', 'enterprise'],
+        ['churn_prediction', 'pro'],
+        ['giving_trends', 'basic'],
+        ['engagement_scoring', 'pro'],
+        ['push_notifications', 'basic'],
+        ['offline_sync', 'pro'],
+        ['deep_linking', 'basic'],
+        ['camera_integration', 'pro'],
+        ['peer_fundraising', 'pro'],
+        ['app_store', 'basic'],
+        ['saml_sso', 'enterprise'],
+        ['soc2', 'enterprise'],
+        ['white_label', 'enterprise'],
+        ['plugin_sdk', 'enterprise'],
+        ['data_portability', 'pro'],
+        ['government_dashboards', 'enterprise'],
+        ['transport', 'basic'],
+        ['discipline', 'free'],
+        ['homework', 'free'],
+        ['school_calendar', 'free'],
+        ['health_records', 'free'],
+        ['alumni', 'basic'],
+        ['library', 'free'],
+        ['choir', 'free'],
+        ['sacraments', 'free'],
+        ['cell_groups', 'free'],
+        ['volunteers', 'free'],
+        ['sermons', 'free'],
+        ['prayer_requests', 'free'],
+        ['payroll', 'pro'],
+        ['hr_leave', 'basic'],
+        ['projects', 'basic'],
+        ['crm', 'pro'],
+        ['stock_take', 'basic'],
+        ['warranties', 'basic'],
+        ['board_resolutions', 'basic'],
+        ['asset_management', 'basic'],
+        ['partners', 'free'],
+        ['event_ticketing', 'basic'],
+        ['workflows', 'pro'],
+        ['chat', 'free'],
+        ['task_manager', 'free'],
+        ['two_fa', 'basic'],
+        ['activity_feed', 'free'],
+        ['global_search', 'basic'],
+        ['surveys', 'free'],
+        ['email_templates', 'basic'],
+        ['qr_codes', 'free'],
+        ['certificates', 'basic'],
+        ['document_signing', 'pro'],
+        ['duplicate_detection', 'pro'],
+        ['bulk_operations', 'basic'],
+        ['keyboard_shortcuts', 'free'],
+        ['clinic_workflow', 'basic'],
+        ['patient_queue', 'free'],
+        ['patient_ehr', 'pro'],
+        ['patient_billing', 'pro'],
+        ['clinic_pharmacy', 'basic'],
+        ['clinic_lab', 'pro'],
+        ['clinical_decision_support', 'enterprise'],
+        ['shop_catalog', 'basic'],
+        ['recurring_donations', 'basic'],
+        ['suggestions', 'free'],
+        ['forums', 'free'],
+        ['login_history', 'free'],
+        ['welfare', 'free'],
+        ['building_fund', 'free'],
+        ['membership_transfer', 'basic'],
+        ['balance_sheet', 'basic'],
+        ['committees', 'free'],
+        ['policy_docs', 'basic'],
+        ['graduation', 'basic'],
+        ['exam_seating', 'basic'],
+        ['ptc_booking', 'basic'],
+        ['lesson_plans', 'free'],
+        ['student_id_cards', 'basic'],
+        ['school_shop', 'basic'],
+        ['sibling_discounts', 'basic'],
+        ['staff_appraisal', 'pro'],
+        ['maintenance', 'free'],
+        ['lost_found', 'free'],
+        ['photo_gallery', 'free'],
+        ['newsletters', 'free'],
+        ['rubrics', 'basic'],
+        ['competency_tracking', 'pro'],
+        ['curriculum_mapping', 'pro'],
+        ['requisitions', 'basic'],
+        ['dashboard_customize', 'free'],
+        ['school_levels', 'free'],
+        ['hostel_management', 'basic'],
+        ['meal_management', 'basic'],
+        ['student_specialization', 'basic'],
+        ['admissions', 'basic'],
+        ['subject_management', 'free'],
+        ['scholarships', 'pro'],
+        ['visitor_management', 'free'],
+        ['page_editor', 'free'],
+        ['document_templates', 'basic'],
+        ['inventory_management', 'basic'],
+        ['parent_portal', 'basic'],
+        ['notification_center', 'free'],
+        ['advanced_analytics_v2', 'pro'],
+        ['receipt_builder', 'basic'],
+      ];
+      for (const [key, plan] of planDefaults) {
+        try { await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE feature_key=$2 AND min_plan IS NULL', [plan, key]); } catch(e) {}
       }
       const devEmail = process.env.DEV_EMAIL || 'admin@ssewasswa.com';
       const devPass = process.env.DEV_PASSWORD;
@@ -2530,6 +2666,11 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Webhooks</h3><a href="/webhooks" class="btn btn-sm">Webhook Mgmt</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Plugins</h3><a href="/marketplace" class="btn btn-sm">Marketplace</a></div>
       <div class="card" style="background:#f1f5f9;border:2px solid #64748b"><h3 style="color:#64748b">NEW: Backup</h3><a href="/backup" class="btn btn-sm">Backup Center</a></div>
+      <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">NEW: Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>
+      <div class="card" style="background:#eef2ff;border:2px solid #6366f1"><h3 style="color:#6366f1">NEW: Parent Portal</h3><a href="/parent-portal" class="btn btn-sm">Parent Access</a></div>
+      <div class="card" style="background:#fdf4ff;border:2px solid #a855f7"><h3 style="color:#a855f7">NEW: Analytics v2</h3><a href="/analytics-v2" class="btn btn-sm">Visual Dashboard</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #f59e0b"><h3 style="color:#f59e0b">NEW: Receipt Builder</h3><a href="/receipts" class="btn btn-sm">Doc Templates</a></div>
+      <div class="card" style="background:#f0f9ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">NEW: Public Portal</h3><a href="/portal/public" class="btn btn-sm">Public Pages</a></div>
       <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
       <div class="card"><h3>Forums</h3><a href="/forums" class="btn btn-sm">Discussions</a></div>
       <div class="card"><h3>Login History</h3><a href="/login-history" class="btn btn-sm">Security</a></div>
@@ -6280,6 +6421,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/dev/plans" style="background:#e11d48;color:white">Plans & Pricing</a>
       <a href="/dev/activity" style="background:#0ea5e9;color:white">Activity</a>
       <a href="/dev/features" style="background:#64748b;color:white">Features</a>
+      <a href="/dev/subscription-access" style="background:#6366f1;color:white">Subscription Access</a>
       <a href="/dev/portals" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white">Portal Switcher</a>
       <a href="/exams" style="background:#3b82f6;color:white">Exams</a>
       <a href="/whatsapp" style="background:#22c55e;color:white">WhatsApp</a>
@@ -12058,20 +12200,56 @@ app.get('/terms', (req, res) => {
 // Feature flag check middleware
 const requireFeature = (featureKey) => async (req, res, next) => {
   try {
-    // Super admin / developer bypasses all feature gates
+    // Super admin / developer bypasses ALL feature gates including subscription
     if (req.session.user?.role === 'super_admin') return next();
     const flag = (await pool.query('SELECT * FROM feature_flags WHERE feature_key=$1', [featureKey])).rows[0];
-    if (flag?.is_active) return next();
-    return res.send(renderPage('Coming Soon', `
-      <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Coming Soon</h1><p>This feature is not yet activated</p></div>
-      <div class="card" style="max-width:600px;margin:40px auto;text-align:center">
-        <div style="font-size:64px;margin:20px 0">🔒</div>
-        <h2>${esc(flag?.name || featureKey)}</h2>
-        <p class="muted">${esc(flag?.description || 'This feature requires activation by the platform developer.')}</p>
-        ${flag?.requirements && flag.requirements !== 'None' ? `<div class="alert alert-info" style="margin:20px 0"><strong>Requirements:</strong> ${esc(flag.requirements)}</div>` : ''}
-        <div style="margin-top:20px"><a href="/dashboard" class="btn">Back to Dashboard</a> <a href="/dev/features" class="btn btn-gold" style="margin-left:8px">Feature Manager</a></div>
-      </div>
-    `, req.session.user));
+    // If feature flag doesn't exist at all, allow (no gate defined)
+    if (!flag) return next();
+    // If feature is not active, show "Coming Soon"
+    if (!flag.is_active) {
+      return res.send(renderPage('Coming Soon', `
+        <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Coming Soon</h1><p>This feature is not yet activated</p></div>
+        <div class="card" style="max-width:600px;margin:40px auto;text-align:center">
+          <div style="font-size:64px;margin:20px 0">&#x1F512;</div>
+          <h2>${esc(flag?.name || featureKey)}</h2>
+          <p class="muted">${esc(flag?.description || 'This feature requires activation by the platform developer.')}</p>
+          ${flag?.requirements && flag.requirements !== 'None' ? '<div class="alert alert-info" style="margin:20px 0"><strong>Requirements:</strong> ' + esc(flag.requirements) + '</div>' : ''}
+          <div style="margin-top:20px"><a href="/dashboard" class="btn">Back to Dashboard</a></div>
+        </div>
+      `, req.session.user));
+    }
+    // Check subscription plan requirement
+    const minPlan = flag.min_plan || 'free';
+    if (minPlan !== 'free') {
+      const planHierarchy = ['free', 'basic', 'pro', 'enterprise'];
+      const sub = (await pool.query('SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status=\'active\'', [req.session.user.tenant_id])).rows[0];
+      const currentPlan = sub?.plan || 'free';
+      const currentIdx = planHierarchy.indexOf(currentPlan);
+      const minIdx = planHierarchy.indexOf(minPlan);
+      if (currentIdx < minIdx) {
+        const planNames = { free: 'Free', basic: 'Basic', pro: 'Professional', enterprise: 'Enterprise' };
+        const nextPlan = planNames[minPlan] || minPlan;
+        return res.send(renderPage('Upgrade Required', `
+          <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+            <h1>Upgrade Required</h1><p>This feature requires a higher subscription plan</p>
+          </div>
+          <div class="card" style="max-width:600px;margin:40px auto;text-align:center">
+            <div style="font-size:64px;margin:20px 0">&#x1F680;</div>
+            <h2>${esc(flag.name)}</h2>
+            <p class="muted">${esc(flag.description || '')}</p>
+            <div class="alert alert-info" style="margin:20px 0">
+              <strong>Current Plan:</strong> ${esc(planNames[currentPlan] || currentPlan)}<br>
+              <strong>Required Plan:</strong> ${esc(nextPlan)}
+            </div>
+            <div style="margin-top:20px">
+              <a href="/settings/subscription" class="btn" style="background:#6366f1;color:white">Upgrade to ${esc(nextPlan)}</a>
+              <a href="/dashboard" class="btn" style="margin-left:8px">Back to Dashboard</a>
+            </div>
+          </div>
+        `, req.session.user));
+      }
+    }
+    return next();
   } catch(e) { return next(); }
 };
 
@@ -12119,6 +12297,72 @@ app.get('/dev/features/:id/toggle', requireAuth, requireSuperAdmin, ah(async (re
   await pool.query('UPDATE feature_flags SET is_active=$1, activated_by=$2, activated_at=NOW() WHERE id=$3', [newActive, req.session.user.email, req.params.id]);
   await audit(req.session.user.email, `Feature ${newActive ? 'activated' : 'deactivated'}`, `${feature.name} (${feature.feature_key})`);
   res.redirect('/dev/features');
+}));
+
+// === SUBSCRIPTION FEATURE ACCESS MANAGER ===
+app.get('/dev/subscription-access', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const features = (await pool.query('SELECT * FROM feature_flags ORDER BY category, name')).rows;
+  const plans = (await pool.query('SELECT name, display_name FROM subscription_plans WHERE is_active=true ORDER BY sort_order')).rows;
+  const planLabels = {};
+  plans.forEach(p => { planLabels[p.name] = p.display_name || p.name; });
+  const planKeys = ['free', 'basic', 'pro', 'enterprise'];
+  const categories = {};
+  features.forEach(f => {
+    const cat = f.category || 'other';
+    if (!categories[cat]) categories[cat] = [];
+    categories[cat].push(f);
+  });
+  const catNames = { core: 'v3.0 Core', uganda: 'v4.0 Uganda Market', enterprise: 'v5.0 Enterprise', ecosystem: 'v6.0 Ecosystem', ai: 'v7.0 AI & Automation', mobile: 'v8.0 Mobile', platform: 'v9.0 Platform' };
+  res.send(renderPage('Subscription Feature Access', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Subscription Feature Access</h1>
+      <p>Control which subscription plans can access each feature</p>
+      <p style="font-size:13px;opacity:0.9;margin-top:4px">Super admin (developer) bypasses all plan restrictions automatically</p>
+    </div>
+    <div class="card" style="margin-bottom:20px">
+      <h3>Quick Actions</h3>
+      <a href="/dev/subscription-access/bulk?plan=free" class="btn btn-sm">Set All to Free</a>
+      <a href="/dev/subscription-access/bulk?plan=basic" class="btn btn-sm" style="margin-left:8px">Set All to Basic</a>
+      <a href="/dev/subscription-access/bulk?plan=pro" class="btn btn-sm" style="margin-left:8px">Set All to Pro</a>
+      <a href="/dev/subscription-access/bulk?plan=enterprise" class="btn btn-sm" style="margin-left:8px">Set All to Enterprise</a>
+    </div>
+    ${Object.entries(categories).map(([cat, items]) => '<div class="card"><h2 style="margin-bottom:15px">' + (catNames[cat] || cat.toUpperCase()) + ' <span class="tag">' + items.length + ' features</span></h2>' +
+      '<table><tr><th>Feature</th><th>Status</th><th>Min Plan</th><th>Actions</th></tr>' +
+      items.map(f => '<tr>' +
+        '<td><strong>' + esc(f.name) + '</strong><br><span class="muted">' + esc(f.feature_key) + '</span></td>' +
+        '<td>' + (f.is_active ? '<span class="tag" style="background:#d1fae5;color:#065f46">Active</span>' : '<span class="tag" style="background:#fef3c7;color:#92400e">Off</span>') + '</td>' +
+        '<td><form method="POST" action="/dev/subscription-access/' + f.id + '" style="display:inline"><select name="min_plan" onchange="this.form.submit()" style="padding:4px 8px;border-radius:6px;border:1px solid #e2e8f0">' +
+          planKeys.map(pk => '<option value="' + pk + '"' + ((f.min_plan || 'free') === pk ? ' selected' : '') + '>' + esc(planLabels[pk] || pk) + '</option>').join('') +
+        '</select></form></td>' +
+        '<td>' + (f.is_active ? '<a href="/dev/subscription-access/' + f.id + '?plan=free" class="btn btn-sm">Free</a> <a href="/dev/subscription-access/' + f.id + '?plan=basic" class="btn btn-sm">Basic</a> <a href="/dev/subscription-access/' + f.id + '?plan=pro" class="btn btn-sm">Pro</a> <a href="/dev/subscription-access/' + f.id + '?plan=enterprise" class="btn btn-sm">Enterprise</a>' : '<span class="muted">Activate first</span>') + '</td>' +
+      '</tr>').join('') +
+      '</table></div>'
+    ).join('')}
+    <div style="margin-top:20px"><a href="/dev/features" class="btn">Back to Feature Manager</a> <a href="/dev/portals" class="btn btn-gold" style="margin-left:8px">Portal Switcher</a></div>
+  `, req.session.user));
+}));
+
+app.post('/dev/subscription-access/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { min_plan } = req.body;
+  if (!['free', 'basic', 'pro', 'enterprise'].includes(min_plan)) return res.status(400).send('Invalid plan');
+  await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE id=$2', [min_plan, req.params.id]);
+  await audit(req.session.user.email, 'feature_plan_update', 'Set feature #' + req.params.id + ' min_plan to ' + min_plan);
+  res.redirect('/dev/subscription-access');
+}));
+
+app.get('/dev/subscription-access/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const plan = req.query.plan;
+  if (!plan || !['free', 'basic', 'pro', 'enterprise'].includes(plan)) return res.redirect('/dev/subscription-access');
+  await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE id=$2', [plan, req.params.id]);
+  res.redirect('/dev/subscription-access');
+}));
+
+app.get('/dev/subscription-access/bulk', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const plan = req.query.plan;
+  if (!plan || !['free', 'basic', 'pro', 'enterprise'].includes(plan)) return res.redirect('/dev/subscription-access');
+  await pool.query('UPDATE feature_flags SET min_plan=$1 WHERE is_active=true', [plan]);
+  await audit(req.session.user.email, 'bulk_plan_update', 'Set all active features min_plan to ' + plan);
+  res.redirect('/dev/subscription-access');
 }));
 
 // =============================================
@@ -23301,6 +23545,29 @@ const featureMigrations = [
 ];
 featureMigrations.forEach(m => migrations.push(m));
 
+// === v11 INVENTORY MANAGEMENT TABLES ===
+const inventoryMigrations = [
+  `CREATE TABLE IF NOT EXISTS inventory_categories (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, name))`,
+  `CREATE TABLE IF NOT EXISTS inventory_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category_id INTEGER REFERENCES inventory_categories(id) ON DELETE SET NULL, sku TEXT, name TEXT NOT NULL, description TEXT, unit TEXT DEFAULT 'pcs', cost_price NUMERIC DEFAULT 0, selling_price NUMERIC DEFAULT 0, current_stock NUMERIC DEFAULT 0, min_stock_level NUMERIC DEFAULT 5, max_stock_level NUMERIC DEFAULT 1000, location TEXT, supplier TEXT, image_url TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS inventory_transactions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, item_id INTEGER REFERENCES inventory_items(id) ON DELETE CASCADE, transaction_type TEXT NOT NULL, quantity NUMERIC NOT NULL, unit_cost NUMERIC DEFAULT 0, reference TEXT, notes TEXT, performed_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS inventory_suppliers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, contact_person TEXT, email TEXT, phone TEXT, address TEXT, notes TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS purchase_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, supplier_id INTEGER REFERENCES inventory_suppliers(id) ON DELETE SET NULL, po_number TEXT UNIQUE, status TEXT DEFAULT 'pending', expected_date DATE, notes TEXT, total_amount NUMERIC DEFAULT 0, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS purchase_order_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, po_id INTEGER REFERENCES purchase_orders(id) ON DELETE CASCADE, item_id INTEGER REFERENCES inventory_items(id) ON DELETE SET NULL, item_name TEXT, quantity NUMERIC DEFAULT 0, unit_cost NUMERIC DEFAULT 0, received_qty NUMERIC DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS stock_adjustments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, item_id INTEGER REFERENCES inventory_items(id) ON DELETE CASCADE, adjustment_type TEXT NOT NULL, quantity NUMERIC NOT NULL, reason TEXT, performed_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+];
+inventoryMigrations.forEach(m => migrations.push(m));
+// === PARENT/STUDENT PORTAL TABLES ===
+const parentPortalMigrations = [
+  `CREATE TABLE IF NOT EXISTS parent_accounts (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, parent_name TEXT NOT NULL, parent_email TEXT UNIQUE, parent_phone TEXT, relation TEXT DEFAULT 'parent', access_code TEXT UNIQUE, is_active BOOLEAN DEFAULT true, last_login TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS parent_login_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, parent_id INTEGER REFERENCES parent_accounts(id) ON DELETE CASCADE, ip_address TEXT, user_agent TEXT, logged_in_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS student_portal_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, portal_enabled BOOLEAN DEFAULT true, allow_grade_view BOOLEAN DEFAULT true, allow_attendance_view BOOLEAN DEFAULT true, allow_fees_view BOOLEAN DEFAULT true, allow_report_download BOOLEAN DEFAULT true, allow_communication BOOLEAN DEFAULT true, welcome_message TEXT DEFAULT 'Welcome to the Student Portal')`,
+  `CREATE TABLE IF NOT EXISTS parent_messages (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, parent_id INTEGER REFERENCES parent_accounts(id) ON DELETE CASCADE, subject TEXT NOT NULL, message TEXT NOT NULL, from_parent BOOLEAN DEFAULT true, is_read BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
+];
+parentPortalMigrations.forEach(m => migrations.push(m));
+['parent_accounts','parent_login_logs','student_portal_settings','parent_messages'].forEach(t => VALID_TABLES.add(t));
+['inventory_categories','inventory_items','inventory_transactions','inventory_suppliers','purchase_orders','purchase_order_items','stock_adjustments'].forEach(t => VALID_TABLES.add(t));
+['document_templates','generated_documents'].forEach(t => VALID_TABLES.add(t));
+
 // Add new tables to VALID_TABLES
 ['quizzes','quiz_questions','quiz_attempts','whatsapp_config','whatsapp_messages','whatsapp_templates','scheduled_reports','report_history','branches','branch_transfers','clinic_patients','clinic_appointments','clinic_consultations','clinic_prescriptions','clinic_prescription_items'].forEach(t => VALID_TABLES.add(t));
 
@@ -23313,7 +23580,8 @@ const DEV_PORTAL_TYPES = [
   { type: 'business', label: 'Business Portal', icon: '🏢', color: '#f59e0b' },
   { type: 'organization', label: 'Organization Portal', icon: '🤝', color: '#10b981' },
   { type: 'individual', label: 'Individual Portal', icon: '👤', color: '#ec4899' },
-  { type: 'clinic', label: 'Clinic Portal', icon: '🏥', color: '#ef4444' }
+  { type: 'clinic', label: 'Clinic Portal', icon: '🏥', color: '#ef4444' },
+  { type: 'public', label: 'Public Portal', icon: '🌐', color: '#0ea5e9' }
 ];
 
 app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
@@ -23321,7 +23589,7 @@ app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const current = req.session.user;
   const devEmail = current.email;
   const existing = (await pool.query(
-    `SELECT t.id, t.name, t.type FROM tenants t JOIN users u ON u.tenant_id = t.id WHERE u.email = $1 AND t.name ILIKE 'Dev %'`,
+    `SELECT id, name, type FROM tenants WHERE email = $1 AND name ILIKE 'Dev %'`,
     [devEmail]
   )).rows;
   const existingMap = {};
@@ -23355,10 +23623,10 @@ app.post('/dev/switch-tenant', requireAuth, requireSuperAdmin, ah(async (req, re
   if (!req.session._original_tenant) {
     req.session._original_tenant = { id: user.tenant_id, name: user.tenant_name, type: user.tenant_type };
   }
-  const tenantName = type === 'clinic' ? 'Dev Clinic Portal' : 'Dev ' + type.charAt(0).toUpperCase() + type.slice(1) + ' Portal';
-  const tenantType = type === 'clinic' ? 'organization' : type;
+  const tenantName = type === 'clinic' ? 'Dev Clinic Portal' : type === 'public' ? 'Dev Public Portal' : 'Dev ' + type.charAt(0).toUpperCase() + type.slice(1) + 'Portal';
+  const tenantType = type === 'clinic' ? 'organization' : type === 'public' ? 'public' : type;
   let tenant = (await pool.query(
-    `SELECT t.id, t.name, t.type FROM tenants t JOIN users u ON u.tenant_id = t.id WHERE u.email = $1 AND t.name = $2`,
+    `SELECT id, name, type FROM tenants WHERE email = $1 AND name = $2`,
     [user.email, tenantName]
   )).rows[0];
   if (!tenant) {
@@ -23388,6 +23656,1275 @@ app.get('/dev/restore-session', requireAuth, requireSuperAdmin, ah(async (req, r
   delete req.session._original_tenant;
   audit(user.email, 'dev_restore_session', 'Restored to ' + orig.name + ' (#' + orig.id + ')');
   req.session.save(() => { res.redirect('/dashboard'); });
+}));
+
+// === PUBLIC PORTAL ===
+app.get('/portal/public', requireAuth, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name, type, email FROM tenants WHERE id=$1', [tid])).rows[0];
+  const pages = (await pool.query("SELECT * FROM public_pages WHERE tenant_id=$1 AND is_published=true ORDER BY page_order", [tid])).rows;
+  const posts = (await pool.query('SELECT * FROM public_posts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [tid])).rows;
+  const shopItems = (await pool.query('SELECT * FROM shop_items WHERE tenant_id=$1 AND is_active=true ORDER BY name LIMIT 50', [tid])).rows;
+  const html = `
+    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);padding:32px;border-radius:16px;margin-bottom:24px;color:white;text-align:center">
+      <h1 style="font-size:28px">${esc(tenant?.name || 'Welcome')}</h1>
+      <p style="opacity:0.9;margin-top:8px">${esc(tenant?.type || 'Organization')} Public Portal</p>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+      <div class="card" style="text-align:center;cursor:pointer" onclick="document.getElementById('pub-pages').scrollIntoView({behavior:'smooth'})">
+        <div style="font-size:36px;margin-bottom:8px">📄</div>
+        <h3>Pages</h3>
+        <p class="muted">${pages.length} published</p>
+      </div>
+      <div class="card" style="text-align:center;cursor:pointer" onclick="document.getElementById('pub-posts').scrollIntoView({behavior:'smooth'})">
+        <div style="font-size:36px;margin-bottom:8px">📰</div>
+        <h3>Posts</h3>
+        <p class="muted">${posts.length} total</p>
+      </div>
+      <div class="card" style="text-align:center;cursor:pointer" onclick="document.getElementById('pub-shop').scrollIntoView({behavior:'smooth'})">
+        <div style="font-size:36px;margin-bottom:8px">🛒</div>
+        <h3>Shop</h3>
+        <p class="muted">${shopItems.length} items</p>
+      </div>
+    </div>
+    <div id="pub-pages" class="card" style="margin-bottom:20px">
+      <h2 style="margin-bottom:12px">Published Pages</h2>
+      ${pages.length === 0 ? '<p class="muted">No published pages yet. Create pages from Settings &gt; Public Pages.</p>' : 
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px">' + 
+        pages.map(p => '<div class="card" style="border:1px solid #e2e8f0"><h3>' + esc(p.title) + '</h3>' + (p.hero_title ? '<p style="color:#64748b;font-size:13px">' + esc(p.hero_title) + '</p>' : '') + '<a href="/public/' + esc(p.slug) + '" class="btn btn-sm" style="margin-top:8px">View Page</a></div>').join('') +
+        '</div>'}
+    </div>
+    <div id="pub-posts" class="card" style="margin-bottom:20px">
+      <h2 style="margin-bottom:12px">Recent Posts</h2>
+      ${posts.length === 0 ? '<p class="muted">No posts yet.</p>' :
+        posts.map(p => '<div style="border-bottom:1px solid #f1f5f9;padding:12px 0"><h3>' + esc(p.title || 'Untitled') + '</h3>' + (p.content ? '<p style="color:#64748b;font-size:14px;max-height:60px;overflow:hidden">' + esc(p.content.substring(0, 150)) + '...</p>' : '') + '<span class="muted" style="font-size:12px">' + (p.created_at ? new Date(p.created_at).toLocaleDateString() : '') + '</span></div>').join('')}
+    </div>
+    <div id="pub-shop" class="card" style="margin-bottom:20px">
+      <h2 style="margin-bottom:12px">Shop Items</h2>
+      ${shopItems.length === 0 ? '<p class="muted">No shop items yet.</p>' :
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">' +
+        shopItems.map(item => '<div class="card" style="border:1px solid #e2e8f0;text-align:center"><h3>' + esc(item.name) + '</h3>' + (item.price ? '<p style="color:#059669;font-weight:bold">UGX ' + Number(item.price).toLocaleString() + '</p>' : '') + '<p class="muted" style="font-size:12px">' + esc(item.description || '').substring(0, 80) + '</p></div>').join('') +
+        '</div>'}
+    </div>
+    <div style="margin-top:20px">
+      <a href="/dashboard" class="btn">Back to Dashboard</a>
+      <a href="/settings/public-pages" class="btn btn-gold" style="margin-left:8px">Manage Pages</a>
+    </div>`;
+  res.send(renderPage('Public Portal', html, req.session.user));
+}));
+
+// ============================================================
+// FEATURE: INVENTORY & STOCK MANAGEMENT
+// ============================================================
+app.get('/inventory', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const items = (await pool.query('SELECT i.*, c.name as category_name FROM inventory_items i LEFT JOIN inventory_categories c ON c.id=i.category_id WHERE i.tenant_id=$1 AND i.is_active=true ORDER BY i.name', [tid])).rows;
+  const categories = (await pool.query('SELECT * FROM inventory_categories WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+  const lowStock = items.filter(i => i.current_stock <= i.min_stock_level);
+  const totalValue = items.reduce((s, i) => s + (Number(i.cost_price) * Number(i.current_stock)), 0);
+  const totalItems = items.reduce((s, i) => s + Number(i.current_stock), 0);
+  const recentTx = (await pool.query('SELECT t.*, i.name as item_name FROM inventory_transactions t LEFT JOIN inventory_items i ON i.id=t.item_id WHERE t.tenant_id=$1 ORDER BY t.created_at DESC LIMIT 10', [tid])).rows;
+  const html = `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Inventory & Stock Management</h1>
+      <p>Track stock levels, suppliers, purchase orders and get low-stock alerts</p>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/inventory/categories" class="btn" style="background:white;color:#059669">Categories</a>
+        <a href="/inventory/suppliers" class="btn" style="background:white;color:#059669">Suppliers</a>
+        <a href="/inventory/purchase-orders" class="btn" style="background:white;color:#059669">Purchase Orders</a>
+        <a href="/inventory/adjustments" class="btn" style="background:white;color:#059669">Adjustments</a>
+        <a href="/inventory/reports" class="btn" style="background:white;color:#059669">Reports</a>
+      </div>
+    </div>
+    ${lowStock.length > 0 ? '<div class="alert alert-danger" style="margin-bottom:16px"><strong>Low Stock Alert:</strong> ' + lowStock.map(i => esc(i.name) + ' (' + i.current_stock + '/' + i.min_stock_level + ')').join(', ') + '</div>' : ''}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#059669">${items.length}</div><div style="color:#64748b">Total Products</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#0ea5e9">${totalItems.toLocaleString()}</div><div style="color:#64748b">Total Units</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#8b5cf6">UGX ${totalValue.toLocaleString()}</div><div style="color:#64748b">Total Value (Cost)</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#ef4444">${lowStock.length}</div><div style="color:#64748b">Low Stock</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#f59e0b">${categories.length}</div><div style="color:#64748b">Categories</div></div>
+    </div>
+    <div class="card" style="margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3>Inventory Items</h3>
+        <a href="/inventory/new" class="btn" style="background:#059669;color:white">+ Add Item</a>
+      </div>
+      ${items.length === 0 ? '<p class="muted">No items yet. Add your first inventory item.</p>' : `
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Item</th><th>SKU</th><th>Category</th><th>Stock</th><th>Cost</th><th>Price</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>${items.map(i => '<tr style="border-bottom:1px solid #f1f5f9">' +
+        '<td><strong>' + esc(i.name) + '</strong></td>' +
+        '<td><code>' + esc(i.sku || '-') + '</code></td>' +
+        '<td>' + esc(i.category_name || '-') + '</td>' +
+        '<td><span style="color:' + (Number(i.current_stock) <= Number(i.min_stock_level) ? '#ef4444;font-weight:bold' : '#059669') + '">' + i.current_stock + ' ' + esc(i.unit) + '</span></td>' +
+        '<td>UGX ' + Number(i.cost_price).toLocaleString() + '</td>' +
+        '<td>UGX ' + Number(i.selling_price).toLocaleString() + '</td>' +
+        '<td>' + (Number(i.current_stock) <= Number(i.min_stock_level) ? '<span class="tag" style="background:#fef3c7;color:#92400e">Low</span>' : '<span class="tag" style="background:#d1fae5;color:#065f46">OK</span>') + '</td>' +
+        '<td><a href="/inventory/' + i.id + '/stock-in" class="btn btn-sm">Stock In</a> <a href="/inventory/' + i.id + '/stock-out" class="btn btn-sm">Stock Out</a> <a href="/inventory/' + i.id + '/edit" class="btn btn-sm">Edit</a></td>' +
+      '</tr>').join('')}</tbody></table></div>`}
+    </div>
+    <div class="card">
+      <h3>Recent Transactions</h3>
+      ${recentTx.length === 0 ? '<p class="muted">No transactions yet.</p>' : `
+      <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Date</th><th>Item</th><th>Type</th><th>Qty</th><th>By</th></tr></thead>
+      <tbody>${recentTx.map(t => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + new Date(t.created_at).toLocaleDateString() + '</td><td>' + esc(t.item_name || 'N/A') + '</td><td><span class="tag" style="background:' + (t.transaction_type === 'stock_in' ? '#d1fae5;color:#065f46' : t.transaction_type === 'stock_out' ? '#fef3c7;color:#92400e' : '#e0e7ff;color:#3730a3') + '">' + esc(t.transaction_type.replace('_', ' ')) + '</span></td><td>' + t.quantity + '</td><td>' + esc(t.performed_by || '-') + '</td></tr>').join('')}</tbody></table>`}
+    </div>`;
+  res.send(renderPage('Inventory Management', html, req.session.user));
+}));
+
+app.get('/inventory/new', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const categories = (await pool.query('SELECT * FROM inventory_categories WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+  res.send(renderPage('Add Inventory Item', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Add Inventory Item</h1><p>Create a new product or stock item</p>
+    </div>
+    <div class="card" style="max-width:600px">
+      <form method="POST" action="/inventory/save">
+        <div class="form-group"><label>Item Name *</label><input name="name" required class="form-control" placeholder="e.g. Exercise Books"></div>
+        <div class="form-group"><label>SKU</label><input name="sku" class="form-control" placeholder="e.g. EB-001"></div>
+        <div class="form-group"><label>Category</label><select name="category_id" class="form-control"><option value="">-- None --</option>${categories.map(c => '<option value="' + c.id + '">' + esc(c.name) + '</option>').join('')}</select></div>
+        <div class="form-group"><label>Description</label><textarea name="description" class="form-control" rows="2"></textarea></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-group"><label>Unit</label><select name="unit" class="form-control"><option>pcs</option><option>kg</option><option>litres</option><option>packets</option><option>boxes</option><option>dozens</option><option>meters</option><option>reams</option></select></div>
+          <div class="form-group"><label>Cost Price (UGX)</label><input name="cost_price" type="number" class="form-control" value="0"></div>
+          <div class="form-group"><label>Selling Price (UGX)</label><input name="selling_price" type="number" class="form-control" value="0"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group"><label>Opening Stock</label><input name="current_stock" type="number" class="form-control" value="0"></div>
+          <div class="form-group"><label>Min Stock Level</label><input name="min_stock_level" type="number" class="form-control" value="5"></div>
+        </div>
+        <div class="form-group"><label>Location</label><input name="location" class="form-control" placeholder="e.g. Store Room A"></div>
+        <div class="form-group"><label>Supplier</label><input name="supplier" class="form-control" placeholder="e.g. ABC Supplies Ltd"></div>
+        <button type="submit" class="btn" style="background:#059669;color:white">Save Item</button>
+        <a href="/inventory" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, req.session.user));
+}));
+
+app.post('/inventory/save', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { name, sku, category_id, description, unit, cost_price, selling_price, current_stock, min_stock_level, max_stock_level, location, supplier } = req.body;
+  await pool.query(`INSERT INTO inventory_items(tenant_id,category_id,sku,name,description,unit,cost_price,selling_price,current_stock,min_stock_level,max_stock_level,location,supplier) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [tid, category_id || null, sku || null, name, description || '', unit || 'pcs', cost_price || 0, selling_price || 0, current_stock || 0, min_stock_level || 5, max_stock_level || 1000, location || '', supplier || '']);
+  if (Number(current_stock) > 0) {
+    const item = (await pool.query('SELECT id FROM inventory_items WHERE tenant_id=$1 AND sku=$2 ORDER BY id DESC LIMIT 1', [tid, sku || '']))?.rows[0];
+    if (item) await pool.query('INSERT INTO inventory_transactions(tenant_id,item_id,transaction_type,quantity,unit_cost,performed_by,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid, item.id, 'stock_in', current_stock, cost_price || 0, req.session.user.email, 'Opening stock']);
+  }
+  await audit(req.session.user.email, 'inventory_item_created', 'Created item: ' + name);
+  req.flash('success', 'Item created successfully');
+  res.redirect('/inventory');
+}));
+
+app.get('/inventory/:id/edit', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const item = (await pool.query('SELECT * FROM inventory_items WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  if (!item) return res.status(404).send('Item not found');
+  const categories = (await pool.query('SELECT * FROM inventory_categories WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+  res.send(renderPage('Edit Item', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Edit: ${esc(item.name)}</h1>
+    </div>
+    <div class="card" style="max-width:600px">
+      <form method="POST" action="/inventory/${item.id}/update">
+        <div class="form-group"><label>Item Name *</label><input name="name" required class="form-control" value="${esc(item.name)}"></div>
+        <div class="form-group"><label>SKU</label><input name="sku" class="form-control" value="${esc(item.sku || '')}"></div>
+        <div class="form-group"><label>Category</label><select name="category_id" class="form-control"><option value="">-- None --</option>${categories.map(c => '<option value="' + c.id + '"' + (c.id === item.category_id ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('')}</select></div>
+        <div class="form-group"><label>Description</label><textarea name="description" class="form-control" rows="2">${esc(item.description || '')}</textarea></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-group"><label>Unit</label><select name="unit" class="form-control">${['pcs','kg','litres','packets','boxes','dozens','meters','reams'].map(u => '<option' + (u === item.unit ? ' selected' : '') + '>' + u + '</option>').join('')}</select></div>
+          <div class="form-group"><label>Cost Price</label><input name="cost_price" type="number" class="form-control" value="${item.cost_price}"></div>
+          <div class="form-group"><label>Selling Price</label><input name="selling_price" type="number" class="form-control" value="${item.selling_price}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group"><label>Min Stock Level</label><input name="min_stock_level" type="number" class="form-control" value="${item.min_stock_level}"></div>
+          <div class="form-group"><label>Max Stock Level</label><input name="max_stock_level" type="number" class="form-control" value="${item.max_stock_level}"></div>
+        </div>
+        <div class="form-group"><label>Location</label><input name="location" class="form-control" value="${esc(item.location || '')}"></div>
+        <div class="form-group"><label>Supplier</label><input name="supplier" class="form-control" value="${esc(item.supplier || '')}"></div>
+        <button type="submit" class="btn" style="background:#059669;color:white">Update Item</button>
+        <a href="/inventory" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, req.session.user));
+}));
+
+app.post('/inventory/:id/update', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { name, sku, category_id, description, unit, cost_price, selling_price, min_stock_level, max_stock_level, location, supplier } = req.body;
+  await pool.query(`UPDATE inventory_items SET name=$1,sku=$2,category_id=$3,description=$4,unit=$5,cost_price=$6,selling_price=$7,min_stock_level=$8,max_stock_level=$9,location=$10,supplier=$11,updated_at=NOW() WHERE id=$12 AND tenant_id=$13`, [name, sku||null, category_id||null, description||'', unit||'pcs', cost_price||0, selling_price||0, min_stock_level||5, max_stock_level||1000, location||'', supplier||'', req.params.id, tid]);
+  await audit(req.session.user.email, 'inventory_item_updated', 'Updated item #' + req.params.id);
+  req.flash('success', 'Item updated');
+  res.redirect('/inventory');
+}));
+
+app.get('/inventory/:id/stock-in', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const item = (await pool.query('SELECT * FROM inventory_items WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  if (!item) return res.status(404).send('Not found');
+  res.send(renderPage('Stock In: ' + item.name, `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Stock In: ${esc(item.name)}</h2>
+      <p class="muted">Current stock: ${item.current_stock} ${esc(item.unit)}</p>
+      <form method="POST" action="/inventory/${item.id}/stock-in-save">
+        <div class="form-group"><label>Quantity *</label><input name="quantity" type="number" min="1" required class="form-control"></div>
+        <div class="form-group"><label>Unit Cost (UGX)</label><input name="unit_cost" type="number" class="form-control" value="${item.cost_price}"></div>
+        <div class="form-group"><label>Reference/Invoice #</label><input name="reference" class="form-control"></div>
+        <div class="form-group"><label>Notes</label><textarea name="notes" class="form-control" rows="2"></textarea></div>
+        <button type="submit" class="btn" style="background:#059669;color:white">Add Stock</button>
+        <a href="/inventory" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, req.session.user));
+}));
+
+app.post('/inventory/:id/stock-in-save', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { quantity, unit_cost, reference, notes } = req.body;
+  await pool.query('UPDATE inventory_items SET current_stock = current_stock + $1, updated_at = NOW() WHERE id=$2 AND tenant_id=$3', [Number(quantity), req.params.id, tid]);
+  await pool.query('INSERT INTO inventory_transactions(tenant_id,item_id,transaction_type,quantity,unit_cost,reference,notes,performed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid, req.params.id, 'stock_in', Number(quantity), unit_cost||0, reference||'', notes||'', req.session.user.email]);
+  await audit(req.session.user.email, 'stock_in', 'Added ' + quantity + ' units to item #' + req.params.id);
+  req.flash('success', 'Stock added successfully');
+  res.redirect('/inventory');
+}));
+
+app.get('/inventory/:id/stock-out', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const item = (await pool.query('SELECT * FROM inventory_items WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  if (!item) return res.status(404).send('Not found');
+  res.send(renderPage('Stock Out: ' + item.name, `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Stock Out: ${esc(item.name)}</h2>
+      <p class="muted">Current stock: ${item.current_stock} ${esc(item.unit)}</p>
+      <form method="POST" action="/inventory/${item.id}/stock-out-save">
+        <div class="form-group"><label>Quantity *</label><input name="quantity" type="number" min="1" max="${item.current_stock}" required class="form-control"></div>
+        <div class="form-group"><label>Reference</label><input name="reference" class="form-control"></div>
+        <div class="form-group"><label>Reason</label><textarea name="notes" class="form-control" rows="2" placeholder="e.g. Sold, Damaged, Used internally"></textarea></div>
+        <button type="submit" class="btn" style="background:#f59e0b;color:white">Remove Stock</button>
+        <a href="/inventory" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, req.session.user));
+}));
+
+app.post('/inventory/:id/stock-out-save', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { quantity, reference, notes } = req.body;
+  await pool.query('UPDATE inventory_items SET current_stock = GREATEST(0, current_stock - $1), updated_at = NOW() WHERE id=$2 AND tenant_id=$3', [Number(quantity), req.params.id, tid]);
+  await pool.query('INSERT INTO inventory_transactions(tenant_id,item_id,transaction_type,quantity,reference,notes,performed_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid, req.params.id, 'stock_out', Number(quantity), reference||'', notes||'', req.session.user.email]);
+  await audit(req.session.user.email, 'stock_out', 'Removed ' + quantity + ' units from item #' + req.params.id);
+  req.flash('success', 'Stock removed');
+  res.redirect('/inventory');
+}));
+
+// Categories
+app.get('/inventory/categories', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const categories = (await pool.query('SELECT c.*, COUNT(i.id) as item_count FROM inventory_categories c LEFT JOIN inventory_items i ON i.category_id=c.id AND i.tenant_id=c.tenant_id AND i.is_active=true WHERE c.tenant_id=$1 GROUP BY c.id ORDER BY c.name', [tid])).rows;
+  res.send(renderPage('Inventory Categories', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Inventory Categories</h1>
+    </div>
+    <div class="card" style="max-width:500px;margin-bottom:20px">
+      <form method="POST" action="/inventory/categories/save"><div style="display:flex;gap:8px"><input name="name" required class="form-control" placeholder="Category name"><input name="description" class="form-control" placeholder="Description"><button type="submit" class="btn" style="background:#059669;color:white">Add</button></div></form>
+    </div>
+    <div class="card">
+      ${categories.length === 0 ? '<p class="muted">No categories yet.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Name</th><th>Description</th><th>Items</th><th>Actions</th></tr></thead><tbody>' + categories.map(c => '<tr style="border-bottom:1px solid #f1f5f9"><td><strong>' + esc(c.name) + '</strong></td><td>' + esc(c.description || '-') + '</td><td>' + c.item_count + '</td><td><a href="/inventory/categories/' + c.id + '/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete category?\')">Delete</a></td></tr>').join('') + '</tbody></table>'}
+    </div>
+    <div style="margin-top:20px"><a href="/inventory" class="btn">Back to Inventory</a></div>`, req.session.user));
+}));
+
+app.post('/inventory/categories/save', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  await pool.query('INSERT INTO inventory_categories(tenant_id,name,description) VALUES($1,$2,$3)', [req.session.user.tenant_id, req.body.name, req.body.description || '']);
+  res.redirect('/inventory/categories');
+}));
+
+app.get('/inventory/categories/:id/delete', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  await pool.query('DELETE FROM inventory_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/inventory/categories');
+}));
+
+// Suppliers
+app.get('/inventory/suppliers', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const suppliers = (await pool.query('SELECT * FROM inventory_suppliers WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+  res.send(renderPage('Suppliers', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Suppliers</h1>
+    </div>
+    <div class="card" style="max-width:600px;margin-bottom:20px">
+      <form method="POST" action="/inventory/suppliers/save">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group"><label>Company Name *</label><input name="name" required class="form-control"></div>
+          <div class="form-group"><label>Contact Person</label><input name="contact_person" class="form-control"></div>
+          <div class="form-group"><label>Email</label><input name="email" type="email" class="form-control"></div>
+          <div class="form-group"><label>Phone</label><input name="phone" class="form-control"></div>
+        </div>
+        <div class="form-group"><label>Address</label><input name="address" class="form-control"></div>
+        <button type="submit" class="btn" style="background:#059669;color:white">Add Supplier</button>
+      </form>
+    </div>
+    <div class="card">
+      ${suppliers.length === 0 ? '<p class="muted">No suppliers yet.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Company</th><th>Contact</th><th>Phone</th><th>Email</th><th>Actions</th></tr></thead><tbody>' + suppliers.map(s => '<tr style="border-bottom:1px solid #f1f5f9"><td><strong>' + esc(s.name) + '</strong></td><td>' + esc(s.contact_person || '-') + '</td><td>' + esc(s.phone || '-') + '</td><td>' + esc(s.email || '-') + '</td><td><a href="/inventory/suppliers/' + s.id + '/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete?\')">Delete</a></td></tr>').join('') + '</tbody></table>'}
+    </div>
+    <div style="margin-top:20px"><a href="/inventory" class="btn">Back to Inventory</a></div>`, req.session.user));
+}));
+
+app.post('/inventory/suppliers/save', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const { name, contact_person, email, phone, address } = req.body;
+  await pool.query('INSERT INTO inventory_suppliers(tenant_id,name,contact_person,email,phone,address) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, name, contact_person||'', email||'', phone||'', address||'']);
+  res.redirect('/inventory/suppliers');
+}));
+
+app.get('/inventory/suppliers/:id/delete', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  await pool.query('DELETE FROM inventory_suppliers WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/inventory/suppliers');
+}));
+
+// Purchase Orders
+app.get('/inventory/purchase-orders', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const pos = (await pool.query('SELECT po.*, s.name as supplier_name FROM purchase_orders po LEFT JOIN inventory_suppliers s ON s.id=po.supplier_id WHERE po.tenant_id=$1 ORDER BY po.created_at DESC', [tid])).rows;
+  const suppliers = (await pool.query('SELECT * FROM inventory_suppliers WHERE tenant_id=$1 AND is_active=true ORDER BY name', [tid])).rows;
+  const items = (await pool.query('SELECT id, name FROM inventory_items WHERE tenant_id=$1 AND is_active=true ORDER BY name', [tid])).rows;
+  res.send(renderPage('Purchase Orders', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Purchase Orders</h1><a href="/inventory/purchase-orders/new" class="btn" style="background:white;color:#059669;margin-top:10px;display:inline-block">+ New PO</a>
+    </div>
+    <div class="card">
+      ${pos.length === 0 ? '<p class="muted">No purchase orders yet.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>PO #</th><th>Supplier</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>' + pos.map(po => '<tr style="border-bottom:1px solid #f1f5f9"><td><strong>' + esc(po.po_number || '#' + po.id) + '</strong></td><td>' + esc(po.supplier_name || '-') + '</td><td>UGX ' + Number(po.total_amount).toLocaleString() + '</td><td><span class="tag" style="background:' + (po.status === 'received' ? '#d1fae5;color:#065f46' : po.status === 'approved' ? '#dbeafe;color:#1e40af' : po.status === 'cancelled' ? '#fee2e2;color:#991b1b' : '#fef3c7;color:#92400e') + '">' + esc(po.status) + '</span></td><td>' + new Date(po.created_at).toLocaleDateString() + '</td><td>' + (po.status === 'pending' ? '<a href="/inventory/purchase-orders/' + po.id + '/approve" class="btn btn-sm">Approve</a> ' : '') + '<a href="/inventory/purchase-orders/' + po.id + '/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Cancel PO?\')">Cancel</a></td></tr>').join('') + '</tbody></table>'}
+    </div>
+    <div style="margin-top:20px"><a href="/inventory" class="btn">Back to Inventory</a></div>`, req.session.user));
+}));
+
+app.get('/inventory/purchase-orders/new', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const suppliers = (await pool.query('SELECT * FROM inventory_suppliers WHERE tenant_id=$1 AND is_active=true ORDER BY name', [tid])).rows;
+  const items = (await pool.query('SELECT id, name, cost_price FROM inventory_items WHERE tenant_id=$1 AND is_active=true ORDER BY name', [tid])).rows;
+  res.send(renderPage('New Purchase Order', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>New Purchase Order</h1>
+    </div>
+    <div class="card" style="max-width:700px">
+      <form method="POST" action="/inventory/purchase-orders/save">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group"><label>Supplier *</label><select name="supplier_id" required class="form-control"><option value="">Select</option>${suppliers.map(s => '<option value="' + s.id + '">' + esc(s.name) + '</option>').join('')}</select></div>
+          <div class="form-group"><label>Expected Delivery Date</label><input name="expected_date" type="date" class="form-control"></div>
+        </div>
+        <div class="form-group"><label>Notes</label><textarea name="notes" class="form-control" rows="2"></textarea></div>
+        <h4 style="margin-top:16px">Order Items</h4>
+        <div id="po-items">
+          <div class="po-item-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 40px;gap:8px;margin-bottom:8px">
+            <select name="item_id_0" class="form-control po-item-select"><option value="">Select item</option>${items.map(i => '<option value="' + i.id + '" data-cost="' + i.cost_price + '">' + esc(i.name) + '</option>').join('')}</select>
+            <input name="qty_0" type="number" class="form-control po-qty" placeholder="Qty" min="1" oninput="updatePO()">
+            <input name="cost_0" type="number" class="form-control po-cost" placeholder="Unit cost" oninput="updatePO()">
+            <button type="button" class="btn btn-sm btn-red" onclick="this.parentElement.remove();updatePO()">X</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm" onclick="addPORow(${JSON.stringify(items).replace(/"/g, '&quot;')})" style="margin:8px 0">+ Add Item</button>
+        <div style="font-size:18px;font-weight:bold;margin:12px 0">Total: UGX <span id="po-total">0</span></div>
+        <button type="submit" class="btn" style="background:#059669;color:white">Create PO</button>
+        <a href="/inventory/purchase-orders" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>
+    <script>
+      let poRowIdx = 1;
+      const itemsData = ${JSON.stringify(items)};
+      function addPORow(items) {
+        const div = document.createElement('div');
+        div.className = 'po-item-row';
+        div.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 40px;gap:8px;margin-bottom:8px';
+        div.innerHTML = '<select name="item_id_'+poRowIdx+'" class="form-control po-item-select"><option value="">Select item</option>'+items.map(i=>'<option value="'+i.id+'" data-cost="'+i.cost_price+'">'+i.name.replace(/"/g,'&quot;')+'</option>').join('')+'</select><input name="qty_'+poRowIdx+'" type="number" class="form-control po-qty" placeholder="Qty" min="1" oninput="updatePO()"><input name="cost_'+poRowIdx+'" type="number" class="form-control po-cost" placeholder="Unit cost" oninput="updatePO()"><button type="button" class="btn btn-sm btn-red" onclick="this.parentElement.remove();updatePO()">X</button>';
+        document.getElementById('po-items').appendChild(div);
+        poRowIdx++;
+      }
+      function updatePO() {
+        let total = 0;
+        document.querySelectorAll('.po-item-row').forEach(row => {
+          const qty = parseFloat(row.querySelector('.po-qty')?.value || 0);
+          const cost = parseFloat(row.querySelector('.po-cost')?.value || 0);
+          total += qty * cost;
+        });
+        document.getElementById('po-total').textContent = total.toLocaleString();
+      }
+    </script>`, req.session.user));
+}));
+
+app.post('/inventory/purchase-orders/save', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { supplier_id, expected_date, notes } = req.body;
+  let total = 0;
+  const poNum = 'PO-' + Date.now().toString(36).toUpperCase();
+  const po = (await pool.query('INSERT INTO purchase_orders(tenant_id,supplier_id,po_number,status,expected_date,notes,total_amount,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id', [tid, supplier_id||null, poNum, 'pending', expected_date||null, notes||'', 0, req.session.user.email])).rows[0];
+  let idx = 0;
+  while (req.body['item_id_' + idx] !== undefined) {
+    const itemId = req.body['item_id_' + idx];
+    const qty = Number(req.body['qty_' + idx]) || 0;
+    const cost = Number(req.body['cost_' + idx]) || 0;
+    if (itemId && qty > 0) {
+      const itemName = (await pool.query('SELECT name FROM inventory_items WHERE id=$1', [itemId])).rows[0]?.name || 'Unknown';
+      await pool.query('INSERT INTO purchase_order_items(tenant_id,po_id,item_id,item_name,quantity,unit_cost) VALUES($1,$2,$3,$4,$5,$6)', [tid, po.id, itemId, itemName, qty, cost]);
+      total += qty * cost;
+    }
+    idx++;
+  }
+  await pool.query('UPDATE purchase_orders SET total_amount=$1 WHERE id=$2', [total, po.id]);
+  await audit(req.session.user.email, 'po_created', 'Created PO ' + poNum);
+  req.flash('success', 'Purchase order created');
+  res.redirect('/inventory/purchase-orders');
+}));
+
+app.get('/inventory/purchase-orders/:id/approve', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  await pool.query('UPDATE purchase_orders SET status=$1 WHERE id=$2 AND tenant_id=$3', ['approved', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/inventory/purchase-orders');
+}));
+
+app.get('/inventory/purchase-orders/:id/delete', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  await pool.query('UPDATE purchase_orders SET status=$1 WHERE id=$2 AND tenant_id=$3', ['cancelled', req.params.id, req.session.user.tenant_id]);
+  res.redirect('/inventory/purchase-orders');
+}));
+
+// Adjustments
+app.get('/inventory/adjustments', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const adjustments = (await pool.query('SELECT sa.*, i.name as item_name FROM stock_adjustments sa LEFT JOIN inventory_items i ON i.id=sa.item_id WHERE sa.tenant_id=$1 ORDER BY sa.created_at DESC LIMIT 50', [tid])).rows;
+  const items = (await pool.query('SELECT id, name, current_stock, unit FROM inventory_items WHERE tenant_id=$1 AND is_active=true ORDER BY name', [tid])).rows;
+  res.send(renderPage('Stock Adjustments', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Stock Adjustments</h1><p>Correct stock levels for damaged, lost, or miscounted items</p>
+    </div>
+    <div class="card" style="max-width:600px;margin-bottom:20px">
+      <form method="POST" action="/inventory/adjustments/save">
+        <div class="form-group"><label>Item *</label><select name="item_id" required class="form-control"><option value="">Select</option>${items.map(i => '<option value="' + i.id + '">' + esc(i.name) + ' (' + i.current_stock + ' ' + esc(i.unit) + ')</option>').join('')}</select></div>
+        <div class="form-group"><label>Adjustment Type</label><select name="adjustment_type" class="form-control"><option value="increase">Increase (found extra)</option><option value="decrease">Decrease (damaged/lost)</option><option value="set">Set to exact count</option></select></div>
+        <div class="form-group"><label>New Quantity *</label><input name="quantity" type="number" required class="form-control" min="0"></div>
+        <div class="form-group"><label>Reason *</label><textarea name="reason" required class="form-control" rows="2" placeholder="e.g. 5 books damaged by water"></textarea></div>
+        <button type="submit" class="btn" style="background:#059669;color:white">Save Adjustment</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3>Adjustment History</h3>
+      ${adjustments.length === 0 ? '<p class="muted">No adjustments yet.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Date</th><th>Item</th><th>Type</th><th>Qty</th><th>Reason</th><th>By</th></tr></thead><tbody>' + adjustments.map(a => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + new Date(a.created_at).toLocaleDateString() + '</td><td>' + esc(a.item_name || 'N/A') + '</td><td><span class="tag">' + esc(a.adjustment_type) + '</span></td><td>' + a.quantity + '</td><td>' + esc(a.reason || '') + '</td><td>' + esc(a.performed_by || '') + '</td></tr>').join('') + '</tbody></table>'}
+    </div>
+    <div style="margin-top:20px"><a href="/inventory" class="btn">Back to Inventory</a></div>`, req.session.user));
+}));
+
+app.post('/inventory/adjustments/save', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { item_id, adjustment_type, quantity, reason } = req.body;
+  const newQty = Number(quantity);
+  const item = (await pool.query('SELECT current_stock FROM inventory_items WHERE id=$1 AND tenant_id=$2', [item_id, tid])).rows[0];
+  if (!item) return res.status(404).send('Item not found');
+  let actualQty = 0;
+  if (adjustment_type === 'increase') { actualQty = Number(item.current_stock) + newQty; }
+  else if (adjustment_type === 'decrease') { actualQty = Math.max(0, Number(item.current_stock) - newQty); }
+  else { actualQty = newQty; }
+  await pool.query('UPDATE inventory_items SET current_stock=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', [actualQty, item_id, tid]);
+  await pool.query('INSERT INTO stock_adjustments(tenant_id,item_id,adjustment_type,quantity,reason,performed_by) VALUES($1,$2,$3,$4,$5,$6)', [tid, item_id, adjustment_type, newQty, reason, req.session.user.email]);
+  await audit(req.session.user.email, 'stock_adjustment', adjustment_type + ' ' + newQty + ' for item #' + item_id);
+  req.flash('success', 'Stock adjusted');
+  res.redirect('/inventory/adjustments');
+}));
+
+// Reports
+app.get('/inventory/reports', requireAuth, requireNotBanned, requireFeature('inventory_management'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const items = (await pool.query('SELECT i.*, c.name as category_name FROM inventory_items i LEFT JOIN inventory_categories c ON c.id=i.category_id WHERE i.tenant_id=$1 AND i.is_active=true ORDER BY i.name', [tid])).rows;
+  const totalValue = items.reduce((s, i) => s + (Number(i.cost_price) * Number(i.current_stock)), 0);
+  const totalRetail = items.reduce((s, i) => s + (Number(i.selling_price) * Number(i.current_stock)), 0);
+  const potentialProfit = totalRetail - totalValue;
+  const lowStock = items.filter(i => Number(i.current_stock) <= Number(i.min_stock_level));
+  const outOfStock = items.filter(i => Number(i.current_stock) === 0);
+  const txByMonth = (await pool.query("SELECT TO_CHAR(created_at,'YYYY-MM') as month, transaction_type, SUM(quantity) as total_qty FROM inventory_transactions WHERE tenant_id=$1 GROUP BY month, transaction_type ORDER BY month DESC LIMIT 12", [tid])).rows;
+  res.send(renderPage('Inventory Reports', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Inventory Reports</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px">
+      <div class="card" style="text-align:center;border-left:4px solid #059669"><h3>Stock Value (Cost)</h3><div style="font-size:24px;font-weight:bold;color:#059669">UGX ${totalValue.toLocaleString()}</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #0ea5e9"><h3>Retail Value</h3><div style="font-size:24px;font-weight:bold;color:#0ea5e9">UGX ${totalRetail.toLocaleString()}</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #8b5cf6"><h3>Potential Profit</h3><div style="font-size:24px;font-weight:bold;color:${potentialProfit >= 0 ? '#059669' : '#ef4444'}">UGX ${potentialProfit.toLocaleString()}</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #f59e0b"><h3>Low Stock Items</h3><div style="font-size:24px;font-weight:bold;color:#f59e0b">${lowStock.length}</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #ef4444"><h3>Out of Stock</h3><div style="font-size:24px;font-weight:bold;color:#ef4444">${outOfStock.length}</div></div>
+    </div>
+    <div class="card" style="margin-bottom:20px">
+      <h3>Low Stock / Reorder Needed</h3>
+      ${lowStock.length === 0 ? '<p class="muted" style="color:#059669">All items are above minimum stock levels.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Item</th><th>Category</th><th>Current</th><th>Min</th><th>Needed</th><th>Cost to Reorder</th></tr></thead><tbody>' + lowStock.map(i => { const needed = Number(i.min_stock_level) - Number(i.current_stock); return '<tr style="border-bottom:1px solid #f1f5f9"><td>' + esc(i.name) + '</td><td>' + esc(i.category_name || '-') + '</td><td style="color:#ef4444;font-weight:bold">' + i.current_stock + '</td><td>' + i.min_stock_level + '</td><td>' + needed + '</td><td>UGX ' + (needed * Number(i.cost_price)).toLocaleString() + '</td></tr>'; }).join('') + '</tbody></table>'}
+    </div>
+    <div class="card">
+      <h3>Transaction History by Month</h3>
+      ${txByMonth.length === 0 ? '<p class="muted">No transactions yet.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Month</th><th>Type</th><th>Total Quantity</th></tr></thead><tbody>' + txByMonth.map(t => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + t.month + '</td><td><span class="tag" style="background:' + (t.transaction_type === 'stock_in' ? '#d1fae5;color:#065f46' : '#fef3c7;color:#92400e') + '">' + esc(t.transaction_type.replace('_',' ')) + '</span></td><td>' + Number(t.total_qty).toLocaleString() + '</td></tr>').join('') + '</tbody></table>'}
+    </div>
+    <div style="margin-top:20px"><a href="/inventory" class="btn">Back to Inventory</a></div>`, req.session.user));
+}));
+
+// ============================================================
+// FEATURE: PARENT/STUDENT SELF-SERVICE PORTAL
+// ============================================================
+app.get('/parent-portal', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const parents = (await pool.query(`SELECT pa.*, s.name as student_name, s.class_name, s.stream FROM parent_accounts pa LEFT JOIN students s ON s.id=pa.student_id WHERE pa.tenant_id=$1 ORDER BY pa.created_at DESC`, [tid])).rows;
+  const settings = (await pool.query('SELECT * FROM student_portal_settings WHERE tenant_id=$1', [tid])).rows[0];
+  const totalParents = parents.length;
+  const activeParents = parents.filter(p => p.is_active).length;
+  const recentLogins = parents.filter(p => p.last_login && (Date.now() - new Date(p.last_login).getTime()) < 7*24*60*60*1000).length;
+  const messages = (await pool.query('SELECT COUNT(*) as unread FROM parent_messages WHERE tenant_id=$1 AND from_parent=true AND is_read=false', [tid])).rows[0].unread;
+  res.send(renderPage('Parent/Student Portal', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Parent & Student Self-Service Portal</h1>
+      <p>Parents and students access grades, attendance, fees, and communicate online</p>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/parent-portal/settings" class="btn" style="background:white;color:#6366f1">Portal Settings</a>
+        <a href="/parent-portal/invitations" class="btn" style="background:white;color:#6366f1">Send Invitations</a>
+        <a href="/parent-portal/messages" class="btn" style="background:white;color:#6366f1">Messages ${Number(messages) > 0 ? '<span class="tag" style="background:#ef4444;color:white">' + messages + '</span>' : ''}</a>
+        <a href="/parent-portal/link-student" class="btn" style="background:white;color:#6366f1">Link Student</a>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#6366f1">${totalParents}</div><div style="color:#64748b">Total Parents</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#059669">${activeParents}</div><div style="color:#64748b">Active</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#0ea5e9">${recentLogins}</div><div style="color:#64748b">Active This Week</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#f59e0b">${messages}</div><div style="color:#64748b">Unread Messages</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3>Registered Parents</h3>
+        <a href="/parent-portal/link-student" class="btn" style="background:#6366f1;color:white">+ Add Parent</a>
+      </div>
+      ${parents.length === 0 ? '<p class="muted">No parent accounts yet. Link a student to create a parent account.</p>' : `
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Parent</th><th>Student</th><th>Class</th><th>Relation</th><th>Access Code</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+      <tbody>${parents.map(p => '<tr style="border-bottom:1px solid #f1f5f9">' +
+        '<td><strong>' + esc(p.parent_name) + '</strong><br><span class="muted">' + esc(p.parent_email || '') + '</span></td>' +
+        '<td>' + esc(p.student_name || 'Unlinked') + '</td>' +
+        '<td>' + esc(p.class_name || '-') + (p.stream ? ' ' + esc(p.stream) : '') + '</td>' +
+        '<td>' + esc(p.relation) + '</td>' +
+        '<td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px">' + esc(p.access_code || '-') + '</code></td>' +
+        '<td>' + (p.is_active ? '<span class="tag" style="background:#d1fae5;color:#065f46">Active</span>' : '<span class="tag" style="background:#fee2e2;color:#991b1b">Disabled</span>') + '</td>' +
+        '<td>' + (p.last_login ? new Date(p.last_login).toLocaleDateString() : 'Never') + '</td>' +
+        '<td><a href="/parent-portal/' + p.id + '/toggle" class="btn btn-sm">' + (p.is_active ? 'Disable' : 'Enable') + '</a> <a href="/parent-portal/' + p.id + '/code" class="btn btn-sm">Reset Code</a></td>' +
+      '</tr>').join('')}</tbody></table></div>`}
+    </div>`, req.session.user));
+}));
+
+app.get('/parent-portal/settings', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const settings = (await pool.query('SELECT * FROM student_portal_settings WHERE tenant_id=$1', [tid])).rows[0];
+  res.send(renderPage('Portal Settings', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Portal Settings</h1><p>Control what parents and students can see</p>
+    </div>
+    <div class="card" style="max-width:600px">
+      <form method="POST" action="/parent-portal/settings/save">
+        <div class="form-group"><label>Welcome Message</label><textarea name="welcome_message" class="form-control" rows="2">${esc(settings?.welcome_message || 'Welcome to the Student Portal')}</textarea></div>
+        <h4 style="margin-top:16px">Access Controls</h4>
+        ${['portal_enabled|Enable Portal|Allow parents/students to log in','allow_grade_view|View Grades|Show exam results and report cards','allow_attendance_view|View Attendance|Show daily attendance records','allow_fees_view|View Fees|Show fee balance and payment history','allow_report_download|Download Reports|Allow PDF report card downloads','allow_communication|Send Messages|Allow parents to send messages to teachers'].map(f => {
+          const [key, label, desc] = f.split('|');
+          const checked = settings ? settings[key] : key === 'portal_enabled';
+          return '<div style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid #f1f5f9"><input type="checkbox" name="' + key + '" ' + (checked ? 'checked' : '') + ' style="width:20px;height:20px"><div><strong>' + label + '</strong><br><span class="muted">' + desc + '</span></div></div>';
+        }).join('')}
+        <button type="submit" class="btn" style="background:#6366f1;color:white;margin-top:16px">Save Settings</button>
+      </form>
+    </div>
+    <div style="margin-top:20px"><a href="/parent-portal" class="btn">Back to Portal</a></div>`, req.session.user));
+}));
+
+app.post('/parent-portal/settings/save', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const fields = ['portal_enabled','allow_grade_view','allow_attendance_view','allow_fees_view','allow_report_download','allow_communication'];
+  const existing = (await pool.query('SELECT id FROM student_portal_settings WHERE tenant_id=$1', [tid])).rows[0];
+  const vals = fields.map(f => req.body[f] === 'on');
+  const msg = req.body.welcome_message || 'Welcome to the Student Portal';
+  if (existing) {
+    await pool.query('UPDATE student_portal_settings SET portal_enabled=$1,allow_grade_view=$2,allow_attendance_view=$3,allow_fees_view=$4,allow_report_download=$5,allow_communication=$6,welcome_message=$7 WHERE id=$8', [...vals, msg, existing.id]);
+  } else {
+    await pool.query('INSERT INTO student_portal_settings(tenant_id,portal_enabled,allow_grade_view,allow_attendance_view,allow_fees_view,allow_report_download,allow_communication,welcome_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid, ...vals, msg]);
+  }
+  await audit(req.session.user.email, 'portal_settings_updated', 'Updated parent portal settings');
+  req.flash('success', 'Settings saved');
+  res.redirect('/parent-portal/settings');
+}));
+
+app.get('/parent-portal/link-student', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id, name, class_name, stream, guardian_name, guardian_phone FROM students WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+  res.send(renderPage('Link Parent to Student', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Add Parent Account</h1><p>Create a parent account linked to a student</p>
+    </div>
+    <div class="card" style="max-width:600px">
+      <form method="POST" action="/parent-portal/link-student/save">
+        <div class="form-group"><label>Student *</label><select name="student_id" required class="form-control"><option value="">Select student</option>${students.map(s => '<option value="' + s.id + '">' + esc(s.name) + ' (' + esc(s.class_name || '') + (s.stream ? ' ' + esc(s.stream) : '') + ')' + (s.guardian_name ? ' — Guardian: ' + esc(s.guardian_name) : '') + '</option>').join('')}</select></div>
+        <div class="form-group"><label>Parent Name *</label><input name="parent_name" required class="form-control" placeholder="e.g. Jane Doe"></div>
+        <div class="form-group"><label>Parent Email *</label><input name="parent_email" type="email" required class="form-control" placeholder="e.g. jane@example.com"></div>
+        <div class="form-group"><label>Parent Phone</label><input name="parent_phone" class="form-control" placeholder="e.g. 0771234567"></div>
+        <div class="form-group"><label>Relation</label><select name="relation" class="form-control"><option>parent</option><option>guardian</option><option>mother</option><option>father</option><option>sibling</option><option>other</option></select></div>
+        <button type="submit" class="btn" style="background:#6366f1;color:white">Create Parent Account</button>
+        <a href="/parent-portal" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, req.session.user));
+}));
+
+app.post('/parent-portal/link-student/save', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { student_id, parent_name, parent_email, parent_phone, relation } = req.body;
+  const accessCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+  try {
+    await pool.query('INSERT INTO parent_accounts(tenant_id,student_id,parent_name,parent_email,parent_phone,relation,access_code) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid, student_id, parent_name, parent_email, parent_phone, relation, accessCode]);
+    await audit(req.session.user.email, 'parent_account_created', 'Created parent account for ' + parent_email + ' linked to student #' + student_id);
+    req.flash('success', 'Parent account created. Access code: ' + accessCode);
+  } catch(e) {
+    if (e.message.includes('parent_email') || e.message.includes('unique')) {
+      req.flash('error', 'A parent account with that email already exists');
+    } else throw e;
+  }
+  res.redirect('/parent-portal');
+}));
+
+app.get('/parent-portal/:id/toggle', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  await pool.query('UPDATE parent_accounts SET is_active = NOT is_active WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/parent-portal');
+}));
+
+app.get('/parent-portal/:id/code', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+  await pool.query('UPDATE parent_accounts SET access_code=$1 WHERE id=$2 AND tenant_id=$3', [newCode, req.params.id, req.session.user.tenant_id]);
+  req.flash('success', 'New access code: ' + newCode);
+  res.redirect('/parent-portal');
+}));
+
+// Parent login page (public-facing)
+app.get('/parent/login', ah(async (req, res) => {
+  res.send(renderPage('Parent Login', `
+    <div style="max-width:400px;margin:60px auto">
+      <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px;border-radius:16px;margin-bottom:20px;color:white;text-align:center">
+        <h1 style="font-size:24px">Parent Portal Login</h1>
+        <p>Enter your access code to view your child's information</p>
+      </div>
+      <div class="card">
+        <form method="POST" action="/parent/login">
+          <div class="form-group"><label>Access Code</label><input name="access_code" required class="form-control" placeholder="Enter your 6-character code" style="font-size:24px;text-align:center;letter-spacing:8px;text-transform:uppercase"></div>
+          <button type="submit" class="btn" style="background:#6366f1;color:white;width:100%;padding:12px">Access Portal</button>
+        </form>
+      </div>
+      <p style="text-align:center;margin-top:16px"><a href="/">Back to Home</a></p>
+    </div>`, null));
+}));
+
+app.post('/parent/login', ah(async (req, res) => {
+  const { access_code } = req.body;
+  const code = (access_code || '').toUpperCase().trim();
+  const parent = (await pool.query('SELECT * FROM parent_accounts WHERE access_code=$1 AND is_active=true', [code])).rows[0];
+  if (!parent) {
+    req.flash('error', 'Invalid access code. Please contact the school.');
+    return res.redirect('/parent/login');
+  }
+  await pool.query('UPDATE parent_accounts SET last_login=NOW() WHERE id=$1', [parent.id]);
+  await pool.query('INSERT INTO parent_login_logs(tenant_id,parent_id,ip_address,user_agent) VALUES($1,$2,$3,$4)', [parent.tenant_id, parent.id, req.ip || '', req.get('User-Agent') || '']);
+  req.session.parent_user = { id: parent.id, tenant_id: parent.tenant_id, name: parent.parent_name, student_id: parent.student_id };
+  res.redirect('/parent/dashboard');
+}));
+
+app.get('/parent/dashboard', ah(async (req, res) => {
+  if (!req.session.parent_user) return res.redirect('/parent/login');
+  const pu = req.session.parent_user;
+  const settings = (await pool.query('SELECT * FROM student_portal_settings WHERE tenant_id=$1', [pu.tenant_id])).rows[0];
+  const student = (await pool.query('SELECT * FROM students WHERE id=$1', [pu.student_id])).rows[0];
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [pu.tenant_id])).rows[0];
+  if (!student) return res.send(renderPage('Error', '<div class="card" style="text-align:center;margin:40px auto;max-width:400px"><h2>Student Not Found</h2><p>The linked student record could not be found.</p><a href="/parent/login" class="btn">Try Again</a></div>', null));
+  const greeting = (settings?.welcome_message || 'Welcome to the Student Portal');
+  const grades = settings?.allow_grade_view ? (await pool.query("SELECT * FROM exam_results WHERE tenant_id=$1 AND student_id=$2 ORDER BY created_at DESC LIMIT 10", [pu.tenant_id, pu.student_id])).rows : [];
+  const attendance = settings?.allow_attendance_view ? (await pool.query("SELECT * FROM attendance WHERE tenant_id=$1 AND student_id=$2 ORDER BY date DESC LIMIT 15", [pu.tenant_id, pu.student_id])).rows : [];
+  const fees = settings?.allow_fees_view ? (await pool.query("SELECT * FROM fees WHERE tenant_id=$1 AND student_id=$2 ORDER BY created_at DESC LIMIT 10", [pu.tenant_id, pu.student_id])).rows : [];
+  const totalFees = fees.reduce((s, f) => s + Number(f.amount || 0), 0);
+  const totalPaid = fees.filter(f => f.status === 'paid').reduce((s, f) => s + Number(f.amount || 0), 0);
+  const unreadMsgs = (await pool.query('SELECT COUNT(*) as cnt FROM parent_messages WHERE parent_id=$1 AND from_parent=true AND is_read=false', [pu.id])).rows[0].cnt;
+  res.send(renderPage('Parent Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>${esc(greeting)}</h1>
+      <p style="opacity:0.9">${esc(tenant?.name || '')}</p>
+      <p>Viewing: <strong>${esc(student.name)}</strong> — ${esc(student.class_name || '')} ${esc(student.stream || '')}</p>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/parent/grades" class="btn" style="background:#6366f1;color:white">Grades</a>
+      <a href="/parent/attendance" class="btn" style="background:#059669;color:white">Attendance</a>
+      <a href="/parent/fees" class="btn" style="background:#f59e0b;color:white">Fees</a>
+      <a href="/parent/messages" class="btn" style="background:#ec4899;color:white">Messages ${Number(unreadMsgs) > 0 ? '(' + unreadMsgs + ')' : ''}</a>
+      <a href="/parent/logout" class="btn" style="background:#64748b;color:white">Logout</a>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px">
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#6366f1">${grades.length}</div><div>Recent Grades</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#059669">${attendance.filter(a => a.status === 'present').length}</div><div>Days Present</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#f59e0b">UGX ${totalFees.toLocaleString()}</div><div>Total Fees</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#ef4444">UGX ${(totalFees - totalPaid).toLocaleString()}</div><div>Balance</div></div>
+    </div>
+    ${grades.length > 0 ? '<div class="card" style="margin-bottom:16px"><h3>Latest Grades</h3><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Subject</th><th>Score</th><th>Grade</th><th>Date</th></tr></thead><tbody>' + grades.slice(0, 5).map(g => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + esc(g.subject || g.exam_name || '') + '</td><td><strong>' + (g.score || g.marks || '-') + '</strong></td><td>' + esc(g.grade || '') + '</td><td>' + (g.created_at ? new Date(g.created_at).toLocaleDateString() : '') + '</td></tr>').join('') + '</tbody></table></div>' : ''}
+    ${attendance.length > 0 ? '<div class="card"><h3>Recent Attendance</h3><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Date</th><th>Status</th><th>Notes</th></tr></thead><tbody>' + attendance.slice(0, 5).map(a => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + (a.date ? new Date(a.date).toLocaleDateString() : '') + '</td><td><span class="tag" style="background:' + (a.status === 'present' ? '#d1fae5;color:#065f46' : '#fee2e2;color:#991b1b') + '">' + esc(a.status) + '</span></td><td>' + esc(a.notes || '') + '</td></tr>').join('') + '</tbody></table></div>' : ''}
+  `, null));
+}));
+
+app.get('/parent/grades', ah(async (req, res) => {
+  if (!req.session.parent_user) return res.redirect('/parent/login');
+  const pu = req.session.parent_user;
+  const settings = (await pool.query('SELECT * FROM student_portal_settings WHERE tenant_id=$1', [pu.tenant_id])).rows[0];
+  if (!settings?.allow_grade_view) return res.send(renderPage('Access Denied', '<div class="card" style="text-align:center;margin:40px"><h2>Grade viewing is disabled</h2><p>Please contact the school administration.</p><a href="/parent/dashboard" class="btn">Back</a></div>', null));
+  const grades = (await pool.query('SELECT * FROM exam_results WHERE tenant_id=$1 AND student_id=$2 ORDER BY created_at DESC', [pu.tenant_id, pu.student_id])).rows;
+  const student = (await pool.query('SELECT name FROM students WHERE id=$1', [pu.student_id])).rows[0];
+  res.send(renderPage('Grades - ' + (student?.name || ''), `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:16px;border-radius:16px;margin-bottom:20px;color:white"><h1>Exam Results & Grades</h1></div>
+    ${grades.length === 0 ? '<div class="card"><p class="muted">No grades available yet.</p></div>' : '<div class="card"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Exam</th><th>Subject</th><th>Score</th><th>Grade</th><th>Remarks</th></tr></thead><tbody>' + grades.map(g => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + esc(g.exam_name || '') + '</td><td>' + esc(g.subject || '') + '</td><td><strong>' + (g.score || g.marks || '-') + '</strong></td><td>' + esc(g.grade || '') + '</td><td>' + esc(g.remarks || '') + '</td></tr>').join('') + '</tbody></table></div>'}
+    <div style="margin-top:16px"><a href="/parent/dashboard" class="btn">Back to Dashboard</a></div>`, null));
+}));
+
+app.get('/parent/attendance', ah(async (req, res) => {
+  if (!req.session.parent_user) return res.redirect('/parent/login');
+  const pu = req.session.parent_user;
+  const settings = (await pool.query('SELECT * FROM student_portal_settings WHERE tenant_id=$1', [pu.tenant_id])).rows[0];
+  if (!settings?.allow_attendance_view) return res.send(renderPage('Access Denied', '<div class="card" style="text-align:center;margin:40px"><h2>Attendance viewing is disabled</h2><a href="/parent/dashboard" class="btn">Back</a></div>', null));
+  const attendance = (await pool.query('SELECT * FROM attendance WHERE tenant_id=$1 AND student_id=$2 ORDER BY date DESC', [pu.tenant_id, pu.student_id])).rows;
+  const present = attendance.filter(a => a.status === 'present').length;
+  const total = attendance.length;
+  const rate = total > 0 ? Math.round(present / total * 100) : 0;
+  res.send(renderPage('Attendance', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:16px;border-radius:16px;margin-bottom:20px;color:white"><h1>Attendance Record</h1></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#059669">${present}/${total}</div><div>Days Present</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#0ea5e9">${rate}%</div><div>Attendance Rate</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#ef4444">${total - present}</div><div>Days Absent</div></div>
+    </div>
+    <div class="card"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Date</th><th>Status</th><th>Notes</th></tr></thead><tbody>${attendance.map(a => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + (a.date ? new Date(a.date).toLocaleDateString() : '') + '</td><td><span class="tag" style="background:' + (a.status === 'present' ? '#d1fae5;color:#065f46' : '#fee2e2;color:#991b1b') + '">' + esc(a.status) + '</span></td><td>' + esc(a.notes || '') + '</td></tr>').join('')}</tbody></table></div>
+    <div style="margin-top:16px"><a href="/parent/dashboard" class="btn">Back</a></div>`, null));
+}));
+
+app.get('/parent/fees', ah(async (req, res) => {
+  if (!req.session.parent_user) return res.redirect('/parent/login');
+  const pu = req.session.parent_user;
+  const settings = (await pool.query('SELECT * FROM student_portal_settings WHERE tenant_id=$1', [pu.tenant_id])).rows[0];
+  if (!settings?.allow_fees_view) return res.send(renderPage('Access Denied', '<div class="card" style="text-align:center;margin:40px"><h2>Fee viewing is disabled</h2><a href="/parent/dashboard" class="btn">Back</a></div>', null));
+  const fees = (await pool.query('SELECT * FROM fees WHERE tenant_id=$1 AND student_id=$2 ORDER BY created_at DESC', [pu.tenant_id, pu.student_id])).rows;
+  const total = fees.reduce((s, f) => s + Number(f.amount || 0), 0);
+  const paid = fees.filter(f => f.status === 'paid').reduce((s, f) => s + Number(f.amount || 0), 0);
+  const balance = total - paid;
+  res.send(renderPage('Fees', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:16px;border-radius:16px;margin-bottom:20px;color:white"><h1>Fee Statement</h1></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#64748b">UGX ${total.toLocaleString()}</div><div>Total Billed</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:#059669">UGX ${paid.toLocaleString()}</div><div>Total Paid</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:24px;font-weight:bold;color:${balance > 0 ? '#ef4444' : '#059669'}">UGX ${balance.toLocaleString()}</div><div>Balance</div></div>
+    </div>
+    <div class="card"><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Description</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody>${fees.map(f => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + esc(f.description || f.fee_type || '') + '</td><td>UGX ' + Number(f.amount).toLocaleString() + '</td><td><span class="tag" style="background:' + (f.status === 'paid' ? '#d1fae5;color:#065f46' : '#fef3c7;color:#92400e') + '">' + esc(f.status) + '</span></td><td>' + (f.created_at ? new Date(f.created_at).toLocaleDateString() : '') + '</td></tr>').join('')}</tbody></table></div>
+    <div style="margin-top:16px"><a href="/parent/dashboard" class="btn">Back</a></div>`, null));
+}));
+
+app.get('/parent/messages', ah(async (req, res) => {
+  if (!req.session.parent_user) return res.redirect('/parent/login');
+  const pu = req.session.parent_user;
+  const settings = (await pool.query('SELECT * FROM student_portal_settings WHERE tenant_id=$1', [pu.tenant_id])).rows[0];
+  if (!settings?.allow_communication) return res.send(renderPage('Access Denied', '<div class="card" style="text-align:center;margin:40px"><h2>Messaging is disabled</h2><a href="/parent/dashboard" class="btn">Back</a></div>', null));
+  const messages = (await pool.query('SELECT * FROM parent_messages WHERE parent_id=$1 ORDER BY created_at DESC', [pu.id])).rows;
+  res.send(renderPage('Messages', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#f472b6);padding:16px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Messages</h1>
+      <a href="/parent/messages/new" class="btn" style="background:white;color:#ec4899;margin-top:8px;display:inline-block">+ New Message</a>
+    </div>
+    <div class="card">
+      ${messages.length === 0 ? '<p class="muted">No messages yet.</p>' : messages.map(m => '<div style="border-bottom:1px solid #f1f5f9;padding:12px 0;cursor:pointer" onclick="this.querySelector(\'.msg-body\').style.display=this.querySelector(\'.msg-body\').style.display===\'none\'?\'block\':\'none\'"><div style="display:flex;justify-content:space-between"><strong>' + esc(m.subject) + '</strong><span class="muted">' + (m.from_parent ? '<span class="tag" style="background:#dbeafe;color:#1e40af">From You</span>' : '<span class="tag" style="background:#d1fae5;color:#065f46">From School</span>') + '</span></div><div class="msg-body" style="display:none;margin-top:8px;padding:12px;background:#f8fafc;border-radius:8px"><p>' + esc(m.message).replace(/\\n/g, '<br>') + '</p><span class="muted" style="font-size:12px">' + new Date(m.created_at).toLocaleString() + '</span></div></div>').join('')}
+    </div>
+    <div style="margin-top:16px"><a href="/parent/dashboard" class="btn">Back</a></div>`, null));
+}));
+
+app.get('/parent/messages/new', ah(async (req, res) => {
+  if (!req.session.parent_user) return res.redirect('/parent/login');
+  res.send(renderPage('New Message', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Send Message to School</h2>
+      <form method="POST" action="/parent/messages/send">
+        <div class="form-group"><label>Subject *</label><input name="subject" required class="form-control" placeholder="e.g. Question about upcoming exam"></div>
+        <div class="form-group"><label>Message *</label><textarea name="message" required class="form-control" rows="5" placeholder="Type your message here..."></textarea></div>
+        <button type="submit" class="btn" style="background:#ec4899;color:white">Send Message</button>
+        <a href="/parent/messages" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, null));
+}));
+
+app.post('/parent/messages/send', ah(async (req, res) => {
+  if (!req.session.parent_user) return res.redirect('/parent/login');
+  const { subject, message } = req.body;
+  await pool.query('INSERT INTO parent_messages(tenant_id,parent_id,subject,message,from_parent) VALUES($1,$2,$3,$4,true)', [req.session.parent_user.tenant_id, req.session.parent_user.id, subject, message]);
+  res.redirect('/parent/messages');
+}));
+
+app.get('/parent/logout', (req, res) => {
+  req.session.parent_user = null;
+  res.redirect('/parent/login');
+});
+
+// Admin messages view
+app.get('/parent-portal/messages', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const messages = (await pool.query(`SELECT pm.*, pa.parent_name, pa.student_id, s.name as student_name FROM parent_messages pm JOIN parent_accounts pa ON pa.id=pm.parent_id LEFT JOIN students s ON s.id=pa.student_id WHERE pm.tenant_id=$1 ORDER BY pm.created_at DESC LIMIT 100`, [tid])).rows;
+  const unread = messages.filter(m => m.from_parent && !m.is_read).length;
+  if (unread > 0) await pool.query('UPDATE parent_messages SET is_read=true WHERE tenant_id=$1 AND from_parent=true AND is_read=false', [tid]);
+  res.send(renderPage('Parent Messages', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#f472b6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Parent Messages</h1><p>Messages from parents</p>
+    </div>
+    <div class="card">
+      ${messages.length === 0 ? '<p class="muted">No messages yet.</p>' : messages.map(m => '<div style="border-bottom:1px solid #f1f5f9;padding:12px 0"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><div><strong>' + esc(m.subject) + '</strong><br><span class="muted">From: ' + esc(m.parent_name) + (m.student_name ? ' (Parent of ' + esc(m.student_name) + ')' : '') + '</span></div><div><span class="tag" style="background:' + (m.from_parent ? '#dbeafe;color:#1e40af' : '#d1fae5;color:#065f46') + '">' + (m.from_parent ? 'Parent' : 'School') + '</span><br><span class="muted" style="font-size:12px">' + new Date(m.created_at).toLocaleString() + '</span></div></div><div style="margin-top:8px;padding:8px;background:#f8fafc;border-radius:6px">' + esc(m.message).replace(/\\n/g, '<br>') + '</div>' +
+      (m.from_parent ? '<form method="POST" action="/parent-portal/messages/reply" style="margin-top:8px"><input type="hidden" name="parent_id" value="' + m.parent_id + '"><div style="display:flex;gap:8px"><input name="reply" class="form-control" placeholder="Type reply..." required><button type="submit" class="btn btn-sm" style="background:#ec4899;color:white">Reply</button></div></form>' : '') + '</div>').join('')}
+    </div>
+    <div style="margin-top:16px"><a href="/parent-portal" class="btn">Back to Portal</a></div>`, req.session.user));
+}));
+
+app.post('/parent-portal/messages/reply', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const { parent_id, reply } = req.body;
+  await pool.query('INSERT INTO parent_messages(tenant_id,parent_id,subject,message,from_parent) VALUES($1,$2,$3,$4,false)', [req.session.user.tenant_id, parent_id, 'Re: Your message', reply]);
+  res.redirect('/parent-portal/messages');
+}));
+
+// Send invitations (bulk SMS-like)
+app.get('/parent-portal/invitations', requireAuth, requireNotBanned, requireFeature('parent_portal'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const parents = (await pool.query('SELECT pa.*, s.name as student_name FROM parent_accounts pa LEFT JOIN students s ON s.id=pa.student_id WHERE pa.tenant_id=$1 AND pa.is_active=true', [tid])).rows;
+  res.send(renderPage('Send Invitations', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Parent Portal Invitations</h1><p>Share access codes with parents</p>
+    </div>
+    <div class="card">
+      <h3>Active Access Codes</h3>
+      <p class="muted">Share these codes with parents. They can log in at /parent/login</p>
+      ${parents.length === 0 ? '<p class="muted">No parent accounts to invite.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Parent</th><th>Student</th><th>Phone</th><th>Access Code</th></tr></thead><tbody>' + parents.map(p => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + esc(p.parent_name) + '</td><td>' + esc(p.student_name || '-') + '</td><td>' + esc(p.parent_phone || '-') + '</td><td><code style="font-size:16px;background:#f1f5f9;padding:4px 8px;border-radius:4px">' + esc(p.access_code) + '</code></td></tr>').join('') + '</tbody></table>'}
+    </div>
+    <div style="margin-top:16px"><a href="/parent-portal" class="btn">Back to Portal</a></div>`, req.session.user));
+}));
+
+// === NOTIFICATION BELL (floating icon for all authenticated users) ===
+app.use(requireAuth, ah(async (req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/ws/')) return next();
+  const unread = (await pool.query('SELECT COUNT(*) as cnt FROM notifications WHERE tenant_id=$1 AND (user_email=$2 OR user_email IS NULL) AND is_read=false', [req.session.user.tenant_id, req.session.user.email])).rows[0]?.cnt || 0;
+  const origSend = res.send.bind(res);
+  res.send = function(html) {
+    if (typeof html === 'string' && html.includes('</body>')) {
+      const bell = `<div style="position:fixed;bottom:20px;right:20px;z-index:99998">
+        <a href="/notifications" style="display:flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;text-decoration:none;font-size:24px;box-shadow:0 4px 12px rgba(99,102,241,0.4);transition:transform 0.2s" title="Notifications">${Number(unread) > 0 ? '<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:white;font-size:11px;font-weight:bold;min-width:20px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center">' + unread + '</span>' : ''}&#x1F514;</a>
+      </div>`;
+      html = html.replace('</body>', bell + '</body>');
+    }
+    origSend(html);
+  };
+  next();
+}));
+
+// ============================================================
+// FEATURE: NOTIFICATION CENTER
+// ============================================================
+app.get('/notifications', requireAuth, requireNotBanned, requireFeature('notification_center'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const allNotifs = (await pool.query(`SELECT * FROM notifications WHERE tenant_id=$1 AND (user_email=$2 OR user_email IS NULL) ORDER BY created_at DESC LIMIT 100`, [tid, req.session.user.email])).rows;
+  const unreadCount = allNotifs.filter(n => !n.is_read).length;
+  const types = ['info', 'success', 'warning', 'error', 'system'];
+  const typeColors = { info: '#0ea5e9', success: '#059669', warning: '#f59e0b', error: '#ef4444', system: '#6366f1' };
+  const typeIcons = { info: '&#x2139;&#xFE0F;', success: '&#x2705;', warning: '&#x26A0;&#xFE0F;', error: '&#x274C;', system: '&#x2699;&#xFE0F;' };
+  res.send(renderPage('Notifications', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Notifications</h1>
+      <p>${unreadCount > 0 ? 'You have ' + unreadCount + ' unread notification' + (unreadCount > 1 ? 's' : '') : 'All caught up!'}</p>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <a href="/notifications/mark-all-read" class="btn btn-sm" style="background:white;color:#6366f1">Mark All Read</a>
+        <a href="/notifications/preferences" class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:white">Preferences</a>
+        <a href="/notifications/send" class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:white">Send Notification</a>
+      </div>
+    </div>
+    ${allNotifs.length === 0 ? '<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px;margin-bottom:12px">&#x1F4ED;</div><h3>No notifications yet</h3><p class="muted">You\\' + "'ll see alerts for fees, attendance, reports, and system updates here.</p></div>'" : 
+      allNotifs.map(n => '<div class="card" style="border-left:4px solid ' + (typeColors[n.type] || '#64748b') + ';margin-bottom:8px;padding:16px;display:flex;gap:12px;align-items:flex-start;opacity:' + (n.is_read ? '0.7' : '1') + ';background:' + (n.is_read ? '#f8fafc' : '#fff') + ';cursor:pointer" ' + (n.link ? "onclick=\"window.location.href='" + esc(n.link) + "'\"" : '') + '>\n        <div style="font-size:24px">' + (typeIcons[n.type] || typeIcons.info) + '</div>\n        <div style="flex:1">\n          <div style="display:flex;justify-content:space-between;align-items:center"><strong>' + esc(n.title) + '</strong>' + (!n.is_read ? '<span class="tag" style="background:#dbeafe;color:#1e40af">New</span>' : '') + '</div>\n          <p style="margin:4px 0;color:#64748b;font-size:14px">' + esc(n.message || '') + '</p>\n          <span class="muted" style="font-size:12px">' + new Date(n.created_at).toLocaleString() + (n.user_email ? ' — for ' + esc(n.user_email) : ' — for everyone') + '</span>\n        </div>\n        ' + (!n.is_read ? '<a href="/notifications/' + n.id + '/read" class="btn btn-sm" style="white-space:nowrap">Mark Read</a>' : '') + '\n      </div>').join('')}
+  `, req.session.user));
+}));
+
+app.get('/notifications/:id/read', requireAuth, requireNotBanned, requireFeature('notification_center'), ah(async (req, res) => {
+  await pool.query('UPDATE notifications SET is_read=true WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/notifications');
+}));
+
+app.get('/notifications/mark-all-read', requireAuth, requireNotBanned, requireFeature('notification_center'), ah(async (req, res) => {
+  await pool.query('UPDATE notifications SET is_read=true WHERE tenant_id=$1 AND (user_email=$2 OR user_email IS NULL)', [req.session.user.tenant_id, req.session.user.email]);
+  res.redirect('/notifications');
+}));
+
+app.get('/notifications/send', requireAuth, requireNotBanned, requireFeature('notification_center'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const users = (await pool.query('SELECT email, role FROM users WHERE tenant_id=$1 AND approved=true', [tid])).rows;
+  res.send(renderPage('Send Notification', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Send Notification</h1><p>Send an in-app notification to users</p>
+    </div>
+    <div class="card" style="max-width:600px">
+      <form method="POST" action="/notifications/send">
+        <div class="form-group"><label>Title *</label><input name="title" required class="form-control" placeholder="e.g. Fee Reminder"></div>
+        <div class="form-group"><label>Message *</label><textarea name="message" required class="form-control" rows="3"></textarea></div>
+        <div class="form-group"><label>Type</label><select name="type" class="form-control"><option value="info">Info</option><option value="success">Success</option><option value="warning">Warning</option><option value="error">Error</option><option value="system">System</option></select></div>
+        <div class="form-group"><label>Send To</label><select name="send_to" class="form-control" id="sendToSelect" onchange="toggleUserSelect()">
+          <option value="all">All Users (tenant-wide)</option>
+          <option value="specific">Specific User</option>
+        </select></div>
+        <div class="form-group" id="userSelectGroup" style="display:none"><label>User Email</label><select name="user_email" class="form-control"><option value="">Select user</option>${users.map(u => '<option value="' + esc(u.email) + '">' + esc(u.email) + ' (' + esc(u.role) + ')</option>').join('')}</select></div>
+        <div class="form-group"><label>Link (optional)</label><input name="link" class="form-control" placeholder="e.g. /fees or /dashboard"></div>
+        <button type="submit" class="btn" style="background:#6366f1;color:white">Send Notification</button>
+        <a href="/notifications" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>
+    <script>function toggleUserSelect(){document.getElementById('userSelectGroup').style.display=document.getElementById('sendToSelect').value==='specific'?'block':'none'}</script>`, req.session.user));
+}));
+
+app.post('/notifications/send', requireAuth, requireNotBanned, requireFeature('notification_center'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { title, message, type, send_to, user_email, link } = req.body;
+  if (send_to === 'specific' && user_email) {
+    await pool.query('INSERT INTO notifications(tenant_id,user_email,title,message,type,link) VALUES($1,$2,$3,$4,$5,$6)', [tid, user_email, title, message, type || 'info', link || null]);
+  } else {
+    await pool.query('INSERT INTO notifications(tenant_id,title,message,type,link) VALUES($1,$2,$3,$4,$5)', [tid, title, message, type || 'info', link || null]);
+  }
+  await audit(req.session.user.email, 'notification_sent', 'Sent "' + title + '" to ' + (send_to === 'specific' ? user_email : 'all users'));
+  req.flash('success', 'Notification sent');
+  res.redirect('/notifications');
+}));
+
+app.get('/notifications/preferences', requireAuth, requireNotBanned, requireFeature('notification_center'), ah(async (req, res) => {
+  res.send(renderPage('Notification Preferences', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Notification Preferences</h1>
+    </div>
+    <div class="card" style="max-width:600px">
+      <h3>Notification Channels</h3>
+      <p class="muted">Configure how you receive notifications</p>
+      <div style="margin-top:16px">
+        ${[['In-App Notifications', 'Receive notifications in the bell icon', true], ['Email Notifications', 'Receive email alerts (requires SMTP setup)', false], ['SMS Notifications', 'Receive SMS alerts (requires Africa\'s Talking setup)', false]].map(([name, desc, enabled]) => '<div style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid #f1f5f9"><input type="checkbox" ' + (enabled ? 'checked' : '') + ' style="width:20px;height:20px" disabled><div><strong>' + name + '</strong><br><span class="muted">' + desc + '</span></div>' + (!enabled ? '<span class="tag" style="background:#fef3c7;color:#92400e">Coming Soon</span>' : '') + '</div>').join('')}
+      </div>
+      <h3 style="margin-top:24px">Notification Types</h3>
+      ${[['Fee Reminders', 'Get notified about upcoming fee deadlines'], ['Attendance Alerts', 'Get notified when your child is absent'], ['Exam Results', 'Get notified when exam results are published'], ['System Updates', 'Get notified about platform updates and maintenance'], ['Messages', 'Get notified when you receive a new message']].map(([name, desc]) => '<div style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid #f1f5f9"><input type="checkbox" checked style="width:20px;height:20px"><div><strong>' + name + '</strong><br><span class="muted">' + desc + '</span></div></div>').join('')}
+      <button class="btn" style="background:#6366f1;color:white;margin-top:16px" disabled>Save Preferences (Coming Soon)</button>
+    </div>
+    <div style="margin-top:16px"><a href="/notifications" class="btn">Back to Notifications</a></div>`, req.session.user));
+}));
+
+// ============================================================
+// FEATURE: ADVANCED ANALYTICS DASHBOARD V2
+// ============================================================
+app.get('/analytics-v2', requireAuth, requireNotBanned, requireFeature('advanced_analytics_v2'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const tt = req.session.user.tenant_type;
+  const isSchool = tt === 'school';
+  const isChurch = tt === 'church';
+  const isBusiness = tt === 'business';
+  const isClinic = tt === 'clinic' || tt === 'organization';
+  // Get tenant stats
+  const totalStudents = isSchool ? (await pool.query('SELECT COUNT(*) as cnt FROM students WHERE tenant_id=$1', [tid])).rows[0].cnt : 0;
+  const totalMembers = isChurch ? (await pool.query('SELECT COUNT(*) as cnt FROM church_members WHERE tenant_id=$1', [tid])).rows[0].cnt : 0;
+  const totalStaff = (await pool.query('SELECT COUNT(*) as cnt FROM staff WHERE tenant_id=$1', [tid])).rows[0].cnt;
+  const totalRevenue = (await pool.query("SELECT COALESCE(SUM(amount),0) as total FROM income WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'", [tid])).rows[0].total;
+  const totalExpenses = (await pool.query("SELECT COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'", [tid])).rows[0].total;
+  const netIncome = Number(totalRevenue) - Number(totalExpenses);
+  // Revenue by month (last 12 months)
+  const monthlyRevenue = (await pool.query("SELECT TO_CHAR(created_at,'YYYY-MM') as month, COALESCE(SUM(amount),0) as total FROM income WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '12 months' GROUP BY month ORDER BY month", [tid])).rows;
+  const monthlyExpenses = (await pool.query("SELECT TO_CHAR(created_at,'YYYY-MM') as month, COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '12 months' GROUP BY month ORDER BY month", [tid])).rows;
+  // Build chart data
+  const allMonths = [...new Set([...monthlyRevenue.map(r => r.month), ...monthlyExpenses.map(r => r.month)])].sort();
+  const revenueData = allMonths.map(m => monthlyRevenue.find(r => r.month === m)?.total || 0);
+  const expenseData = allMonths.map(m => monthlyExpenses.find(r => r.month === m)?.total || 0);
+  const barColors = revenueData.map((r, i) => r >= expenseData[i] ? '#059669' : '#ef4444');
+  // Additional KPIs based on portal type
+  let extraKPIs = '';
+  if (isSchool) {
+    const attendanceRate = (await pool.query("SELECT COUNT(*) FILTER (WHERE status='present') as present, COUNT(*) as total FROM attendance WHERE tenant_id=$1 AND date >= CURRENT_DATE - INTERVAL '7 days'", [tid])).rows[0];
+    const feeCollected = (await pool.query("SELECT COALESCE(SUM(amount_paid),0) as total FROM fees WHERE tenant_id=$1 AND status='paid'", [tid])).rows[0].total;
+    const feeOutstanding = (await pool.query("SELECT COALESCE(SUM(amount) - SUM(amount_paid),0) as total FROM fees WHERE tenant_id=$1 AND status != 'paid'", [tid])).rows[0].total;
+    extraKPIs = `
+      <div class="card" style="text-align:center;border-left:4px solid #0ea5e9"><div style="font-size:24px;font-weight:bold;color:#0ea5e9">${totalStudents}</div><div>Total Students</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #8b5cf6">${attendanceRate.total > 0 ? Math.round(Number(attendanceRate.present) / Number(attendanceRate.total) * 100) : 0}%</div><div>Weekly Attendance</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #059669"><div style="font-size:20px;font-weight:bold;color:#059669">UGX ${Number(feeCollected).toLocaleString()}</div><div>Fees Collected</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #ef4444"><div style="font-size:20px;font-weight:bold;color:#ef4444">UGX ${Number(feeOutstanding).toLocaleString()}</div><div>Outstanding</div></div>`;
+  } else if (isChurch) {
+    const totalDonations = (await pool.query("SELECT COALESCE(SUM(amount),0) as total FROM donations WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'", [tid])).rows[0].total;
+    const activeCellGroups = (await pool.query('SELECT COUNT(*) as cnt FROM cell_groups WHERE tenant_id=$1', [tid])).rows[0].cnt;
+    extraKPIs = `
+      <div class="card" style="text-align:center;border-left:4px solid #8b5cf6"><div style="font-size:24px;font-weight:bold;color:#8b5cf6">${totalMembers}</div><div>Total Members</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #059669"><div style="font-size:20px;font-weight:bold;color:#059669">UGX ${Number(totalDonations).toLocaleString()}</div><div>Donations (30d)</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #0ea5e9"><div style="font-size:24px;font-weight:bold;color:#0ea5e9">${activeCellGroups}</div><div>Cell Groups</div></div>`;
+  } else if (isBusiness) {
+    const totalSales = (await pool.query("SELECT COALESCE(SUM(total_amount),0) as total FROM sales WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'", [tid])).rows[0].total;
+    const totalCustomers = (await pool.query('SELECT COUNT(*) as cnt FROM customers WHERE tenant_id=$1', [tid])).rows[0].cnt;
+    extraKPIs = `
+      <div class="card" style="text-align:center;border-left:4px solid #0ea5e9"><div style="font-size:24px;font-weight:bold;color:#0ea5e9">${totalCustomers}</div><div>Customers</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #059669"><div style="font-size:20px;font-weight:bold;color:#059669">UGX ${Number(totalSales).toLocaleString()}</div><div>Sales (30d)</div></div>`;
+  }
+  // Category breakdown
+  const expenseByCategory = (await pool.query("SELECT category, COALESCE(SUM(amount),0) as total FROM expenses WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days' GROUP BY category ORDER BY total DESC LIMIT 10", [tid])).rows;
+  const incomeByCategory = (await pool.query("SELECT COALESCE(category,'Other') as category, COALESCE(SUM(amount),0) as total FROM income WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days' GROUP BY category ORDER BY total DESC LIMIT 10", [tid])).rows;
+  // Simple bar chart using CSS (no external lib needed)
+  const maxRevenue = Math.max(...revenueData, 1);
+  const barChart = allMonths.map((m, i) => {
+    const h = Math.max(2, (revenueData[i] / maxRevenue) * 150);
+    return '<div style="text-align:center;flex:1;min-width:40px"><div style="background:linear-gradient(180deg,#059669,#10b981);height:' + h + 'px;border-radius:4px 4px 0 0;margin:0 auto;max-width:30px" title="Revenue: UGX ' + Number(revenueData[i]).toLocaleString() + '"></div><div style="font-size:10px;color:#64748b;margin-top:4px">' + m.substring(5) + '</div></div>';
+  }).join('');
+  const pieData = expenseByCategory.slice(0, 6);
+  const pieColors = ['#6366f1','#059669','#f59e0b','#ef4444','#0ea5e9','#8b5cf6'];
+  const pieTotal = pieData.reduce((s, d) => s + Number(d.total), 0) || 1;
+  // Build conic gradient pie
+  let cumPercent = 0;
+  const conicStops = pieData.map((d, i) => {
+    const pct = (Number(d.total) / pieTotal * 100);
+    const start = cumPercent;
+    cumPercent += pct;
+    return pieColors[i % pieColors.length] + ' ' + start + '% ' + cumPercent + '%';
+  }).join(', ');
+  res.send(renderPage('Analytics Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Analytics Dashboard</h1>
+      <p>Overview of your organization performance</p>
+      <a href="/analytics-v2/export" class="btn" style="background:white;color:#6366f1;margin-top:8px;display:inline-block">Export PDF</a>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+      <div class="card" style="text-align:center;border-left:4px solid #059669"><div style="font-size:24px;font-weight:bold;color:#059669">UGX ${Number(totalRevenue).toLocaleString()}</div><div>Revenue (30d)</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #ef4444"><div style="font-size:24px;font-weight:bold;color:#ef4444">UGX ${Number(totalExpenses).toLocaleString()}</div><div>Expenses (30d)</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid ${netIncome >= 0 ? '#059669' : '#ef4444'}"><div style="font-size:24px;font-weight:bold;color:${netIncome >= 0 ? '#059669' : '#ef4444'}">UGX ${netIncome.toLocaleString()}</div><div>Net Income (30d)</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #0ea5e9"><div style="font-size:24px;font-weight:bold;color:#0ea5e9">${totalStaff}</div><div>Staff</div></div>
+      ${extraKPIs}
+    </div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px">
+      <div class="card">
+        <h3>Revenue Trend (12 Months)</h3>
+        <div style="display:flex;align-items:flex-end;gap:4px;height:180px;padding-top:10px">${barChart}</div>
+        <div style="margin-top:8px;display:flex;gap:16px;justify-content:center"><span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;background:#059669;border-radius:2px;margin-right:4px"></span>Revenue</span></div>
+      </div>
+      <div class="card">
+        <h3>Expense Breakdown (30d)</h3>
+        ${pieData.length > 0 ? '<div style="width:120px;height:120px;border-radius:50%;background:conic-gradient(' + conicStops + ');margin:12px auto"></div>' +
+          '<div style="margin-top:8px">' + pieData.map((d, i) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px"><div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:' + pieColors[i % pieColors.length] + ';display:inline-block"></span>' + esc(d.category || 'Uncategorized') + '</div><span>UGX ' + Number(d.total).toLocaleString() + '</span></div>').join('') + '</div>' : '<p class="muted">No expense data.</p>'}
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <h3>Top Income Sources (30d)</h3>
+        ${incomeByCategory.length === 0 ? '<p class="muted">No income data.</p>' : '<div style="margin-top:8px">' + incomeByCategory.map((d, i) => '<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px"><span>' + esc(d.category) + '</span><span>UGX ' + Number(d.total).toLocaleString() + '</span></div><div style="background:#e2e8f0;height:8px;border-radius:4px"><div style="background:#059669;height:8px;border-radius:4px;width:' + Math.round(Number(d.total) / (Number(incomeByCategory[0].total) || 1) * 100) + '%"></div></div></div>').join('') + '</div>'}
+      </div>
+      <div class="card">
+        <h3>Top Expense Categories (30d)</h3>
+        ${expenseByCategory.length === 0 ? '<p class="muted">No expense data.</p>' : '<div style="margin-top:8px">' + expenseByCategory.map((d, i) => '<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px"><span>' + esc(d.category || 'Uncategorized') + '</span><span>UGX ' + Number(d.total).toLocaleString() + '</span></div><div style="background:#e2e8f0;height:8px;border-radius:4px"><div style="background:#ef4444;height:8px;border-radius:4px;width:' + Math.round(Number(d.total) / (Number(expenseByCategory[0].total) || 1) * 100) + '%"></div></div></div>').join('') + '</div>'}
+      </div>
+    </div>`, req.session.user));
+}));
+
+app.get('/analytics-v2/export', requireAuth, requireNotBanned, requireFeature('advanced_analytics_v2'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const income = (await pool.query('SELECT * FROM income WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100', [tid])).rows;
+  const expenses = (await pool.query('SELECT * FROM expenses WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100', [tid])).rows;
+  const totalIncome = income.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const totalExpenses = expenses.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const html = renderPage('Analytics Report', `
+    <div style="padding:20px;max-width:800px;margin:0 auto">
+      <h1 style="text-align:center">Financial Report</h1>
+      <p style="text-align:center;color:#64748b">Generated: ${new Date().toLocaleDateString()}</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0">
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:16px;text-align:center"><h3>Total Income</h3><p style="font-size:24px;font-weight:bold;color:#059669">UGX ${totalIncome.toLocaleString()}</p></div>
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:16px;text-align:center"><h3>Total Expenses</h3><p style="font-size:24px;font-weight:bold;color:#ef4444">UGX ${totalExpenses.toLocaleString()}</p></div>
+      </div>
+      <h2>Income Records (${income.length})</h2>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Date</th><th>Description</th><th>Amount</th></tr></thead><tbody>${income.map(r => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + (r.created_at ? new Date(r.created_at).toLocaleDateString() : '') + '</td><td>' + esc(r.description || r.category || '') + '</td><td>UGX ' + Number(r.amount).toLocaleString() + '</td></tr>').join('')}</tbody></table>
+      <h2>Expense Records (${expenses.length})</h2>
+      <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Date</th><th>Description</th><th>Amount</th></tr></thead><tbody>${expenses.map(r => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + (r.created_at ? new Date(r.created_at).toLocaleDateString() : '') + '</td><td>' + esc(r.description || r.category || '') + '</td><td>UGX ' + Number(r.amount).toLocaleString() + '</td></tr>').join('')}</tbody></table>
+      <p style="text-align:center;margin-top:20px;font-size:12px;color:#94a3b8">Generated by Comfort Platform</p>
+    </div>`, req.session.user);
+  res.type('html').send(html);
+}));
+
+// ============================================================
+// FEATURE: DOCUMENT & RECEIPT BUILDER
+// ============================================================
+app.get('/receipts', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const templates = (await pool.query('SELECT * FROM document_templates WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+  const docs = (await pool.query('SELECT gd.*, dt.name as template_name FROM generated_documents gd LEFT JOIN document_templates dt ON dt.id=gd.template_id WHERE gd.tenant_id=$1 ORDER BY gd.created_at DESC LIMIT 50', [tid])).rows;
+  res.send(renderPage('Document & Receipt Builder', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Document & Receipt Builder</h1>
+      <p>Create professional receipts, invoices, and custom documents</p>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/receipts/templates" class="btn" style="background:white;color:#f59e0b">Templates</a>
+        <a href="/receipts/generate" class="btn" style="background:white;color:#f59e0b">Generate Document</a>
+        <a href="/receipts/history" class="btn" style="background:white;color:#f59e0b">History (${docs.length})</a>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#f59e0b">${templates.length}</div><div style="color:#64748b">Templates</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#059669">${docs.length}</div><div style="color:#64748b">Documents Generated</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#0ea5e9">${docs.filter(d => d.status === 'final').length}</div><div style="color:#64748b">Finalized</div></div>
+    </div>
+    <div class="card">
+      <h3>Recent Documents</h3>
+      ${docs.length === 0 ? '<p class="muted">No documents generated yet.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Number</th><th>Type</th><th>Recipient</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>' + docs.slice(0, 20).map(d => '<tr style="border-bottom:1px solid #f1f5f9"><td><strong>' + esc(d.doc_number || '#' + d.id) + '</strong></td><td>' + esc(d.template_name || d.doc_type || 'Custom') + '</td><td>' + esc(d.recipient_name || '-') + '</td><td>' + (d.amount ? 'UGX ' + Number(d.amount).toLocaleString() : '-') + '</td><td><span class="tag" style="background:' + (d.status === 'final' ? '#d1fae5;color:#065f46' : '#fef3c7;color:#92400e') + '">' + esc(d.status) + '</span></td><td>' + new Date(d.created_at).toLocaleDateString() + '</td><td><a href="/receipts/' + d.id + '/view" class="btn btn-sm">View</a> <a href="/receipts/' + d.id + '/finalize" class="btn btn-sm">Finalize</a></td></tr>').join('') + '</tbody></table>'}
+    </div>`, req.session.user));
+}));
+
+app.get('/receipts/templates', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const templates = (await pool.query('SELECT * FROM document_templates WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+  res.send(renderPage('Document Templates', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Document Templates</h1><a href="/receipts/templates/new" class="btn" style="background:white;color:#f59e0b;margin-top:8px;display:inline-block">+ New Template</a>
+    </div>
+    ${templates.length === 0 ? '<div class="card" style="text-align:center;padding:40px"><h3>No templates yet</h3><p class="muted">Create your first template to start generating professional documents.</p><a href="/receipts/templates/new" class="btn">Create Template</a></div>' :
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">' + templates.map(t => '<div class="card" style="border:2px solid ' + (t.is_default ? '#f59e0b' : '#e2e8f0') + ';border-radius:12px;padding:20px"><h3>' + esc(t.name) + (t.is_default ? ' <span class="tag" style="background:#fef3c7;color:#92400e">Default</span>' : '') + '</h3><p class="muted">Type: ' + esc(t.template_type) + '</p><p style="font-size:13px">Prefix: ' + esc(t.auto_number_prefix || 'DOC') + ' | Next #: ' + t.next_number + '</p><div style="margin-top:12px"><a href="/receipts/templates/' + t.id + '/edit" class="btn btn-sm">Edit</a> <a href="/receipts/templates/' + t.id + '/default" class="btn btn-sm">' + (t.is_default ? 'Unset Default' : 'Set Default') + '</a> <a href="/receipts/templates/' + t.id + '/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete?\')">Delete</a></div></div>').join('') + '</div>'}
+    <div style="margin-top:20px"><a href="/receipts" class="btn">Back</a></div>`, req.session.user));
+}));
+
+app.get('/receipts/templates/new', requireAuth, requireNotBanned, requireFeature('receipt_builder'), (req, res) => {
+  res.send(renderPage('New Template', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:24px;border-radius:16px;margin-bottom:20px;color:white"><h1>New Document Template</h1></div>
+    <div class="card" style="max-width:600px">
+      <form method="POST" action="/receipts/templates/save">
+        <div class="form-group"><label>Template Name *</label><input name="name" required class="form-control" placeholder="e.g. School Fee Receipt"></div>
+        <div class="form-group"><label>Template Type</label><select name="template_type" class="form-control"><option value="receipt">Receipt</option><option value="invoice">Invoice</option><option value="report">Report</option><option value="letter">Letter</option><option value="certificate">Certificate</option><option value="custom">Custom</option></select></div>
+        <div class="form-group"><label>Header Text</label><textarea name="header_text" class="form-control" rows="2" placeholder="Organization name, address, etc."></textarea></div>
+        <div class="form-group"><label>Footer Text</label><textarea name="footer_text" class="form-control" rows="2" placeholder="Thank you message, contact info"></textarea></div>
+        <div class="form-group"><label>Document Number Prefix</label><input name="auto_number_prefix" class="form-control" value="RCP" placeholder="e.g. RCP, INV, REP"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 0"><input type="checkbox" name="show_stamp" id="show_stamp"><label for="show_stamp">Show approval stamp</label></div>
+        <div class="form-group" id="stamp_text_group"><label>Stamp Text</label><input name="stamp_text" class="form-control" value="APPROVED" placeholder="e.g. APPROVED, PAID, ISSUED"></div>
+        <button type="submit" class="btn" style="background:#f59e0b;color:white">Create Template</button>
+        <a href="/receipts/templates" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, req.session.user));
+});
+
+app.post('/receipts/templates/save', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { name, template_type, header_text, footer_text, auto_number_prefix, show_stamp, stamp_text } = req.body;
+  await pool.query('INSERT INTO document_templates(tenant_id,name,template_type,header_text,footer_text,auto_number_prefix,show_stamp,stamp_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid, name, template_type || 'receipt', header_text || '', footer_text || '', auto_number_prefix || 'DOC', show_stamp === 'on', stamp_text || '']);
+  await audit(req.session.user.email, 'template_created', 'Created template: ' + name);
+  req.flash('success', 'Template created');
+  res.redirect('/receipts/templates');
+}));
+
+app.get('/receipts/templates/:id/edit', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const t = (await pool.query('SELECT * FROM document_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  if (!t) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Template', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:24px;border-radius:16px;margin-bottom:20px;color:white"><h1>Edit: ${esc(t.name)}</h1></div>
+    <div class="card" style="max-width:600px">
+      <form method="POST" action="/receipts/templates/${t.id}/update">
+        <div class="form-group"><label>Template Name *</label><input name="name" required class="form-control" value="${esc(t.name)}"></div>
+        <div class="form-group"><label>Template Type</label><select name="template_type" class="form-control">${['receipt','invoice','report','letter','certificate','custom'].map(tp => '<option' + (tp === t.template_type ? ' selected' : '') + '>' + tp + '</option>').join('')}</select></div>
+        <div class="form-group"><label>Header Text</label><textarea name="header_text" class="form-control" rows="2">${esc(t.header_text || '')}</textarea></div>
+        <div class="form-group"><label>Footer Text</label><textarea name="footer_text" class="form-control" rows="2">${esc(t.footer_text || '')}</textarea></div>
+        <div class="form-group"><label>Document Number Prefix</label><input name="auto_number_prefix" class="form-control" value="${esc(t.auto_number_prefix || 'DOC')}"></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 0"><input type="checkbox" name="show_stamp" id="show_stamp" ${t.show_stamp ? 'checked' : ''}><label for="show_stamp">Show approval stamp</label></div>
+        <div class="form-group"><label>Stamp Text</label><input name="stamp_text" class="form-control" value="${esc(t.stamp_text || '')}"></div>
+        <button type="submit" class="btn" style="background:#f59e0b;color:white">Update Template</button>
+        <a href="/receipts/templates" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, req.session.user));
+}));
+
+app.post('/receipts/templates/:id/update', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { name, template_type, header_text, footer_text, auto_number_prefix, show_stamp, stamp_text } = req.body;
+  await pool.query('UPDATE document_templates SET name=$1,template_type=$2,header_text=$3,footer_text=$4,auto_number_prefix=$5,show_stamp=$6,stamp_text=$7 WHERE id=$8 AND tenant_id=$9', [name, template_type||'receipt', header_text||'', footer_text||'', auto_number_prefix||'DOC', show_stamp==='on', stamp_text||'', req.params.id, tid]);
+  res.redirect('/receipts/templates');
+}));
+
+app.get('/receipts/templates/:id/default', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const t = (await pool.query('SELECT is_default FROM document_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  if (!t) return res.status(404).send('Not found');
+  await pool.query('UPDATE document_templates SET is_default=false WHERE tenant_id=$1', [tid]);
+  await pool.query('UPDATE document_templates SET is_default=true WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
+  res.redirect('/receipts/templates');
+}));
+
+app.get('/receipts/templates/:id/delete', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  await pool.query('DELETE FROM document_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/receipts/templates');
+}));
+
+// Generate document
+app.get('/receipts/generate', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const templates = (await pool.query('SELECT * FROM document_templates WHERE tenant_id=$1 ORDER BY is_default DESC, name', [tid])).rows;
+  const selected = templates.find(t => t.is_default) || templates[0];
+  res.send(renderPage('Generate Document', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:24px;border-radius:16px;margin-bottom:20px;color:white"><h1>Generate Document</h1></div>
+    <div class="card" style="max-width:700px">
+      <form method="POST" action="/receipts/generate-save">
+        <div class="form-group"><label>Template *</label><select name="template_id" required class="form-control">${templates.map(t => '<option value="' + t.id + '"' + (selected && t.id === selected.id ? ' selected' : '') + '>' + esc(t.name) + ' (' + esc(t.template_type) + ')</option>').join('')}</select></div>
+        <div class="form-group"><label>Document Type</label><input name="doc_type" class="form-control" value="receipt" placeholder="receipt, invoice, etc."></div>
+        <div class="form-group"><label>Title *</label><input name="title" required class="form-control" placeholder="e.g. Fee Receipt for Term 1 2025"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group"><label>Recipient Name *</label><input name="recipient_name" required class="form-control"></div>
+          <div class="form-group"><label>Amount (UGX)</label><input name="amount" type="number" class="form-control" value="0"></div>
+        </div>
+        <div class="form-group"><label>Recipient Email</label><input name="recipient_email" class="form-control"></div>
+        <div class="form-group"><label>Line Items (JSON array or leave blank)</label><textarea name="items_json" class="form-control" rows="4" placeholder='[{"description":"Tuition Fee","amount":500000},{"description":"Uniform","amount":50000}]'></textarea></div>
+        <div class="form-group"><label>Additional Notes</label><textarea name="notes" class="form-control" rows="2"></textarea></div>
+        <button type="submit" class="btn" style="background:#f59e0b;color:white">Generate Document</button>
+        <a href="/receipts" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>`, req.session.user));
+}));
+
+app.post('/receipts/generate-save', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { template_id, doc_type, title, recipient_name, recipient_email, amount, items_json, notes } = req.body;
+  const template = (await pool.query('SELECT * FROM document_templates WHERE id=$1 AND tenant_id=$2', [template_id, tid])).rows[0];
+  const docNumber = (template?.auto_number_prefix || 'DOC') + '-' + String(template?.next_number || 1).padStart(4, '0');
+  let items = [];
+  try { items = JSON.parse(items_json || '[]'); } catch(e) { items = []; }
+  const content = { items, notes: notes || '' };
+  await pool.query('INSERT INTO generated_documents(tenant_id,template_id,doc_number,doc_type,title,content,recipient_name,recipient_email,amount,generated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [tid, template_id || null, docNumber, doc_type || 'receipt', title, JSON.stringify(content), recipient_name, recipient_email || null, amount || 0, req.session.user.email]);
+  if (template) await pool.query('UPDATE document_templates SET next_number = next_number + 1 WHERE id=$1', [template.id]);
+  await audit(req.session.user.email, 'document_generated', 'Generated ' + docNumber + ': ' + title);
+  req.flash('success', 'Document generated: ' + docNumber);
+  res.redirect('/receipts');
+}));
+
+app.get('/receipts/:id/view', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const doc = (await pool.query('SELECT gd.*, dt.header_text, dt.footer_text, dt.show_stamp, dt.stamp_text, dt.name as template_name FROM generated_documents gd LEFT JOIN document_templates dt ON dt.id=gd.template_id WHERE gd.id=$1 AND gd.tenant_id=$2', [req.params.id, tid])).rows[0];
+  if (!doc) return res.status(404).send('Document not found');
+  const tenant = (await pool.query('SELECT name, email, type FROM tenants WHERE id=$1', [tid])).rows[0];
+  let content = {};
+  try { content = typeof doc.content === 'string' ? JSON.parse(doc.content) : (doc.content || {}); } catch(e) {}
+  const items = content.items || [];
+  const stampHTML = doc.show_stamp ? '<div style="border:3px solid #059669;color:#059669;padding:12px 24px;border-radius:8px;display:inline-block;transform:rotate(-12deg);font-weight:bold;font-size:18px;opacity:0.7;margin-top:20px">' + esc(doc.stamp_text || 'APPROVED') + '</div>' : '';
+  res.send(renderPage(doc.doc_number || 'Document', `
+    <div style="max-width:700px;margin:20px auto;border:1px solid #e2e8f0;border-radius:12px;padding:40px;background:white;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
+      ${doc.header_text ? '<div style="text-align:center;border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:20px"><h2>' + esc(doc.header_text).replace(/\\n/g, '<br>') + '</h2><p class="muted">' + esc(tenant?.name || '') + '</p></div>' : '<div style="text-align:center;border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:20px"><h2>' + esc(tenant?.name || '') + '</h2></div>'}
+      <div style="display:flex;justify-content:space-between;margin-bottom:20px">
+        <div><strong>Document #:</strong> ${esc(doc.doc_number || '#' + doc.id)}</div>
+        <div><strong>Date:</strong> ${new Date(doc.created_at).toLocaleDateString()}</div>
+      </div>
+      <h3 style="text-align:center;margin-bottom:16px">${esc(doc.title)}</h3>
+      <div style="margin-bottom:16px"><strong>Recipient:</strong> ${esc(doc.recipient_name || 'N/A')}</div>
+      ${items.length > 0 ? '<table style="width:100%;border-collapse:collapse;margin-bottom:16px"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Description</th><th style="text-align:right">Amount</th></tr></thead><tbody>' + items.map(item => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + esc(item.description || '') + '</td><td style="text-align:right">UGX ' + Number(item.amount || 0).toLocaleString() + '</td></tr>').join('') + '<tr style="border-top:2px solid #1e293b"><td><strong>TOTAL</strong></td><td style="text-align:right"><strong>UGX ${Number(doc.amount || items.reduce((s,i) => s + Number(i.amount||0), 0)).toLocaleString()}</strong></td></tr></tbody></table>' : '<div style="text-align:center;font-size:24px;font-weight:bold;color:#1e293b;margin:20px 0">UGX ' + Number(doc.amount || 0).toLocaleString() + '</div>'}
+      ${content.notes ? '<div style="margin-top:16px;padding:12px;background:#f8fafc;border-radius:8px"><strong>Notes:</strong> ' + esc(content.notes) + '</div>' : ''}
+      <div style="text-align:center;margin-top:24px">${stampHTML}</div>
+      ${doc.footer_text ? '<div style="text-align:center;border-top:1px solid #e2e8f0;padding-top:12px;margin-top:24px;font-size:13px;color:#64748b">' + esc(doc.footer_text).replace(/\\n/g, '<br>') + '</div>' : ''}
+      <div style="text-align:center;margin-top:12px;font-size:11px;color:#94a3b8">Generated by Comfort Platform</div>
+    </div>
+    <div style="text-align:center;margin-top:16px">
+      <a href="/receipts" class="btn">Back to Documents</a>
+      ${doc.status !== 'final' ? '<a href="/receipts/' + doc.id + '/finalize" class="btn" style="background:#059669;color:white;margin-left:8px">Finalize Document</a>' : ''}
+    </div>`, req.session.user));
+}));
+
+app.get('/receipts/:id/finalize', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  await pool.query('UPDATE generated_documents SET status=$1 WHERE id=$2 AND tenant_id=$3', ['final', req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'document_finalized', 'Finalized document #' + req.params.id);
+  req.flash('success', 'Document finalized');
+  res.redirect('/receipts/' + req.params.id + '/view');
+}));
+
+app.get('/receipts/history', requireAuth, requireNotBanned, requireFeature('receipt_builder'), ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const docs = (await pool.query('SELECT gd.*, dt.name as template_name FROM generated_documents gd LEFT JOIN document_templates dt ON dt.id=gd.template_id WHERE gd.tenant_id=$1 ORDER BY gd.created_at DESC LIMIT 200', [tid])).rows;
+  res.send(renderPage('Document History', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:24px;border-radius:16px;margin-bottom:20px;color:white"><h1>Document History</h1></div>
+    <div class="card">
+      ${docs.length === 0 ? '<p class="muted">No documents generated yet.</p>' : '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Number</th><th>Type</th><th>Title</th><th>Recipient</th><th>Amount</th><th>Status</th><th>Generated By</th><th>Date</th><th>Actions</th></tr></thead><tbody>' + docs.map(d => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + esc(d.doc_number || '#' + d.id) + '</td><td>' + esc(d.template_name || d.doc_type || '') + '</td><td>' + esc(d.title) + '</td><td>' + esc(d.recipient_name || '-') + '</td><td>' + (d.amount ? 'UGX ' + Number(d.amount).toLocaleString() : '-') + '</td><td><span class="tag" style="background:' + (d.status === 'final' ? '#d1fae5;color:#065f46' : '#fef3c7;color:#92400e') + '">' + esc(d.status) + '</span></td><td>' + esc(d.generated_by || '') + '</td><td>' + new Date(d.created_at).toLocaleDateString() + '</td><td><a href="/receipts/' + d.id + '/view" class="btn btn-sm">View</a></td></tr>').join('') + '</tbody></table>'}
+    </div>
+    <div style="margin-top:16px"><a href="/receipts" class="btn">Back</a></div>`, req.session.user));
 }));
 
 // === FLOATING DEV BAR (shown when impersonating) ===
