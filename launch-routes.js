@@ -2550,9 +2550,11 @@ async function syncOfflineData() {
   // NOTE: BASE_URL and getStructuredData() are defined in Section 1.5 above
 
   // robots.txt — tells search engines what to crawl
+  // NOTE: Static robots.txt in public/robots.txt is served first by express.static.
+  // This dynamic route is a fallback in case the static file is missing.
   app.get('/robots.txt', (req, res) => {
     res.setHeader('Content-Type', 'text/plain');
-    res.set('Cache-Control', 'no-cache');
+    res.set('Cache-Control', 'public, max-age=86400');
     res.send(`User-agent: *
 Allow: /
 
