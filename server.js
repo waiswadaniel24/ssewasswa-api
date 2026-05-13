@@ -50,9 +50,18 @@ let redisCache = null;
 try {
   const IORedis = require('ioredis');
   if (process.env.REDIS_URL) {
-    redisCache = new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: 3, retryDelayOnFailover: 100 });
-    redisCache.on('error', (err) => console.warn('[Redis Cache]', err.message));
-    console.log('[Redis Cache] Connected for query caching');
+    redisCache = new IORedis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: 1,
+      retryDelayOnFailover: 100,
+      retryStrategy(times) { return null; }, // Stop reconnecting after first failure
+      enableOfflineQueue: false,
+      lazyConnect: true
+    });
+    redisCache.on('error', () => {}); // Suppress connection errors silently
+    redisCache.connect().then(() => console.log('[Redis Cache] Connected for query caching')).catch(() => {
+      console.log('[Redis Cache] Connection failed, running without cache');
+      redisCache = null;
+    });
   }
 } catch (e) { console.warn('[Redis Cache] Not available:', e.message); }
 
