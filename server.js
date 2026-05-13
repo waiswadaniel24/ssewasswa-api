@@ -418,7 +418,7 @@ const sendEmail = async (to, subject, html) => {
     return true;
   } catch (e) { console.warn('Email failed:', e.message); return false; }
 };
-const queueEmail = (tenantId, to, subject, body) => pool.query('INSERT INTO email_queue(tenant_id,to_email,subject,body) VALUES($1,$2,$3,$4)', [tenantId, to, subject, body]).catch(e => console.error('[DB Error]', e.message));
+const queueEmail = (tenantId, to, subject, body, isHtml = true) => pool.query('INSERT INTO email_queue(tenant_id,to_email,subject,body,html) VALUES($1,$2,$3,$4,$5)', [tenantId, to, subject, body, isHtml]).catch(e => console.error('[DB Error]', e.message));
 
 // SMS helper
 const sendSMS = async (phone, message) => {
@@ -977,7 +977,9 @@ const migrations = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS backup_codes TEXT[]`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id INTEGER`,
   `CREATE TABLE IF NOT EXISTS trusted_devices (id SERIAL PRIMARY KEY, user_id INTEGER, device_hash TEXT, name TEXT, last_used TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS email_queue (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, to_email TEXT NOT NULL, subject TEXT, body TEXT, status TEXT DEFAULT 'queued', sent_at TIMESTAMPTZ, error TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS email_queue (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, to_email TEXT NOT NULL, subject TEXT, body TEXT, html BOOLEAN DEFAULT false, status TEXT DEFAULT 'queued', attempts INTEGER DEFAULT 0, sent_at TIMESTAMPTZ, error TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `ALTER TABLE email_queue ADD COLUMN IF NOT EXISTS html BOOLEAN DEFAULT false`,
+  `ALTER TABLE email_queue ADD COLUMN IF NOT EXISTS attempts INTEGER DEFAULT 0`,
   `CREATE TABLE IF NOT EXISTS sms_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, phone TEXT NOT NULL, message TEXT, status TEXT DEFAULT 'queued', sent_at TIMESTAMPTZ, error TEXT, trigger_type TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
 
   // ============ v3.0 MIGRATIONS ============
@@ -1954,7 +1956,7 @@ if ('serviceWorker' in navigator && window.__VAPID_KEY) {
         <option value="fr" ${user.language==='fr'?'selected':''}>FR</option>
       </select>
       <a href="/logout">Logout</a>
-    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
+    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/#pricing" style="font-size:13px">Pricing</a><a href="/#faq" style="font-size:13px">FAQ</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
@@ -4925,6 +4927,100 @@ app.post('/business/inventory/save', requireAuth, requireNotBanned, requireTenan
   const { name, sku, quantity, cost_price, selling_price } = req.body;
   await pool.query('INSERT INTO inventory(tenant_id,name,sku,quantity,cost_price,selling_price) VALUES($1,$2,$3,$4,$5,$6)', [t, name, sku, quantity, cost_price, selling_price]);
   res.redirect('/business/inventory');
+}));
+
+// === BUSINESS: BRANCH STOCK TRANSFERS ===
+app.get('/business/transfers', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const transfers = (await pool.query('SELECT * FROM stock_transfers WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const statusBadge = s => {
+    const colors = { pending: '#f59e0b', approved: '#3b82f6', completed: '#059669', rejected: '#dc2626' };
+    return `<span style="background:${colors[s]||'#999'};color:#fff;padding:2px 10px;border-radius:12px;font-size:0.85em">${esc(s)}</span>`;
+  };
+  res.send(renderPage('Stock Transfers', `
+    <div class="card"><h3>Branch Stock Transfers</h3>
+      <a href="/business/transfers/new" class="btn btn-sm" style="margin-bottom:15px">+ New Transfer</a>
+      ${transfers.length ? `<table style="margin-top:15px"><tr><th>Product</th><th>From</th><th>To</th><th>Qty</th><th>Status</th><th>Date</th><th>Actions</th></tr>
+      ${transfers.map(tr => `<tr>
+        <td>${esc(tr.product_name)}</td><td>${esc(tr.from_branch)}</td><td>${esc(tr.to_branch)}</td>
+        <td>${tr.quantity}</td><td>${statusBadge(tr.status)}</td>
+        <td>${new Date(tr.created_at).toLocaleDateString()}</td>
+        <td>
+          ${tr.status === 'pending' ? `
+            <a href="/business/transfers/${tr.id}/approve" class="btn btn-green btn-sm" onclick="return confirm('Approve this transfer?')">Approve</a>
+            <a href="/business/transfers/${tr.id}/reject" class="btn btn-sm btn-red" onclick="return confirm('Reject this transfer?')">Reject</a>
+            <a href="/business/transfers/${tr.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete this transfer?')">Delete</a>
+          ` : ''}
+        </td>
+      </tr>`).join('')}</table>` : '<p class="muted">No transfers yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/business/transfers/new', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const products = (await pool.query('SELECT id, name FROM inventory WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const branches = (await pool.query('SELECT id, name FROM branches WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('New Stock Transfer', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>New Stock Transfer</h3>
+      <form method="POST" action="/business/transfers/save">
+        <label>Product</label>
+        <select name="product_id" required><option value="">Select product</option>${products.map(p => `<option value="${p.id}" data-name="${esc(p.name)}">${esc(p.name)}</option>`).join('')}</select>
+        <label>From Branch</label>
+        <select name="from_branch" required><option value="">Select source branch</option>${branches.map(b => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('')}</select>
+        <label>To Branch</label>
+        <select name="to_branch" required><option value="">Select destination branch</option>${branches.map(b => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('')}</select>
+        <input name="quantity" type="number" placeholder="Quantity" min="1" required>
+        <textarea name="notes" placeholder="Notes (optional)" rows="3"></textarea>
+        <button class="btn btn-green">Create Transfer</button>
+      </form>
+      <script>
+        document.querySelector('select[name=product_id]').addEventListener('change', function(){
+          var opt = this.options[this.selectedIndex];
+          this.dataset.selectedName = opt.dataset.name || opt.text;
+        });
+      </script>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/business/transfers/save', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { product_id, from_branch, to_branch, quantity, notes } = req.body;
+  const product = (await pool.query('SELECT name FROM inventory WHERE id=$1 AND tenant_id=$2', [product_id, t])).rows[0];
+  if (!product) { return res.redirect('/business/transfers/new'); }
+  await pool.query('INSERT INTO stock_transfers(tenant_id, product_id, product_name, from_branch, to_branch, quantity, notes, created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+    [t, product_id, product.name, from_branch, to_branch, quantity, notes, req.session.user.email]);
+  await audit(req.session.user.email, 'stock_transfer_create', `Transfer of ${quantity}x ${product.name} from ${from_branch} to ${to_branch}`);
+  res.redirect('/business/transfers');
+}));
+
+app.get('/business/transfers/:id/approve', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tr = (await pool.query('SELECT * FROM stock_transfers WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!tr || tr.status !== 'pending') { return res.redirect('/business/transfers'); }
+  // Deduct from from_branch
+  await pool.query('UPDATE inventory SET quantity = quantity - $1 WHERE tenant_id=$2 AND name=$3', [tr.quantity, t, tr.from_branch]);
+  // Add to to_branch
+  await pool.query('UPDATE inventory SET quantity = quantity + $1 WHERE tenant_id=$2 AND name=$3', [tr.quantity, t, tr.to_branch]);
+  // Update status to completed
+  await pool.query('UPDATE stock_transfers SET status=$1, completed_at=NOW() WHERE id=$2', ['completed', req.params.id]);
+  await audit(req.session.user.email, 'stock_transfer_approve', `Approved transfer #${req.params.id}: ${tr.quantity}x ${tr.product_name} from ${tr.from_branch} to ${tr.to_branch}`);
+  res.redirect('/business/transfers');
+}));
+
+app.get('/business/transfers/:id/reject', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("UPDATE stock_transfers SET status='rejected' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+  await audit(req.session.user.email, 'stock_transfer_reject', `Rejected transfer #${req.params.id}`);
+  res.redirect('/business/transfers');
+}));
+
+app.get('/business/transfers/:id/delete', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("DELETE FROM stock_transfers WHERE id=$1 AND tenant_id=$2 AND status='pending'", [req.params.id, t]);
+  await audit(req.session.user.email, 'stock_transfer_delete', `Deleted pending transfer #${req.params.id}`);
+  res.redirect('/business/transfers');
 }));
 
 // === BUSINESS: INVOICES (with mark as paid) ===
@@ -10969,7 +11065,7 @@ ${process.env.GA_TRACKING_ID ? `
       <a href="/worker/login" style="font-size:12px">Worker</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">Logout</a>
-    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
+    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/#pricing" style="font-size:13px">Pricing</a><a href="/#faq" style="font-size:13px">FAQ</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
@@ -10996,36 +11092,218 @@ ${process.env.GA_TRACKING_ID ? `
 </body></html>`;
 };
 
-// 3.16: SETUP CHECKLIST
-app.get('/setup', requireAuth, ah(async (req, res) => {
+// 3.16: ONBOARDING WIZARD (4-step)
+// Helper: generate progress bar HTML for wizard steps
+const wizardProgress = (step) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:30px;max-width:500px">
+  <div style="flex:1;height:8px;border-radius:4px;background:${step >= 1 ? '#059669' : '#e2e8f0'}"></div>
+  <div style="flex:1;height:8px;border-radius:4px;background:${step >= 2 ? '#059669' : '#e2e8f0'}"></div>
+  <div style="flex:1;height:8px;border-radius:4px;background:${step >= 3 ? '#059669' : '#e2e8f0'}"></div>
+  <div style="flex:1;height:8px;border-radius:4px;background:${step >= 4 ? '#059669' : '#e2e8f0'}"></div>
+  <span class="muted">Step ${step} of 4</span>
+</div>`;
+
+// Middleware: redirect to dashboard if onboarding already completed
+const checkOnboardingNotDone = ah(async (req, res, next) => {
+  const tenant = (await pool.query('SELECT onboarding_done, type FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0];
+  if (tenant?.onboarding_done) return res.redirect('/dashboard');
+  req.tenant = tenant;
+  next();
+});
+
+// STEP 1: Organization Profile
+app.get('/setup', requireAuth, requireNotBanned, checkOnboardingNotDone, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
-  if (tenant?.setup_complete) return res.redirect('/dashboard');
-  const [studentCount, staffCount, feeCount] = await Promise.all([
-    pool.query('SELECT COUNT(*) as count FROM students WHERE tenant_id=$1', [t]),
-    pool.query('SELECT COUNT(*) as count FROM staff WHERE tenant_id=$1', [t]),
-    pool.query('SELECT COUNT(*) as count FROM fees WHERE tenant_id=$1', [t])
-  ]);
-  const steps = [
-    { name: 'Create your account', done: true },
-    { name: 'Add your first student', done: parseInt(studentCount.rows[0]?.count || 0) > 0, link: '/school/students/new' },
-    { name: 'Add staff members', done: parseInt(staffCount.rows[0]?.count || 0) > 0, link: '/school/staff/new' },
-    { name: 'Set up fee structures', done: parseInt(feeCount.rows[0]?.count || 0) > 0, link: '/school/fee-structures/new' },
-    { name: 'Customize branding', done: !!(tenant?.logo_url || tenant?.primary_color), link: '/settings/branding' },
-    { name: 'Set up grading scale', done: false, link: '/school/grading' },
-  ];
-  const doneCount = steps.filter(s => s.done).length;
-  if (doneCount >= steps.length - 1) {
-    await pool.query('UPDATE tenants SET setup_complete=true WHERE id=$1', [t]);
-  }
-  res.send(renderPage('Setup Checklist', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Welcome to Comfort!</h1><p>Let's get you set up in minutes</p></div>
+  const typeOptions = ['school','church','business','ngo','clinic','other'];
+  res.send(renderPage('Setup - Organization Profile', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Welcome to Comfort!</h1><p>Let's get your organization set up in a few quick steps.</p></div>
     <div class="card" style="max-width:600px;margin:0 auto">
-      <h2>Setup Progress</h2>
-      <div style="background:#e2e8f0;border-radius:12px;height:20px;margin:15px 0"><div style="background:linear-gradient(90deg,#059669,#10b981);height:20px;border-radius:12px;width:${(doneCount/steps.length*100).toFixed(0)}%"></div></div>
-      <p style="text-align:center;margin-bottom:20px">${doneCount} of ${steps.length} steps completed</p>
-      ${steps.map((s,i) => `<div style="display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid #e2e8f0"><span style="font-size:20px">${s.done ? '✅' : `${i+1}`}</span><span style="flex:1${s.done?';text-decoration:line-through;opacity:0.6':''}">${esc(s.name)}</span>${!s.done && s.link ? `<a href="${s.link}" class="btn btn-sm btn-green">Start</a>` : ''}</div>`).join('')}
-      <a href="/dashboard" class="btn" style="width:100%;margin-top:20px">Go to Dashboard</a>
+      <h2>Step 1: Organization Profile</h2>
+      ${wizardProgress(1)}
+      <form method="POST" action="/setup/step1">
+        <label>Organization Name</label>
+        <input name="name" value="${esc(tenant?.name||'')}" required>
+        <label>Type</label>
+        <select name="type">${typeOptions.map(tp => `<option value="${tp}"${tenant?.type===tp?' selected':''}>${tp.charAt(0).toUpperCase()+tp.slice(1)}</option>`).join('')}</select>
+        <label>Phone</label>
+        <input name="phone" type="tel" value="${esc(tenant?.phone||'')}" placeholder="+256 700 000 000">
+        <label>Address</label>
+        <input name="address" value="${esc(tenant?.address||'')}" placeholder="Physical address">
+        ${process.env.CLOUDINARY_URL ? `<label>Logo Upload</label><input name="logo" type="file" accept="image/*"><p class="muted">Optional — you can add this later in Branding settings.</p>` : ''}
+        <button type="submit" class="btn btn-green" style="width:100%">Next →</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/setup/step1', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, type, phone, address } = req.body;
+  await pool.query('UPDATE tenants SET name=$1, type=$2, phone=$3, address=$4 WHERE id=$5', [name, type, phone||null, address||null, t]);
+  res.redirect('/setup/step2');
+}));
+
+// STEP 2: Add Staff
+app.get('/setup/step2', requireAuth, requireNotBanned, checkOnboardingNotDone, ah(async (req, res) => {
+  res.send(renderPage('Setup - Add Staff', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Add Your Team</h1><p>Invite staff members to help you manage things.</p></div>
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <h2>Step 2: Add Staff</h2>
+      ${wizardProgress(2)}
+      <p class="muted" style="margin-bottom:15px">Add up to 5 staff members quickly. They'll receive an email invitation to set their password.</p>
+      <form method="POST" action="/setup/step2/save">
+        <input type="hidden" id="staff-count" name="staff_count" value="1">
+        <div id="staff-fields">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+            <input name="staff_name_1" placeholder="Full Name">
+            <input name="staff_email_1" type="email" placeholder="Email">
+            <select name="staff_role_1"><option value="teacher">Teacher</option><option value="head_teacher">Head Teacher</option><option value="pastor">Pastor</option><option value="manager">Manager</option><option value="accountant">Accountant</option><option value="admin">Admin</option></select>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm" onclick="addStaffRow()" style="margin-bottom:20px">+ Add Another</button>
+        <div style="display:flex;gap:10px">
+          <button type="submit" class="btn btn-green" style="flex:1">Save Staff &amp; Next →</button>
+          <a href="/setup/step3" class="btn" style="flex:1;text-align:center">Skip</a>
+        </div>
+      </form>
+    </div>
+    <script>
+      let staffNum = 1;
+      function addStaffRow() {
+        if (staffNum >= 5) { alert('Maximum 5 staff members at once.'); return; }
+        staffNum++;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px';
+        row.innerHTML = '<input name="staff_name_'+staffNum+'" placeholder="Full Name"><input name="staff_email_'+staffNum+'" type="email" placeholder="Email"><select name="staff_role_'+staffNum+'"><option value="teacher">Teacher</option><option value="head_teacher">Head Teacher</option><option value="pastor">Pastor</option><option value="manager">Manager</option><option value="accountant">Accountant</option><option value="admin">Admin</option></select>';
+        document.getElementById('staff-fields').appendChild(row);
+        document.getElementById('staff-count').value = staffNum;
+      }
+    </script>
+  `, req.session.user));
+}));
+
+app.post('/setup/step2/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const count = Math.min(parseInt(req.body.staff_count)||0, 5);
+  let created = 0;
+  for (let i = 1; i <= count; i++) {
+    const name = (req.body[`staff_name_${i}`]||'').trim();
+    const email = (req.body[`staff_email_${i}`]||'').trim();
+    const role = req.body[`staff_role_${i}`] || 'teacher';
+    if (!name || !email) continue;
+    // Check if staff email already exists for this tenant
+    const existing = (await pool.query('SELECT id FROM staff WHERE email=$1 AND tenant_id=$2', [email, t])).rows[0];
+    if (existing) continue;
+    const tempPass = Math.random().toString(36).slice(-10);
+    const hash = await bcrypt.hash(tempPass, 10);
+    await pool.query('INSERT INTO staff(tenant_id,email,password,password_hash,name,role,approved) VALUES($1,$2,$3,$3,$4,$5,true)', [t, email, hash, name, role]);
+    // Send invite email
+    const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+    try {
+      await sendEmail(email, `You're invited to ${tenant?.name||'Comfort'}`, `
+        <h2>Welcome aboard, ${esc(name)}!</h2>
+        <p>You've been added as <strong>${esc(role)}</strong> on <strong>${esc(tenant?.name||'Comfort')}</strong>.</p>
+        <p>Your temporary password is: <code>${tempPass}</code></p>
+        <p><a href="${process.env.BASE_URL||'http://localhost:3000'}/login" style="background:#059669;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block;margin-top:10px">Log In Now</a></p>
+        <p class="muted" style="margin-top:15px">Please change your password after first login.</p>
+      `);
+    } catch(e) { /* email may fail silently */ }
+    created++;
+  }
+  res.redirect('/setup/step3');
+}));
+
+// STEP 3: Configure Settings
+app.get('/setup/step3', requireAuth, requireNotBanned, checkOnboardingNotDone, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT currency, type FROM tenants WHERE id=$1', [t])).rows[0];
+  const currentCurrency = tenant?.currency || 'UGX';
+  const isSchool = tenant?.type === 'school';
+  const currencyOptions = [
+    { code: 'UGX', label: 'UGX - Uganda Shilling' },
+    { code: 'KES', label: 'KES - Kenya Shilling' },
+    { code: 'TZS', label: 'TZS - Tanzania Shilling' },
+    { code: 'RWF', label: 'RWF - Rwanda Franc' },
+    { code: 'USD', label: 'USD - US Dollar' },
+  ];
+  res.send(renderPage('Setup - Configure Settings', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Configure Settings</h1><p>Set your preferences so everything works just right.</p></div>
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <h2>Step 3: Settings</h2>
+      ${wizardProgress(3)}
+      <form method="POST" action="/setup/step3">
+        <label>Currency</label>
+        <select name="currency">${currencyOptions.map(c => `<option value="${c.code}"${currentCurrency===c.code?' selected':''}>${c.label}</option>`).join('')}</select>
+        ${isSchool ? `
+        <h3 style="margin-top:20px">Academic Year Setup</h3>
+        <p class="muted" style="margin-bottom:10px">Set up your first term for the academic year.</p>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Term Name</label><input name="term_name" placeholder="e.g. Term 1" required></div>
+          <div><label>Year</label><input name="year" value="${new Date().getFullYear()}" required></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Start Date</label><input name="term_start" type="date" required></div>
+          <div><label>End Date</label><input name="term_end" type="date" required></div>
+        </div>
+        ` : ''}
+        <div style="display:flex;gap:10px;margin-top:20px">
+          <button type="submit" class="btn btn-green" style="flex:1">Save &amp; Finish →</button>
+          <a href="/setup/complete" class="btn" style="flex:1;text-align:center">Skip</a>
+        </div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/setup/step3', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { currency, term_name, year, term_start, term_end } = req.body;
+  // Save currency
+  await pool.query('UPDATE tenants SET currency=$1 WHERE id=$2', [currency||'UGX', t]);
+  // Save academic year for schools
+  if (term_name && year) {
+    await pool.query('UPDATE tenants SET current_term=$1, academic_year=$2 WHERE id=$3', [term_name, year, t]);
+    // Also insert into platform_settings for persistence
+    const existing = (await pool.query('SELECT key FROM platform_settings WHERE key=$1', [`tenant_${t}_term`])).rows[0];
+    if (!existing) {
+      await pool.query('INSERT INTO platform_settings(key,value) VALUES($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [`tenant_${t}_term`, JSON.stringify({ term: term_name, year, start: term_start||null, end: term_end||null })]);
+    } else {
+      await pool.query('INSERT INTO platform_settings(key,value) VALUES($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2', [`tenant_${t}_term`, JSON.stringify({ term: term_name, year, start: term_start||null, end: term_end||null })]);
+    }
+    // Ensure tenant_country_settings exists for this tenant
+    const csExists = (await pool.query('SELECT id FROM tenant_country_settings WHERE tenant_id=$1', [t])).rows[0];
+    if (!csExists) {
+      await pool.query('INSERT INTO tenant_country_settings(tenant_id,country_code,currency) VALUES($1,$2,$3)', [t, currency==='USD'?'US':currency.slice(0,2).toUpperCase(), currency||'UGX']);
+    } else {
+      await pool.query('UPDATE tenant_country_settings SET currency=$1 WHERE tenant_id=$2', [currency||'UGX', t]);
+    }
+  }
+  res.redirect('/setup/complete');
+}));
+
+// STEP 4: Complete!
+app.get('/setup/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // Mark onboarding as done
+  await pool.query('UPDATE tenants SET onboarding_done=true, setup_complete=true WHERE id=$1', [t]);
+  const tenant = (await pool.query('SELECT type FROM tenants WHERE id=$1', [t])).rows[0];
+  const orgType = tenant?.type || 'school';
+  const portalPath = `/portal/${orgType}`;
+  const addPath = orgType === 'school' ? '/school/students/new' : orgType === 'church' ? '/church/members/new' : '/business/contacts/new';
+  const feesPath = '/school/fee-structures/new';
+  res.send(renderPage('Setup Complete!', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>🎉 You're All Set!</h1><p>Your organization is ready to go.</p></div>
+    <div class="card" style="max-width:600px;margin:0 auto;text-align:center">
+      <h2>Setup Complete</h2>
+      ${wizardProgress(4)}
+      <p style="font-size:48px;margin:20px 0">🎊</p>
+      <p style="font-size:18px;margin-bottom:30px">Congratulations! Your Comfort workspace is configured and ready to use.</p>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:30px">
+        <a href="${addPath}" class="btn btn-green">Add ${orgType==='school'?'Students':'Members'}</a>
+        <a href="${feesPath}" class="btn btn-gold">Set Up Fees</a>
+        <a href="${portalPath}" class="btn">Dashboard</a>
+      </div>
+      <a href="${portalPath}" class="btn btn-green" style="width:100%;font-size:18px;padding:14px">Go to Dashboard →</a>
     </div>
   `, req.session.user));
 }));
@@ -18745,7 +19023,9 @@ const phase2Tables = [
   // Drug Interactions Database (built-in knowledge base for CDS)
   `CREATE TABLE IF NOT EXISTS drug_interactions (id SERIAL PRIMARY KEY, drug_a TEXT NOT NULL, drug_b TEXT NOT NULL, severity TEXT DEFAULT 'moderate', description TEXT, recommendation TEXT, evidence_level TEXT DEFAULT 'established', created_at TIMESTAMPTZ DEFAULT NOW())`,
   // Tenant Country Settings
-  `CREATE TABLE IF NOT EXISTS tenant_country_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, country_code TEXT DEFAULT 'UG', currency TEXT DEFAULT 'UGX', timezone TEXT DEFAULT 'Africa/Kampala', language TEXT DEFAULT 'en', preferred_payment TEXT DEFAULT 'mtn_momo', flutterwave_enabled BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`
+  `CREATE TABLE IF NOT EXISTS tenant_country_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, country_code TEXT DEFAULT 'UG', currency TEXT DEFAULT 'UGX', timezone TEXT DEFAULT 'Africa/Kampala', language TEXT DEFAULT 'en', preferred_payment TEXT DEFAULT 'mtn_momo', flutterwave_enabled BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Multi-Branch Stock Transfers
+  `CREATE TABLE IF NOT EXISTS stock_transfers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), product_id INTEGER, product_name TEXT NOT NULL, from_branch TEXT NOT NULL, to_branch TEXT NOT NULL, quantity INTEGER NOT NULL, status TEXT DEFAULT 'pending', notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), completed_at TIMESTAMPTZ)`
 ];
 
 // Create Phase 2 tables & seed data (async IIFE for top-level await compatibility)
@@ -18846,6 +19126,234 @@ for (const [key, name, desc, ver, cat, req] of phase2Flags) {
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT \'UG\''); } catch (e) { console.warn('[Caught]', e.message); }
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT \'UGX\''); } catch (e) { console.warn('[Caught]', e.message); }
 try { await pool.query('ALTER TABLE staff ADD COLUMN IF NOT EXISTS salary INTEGER DEFAULT 0'); } catch (e) { console.warn('[Caught]', e.message); }
+try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS onboarding_done BOOLEAN DEFAULT false'); } catch (e) { console.warn('[Caught]', e.message); }
+try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS current_term TEXT'); } catch (e) { console.warn('[Caught]', e.message); }
+try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS academic_year TEXT'); } catch (e) { console.warn('[Caught]', e.message); }
+
+// --- SEO Blog Posts Migration ---
+try {
+  const blogCount = parseInt((await pool.query('SELECT COUNT(*) FROM blog_posts')).rows[0].count);
+  if (blogCount < 10) {
+    const blogPosts = [
+      {
+        slug: 'how-school-management-software-transforming-education-uganda',
+        title: 'How School Management Software is Transforming Education in Uganda',
+        excerpt: 'Discover how digital school management systems are helping Ugandan schools overcome paper-based challenges, improve fee collection, and boost parent engagement for better educational outcomes.',
+        image_url: '',
+        category: 'education',
+        author: 'Comfort Team',
+        content: `<h2>The State of School Administration in Uganda</h2>
+<p>Uganda is home to thousands of primary and secondary schools, ranging from government-funded UPE and USE institutions to private academies. Despite significant progress in enrollment rates over the past two decades, school administration remains largely manual and paper-driven. Head teachers across the country spend countless hours managing student records, tracking fee payments, and compiling end-of-term report cards using ledger books and spreadsheets. This not only consumes valuable time that could be spent on academic leadership but also introduces errors that affect decision-making at every level of the education system.</p>
+
+<h2>Key Challenges Facing Ugandan Schools</h2>
+<h3>Paper-Based Record Keeping</h3>
+<p>Many Ugandan schools still rely on handwritten admission registers, attendance books, and fee collection ledgers. These paper records are vulnerable to damage from weather, pests, and simple wear-and-tear. When a student transfers to another school, retrieving their academic history can take days or even weeks. During national examinations, verifying candidate registration data against school records becomes a cumbersome exercise prone to discrepancies.</p>
+
+<h3>Fee Collection and Tracking</h3>
+<p>School fee collection in Uganda involves multiple channels including cash, bank deposits, mobile money, and sometimes in-kind payments. Reconciling these different payment methods manually is error-prone and time-consuming. Schools often struggle with outstanding balances, unclear payment histories, and the administrative burden of issuing receipts. Parents, in turn, lack transparency into their payment status and may be unfairly denied admission or report cards due to record-keeping gaps.</p>
+
+<h3>Communication Between Schools and Parents</h3>
+<p>Parent-teacher engagement is widely recognised as a critical factor in student performance. However, many Ugandan schools still depend on physical notice boards, termly meetings, or occasional phone calls to communicate with parents. Important updates about fee deadlines, exam schedules, or student attendance issues frequently fail to reach parents in time. This disconnect contributes to late fee payments, missed school events, and lower academic performance among students whose parents are not actively involved.</p>
+
+<h2>How Digital Solutions Are Changing the Landscape</h2>
+<p>School management software like <strong>Comfort</strong> is addressing these challenges head-on by providing an all-in-one digital platform tailored to the needs of African educational institutions. Here are the key areas where technology is making a difference:</p>
+
+<ul>
+<li><strong>Automated Report Cards:</strong> Teachers enter marks once and the system automatically calculates totals, averages, grades, and ranks. Report cards can be generated in seconds and shared with parents digitally or printed on demand.</li>
+<li><strong>Digital Fee Tracking:</strong> Every payment is recorded in real time with automatic receipt generation. Parents can check their balance via a parent portal, and administrators can instantly see who has outstanding balances without manually scanning ledger books.</li>
+<li><strong>Attendance Monitoring:</strong> Teachers mark attendance on a tablet or smartphone, and the data flows instantly to the admin dashboard. Patterns of absenteeism are flagged early, enabling timely intervention before a student falls behind.</li>
+<li><strong>Parent Communication:</strong> Integrated SMS notifications and a parent portal keep families informed about fee reminders, exam results, school events, and attendance alerts. This bridges the communication gap that has long hampered parent engagement in Ugandan schools.</li>
+<li><strong>Timetable and Exam Scheduling:</strong> Intelligent scheduling tools help deputy head teachers create conflict-free timetables and organise examination sessions with minimal manual effort.</li>
+</ul>
+
+<h2>Real Benefits for Ugandan Schools</h2>
+<p>Schools that have adopted digital management systems report significant improvements in operational efficiency. Administrative staff spend less time on paperwork and more time supporting teaching and learning. Fee collection rates improve because parents receive timely reminders and can verify their payment status at any time. Academic outcomes benefit from the ability to identify struggling students early and intervene before end-of-term examinations.</p>
+
+<h2>Getting Started with School Management Software</h2>
+<p>Transitioning from manual to digital management does not have to be overwhelming. Platforms like Comfort are designed with simplicity in mind, offering intuitive interfaces that require minimal training. Schools can start with core modules such as student enrollment and fee tracking, then gradually adopt additional features like parent portals, online examinations, and library management as their confidence grows.</p>
+
+<p>The future of education in Uganda depends on building strong, efficient institutions that can focus their energy on teaching rather than administration. School management software is not a luxury reserved for wealthy urban academies; it is an essential tool that levels the playing field and enables every school to operate at its best.</p>`
+      },
+      {
+        slug: 'complete-guide-church-management-tithes-members-events',
+        title: 'Complete Guide to Church Management: Tithes, Members and Events',
+        excerpt: 'Learn how modern church management tools can help African churches track tithes and offerings, manage member directories, plan events, and streamline communication with their congregation.',
+        image_url: '',
+        category: 'church',
+        author: 'Comfort Team',
+        content: `<h2>The Growing Need for Church Management in Africa</h2>
+<p>Across Africa, churches are experiencing unprecedented growth. From bustling urban megachurches in Lagos and Nairobi to vibrant rural congregations in rural Uganda and Ghana, the number of church members continues to rise year after year. While this growth is a testament to the strength of faith communities across the continent, it also brings significant administrative challenges. Managing a congregation of hundreds or thousands of members using paper records and spreadsheets is becoming increasingly impractical.</p>
+
+<h2>Tracking Tithes and Offerings</h2>
+<h3>The Challenge</h3>
+<p>Financial stewardship is one of the most sensitive and important responsibilities of church leadership. Members contribute tithes, offerings, seed gifts, and special donations through various channels including cash, mobile money, bank transfers, and sometimes even in-kind contributions. Tracking these contributions accurately is essential for transparency, accountability, and compliance with local regulations governing religious organisations.</p>
+
+<h3>The Digital Solution</h3>
+<p>A modern church management system allows treasurers to record every contribution with details including the date, amount, category, channel, and member identity. Reports can be generated instantly to show monthly tithe totals, offering trends, and individual member giving history. Some platforms, like <strong>Comfort</strong>, even support mobile money integration so members can give directly from their phones with automatic recording in the church database. This eliminates manual reconciliation and provides a clear audit trail that builds trust within the congregation.</p>
+
+<h2>Building and Maintaining a Member Directory</h2>
+<p>A comprehensive member directory is the backbone of effective church administration. It typically includes personal details such as name, contact information, family relationships, membership status, and small group assignments. In many African churches, this information is scattered across multiple notebooks, WhatsApp groups, and personal phone contacts, making it difficult to get an accurate picture of the congregation.</p>
+
+<p>With a digital member management system, all this information is centralised in one secure database. Church administrators can quickly search for members, filter by criteria such as age group or ministry involvement, and track membership milestones like baptism dates and membership anniversaries. Cell group and department leaders can access their group rosters directly, reducing the administrative burden on the central church office.</p>
+
+<h2>Event Planning and Calendar Management</h2>
+<p>Churches are busy places. Between Sunday services, mid-week Bible studies, youth meetings, women conferences, men fellowships, choir rehearsals, and community outreach programmes, there is always something happening. Coordinating all these events without a centralised system often leads to scheduling conflicts, double-booked venues, and poor communication about event details.</p>
+
+<p>A digital church management platform provides a shared calendar where all events are visible to authorised users. Event organisers can create events with dates, times, venues, descriptions, and expected attendance. Automated notifications can be sent to relevant groups, ensuring that everyone knows about upcoming activities. For large events like conferences and crusades, the system can handle registration, ticketing, and follow-up communication after the event.</p>
+
+<h2>Prayer Requests and Pastoral Care</h2>
+<p>One of the most important functions of a church is pastoral care. Members bring prayer requests, personal challenges, and pastoral needs to their leaders regularly. Without a system to track these requests, important needs can be forgotten, and follow-up becomes inconsistent. A church management tool allows pastoral teams to log prayer requests, assign them to specific leaders, track progress, and ensure that every member receives the care and attention they need.</p>
+
+<h2>Communication and Engagement</h2>
+<p>Effective communication is vital for a healthy church community. SMS notifications, email newsletters, and push notifications through a church app or portal help keep members informed and engaged. Whether it is a reminder about an upcoming event, an update on a building project, or a word of encouragement from the pastor, digital communication channels ensure that messages reach the right people at the right time.</p>
+
+<h2>Choosing the Right Church Management Platform</h2>
+<p>When selecting a church management tool, African churches should look for platforms that offer mobile accessibility, local payment integration, and support for the specific needs of their context. <strong>Comfort</strong> provides a comprehensive church management module designed for the African context, including tithe tracking, member management, event planning, prayer request management, and multi-channel communication, all accessible from any device with an internet connection.</p>
+
+<p>By adopting digital church management, congregations across Africa can focus more on their spiritual mission and less on administrative overhead, ultimately building stronger, more connected faith communities.</p>`
+      },
+      {
+        slug: 'small-business-inventory-management-guide-africa',
+        title: 'Small Business Inventory Management: A Guide for African Entrepreneurs',
+        excerpt: 'Master inventory management for your African small business. Learn about stock control, POS systems, profit tracking, customer management, and how to manage multi-branch operations efficiently.',
+        image_url: '',
+        category: 'business',
+        author: 'Comfort Team',
+        content: `<h2>Why Inventory Management Matters for African Small Businesses</h2>
+<p>Small and medium enterprises are the backbone of African economies, contributing over sixty percent of employment across the continent. From retail shops in busy Kampala markets to hardware stores in Accra and clothing boutiques in Dar es Salaam, African entrepreneurs demonstrate remarkable ingenuity and resilience. However, one area where many small businesses struggle is inventory management. Poor stock control leads to overstocking of slow-moving items, stockouts of popular products, unrecorded sales, and difficulty calculating actual profits. These challenges can mean the difference between a thriving business and one that barely survives.</p>
+
+<h2>Common Inventory Challenges</h2>
+<h3>Lack of Real-Time Stock Visibility</h3>
+<p>Many small business owners in Africa still rely on mental accounting or paper-based stock records. They know roughly how much of a product they have, but not exactly. This imprecision leads to two costly outcomes: ordering too much of items that are not selling, tying up capital in dead stock, or running out of fast-moving products and losing sales to competitors. Without accurate, real-time stock data, it is impossible to make informed purchasing decisions.</p>
+
+<h3>Manual Sales Recording</h3>
+<p>In shops without a point-of-sale system, sales are often recorded in notebooks or not tracked at all. This makes it extremely difficult to know which products are performing well, what the daily revenue looks like, or whether employees are handling transactions correctly. At the end of the month, calculating profits becomes a guessing game based on bank deposits and cash counts rather than actual sales data.</p>
+
+<h3>Poor Customer Data Management</h3>
+<p>Repeat customers are the most valuable asset of any small business. However, without a system to record customer details, purchase history, and preferences, many African businesses miss opportunities to build lasting customer relationships. Customers who feel unrecognised or unappreciated may switch to competitors who offer a more personalised experience.</p>
+
+<h2>Building an Effective Inventory System</h2>
+<h3>Start with a Point-of-Sale System</h3>
+<p>A point-of-sale system is the foundation of good inventory management. Every sale is recorded digitally, automatically updating stock levels and generating accurate revenue reports. Modern POS solutions designed for the African market support multiple payment methods including cash, mobile money, and bank transfers. Some platforms, like <strong>Comfort</strong>, combine POS functionality with full inventory management, creating a seamless system where sales and stock data are always in sync.</p>
+
+<h3>Organise Your Products with Categories</h3>
+<p>Group your products into logical categories and subcategories. This makes it easier to find items in the system, analyse sales by product type, and identify which categories are driving revenue. For a grocery shop, categories might include beverages, dairy, grains, and household items. For a hardware store, categories could span building materials, tools, plumbing, and electrical supplies.</p>
+
+<h3>Set Reorder Levels and Minimum Stock Quantities</h3>
+<p>For each product, define a minimum stock quantity below which a reorder alert should be triggered. This proactive approach prevents stockouts of popular items and ensures you always have enough inventory to meet customer demand. The best inventory management systems can automatically generate purchase orders or send alerts when stock falls below the defined threshold.</p>
+
+<h2>Tracking Profits Accurately</h2>
+<p>Profit tracking requires knowing both your revenue and your costs. Revenue comes directly from your POS data: total sales, returns, and discounts. Costs include the purchase price of goods sold, operating expenses like rent and utilities, and any employee wages. A business management platform that integrates POS with expense tracking gives you a clear, real-time picture of your profit margins on every product and across your entire business.</p>
+
+<h2>Managing Multiple Branches</h2>
+<p>For entrepreneurs with more than one location, inventory management becomes even more critical. Stock transfers between branches, consolidated reporting, and consistent pricing across locations all require a centralised system. Cloud-based business management tools allow branch managers to record sales and stock movements from their location while the business owner views consolidated reports from anywhere. This eliminates the need to physically visit each branch to assess performance and stock levels.</p>
+
+<h2>Customer Relationship Management</h2>
+<p>A built-in customer management module allows you to capture customer details at the point of sale, track purchase history, and identify your most loyal customers. With this data, you can create targeted promotions, offer loyalty rewards, and provide personalised service that keeps customers coming back. In competitive African markets, this level of customer engagement can be a significant competitive advantage.</p>
+
+<h2>Conclusion</h2>
+<p>Effective inventory management is not just about counting stock. It is about building systems that give you visibility, control, and insight into every aspect of your business. By adopting digital tools like <strong>Comfort</strong>, African entrepreneurs can transform their operations, reduce waste, increase profitability, and position their businesses for sustainable growth.</p>`
+      },
+      {
+        slug: 'clinics-digitize-patient-records-uganda',
+        title: 'How Clinics Can Digitize Patient Records in Uganda',
+        excerpt: 'A practical guide for Ugandan health facilities on transitioning from paper-based patient records to digital systems, covering electronic health records, pharmacy management, lab integration, and insurance billing.',
+        image_url: '',
+        category: 'health',
+        author: 'Comfort Team',
+        content: `<h2>The Case for Digital Patient Records in Uganda</h2>
+<p>Uganda healthcare facilities, from private clinics in Kampala to rural health centres in districts like Mukono, Jinja, and Mbarara, handle thousands of patient visits every week. Despite the critical importance of accurate patient data, the majority of these facilities still rely on paper-based record keeping. Patient files are stored in cardboard folders on shelves, prescriptions are handwritten, and lab results are collected on paper slips. This approach creates serious challenges including lost records, illegible prescriptions, delayed test results, and difficulty tracking patient histories across visits.</p>
+
+<p>The Government of Uganda, through the Ministry of Health, has been advocating for the digitisation of health records as part of broader e-health initiatives. However, many clinics lack the technical expertise and affordable tools needed to make this transition. This guide explains how clinics can practically move from paper to digital records using platforms like <strong>Comfort</strong>.</p>
+
+<h2>Patient Registration and Digital IDs</h2>
+<p>The first step in digitising a clinic is setting up a digital patient registration system. Instead of writing patient details in a register, front desk staff enter information directly into a digital system. Each patient receives a unique digital identifier, typically linked to their name, date of birth, phone number, and national ID number. This makes it easy to retrieve patient records for return visits and eliminates the problem of duplicate files or lost patient history.</p>
+
+<p>For clinics with high patient volumes, self-service registration kiosks or mobile-based pre-registration forms can significantly reduce wait times and front desk workload. Patients can fill in their basic details on their phones before arriving at the clinic, allowing staff to verify and complete registration within seconds.</p>
+
+<h2>Electronic Health Records</h2>
+<p>An electronic health record system captures the full clinical picture of each patient across multiple visits. Key components include:</p>
+<ul>
+<li><strong>Patient History:</strong> Previous diagnoses, treatments, surgeries, and ongoing conditions</li>
+<li><strong>Vital Signs:</strong> Temperature, blood pressure, heart rate, weight, height, and BMI recorded digitally at each visit</li>
+<li><strong>Allergies and Reactions:</strong> Documented drug allergies and adverse reactions to prevent dangerous prescriptions</li>
+<li><strong>Chronic Conditions:</strong> Long-term conditions like hypertension, diabetes, and HIV with status tracking</li>
+<li><strong>Immunisations:</strong> Complete vaccination history with dates, batch numbers, and next dose reminders</li>
+<li><strong>Prescriptions:</strong> Digital prescriptions that are legible, trackable, and integrated with pharmacy stock</li>
+</ul>
+
+<h2>Pharmacy Management</h2>
+<p>A digitised clinic should integrate pharmacy management with patient records. When a doctor prescribes medication, the prescription flows directly to the pharmacy module where staff can check availability, dispense the correct medication, and automatically update stock levels. This integration prevents dispensing errors, reduces wait times for patients, and provides accurate data on drug consumption patterns for better procurement planning.</p>
+
+<p>For Ugandan clinics, pharmacy management should also handle multiple pricing tiers such as cash-paying patients, insurance-covered patients, and those on government subsidy programmes. Real-time stock alerts prevent stockouts of essential medications like antimalarials and antibiotics.</p>
+
+<h2>Laboratory Results Integration</h2>
+<p>Laboratory tests are a routine part of clinical care in Uganda, from malaria rapid tests and complete blood counts to HIV viral load monitoring. A digital system allows laboratory staff to enter test results directly, making them instantly available to the treating clinician through the patient record. This eliminates delays caused by physically carrying paper lab slips between the laboratory and the consultation room, and ensures results are always filed in the correct patient record.</p>
+
+<h2>Billing and Insurance Claims</h2>
+<p>Ugandan clinics deal with a mix of payment methods including out-of-pocket cash payments, mobile money, and insurance cover from providers like UAP, Jubilee, and NHIF. A digital billing system generates invoices automatically based on consultation fees, tests ordered, medications dispensed, and procedures performed. For insured patients, the system should support insurance claim generation with proper coding, making it easier to submit claims and track payment status.</p>
+
+<h2>Getting Started</h2>
+<p>The transition from paper to digital records does not have to happen overnight. Clinics can start with patient registration and billing, then gradually add clinical modules for consultation notes, pharmacy, and laboratory integration. <strong>Comfort</strong> offers a modular clinic management system designed for the Ugandan context, with features tailored to local workflows, payment methods, and regulatory requirements. The platform is accessible via web browser, meaning no expensive hardware installations are required, and clinic staff can access it from any device.</p>
+
+<p>By digitising patient records, Ugandan clinics can improve the quality of care, reduce medical errors, speed up service delivery, and build a foundation for data-driven health management at every level of the healthcare system.</p>`
+      },
+      {
+        slug: 'why-school-needs-parent-portal-2026',
+        title: 'Why Your School Needs a Parent Portal in 2026',
+        excerpt: 'Discover why a parent portal is essential for modern schools in 2026. Learn how real-time fee tracking, online report cards, attendance monitoring, and mobile money payments can transform parent engagement.',
+        image_url: '',
+        category: 'education',
+        author: 'Comfort Team',
+        content: `<h2>The Evolving Role of Parents in Education</h2>
+<p>The relationship between schools and parents has evolved dramatically over the past decade. Gone are the days when parent involvement meant attending a once-per-term meeting and collecting a printed report card. In 2026, parents expect to be actively involved in their children education, with real-time access to academic performance, fee status, and school communications. Schools that fail to meet this expectation risk losing enrollments to competitors who offer greater transparency and engagement.</p>
+
+<p>For schools across Uganda, Kenya, Tanzania, and the wider East African region, a parent portal is no longer a nice-to-have feature. It is an essential tool that strengthens the parent-school partnership, improves student outcomes, and streamlines administrative processes. Here is why your school needs a parent portal in 2026.</p>
+
+<h2>Real-Time Fee Tracking and Payments</h2>
+<h3>Transparency Builds Trust</h3>
+<p>One of the most common sources of friction between schools and parents is confusion over fee payments. Parents often want to know exactly how much they have paid, what the outstanding balance is, and whether specific fees like lunch or transport have been cleared. Without a digital system, obtaining this information requires a visit to the school bursar office or a phone call that may not be answered promptly.</p>
+
+<p>A parent portal provides instant, 24-hour access to fee information. Parents can view their complete payment history, see the current balance, and understand exactly what fees are outstanding. This transparency reduces disputes, builds trust between the school and families, and improves fee collection rates because parents are always aware of what is due.</p>
+
+<h3>Mobile Money Integration</h3>
+<p>In East Africa, mobile money is the dominant payment method for millions of parents. A parent portal that integrates with MTN Mobile Money, Airtel Money, and bank transfer options allows parents to pay fees directly from the portal. Payments are recorded automatically, updating the school records in real time. This eliminates manual reconciliation and ensures that no payment goes unrecorded.</p>
+
+<h2>Online Report Cards</h2>
+<p>Waiting for end-of-term report card distribution day is becoming a thing of the past. With a parent portal, report cards are available online as soon as teachers finish marking and grading. Parents can view detailed academic performance including subject marks, class rankings, teacher comments, and term-over-term progress trends. This timely access allows parents to celebrate achievements and address areas of concern immediately, rather than waiting weeks after the term has ended.</p>
+
+<p>Digital report cards also solve logistical challenges. Parents who travel frequently, work far from their children school, or live in different regions no longer need to arrange physical pickup. The report card is always accessible from any device with an internet connection.</p>
+
+<h2>Attendance Monitoring</h2>
+<p>Student attendance is a strong predictor of academic performance. When parents can monitor their children attendance in real time through a portal, they can quickly identify patterns of absenteeism and take corrective action. If a student misses morning assembly, parents can receive an instant notification and follow up with the child or the school. This level of oversight is particularly valuable for boarding schools where parents may not see their children daily.</p>
+
+<p>Schools benefit too. Knowing that parents are monitoring attendance acts as a deterrent for truancy, and teachers appreciate the ability to communicate attendance concerns directly to parents through the portal messaging system.</p>
+
+<h2>Direct Communication Channels</h2>
+<p>A parent portal provides structured, reliable communication between the school and families. Instead of relying on students to deliver paper notices that may be lost in transit, schools can post announcements, event invitations, and important updates directly to the portal. Parents receive notifications via SMS or email, ensuring nothing is missed. Private messaging features allow parents to communicate directly with class teachers or the head teacher without waiting for a physical meeting.</p>
+
+<h2>Homework and Assignments</h2>
+<p>In 2026, many schools are moving towards digital homework management. Teachers post assignments on the portal with due dates, instructions, and attached resources. Parents can see what homework has been assigned and when it is due, enabling them to support their children at home. This is especially helpful for parents who want to be involved in their children learning but are unsure what is being taught or what assignments are pending.</p>
+
+<h2>Choosing the Right Parent Portal</h2>
+<p>When selecting a parent portal solution, schools should prioritise mobile accessibility, local payment integration, ease of use, and robust data security. The portal should be intuitive enough that even parents with limited technical experience can navigate it comfortably. <strong>Comfort</strong> offers a parent portal specifically designed for the African education context, with mobile money payment support, multilingual interfaces, and features that address the unique needs of schools across the continent.</p>
+
+<p>A parent portal is an investment in the parent-school relationship. By providing transparency, convenience, and real-time information, schools can build stronger partnerships with families and create an environment where every student has the support they need to succeed.</p>`
+      }
+    ];
+
+    for (const post of blogPosts) {
+      try {
+        await pool.query(
+          'INSERT INTO blog_posts(slug,title,content,excerpt,image_url,category,author,is_published,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,true,NOW()) ON CONFLICT (slug) DO NOTHING',
+          [post.slug, post.title, post.content, post.excerpt, post.image_url, post.category, post.author]
+        );
+      } catch (e) { console.warn('[Blog Seed Error]', e.message); }
+    }
+    console.log(`[Phase2] SEO blog posts seeded (${blogPosts.length} posts)`);
+  }
+} catch (e) { console.warn('[Blog Migration Error]', e.message); }
+
 console.log('[Phase2] DB tables, indexes, drug interactions, and feature flags initialized');
 } catch (e) { console.error('[Phase2] Init error:', e.message); }
 })(); // End Phase 2 async IIFE

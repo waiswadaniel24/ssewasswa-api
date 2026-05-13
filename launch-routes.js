@@ -810,6 +810,120 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       </div>
 
+      <!-- TRUSTED BY AFRICAN INSTITUTIONS - TESTIMONIALS -->
+      <div style="background:linear-gradient(135deg,#f0f9ff,#e0f2fe);padding:50px 0;margin:40px 0">
+        <div class="container">
+          <h2 style="text-align:center;margin-bottom:30px">Trusted by African Institutions</h2>
+          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+            <!-- 3 testimonial cards -->
+            <div class="card" style="border-left:4px solid #059669">
+              <p class="muted" style="font-style:italic">"Comfort transformed how we manage fees. Parents can now pay via mobile money and track their children's progress in real time."</p>
+              <div style="margin-top:15px"><strong>Grace Nakamya</strong><br><span class="muted">Head Teacher, Sunrise Primary School - Kampala</span></div>
+            </div>
+            <div class="card" style="border-left:4px solid #4f46e5">
+              <p class="muted" style="font-style:italic">"Our church membership grew 40% after digitizing. The tithe tracking and member portal saved us hours every week."</p>
+              <div style="margin-top:15px"><strong>Pastor James Okello</strong><br><span class="muted">Senior Pastor, Grace Community Church - Gulu</span></div>
+            </div>
+            <div class="card" style="border-left:4px solid #f59e0b">
+              <p class="muted" style="font-style:italic">"The POS and inventory system paid for itself in the first month. We finally have accurate stock levels across all branches."</p>
+              <div style="margin-top:15px"><strong>Amina Mohamed</strong><br><span class="muted">Owner, Al-Baraka General Stores - Jinja</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PRICING TABLE -->
+      <div style="padding:50px 0" id="pricing">
+        <div class="container">
+          <h2 style="text-align:center;margin-bottom:10px">Simple, Transparent Pricing</h2>
+          <p style="text-align:center;margin-bottom:30px" class="muted">Start free, upgrade when you're ready</p>
+          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px">
+            <!-- Free Plan -->
+            <div class="card" style="text-align:center;padding:30px;border:2px solid #e2e8f0">
+              <h3>Free</h3>
+              <div style="font-size:36px;font-weight:800;margin:15px 0"><span style="font-size:16px">UGX </span>0</div>
+              <p class="muted">Forever free for small institutions</p>
+              <hr style="margin:20px 0;border-color:#e2e8f0">
+              <ul style="text-align:left;list-style:none;padding:0">
+                <li style="padding:8px 0">✅ Up to 50 students/members</li>
+                <li style="padding:8px 0">✅ Basic fee tracking</li>
+                <li style="padding:8px 0">✅ Attendance management</li>
+                <li style="padding:8px 0">✅ Mobile app access</li>
+                <li style="padding:8px 0;color:#94a3b8">❌ Advanced reports</li>
+                <li style="padding:8px 0;color:#94a3b8">❌ Multi-branch</li>
+              </ul>
+              <a href="/register" class="btn" style="margin-top:20px;width:100%;display:block">Get Started</a>
+            </div>
+            <!-- Basic Plan -->
+            <div class="card" style="text-align:center;padding:30px;border:2px solid #4f46e5;transform:scale(1.05)">
+              <div style="background:#4f46e5;color:white;display:inline-block;padding:4px 16px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:10px">POPULAR</div>
+              <h3>Basic</h3>
+              <div style="font-size:36px;font-weight:800;margin:15px 0"><span style="font-size:16px">UGX </span>50,000</div>
+              <p class="muted">Per month</p>
+              <hr style="margin:20px 0;border-color:#e2e8f0">
+              <ul style="text-align:left;list-style:none;padding:0">
+                <li style="padding:8px 0">✅ Up to 500 students/members</li>
+                <li style="padding:8px 0">✅ Full fee management</li>
+                <li style="padding:8px 0">✅ Report card generation</li>
+                <li style="padding:8px 0">✅ SMS notifications</li>
+                <li style="padding:8px 0">✅ Mobile money payments</li>
+                <li style="padding:8px 0;color:#94a3b8">❌ Multi-branch</li>
+              </ul>
+              <a href="/register" class="btn" style="margin-top:20px;width:100%;display:block;background:#4f46e5">Start Free Trial</a>
+            </div>
+            <!-- Pro Plan -->
+            <div class="card" style="text-align:center;padding:30px;border:2px solid #e2e8f0">
+              <h3>Professional</h3>
+              <div style="font-size:36px;font-weight:800;margin:15px 0"><span style="font-size:16px">UGX </span>150,000</div>
+              <p class="muted">Per month</p>
+              <hr style="margin:20px 0;border-color:#e2e8f0">
+              <ul style="text-align:left;list-style:none;padding:0">
+                <li style="padding:8px 0">✅ Unlimited students/members</li>
+                <li style="padding:8px 0">✅ All Basic features</li>
+                <li style="padding:8px 0">✅ Payroll & HR</li>
+                <li style="padding:8px 0">✅ Multi-branch support</li>
+                <li style="padding:8px 0">✅ Advanced analytics</li>
+                <li style="padding:8px 0">✅ Priority support</li>
+              </ul>
+              <a href="/register" class="btn" style="margin-top:20px;width:100%;display:block">Start Free Trial</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FAQ SECTION -->
+      <div style="background:#f8fafc;padding:50px 0" id="faq">
+        <div class="container">
+          <h2 style="text-align:center;margin-bottom:30px">Frequently Asked Questions</h2>
+          <div style="max-width:700px;margin:0 auto">
+            <div class="card" style="margin-bottom:12px">
+              <h3 style="font-size:16px">Is Comfort really free?</h3>
+              <p class="muted">Yes! Our Free plan supports up to 50 students or members with core features. No credit card required. Upgrade anytime as your institution grows.</p>
+            </div>
+            <div class="card" style="margin-bottom:12px">
+              <h3 style="font-size:16px">Does it work on mobile phones?</h3>
+              <p class="muted">Absolutely. Comfort is a Progressive Web App (PWA) — it works beautifully on any device with a browser. You can even install it on your phone like a native app.</p>
+            </div>
+            <div class="card" style="margin-bottom:12px">
+              <h3 style="font-size:16px">Can parents pay fees via mobile money?</h3>
+              <p class="muted">Yes! We support MTN MoMo and Airtel Money payments. Parents receive instant receipts and fee balances update automatically.</p>
+            </div>
+            <div class="card" style="margin-bottom:12px">
+              <h3 style="font-size:16px">Is my data secure?</h3>
+              <p class="muted">Your data is encrypted in transit and at rest. We use industry-standard security practices including HTTPS, session management, and regular backups.</p>
+            </div>
+            <div class="card" style="margin-bottom:12px">
+              <h3 style="font-size:16px">Do I need internet to use it?</h3>
+              <p class="muted">Comfort works offline! Teachers can mark attendance and enter marks without internet. Data syncs automatically when you're back online.</p>
+            </div>
+            <div class="card" style="margin-bottom:12px">
+              <h3 style="font-size:16px">Can I use it for multiple schools or branches?</h3>
+              <p class="muted">Yes, our Professional plan supports multi-branch operations. Manage inventory, staff, and reports across all locations from one dashboard.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ENTERTAINMENT / EVENTS ROTATION -->
       ${entertainment.length > 0 ? `
       <div style="background:#f1f5f9;padding:40px 20px">
