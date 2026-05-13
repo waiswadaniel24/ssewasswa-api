@@ -917,6 +917,14 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               </div>
             </div>
             <div>
+              <div style="font-weight:700;color:white;margin-bottom:12px">Portals</div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <a href="/login" style="color:#94a3b8;text-decoration:none">Admin Login</a>
+                <a href="/worker/login" style="color:#94a3b8;text-decoration:none">Worker Login</a>
+                <a href="/register" style="color:#94a3b8;text-decoration:none">Create Account</a>
+              </div>
+            </div>
+            <div>
               <div style="font-weight:700;color:white;margin-bottom:12px">Contact &amp; Help</div>
               <div style="display:flex;flex-direction:column;gap:6px">
                 <a href="mailto:support@ssewasswa.onrender.com" style="color:#94a3b8;text-decoration:none">Email Support</a>
@@ -980,7 +988,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ${getStructuredData()}
     `;
 
-    res.send(renderPage('Comfort - The Operating System for African Institutions', content, null));
+    res.send(renderPage('Comfort - The Operating System for African Institutions', content, null, '/'));
   }));
 
   // =========================================================================
@@ -1093,7 +1101,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Entertainment Hub - Comfort', content, req.session.user || null));
+    res.send(renderPage('Entertainment Hub - Comfort', content, req.session.user || null, '/p/entertainment'));
   }));
 
   // =========================================================================
@@ -1227,7 +1235,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Blog & News - Comfort', content, req.session.user || null));
+    res.send(renderPage('Blog & News - Comfort', content, req.session.user || null, '/blog'));
   }));
 
   // Blog post detail page
@@ -1298,7 +1306,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       `;
 
-      res.send(renderPage(post.title + ' - Comfort Blog', content, req.session.user || null));
+      res.send(renderPage(post.title + ' - Comfort Blog', content, req.session.user || null, '/blog/' + id));
     } catch (e) {
       console.error('[Blog Post] Error:', e.message);
       res.redirect('/blog');
@@ -1339,7 +1347,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       </div>
     `;
-    res.send(renderPage('Privacy Policy - Comfort', content, req.session.user || null));
+    res.send(renderPage('Privacy Policy - Comfort', content, req.session.user || null, '/privacy'));
   }));
 
   app.get('/terms', ah(async (req, res) => {
@@ -1375,7 +1383,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       </div>
     `;
-    res.send(renderPage('Terms of Service - Comfort', content, req.session.user || null));
+    res.send(renderPage('Terms of Service - Comfort', content, req.session.user || null, '/terms'));
   }));
 
   app.get('/p/fundraising', ah(async (req, res) => {
@@ -1438,7 +1446,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Fundraising - Comfort', content, req.session.user || null));
+    res.send(renderPage('Fundraising - Comfort', content, req.session.user || null, '/p/fundraising'));
   }));
 
   // =========================================================================
@@ -2517,7 +2525,7 @@ async function syncOfflineData() {
       </div>
     `;
 
-    res.send(renderPage('Useful Links - Comfort', content, req.session.user || null));
+    res.send(renderPage('Useful Links - Comfort', content, req.session.user || null, '/links'));
   }));
 
   // =========================================================================
@@ -2542,29 +2550,13 @@ async function syncOfflineData() {
   // NOTE: BASE_URL and getStructuredData() are defined in Section 1.5 above
 
   // robots.txt — tells search engines what to crawl
+  // NOTE: Static robots.txt in public/robots.txt is served first by express.static.
+  // This dynamic route is a fallback in case the static file is missing.
   app.get('/robots.txt', (req, res) => {
     res.setHeader('Content-Type', 'text/plain');
+    res.set('Cache-Control', 'public, max-age=86400');
     res.send(`User-agent: *
 Allow: /
-Allow: /register
-Allow: /login
-Allow: /p/
-Allow: /links
-Allow: /manifest.json
-Disallow: /dashboard
-Disallow: /portal/
-Disallow: /school/
-Disallow: /clinic/
-Disallow: /church/
-Disallow: /business/
-Disallow: /dev/
-Disallow: /admin/
-Disallow: /api/
-Disallow: /billing/
-Disallow: /settings/
-Disallow: /notifications
-Disallow: /search
-Disallow: /toggle-dark
 
 Sitemap: ${BASE_URL}/sitemap.xml
 `);
@@ -2591,7 +2583,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       let publicPosts = [];
       try {
         publicPosts = (await pool.query(`
-          SELECT id, title, created_at, category FROM public_posts ORDER BY created_at DESC LIMIT 100
+          SELECT slug, title, published_at, category FROM blog_posts WHERE is_published = true ORDER BY published_at DESC LIMIT 100
         `)).rows;
       } catch (e) { /* no posts yet */ }
 
@@ -2601,7 +2593,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
         { url: '/', priority: '1.0', changefreq: 'daily' },
         { url: '/register', priority: '0.9', changefreq: 'monthly' },
         { url: '/login', priority: '0.8', changefreq: 'monthly' },
-        { url: '/blog', priority: '0.9', changefreq: 'daily' },
+        { url: '/blog/posts', priority: '0.9', changefreq: 'daily' },
         { url: '/p/entertainment', priority: '0.7', changefreq: 'daily' },
         { url: '/p/fundraising', priority: '0.7', changefreq: 'weekly' },
         { url: '/links', priority: '0.6', changefreq: 'monthly' },
@@ -2640,8 +2632,8 @@ Sitemap: ${BASE_URL}/sitemap.xml
       for (const post of publicPosts) {
         xml += `
   <url>
-    <loc>${BASE_URL}/blog/${post.id}</loc>
-    <lastmod>${post.created_at ? new Date(post.created_at).toISOString().split('T')[0] : now}</lastmod>
+    <loc>${BASE_URL}/blog/posts/${post.slug}</loc>
+    <lastmod>${post.published_at ? new Date(post.published_at).toISOString().split('T')[0] : now}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>`;
@@ -2652,12 +2644,14 @@ Sitemap: ${BASE_URL}/sitemap.xml
 
       res.type('xml');
       res.set('Cache-Control', 'public, max-age=3600');
+      res.set('Content-Length', Buffer.byteLength(xml));
       res.send(xml);
     } catch (err) {
       // Always return valid XML — never fall through to the 500 HTML error handler
+      const fallbackXml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>';
       res.type('xml');
-      res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>`);
+      res.set('Content-Length', Buffer.byteLength(fallbackXml));
+      res.status(200).send(fallbackXml);
     }
   });
 
@@ -2677,4 +2671,5 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // =========================================================================
 
   console.log('[Launch] All launch routes registered successfully');
+  app._launchRoutesLoaded = true;
 };
