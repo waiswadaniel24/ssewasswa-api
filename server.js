@@ -28,7 +28,9 @@ const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { authenticator } = require('otplib');
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle } = require('docx');
+const PDFDocument = require('pdfkit');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const http = require('http');
@@ -423,13 +425,21 @@ const queueEmail = (tenantId, to, subject, body, isHtml = true) => pool.query('I
 // SMS helper
 const sendSMS = async (phone, message) => {
   if (!process.env.AT_API_KEY || !process.env.AT_USERNAME) return false;
+  // Check opt-outs before sending
+  const optOut = await pool.query('SELECT 1 FROM sms_opt_outs WHERE phone=$1', [phone]);
+  if (optOut.rows.length > 0) {
+    console.log(`[SMS] Skipped opt-out number: ${phone}`);
+    return { skipped: true, reason: 'opt_out' };
+  }
   try {
     const africastalking = require('africastalking')({ apiKey: process.env.AT_API_KEY, username: process.env.AT_USERNAME });
-    await africastalking.SMS.send({ to: phone, message, from: process.env.AT_SENDER_ID || undefined });
-    return true;
+    const response = await africastalking.SMS.send({ to: phone, message, from: process.env.AT_SENDER_ID || undefined });
+    // Capture message ID from Africa's Talking for delivery receipt tracking
+    const messageId = response?.SMSMessageData?.Recipients?.[0]?.id || null;
+    return { sent: true, messageId };
   } catch (e) { console.warn('SMS failed:', e.message); return false; }
 };
-const logSMS = (tenantId, phone, message, triggerType) => pool.query('INSERT INTO sms_logs(tenant_id,phone,message,trigger_type) VALUES($1,$2,$3,$4)', [tenantId, phone, message, triggerType || 'manual']).catch(e => console.error('[DB Error]', e.message));
+const logSMS = (tenantId, phone, message, triggerType, reference) => pool.query('INSERT INTO sms_logs(tenant_id,phone,message,trigger_type,reference) VALUES($1,$2,$3,$4,$5)', [tenantId, phone, message, triggerType || 'manual', reference || null]).catch(e => console.error('[DB Error]', e.message));
 
 // Webhook delivery
 const fireWebhook = async (tenantId, event, payload) => {
@@ -1206,6 +1216,9 @@ const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_push_subscriptions_tenant ON push_subscriptions(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_scheduled_reports_next ON scheduled_reports(next_run) WHERE active = true`,
   `CREATE INDEX IF NOT EXISTS idx_sms_opt_outs_phone ON sms_opt_outs(phone)`,
+  // SMS delivery receipt tracking: add reference column to sms_logs
+  `ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS reference TEXT`,
+  `CREATE INDEX IF NOT EXISTS idx_sms_logs_reference ON sms_logs(reference)`,
   // Seed default feature flags
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('plan_enforcement', 'Plan Enforcement', 'Block free plan at 50 students', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('usage_limits', 'Usage Limits', 'Auto-block when plan limit exceeded', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
@@ -1702,7 +1715,11 @@ const migrations = [
   `UPDATE gallery_photos SET photo_url = url WHERE photo_url IS NULL AND url IS NOT NULL`,
   // Documents table: add file_type and uploaded_by if missing
   `ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_type TEXT`,
-  `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by TEXT`
+  `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by TEXT`,
+  // ============ v15 AUTOMATED FEE REMINDERS ============
+  `CREATE TABLE IF NOT EXISTS fee_reminder_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER UNIQUE, auto_notify BOOLEAN DEFAULT false, frequency TEXT DEFAULT 'weekly', days_before INTEGER DEFAULT 7, enabled_channels TEXT[] DEFAULT '{sms,email}', last_run TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  `ALTER TABLE sms_logs ADD COLUMN IF NOT EXISTS trigger_type TEXT`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('auto_fee_reminders', 'Automated Fee Reminders', 'Hourly auto SMS/email reminders for outstanding fees', '3.0', 'core', 'Worker process running', true) ON CONFLICT DO NOTHING`
 ];
 
 // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
@@ -1943,7 +1960,22 @@ if ('serviceWorker' in navigator && window.__VAPID_KEY) {
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
-      <a href="/notifications" title="Notifications">🔔</a>
+      <div style="position:relative;display:inline-block" id="notifDropdown">
+        <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="Notifications">
+          🔔
+          <span id="notifBadge" style="position:absolute;top:-5px;right:-8px;background:#dc2626;color:white;font-size:10px;padding:1px 5px;border-radius:10px;display:none">0</span>
+        </button>
+        <div id="notifPanel" style="display:none;position:absolute;right:0;top:35px;width:350px;max-height:400px;overflow-y:auto;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000">
+          <div style="padding:12px;border-bottom:1px solid ${dark ? '#334155' : '#e2e8f0'};display:flex;justify-content:space-between;align-items:center">
+            <strong>Notifications</strong>
+            <a href="#" onclick="markAllRead();return false" style="font-size:12px;color:#4f46e5">Mark all read</a>
+          </div>
+          <div id="notifList"><div style="padding:20px;text-align:center" class="muted">Loading...</div></div>
+          <div style="padding:10px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};text-align:center">
+            <a href="/notifications" style="font-size:13px;color:#4f46e5">View All Notifications</a>
+          </div>
+        </div>
+      </div>
       <a href="/dashboard">Dashboard</a>
       <a href="/search">Search</a>
       <a href="/settings/profile">Settings</a>
@@ -1983,27 +2015,41 @@ ${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;le
 </footer>
 <script>
 ${user ? `
-// Real-time WebSocket notifications (falls back to polling)
+// Real-time notification badge + WebSocket/polling
+var _notifBadge = document.getElementById('notifBadge');
+function updateNotifBadge(count){ if(!_notifBadge) return; if(count>0){_notifBadge.textContent=count>99?'99+':count;_notifBadge.style.display='inline-block';}else{_notifBadge.style.display='none';} }
 (function(){
-  var bell = document.querySelector('a[href="/notifications"][title="Notifications"]');
-  if(!bell) return;
-  var badge = document.createElement('span');
-  badge.id = 'notif-badge';
-  badge.style.cssText = 'display:none;position:absolute;top:-6px;right:-8px;background:#dc2626;color:white;font-size:10px;font-weight:700;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center';
-  bell.style.position = 'relative';
-  bell.appendChild(badge);
-  function updateBadge(count){if(count>0){badge.textContent=count>99?'99+':count;badge.style.display='inline-block';}else{badge.style.display='none';}}
-  // Try WebSocket first
+  function updateBadge(count){if(count>0){_notifBadge.textContent=count>99?'99+':count;_notifBadge.style.display='inline-block';}else{_notifBadge.style.display='none';}}
   try {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var ws = new WebSocket(proto + '//' + location.host + '/ws/notifications?sid=' + encodeURIComponent(document.cookie.match(/connect\\.sid=([^;]+)/) ? document.cookie.match(/connect\\.sid=([^;]+)/)[1] : ''));
     ws.onopen = function(){ console.log('[WS] Connected'); fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); };
-    ws.onmessage = function(e){ var d=JSON.parse(e.data); if(d.type==='notification'){updateBadge(d.count);if(Notification.permission==='granted'){new Notification('Comfort',{body:d.title,icon:'/favicon.ico'});}else if(d.title){badge.style.animation='none';badge.offsetHeight;badge.style.animation='pulse 0.5s ease';}} };
+    ws.onmessage = function(e){ var d=JSON.parse(e.data); if(d.type==='notification'){updateBadge(d.count);if(Notification.permission==='granted'){new Notification('Comfort',{body:d.title,icon:'/favicon.ico'});}else if(d.title){_notifBadge.style.animation='none';_notifBadge.offsetHeight;_notifBadge.style.animation='pulse 0.5s ease';}} };
     ws.onclose = function(){ console.log('[WS] Closed, fallback to polling'); startPolling(); };
     ws.onerror = function(){ ws.close(); };
   } catch(e){ startPolling(); }
   function startPolling(){ setInterval(function(){ fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); }, 30000); }
 })();
+// Notification dropdown panel
+var _notifPanelOpen = false;
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function timeAgo(d){var s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
+function toggleNotifPanel(){
+  var p=document.getElementById('notifPanel'); if(!p) return;
+  if(p.style.display==='none'||p.style.display===''){
+    p.style.display='block'; _notifPanelOpen=true;
+    fetch('/notifications/recent').then(function(r){return r.json()}).then(function(d){
+      var list=document.getElementById('notifList'); if(!list) return;
+      if(!d.length){list.innerHTML='<div style="padding:20px;text-align:center" class="muted">No notifications</div>';return}
+      list.innerHTML=d.map(function(n){return '<div style="padding:10px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;'+(n.read?'opacity:0.6':'')+'" onclick="markRead('+n.id+')">'+
+        '<div style="display:flex;justify-content:space-between"><strong style="font-size:13px">'+esc(n.title)+'</strong><span class="muted" style="font-size:11px">'+timeAgo(n.created_at)+'</span></div>'+
+        '<p class="muted" style="font-size:12px;margin-top:2px">'+esc(n.message)+'</p></div>'}).join('');
+    }).catch(function(){document.getElementById('notifList').innerHTML='<div style="padding:20px;text-align:center" class="muted">Error loading</div>';});
+  } else { p.style.display='none'; _notifPanelOpen=false; }
+}
+function markRead(id){fetch('/notifications/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
+function markAllRead(){fetch('/notifications/mark-all-read',{method:'POST'}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
+document.addEventListener('click',function(e){var dd=document.getElementById('notifDropdown');if(dd&&!dd.contains(e.target)){var p=document.getElementById('notifPanel');if(p&&_notifPanelOpen){p.style.display='none';_notifPanelOpen=false;}}});
 ` : ''}
 ${user ? `
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();var b=document.getElementById('install-btn');if(b){b.style.display='flex';b.addEventListener('click',function(){e.prompt();e.userChoice.then(function(c){if(c.outcome==='accepted')b.style.display='none'});});}
@@ -2046,7 +2092,7 @@ app.post('/login', validate({ email: { required: true, email: true }, password: 
   } catch (e) {
     if (e.message.includes('password_hash')) {
       // DB doesn't have password_hash column, select without it
-      u = (await pool.query('SELECT u.id,u.tenant_id,u.email,u.password,u.role,u.approved,u.banned,u.ban_reason,u.dark_mode,u.created_at,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
+      u = (await pool.query('SELECT u.id,u.tenant_id,u.email,u.password,u.role,u.approved,u.banned,u.ban_reason,u.dark_mode,u.created_at,u.two_fa_enabled,u.two_fa_secret,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
     } else throw e;
   }
   const storedHash = u?.password_hash || u?.password;
@@ -2070,8 +2116,49 @@ app.post('/login', validate({ email: { required: true, email: true }, password: 
   }
   // Clear lockout on successful login
   await pool.query('DELETE FROM login_attempts WHERE email=$1', [email]);
+  // 2FA challenge: if user has 2FA enabled, redirect to code entry instead of setting session
+  if (u.two_fa_enabled) {
+    req.session._pending2FA = email;
+    return res.redirect('/login/2fa');
+  }
   req.session.user = u;
   await audit(email, 'login', 'User logged in');
+  res.redirect('/dashboard');
+}));
+
+app.get('/login/2fa', (req, res) => {
+  const pendingEmail = req.session._pending2FA;
+  if (!pendingEmail) return res.redirect('/login');
+  res.send(renderPage('Two-Factor Authentication', `
+    <div class="card" style="max-width:450px;margin:40px auto">
+      <h2 style="text-align:center;margin-bottom:20px">Two-Factor Authentication</h2>
+      <p style="text-align:center;color:#64748b">Enter the 6-digit code from your authenticator app for:</p>
+      <p style="text-align:center;font-weight:bold;margin-bottom:20px">${esc(pendingEmail)}</p>
+      <form method="POST" action="/login/2fa">
+        <input name="code" placeholder="6-digit code" required maxlength="6" style="text-align:center;font-size:24px;letter-spacing:5px" inputmode="numeric" pattern="[0-9]{6}">
+        <button class="btn" style="width:100%;margin-top:10px">Verify</button>
+      </form>
+      <p style="text-align:center;margin-top:15px"><a href="/login" style="color:#64748b">Cancel</a></p>
+    </div>
+  `, null, req));
+});
+
+app.post('/login/2fa', ah(async (req, res) => {
+  const pendingEmail = req.session._pending2FA;
+  if (!pendingEmail) return res.redirect('/login');
+  const code = (req.body.code || '').trim();
+  const user = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [pendingEmail])).rows[0];
+  if (!user || !user.two_fa_secret) {
+    delete req.session._pending2FA;
+    return res.send(renderPage('Login', '<div class="alert alert-error">2FA is not configured for this account.</div>', null));
+  }
+  const isValid = authenticator.verify({ token: code, secret: user.two_fa_secret });
+  if (!isValid) {
+    return res.send(renderPage('Two-Factor Authentication', `<div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Invalid Code</h2><p style="text-align:center;color:#ef4444">The code you entered is incorrect. Please try again.</p><form method="POST" action="/login/2fa"><input name="code" placeholder="6-digit code" required maxlength="6" style="text-align:center;font-size:24px;letter-spacing:5px" inputmode="numeric" pattern="[0-9]{6}"><button class="btn" style="width:100%;margin-top:10px">Verify</button></form><p style="text-align:center;margin-top:15px"><a href="/login" style="color:#64748b">Cancel</a></p></div>`, null, req));
+  }
+  delete req.session._pending2FA;
+  req.session.user = user;
+  await audit(pendingEmail, 'login', 'User logged in with 2FA');
   res.redirect('/dashboard');
 }));
 
@@ -2579,6 +2666,7 @@ app.get('/school/fees', requireAuth, requireNotBanned, ah(async (req, res) => {
       <div style="display:flex;gap:10px;margin:15px 0;flex-wrap:wrap">
         <a href="/school/fees/new" class="btn btn-sm">+ Add Fee</a>
         <a href="/school/fees/pay" class="btn btn-green btn-sm">Record Payment</a>
+        <a href="/school/fees/reminders" class="btn btn-sm" style="background:linear-gradient(135deg,#f59e0b,#d97706)">⚙️ Auto Reminders</a>
       </div>
       <table><tr><th>Adm#</th><th>Student</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Term</th><th>Year</th></tr>
       ${fees.map(f => `<tr>
@@ -3161,7 +3249,18 @@ app.get('/school/report-cards', requireAuth, requireNotBanned, ah(async (req, re
         <select name="exam_id" required><option value="">Select Exam</option>
           ${exams.map(e => `<option value="${e.id}">${esc(e.name)} - ${esc(e.term)} ${e.year || ''}</option>`).join('')}
         </select>
-        <button class="btn btn-gold">Download Report Card</button>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-gold" type="submit">Download DOCX</button>
+          <button class="btn" type="button" style="background:#dc2626;color:white" onclick="downloadPDF()">Download PDF</button>
+        </div>
+        <script>
+        function downloadPDF() {
+          const sid = document.querySelector('select[name=student_id]').value;
+          const eid = document.querySelector('select[name=exam_id]').value;
+          if (!sid || !eid) { alert('Please select a student and exam first.'); return; }
+          window.open('/school/report-cards/generate-pdf?student_id=' + sid + '&exam_id=' + eid, '_blank');
+        }
+        </script>
       </form>
     </div>
   `, req.session.user));
@@ -3172,7 +3271,7 @@ app.post('/school/report-cards/generate', requireAuth, requireNotBanned, ah(asyn
   const { student_id, exam_id } = req.body;
   const student = (await pool.query('SELECT * FROM students WHERE id=$1 AND tenant_id=$2', [student_id, t])).rows[0];
   const exam = (await pool.query('SELECT * FROM exams WHERE id=$1 AND tenant_id=$2', [exam_id, t])).rows[0];
-  const marks = (await pool.query('SELECT subject,score,grade FROM marks WHERE exam_id=$1 AND student_id=$2', [exam_id, student_id])).rows;
+  const marks = (await pool.query('SELECT m.subject,m.score,m.grade,gs.comment FROM marks m LEFT JOIN grading_scales gs ON gs.grade=m.grade AND gs.tenant_id=$3 WHERE m.exam_id=$1 AND m.student_id=$2', [exam_id, student_id, t])).rows;
   const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
   const totalScore = marks.reduce((a, m) => a + (parseInt(m.score) || 0), 0);
   const avgScore = marks.length > 0 ? Math.round(totalScore / marks.length) : 0;
@@ -3213,6 +3312,126 @@ app.post('/school/report-cards/generate', requireAuth, requireNotBanned, ah(asyn
   const buffer = await Packer.toBuffer(doc);
   res.setHeader('Content-Disposition', `attachment; filename=ReportCard-${student.admission_no}.docx`);
   res.send(buffer);
+}));
+
+// === SCHOOL: REPORT CARDS (.pdf) ===
+app.get('/school/report-cards/generate-pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { student_id, exam_id } = req.query;
+  if (!student_id || !exam_id) return res.status(400).send('student_id and exam_id are required');
+  const student = (await pool.query('SELECT * FROM students WHERE id=$1 AND tenant_id=$2', [student_id, t])).rows[0];
+  const exam = (await pool.query('SELECT * FROM exams WHERE id=$1 AND tenant_id=$2', [exam_id, t])).rows[0];
+  if (!student || !exam) return res.status(404).send('Student or exam not found');
+  const marks = (await pool.query('SELECT m.subject,m.score,m.grade,gs.comment FROM marks m LEFT JOIN grading_scales gs ON gs.grade=m.grade AND gs.tenant_id=$3 WHERE m.exam_id=$1 AND m.student_id=$2', [exam_id, student_id, t])).rows;
+  const tenant = (await pool.query('SELECT name,address,phone FROM tenants WHERE id=$1', [t])).rows[0];
+  const totalScore = marks.reduce((a, m) => a + (parseInt(m.score) || 0), 0);
+  const avgScore = marks.length > 0 ? Math.round(totalScore / marks.length) : 0;
+  const fee = (await pool.query('SELECT amount,paid FROM fees WHERE student_id=$1 AND tenant_id=$2 LIMIT 1', [student_id, t])).rows[0];
+
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="ReportCard-${student.admission_no}.pdf"`);
+  doc.pipe(res);
+
+  const pageWidth = doc.page.width - 80; // margin 40 each side
+
+  // School header
+  doc.fontSize(18).fill('#4f46e5').text(tenant?.name || 'Comfort', { align: 'center' });
+  doc.fontSize(10).fill('#64748b').text(tenant?.address || '', { align: 'center' });
+  if (tenant?.phone) doc.fontSize(10).fill('#64748b').text('Tel: ' + tenant.phone, { align: 'center' });
+  doc.moveDown(0.3);
+
+  // Divider
+  const divY = doc.y;
+  doc.moveTo(40, divY).lineTo(40 + pageWidth, divY).stroke('#4f46e5');
+  doc.moveDown(0.5);
+
+  // Title
+  doc.fontSize(14).fill('#1e293b').text('STUDENT REPORT CARD', { align: 'center' });
+  doc.fontSize(10).fill('#475569').text(`${exam.name} - ${exam.term} ${exam.year || ''}`, { align: 'center' });
+  doc.moveDown(0.8);
+
+  // Student info box
+  const infoY = doc.y;
+  doc.rect(40, infoY, pageWidth, 50).fillAndStroke('#f8fafc', '#e2e8f0');
+  doc.fill('#1e293b').fontSize(10);
+  doc.text(`Student: ${student.name}`, 55, infoY + 8);
+  doc.text(`ADM#: ${student.admission_no}`, 55, infoY + 22);
+  doc.text(`Class: ${student.class} ${student.stream || ''}`, 300, infoY + 8);
+  doc.text(`Date: ${new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}`, 300, infoY + 22);
+  doc.y = infoY + 55;
+
+  // Table header
+  doc.moveDown(0.3);
+  const tableLeft = 40;
+  const colWidths = [35, 145, 60, 60, 140];
+  const tableWidth = colWidths.reduce((a, b) => a + b, 0);
+  const headers = ['#', 'Subject', 'Marks', 'Grade', 'Comment'];
+  const headerH = 20;
+  const rowH = 18;
+
+  const tableTop = doc.y;
+  doc.rect(tableLeft, tableTop, tableWidth, headerH).fill('#4f46e5');
+  doc.fill('white').fontSize(9);
+  let x = tableLeft;
+  headers.forEach((h, i) => {
+    doc.text(h, x + 4, tableTop + 5, { width: colWidths[i] - 8 });
+    x += colWidths[i];
+  });
+
+  // Rows
+  let y = tableTop + headerH;
+  marks.forEach((m, i) => {
+    // Check for page break
+    if (y + rowH > doc.page.height - 80) {
+      doc.addPage();
+      y = 40;
+    }
+    if (i % 2 === 0) {
+      doc.rect(tableLeft, y, tableWidth, rowH).fill('#f8fafc');
+    }
+    // Draw row border
+    doc.rect(tableLeft, y, tableWidth, rowH).stroke('#e2e8f0');
+    doc.fill('#1e293b').fontSize(8);
+    x = tableLeft;
+    const vals = [String(i + 1), m.subject, String(m.score || '-'), m.grade || '', m.comment || ''];
+    vals.forEach((val, j) => {
+      doc.text(val, x + 4, y + 4, { width: colWidths[j] - 8 });
+      x += colWidths[j];
+    });
+    y += rowH;
+  });
+
+  // Draw bottom border of last row
+  doc.moveTo(tableLeft, y).lineTo(tableLeft + tableWidth, y).stroke('#e2e8f0');
+
+  doc.y = y + 10;
+  doc.moveDown(0.5);
+
+  // Summary
+  doc.fontSize(10).fill('#1e293b');
+  doc.text(`Total Score: ${totalScore}     Average: ${avgScore}%`, { continued: false });
+
+  // Fee status
+  if (fee) {
+    doc.moveDown(0.5);
+    const feeY = doc.y;
+    doc.rect(40, feeY, tableWidth, 50).fillAndStroke('#fefce8', '#fde047');
+    doc.fill('#1e293b').fontSize(9);
+    doc.text('FEE STATUS', 55, feeY + 5);
+    doc.fontSize(8).fill('#475569');
+    doc.text(`Total Fees: UGX ${parseInt(fee.amount).toLocaleString()}    Paid: UGX ${parseInt(fee.paid).toLocaleString()}    Balance: UGX ${(fee.amount - fee.paid).toLocaleString()}`, 55, feeY + 20);
+    doc.y = feeY + 55;
+  }
+
+  doc.moveDown(1);
+  doc.fontSize(10).fill('#1e293b').text('Class Teacher Comment: ________________________');
+  doc.text('Head Teacher Comment: ________________________');
+  doc.moveDown(1.5);
+
+  // Footer
+  doc.fontSize(8).fill('#94a3b8').text(`Generated by Comfort on ${new Date().toLocaleDateString()}`, { align: 'center' });
+  doc.end();
 }));
 
 // === SCHOOL: GENERAL REPORTS ===
@@ -3421,6 +3640,7 @@ app.get('/school/fees/:id/receipt', requireAuth, requireNotBanned, ah(async (req
       </div>
       <div style="text-align:center;padding:15px;border-top:1px solid #e2e8f0">
         <button class="btn btn-sm" onclick="window.print()">Print Receipt</button>
+        <a href="/school/fees/${req.params.id}/receipt-pdf" class="btn btn-sm" style="margin-left:8px;background:#dc2626;color:white">Download PDF</a>
         <a href="/school/fees" class="btn btn-sm" style="margin-left:8px">Back to Fees</a>
       </div>
     </div>
@@ -3642,6 +3862,25 @@ app.get('/notifications/count', requireAuth, ah(async (req, res) => {
   const t = u.tenant_id;
   const count = (await pool.query('SELECT COUNT(*) FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) AND read=false', [t, u.email])).rows[0].count;
   res.json({ count: parseInt(count) });
+}));
+
+app.get('/notifications/recent', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  const t = u.tenant_id;
+  const notifications = (await pool.query('SELECT id, title, message, type, read, created_at FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) ORDER BY created_at DESC LIMIT 10', [t, u.email])).rows;
+  res.json(notifications);
+}));
+
+app.post('/notifications/mark-read', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  await pool.query('UPDATE notifications SET read=true WHERE id=$1 AND tenant_id=$2', [req.body.id, u.tenant_id]);
+  res.json({ ok: true });
+}));
+
+app.post('/notifications/mark-all-read', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  await pool.query('UPDATE notifications SET read=true WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) AND read=false', [u.tenant_id, u.email]);
+  res.json({ ok: true });
 }));
 
 // === SCHOOL: SMS NOTIFICATIONS ===
@@ -8426,13 +8665,15 @@ app.get('/sms/send', requireAuth, requireNotBanned, (req, res) => {
 
 app.post('/sms/send', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { phone, message } = req.body;
-  const sent = await sendSMS(phone, message);
-  await audit(req.session.user.email, 'sms_sent', `To: ${phone}`);
-  res.send(renderPage('SMS', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert ${sent?'alert-success':'alert-info'}">${sent?'SMS sent successfully!':'SMS queued. Configure Africa\'s Talking env vars for delivery.'}</div><a href="/sms/send" class="btn">Send Another</a></div>`, req.session.user));
+  const result = await sendSMS(phone, message);
+  const sent = result?.sent;
+  const skipped = result?.skipped;
+  await audit(req.session.user.email, 'sms_sent', `To: ${phone}${skipped ? ' (opt-out skipped)' : ''}`);
+  res.send(renderPage('SMS', `<div class="card" style="max-width:600px;margin:40px auto"><div class="alert ${sent?'alert-success':skipped?'alert-info':'alert-error'}">${sent?'SMS sent successfully!':skipped?'SMS skipped — recipient has opted out.':'SMS failed. Configure Africa\'s Talking env vars for delivery.'}</div><a href="/sms/send" class="btn">Send Another</a></div>`, req.session.user));
 }));
 
-// === FEE RECEIPT PDF (Enhanced) ===
-app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+// === FEE RECEIPT DOCX (Legacy) ===
+app.get('/school/fees/:id/receipt-docx', requireAuth, requireNotBanned, ah(async (req, res) => {
   const fee = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no,s.class FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1', [req.params.id])).rows[0];
   if (!fee) return res.status(404).send('Fee not found');
   const tenant = (await pool.query('SELECT name,email,phone,address FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0];
@@ -8461,6 +8702,107 @@ app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   res.setHeader('Content-Disposition', `attachment; filename="receipt-${receiptNo}.docx"`);
   res.send(buffer);
+}));
+
+// === FEE RECEIPT PDF (Real PDF generation) ===
+app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const fee = (await pool.query('SELECT f.*,s.name as student_name,s.admission_no,s.class,s.guardian_name FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.id=$1', [req.params.id])).rows[0];
+  if (!fee) return res.status(404).send('Fee record not found');
+  const tenant = (await pool.query('SELECT name,address,phone,email,logo_url FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0];
+  const receiptNo = fee.receipt_no || ('RCP-' + fee.id + '-' + Date.now().toString(36).toUpperCase());
+  // Persist receipt number
+  if (!fee.receipt_no) {
+    try { await pool.query('UPDATE fees SET receipt_no=$1 WHERE id=$2', [receiptNo, fee.id]); } catch(e) { /* ignore */ }
+  }
+
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="receipt-${receiptNo}.pdf"`);
+  doc.pipe(res);
+
+  const pw = doc.page.width - 100;
+
+  // Header
+  doc.fontSize(20).fill('#4f46e5').text(tenant?.name || 'Comfort', { align: 'center' });
+  if (tenant?.address) doc.fontSize(9).fill('#64748b').text(tenant.address, { align: 'center' });
+  if (tenant?.phone) doc.fontSize(9).fill('#64748b').text('Tel: ' + tenant.phone, { align: 'center' });
+  if (tenant?.email) doc.fontSize(9).fill('#64748b').text(tenant.email, { align: 'center' });
+
+  // Divider
+  doc.moveDown(0.3);
+  const divY = doc.y;
+  doc.moveTo(50, divY).lineTo(50 + pw, divY).stroke('#4f46e5');
+  doc.moveDown(0.5);
+
+  // Title
+  doc.fontSize(16).fill('#3730a3').text('OFFICIAL FEE RECEIPT', { align: 'center' });
+  doc.moveDown(0.8);
+
+  // Receipt info
+  doc.fontSize(10).fill('#1e293b');
+  doc.text(`Receipt No: ${receiptNo}`, 50);
+  doc.text(`Date: ${new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}`, 50);
+  doc.moveDown(0.5);
+
+  // Student info box
+  const boxY = doc.y;
+  doc.rect(50, boxY, pw, fee.guardian_name ? 70 : 55).fillAndStroke('#f8fafc', '#e2e8f0');
+  doc.fill('#1e293b').fontSize(10);
+  doc.text(`Student Name: ${fee.student_name || '-'}`, 65, boxY + 8);
+  doc.text(`Admission No: ${fee.admission_no || '-'}`, 65, boxY + 22);
+  doc.text(`Class: ${fee.class || '-'}`, 300, boxY + 8);
+  if (fee.guardian_name) doc.text(`Guardian: ${fee.guardian_name}`, 300, boxY + 22);
+  doc.y = boxY + (fee.guardian_name ? 75 : 60);
+
+  doc.moveDown(0.5);
+
+  // Fee details table
+  const tblLeft = 50;
+  const cW = [(pw * 0.6), (pw * 0.4)];
+  const tblW = cW[0] + cW[1];
+  const hdrH = 22;
+  const rH = 20;
+
+  // Table header
+  const tblTop = doc.y;
+  doc.rect(tblLeft, tblTop, tblW, hdrH).fill('#4f46e5');
+  doc.fill('white').fontSize(10);
+  doc.text('Description', tblLeft + 8, tblTop + 5, { width: cW[0] - 16 });
+  doc.text('Amount (UGX)', tblLeft + cW[0] + 8, tblTop + 5, { width: cW[1] - 16, align: 'right' });
+
+  let rowY = tblTop + hdrH;
+  const rows = [
+    [`School Fees - ${fee.term || 'Term'} ${fee.year || ''}`, Number(fee.amount || 0).toLocaleString()],
+    ['Total Fees', Number(fee.amount || 0).toLocaleString()],
+    ['Amount Paid', Number(fee.paid || 0).toLocaleString()],
+    ['Balance', Number(fee.amount - fee.paid || 0).toLocaleString()],
+  ];
+  const rowStyles = [null, { bold: true }, { bold: true, color: '#059669' }, { bold: true, color: Number(fee.amount - fee.paid || 0) > 0 ? '#dc2626' : '#059669' }];
+
+  rows.forEach((r, i) => {
+    if (i % 2 === 0) doc.rect(tblLeft, rowY, tblW, rH).fill('#f8fafc');
+    doc.rect(tblLeft, rowY, tblW, rH).stroke('#e2e8f0');
+    const style = rowStyles[i];
+    doc.fill(style?.color || '#1e293b').fontSize(style?.bold ? 10 : 9);
+    doc.text(r[0], tblLeft + 8, rowY + 5, { width: cW[0] - 16 });
+    doc.text(r[1], tblLeft + cW[0] + 8, rowY + 5, { width: cW[1] - 16, align: 'right' });
+    rowY += rH;
+  });
+  doc.moveTo(tblLeft, rowY).lineTo(tblLeft + tblW, rowY).stroke('#e2e8f0');
+
+  doc.y = rowY + 20;
+
+  // Signature lines
+  doc.fontSize(9).fill('#64748b');
+  const sigY = doc.y;
+  doc.text('Received By: ___________________', 50, sigY);
+  doc.text('Parent/Guardian: ___________________', 300, sigY);
+  doc.moveDown(2);
+
+  // Footer
+  doc.fontSize(8).fill('#94a3b8').text(`This is an official receipt from ${tenant?.name || 'Comfort'}. Keep for your records.`, { align: 'center' });
+  doc.fontSize(8).fill('#94a3b8').text(`Generated by Comfort on ${new Date().toLocaleDateString()}`, { align: 'center' });
+  doc.end();
 }));
 
 // === PUBLIC API DOCS ===
@@ -8863,8 +9205,8 @@ app.post('/school/fee-balance-sms/send', requireAuth, requireNotBanned, ah(async
   for (const b of balances) {
     const msg = template.replace('{name}', b.name).replace('{balance}', `UGX ${b.balance.toLocaleString()}`);
     const ok = await sendSMS(b.guardian_phone, msg);
-    await logSMS(t, b.guardian_phone, msg, 'fee_balance');
-    if (ok) sent++;
+    if (ok?.sent) await logSMS(t, b.guardian_phone, msg, 'fee_balance');
+    if (ok?.sent) sent++;
   }
   await audit(req.session.user.email, 'bulk_fee_sms', `Sent fee balance SMS to ${sent}/${balances.length} parents`);
   res.send(renderPage('SMS Sent', `<div class="card"><div class="alert alert-success">Fee balance SMS sent to ${sent}/${balances.length} parents!</div><a href="/school/fee-balance-sms" class="btn">Back</a></div>`, req.session.user));
@@ -9235,7 +9577,7 @@ app.get('/sms-campaigns/:id/send', requireAuth, requireNotBanned, ah(async (req,
   else if (campaign.target_group === 'all_members') phones = (await pool.query('SELECT phone FROM members WHERE tenant_id=$1 AND phone IS NOT NULL', [req.session.user.tenant_id])).rows.map(r=>r.phone);
   else if (campaign.target_group === 'all_parents') phones = (await pool.query('SELECT DISTINCT guardian_phone FROM students WHERE tenant_id=$1 AND guardian_phone IS NOT NULL', [req.session.user.tenant_id])).rows.map(r=>r.guardian_phone);
   let sent = 0;
-  for (const phone of phones) { const ok = await sendSMS(phone, campaign.message); await logSMS(req.session.user.tenant_id, phone, campaign.message, 'campaign'); if (ok) sent++; }
+  for (const phone of phones) { const ok = await sendSMS(phone, campaign.message); if (ok?.sent) { await logSMS(req.session.user.tenant_id, phone, campaign.message, 'campaign'); sent++; } }
   await pool.query('UPDATE sms_campaigns SET status=$1,sent_count=$2 WHERE id=$3', ['sent', sent, req.params.id]);
   res.redirect('/sms-campaigns');
 }));
@@ -9819,10 +10161,93 @@ app.get('/school/fees/remind', requireAuth, requireNotBanned, ah(async (req, res
   let sent = 0;
   for (const fee of fees) {
     const balance = parseInt(fee.amount) - parseInt(fee.paid);
-    if (fee.guardian_phone) { const ok = await sendSMS(fee.guardian_phone, `Fee reminder: ${fee.student_name} has balance of UGX ${balance.toLocaleString()}. Please clear. - Comfort`); if (ok) sent++; }
+    if (fee.guardian_phone) { const ok = await sendSMS(fee.guardian_phone, `Fee reminder: ${fee.student_name} has balance of UGX ${balance.toLocaleString()}. Please clear. - Comfort`); if (ok?.sent) sent++; }
     if (fee.parent_email) { await sendEmail(fee.parent_email, `Fee Balance Reminder - ${fee.student_name}`, `<p>Dear Parent,</p><p>Your child <strong>${esc(fee.student_name)}</strong> has an outstanding fee balance of <strong>UGX ${balance.toLocaleString()}</strong>.</p><p>Please clear the balance at your earliest convenience.</p>`); sent++; }
   }
   res.send(renderPage('Fee Reminders', `<div class="card"><div class="alert alert-success"><h2>Reminders Sent</h2><p>${sent} reminders sent to parents with outstanding balances.</p></div><a href="/school/fees" class="btn">Back to Fees</a></div>`, req.session.user));
+}));
+
+// === AUTOMATED FEE REMINDER CONFIGURATION ===
+app.get('/school/fees/reminders', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // Get or create settings for this tenant
+  let settings = (await pool.query('SELECT * FROM fee_reminder_settings WHERE tenant_id = $1', [t])).rows[0];
+  if (!settings) {
+    await pool.query('INSERT INTO fee_reminder_settings(tenant_id) VALUES($1) ON CONFLICT DO NOTHING', [t]);
+    settings = (await pool.query('SELECT * FROM fee_reminder_settings WHERE tenant_id = $1', [t])).rows[0];
+  }
+  // Get count of outstanding fees for preview
+  const outstandingCount = (await pool.query('SELECT COUNT(*) FROM fees f JOIN students s ON f.student_id = s.id WHERE f.tenant_id = $1 AND (f.amount - f.paid) > 0', [t])).rows[0].count;
+  const smsEnabled = !!(process.env.AT_API_KEY && process.env.AT_USERNAME);
+  const emailEnabled = !!(process.env.GMAIL_USER && process.env.GMAIL_PASS);
+  res.send(renderPage('Automated Fee Reminders', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>⚙️ Automated Fee Reminders</h1><p>Configure automatic SMS and email reminders for parents with outstanding balances</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${outstandingCount}</div><div>Outstanding Fees</div></div>
+      <div class="stat-card"><div class="stat-num">${settings.auto_notify ? '🟢 ON' : '🔴 OFF'}</div><div>Auto Reminders</div></div>
+      <div class="stat-card"><div class="stat-num">${settings.last_run ? new Date(settings.last_run).toLocaleString() : 'Never'}</div><div>Last Run</div></div>
+    </div>
+    <div class="card" style="max-width:700px;margin:20px auto">
+      <h3>Reminder Settings</h3>
+      <form method="POST" action="/school/fees/reminders/save">
+        <label style="display:flex;align-items:center;gap:10px;margin:15px 0;font-size:16px;font-weight:600">
+          <input type="checkbox" name="auto_notify" value="true" ${settings.auto_notify ? 'checked' : ''} style="width:auto;margin:0">
+          Enable Automated Fee Reminders
+        </label>
+        <label>Frequency
+          <select name="frequency">
+            <option value="daily" ${settings.frequency === 'daily' ? 'selected' : ''}>Daily</option>
+            <option value="weekly" ${settings.frequency === 'weekly' ? 'selected' : ''}>Weekly</option>
+            <option value="monthly" ${settings.frequency === 'monthly' ? 'selected' : ''}>Monthly</option>
+          </select>
+        </label>
+        <label>Days Before Due Date Reminder
+          <input type="number" name="days_before" value="${settings.days_before || 7}" min="1" max="30" placeholder="Default: 7">
+        </label>
+        <label>Reminder Channels</label>
+        <div style="display:flex;gap:20px;margin:10px 0">
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" name="channels" value="sms" ${(settings.enabled_channels || ['sms','email']).includes('sms') ? 'checked' : ''} style="width:auto;margin:0" ${!smsEnabled ? 'disabled title="Africa&apos;s Talking not configured"' : ''}>
+            SMS ${smsEnabled ? '' : '<span class="muted">(not configured)</span>'}
+          </label>
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" name="channels" value="email" ${(settings.enabled_channels || ['sms','email']).includes('email') ? 'checked' : ''} style="width:auto;margin:0" ${!emailEnabled ? 'disabled title="Gmail not configured"' : ''}>
+            Email ${emailEnabled ? '' : '<span class="muted">(not configured)</span>'}
+          </label>
+        </div>
+        <div class="alert alert-info" style="margin-top:20px">
+          <strong>How it works:</strong> The worker process checks every hour for tenants with auto reminders enabled. It finds all students with outstanding fee balances (max 50 per run) and queues SMS/email reminders. The reminders are then sent by the existing SMS and email systems.
+        </div>
+        <h4 style="margin-top:20px">Message Preview</h4>
+        <div class="card" style="background:#f1f5f9;border:1px dashed #94a3b8">
+          <strong>SMS:</strong><br><span class="muted">Fee reminder: {Student Name} has an outstanding balance of UGX {Balance}. Please clear the balance. - Comfort</span>
+          <hr style="margin:10px 0;border-color:#e2e8f0">
+          <strong>Email:</strong><br>
+          <span class="muted">Subject: Fee Balance Reminder - {Student Name}</span><br>
+          <span class="muted">Body: Professional email with balance details and payment prompt</span>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px">
+          <button type="submit" class="btn btn-green">Save Settings</button>
+          <a href="/school/fees/remind" class="btn btn-sm">Send Manual Reminders Now</a>
+          <a href="/school/fees" class="btn btn-sm">Back to Fees</a>
+        </div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/school/fees/reminders/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const autoNotify = req.body.auto_notify === 'true';
+  const frequency = ['daily', 'weekly', 'monthly'].includes(req.body.frequency) ? req.body.frequency : 'weekly';
+  const daysBefore = Math.min(30, Math.max(1, parseInt(req.body.days_before) || 7));
+  const channels = Array.isArray(req.body.channels) ? req.body.channels : (req.body.channels ? [req.body.channels] : ['sms', 'email']);
+  await pool.query(
+    `INSERT INTO fee_reminder_settings(tenant_id, auto_notify, frequency, days_before, enabled_channels, updated_at) VALUES($1, $2, $3, $4, $5, NOW()) ON CONFLICT (tenant_id) DO UPDATE SET auto_notify = $2, frequency = $3, days_before = $4, enabled_channels = $5, updated_at = NOW()`,
+    [t, autoNotify, frequency, daysBefore, channels]
+  );
+  await audit(req.session.user.email, 'fee_reminder_settings', `Auto fee reminders ${autoNotify ? 'enabled' : 'disabled'}, frequency: ${frequency}`);
+  res.send(renderPage('Fee Reminders Saved', `<div class="card"><div class="alert alert-success"><h2>Settings Saved</h2><p>Automated fee reminders are now <strong>${autoNotify ? 'ENABLED' : 'DISABLED'}</strong>.</p><ul style="margin-top:10px"><li>Frequency: ${esc(frequency)}</li><li>Days before due: ${daysBefore}</li><li>Channels: ${esc(channels.join(', '))}</li></ul></div><a href="/school/fees/reminders" class="btn">Back to Settings</a> <a href="/school/fees" class="btn btn-sm">Fees</a></div>`, req.session.user));
 }));
 
 // === v1.0: REAL FILE UPLOAD WITH MULTER ===
@@ -9891,10 +10316,10 @@ app.post('/sms/bulk/send', requireAuth, requireNotBanned, ah(async (req, res) =>
     if (g === 'members') { const r = await pool.query('SELECT phone FROM church_members WHERE tenant_id=$1 AND phone IS NOT NULL', [t]); r.rows.forEach(r => phones.add(r.phone)); }
     if (g === 'staff') { const r = await pool.query('SELECT phone FROM staff WHERE tenant_id=$1 AND phone IS NOT NULL', [t]); r.rows.forEach(r => phones.add(r.phone)); }
   }
-  let sent = 0;
-  for (const phone of phones) { const ok = await sendSMS(phone, message); if (ok) sent++; }
-  await audit(req.session.user.email, 'bulk_sms', `Sent ${sent}/${phones.size} SMS to ${selectedGroups.join(', ')}`);
-  res.send(renderPage('Bulk SMS', `<div class="card"><div class="alert alert-success"><h2>SMS Sent</h2><p>${sent} of ${phones.size} messages delivered.</p></div><a href="/sms/bulk" class="btn">Send More</a></div>`, req.session.user));
+  let sent = 0, skipped = 0;
+  for (const phone of phones) { const ok = await sendSMS(phone, message); if (ok?.sent) sent++; else if (ok?.skipped) skipped++; }
+  await audit(req.session.user.email, 'bulk_sms', `Sent ${sent}/${phones.size} SMS to ${selectedGroups.join(', ')} (${skipped} opt-outs)`);
+  res.send(renderPage('Bulk SMS', `<div class="card"><div class="alert alert-success"><h2>SMS Sent</h2><p>${sent} of ${phones.size} messages delivered.${skipped ? ` ${skipped} skipped (opt-out).` : ''}</p></div><a href="/sms/bulk" class="btn">Send More</a></div>`, req.session.user));
 }));
 
 // === v2.0: DEBT AGING REPORT ===
@@ -10744,16 +11169,11 @@ app.get('/dev/government', requireAuth, requireSuperAdmin, ah(async (req, res) =
 app.post('/school/students/save', requirePlanLimit('students'));
 // POS checkout - block free users
 app.post('/business/pos/checkout', requirePlanLimit('sales'));
-// SMS send - block free users
-app.post('/sms/send', (req, res, next) => {
-  const plan = req.session.user?.role === 'super_admin' ? 'enterprise' : 'free';
-  if (plan === 'free') {
-    try { checkPlanLimit(req.session.user.tenant_id, 'students').then(check => {
-      if (check.plan === 'free') return res.send(renderPage('Plan Required', '<div class="card"><div class="alert alert-error"><h2>SMS Requires Basic Plan</h2><p>Free plan does not include SMS. Upgrade to Basic or Pro to send SMS.</p></div><a href="/billing" class="btn btn-gold">Upgrade Plan</a></div>', req.session.user));
-      next();
-    }); } catch(e) { next(); }
-  } else next();
-});
+// SMS send - plan gate (middleware applied before the handler at line ~8537)
+// NOTE: The duplicate app.post('/sms/send') was removed — the original handler at ~line 8537
+// already uses requireAuth + requireNotBanned + ah(). Plan enforcement for SMS is handled
+// via requirePlanLimit('sms_logs') or inline checks in the handler itself if needed.
+// If SMS plan gating is desired, add it to the original handler at line ~8537.
 // API access - block free users
 const apiAuthWithPlan = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -11056,7 +11476,22 @@ ${process.env.GA_TRACKING_ID ? `
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
-      <a href="/notifications" title="Notifications">🔔</a>
+      <div style="position:relative;display:inline-block" id="notifDropdown">
+        <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="Notifications">
+          🔔
+          <span id="notifBadge" style="position:absolute;top:-5px;right:-8px;background:#dc2626;color:white;font-size:10px;padding:1px 5px;border-radius:10px;display:none">0</span>
+        </button>
+        <div id="notifPanel" style="display:none;position:absolute;right:0;top:35px;width:350px;max-height:400px;overflow-y:auto;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000">
+          <div style="padding:12px;border-bottom:1px solid ${dark ? '#334155' : '#e2e8f0'};display:flex;justify-content:space-between;align-items:center">
+            <strong>Notifications</strong>
+            <a href="#" onclick="markAllRead();return false" style="font-size:12px;color:#4f46e5">Mark all read</a>
+          </div>
+          <div id="notifList"><div style="padding:20px;text-align:center" class="muted">Loading...</div></div>
+          <div style="padding:10px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};text-align:center">
+            <a href="/notifications" style="font-size:13px;color:#4f46e5">View All Notifications</a>
+          </div>
+        </div>
+      </div>
       <a href="/dashboard">Dashboard</a>
       <a href="/search">Search</a>
       <a href="/settings/profile">Settings</a>
@@ -11089,6 +11524,42 @@ ${process.env.GA_TRACKING_ID ? `
   </div>
   <div style="text-align:center;margin-top:20px;padding-top:15px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}"><p class="muted">&copy; ${new Date().getFullYear()} ${esc(platformSettings.site_name)}. ${esc(platformSettings.footer_text)}</p></div>
 </footer>
+${user ? `<script>
+// Notification badge + dropdown panel (V3)
+var _notifBadge = document.getElementById('notifBadge');
+function updateNotifBadge(count){ if(!_notifBadge) return; if(count>0){_notifBadge.textContent=count>99?'99+':count;_notifBadge.style.display='inline-block';}else{_notifBadge.style.display='none';} }
+(function(){
+  function updateBadge(count){if(count>0){_notifBadge.textContent=count>99?'99+':count;_notifBadge.style.display='inline-block';}else{_notifBadge.style.display='none';}}
+  try {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var ws = new WebSocket(proto + '//' + location.host + '/ws/notifications?sid=' + encodeURIComponent(document.cookie.match(/connect\\.sid=([^;]+)/) ? document.cookie.match(/connect\\.sid=([^;]+)/)[1] : ''));
+    ws.onopen = function(){ fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); };
+    ws.onmessage = function(e){ var d=JSON.parse(e.data); if(d.type==='notification'){updateBadge(d.count);if(Notification.permission==='granted'){new Notification('Comfort',{body:d.title,icon:'/favicon.ico'});}} };
+    ws.onclose = function(){ startPolling(); };
+    ws.onerror = function(){ ws.close(); };
+  } catch(e){ startPolling(); }
+  function startPolling(){ setInterval(function(){ fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); }, 30000); }
+})();
+var _notifPanelOpen = false;
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function timeAgo(d){var s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
+function toggleNotifPanel(){
+  var p=document.getElementById('notifPanel'); if(!p) return;
+  if(p.style.display==='none'||p.style.display===''){
+    p.style.display='block'; _notifPanelOpen=true;
+    fetch('/notifications/recent').then(function(r){return r.json()}).then(function(d){
+      var list=document.getElementById('notifList'); if(!list) return;
+      if(!d.length){list.innerHTML='<div style="padding:20px;text-align:center" class="muted">No notifications</div>';return}
+      list.innerHTML=d.map(function(n){return '<div style="padding:10px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;'+(n.read?'opacity:0.6':'')+'" onclick="markRead('+n.id+')">'+
+        '<div style="display:flex;justify-content:space-between"><strong style="font-size:13px">'+esc(n.title)+'</strong><span class="muted" style="font-size:11px">'+timeAgo(n.created_at)+'</span></div>'+
+        '<p class="muted" style="font-size:12px;margin-top:2px">'+esc(n.message)+'</p></div>'}).join('');
+    }).catch(function(){document.getElementById('notifList').innerHTML='<div style="padding:20px;text-align:center" class="muted">Error loading</div>';});
+  } else { p.style.display='none'; _notifPanelOpen=false; }
+}
+function markRead(id){fetch('/notifications/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
+function markAllRead(){fetch('/notifications/mark-all-read',{method:'POST'}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
+document.addEventListener('click',function(e){var dd=document.getElementById('notifDropdown');if(dd&&!dd.contains(e.target)){var p=document.getElementById('notifPanel');if(p&&_notifPanelOpen){p.style.display='none';_notifPanelOpen=false;}}});
+</script>` : ''}
 </body></html>`;
 };
 
@@ -11413,6 +11884,80 @@ app.use('/api/v1', rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 app.use('/api/v2', rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
 // === END v3.0 PRODUCTION HARDENING ===
+
+// =============================================
+// SMS DELIVERY DASHBOARD (Developer)
+// =============================================
+app.get('/dev/sms/stats', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const t = req.query.tenant_id ? parseInt(req.query.tenant_id) : req.session.user.tenant_id;
+  const stats = (await pool.query("SELECT status, COUNT(*) as count FROM sms_logs WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '30 days' GROUP BY status", [t])).rows;
+  const statusMap = {};
+  stats.forEach(s => { statusMap[s.status || 'unknown'] = parseInt(s.count); });
+  const total = Object.values(statusMap).reduce((a, b) => a + b, 0);
+  const recent = (await pool.query('SELECT * FROM sms_logs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t])).rows;
+  const statusBadge = (status) => {
+    const colors = { delivered: '#059669', sent: '#2563eb', queued: '#d97706', failed: '#dc2626', buffered: '#8b5cf6', submitted: '#0ea5e9' };
+    const c = colors[status] || '#6b7280';
+    return `<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;background:${c};color:white">${esc(status || 'unknown')}</span>`;
+  };
+  res.send(renderPage('SMS Delivery Stats', `
+    <div class="hero" style="background:linear-gradient(135deg,#2563eb,#7c3aed)"><h1>SMS Delivery Dashboard</h1><p>Last 30 days overview</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${total}</div><div>Total SMS</div></div>
+      ${Object.entries(statusMap).map(([status, count]) => `<div class="stat-card"><div class="stat-num" style="color:${status==='delivered'?'#059669':status==='failed'?'#dc2626':'#2563eb'}">${count}</div><div>${statusBadge(status)}</div></div>`).join('')}
+    </div>
+    <div class="card">
+      <h3>Recent SMS Activity (last 50)</h3>
+      ${recent.length ? `<table><tr><th>ID</th><th>Phone</th><th>Message</th><th>Status</th><th>Trigger</th><th>Date</th></tr>
+      ${recent.map(r => `<tr><td>${r.id}</td><td><code>${esc(r.phone)}</code></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((r.message||'').substring(0,50))}</td><td>${statusBadge(r.status)}</td><td>${esc(r.trigger_type||'')}</td><td>${new Date(r.created_at).toLocaleString()}</td></tr>`).join('')}
+      </table>` : '<p class="muted">No SMS activity in the last 30 days.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+// =============================================
+// SMS OPT-OUT MANAGEMENT (Developer)
+// =============================================
+app.get('/dev/sms/optouts', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const t = req.query.tenant_id ? parseInt(req.query.tenant_id) : null;
+  const optOuts = (await pool.query(t ? 'SELECT o.*, t.name as tenant_name FROM sms_opt_outs o JOIN tenants t ON o.tenant_id=t.id WHERE o.tenant_id=$1 ORDER BY o.created_at DESC' : 'SELECT o.*, t.name as tenant_name FROM sms_opt_outs o JOIN tenants t ON o.tenant_id=t.id ORDER BY o.created_at DESC LIMIT 100', t ? [t] : [])).rows;
+  res.send(renderPage('SMS Opt-Outs (Admin)', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>SMS Opt-Out Management</h1><p>${optOuts.length} opt-outs across tenants</p></div>
+    <div class="card">
+      <form method="POST" action="/dev/sms/optouts/add" style="display:inline;margin-bottom:15px">
+        <input name="phone" placeholder="+256..." required style="width:200px">
+        <input name="tenant_id" placeholder="Tenant ID" type="number" style="width:100px">
+        <input name="reason" placeholder="Reason">
+        <button class="btn btn-sm">Add Opt-Out</button>
+      </form>
+      <form method="POST" action="/dev/sms/optouts/remove" style="display:inline;margin-bottom:15px">
+        <input name="phone" placeholder="+256..." required style="width:200px">
+        <button class="btn btn-sm btn-green">Remove Opt-Out</button>
+      </form>
+    </div>
+    <div class="card">
+      ${optOuts.length ? `<table><tr><th>ID</th><th>Phone</th><th>Tenant</th><th>Reason</th><th>Date</th></tr>
+      ${optOuts.map(o => `<tr><td>${o.id}</td><td><code>${esc(o.phone)}</code></td><td>${esc(o.tenant_name||o.tenant_id)}</td><td>${esc(o.reason||'-')}</td><td>${new Date(o.created_at).toLocaleDateString()}</td></tr>`).join('')}
+      </table>` : '<p class="muted">No opt-outs recorded.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/sms/optouts/add', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { phone, tenant_id, reason } = req.body;
+  if (!phone) return res.status(400).send('Phone required');
+  const tid = parseInt(tenant_id) || req.session.user.tenant_id;
+  await pool.query('INSERT INTO sms_opt_outs(tenant_id,phone,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [tid, phone, reason || 'admin-added']);
+  res.redirect('/dev/sms/optouts');
+}));
+
+app.post('/dev/sms/optouts/remove', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).send('Phone required');
+  await pool.query('DELETE FROM sms_opt_outs WHERE phone=$1', [phone]);
+  res.redirect('/dev/sms/optouts');
+}));
+
 
 
 app.get('/terms', (req, res) => {
@@ -14233,16 +14778,18 @@ app.get('/settings/2fa/setup', requireAuth, ah(async (req, res) => {
 app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
   const user = (await pool.query('SELECT two_fa_secret FROM users WHERE email=$1', [req.session.user.email])).rows[0];
   if (!user?.two_fa_secret) return res.redirect('/settings/2fa');
-  // Simple verification - in production use proper TOTP
-  if (req.body.code.length === 6) {
-    await pool.query('UPDATE users SET two_fa_enabled=true WHERE email=$1', [req.session.user.email]);
-    req.session.user.two_fa_enabled = true;
+  const code = (req.body.code || '').trim();
+  const isValid = authenticator.verify({ token: code, secret: user.two_fa_secret });
+  if (!isValid) {
+    return res.send(renderPage('2FA Setup', '<div class="card alert alert-error"><h2>Invalid Code</h2><p>The code you entered is incorrect. Please try again.</p><a href="/settings/2fa/setup" class="btn">Back</a></div>', req.session.user));
   }
+  await pool.query('UPDATE users SET two_fa_enabled=true WHERE email=$1', [req.session.user.email]);
+  req.session.user.two_fa_enabled = true;
   res.redirect('/settings/2fa');
 }));
 
 app.get('/settings/2fa/disable', requireAuth, ah(async (req, res) => {
-  await pool.query('UPDATE users SET two_fa_enabled=false, two_fa_secret=NULL WHERE email=$1', [req.session.user.email]);
+  await pool.query('UPDATE users SET two_fa_enabled=false, two_fa_secret=NULL, totp_secret=NULL WHERE email=$1', [req.session.user.email]);
   req.session.user.two_fa_enabled = false;
   res.redirect('/settings/2fa');
 }));
@@ -14861,6 +15408,7 @@ app.get('/clinic', requireAuth, requireNotBanned, requireFeature('clinic_workflo
       <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Pharmacists (${pharmacists.rows.length})</h3><a href="/clinic/staff?role=pharmacist" class="btn btn-sm btn-green">Manage Pharmacists</a><a href="/clinic/staff/new?role=pharmacist" class="btn btn-sm" style="margin-top:8px">+ Add Pharmacist</a></div>
       <div class="card" style="border-top:4px solid #8b5cf6"><h3 style="color:#8b5cf6">Lab Technicians (${labTechs.rows.length})</h3><a href="/clinic/staff?role=lab_technician" class="btn btn-sm btn-green">Manage Lab Staff</a><a href="/clinic/staff/new?role=lab_technician" class="btn btn-sm" style="margin-top:8px">+ Add Lab Tech</a></div>
       <div class="card" style="border-top:4px solid #ec4899"><h3 style="color:#ec4899">Nurses (${nurses.rows.length})</h3><a href="/clinic/staff?role=nurse" class="btn btn-sm btn-green">Manage Nurses</a><a href="/clinic/staff/new?role=nurse" class="btn btn-sm" style="margin-top:8px">+ Add Nurse</a></div>
+      <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Appointments</h3><a href="/clinic/appointments" class="btn btn-sm">Manage Appointments</a><a href="/clinic/appointments/new" class="btn btn-sm btn-green" style="margin-top:8px">+ Book Appointment</a></div>
       <div class="card" style="background:#fef3c7;border:2px solid #f59e0b"><h3 style="color:#f59e0b">Patient Queue</h3><a href="/clinic/queue" class="btn btn-sm btn-gold">View Queue</a><a href="/clinic/queue/new" class="btn btn-sm" style="margin-top:8px">+ Add Patient</a></div>
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Prescriptions</h3><a href="/clinic/prescriptions" class="btn btn-sm btn-red">Pending Rx</a><a href="/clinic/pharmacy" class="btn btn-sm" style="margin-top:8px">Pharmacy</a></div>
       <div class="card" style="background:#f5f3ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Laboratory</h3><a href="/clinic/lab" class="btn btn-sm">Lab Requests</a><a href="/clinic/lab/results" class="btn btn-sm" style="margin-top:8px">Results</a></div>
@@ -14950,7 +15498,7 @@ app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_
   const doctors = (await pool.query("SELECT * FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true", [t])).rows;
   res.send(renderPage('Patient Queue', `
     <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Patient Queue</h1><p>Triage and manage waiting patients</p></div>
-    <div class="card"><a href="/clinic/queue/new" class="btn btn-green" style="margin-bottom:15px">+ Add Patient to Queue</a>
+    <div class="card"><div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap"><a href="/clinic/queue/new" class="btn btn-green">+ Add Patient to Queue</a><a href="/clinic/appointments/new" class="btn" style="background:linear-gradient(135deg,#3b82f6,#6366f1)">+ Book Appointment</a></div>
     <table><tr><th>#</th><th>Patient</th><th>Complaint</th><th>Priority</th><th>Status</th><th>Doctor</th><th>Actions</th></tr>
     ${queue.map((q,i) => `<tr style="${q.priority==='emergency'?'background:#fee2e2':q.priority==='urgent'?'background:#fef3c7':''}"><td>${i+1}</td><td>${esc(q.patient_name)}</td><td>${esc(q.complaint||'-')}</td><td><span class="tag" style="background:${q.priority==='emergency'?'#dc2626':q.priority==='urgent'?'#f59e0b':'#059669'};color:white">${esc(q.priority)}</span></td><td><span class="tag">${esc(q.status)}</span></td><td>${esc(q.doctor_name||'Unassigned')}</td><td>
       ${q.status==='waiting'?`<a href="/clinic/queue/${q.id}/see" class="btn btn-sm btn-green">See Patient</a>`:''}
@@ -15323,6 +15871,219 @@ app.post('/clinic/pharmacy/inventory/:id/update', requireAuth, requireNotBanned,
   res.redirect('/clinic/pharmacy/inventory');
 }));
 
+// =============================================
+// CLINIC APPOINTMENTS: Scheduled future visits
+// =============================================
+
+// Helper: status badge HTML
+const apptStatusBadge = (status) => {
+  const colors = { scheduled: '#3b82f6', completed: '#059669', cancelled: '#dc2626', 'no-show': '#f59e0b' };
+  const c = colors[status] || '#6b7280';
+  return `<span class="tag" style="background:${c};color:white">${esc(status)}</span>`;
+};
+
+// GET /clinic/appointments — List all appointments (filterable by date, status)
+app.get('/clinic/appointments', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const filter = req.query.filter || 'all';
+  let where = 'WHERE tenant_id=$1';
+  const params = [t];
+  if (filter === 'today') { where += ' AND appointment_date=CURRENT_DATE'; }
+  else if (filter === 'week') { where += ' AND appointment_date >= CURRENT_DATE AND appointment_date <= CURRENT_DATE + INTERVAL \'7 days\''; }
+  else if (filter === 'cancelled') { where += ' AND status=$2'; params.push('cancelled'); }
+  else if (filter === 'completed') { where += ' AND status=$2'; params.push('completed'); }
+  const appts = (await pool.query(`SELECT * FROM clinic_appointments ${where} ORDER BY appointment_date, appointment_time`, params)).rows;
+  const todayCount = (await pool.query("SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=CURRENT_DATE AND status='scheduled'", [t])).rows[0].count;
+  const scheduledCount = (await pool.query("SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1 AND status='scheduled'", [t])).rows[0].count;
+  res.send(renderPage('Appointments', `
+    <div class="hero" style="background:linear-gradient(135deg,#3b82f6,#6366f1)"><h1>Appointments</h1><p>Schedule and manage patient appointments</p>
+    <div style="margin-top:12px"><a href="/clinic/appointments/new" class="btn btn-green">+ New Appointment</a></div></div>
+    <div class="stats">
+      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num" style="color:#3b82f6">${todayCount}</div><div>Today's Appointments</div></div>
+      <div class="stat-card" style="border-left:4px solid #059669"><div class="stat-num" style="color:#059669">${scheduledCount}</div><div>Scheduled Total</div></div>
+    </div>
+    <div class="card">
+      <div class="tab-bar" style="margin-bottom:15px">
+        <a href="/clinic/appointments?filter=all" class="${filter==='all'?'active':''}">All</a>
+        <a href="/clinic/appointments?filter=today" class="${filter==='today'?'active':''}">Today</a>
+        <a href="/clinic/appointments?filter=week" class="${filter==='week'?'active':''}">This Week</a>
+        <a href="/clinic/appointments?filter=completed" class="${filter==='completed'?'active':''}">Completed</a>
+        <a href="/clinic/appointments?filter=cancelled" class="${filter==='cancelled'?'active':''}">Cancelled</a>
+      </div>
+      <table><tr><th>Patient</th><th>Phone</th><th>Date</th><th>Time</th><th>Doctor</th><th>Reason</th><th>Status</th><th>Actions</th></tr>
+      ${appts.length ? appts.map(a => `<tr>
+        <td><strong>${esc(a.patient_name)}</strong></td>
+        <td>${esc(a.phone||'-')}</td>
+        <td>${a.appointment_date ? new Date(a.appointment_date+'T00:00:00').toLocaleDateString() : '-'}</td>
+        <td>${a.appointment_time || '-'}</td>
+        <td>${esc(a.doctor_name||'Unassigned')}</td>
+        <td>${esc(a.reason||'-')}</td>
+        <td>${apptStatusBadge(a.status)}</td>
+        <td>
+          ${a.status==='scheduled' ? `
+            <a href="/clinic/appointments/${a.id}/complete" class="btn btn-sm btn-green" onclick="return confirm('Convert to queue entry?')">Complete</a>
+            <a href="/clinic/appointments/${a.id}/cancel" class="btn btn-sm btn-red" onclick="return confirm('Cancel this appointment?')">Cancel</a>
+          ` : '<span class="muted" style="font-size:12px">No actions</span>'}
+        </td>
+      </tr>`).join('') : '<tr><td colspan="8">No appointments found</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+// GET /clinic/appointments/today — Today's appointments shortcut
+app.get('/clinic/appointments/today', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
+  res.redirect('/clinic/appointments?filter=today');
+});
+
+// GET /clinic/appointments/new — Book new appointment form
+app.get('/clinic/appointments/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id,name,parent_phone FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 300', [t])).rows;
+  const doctors = (await pool.query("SELECT id,name FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [t])).rows;
+  const today = new Date().toISOString().split('T')[0];
+  res.send(renderPage('New Appointment', `
+    <div class="card" style="max-width:650px;margin:0 auto"><h2>Book New Appointment</h2>
+    <form method="POST" action="/clinic/appointments/save">
+      <label>Patient *</label>
+      <select name="patient_type" onchange="document.getElementById('patientSelect').style.display=this.value==='student'?'block':'none';document.getElementById('patientName').style.display=this.value==='student'?'none':'block'">
+        <option value="patient">Walk-in / New Patient</option>
+        <option value="student">Existing Student</option>
+        <option value="staff">Staff Member</option>
+      </select>
+      <div id="patientSelect">
+        <select name="patient_id" onchange="if(this.value){const opt=this.options[this.selectedIndex];document.getElementById('patientName').querySelector('input').value=opt.dataset.name||'';document.getElementById('phoneField').querySelector('input').value=opt.dataset.phone||''}">
+          <option value="">Select Student...</option>
+          ${students.map(s => `<option value="${s.id}" data-name="${esc(s.name)}" data-phone="${esc(s.parent_phone||'')}">${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="patientName">
+        <input name="patient_name" placeholder="Patient Full Name" required>
+      </div>
+      <div id="phoneField">
+        <input name="phone" placeholder="Phone Number">
+      </div>
+      <label>Appointment Date *</label>
+      <input name="appointment_date" type="date" min="${today}" required>
+      <label>Appointment Time *</label>
+      <input name="appointment_time" type="time" required>
+      <label>Doctor</label>
+      <select name="doctor_name">
+        <option value="">Any Available Doctor</option>
+        ${doctors.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('')}
+      </select>
+      <label>Reason</label>
+      <textarea name="reason" rows="3" placeholder="Reason for visit"></textarea>
+      <label>Notes</label>
+      <textarea name="notes" rows="2" placeholder="Additional notes"></textarea>
+      <button class="btn btn-green" style="width:100%">Book Appointment</button>
+    </form></div>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        var sel = document.querySelector('select[name=patient_type]');
+        if (sel && sel.value === 'patient') document.getElementById('patientSelect').style.display = 'none';
+      });
+    </script>
+  `, req.session.user));
+}));
+
+// POST /clinic/appointments/save — Save appointment
+app.post('/clinic/appointments/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, patient_type, patient_id, phone, appointment_date, appointment_time, doctor_name, reason, notes } = req.body;
+  if (!patient_name || !appointment_date || !appointment_time) {
+    return res.redirect('/clinic/appointments/new');
+  }
+  await pool.query(
+    'INSERT INTO clinic_appointments(tenant_id,patient_name,patient_type,patient_id,phone,appointment_date,appointment_time,doctor_name,reason,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+    [t, patient_name, patient_type || 'patient', patient_id || null, phone || null, appointment_date, appointment_time, doctor_name || null, reason || null, notes || null, req.session.user.email]
+  );
+  res.redirect('/clinic/appointments');
+}));
+
+// GET /clinic/appointments/:id/cancel — Cancel appointment
+app.get('/clinic/appointments/:id/cancel', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("UPDATE clinic_appointments SET status='cancelled' WHERE tenant_id=$1 AND id=$2 AND status='scheduled'", [t, req.params.id]);
+  res.redirect('/clinic/appointments');
+}));
+
+// GET /clinic/appointments/:id/complete — Mark completed and convert to queue entry
+app.get('/clinic/appointments/:id/complete', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const appt = (await pool.query('SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND id=$2 AND status=\'scheduled\'', [t, req.params.id])).rows[0];
+  if (!appt) return res.redirect('/clinic/appointments');
+  // Mark appointment completed
+  await pool.query("UPDATE clinic_appointments SET status='completed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
+  // Create queue entry
+  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0];
+  await pool.query(
+    'INSERT INTO patient_queue(tenant_id,patient_type,patient_id,patient_name,complaint,priority,triage_notes,queue_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+    [t, appt.patient_type || 'patient', appt.patient_id || null, appt.patient_name, appt.reason || 'Appointment visit', 'normal', 'From appointment #' + appt.id, maxQ.next]
+  );
+  res.redirect('/clinic/queue');
+}));
+
+// =============================================
+// PUBLIC APPOINTMENT BOOKING (no auth required)
+// =============================================
+
+// GET /clinic/book/:tenant_subdomain — Public appointment booking
+app.get('/clinic/book/:tenant_subdomain', ah(async (req, res) => {
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
+  if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic does not exist.</p></div>', null));
+  const doctors = (await pool.query("SELECT name FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [tenant.id])).rows;
+  const today = new Date().toISOString().split('T')[0];
+  const success = req.query.success === '1';
+  res.send(renderPageV3('Book Appointment - ' + tenant.name, `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
+      <h1>${esc(tenant.name)}</h1>
+      <p>Book your appointment online</p>
+    </div>
+    ${success ? `<div class="card" style="background:#ecfdf5;border:2px solid #059669;text-align:center">
+      <h2 style="color:#059669">&#10003; Appointment Booked!</h2>
+      <p>Your appointment has been scheduled. We will contact you to confirm.</p>
+      <a href="/clinic/book/${esc(tenant.subdomain)}" class="btn btn-green" style="margin-top:12px">Book Another</a>
+    </div>` : ''}
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <h2 style="margin-bottom:20px">Schedule an Appointment</h2>
+      <form method="POST" action="/clinic/book/${esc(tenant.subdomain)}/save">
+        <label><strong>Full Name *</strong></label>
+        <input name="patient_name" placeholder="Your full name" required>
+        <label><strong>Phone Number *</strong></label>
+        <input name="phone" placeholder="e.g. 0771234567" required>
+        <label><strong>Preferred Date *</strong></label>
+        <input name="appointment_date" type="date" min="${today}" required>
+        <label><strong>Preferred Time *</strong></label>
+        <input name="appointment_time" type="time" required>
+        ${doctors.length ? `<label><strong>Preferred Doctor</strong></label>
+        <select name="doctor_name">
+          <option value="">Any Available Doctor</option>
+          ${doctors.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('')}
+        </select>` : ''}
+        <label><strong>Reason for Visit *</strong></label>
+        <textarea name="reason" rows="3" placeholder="Describe your symptoms or reason for the visit" required></textarea>
+        <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Book Appointment</button>
+      </form>
+      <p class="muted" style="margin-top:15px;text-align:center;font-size:13px">By booking, you agree to arrive on time. Walk-ins are also welcome.</p>
+    </div>
+  `, null, { description: `Book an appointment at ${tenant.name}`, path: `/clinic/book/${tenant.subdomain}` }));
+}));
+
+// POST /clinic/book/:tenant_subdomain/save — Save public appointment
+app.post('/clinic/book/:tenant_subdomain/save', ah(async (req, res) => {
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
+  if (!tenant) return res.status(404).send('Clinic not found');
+  const { patient_name, phone, appointment_date, appointment_time, doctor_name, reason } = req.body;
+  if (!patient_name || !phone || !appointment_date || !appointment_time || !reason) {
+    return res.redirect(`/clinic/book/${tenant.subdomain}`);
+  }
+  await pool.query(
+    'INSERT INTO clinic_appointments(tenant_id,patient_name,patient_type,phone,appointment_date,appointment_time,doctor_name,reason,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+    [tenant.id, patient_name, 'patient', phone, appointment_date, appointment_time, doctor_name || null, reason, 'public_booking']
+  );
+  res.redirect(`/clinic/book/${tenant.subdomain}?success=1`);
+}));
 
 // =============================================
 // STUDENT SPECIALIZATION: School Levels, Hostels, Meals, Tracks
@@ -17929,6 +18690,17 @@ app.post('/webhook/flutterwave', express.raw({ type: 'application/json' }), ah(a
   res.status(200).send('OK');
 }));
 
+// SMS delivery receipt webhook (Africa's Talking callback)
+app.post('/webhook/sms/delivery', express.json(), ah(async (req, res) => {
+  const { status, phoneNumber, id, retryCount } = req.body;
+  console.log(`[SMS Delivery] Received: status=${status} phone=${phoneNumber} ref=${id} retries=${retryCount}`);
+  try {
+    await pool.query("UPDATE sms_logs SET status=$1 WHERE reference=$2", [status, id]);
+    console.log(`[SMS Delivery] Updated ${status} for ${phoneNumber} (ref: ${id})`);
+  } catch (e) { console.warn('[SMS Delivery] Error:', e.message); }
+  res.sendStatus(200);
+}));
+
 // Flutterwave payment verification endpoint
 app.get('/api/v1/payment/verify/:ref', ah(async (req, res) => {
   const ref = req.params.ref;
@@ -18830,15 +19602,14 @@ app.get('/school/fee-reminders', requireAuth, requireNotBanned, ah(async (req, r
 app.post('/school/fee-reminders/send-sms', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const overdue = (await pool.query('SELECT f.*, s.name as student_name, s.guardian_phone FROM fees f JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 AND (f.amount-f.paid)>0 AND s.guardian_phone IS NOT NULL', [t])).rows;
-  let sent = 0, failed = 0;
+  let sent = 0, failed = 0, skipped = 0;
   for (const f of overdue) {
     const bal = f.amount - f.paid;
     const msg = `Dear Parent/Guardian, ${f.student_name} has a fee balance of UGX ${bal.toLocaleString()}. Please pay to avoid inconvenience. - School Admin`;
     const ok = await sendSMS(f.guardian_phone, msg);
-    await logSMS(t, f.guardian_phone, msg, 'fee_reminder');
-    if (ok) sent++; else failed++;
+    if (ok?.sent) { await logSMS(t, f.guardian_phone, msg, 'fee_reminder'); sent++; } else if (ok?.skipped) { skipped++; } else { failed++; }
   }
-  await audit(req.session.user.email, 'fee_reminders', `Sent ${sent} SMS reminders (${failed} failed)`);
+  await audit(req.session.user.email, 'fee_reminders', `Sent ${sent} SMS reminders (${failed} failed, ${skipped} opt-out)`);
   res.send(renderPage('Reminders Sent', `
     <div class="card"><div class="alert alert-success"><h2>SMS Reminders Sent!</h2><p>Successfully sent: ${sent}</p><p>Failed: ${failed}</p></div>
     <a href="/school/fee-reminders" class="btn">Back to Reminders</a></div>
@@ -19025,7 +19796,9 @@ const phase2Tables = [
   // Tenant Country Settings
   `CREATE TABLE IF NOT EXISTS tenant_country_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, country_code TEXT DEFAULT 'UG', currency TEXT DEFAULT 'UGX', timezone TEXT DEFAULT 'Africa/Kampala', language TEXT DEFAULT 'en', preferred_payment TEXT DEFAULT 'mtn_momo', flutterwave_enabled BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
   // Multi-Branch Stock Transfers
-  `CREATE TABLE IF NOT EXISTS stock_transfers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), product_id INTEGER, product_name TEXT NOT NULL, from_branch TEXT NOT NULL, to_branch TEXT NOT NULL, quantity INTEGER NOT NULL, status TEXT DEFAULT 'pending', notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), completed_at TIMESTAMPTZ)`
+  `CREATE TABLE IF NOT EXISTS stock_transfers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), product_id INTEGER, product_name TEXT NOT NULL, from_branch TEXT NOT NULL, to_branch TEXT NOT NULL, quantity INTEGER NOT NULL, status TEXT DEFAULT 'pending', notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), completed_at TIMESTAMPTZ)`,
+  // Clinic Appointments (scheduled visits)
+  `CREATE TABLE IF NOT EXISTS clinic_appointments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), patient_name TEXT NOT NULL, patient_type TEXT DEFAULT 'patient', patient_id INTEGER, phone TEXT, appointment_date DATE NOT NULL, appointment_time TIME NOT NULL, doctor_name TEXT, reason TEXT, status TEXT DEFAULT 'scheduled', notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), reminder_sent BOOLEAN DEFAULT false)`
 ];
 
 // Create Phase 2 tables & seed data (async IIFE for top-level await compatibility)
@@ -19049,7 +19822,10 @@ const phase2Indexes = [
   `CREATE INDEX IF NOT EXISTS idx_patient_insurance_tenant ON patient_insurance(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_insurance_claims_tenant ON insurance_claims(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_drug_interactions_drugs ON drug_interactions(drug_a, drug_b)`,
-  `CREATE INDEX IF NOT EXISTS idx_tenant_country_settings ON tenant_country_settings(tenant_id)`
+  `CREATE INDEX IF NOT EXISTS idx_tenant_country_settings ON tenant_country_settings(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_clinic_appointments_tenant ON clinic_appointments(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_clinic_appointments_date ON clinic_appointments(appointment_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_clinic_appointments_status ON clinic_appointments(status)`
 ];
 // Round 3: Performance indexes
 const round3Indexes = [
