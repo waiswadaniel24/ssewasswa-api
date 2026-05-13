@@ -20578,6 +20578,25 @@ try {
   console.log('[Launch] Public routes loaded');
 } catch (e) {
   console.warn('[Launch] Failed to load launch routes:', e.message);
+  console.warn('[Launch] Stack:', e.stack?.split('\n').slice(0,5).join('\n'));
+}
+
+// === FALLBACK PUBLIC ROUTES (if launch-routes failed to load) ===
+if (!app._launchRoutesLoaded) {
+  console.log('[Launch] Registering fallback public routes...');
+  app.get('/blog', (req, res) => {
+    res.send(renderPageV3('Blog & News - Comfort', `
+      <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:16px;margin-bottom:25px;color:white;text-align:center">
+        <h1>Blog & News</h1><p style="opacity:0.9;margin-top:8px">Insights, tips, and updates from Comfort</p>
+      </div>
+      <div class="card" style="text-align:center;padding:60px">
+        <div style="font-size:48px;margin-bottom:16px">&#128240;</div>
+        <h2>Coming Soon</h2>
+        <p class="muted" style="margin-top:8px">Check back soon for articles and updates!</p>
+        <a href="/" class="btn" style="margin-top:20px;display:inline-block">Back Home</a>
+      </div>
+    `, null));
+  });
 }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===

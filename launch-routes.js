@@ -2686,4 +2686,5 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // =========================================================================
 
   console.log('[Launch] All launch routes registered successfully');
+  app._launchRoutesLoaded = true;
 };
