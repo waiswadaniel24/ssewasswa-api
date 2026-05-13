@@ -1,4 +1,20 @@
 User-agent: *
 Allow: /
 
+Disallow: /dashboard
+Disallow: /portal/
+Disallow: /school/
+Disallow: /clinic/
+Disallow: /church/
+Disallow: /business/
+Disallow: /dev/
+Disallow: /admin/
+Disallow: /worker/
+Disallow: /api/
+Disallow: /billing/
+Disallow: /settings/
+Disallow: /notifications
+Disallow: /search
+Disallow: /toggle-dark
+
 Sitemap: https://ssewasswa.onrender.com/sitemap.xml

@@ -18713,6 +18713,27 @@ for (const [key, name, desc, ver, cat, req] of phase2Flags) {
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS country TEXT DEFAULT \'UG\''); } catch (e) { console.warn('[Caught]', e.message); }
 try { await pool.query('ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT \'UGX\''); } catch (e) { console.warn('[Caught]', e.message); }
 console.log('[Phase2] DB tables, indexes, drug interactions, and feature flags initialized');
+
+// Clean up duplicate test tenants (keep newest, delete older duplicates by name)
+try {
+  const dupes = (await pool.query(`
+    SELECT name, COUNT(*) as cnt, array_agg(id ORDER BY created_at DESC) as ids
+    FROM tenants
+    GROUP BY name
+    HAVING COUNT(*) > 1
+  `)).rows;
+  for (const d of dupes) {
+    // Keep the first (newest) id, delete the rest
+    const keep = d.ids[0];
+    const remove = d.ids.slice(1);
+    for (const rid of remove) {
+      await pool.query('DELETE FROM tenants WHERE id=$1', [rid]);
+      console.log(`[Cleanup] Deleted duplicate tenant "${d.name}" (id=${rid}), keeping id=${keep}`);
+    }
+  }
+  if (dupes.length > 0) console.log(`[Cleanup] Removed ${dupes.length} duplicate tenant group(s)`);
+} catch (e) { console.warn('[Cleanup] Duplicate tenant cleanup error:', e.message); }
+
 } catch (e) { console.error('[Phase2] Init error:', e.message); }
 })(); // End Phase 2 async IIFE
 
