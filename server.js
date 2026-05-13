@@ -9,6 +9,13 @@ if (!process.env.SESSION_SECRET && process.env.SESSION_SECRE) process.env.SESSIO
 
 // Suppress experimental warnings via env var instead of monkey-patching
 if (!process.env.NODE_NO_WARNINGS) process.env.NODE_NO_WARNINGS = '1';
+
+// === GLOBAL TLS SAFETY NET ===
+// Render/Heroku managed databases use self-signed certs internally.
+// This ensures all outbound HTTPS requests (fetch, nodemailer, webhooks) work.
+if (process.env.NODE_ENV === 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
 process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
 const express = require('express');
 const session = require('express-session');
@@ -114,7 +121,7 @@ if (process.env.SENTRY_DSN) {
 const app = express();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false, // rejectUnauthorized:true enforces proper SSL cert validation in production
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false, // rejectUnauthorized:false required for Render/Heroku managed PostgreSQL (self-signed CA)
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
@@ -277,7 +284,8 @@ const VALID_TABLES = new Set([
   'push_subscriptions', 'ussd_sessions', 'translations', 'platform_settings',
   'platform_status', 'backup_queue', 'developer_revenue', 'momo_payments',
   'graduation_students', 'student_track_assignments', 'policy_acknowledgments',
-  'plugin_registry', 'tenant_plugins', 'sms_opt_outs', 'session'
+  'plugin_registry', 'tenant_plugins', 'sms_opt_outs', 'session',
+  'leave_requests', 'expense_claims', 'visitors', 'assets', 'feedback_entries', 'user_notes', 'announcements'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -22042,6 +22050,435 @@ try {
   console.warn('[Launch] Failed to load launch routes:', e.message);
 }
 
+// ============================================================
+// ROUND 3 FEATURES: Leave, Expenses, Visitors, Assets, Feedback, Notes, Announcements
+// ============================================================
+
+// --- ROUND 3 MIGRATIONS ---
+const round3Migrations = [
+  `CREATE TABLE IF NOT EXISTS leave_requests (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email VARCHAR(255) NOT NULL, leave_type VARCHAR(50) NOT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL, days NUMERIC(5,1) NOT NULL, reason TEXT, status VARCHAR(20) NOT NULL DEFAULT 'pending', approver_email VARCHAR(255), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS expense_claims (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email VARCHAR(255) NOT NULL, title VARCHAR(255) NOT NULL, amount NUMERIC(12,2) NOT NULL, category VARCHAR(100) NOT NULL, description TEXT, receipt_url VARCHAR(500), status VARCHAR(20) NOT NULL DEFAULT 'pending', approver_email VARCHAR(255), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS visitors (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), name VARCHAR(255) NOT NULL, phone VARCHAR(50), purpose TEXT NOT NULL, host_name VARCHAR(255) NOT NULL, badge_number VARCHAR(50), check_in TIMESTAMPTZ NOT NULL DEFAULT NOW(), check_out TIMESTAMPTZ, status VARCHAR(10) NOT NULL DEFAULT 'in')`,
+  `CREATE TABLE IF NOT EXISTS assets (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), name VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL, serial_number VARCHAR(255), location VARCHAR(255), status VARCHAR(20) NOT NULL DEFAULT 'available', assigned_to VARCHAR(255), purchase_date DATE, purchase_price NUMERIC(12,2), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS feedback_entries (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL, rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5), subject VARCHAR(255) NOT NULL, message TEXT NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'open', response TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS user_notes (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email VARCHAR(255) NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, priority VARCHAR(10) NOT NULL DEFAULT 'medium', is_done BOOLEAN NOT NULL DEFAULT FALSE, due_date DATE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS announcements (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email VARCHAR(255) NOT NULL, title VARCHAR(255) NOT NULL, content TEXT NOT NULL, priority VARCHAR(20) NOT NULL DEFAULT 'normal', target_audience VARCHAR(20) NOT NULL DEFAULT 'all', pinned BOOLEAN NOT NULL DEFAULT FALSE, expires_at DATE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`
+];
+round3Migrations.forEach(m => migrations.push(m));
+
+// ============================================================
+//  FEATURE 1: LEAVE MANAGEMENT
+// ============================================================
+const LEAVE_BALANCE = { annual: 21, sick: 7, emergency: 3 };
+
+function leaveBadge(s) {
+  const c = { pending: '#f0ad4e', approved: '#5cb85c', rejected: '#d9534f' };
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${c[s]||'#999'}">${esc(s)}</span>`;
+}
+
+app.get('/leave', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id, email = req.session.user.email, role = req.session.user.role || 'staff';
+  let rows;
+  if (role === 'admin' || role === 'hr') { rows = await pool.query('SELECT * FROM leave_requests WHERE tenant_id=$1 ORDER BY created_at DESC', [tid]); }
+  else { rows = await pool.query('SELECT * FROM leave_requests WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC', [tid, email]); }
+  res.send(renderPage('Leave Management', `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Leave Management</h2><a href="/leave/new" class="btn btn-green">+ New Request</a></div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+    <div style="background:#e8f4fd;padding:12px;border-radius:8px;text-align:center"><div style="font-size:24px;font-weight:700;color:#2980b9">${LEAVE_BALANCE.annual}</div><div style="font-size:13px;color:#555">Annual Days</div></div>
+    <div style="background:#fdf2e8;padding:12px;border-radius:8px;text-align:center"><div style="font-size:24px;font-weight:700;color:#e67e22">${LEAVE_BALANCE.sick}</div><div style="font-size:13px;color:#555">Sick Days</div></div>
+    <div style="background:#fde8e8;padding:12px;border-radius:8px;text-align:center"><div style="font-size:24px;font-weight:700;color:#c0392b">${LEAVE_BALANCE.emergency}</div><div style="font-size:13px;color:#555">Emergency Days</div></div>
+  </div>
+  <table><thead><tr><th>Type</th><th>Dates</th><th>Days</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+  ${rows.rows.map(r=>`<tr><td>${esc(r.leave_type)}</td><td>${esc(r.start_date)} &rarr; ${esc(r.end_date)}</td><td>${esc(r.days)}</td><td>${esc(r.reason||'&mdash;')}</td><td>${leaveBadge(r.status)}</td>
+  <td>${(role==='admin'||role==='hr')&&r.status==='pending'?`<a href="/leave/approve/${r.id}" class="btn" style="background:#5cb85c;color:#fff;font-size:12px;padding:3px 8px">Approve</a> <a href="/leave/reject/${r.id}" class="btn" style="background:#d9534f;color:#fff;font-size:12px;padding:3px 8px">Reject</a>`:'&mdash;'}</td></tr>`).join('')}
+  ${rows.rows.length===0?'<tr><td colspan="6" style="text-align:center;color:#999">No leave requests found.</td></tr>':''}
+  </tbody></table></div>`, req.session.user));
+}));
+
+app.get('/leave/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Leave Request', `<div class="card"><h2>New Leave Request</h2>
+  <form method="POST" action="/leave/save"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Leave Type</label><select name="leave_type" required><option value="annual">Annual Leave</option><option value="sick">Sick Leave</option><option value="emergency">Emergency Leave</option><option value="maternity">Maternity Leave</option><option value="paternity">Paternity Leave</option><option value="study">Study Leave</option></select>
+  <label>Start Date</label><input type="date" name="start_date" required>
+  <label>End Date</label><input type="date" name="end_date" required>
+  <label>Number of Days</label><input type="number" name="days" min="0.5" step="0.5" required>
+  <label>Reason</label><textarea name="reason" rows="3" placeholder="Brief reason for leave..."></textarea>
+  <button type="submit" class="btn btn-green">Submit Request</button> <a href="/leave" class="btn" style="background:#999;color:#fff">Cancel</a>
+  </form></div>`, req.session.user));
+});
+
+app.post('/leave/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('INSERT INTO leave_requests (tenant_id,user_email,leave_type,start_date,end_date,days,reason) VALUES ($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, req.session.user.email, req.body.leave_type, req.body.start_date, req.body.end_date, parseFloat(req.body.days), req.body.reason]);
+  audit(req.session.user.email, 'leave_request', `Submitted ${req.body.leave_type} leave`);
+  res.redirect('/leave');
+}));
+
+app.get('/leave/approve/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE leave_requests SET status=$1,approver_email=$2 WHERE id=$3 AND tenant_id=$4', ['approved', req.session.user.email, req.params.id, req.session.user.tenant_id]);
+  const lr = await pool.query('SELECT user_email,leave_type FROM leave_requests WHERE id=$1', [req.params.id]);
+  if (lr.rows[0]) { audit(req.session.user.email, 'leave_approved', '#'+req.params.id); notify(req.session.user.tenant_id, lr.rows[0].user_email, 'Leave Approved', `Your ${lr.rows[0].leave_type} leave has been approved.`, 'success'); }
+  res.redirect('/leave');
+}));
+
+app.get('/leave/reject/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE leave_requests SET status=$1,approver_email=$2 WHERE id=$3 AND tenant_id=$4', ['rejected', req.session.user.email, req.params.id, req.session.user.tenant_id]);
+  const lr = await pool.query('SELECT user_email,leave_type FROM leave_requests WHERE id=$1', [req.params.id]);
+  if (lr.rows[0]) { audit(req.session.user.email, 'leave_rejected', '#'+req.params.id); notify(req.session.user.tenant_id, lr.rows[0].user_email, 'Leave Rejected', `Your ${lr.rows[0].leave_type} leave has been rejected.`, 'warning'); }
+  res.redirect('/leave');
+}));
+
+app.get('/leave/my', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const rows = await pool.query('SELECT * FROM leave_requests WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC', [req.session.user.tenant_id, req.session.user.email]);
+  const used = rows.rows.filter(r=>r.status==='approved').reduce((s,r)=>s+parseFloat(r.days),0);
+  res.send(renderPage('My Leaves', `<div class="card"><h2>My Leaves</h2><div class="alert" style="background:#e8f4fd;color:#2980b9">Total approved days used: <strong>${used}</strong> / ${LEAVE_BALANCE.annual} annual</div>
+  <a href="/leave/new" class="btn btn-green" style="margin:10px 0">+ New Request</a>
+  <table><thead><tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th></tr></thead><tbody>
+  ${rows.rows.map(r=>`<tr><td>${esc(r.leave_type)}</td><td>${esc(r.start_date)}</td><td>${esc(r.end_date)}</td><td>${esc(r.days)}</td><td>${leaveBadge(r.status)}</td></tr>`).join('')}
+  ${rows.rows.length===0?'<tr><td colspan="5" style="text-align:center;color:#999">No leave history.</td></tr>':''}
+  </tbody></table><p style="margin-top:12px"><a href="/leave">&larr; All Leaves</a></p></div>`, req.session.user));
+}));
+
+// ============================================================
+//  FEATURE 2: EXPENSE CLAIMS
+// ============================================================
+function expenseBadge(s) {
+  const c = { pending: '#f0ad4e', approved: '#5cb85c', rejected: '#d9534f' };
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${c[s]||'#999'}">${esc(s)}</span>`;
+}
+
+app.get('/expense-claims', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id, role = req.session.user.role || 'staff';
+  let rows;
+  if (role==='admin'||role==='hr'||role==='finance') { rows = await pool.query('SELECT * FROM expense_claims WHERE tenant_id=$1 ORDER BY created_at DESC', [tid]); }
+  else { rows = await pool.query('SELECT * FROM expense_claims WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC', [tid, req.session.user.email]); }
+  const pending = rows.rows.filter(r=>r.status==='pending').reduce((s,r)=>s+parseFloat(r.amount),0);
+  res.send(renderPage('Expense Claims', `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Expense Claims</h2><a href="/expense-claims/new" class="btn btn-green">+ New Claim</a></div>
+  ${pending>0?`<div class="alert" style="background:#fff3cd;color:#856404">Total pending: <strong>${Number(pending).toLocaleString()}</strong></div>`:''}
+  <table><thead><tr><th>Title</th><th>Category</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>
+  ${rows.rows.map(r=>`<tr><td>${esc(r.title)}</td><td>${esc(r.category)}</td><td><strong>${Number(r.amount).toLocaleString()}</strong></td><td>${expenseBadge(r.status)}</td><td>${r.created_at.toISOString().split('T')[0]}</td>
+  <td>${(role==='admin'||role==='hr'||role==='finance')&&r.status==='pending'?`<a href="/expense-claims/approve/${r.id}" class="btn" style="background:#5cb85c;color:#fff;font-size:12px;padding:3px 8px">Approve</a> <a href="/expense-claims/reject/${r.id}" class="btn" style="background:#d9534f;color:#fff;font-size:12px;padding:3px 8px">Reject</a>`:'&mdash;'}</td></tr>`).join('')}
+  ${rows.rows.length===0?'<tr><td colspan="6" style="text-align:center;color:#999">No expense claims.</td></tr>':''}
+  </tbody></table></div>`, req.session.user));
+}));
+
+app.get('/expense-claims/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Expense Claim', `<div class="card"><h2>New Expense Claim</h2>
+  <form method="POST" action="/expense-claims/save"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Title</label><input type="text" name="title" required placeholder="e.g. Workshop Materials">
+  <label>Amount</label><input type="number" name="amount" step="0.01" min="0" required>
+  <label>Category</label><select name="category" required><option value="travel">Travel</option><option value="meals">Meals</option><option value="office">Office Supplies</option><option value="equipment">Equipment</option><option value="training">Training</option><option value="utilities">Utilities</option><option value="maintenance">Maintenance</option><option value="other">Other</option></select>
+  <label>Description</label><textarea name="description" rows="3" placeholder="Provide details..."></textarea>
+  <label>Receipt URL (optional)</label><input type="url" name="receipt_url" placeholder="https://...">
+  <button type="submit" class="btn btn-green">Submit Claim</button> <a href="/expense-claims" class="btn" style="background:#999;color:#fff">Cancel</a>
+  </form></div>`, req.session.user));
+});
+
+app.post('/expense-claims/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('INSERT INTO expense_claims (tenant_id,user_email,title,amount,category,description,receipt_url) VALUES ($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, req.session.user.email, req.body.title, parseFloat(req.body.amount), req.body.category, req.body.description, req.body.receipt_url||null]);
+  audit(req.session.user.email, 'expense_claim', `Submitted: ${req.body.title}`);
+  res.redirect('/expense-claims');
+}));
+
+app.get('/expense-claims/approve/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE expense_claims SET status=$1,approver_email=$2 WHERE id=$3 AND tenant_id=$4', ['approved', req.session.user.email, req.params.id, req.session.user.tenant_id]);
+  const cl = await pool.query('SELECT user_email,title,amount FROM expense_claims WHERE id=$1', [req.params.id]);
+  if (cl.rows[0]) { audit(req.session.user.email, 'expense_approved', '#'+req.params.id); notify(req.session.user.tenant_id, cl.rows[0].user_email, 'Expense Approved', `"${cl.rows[0].title}" approved.`, 'success'); }
+  res.redirect('/expense-claims');
+}));
+
+app.get('/expense-claims/reject/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE expense_claims SET status=$1,approver_email=$2 WHERE id=$3 AND tenant_id=$4', ['rejected', req.session.user.email, req.params.id, req.session.user.tenant_id]);
+  const cl = await pool.query('SELECT user_email,title FROM expense_claims WHERE id=$1', [req.params.id]);
+  if (cl.rows[0]) { audit(req.session.user.email, 'expense_rejected', '#'+req.params.id); notify(req.session.user.tenant_id, cl.rows[0].user_email, 'Expense Rejected', `"${cl.rows[0].title}" rejected.`, 'warning'); }
+  res.redirect('/expense-claims');
+}));
+
+// ============================================================
+//  FEATURE 3: VISITOR MANAGEMENT
+// ============================================================
+app.get('/visitors', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const rows = await pool.query('SELECT * FROM visitors WHERE tenant_id=$1 ORDER BY check_in DESC', [req.session.user.tenant_id]);
+  const inCount = rows.rows.filter(r=>r.status==='in').length;
+  res.send(renderPage('Visitor Management', `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Visitor Management</h2><div><span class="alert" style="background:#d4edda;color:#155724;display:inline-block;margin-right:8px"><strong>${inCount}</strong> currently in</span><a href="/visitors/checkin" class="btn btn-green">+ Check-In</a></div></div>
+  <table><thead><tr><th>Badge</th><th>Visitor</th><th>Phone</th><th>Purpose</th><th>Host</th><th>Check-In</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+  ${rows.rows.map(r=>`<tr><td><code>#${esc(r.badge_number)}</code></td><td>${esc(r.name)}</td><td>${esc(r.phone||'&mdash;')}</td><td>${esc(r.purpose)}</td><td>${esc(r.host_name)}</td><td>${r.check_in.toISOString().replace('T',' ').slice(0,16)}</td><td><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${r.status==='in'?'#5cb85c':'#6c757d'}">${esc(r.status==='in'?'IN':'OUT')}</span></td><td>${r.status==='in'?`<a href="/visitors/checkout/${r.id}" class="btn" style="background:#e67e22;color:#fff;font-size:12px;padding:3px 8px">Check-Out</a>`:'&mdash;'}</td></tr>`).join('')}
+  ${rows.rows.length===0?'<tr><td colspan="8" style="text-align:center;color:#999">No visitors recorded.</td></tr>':''}
+  </tbody></table></div>`, req.session.user));
+}));
+
+app.get('/visitors/checkin', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Visitor Check-In', `<div class="card"><h2>Visitor Check-In</h2>
+  <form method="POST" action="/visitors/checkin"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Visitor Name</label><input type="text" name="name" required placeholder="Full name">
+  <label>Phone Number</label><input type="tel" name="phone" placeholder="+254 700 123456">
+  <label>Purpose of Visit</label><textarea name="purpose" rows="2" required placeholder="Purpose of visit..."></textarea>
+  <label>Host Name</label><input type="text" name="host_name" required placeholder="Who are they visiting?">
+  <label>Badge Number</label><input type="text" name="badge_number" required placeholder="e.g. V-0042">
+  <button type="submit" class="btn btn-green">Check-In</button> <a href="/visitors" class="btn" style="background:#999;color:#fff">Cancel</a>
+  </form></div>`, req.session.user));
+});
+
+app.post('/visitors/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('INSERT INTO visitors (tenant_id,name,phone,purpose,host_name,badge_number) VALUES ($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, req.body.name, req.body.phone||null, req.body.purpose, req.body.host_name, req.body.badge_number]);
+  audit(req.session.user.email, 'visitor_checkin', `Checked in: ${req.body.name}`);
+  res.redirect('/visitors');
+}));
+
+app.get('/visitors/checkout/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE visitors SET status=$1,check_out=NOW() WHERE id=$2 AND tenant_id=$3', ['out', req.params.id, req.session.user.tenant_id]);
+  audit(req.session.user.email, 'visitor_checkout', '#'+req.params.id);
+  res.redirect('/visitors');
+}));
+
+// ============================================================
+//  FEATURE 4: ASSET MANAGEMENT
+// ============================================================
+function assetBadge(s) {
+  const c = { available:'#5cb85c', assigned:'#2980b9', maintenance:'#f0ad4e', retired:'#6c757d' };
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${c[s]||'#999'}">${esc(s)}</span>`;
+}
+
+app.get('/assets', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const rows = await pool.query('SELECT * FROM assets WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+  const totalVal = rows.rows.reduce((s,r)=>s+parseFloat(r.purchase_price||0),0);
+  res.send(renderPage('Asset Management', `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Asset Management</h2><a href="/assets/new" class="btn btn-green">+ Add Asset</a></div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+    <div style="background:#d4edda;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#155724">${rows.rows.filter(r=>r.status==='available').length}</div><div style="font-size:12px;color:#555">Available</div></div>
+    <div style="background:#d1ecf1;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#0c5460">${rows.rows.filter(r=>r.status==='assigned').length}</div><div style="font-size:12px;color:#555">Assigned</div></div>
+    <div style="background:#fff3cd;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#856404">${rows.rows.filter(r=>r.status==='maintenance').length}</div><div style="font-size:12px;color:#555">Maintenance</div></div>
+    <div style="background:#e2e3e5;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#383d41">${totalVal.toLocaleString()}</div><div style="font-size:12px;color:#555">Total Value</div></div>
+  </div>
+  <div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Category</th><th>Serial</th><th>Location</th><th>Status</th><th>Assigned To</th><th>Actions</th></tr></thead><tbody>
+  ${rows.rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.category)}</td><td><code>${esc(r.serial_number||'&mdash;')}</code></td><td>${esc(r.location||'&mdash;')}</td><td>${assetBadge(r.status)}</td><td>${esc(r.assigned_to||'&mdash;')}</td><td><a href="/assets/edit/${r.id}" class="btn" style="font-size:12px;padding:3px 8px">Edit</a>${r.status!=='retired'?` <a href="/assets/retire/${r.id}" class="btn" style="background:#6c757d;color:#fff;font-size:12px;padding:3px 8px">Retire</a>`:''}</td></tr>`).join('')}
+  ${rows.rows.length===0?'<tr><td colspan="7" style="text-align:center;color:#999">No assets registered.</td></tr>':''}
+  </tbody></table></div></div>`, req.session.user));
+}));
+
+app.get('/assets/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Asset', `<div class="card"><h2>Add New Asset</h2>
+  <form method="POST" action="/assets/save"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Asset Name</label><input type="text" name="name" required placeholder="e.g. Dell Latitude 5520">
+  <label>Category</label><select name="category" required><option value="it">IT Equipment</option><option value="furniture">Furniture</option><option value="vehicle">Vehicle</option><option value="lab">Lab Equipment</option><option value="office">Office Equipment</option><option value="infrastructure">Infrastructure</option><option value="other">Other</option></select>
+  <label>Serial Number</label><input type="text" name="serial_number" placeholder="SN-2024-00142">
+  <label>Location</label><input type="text" name="location" placeholder="Room 204, Block B">
+  <label>Assigned To (optional)</label><input type="text" name="assigned_to" placeholder="john@institution.com">
+  <label>Purchase Date</label><input type="date" name="purchase_date">
+  <label>Purchase Price</label><input type="number" name="purchase_price" step="0.01" min="0">
+  <button type="submit" class="btn btn-green">Add Asset</button> <a href="/assets" class="btn" style="background:#999;color:#fff">Cancel</a>
+  </form></div>`, req.session.user));
+});
+
+app.post('/assets/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const status = req.body.assigned_to ? 'assigned' : 'available';
+  await pool.query('INSERT INTO assets (tenant_id,name,category,serial_number,location,status,assigned_to,purchase_date,purchase_price) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [req.session.user.tenant_id, req.body.name, req.body.category, req.body.serial_number||null, req.body.location||null, status, req.body.assigned_to||null, req.body.purchase_date||null, parseFloat(req.body.purchase_price)||0]);
+  audit(req.session.user.email, 'asset_created', req.body.name);
+  res.redirect('/assets');
+}));
+
+app.get('/assets/edit/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const row = await pool.query('SELECT * FROM assets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  const a = row.rows[0]; if (!a) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Asset', `<div class="card"><h2>Edit: ${esc(a.name)}</h2>
+  <form method="POST" action="/assets/update/${a.id}"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Asset Name</label><input type="text" name="name" required value="${esc(a.name)}">
+  <label>Category</label><select name="category" required>${['it','furniture','vehicle','lab','office','infrastructure','other'].map(c=>`<option value="${c}" ${c===a.category?'selected':''}>${c}</option>`).join('')}</select>
+  <label>Serial Number</label><input type="text" name="serial_number" value="${esc(a.serial_number||'')}">
+  <label>Location</label><input type="text" name="location" value="${esc(a.location||'')}">
+  <label>Status</label><select name="status" required>${['available','assigned','maintenance','retired'].map(s=>`<option value="${s}" ${s===a.status?'selected':''}>${s}</option>`).join('')}</select>
+  <label>Assigned To</label><input type="text" name="assigned_to" value="${esc(a.assigned_to||'')}">
+  <label>Purchase Date</label><input type="date" name="purchase_date" value="${a.purchase_date||''}">
+  <label>Purchase Price</label><input type="number" name="purchase_price" step="0.01" min="0" value="${a.purchase_price||''}">
+  <button type="submit" class="btn btn-green">Update</button> <a href="/assets" class="btn" style="background:#999;color:#fff">Cancel</a>
+  </form></div>`, req.session.user));
+});
+
+app.post('/assets/update/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE assets SET name=$1,category=$2,serial_number=$3,location=$4,status=$5,assigned_to=$6,purchase_date=$7,purchase_price=$8 WHERE id=$9 AND tenant_id=$10', [req.body.name, req.body.category, req.body.serial_number||null, req.body.location||null, req.body.status, req.body.assigned_to||null, req.body.purchase_date||null, parseFloat(req.body.purchase_price)||0, req.params.id, req.session.user.tenant_id]);
+  audit(req.session.user.email, 'asset_updated', '#'+req.params.id);
+  res.redirect('/assets');
+}));
+
+app.get('/assets/retire/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE assets SET status=$1,assigned_to=NULL WHERE id=$2 AND tenant_id=$3', ['retired', req.params.id, req.session.user.tenant_id]);
+  audit(req.session.user.email, 'asset_retired', '#'+req.params.id);
+  res.redirect('/assets');
+}));
+
+// ============================================================
+//  FEATURE 5: FEEDBACK & SURVEYS
+// ============================================================
+function feedbackBadge(s) {
+  const c = { open:'#2980b9', resolved:'#5cb85c', dismissed:'#6c757d' };
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${c[s]||'#999'}">${esc(s)}</span>`;
+}
+function starsHtml(n) { return '<span style="color:#e67e22">' + '*'.repeat(n) + '</span><span style="color:#ccc">' + '*'.repeat(5-n) + '</span>'; }
+
+app.get('/feedback', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Submit Feedback', `<div class="card"><h2>Submit Feedback</h2>
+  <form method="POST" action="/feedback/submit"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Category</label><select name="category" required><option value="general">General</option><option value="facilities">Facilities</option><option value="academics">Academics</option><option value="hr">HR / Personnel</option><option value="it">IT Support</option><option value="safety">Safety</option><option value="suggestion">Suggestion</option><option value="complaint">Complaint</option></select>
+  <label>Rating (1-5)</label><div style="display:flex;gap:8px">${[1,2,3,4,5].map(n=>`<label style="display:flex;align-items:center;gap:2px;cursor:pointer"><input type="radio" name="rating" value="${n}" required style="width:18px;height:18px"> ${n}</label>`).join('')}</div>
+  <label>Subject</label><input type="text" name="subject" required placeholder="Brief subject">
+  <label>Message</label><textarea name="message" rows="4" required placeholder="Describe your feedback..."></textarea>
+  <button type="submit" class="btn btn-green">Submit</button>
+  </form></div>`, req.session.user));
+});
+
+app.post('/feedback/submit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('INSERT INTO feedback_entries (tenant_id,user_email,category,rating,subject,message) VALUES ($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, req.session.user.email, req.body.category, parseInt(req.body.rating), req.body.subject, req.body.message]);
+  audit(req.session.user.email, 'feedback', req.body.subject);
+  res.redirect('/feedback');
+}));
+
+app.get('/feedback/admin', requireAuth, ah(async (req, res) => {
+  const rows = await pool.query('SELECT * FROM feedback_entries WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+  const avg = rows.rows.length>0?(rows.rows.reduce((s,r)=>s+r.rating,0)/rows.rows.length).toFixed(1):'N/A';
+  res.send(renderPage('Feedback Management', `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Feedback Management</h2><div class="alert" style="background:#e8f4fd;color:#2980b9;display:inline-block">Avg: <strong>${esc(avg)}</strong>/5</div></div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+    <div style="background:#d1ecf1;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#0c5460">${rows.rows.filter(r=>r.status==='open').length}</div><div style="font-size:12px;color:#555">Open</div></div>
+    <div style="background:#d4edda;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#155724">${rows.rows.filter(r=>r.status==='resolved').length}</div><div style="font-size:12px;color:#555">Resolved</div></div>
+    <div style="background:#e2e3e5;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#383d41">${rows.rows.length}</div><div style="font-size:12px;color:#555">Total</div></div>
+  </div>
+  <table><thead><tr><th>From</th><th>Category</th><th>Subject</th><th>Rating</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>
+  ${rows.rows.map(r=>`<tr><td>${esc(r.user_email)}</td><td>${esc(r.category)}</td><td>${esc(r.subject)}</td><td>${starsHtml(r.rating)}</td><td>${feedbackBadge(r.status)}</td><td>${r.created_at.toISOString().split('T')[0]}</td>
+  <td>${r.status==='open'?`<a href="/feedback/respond/${r.id}" class="btn" style="font-size:12px;padding:3px 8px">Respond</a> <a href="/feedback/resolve/${r.id}" class="btn" style="background:#5cb85c;color:#fff;font-size:12px;padding:3px 8px">Resolve</a>`:'&mdash;'}</td></tr>`).join('')}
+  ${rows.rows.length===0?'<tr><td colspan="7" style="text-align:center;color:#999">No feedback entries.</td></tr>':''}
+  </tbody></table></div>`, req.session.user));
+}));
+
+app.get('/feedback/respond/:id', requireAuth, ah(async (req, res) => {
+  const row = await pool.query('SELECT * FROM feedback_entries WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  const f = row.rows[0]; if (!f) return res.status(404).send('Not found');
+  res.send(renderPage('Respond to Feedback', `<div class="card"><h2>Respond to Feedback</h2>
+  <div style="background:#f8f9fa;padding:12px;border-radius:8px;margin-bottom:16px"><strong>${esc(f.subject)}</strong><br><span style="color:#666">From: ${esc(f.user_email)}</span><p style="margin:8px 0">${esc(f.message)}</p></div>
+  <form method="POST" action="/feedback/respond/${f.id}"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Response</label><textarea name="response" rows="4" required placeholder="Write your response..."></textarea>
+  <button type="submit" class="btn btn-green">Send Response</button> <a href="/feedback/admin" class="btn" style="background:#999;color:#fff">Cancel</a>
+  </form></div>`, req.session.user));
+}));
+
+app.post('/feedback/respond/:id', requireAuth, ah(async (req, res) => {
+  const f = await pool.query('SELECT user_email,subject FROM feedback_entries WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  await pool.query('UPDATE feedback_entries SET response=$1 WHERE id=$2 AND tenant_id=$3', [req.body.response, req.params.id, req.session.user.tenant_id]);
+  if (f.rows[0]) { audit(req.session.user.email, 'feedback_responded', '#'+req.params.id); notify(req.session.user.tenant_id, f.rows[0].user_email, 'Feedback Response', `Response to "${f.rows[0].subject}"`, 'info'); }
+  res.redirect('/feedback/admin');
+}));
+
+app.get('/feedback/resolve/:id', requireAuth, ah(async (req, res) => {
+  const f = await pool.query('SELECT user_email,subject FROM feedback_entries WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  await pool.query('UPDATE feedback_entries SET status=$1 WHERE id=$2 AND tenant_id=$3', ['resolved', req.params.id, req.session.user.tenant_id]);
+  if (f.rows[0]) { audit(req.session.user.email, 'feedback_resolved', '#'+req.params.id); notify(req.session.user.tenant_id, f.rows[0].user_email, 'Feedback Resolved', `"${f.rows[0].subject}" resolved.`, 'success'); }
+  res.redirect('/feedback/admin');
+}));
+
+// ============================================================
+//  FEATURE 6: QUICK NOTES / TODO
+// ============================================================
+function priorityBadge(p) {
+  const c = { high:'#d9534f', medium:'#f0ad4e', low:'#5cb85c' };
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:#fff;background:${c[p]||'#999'}">${esc(p)}</span>`;
+}
+
+app.get('/notes', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const rows = await pool.query('SELECT * FROM user_notes WHERE tenant_id=$1 AND user_email=$2 ORDER BY is_done ASC,priority DESC,created_at DESC', [req.session.user.tenant_id, req.session.user.email]);
+  const pending = rows.rows.filter(r=>!r.is_done).length;
+  res.send(renderPage('My Notes', `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>My Notes & Tasks</h2><a href="/notes/new" class="btn btn-green">+ New Note</a></div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+    <div style="background:#d4edda;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#155724">${rows.rows.length}</div><div style="font-size:12px;color:#555">Total</div></div>
+    <div style="background:#fff3cd;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#856404">${pending}</div><div style="font-size:12px;color:#555">Pending</div></div>
+    <div style="background:#d1ecf1;padding:10px;border-radius:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#0c5460">${rows.rows.length-pending}</div><div style="font-size:12px;color:#555">Done</div></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+  ${rows.rows.map(r=>`<div style="display:flex;align-items:flex-start;gap:12px;padding:12px;border-radius:8px;background:${r.is_done?'#f8f9fa':'#fff'};border:1px solid #e9ecef;${r.is_done?'opacity:0.6':''}">
+    <input type="checkbox" ${r.is_done?'checked':''} onchange="location.href='/notes/toggle/${r.id}'" style="width:20px;height:20px;margin-top:2px;cursor:pointer">
+    <div style="flex:1"><div style="display:flex;align-items:center;gap:8px"><strong style="${r.is_done?'text-decoration:line-through':''}">${esc(r.title)}</strong>${priorityBadge(r.priority)}${r.due_date?`<span style="font-size:11px;color:#666">Due: ${esc(r.due_date)}</span>`:''}</div>
+    ${r.content?`<p style="margin:4px 0 0;color:#555;font-size:14px">${esc(r.content.length>150?r.content.slice(0,150)+'...':r.content)}</p>`:''}</div>
+    <a href="/notes/delete/${r.id}" style="color:#d9534f;text-decoration:none;font-size:18px" title="Delete">&times;</a>
+  </div>`).join('')}
+  ${rows.rows.length===0?'<p style="text-align:center;color:#999;padding:24px">No notes yet.</p>':''}
+  </div></div>`, req.session.user));
+}));
+
+app.get('/notes/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Note', `<div class="card"><h2>New Note</h2>
+  <form method="POST" action="/notes/save"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Title</label><input type="text" name="title" required placeholder="What needs to be done?">
+  <label>Content (optional)</label><textarea name="content" rows="3"></textarea>
+  <label>Priority</label><select name="priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+  <label>Due Date (optional)</label><input type="date" name="due_date">
+  <button type="submit" class="btn btn-green">Save Note</button> <a href="/notes" class="btn" style="background:#999;color:#fff">Cancel</a>
+  </form></div>`, req.session.user));
+});
+
+app.post('/notes/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('INSERT INTO user_notes (tenant_id,user_email,title,content,priority,due_date) VALUES ($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, req.session.user.email, req.body.title, req.body.content||null, req.body.priority, req.body.due_date||null]);
+  audit(req.session.user.email, 'note_created', req.body.title);
+  res.redirect('/notes');
+}));
+
+app.get('/notes/toggle/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE user_notes SET is_done=NOT is_done WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, req.session.user.tenant_id, req.session.user.email]);
+  res.redirect('/notes');
+}));
+
+app.get('/notes/delete/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('DELETE FROM user_notes WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, req.session.user.tenant_id, req.session.user.email]);
+  res.redirect('/notes');
+}));
+
+// ============================================================
+//  FEATURE 7: ANNOUNCEMENT BOARD
+// ============================================================
+function annPriorityBadge(p) {
+  const c = { normal:'#6c757d', important:'#e67e22', urgent:'#d9534f' };
+  return `<span style="display:inline-block;padding:3px 12px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${c[p]||'#999'}">${esc(p)}</span>`;
+}
+
+app.get('/announcements', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const rows = await pool.query("SELECT * FROM announcements WHERE tenant_id=$1 AND (expires_at IS NULL OR expires_at >= CURRENT_DATE) ORDER BY pinned DESC,priority DESC,created_at DESC", [req.session.user.tenant_id]);
+  const role = req.session.user.role || 'staff';
+  res.send(renderPage('Announcements', `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Announcement Board</h2>${(role==='admin'||role==='hr')?'<a href="/announcements/new" class="btn btn-green">+ New</a>':''}</div>
+  ${rows.rows.length===0?'<p style="text-align:center;color:#999;padding:24px">No announcements.</p>':''}
+  <div style="display:flex;flex-direction:column;gap:12px">
+  ${rows.rows.map(r=>`<div style="border:1px solid ${r.priority==='urgent'?'#d9534f':r.priority==='important'?'#e67e22':'#e9ecef'};border-radius:8px;padding:16px;background:${r.priority==='urgent'?'#fff5f5':r.priority==='important'?'#fffbf0':'#fff'};${r.pinned?'border-left:4px solid #2980b9;':''}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="flex:1">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${r.pinned?'<span style="font-size:14px">PIN</span>':''}<strong style="font-size:16px">${esc(r.title)}</strong>${annPriorityBadge(r.priority)}<span style="font-size:11px;color:#999;background:#f0f0f0;padding:1px 8px;border-radius:10px">${esc(r.target_audience)}</span></div>
+      <p style="margin:8px 0;color:#333;white-space:pre-wrap">${esc(r.content)}</p>
+      <div style="font-size:12px;color:#999">By ${esc(r.user_email)} &middot; ${r.created_at.toISOString().split('T')[0]}${r.expires_at?' &middot; Expires '+esc(r.expires_at):''}</div>
+    </div>${(role==='admin'||role==='hr')?`<div style="display:flex;gap:4px;flex-shrink:0;margin-left:8px"><a href="/announcements/pin/${r.id}" class="btn" style="font-size:11px;padding:3px 8px">${r.pinned?'Unpin':'Pin'}</a><a href="/announcements/delete/${r.id}" class="btn" style="background:#d9534f;color:#fff;font-size:11px;padding:3px 8px">&times;</a></div>`:''}</div></div>`).join('')}
+  </div></div>`, req.session.user));
+}));
+
+app.get('/announcements/new', requireAuth, ah(async (req, res) => {
+  const role = req.session.user.role||'staff';
+  if (role!=='admin'&&role!=='hr') return res.status(403).send('Access denied');
+  res.send(renderPage('New Announcement', `<div class="card"><h2>New Announcement</h2>
+  <form method="POST" action="/announcements/save"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}">
+  <label>Title</label><input type="text" name="title" required>
+  <label>Content</label><textarea name="content" rows="5" required></textarea>
+  <label>Priority</label><select name="priority"><option value="normal">Normal</option><option value="important">Important</option><option value="urgent">Urgent</option></select>
+  <label>Target Audience</label><select name="target_audience"><option value="all">Everyone</option><option value="staff">Staff Only</option><option value="students">Students Only</option><option value="parents">Parents Only</option></select>
+  <label>Expires At (optional)</label><input type="date" name="expires_at">
+  <button type="submit" class="btn btn-green">Publish</button> <a href="/announcements" class="btn" style="background:#999;color:#fff">Cancel</a>
+  </form></div>`, req.session.user));
+}));
+
+app.post('/announcements/save', requireAuth, ah(async (req, res) => {
+  await pool.query('INSERT INTO announcements (tenant_id,user_email,title,content,priority,target_audience,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, req.session.user.email, req.body.title, req.body.content, req.body.priority, req.body.target_audience, req.body.expires_at||null]);
+  audit(req.session.user.email, 'announcement', req.body.title);
+  notify(req.session.user.tenant_id, null, req.body.title, req.body.content.length>200?req.body.content.slice(0,200)+'...':req.body.content, req.body.priority==='urgent'?'warning':'info');
+  res.redirect('/announcements');
+}));
+
+app.get('/announcements/pin/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('UPDATE announcements SET pinned=NOT pinned WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/announcements');
+}));
+
+app.get('/announcements/delete/:id', requireAuth, ah(async (req, res) => {
+  await pool.query('DELETE FROM announcements WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/announcements');
+}));
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
@@ -22118,4 +22555,4 @@ server.listen(PORT, () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`WebSocket: ws${process.env.NODE_ENV === 'production' ? 's' : ''}://localhost:${PORT}/ws/notifications`);
 });
-// Deploy trigger 1778408080
+// Deploy trigger 1783412000
