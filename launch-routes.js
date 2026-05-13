@@ -397,29 +397,17 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   }
 
   // =========================================================================
-  // DIAGNOSTIC: Test if launch-routes routing works at all
-  // =========================================================================
-
-  app.get('/ping', (req, res) => {
-    console.log('[PING] Route hit!');
-    res.send('pong');
-  });
-
-  // =========================================================================
   // SECTION 5: PUBLIC LANDING PAGE (replaces /)
   // =========================================================================
 
   app.get('/', ah(async (req, res) => {
-    console.log('[Landing] Route handler hit, session.user:', !!req.session.user);
     // If logged in, redirect to dashboard
     if (req.session.user) return res.redirect('/dashboard');
 
-    console.log('[Landing] Fetching data...');
     const adverts = await getActiveAdverts();
     const entertainment = await getScrapedContent('entertainment', 6);
     const newsItems = await getScrapedContent('news', 5);
     const publicNews = await getPublicPosts('news', 3);
-    console.log('[Landing] Data fetched, building content...');
 
     // Build advert banner HTML
     const advertHTML = adverts.length > 0 ? `
@@ -1000,11 +988,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ${getStructuredData()}
     `;
 
-    console.log('[Landing] Content built, length:', content.length);
-    console.log('[Landing] Calling renderPage...');
-    const html = renderPage('Comfort - The Operating System for African Institutions', content, null);
-    console.log('[Landing] renderPage returned, html length:', html ? html.length : 'NULL');
-    res.send(html);
+    res.send(renderPage('Comfort - The Operating System for African Institutions', content, null));
   }));
 
   // =========================================================================
