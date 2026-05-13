@@ -1,4 +1,4 @@
-const CACHE = 'ssewasswa-v9.0';
+const CACHE = 'comfort-v1.0';
 const urlsToCache = ['/', '/offline', '/manifest.json'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(urlsToCache))));
 self.addEventListener('fetch', e => {

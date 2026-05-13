@@ -36,4 +36,4 @@ new Worker('backup', async job => {
   }
 }, { connection: redis });
 
-console.log('SSEWASSWA Workers Running');
+console.log('Comfort Workers Running');
