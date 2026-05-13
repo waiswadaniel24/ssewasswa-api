@@ -10823,8 +10823,9 @@ const renderPageV3 = (title, content, user, meta = {}) => {
   const googleVerification = process.env.GOOGLE_SITE_VERIFICATION || '';
   // Auto-inject CSRF token into all forms in the content
   let safeContent = content || '';
-  if (meta.csrfToken && safeContent.includes('<form')) {
-    safeContent = safeContent.replace(/<form([^>]*)>/g, `<form$1><input type="hidden" name="_csrf" value="${meta.csrfToken}">`);
+  const csrfTokenV3 = meta.csrfToken || global.__csrfToken || null;
+  if (csrfTokenV3 && safeContent.includes('<form')) {
+    safeContent = safeContent.replace(/<form([^>]*)>/g, `<form$1><input type="hidden" name="_csrf" value="${csrfTokenV3}">`);
   }
   return `<!DOCTYPE html>
 <html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
