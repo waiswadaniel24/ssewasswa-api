@@ -2058,24 +2058,19 @@ app.get('/register', (req, res) => {
         </select>
         <input name="email" type="email" placeholder="Your Email" required>
         <input name="phone" placeholder="Phone +256..." required>
-        <input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number">
-        <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required>
+        <input name="password" type="password" placeholder="Create a Password" required>
+        <input name="confirm_password" type="password" placeholder="Confirm Password" required>
         <button class="btn" style="width:100%">Register</button>
       </form>
     </div>
   `, null, req));
 });
 
-app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 8 }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
+app.post('/register', validate({ email: { required: true, email: true }, password: { required: true }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
   const { org_name, type, email, phone, password, confirm_password } = req.body;
-  // Password complexity validation (Phase 1 Security Fix)
-  const passwordErrors = [];
-  if (!password || password.length < 8) passwordErrors.push('Password must be at least 8 characters long');
-  if (password && !/[A-Z]/.test(password)) passwordErrors.push('Password must contain at least 1 uppercase letter');
-  if (password && !/[0-9]/.test(password)) passwordErrors.push('Password must contain at least 1 number');
-  if (password !== confirm_password) passwordErrors.push('Passwords do not match');
-  if (passwordErrors.length > 0) {
-    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="organization" ${type==='organization'?'selected':''}>Organization</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
+  // Simple password validation - just check passwords match
+  if (password !== confirm_password) {
+    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Passwords do not match</h3><p>Please make sure both passwords are the same.</p></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="organization" ${type==='organization'?'selected':''}>Organization</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Create a Password" required><input name="confirm_password" type="password" placeholder="Confirm Password" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
   }
   const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
@@ -20578,25 +20573,6 @@ try {
   console.log('[Launch] Public routes loaded');
 } catch (e) {
   console.warn('[Launch] Failed to load launch routes:', e.message);
-  console.warn('[Launch] Stack:', e.stack?.split('\n').slice(0,5).join('\n'));
-}
-
-// === FALLBACK PUBLIC ROUTES (if launch-routes failed to load) ===
-if (!app._launchRoutesLoaded) {
-  console.log('[Launch] Registering fallback public routes...');
-  app.get('/blog', (req, res) => {
-    res.send(renderPageV3('Blog & News - Comfort', `
-      <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:16px;margin-bottom:25px;color:white;text-align:center">
-        <h1>Blog & News</h1><p style="opacity:0.9;margin-top:8px">Insights, tips, and updates from Comfort</p>
-      </div>
-      <div class="card" style="text-align:center;padding:60px">
-        <div style="font-size:48px;margin-bottom:16px">&#128240;</div>
-        <h2>Coming Soon</h2>
-        <p class="muted" style="margin-top:8px">Check back soon for articles and updates!</p>
-        <a href="/" class="btn" style="margin-top:20px;display:inline-block">Back Home</a>
-      </div>
-    `, null));
-  });
 }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
