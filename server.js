@@ -6678,7 +6678,8 @@ app.post('/dev/blog/create', requireAuth, requireSuperAdmin, ah(async (req, res)
       [slug, title, content, excerpt, image_url, category, req.session.user.email, published, published ? new Date() : null]);
   } catch (dbErr) {
     console.error('[Blog Create Error]', dbErr.message);
-    return res.send(renderPage('Blog Error', `<div class="card"><div class="alert alert-error"><h2>Failed to Create Post</h2><p>${esc(dbErr.message)}</p></div><a href="/dev/blog" class="btn">Back to Blog</a></div>`, req.session.user));
+    const userMsg = dbErr.message.includes('duplicate key') ? 'A post with this slug already exists. Please use a different slug.' : 'Failed to create post. Please try again.';
+    return res.send(renderPage('Blog Error', `<div class="card"><div class="alert alert-error"><h2>Failed to Create Post</h2><p>${esc(userMsg)}</p></div><a href="/dev/blog" class="btn">Back to Blog</a></div>`, req.session.user));
   }
   await audit(req.session.user.email, 'create_blog_post', `Blog post: ${title}`);
   res.redirect('/dev/blog');
