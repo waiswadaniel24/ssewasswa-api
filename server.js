@@ -2165,7 +2165,7 @@ app.get('/settings/backup', requireAuth, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
   const tables = ['students', 'fees', 'exams', 'marks', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'invoices', 'expenses', 'attendance', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'customers', 'budget_items', 'goals', 'personal_notes'];
-  let backup = `SSEWASSWA DATA BACKUP\nOrganization: ${tenant.name}\nDate: ${new Date().toISOString()}\n\n`;
+  let backup = `Comfort DATA BACKUP\nOrganization: ${tenant.name}\nDate: ${new Date().toISOString()}\n\n`;
   for (const table of tables) {
     try {
       const data = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t])).rows;
