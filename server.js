@@ -2066,7 +2066,7 @@ app.get('/register', (req, res) => {
   `, null, req));
 });
 
-app.post('/register', validate({ email: { required: true, email: true }, password: { required: true }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
+app.post('/register', validate({ email: { required: true, email: true }, password: { required: true }, org_name: { required: true, maxLength: 200 }, type: { required: true } }), ah(async (req, res) => {
   const { org_name, type, email, phone, password, confirm_password } = req.body;
   // Simple password validation - just check passwords match
   if (password !== confirm_password) {
