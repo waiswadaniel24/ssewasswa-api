@@ -1270,7 +1270,7 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('local_languages', 'Local Languages', 'Luganda, Swahili, French translations', '4.0', 'uganda', 'Translations seeded', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('uneb_integration', 'UNEB Integration', 'Uganda National Examinations Board', '4.0', 'uganda', 'UNEB API credentials', false) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('nira_verification', 'NIRA Verification', 'National ID verification', '4.0', 'uganda', 'NIRA API credentials', false) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('advanced_analytics', 'Detailed analytics dashboard with charts', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('advanced_analytics', 'Advanced Analytics', 'Detailed analytics dashboard with charts', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('scheduled_reports', 'Scheduled Reports', 'Auto-send reports on schedule', '5.0', 'enterprise', 'GMAIL_USER + GMAIL_PASS env vars', false) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('momo_payments', 'Mobile Money', 'MTN MoMo and Airtel Money integration', '5.0', 'enterprise', 'MoMo API credentials', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('multi_currency', 'Multi-Currency', 'UGX, KES, TZS, RWF, USD support', '5.0', 'enterprise', 'None', true) ON CONFLICT DO NOTHING`,
@@ -2022,7 +2022,7 @@ if ('serviceWorker' in navigator && window.__VAPID_KEY) {
       <a href="/settings/profile">Settings</a>
       <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
-      <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(req.csrfToken)}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer" title="Language">
+      <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(csrfToken || '')}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer" title="Language">
         <option value="en" ${(user.language||'en')==='en'?'selected':''}>EN</option>
         <option value="lg" ${user.language==='lg'?'selected':''}>LG</option>
         <option value="sw" ${user.language==='sw'?'selected':''}>SW</option>
