@@ -1,5 +1,5 @@
 /**
- * SSEWASSWA Platform - Unit Tests
+ * Comfort Platform - Unit Tests
  * Tests for authentication, payment, validation, and utility functions
  * 
  * Run: node test/server.test.js
@@ -273,7 +273,7 @@ function testUtilities() {
 // RUN ALL TESTS
 // ============================================================
 console.log('============================================================');
-console.log('  SSEWASSWA Platform Test Suite v9.0');
+console.log('  Comfort Platform Test Suite v1.0');
 console.log('  Running: ' + new Date().toISOString());
 console.log('============================================================');
 

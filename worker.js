@@ -50,4 +50,4 @@ new Worker('backup', async job => {
   }
 }, { connection: redis });
 
-console.log('SSEWASSWA Workers v9.0 Running');
+console.log('Comfort Workers v1.0 Running');

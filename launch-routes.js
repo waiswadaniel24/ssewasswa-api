@@ -1,5 +1,5 @@
 /**
- * SSEWASSWA Platform - Launch Routes
+ * Comfort Platform - Launch Routes
  * ====================================
  * Supplementary routes file adding public landing page, entertainment,
  * fundraising, tenant sites, web scraping, subscription verification,
@@ -130,7 +130,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     {
       "@context": "https://schema.org",
       "@type": "Organization",
-      "name": "SSEWASSWA",
+      "name": "Comfort",
       "url": "${BASE_URL}",
       "logo": "${BASE_URL}/icon.png",
       "description": "All-in-One Management Platform for Schools, Clinics, Churches and Businesses in Africa",
@@ -145,7 +145,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
-      "name": "SSEWASSWA Platform",
+      "name": "Comfort Platform",
       "applicationCategory": "BusinessApplication",
       "operatingSystem": "Web",
       "offers": [
@@ -164,13 +164,13 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       "mainEntity": [
         {
           "@type": "Question",
-          "name": "Is SSEWASSWA really free to start?",
+          "name": "Is Comfort really free to start?",
           "acceptedAnswer": { "@type": "Answer", "text": "Yes! Our Free plan includes up to 50 records, 1 user, basic reports, and 5 SMS per day. No credit card required. Upgrade when you need more capacity." }
         },
         {
           "@type": "Question",
           "name": "Does it work without internet?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Yes! SSEWASSWA has offline mode built in. You can enter data when disconnected, and everything syncs automatically when your connection returns." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes! Comfort has offline mode built in. You can enter data when disconnected, and everything syncs automatically when your connection returns." }
         },
         {
           "@type": "Question",
@@ -184,17 +184,12 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         },
         {
           "@type": "Question",
-          "name": "Can I use SSEWASSWA on my phone?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Yes! SSEWASSWA is a Progressive Web App (PWA). Install it directly from your browser on any phone or tablet. Works on Android, iOS, and desktop." }
+          "name": "Can I use Comfort on my phone?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes! Comfort is a Progressive Web App (PWA). Install it directly from your browser on any phone or tablet. Works on Android, iOS, and desktop." }
         }
       ]
     }
     </script>
-    <link rel="canonical" href="${BASE_URL}/" />
-    <meta property="og:url" content="${BASE_URL}/" />
-    <meta property="og:image" content="${BASE_URL}/icon.png" />
-    <meta name="twitter:image" content="${BASE_URL}/icon.png" />
-    <meta name="twitter:card" content="summary_large_image" />
   `;
 
   // =========================================================================
@@ -245,7 +240,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       const timeout = setTimeout(() => controller.abort(), 15000);
       const resp = await fetch(url, {
         signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SSEWASSWA-Bot/1.0)' }
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Comfort-Bot/1.0)' }
       });
       clearTimeout(timeout);
       if (!resp.ok) return [];
@@ -278,7 +273,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       const timeout = setTimeout(() => controller.abort(), 15000);
       const resp = await fetch(url, {
         signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SSEWASSWA-Bot/1.0)' }
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Comfort-Bot/1.0)' }
       });
       clearTimeout(timeout);
       if (!resp.ok) return [];
@@ -451,7 +446,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     `).join('');
 
     // News ticker HTML
-    const allNews = [...publicNews.map(n => ({ title: n.title, source: 'SSEWASSWA', url: '#' })), ...newsItems.map(n => ({ title: n.title, source: n.source || '', url: n.url || '#' }))];
+    const allNews = [...publicNews.map(n => ({ title: n.title, source: 'Comfort', url: '#' })), ...newsItems.map(n => ({ title: n.title, source: n.source || '', url: n.url || '#' }))];
     const newsTickerHTML = allNews.slice(0, 5).map(n => `<span style="margin-right:40px"><a href="${esc(n.url)}" style="color:white;text-decoration:none">${esc(n.title)}</a> <span style="opacity:0.7;font-size:11px">[${esc(n.source)}]</span></span>`).join('');
 
     const content = `
@@ -619,7 +614,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;max-width:1000px;margin:0 auto">
           <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
             <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
-            <p style="color:#475569;line-height:1.7;font-style:italic">"SSEWASSWA made managing our school so easy. We track fees, attendance, and grades all in one place. Parents love the real-time updates!"</p>
+            <p style="color:#475569;line-height:1.7;font-style:italic">"Comfort made managing our school so easy. We track fees, attendance, and grades all in one place. Parents love the real-time updates!"</p>
             <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
               <div style="width:40px;height:40px;background:linear-gradient(135deg,#059669,#10b981);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">JK</div>
               <div><div style="font-weight:600;color:#1e293b">James K.</div><div style="font-size:13px;color:#64748b">School Administrator, Kampala</div></div>
@@ -627,7 +622,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           </div>
           <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
             <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
-            <p style="color:#475569;line-height:1.7;font-style:italic">"Our church tithe collection improved by 60% after switching to SSEWASSWA. The mobile money integration is perfect for Uganda."</p>
+            <p style="color:#475569;line-height:1.7;font-style:italic">"Our church tithe collection improved by 60% after switching to Comfort. The mobile money integration is perfect for Uganda."</p>
             <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
               <div style="width:40px;height:40px;background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">GN</div>
               <div><div style="font-weight:600;color:#1e293b">Grace N.</div><div style="font-size:13px;color:#64748b">Church Treasurer, Entebbe</div></div>
@@ -635,7 +630,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           </div>
           <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
             <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
-            <p style="color:#475569;line-height:1.7;font-style:italic">"As a small business owner, SSEWASSWA replaced 4 different apps for me. Invoices, inventory, customers — everything in one dashboard."</p>
+            <p style="color:#475569;line-height:1.7;font-style:italic">"As a small business owner, Comfort replaced 4 different apps for me. Invoices, inventory, customers — everything in one dashboard."</p>
             <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
               <div style="width:40px;height:40px;background:linear-gradient(135deg,#d97706,#f59e0b);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">PM</div>
               <div><div style="font-weight:600;color:#1e293b">Peter M.</div><div style="font-size:13px;color:#64748b">Business Owner, Jinja</div></div>
@@ -647,14 +642,14 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       <!-- COMPARISON TABLE -->
       <div style="background:#f1f5f9;padding:60px 20px">
         <div style="max-width:900px;margin:0 auto">
-          <h2 style="text-align:center;font-size:32px;font-weight:800;margin-bottom:12px;color:#1e293b">Why SSEWASSWA?</h2>
+          <h2 style="text-align:center;font-size:32px;font-weight:800;margin-bottom:12px;color:#1e293b">Why Comfort?</h2>
           <p style="text-align:center;color:#64748b;margin-bottom:36px">See how we compare to using multiple separate tools.</p>
           <div style="overflow-x:auto">
             <table style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06)">
               <thead>
                 <tr style="background:linear-gradient(135deg,#059669,#0891b2)">
                   <th style="padding:16px;text-align:left;color:white;font-weight:700">Feature</th>
-                  <th style="padding:16px;text-align:center;color:white;font-weight:700">SSEWASSWA</th>
+                  <th style="padding:16px;text-align:center;color:white;font-weight:700">Comfort</th>
                   <th style="padding:16px;text-align:center;color:white;font-weight:700">Others</th>
                 </tr>
               </thead>
@@ -789,12 +784,12 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         <h2 style="text-align:center;font-size:32px;font-weight:800;margin-bottom:36px;color:#1e293b">Frequently Asked Questions</h2>
         <div style="display:flex;flex-direction:column;gap:12px">
           <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Is SSEWASSWA really free to start?</summary>
+            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Is Comfort really free to start?</summary>
             <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Yes! Our Free plan includes up to 50 records, 1 user, basic reports, and 5 SMS per day. No credit card required. Upgrade when you need more capacity.</p>
           </details>
           <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
             <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Does it work without internet?</summary>
-            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Yes! SSEWASSWA has offline mode built in. You can enter data when disconnected, and everything syncs automatically when your connection returns. Perfect for areas with intermittent internet.</p>
+            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Yes! Comfort has offline mode built in. You can enter data when disconnected, and everything syncs automatically when your connection returns. Perfect for areas with intermittent internet.</p>
           </details>
           <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
             <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Can I migrate from my current system?</summary>
@@ -809,8 +804,8 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Your data is encrypted, backed up daily, and stored securely. Each institution's data is completely isolated. We comply with Uganda's data protection regulations.</p>
           </details>
           <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Can I use SSEWASSWA on my phone?</summary>
-            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Yes! SSEWASSWA is a Progressive Web App (PWA). Install it directly from your browser on any phone or tablet - no app store needed. Works on Android, iOS, and desktop.</p>
+            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Can I use Comfort on my phone?</summary>
+            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Yes! Comfort is a Progressive Web App (PWA). Install it directly from your browser on any phone or tablet - no app store needed. Works on Android, iOS, and desktop.</p>
           </details>
         </div>
       </div>
@@ -854,9 +849,9 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
       <!-- WHATSAPP SHARE SECTION -->
       <div style="background:linear-gradient(135deg,#25D366,#128C7E);padding:50px 20px;text-align:center">
-        <h2 style="font-size:clamp(22px,4vw,36px);font-weight:900;color:white;margin-bottom:12px">Share SSEWASSWA on WhatsApp</h2>
+        <h2 style="font-size:clamp(22px,4vw,36px);font-weight:900;color:white;margin-bottom:12px">Share Comfort on WhatsApp</h2>
         <p style="color:rgba(255,255,255,0.9);font-size:17px;margin-bottom:28px;max-width:550px;margin-left:auto;margin-right:auto">Know someone who needs this? Spread the word and help transform more institutions across Africa.</p>
-        <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out SSEWASSWA - The All-in-One Management Platform for Schools, Clinics, Churches & Businesses in Africa! Start free: ' + BASE_URL)}" target="blank" rel="noopener" style="display:inline-flex;align-items:center;gap:10px;padding:16px 40px;background:white;color:#25D366;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
+        <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out Comfort - The All-in-One Management Platform for Schools, Clinics, Churches & Businesses in Africa! Start free: ' + BASE_URL)}" target="blank" rel="noopener" style="display:inline-flex;align-items:center;gap:10px;padding:16px 40px;background:white;color:#25D366;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
           Share on WhatsApp
         </a>
@@ -865,7 +860,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       <!-- FINAL CTA -->
       <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:80px 20px;text-align:center">
         <h2 style="font-size:clamp(24px,4vw,42px);font-weight:900;color:white;margin-bottom:12px">Ready to Transform Your Institution?</h2>
-        <p style="color:#94a3b8;font-size:18px;margin-bottom:36px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics, and businesses already using SSEWASSWA.</p>
+        <p style="color:#94a3b8;font-size:18px;margin-bottom:36px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics, and businesses already using Comfort.</p>
         <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
           <a href="/register" style="display:inline-block;padding:16px 40px;background:linear-gradient(135deg,#059669,#0891b2);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none">Start Free Now</a>
           <a href="/blog" style="display:inline-block;padding:16px 40px;background:rgba(255,255,255,0.1);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;border:2px solid rgba(255,255,255,0.3)">Read Our Blog</a>
@@ -875,7 +870,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       <!-- CTA BANNER -->
       <div style="background:linear-gradient(135deg,#059669,#10b981);padding:60px 20px;border-radius:20px;margin:40px 0;text-align:center">
         <h2 style="color:white;font-size:32px;font-weight:900;margin-bottom:12px">Ready to Transform Your Institution?</h2>
-        <p style="color:#d1fae5;font-size:18px;margin-bottom:24px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics and businesses already using SSEWASSWA.</p>
+        <p style="color:#d1fae5;font-size:18px;margin-bottom:24px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics and businesses already using Comfort.</p>
         <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
           <a href="/register" style="display:inline-block;padding:16px 36px;background:white;color:#059669;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px;box-shadow:0 4px 20px rgba(0,0,0,0.15)">Get Started Free</a>
           <a href="/help" style="display:inline-block;padding:16px 36px;background:transparent;color:white;border:2px solid white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Learn More</a>
@@ -887,7 +882,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         <div style="max-width:1200px;margin:0 auto">
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:24px;margin-bottom:30px">
             <div>
-              <div style="font-size:20px;font-weight:800;color:white;margin-bottom:12px">SSEWASSWA</div>
+              <div style="font-size:20px;font-weight:800;color:white;margin-bottom:12px">Comfort</div>
               <p style="line-height:1.7">The Operating System for Schools, Clinics, Churches &amp; Businesses in Africa.</p>
             </div>
             <div>
@@ -932,13 +927,13 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             </div>
           </div>
           <div style="border-top:1px solid #1e293b;padding-top:16px;text-align:center">
-            &copy; ${new Date().getFullYear()} SSEWASSWA Platform. All rights reserved. Built with &#10084; in Uganda.
+            &copy; ${new Date().getFullYear()} Comfort Platform. All rights reserved. Built with &#10084; in Uganda.
           </div>
         </div>
       </footer>
 
       <!-- FLOATING WHATSAPP BUTTON -->
-      <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out SSEWASSWA - The All-in-One Platform for Schools, Clinics, Churches & Businesses! ' + BASE_URL)}" target="_blank" rel="noopener" style="position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:50%;background:#25D366;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(37,211,102,0.4);z-index:9999;transition:transform 0.3s" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="Share on WhatsApp">
+      <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out Comfort - The All-in-One Platform for Schools, Clinics, Churches & Businesses! ' + BASE_URL)}" target="_blank" rel="noopener" style="position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:50%;background:#25D366;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(37,211,102,0.4);z-index:9999;transition:transform 0.3s" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="Share on WhatsApp">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
       </a>
 
@@ -985,7 +980,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ${getStructuredData()}
     `;
 
-    res.send(renderPage('SSEWASSWA - The Operating System for African Institutions', content, null));
+    res.send(renderPage('Comfort - The Operating System for African Institutions', content, null));
   }));
 
   // =========================================================================
@@ -1003,7 +998,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       <div style="background:white;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
         <div style="background:linear-gradient(135deg,${color});padding:16px 20px;color:white">
           <div style="font-weight:700;font-size:15px">${esc(item.title)}</div>
-          <div style="font-size:12px;opacity:0.85;margin-top:4px">${esc(item.source || 'SSEWASSWA')}</div>
+          <div style="font-size:12px;opacity:0.85;margin-top:4px">${esc(item.source || 'Comfort')}</div>
         </div>
         ${item.summary ? `<div style="padding:12px 20px;font-size:14px;color:#475569">${esc(item.summary)}</div>` : ''}
         <div style="padding:8px 20px 16px">
@@ -1098,7 +1093,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Entertainment Hub - SSEWASSWA', content, req.session.user || null));
+    res.send(renderPage('Entertainment Hub - Comfort', content, req.session.user || null));
   }));
 
   // =========================================================================
@@ -1120,11 +1115,11 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
     // Default blog posts if none exist yet
     const defaultPosts = [
-      { id: 0, title: 'Why African Schools Are Going Digital in 2025', content: 'Across Africa, schools are embracing digital transformation to streamline operations, improve learning outcomes, and stay competitive. From student management to fee collection and exam result generation, technology is revolutionizing how educational institutions operate. SSEWASSWA provides an all-in-one platform designed specifically for the unique challenges faced by African schools, including offline capability, mobile money integration, and support for local examination systems like UNEB. The shift to digital is not just about convenience — it is about ensuring every student gets the attention they deserve and every parent stays informed about their child progress.', category: 'blog', section: 'Blog', created_at: new Date() },
-      { id: 0, title: 'How Churches Can Boost Tithe Collection with Technology', content: 'Churches across Uganda and East Africa are discovering that modern technology can significantly improve tithe and offering collection, member engagement, and community outreach. SSEWASSWA Church Management module provides tools for tracking tithes, managing member directories, scheduling services, and broadcasting prayer requests via SMS. With mobile money integration, members can give from anywhere, and church leaders get real-time financial dashboards. The platform also supports fundraising campaigns that can be shared on WhatsApp and social media, extending your church reach beyond the physical building.', category: 'blog', section: 'Blog', created_at: new Date() },
-      { id: 0, title: '5 Ways Small Businesses in Uganda Can Save Money', content: 'Running a business in Uganda comes with unique challenges — high overhead costs, unpredictable supply chains, and limited access to affordable management tools. Here are five ways SSEWASSWA helps small businesses save money and grow: 1) Replace multiple subscriptions with one affordable platform. 2) Track inventory in real-time to reduce waste and theft. 3) Generate professional invoices that get paid faster. 4) Monitor profit and loss with automated reports. 5) Manage customer relationships to increase repeat business. With plans starting from UGX 0 for the free tier, every business can afford to get organized and start growing.', category: 'tips', section: 'Tips & Guides', created_at: new Date() },
-      { id: 0, title: 'The Future of Healthcare Management in East Africa', content: 'Clinics and health centers across East Africa face mounting pressure to deliver quality care while managing limited resources. Paper-based patient records, manual billing, and disconnected laboratory systems create bottlenecks that affect patient outcomes. SSEWASSWA Clinic Management module digitizes the entire patient journey — from registration to consultation, pharmacy dispensing, and laboratory results. With HMIS-compliant reporting and SMS appointment reminders, clinics can operate more efficiently while maintaining the personal touch that patients value. The platform offline mode ensures continuity of care even when internet connectivity is unreliable.', category: 'blog', section: 'Blog', created_at: new Date() },
-      { id: 0, title: 'Getting Started with SSEWASSWA: A Step-by-Step Guide', content: 'Setting up your institution on SSEWASSWA takes less than 10 minutes. Here is a quick walkthrough: Step 1 — Create your free account at ssewasswa.onrender.com/register. Step 2 — Choose your institution type (School, Church, Clinic, or Business). Step 3 — Fill in your institution details and customize your branding. Step 4 — Start adding data — students, members, patients, or inventory. Step 5 — Invite your team members and assign roles. Step 6 — Explore features like SMS notifications, report generation, and fundraising campaigns. The free plan gives you up to 50 records, 1 user, and 5 SMS per day — perfect for getting started. Upgrade to Basic or Pro when you need more capacity.', category: 'tips', section: 'Tips & Guides', created_at: new Date() },
+      { id: 0, title: 'Why African Schools Are Going Digital in 2025', content: 'Across Africa, schools are embracing digital transformation to streamline operations, improve learning outcomes, and stay competitive. From student management to fee collection and exam result generation, technology is revolutionizing how educational institutions operate. Comfort provides an all-in-one platform designed specifically for the unique challenges faced by African schools, including offline capability, mobile money integration, and support for local examination systems like UNEB. The shift to digital is not just about convenience — it is about ensuring every student gets the attention they deserve and every parent stays informed about their child progress.', category: 'blog', section: 'Blog', created_at: new Date() },
+      { id: 0, title: 'How Churches Can Boost Tithe Collection with Technology', content: 'Churches across Uganda and East Africa are discovering that modern technology can significantly improve tithe and offering collection, member engagement, and community outreach. Comfort Church Management module provides tools for tracking tithes, managing member directories, scheduling services, and broadcasting prayer requests via SMS. With mobile money integration, members can give from anywhere, and church leaders get real-time financial dashboards. The platform also supports fundraising campaigns that can be shared on WhatsApp and social media, extending your church reach beyond the physical building.', category: 'blog', section: 'Blog', created_at: new Date() },
+      { id: 0, title: '5 Ways Small Businesses in Uganda Can Save Money', content: 'Running a business in Uganda comes with unique challenges — high overhead costs, unpredictable supply chains, and limited access to affordable management tools. Here are five ways Comfort helps small businesses save money and grow: 1) Replace multiple subscriptions with one affordable platform. 2) Track inventory in real-time to reduce waste and theft. 3) Generate professional invoices that get paid faster. 4) Monitor profit and loss with automated reports. 5) Manage customer relationships to increase repeat business. With plans starting from UGX 0 for the free tier, every business can afford to get organized and start growing.', category: 'tips', section: 'Tips & Guides', created_at: new Date() },
+      { id: 0, title: 'The Future of Healthcare Management in East Africa', content: 'Clinics and health centers across East Africa face mounting pressure to deliver quality care while managing limited resources. Paper-based patient records, manual billing, and disconnected laboratory systems create bottlenecks that affect patient outcomes. Comfort Clinic Management module digitizes the entire patient journey — from registration to consultation, pharmacy dispensing, and laboratory results. With HMIS-compliant reporting and SMS appointment reminders, clinics can operate more efficiently while maintaining the personal touch that patients value. The platform offline mode ensures continuity of care even when internet connectivity is unreliable.', category: 'blog', section: 'Blog', created_at: new Date() },
+      { id: 0, title: 'Getting Started with Comfort: A Step-by-Step Guide', content: 'Setting up your institution on Comfort takes less than 10 minutes. Here is a quick walkthrough: Step 1 — Create your free account at ssewasswa.onrender.com/register. Step 2 — Choose your institution type (School, Church, Clinic, or Business). Step 3 — Fill in your institution details and customize your branding. Step 4 — Start adding data — students, members, patients, or inventory. Step 5 — Invite your team members and assign roles. Step 6 — Explore features like SMS notifications, report generation, and fundraising campaigns. The free plan gives you up to 50 records, 1 user, and 5 SMS per day — perfect for getting started. Upgrade to Basic or Pro when you need more capacity.', category: 'tips', section: 'Tips & Guides', created_at: new Date() },
     ];
 
     const displayPosts = allBlogContent.length > 0 ? allBlogContent : defaultPosts;
@@ -1178,7 +1173,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         ${advertBanner}
         <div style="text-align:center;margin-bottom:40px">
           <h1 style="font-size:36px;font-weight:900;color:#1e293b">&#128240; Blog &amp; News</h1>
-          <p style="color:#64748b;font-size:18px;margin-top:8px">Insights, tips, and updates from the SSEWASSWA team</p>
+          <p style="color:#64748b;font-size:18px;margin-top:8px">Insights, tips, and updates from the Comfort team</p>
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 320px;gap:32px;align-items:start">
@@ -1203,7 +1198,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             <!-- WhatsApp Share -->
             <div style="background:linear-gradient(135deg,#25D366,#128C7E);border-radius:16px;padding:20px;text-align:center;margin-bottom:20px">
               <div style="color:white;font-weight:700;margin-bottom:8px;font-size:15px">Share on WhatsApp</div>
-              <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out SSEWASSWA Blog - Insights for Schools, Churches, Clinics & Businesses! ' + BASE_URL + '/blog')}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 24px;background:white;color:#25D366;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Share Now</a>
+              <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out Comfort Blog - Insights for Schools, Churches, Clinics & Businesses! ' + BASE_URL + '/blog')}" target="_blank" rel="noopener" style="display:inline-block;padding:10px 24px;background:white;color:#25D366;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Share Now</a>
             </div>
 
             <!-- Latest News -->
@@ -1216,7 +1211,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:16px;padding:20px;text-align:center;margin-top:20px;color:white">
               <h3 style="font-size:16px;font-weight:700;margin-bottom:8px">Stay Updated</h3>
               <p style="font-size:13px;opacity:0.9;margin-bottom:16px">Get the latest tips and updates for your institution.</p>
-              <a href="/register" style="display:inline-block;padding:10px 24px;background:white;color:#4f46e5;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Join SSEWASSWA</a>
+              <a href="/register" style="display:inline-block;padding:10px 24px;background:white;color:#4f46e5;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Join Comfort</a>
             </div>
           </div>
         </div>
@@ -1232,7 +1227,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Blog & News - SSEWASSWA', content, req.session.user || null));
+    res.send(renderPage('Blog & News - Comfort', content, req.session.user || null));
   }));
 
   // Blog post detail page
@@ -1259,7 +1254,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       `).join('');
 
       const shareUrl = encodeURIComponent(`${BASE_URL}/blog/${postId}`);
-      const shareText = encodeURIComponent(post.title + ' - SSEWASSWA Blog');
+      const shareText = encodeURIComponent(post.title + ' - Comfort Blog');
 
       const content = `
         <div style="padding:20px 0">
@@ -1303,7 +1298,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       `;
 
-      res.send(renderPage(post.title + ' - SSEWASSWA Blog', content, req.session.user || null));
+      res.send(renderPage(post.title + ' - Comfort Blog', content, req.session.user || null));
     } catch (e) {
       console.error('[Blog Post] Error:', e.message);
       res.redirect('/blog');
@@ -1322,10 +1317,10 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           <p style="margin-bottom:16px"><strong>Last updated:</strong> ${new Date().toLocaleDateString('en-UG', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">1. Information We Collect</h2>
-          <p style="margin-bottom:12px">SSEWASSWA collects information you provide directly when registering an account, creating an institution profile, or using our services. This includes your name, email address, phone number, institution details, and any data you enter into the platform such as student records, financial transactions, member directories, and communication logs. We also collect usage data automatically, including pages visited, features used, browser type, device information, and IP addresses to improve our service and ensure security.</p>
+          <p style="margin-bottom:12px">Comfort collects information you provide directly when registering an account, creating an institution profile, or using our services. This includes your name, email address, phone number, institution details, and any data you enter into the platform such as student records, financial transactions, member directories, and communication logs. We also collect usage data automatically, including pages visited, features used, browser type, device information, and IP addresses to improve our service and ensure security.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">2. How We Use Your Information</h2>
-          <p style="margin-bottom:12px">We use your information to provide and improve the SSEWASSWA platform, process transactions, send notifications and alerts, provide customer support, comply with legal obligations, and detect and prevent fraud or unauthorized access. Your data is never sold to third parties for marketing purposes. We may share anonymized, aggregated data for analytics and platform improvement.</p>
+          <p style="margin-bottom:12px">We use your information to provide and improve the Comfort platform, process transactions, send notifications and alerts, provide customer support, comply with legal obligations, and detect and prevent fraud or unauthorized access. Your data is never sold to third parties for marketing purposes. We may share anonymized, aggregated data for analytics and platform improvement.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">3. Data Security</h2>
           <p style="margin-bottom:12px">We implement industry-standard security measures to protect your data, including encryption in transit (HTTPS/TLS), encrypted password storage using bcrypt hashing, session management with secure cookies, multi-tenant data isolation ensuring each institution data is separate, regular security audits and monitoring, and automated backups. While no system is completely secure, we continuously work to protect your information from unauthorized access, alteration, or disclosure.</p>
@@ -1337,14 +1332,14 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           <p style="margin-bottom:12px">Under Uganda Data Protection Act and applicable laws, you have the right to access your personal data, correct inaccurate data, request deletion of your data, withdraw consent for data processing, data portability, and lodge a complaint with the data protection authority. To exercise any of these rights, contact us at waiswadaniel24@gmail.com.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">6. Third-Party Services</h2>
-          <p style="margin-bottom:12px">SSEWASSWA integrates with third-party services including Flutterwave for payment processing, Africa Talking for SMS delivery, Cloudinary for file storage, and Google Analytics for website analytics. Each third-party service has its own privacy policy, and we encourage you to review them. We only share data with these providers as necessary to provide the services you request.</p>
+          <p style="margin-bottom:12px">Comfort integrates with third-party services including Flutterwave for payment processing, Africa Talking for SMS delivery, Cloudinary for file storage, and Google Analytics for website analytics. Each third-party service has its own privacy policy, and we encourage you to review them. We only share data with these providers as necessary to provide the services you request.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">7. Contact</h2>
           <p>For privacy-related questions or concerns, contact us at <a href="mailto:waiswadaniel24@gmail.com" style="color:#4f46e5">waiswadaniel24@gmail.com</a>.</p>
         </div>
       </div>
     `;
-    res.send(renderPage('Privacy Policy - SSEWASSWA', content, req.session.user || null));
+    res.send(renderPage('Privacy Policy - Comfort', content, req.session.user || null));
   }));
 
   app.get('/terms', ah(async (req, res) => {
@@ -1355,32 +1350,32 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           <p style="margin-bottom:16px"><strong>Last updated:</strong> ${new Date().toLocaleDateString('en-UG', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">1. Acceptance of Terms</h2>
-          <p style="margin-bottom:12px">By accessing or using the SSEWASSWA platform, you agree to be bound by these Terms of Service. If you do not agree to these terms, you may not access or use the platform. SSEWASSWA reserves the right to modify these terms at any time, and continued use of the platform constitutes acceptance of any changes.</p>
+          <p style="margin-bottom:12px">By accessing or using the Comfort platform, you agree to be bound by these Terms of Service. If you do not agree to these terms, you may not access or use the platform. Comfort reserves the right to modify these terms at any time, and continued use of the platform constitutes acceptance of any changes.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">2. Service Description</h2>
-          <p style="margin-bottom:12px">SSEWASSWA is a multi-tenant SaaS platform providing management tools for schools, clinics, churches, and businesses in Africa. Services include student management, financial tracking, inventory management, member directories, communication tools, fundraising, entertainment content aggregation, and more. We reserve the right to modify, suspend, or discontinue any feature at any time.</p>
+          <p style="margin-bottom:12px">Comfort is a multi-tenant SaaS platform providing management tools for schools, clinics, churches, and businesses in Africa. Services include student management, financial tracking, inventory management, member directories, communication tools, fundraising, entertainment content aggregation, and more. We reserve the right to modify, suspend, or discontinue any feature at any time.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">3. Account Responsibilities</h2>
           <p style="margin-bottom:12px">You are responsible for maintaining the confidentiality of your account credentials, ensuring the accuracy of information you provide, all activities that occur under your account, notifying us immediately of any unauthorized use, and complying with all applicable laws and regulations. You must not share your account credentials with others or use another person account without authorization.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">4. Subscription Plans and Billing</h2>
-          <p style="margin-bottom:12px">SSEWASSWA offers both free and paid subscription plans. Plan details including pricing, record limits, and feature availability are listed on our homepage. Payments are processed through Flutterwave and are non-refundable except as required by law. Plan limits apply per tenant and are enforced automatically. We reserve the right to change pricing with 30 days notice.</p>
+          <p style="margin-bottom:12px">Comfort offers both free and paid subscription plans. Plan details including pricing, record limits, and feature availability are listed on our homepage. Payments are processed through Flutterwave and are non-refundable except as required by law. Plan limits apply per tenant and are enforced automatically. We reserve the right to change pricing with 30 days notice.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">5. Acceptable Use</h2>
           <p style="margin-bottom:12px">You agree not to use the platform for any unlawful purpose, upload malicious code or viruses, attempt to gain unauthorized access to other accounts or systems, harass or harm other users, use automated tools to scrape or collect data without permission, or violate any intellectual property rights. Violations may result in account suspension or termination without refund.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">6. Data Ownership</h2>
-          <p style="margin-bottom:12px">You retain ownership of all data you enter into the platform. SSEWASSWA does not claim ownership of your data. We will not access, modify, or delete your data except as necessary to provide the service, comply with legal obligations, or prevent security threats. You can export your data at any time.</p>
+          <p style="margin-bottom:12px">You retain ownership of all data you enter into the platform. Comfort does not claim ownership of your data. We will not access, modify, or delete your data except as necessary to provide the service, comply with legal obligations, or prevent security threats. You can export your data at any time.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">7. Limitation of Liability</h2>
-          <p style="margin-bottom:12px">SSEWASSWA is provided as-is without warranties of any kind. We are not liable for any indirect, incidental, special, or consequential damages arising from your use of the platform. Our total liability shall not exceed the amount you paid for the service in the 12 months preceding the claim. We are not responsible for data loss caused by force majeure events.</p>
+          <p style="margin-bottom:12px">Comfort is provided as-is without warranties of any kind. We are not liable for any indirect, incidental, special, or consequential damages arising from your use of the platform. Our total liability shall not exceed the amount you paid for the service in the 12 months preceding the claim. We are not responsible for data loss caused by force majeure events.</p>
 
           <h2 style="font-size:20px;font-weight:700;margin-top:24px;margin-bottom:12px;color:#1e293b">8. Contact</h2>
           <p>For questions about these terms, contact us at <a href="mailto:waiswadaniel24@gmail.com" style="color:#4f46e5">waiswadaniel24@gmail.com</a>.</p>
         </div>
       </div>
     `;
-    res.send(renderPage('Terms of Service - SSEWASSWA', content, req.session.user || null));
+    res.send(renderPage('Terms of Service - Comfort', content, req.session.user || null));
   }));
 
   app.get('/p/fundraising', ah(async (req, res) => {
@@ -1431,7 +1426,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           <div style="text-align:center;padding:60px 20px;background:white;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06)">
             <div style="font-size:48px;margin-bottom:16px">&#127881;</div>
             <h2 style="font-size:24px;font-weight:700;color:#1e293b;margin-bottom:8px">No Active Campaigns Yet</h2>
-            <p style="color:#64748b;margin-bottom:24px">Be the first to create a fundraising campaign on SSEWASSWA!</p>
+            <p style="color:#64748b;margin-bottom:24px">Be the first to create a fundraising campaign on Comfort!</p>
             <a href="/register" style="display:inline-block;padding:14px 32px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none">Get Started</a>
           </div>
         `}
@@ -1443,7 +1438,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Fundraising - SSEWASSWA', content, req.session.user || null));
+    res.send(renderPage('Fundraising - Comfort', content, req.session.user || null));
   }));
 
   // =========================================================================
@@ -1462,7 +1457,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           <div style="text-align:center;padding:80px 20px">
             <div style="font-size:64px;margin-bottom:16px">&#128533;</div>
             <h1 style="font-size:32px;font-weight:800;color:#1e293b;margin-bottom:8px">Institution Not Found</h1>
-            <p style="color:#64748b;margin-bottom:24px">The institution "${esc(subdomain)}" doesn't exist on SSEWASSWA yet.</p>
+            <p style="color:#64748b;margin-bottom:24px">The institution "${esc(subdomain)}" doesn't exist on Comfort yet.</p>
             <a href="/" style="display:inline-block;padding:14px 32px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none">Go Home</a>
           </div>
         `, null));
@@ -1630,12 +1625,12 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
           <!-- Shared Footer -->
           <div style="margin-top:40px;padding-top:20px;border-top:1px solid #e2e8f0;text-align:center">
-            <p style="color:#94a3b8;font-size:13px">Powered by <a href="/" style="color:#4f46e5;font-weight:600">SSEWASSWA</a> &bull; All-in-One Management Platform</p>
+            <p style="color:#94a3b8;font-size:13px">Powered by <a href="/" style="color:#4f46e5;font-weight:600">Comfort</a> &bull; All-in-One Management Platform</p>
           </div>
         </div>
       `;
 
-      res.send(renderPage(`${tenant.name} - SSEWASSWA`, content, req.session.user || null));
+      res.send(renderPage(`${tenant.name} - Comfort`, content, req.session.user || null));
     } catch (e) {
       console.error('[Tenant Page] Error:', e.message);
       res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">An error occurred loading this page.</div></div>', null));
@@ -1652,7 +1647,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     const typeColor = { school: '#059669', church: '#7c3aed', business: '#d97706', clinic: '#0891b2', organization: '#4f46e5' };
     res.send(renderPage('Find Institutions', `
       <div style="text-align:center;margin-bottom:30px">
-        <h1 style="font-size:32px;font-weight:900;color:#1e293b">&#128269; Find Institutions on SSEWASSWA</h1>
+        <h1 style="font-size:32px;font-weight:900;color:#1e293b">&#128269; Find Institutions on Comfort</h1>
         <p style="color:#64748b;font-size:16px;margin-top:8px">Discover schools, churches, clinics and businesses using our platform</p>
       </div>
       ${tenants.length > 0 ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">${tenants.map(t => `
@@ -1679,7 +1674,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     try {
       const dbEvents = await getScrapedContent('events', 30);
       const pubEvents = await getPublicPosts('event', 20);
-      res.json({ ok: true, events: [...pubEvents.map(p => ({ ...p, source: 'SSEWASSWA' })), ...dbEvents] });
+      res.json({ ok: true, events: [...pubEvents.map(p => ({ ...p, source: 'Comfort' })), ...dbEvents] });
     } catch (e) {
       res.json({ ok: true, events: FALLBACK_DATA.events || [] });
     }
@@ -1689,7 +1684,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     try {
       const dbNews = await getScrapedContent('news', 30);
       const pubNews = await getPublicPosts('news', 20);
-      res.json({ ok: true, news: [...pubNews.map(p => ({ ...p, source: 'SSEWASSWA' })), ...dbNews] });
+      res.json({ ok: true, news: [...pubNews.map(p => ({ ...p, source: 'Comfort' })), ...dbNews] });
     } catch (e) {
       res.json({ ok: true, news: FALLBACK_DATA.news || [] });
     }
@@ -1699,7 +1694,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     try {
       const dbEnt = await getScrapedContent('entertainment', 30);
       const pubEnt = await getPublicPosts('entertainment', 20);
-      res.json({ ok: true, entertainment: [...pubEnt.map(p => ({ ...p, source: 'SSEWASSWA' })), ...dbEnt] });
+      res.json({ ok: true, entertainment: [...pubEnt.map(p => ({ ...p, source: 'Comfort' })), ...dbEnt] });
     } catch (e) {
       res.json({ ok: true, entertainment: FALLBACK_DATA.entertainment || [] });
     }
@@ -1794,7 +1789,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         );
 
         // Send welcome email
-        await sendEmail(user.email, 'Welcome to SSEWASSWA Pro!', `
+        await sendEmail(user.email, 'Welcome to Comfort Pro!', `
           <h2>Your ${plan} plan is now active!</h2>
           <p>Thank you for subscribing. Your institution is now verified and you have access to all ${plan} features.</p>
           <p>Plan: <strong>${plan.toUpperCase()}</strong></p>
@@ -1803,7 +1798,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
         // Send welcome SMS
         if (user.phone) {
-          await sendSMS(user.phone, `SSEWASSWA: Your ${plan} plan is now active! Welcome aboard.`);
+          await sendSMS(user.phone, `Comfort: Your ${plan} plan is now active! Welcome aboard.`);
         }
 
         // Notify
@@ -2348,8 +2343,8 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   app.get('/manifest.json', (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(JSON.stringify({
-      name: 'SSEWASSWA Platform',
-      short_name: 'SSEWASSWA',
+      name: 'Comfort Platform',
+      short_name: 'Comfort',
       description: 'All-in-One Management: School, Clinic, Church, Business - Built for Africa',
       start_url: '/',
       display: 'standalone',
@@ -2376,7 +2371,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     res.setHeader('Content-Type', 'application/javascript');
     res.setHeader('Service-Worker-Allowed', '/');
     res.send(`
-const CACHE = 'ssewasswa-v10.0';
+const CACHE = 'comfort-v1.0';
 const urlsToCache = ['/', '/offline', '/manifest.json', '/p/entertainment', '/p/fundraising'];
 
 self.addEventListener('install', e => {
@@ -2417,7 +2412,7 @@ self.addEventListener('sync', e => {
 
 self.addEventListener('push', e => {
   const data = e.data ? e.data.json() : {};
-  self.registration.showNotification(data.title || 'SSEWASSWA', {
+  self.registration.showNotification(data.title || 'Comfort', {
     body: data.body || 'You have a new notification',
     icon: '/icon.png',
     badge: '/icon.png',
@@ -2522,7 +2517,7 @@ async function syncOfflineData() {
       </div>
     `;
 
-    res.send(renderPage('Useful Links - SSEWASSWA', content, req.session.user || null));
+    res.send(renderPage('Useful Links - Comfort', content, req.session.user || null));
   }));
 
   // =========================================================================
@@ -2534,7 +2529,7 @@ async function syncOfflineData() {
       <div style="text-align:center;padding:80px 20px">
         <div style="font-size:64px;margin-bottom:16px">&#128225;</div>
         <h1 style="font-size:32px;font-weight:800;color:#1e293b;margin-bottom:12px">You're Offline</h1>
-        <p style="color:#64748b;margin-bottom:8px">Don't worry! SSEWASSWA works offline.</p>
+        <p style="color:#64748b;margin-bottom:8px">Don't worry! Comfort works offline.</p>
         <p style="color:#94a3b8;font-size:14px;margin-bottom:24px">Any data you enter will sync when your connection returns.</p>
         <a href="/" style="display:inline-block;padding:14px 32px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none">Try Again</a>
       </div>
@@ -2576,84 +2571,95 @@ Sitemap: ${BASE_URL}/sitemap.xml
   });
 
   // sitemap.xml — lists all public pages for Google to discover
-  app.get('/sitemap.xml', ah(async (req, res) => {
-    // Gather all public tenant pages
-    let tenantPages = [];
+  // Uses plain try-catch (NOT ah()) so errors still return valid XML instead of 500 HTML
+  app.get('/sitemap.xml', async (req, res) => {
     try {
-      tenantPages = (await pool.query(`
-        SELECT p.slug, p.updated_at, t.name as org_name, t.type as org_type
-        FROM public_pages p
-        JOIN tenants t ON p.tenant_id = t.id
-        WHERE p.is_published = true
-      `)).rows;
-    } catch (e) { /* no pages yet */ }
+      // Gather all tenants with active public pages (query tenants directly for reliable URLs)
+      let tenantPages = [];
+      try {
+        tenantPages = (await pool.query(`
+          SELECT t.subdomain, t.name, t.type, t.created_at
+          FROM tenants t
+          WHERE EXISTS (
+            SELECT 1 FROM public_pages p WHERE p.tenant_id = t.id AND p.is_published = true
+          )
+          ORDER BY t.created_at DESC
+        `)).rows;
+      } catch (e) { /* no pages yet */ }
 
-    // Gather all public posts
-    let publicPosts = [];
-    try {
-      publicPosts = (await pool.query(`
-        SELECT id, title, created_at, category FROM public_posts ORDER BY created_at DESC LIMIT 100
-      `)).rows;
-    } catch (e) { /* no posts yet */ }
+      // Gather all public posts
+      let publicPosts = [];
+      try {
+        publicPosts = (await pool.query(`
+          SELECT id, title, created_at, category FROM public_posts ORDER BY created_at DESC LIMIT 100
+        `)).rows;
+      } catch (e) { /* no posts yet */ }
 
-    const now = new Date().toISOString().split('T')[0];
+      const now = new Date().toISOString().split('T')[0];
 
-    const staticPages = [
-      { url: '/', priority: '1.0', changefreq: 'daily' },
-      { url: '/register', priority: '0.9', changefreq: 'monthly' },
-      { url: '/login', priority: '0.8', changefreq: 'monthly' },
-      { url: '/blog', priority: '0.9', changefreq: 'daily' },
-      { url: '/p/entertainment', priority: '0.7', changefreq: 'daily' },
-      { url: '/p/fundraising', priority: '0.7', changefreq: 'weekly' },
-      { url: '/links', priority: '0.6', changefreq: 'monthly' },
-      { url: '/directory', priority: '0.8', changefreq: 'weekly' },
-      { url: '/privacy', priority: '0.3', changefreq: 'yearly' },
-      { url: '/terms', priority: '0.3', changefreq: 'yearly' },
-    ];
+      const staticPages = [
+        { url: '/', priority: '1.0', changefreq: 'daily' },
+        { url: '/register', priority: '0.9', changefreq: 'monthly' },
+        { url: '/login', priority: '0.8', changefreq: 'monthly' },
+        { url: '/blog', priority: '0.9', changefreq: 'daily' },
+        { url: '/p/entertainment', priority: '0.7', changefreq: 'daily' },
+        { url: '/p/fundraising', priority: '0.7', changefreq: 'weekly' },
+        { url: '/links', priority: '0.6', changefreq: 'monthly' },
+        { url: '/directory', priority: '0.8', changefreq: 'weekly' },
+        { url: '/privacy', priority: '0.3', changefreq: 'yearly' },
+        { url: '/terms', priority: '0.3', changefreq: 'yearly' },
+      ];
 
-    let xml = `<?xml version="1.0" encoding="UTF-8"?>
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:xhtml="http://www.w3.org/1999/xhtml">`;
 
-    // Static pages
-    for (const page of staticPages) {
-      xml += `
+      // Static pages
+      for (const page of staticPages) {
+        xml += `
   <url>
     <loc>${BASE_URL}${page.url}</loc>
     <lastmod>${now}</lastmod>
     <changefreq>${page.changefreq}</changefreq>
     <priority>${page.priority}</priority>
   </url>`;
-    }
+      }
 
-    // Tenant public pages
-    for (const tp of tenantPages) {
-      xml += `
+      // Tenant public pages (use subdomain for /p/:subdomain route)
+      for (const tp of tenantPages) {
+        xml += `
   <url>
-    <loc>${BASE_URL}/p/${esc(tp.slug)}</loc>
-    <lastmod>${tp.updated_at ? new Date(tp.updated_at).toISOString().split('T')[0] : now}</lastmod>
+    <loc>${BASE_URL}/p/${tp.subdomain}</loc>
+    <lastmod>${tp.created_at ? new Date(tp.created_at).toISOString().split('T')[0] : now}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>`;
-    }
+      }
 
-    // Public blog posts
-    for (const post of publicPosts) {
-      xml += `
+      // Public blog posts
+      for (const post of publicPosts) {
+        xml += `
   <url>
     <loc>${BASE_URL}/blog/${post.id}</loc>
     <lastmod>${post.created_at ? new Date(post.created_at).toISOString().split('T')[0] : now}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>`;
-    }
+      }
 
-    xml += `
+      xml += `
 </urlset>`;
 
-    res.setHeader('Content-Type', 'application/xml');
-    res.send(xml);
-  }));
+      res.type('xml');
+      res.set('Cache-Control', 'public, max-age=3600');
+      res.send(xml);
+    } catch (err) {
+      // Always return valid XML — never fall through to the 500 HTML error handler
+      res.type('xml');
+      res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>`);
+    }
+  });
 
   // Google site verification route (placeholder — update with your actual verification code)
   app.get('/google:siteVerification.html', (req, res) => {
