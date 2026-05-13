@@ -6714,7 +6714,7 @@ app.get('/blog/posts', ah(async (req, res) => {
       `).join('')}
     </div>
     ${posts.length === 0 ? '<div class="card" style="text-align:center;padding:40px"><h3>No posts yet</h3><p class="muted">Check back soon for updates!</p></div>' : ''}
-  `, null, { description: 'Comfort blog - news, updates, tips and insights for African institutions' }));
+  `, null, { description: 'Comfort blog - news, updates, tips and insights for African institutions', path: '/blog/posts' }));
 }));
 
 // Public blog post detail (blog_posts table)
@@ -6736,7 +6736,7 @@ app.get('/blog/posts/:slug', ah(async (req, res) => {
         <a href="/blog/posts" class="btn" style="margin-top:10px">More Articles</a>
       </div>
     </div>
-  `, null, { description: post.excerpt || post.title, keywords: post.category }));
+  `, null, { description: post.excerpt || post.title, keywords: post.category, path: `/blog/posts/${req.params.slug}` }));
 }));
 
 // === DEV WITHDRAWAL SYSTEM ===
@@ -10848,6 +10848,7 @@ const renderPageV3 = (title, content, user, meta = {}) => {
 ${googleVerification ? `<meta name="google-site-verification" content="${esc(googleVerification)}">` : ''}
 <meta name="description" content="${esc(description)}">
 <meta name="keywords" content="${esc(keywords)}">
+<meta name="robots" content="index, follow">
 <link rel="canonical" href="${esc(canonicalUrl)}">
 <meta property="og:title" content="${esc(title)} | Comfort">
 <meta property="og:description" content="${esc(description)}">
@@ -10998,7 +10999,7 @@ app.get('/c/:subdomain', ah(async (req, res) => {
     ${tenant.type === 'church' ? `<div class="grid"><div class="card"><h3>Service Times</h3><a href="/church/schedule" class="btn btn-sm">View Schedule</a></div><div class="card"><h3>Donate</h3><a href="/donate/${tenant.id}" class="btn btn-sm btn-gold">Give Online</a></div><div class="card"><h3>Prayer Requests</h3><a href="/church/prayers" class="btn btn-sm">Submit Request</a></div></div>` : ''}
     ${tenant.type === 'school' ? `<div class="grid"><div class="card"><h3>Student Portal</h3><a href="/parent/login" class="btn btn-sm">Parent Login</a></div><div class="card"><h3>School Info</h3><p class="muted">Contact: ${esc(tenant.email||'-')}</p></div></div>` : ''}
     ${tenant.type === 'business' ? `<div class="grid"><div class="card"><h3>Products</h3><a href="/business/inventory" class="btn btn-sm">Browse</a></div><div class="card"><h3>Contact</h3><p class="muted">${esc(tenant.phone||tenant.email||'-')}</p></div></div>` : ''}
-  `, null, { description: `${tenant.name} - ${tenant.type} powered by Comfort` }));
+  `, null, { description: `${tenant.name} - ${tenant.type} powered by Comfort`, path: `/p/${req.params.subdomain}` }));
 }));
 
 // 3.18: GRANT SCRAPER
@@ -20628,6 +20629,9 @@ try {
 if (!app._launchRoutesLoaded) {
   console.log('[Launch] Registering fallback public routes...');
   app.get('/blog', (req, res) => {
+    res.redirect('/blog/posts');
+  });
+  app.get('/blog/posts-fallback', (req, res) => {
     res.send(renderPageV3('Blog & News - Comfort', `
       <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:16px;margin-bottom:25px;color:white;text-align:center">
         <h1>Blog & News</h1><p style="opacity:0.9;margin-top:8px">Insights, tips, and updates from Comfort</p>
