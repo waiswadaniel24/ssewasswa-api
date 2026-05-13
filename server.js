@@ -226,7 +226,7 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:768px){.nav{flex-direction:column;gap:10px}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}}
 </style></head><body>
 <nav class="nav">
-  <div><a href="/" style="font-size:20px;font-weight:800">SSEWASSWA</a></div>
+  <div><a href="/" style="font-size:20px;font-weight:800">Comfort</a></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     ${user ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
@@ -248,7 +248,7 @@ app.get('/', (req, res) => {
 // === AUTH ===
 app.get('/', (req, res) => {
   if (req.session.user) return res.redirect('/dashboard');
-  res.send(renderPage('SSEWASSWA Platform', `
+  res.send(renderPage('Comfort Platform', `
     <div class="hero">
       <h1 style="font-size:48px;margin-bottom:15px">All-in-One Management</h1>
       <p style="font-size:20px;opacity:0.9;margin-bottom:30px">School \u2022 Organization \u2022 Church \u2022 Business \u2022 Individual</p>
@@ -2476,7 +2476,7 @@ app.use((err, req, res, next) => {
 // === START ===
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`SSEWASSWA Platform LIVE on ${PORT}`);
+  console.log(`Comfort Platform LIVE on ${PORT}`);
   console.log(`Dev Master: waiswadaniel24@gmail.com / Daniel@2025`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
