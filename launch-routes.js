@@ -2552,15 +2552,10 @@ async function syncOfflineData() {
   // robots.txt — tells search engines what to crawl
   app.get('/robots.txt', (req, res) => {
     res.setHeader('Content-Type', 'text/plain');
+    res.set('Cache-Control', 'public, max-age=3600');
     res.send(`User-agent: *
 Allow: /
-Allow: /register
-Allow: /login
-Allow: /p/
-Allow: /links
-Allow: /manifest.json
 Allow: /sitemap.xml
-Allow: /robots.txt
 Disallow: /dashboard
 Disallow: /portal/
 Disallow: /school/
