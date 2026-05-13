@@ -2552,25 +2552,9 @@ async function syncOfflineData() {
   // robots.txt — tells search engines what to crawl
   app.get('/robots.txt', (req, res) => {
     res.setHeader('Content-Type', 'text/plain');
-    res.set('Cache-Control', 'public, max-age=3600');
+    res.set('Cache-Control', 'no-cache');
     res.send(`User-agent: *
 Allow: /
-Allow: /sitemap.xml
-Disallow: /dashboard
-Disallow: /portal/
-Disallow: /school/
-Disallow: /clinic/
-Disallow: /church/
-Disallow: /business/
-Disallow: /dev/
-Disallow: /admin/
-Disallow: /worker/
-Disallow: /api/
-Disallow: /billing/
-Disallow: /settings/
-Disallow: /notifications
-Disallow: /search
-Disallow: /toggle-dark
 
 Sitemap: ${BASE_URL}/sitemap.xml
 `);
