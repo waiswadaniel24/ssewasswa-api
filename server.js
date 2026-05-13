@@ -109,7 +109,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://cdn-cookieyes.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https://*.googleusercontent.com"],
@@ -117,11 +117,83 @@ app.use(helmet({
       frameSrc: ["'self'", "https://checkout.flutterwave.com", "https://secure.3gdirectpay.com"],
     }
   },
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false
 }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static('public', { index: false }));
+
+// === PUBLIC XML/TXT ROUTES (before session so they don't set cookies) ===
+app.get('/robots.txt', (req, res) => {
+  res.set('Content-Type', 'text/plain');
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.send(`User-agent: *
+Allow: /
+Allow: /register
+Allow: /login
+Allow: /p/
+Allow: /links
+Allow: /manifest.json
+Disallow: /dashboard
+Disallow: /portal/
+Disallow: /school/
+Disallow: /clinic/
+Disallow: /church/
+Disallow: /business/
+Disallow: /dev/
+Disallow: /admin/
+Disallow: /worker/
+Disallow: /api/
+Disallow: /billing/
+Disallow: /settings/
+Disallow: /notifications
+Disallow: /search
+Disallow: /toggle-dark
+
+Sitemap: ${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}/sitemap.xml`);
+});
+
+app.get('/sitemap.xml', async (req, res) => {
+  try {
+    const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+    let staticPages = [
+      { url: '/', freq: 'daily', priority: '1.0' },
+      { url: '/register', freq: 'monthly', priority: '0.9' },
+      { url: '/login', freq: 'monthly', priority: '0.8' },
+      { url: '/blog', freq: 'daily', priority: '0.9' },
+      { url: '/p/entertainment', freq: 'daily', priority: '0.7' },
+      { url: '/p/fundraising', freq: 'weekly', priority: '0.7' },
+      { url: '/links', freq: 'monthly', priority: '0.6' },
+      { url: '/directory', freq: 'weekly', priority: '0.8' },
+      { url: '/privacy', freq: 'yearly', priority: '0.3' },
+      { url: '/terms', freq: 'yearly', priority: '0.3' }
+    ];
+    // Dynamically fetch blog posts for sitemap
+    let blogPages = [];
+    try {
+      const posts = await pool.query("SELECT slug, updated_at FROM public_posts WHERE published=true ORDER BY updated_at DESC LIMIT 50");
+      blogPages = posts.rows.map(p => ({ url: '/blog/' + (p.slug || p.id), freq: 'weekly', priority: '0.6' }));
+    } catch {}
+    const today = new Date().toISOString().split('T')[0];
+    const allPages = [...staticPages, ...blogPages];
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+${allPages.map(p => `  <url>
+    <loc>${BASE_URL}${p.url}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>${p.freq}</changefreq>
+    <priority>${p.priority}</priority>
+  </url>`).join('\n')}
+</urlset>`;
+    res.set('Content-Type', 'application/xml');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(xml);
+  } catch (e) {
+    res.status(500).set('Content-Type', 'application/xml').send('<error>Failed to generate sitemap</error>');
+  }
+});
 
 // === CSRF PROTECTION (Phase 2 - Full Enforcement) ===
 if (process.env.NODE_ENV === 'production' && !process.env.CSRF_SECRET && !process.env.SESSION_SECRET) {
