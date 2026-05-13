@@ -988,7 +988,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ${getStructuredData()}
     `;
 
-    res.send(renderPage('Comfort - The Operating System for African Institutions', content, null));
+    res.send(renderPage('Comfort - The Operating System for African Institutions', content, null, '/'));
   }));
 
   // =========================================================================
@@ -1101,7 +1101,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Entertainment Hub - Comfort', content, req.session.user || null));
+    res.send(renderPage('Entertainment Hub - Comfort', content, req.session.user || null, '/p/entertainment'));
   }));
 
   // =========================================================================
@@ -1235,7 +1235,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Blog & News - Comfort', content, req.session.user || null));
+    res.send(renderPage('Blog & News - Comfort', content, req.session.user || null, '/blog'));
   }));
 
   // Blog post detail page
@@ -1306,7 +1306,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       `;
 
-      res.send(renderPage(post.title + ' - Comfort Blog', content, req.session.user || null));
+      res.send(renderPage(post.title + ' - Comfort Blog', content, req.session.user || null, '/blog/' + id));
     } catch (e) {
       console.error('[Blog Post] Error:', e.message);
       res.redirect('/blog');
@@ -1347,7 +1347,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       </div>
     `;
-    res.send(renderPage('Privacy Policy - Comfort', content, req.session.user || null));
+    res.send(renderPage('Privacy Policy - Comfort', content, req.session.user || null, '/privacy'));
   }));
 
   app.get('/terms', ah(async (req, res) => {
@@ -1383,7 +1383,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       </div>
     `;
-    res.send(renderPage('Terms of Service - Comfort', content, req.session.user || null));
+    res.send(renderPage('Terms of Service - Comfort', content, req.session.user || null, '/terms'));
   }));
 
   app.get('/p/fundraising', ah(async (req, res) => {
@@ -1446,7 +1446,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Fundraising - Comfort', content, req.session.user || null));
+    res.send(renderPage('Fundraising - Comfort', content, req.session.user || null, '/p/fundraising'));
   }));
 
   // =========================================================================
@@ -2525,7 +2525,7 @@ async function syncOfflineData() {
       </div>
     `;
 
-    res.send(renderPage('Useful Links - Comfort', content, req.session.user || null));
+    res.send(renderPage('Useful Links - Comfort', content, req.session.user || null, '/links'));
   }));
 
   // =========================================================================

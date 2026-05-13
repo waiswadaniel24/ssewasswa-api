@@ -1826,12 +1826,15 @@ loadPlatformSettings();
 setInterval(loadPlatformSettings, 60000);
 
 // === RENDER PAGE (with dark mode support) ===
-const renderPage = (title, content, user, csrfTokenOrReq) => {
+const renderPage = (title, content, user, csrfTokenOrReq, pagePath) => {
   const dark = user?.dark_mode;
   const siteName = platformSettings?.site_name || 'Comfort';
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
   // Extract CSRF token from either a string or a request object
   const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || null);
+  // Canonical URL: use provided pagePath, or extract from request object, or default to /
+  const canonicalPath = pagePath || (typeof csrfTokenOrReq === 'object' && csrfTokenOrReq?.originalUrl) || '/';
+  const canonicalUrl = `${process.env.BASE_URL || 'https://ssewasswa.onrender.com'}${canonicalPath}`;
   // Auto-inject CSRF token into all forms in the content
   let safeContent = content || '';
   if (csrfToken && safeContent.includes('<form')) {
@@ -1846,13 +1849,13 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
 <meta property="og:description" content="${esc(siteDesc)}">
 ${platformSettings.google_verification ? `<meta name="google-site-verification" content="${esc(platformSettings.google_verification)}">` : ''}
 <meta property="og:type" content="website">
-<meta property="og:url" content="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
+<meta property="og:url" content="${esc(canonicalUrl)}">
 <meta property="og:site_name" content="${esc(siteName)}">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(title)} | ${esc(siteName)}">
 <meta name="twitter:description" content="${esc(siteDesc)}">
 <meta name="robots" content="index, follow">
-<link rel="canonical" href="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
+<link rel="canonical" href="${esc(canonicalUrl)}">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:${dark ? '#0f172a' : '#f8fafc'};color:${dark ? '#e2e8f0' : '#1e293b'};line-height:1.6;transition:background 0.3s,color 0.3s}
