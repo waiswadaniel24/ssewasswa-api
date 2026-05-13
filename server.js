@@ -2125,6 +2125,13 @@ app.get('/login', (req, res) => {
       <p style="text-align:center;margin-top:15px">No account? <a href="/register">Register</a></p>
       <p style="text-align:center;margin-top:8px"><a href="/forgot-password" style="font-size:13px">Forgot Password?</a></p>
       <p style="text-align:center;margin-top:8px"><a href="/parent/login" style="font-size:13px">Parent Portal</a></p>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0">
+        <p style="text-align:center;color:#64748b;font-size:13px;margin-bottom:10px">Or continue with</p>
+        <div style="display:flex;gap:8px;justify-content:center">
+          <a href="/auth/google" class="btn" style="background:#ea4335;color:white;flex:1;max-width:180px;padding:10px;font-size:14px">Google</a>
+          <a href="/auth/microsoft" class="btn" style="background:#00a4ef;color:white;flex:1;max-width:180px;padding:10px;font-size:14px">Microsoft</a>
+        </div>
+      </div>
     </div>
   `, null, req));
 });
@@ -2519,6 +2526,10 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Clinic v2</h3><a href="/clinic-enhanced" class="btn btn-sm">Enhanced Clinic</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">NEW: Deep Links</h3><a href="/links" class="btn btn-sm">URL Shortener</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Webhooks</h3><a href="/webhooks" class="btn btn-sm">Webhook Mgmt</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Plugins</h3><a href="/marketplace" class="btn btn-sm">Marketplace</a></div>
+      <div class="card" style="background:#f1f5f9;border:2px solid #64748b"><h3 style="color:#64748b">NEW: Backup</h3><a href="/backup" class="btn btn-sm">Backup Center</a></div>
       <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
       <div class="card"><h3>Forums</h3><a href="/forums" class="btn btn-sm">Discussions</a></div>
       <div class="card"><h3>Login History</h3><a href="/login-history" class="btn btn-sm">Security</a></div>
@@ -6275,6 +6286,10 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/scheduled-reports" style="background:#f59e0b;color:white">Reports</a>
       <a href="/branches" style="background:#8b5cf6;color:white">Branches</a>
       <a href="/clinic-enhanced" style="background:#ef4444;color:white">Clinic</a>
+      <a href="/links" style="background:#0ea5e9;color:white">Deep Links</a>
+      <a href="/webhooks" style="background:#8b5cf6;color:white">Webhooks</a>
+      <a href="/marketplace" style="background:#d97706;color:white">Plugins</a>
+      <a href="/backup" style="background:#64748b;color:white">Backup</a>
     </div>
 
     <!-- MY MONEY SECTION -->
@@ -24455,6 +24470,398 @@ app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, ah(async (req
   </div>
   <div style="margin-top:12px"><a href="/clinic-enhanced" class="btn">&larr; Dashboard</a></div>`;
   res.send(renderPage('Clinic Reports', html, req.session.user));
+}));
+
+// ============================================================
+// FEATURE 6: OAUTH2 LOGIN (Google + Microsoft)
+// ============================================================
+app.get('/auth/google', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const redirectUri = (process.env.BASE_URL || '') + '/auth/google/callback';
+  if (!clientId) return res.send(renderPage('OAuth2', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2>Google Login Not Configured</h2><p class="muted">Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars to enable Google OAuth2 login.</p><a href="/login" class="btn">Back to Login</a></div>', null));
+  const scope = 'openid email profile';
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=select_account`;
+  res.redirect(url);
+});
+
+app.get('/auth/google/callback', ah(async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.send(renderPage('OAuth2 Error', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Google Login Error</h2><p>${esc(error)}</p><a href="/login" class="btn">Back to Login</a></div>`, null));
+  if (!code || !process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) return res.redirect('/login');
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `code=${code}&client_id=${process.env.GOOGLE_CLIENT_ID}&client_secret=${process.env.GOOGLE_CLIENT_SECRET}&redirect_uri=${encodeURIComponent((process.env.BASE_URL||'')+'/auth/google/callback')}&grant_type=authorization_code`
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) return res.send(renderPage('OAuth2 Error', '<div class="card" style="max-width:500px;margin:40px auto"><h2>Token Error</h2><p>Could not obtain access token from Google.</p><a href="/login" class="btn">Back to Login</a></div>', null));
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+    const profile = await profileRes.json();
+    let u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [profile.email])).rows[0];
+    if (!u) {
+      // Auto-create account via OAuth2
+      const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved) VALUES ($1, $2, $3, true, true) RETURNING id', [profile.name || 'Google User', 'individual', profile.email]);
+      const tenantId = tenantResult.rows[0].id;
+      const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
+      u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, profile.email, hash, 'admin'])).rows[0];
+      await pool.query('INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1, \'starter\', \'active\')', [tenantId]);
+      u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [profile.email])).rows[0];
+    }
+    if (u.banned) return res.send(renderPage('Banned', '<div class="card"><div class="alert alert-error">Account banned</div><a href="/login" class="btn">Back</a></div>', null));
+    req.session.user = u;
+    audit(u.email, 'oauth2_google_login', 'Google OAuth2 login');
+    res.redirect('/dashboard');
+  } catch (e) {
+    res.send(renderPage('OAuth2 Error', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Error</h2><p>${esc(e.message)}</p><a href="/login" class="btn">Back to Login</a></div>`, null));
+  }
+}));
+
+app.get('/auth/microsoft', (req, res) => {
+  const clientId = process.env.MS_CLIENT_ID;
+  const redirectUri = (process.env.BASE_URL || '') + '/auth/microsoft/callback';
+  if (!clientId) return res.send(renderPage('OAuth2', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2>Microsoft Login Not Configured</h2><p class="muted">Set MS_CLIENT_ID and MS_CLIENT_SECRET env vars to enable Microsoft OAuth2 login.</p><a href="/login" class="btn">Back to Login</a></div>', null));
+  const scope = 'openid email profile User.Read';
+  const url = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}`;
+  res.redirect(url);
+});
+
+app.get('/auth/microsoft/callback', ah(async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.send(renderPage('OAuth2 Error', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Microsoft Login Error</h2><p>${esc(error)}</p><a href="/login" class="btn">Back to Login</a></div>`, null));
+  if (!code || !process.env.MS_CLIENT_ID || !process.env.MS_CLIENT_SECRET) return res.redirect('/login');
+  try {
+    const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `code=${code}&client_id=${process.env.MS_CLIENT_ID}&client_secret=${process.env.MS_CLIENT_SECRET}&redirect_uri=${encodeURIComponent((process.env.BASE_URL||'')+'/auth/microsoft/callback')}&grant_type=authorization_code&scope=openid email profile`
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) return res.send(renderPage('OAuth2 Error', '<div class="card" style="max-width:500px;margin:40px auto"><h2>Token Error</h2><p>Could not obtain access token from Microsoft.</p><a href="/login" class="btn">Back to Login</a></div>', null));
+    const profileRes = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: 'Bearer ' + tokens.access_token } });
+    const profile = await profileRes.json();
+    const email = profile.mail || profile.userPrincipalName;
+    if (!email) return res.redirect('/login');
+    let u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
+    if (!u) {
+      const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved) VALUES ($1, $2, $3, true, true) RETURNING id', [profile.displayName || 'Microsoft User', 'individual', email]);
+      const tenantId = tenantResult.rows[0].id;
+      const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
+      u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, email, hash, 'admin'])).rows[0];
+      await pool.query('INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1, \'starter\', \'active\')', [tenantId]);
+      u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
+    }
+    if (u.banned) return res.send(renderPage('Banned', '<div class="card"><div class="alert alert-error">Account banned</div><a href="/login" class="btn">Back</a></div>', null));
+    req.session.user = u;
+    audit(u.email, 'oauth2_microsoft_login', 'Microsoft OAuth2 login');
+    res.redirect('/dashboard');
+  } catch (e) {
+    res.send(renderPage('OAuth2 Error', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Error</h2><p>${esc(e.message)}</p><a href="/login" class="btn">Back to Login</a></div>`, null));
+  }
+}));
+
+// ============================================================
+// FEATURE 7: DEEP LINKING (URL Shortener)
+// ============================================================
+const featureMigrations2 = [
+  `CREATE TABLE IF NOT EXISTS short_links (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    code VARCHAR(20) UNIQUE NOT NULL, target_url TEXT NOT NULL,
+    label VARCHAR(255), clicks INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT true,
+    created_by VARCHAR(255), expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS link_clicks (
+    id SERIAL PRIMARY KEY, link_id INTEGER REFERENCES short_links(id) ON DELETE CASCADE,
+    ip_address TEXT, user_agent TEXT, referrer TEXT, clicked_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS webhook_endpoints (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    url TEXT NOT NULL, events TEXT[], secret VARCHAR(255),
+    is_active BOOLEAN DEFAULT true, last_triggered TIMESTAMPTZ,
+    total_deliveries INTEGER DEFAULT 0, total_failures INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id SERIAL PRIMARY KEY, endpoint_id INTEGER REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+    tenant_id INTEGER NOT NULL, event_type VARCHAR(100), payload JSONB,
+    status VARCHAR(20) DEFAULT 'pending', response_code INTEGER,
+    attempts INTEGER DEFAULT 0, max_attempts INTEGER DEFAULT 3,
+    next_retry TIMESTAMPTZ, last_error TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(), delivered_at TIMESTAMPTZ
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_webhook_del_next ON webhook_deliveries(next_retry) WHERE status='failed'`,
+  `CREATE TABLE IF NOT EXISTS installed_plugins (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    plugin_key VARCHAR(100) NOT NULL, is_active BOOLEAN DEFAULT true,
+    installed_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, plugin_key)
+  )`
+];
+featureMigrations2.forEach(m => migrations.push(m));
+['short_links','link_clicks','webhook_endpoints','webhook_deliveries','installed_plugins'].forEach(t => VALID_TABLES.add(t));
+
+app.get('/links', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const rows = (await pool.query('SELECT * FROM short_links WHERE tenant_id=$1 ORDER BY created_at DESC', [tid])).rows;
+  const totalClicks = rows.reduce((s, r) => s + (r.clicks || 0), 0);
+  const html = `<div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+    <h1>Deep Links</h1><p>Create short, trackable links for sharing</p>
+    <a href="/links/new" class="btn" style="background:white;color:#0ea5e9;margin-top:10px;display:inline-block">+ New Link</a>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+    <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#0ea5e9">${rows.length}</div><div style="color:#64748b">Total Links</div></div>
+    <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#059669">${totalClicks}</div><div style="color:#64748b">Total Clicks</div></div>
+    <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#f59e0b">${rows.filter(r=>r.is_active).length}</div><div style="color:#64748b">Active</div></div>
+  </div>
+  <div class="card"><h3>Your Links</h3><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Label</th><th>Short URL</th><th>Target</th><th>Clicks</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>${rows.map(r => '<tr style="border-bottom:1px solid #f1f5f9"><td><strong>' + esc(r.label || 'Untitled') + '</strong></td><td><code>' + esc(r.code) + '</code></td><td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.target_url) + '</td><td>' + r.clicks + '</td><td>' + (r.is_active ? '<span style="color:#22c55e">Active</span>' : '<span style="color:#94a3b8">Disabled</span>') + '</td><td><a href="/links/' + r.id + '/stats" class="btn btn-sm">Stats</a> <a href="/links/' + r.id + '/toggle" class="btn btn-sm">' + (r.is_active ? 'Disable' : 'Enable') + '</a> <a href="/links/' + r.id + '/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete?\')">Delete</a></td></tr>').join('')}</tbody></table>
+  ${rows.length === 0 ? '<p class="muted">No links yet.</p>' : ''}</div>`;
+  res.send(renderPage('Deep Links', html, req.session.user));
+}));
+
+app.get('/links/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Link', `<div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);padding:24px;border-radius:16px;margin-bottom:20px;color:white"><h1>Create Short Link</h1></div>
+  <div class="card"><form method="POST" action="/links/save" style="display:grid;gap:12px;max-width:500px">
+    <div><label>Label</label><input name="label" placeholder="e.g. School Open Day" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+    <div><label>Target URL *</label><input name="target_url" required placeholder="https://example.com/page" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+    <div><label>Custom Code (optional, leave blank for auto)</label><input name="code" placeholder="my-link" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+    <div><label>Expires</label><input name="expires_at" type="datetime-local" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+    <input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}">
+    <button class="btn btn-green" type="submit">Create Link</button>
+    <a href="/links" class="btn" style="background:#94a3b8;color:white">Cancel</a>
+  </form></div>`, req.session.user));
+});
+
+app.post('/links/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { label, target_url, code, expires_at } = req.body;
+  const shortCode = code ? code.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 20) : require('crypto').randomBytes(4).toString('hex');
+  const existing = (await pool.query('SELECT id FROM short_links WHERE code=$1', [shortCode])).rows[0];
+  if (existing) return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">That short code is already taken. Try another.</div><a href="/links/new" class="btn">Back</a></div>', req.session.user));
+  await pool.query('INSERT INTO short_links (tenant_id,code,target_url,label,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6)', [tid, shortCode, target_url, label, expires_at || null, req.session.user.email]);
+  audit(req.session.user.email, 'link_created', shortCode);
+  res.redirect('/links');
+}));
+
+app.get('/l/:code', ah(async (req, res) => {
+  const link = (await pool.query('SELECT * FROM short_links WHERE code=$1', [req.params.code])).rows[0];
+  if (!link) return res.status(404).send('Link not found');
+  if (!link.is_active) return res.status(410).send('Link disabled');
+  if (link.expires_at && new Date(link.expires_at) < new Date()) return res.status(410).send('Link expired');
+  await pool.query('UPDATE short_links SET clicks=clicks+1 WHERE id=$1', [link.id]);
+  await pool.query('INSERT INTO link_clicks (link_id,ip_address,user_agent,referrer) VALUES ($1,$2,$3,$4)', [link.id, req.ip, req.headers['user-agent'] || '', req.headers['referer'] || '']);
+  res.redirect(link.target_url);
+}));
+
+app.get('/links/:id/stats', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const link = (await pool.query('SELECT * FROM short_links WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  if (!link) return res.status(404).send('Not found');
+  const clicks = (await pool.query('SELECT * FROM link_clicks WHERE link_id=$1 ORDER BY clicked_at DESC LIMIT 50', [link.id])).rows;
+  const byDay = (await pool.query("SELECT DATE(clicked_at) AS day, COUNT(*) AS cnt FROM link_clicks WHERE link_id=$1 GROUP BY day ORDER BY day DESC LIMIT 30", [link.id])).rows;
+  res.send(renderPage('Link Stats: ' + (link.label || link.code), `
+    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>${esc(link.label || link.code)}</h1><p>Target: ${esc(link.target_url)}</p><p>Total clicks: ${link.clicks}</p>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card"><h3>Clicks by Day</h3>${byDay.map(d => '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:13px"><span style="min-width:80px">' + d.day + '</span><div style="background:#0ea5e9;height:16px;border-radius:4px;width:' + Math.min(d.cnt*20,300) + 'px"></div><span>' + d.cnt + '</span></div>').join('') || '<p class="muted">No data</p>'}</div>
+      <div class="card"><h3>Recent Clicks</h3>${clicks.map(c => '<div style="border-bottom:1px solid #f1f5f9;padding:6px 0;font-size:12px"><span style="color:#64748b">' + (c.ip_address||'') + '</span> <span style="color:#94a3b8">' + (c.user_agent||'').substring(0,40) + '</span></div>').join('') || '<p class="muted">No clicks yet</p>'}</div>
+    </div><div style="margin-top:12px"><a href="/links" class="btn">&larr; All Links</a></div>`, req.session.user));
+}));
+
+app.get('/links/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE short_links SET is_active=NOT is_active WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/links');
+}));
+
+app.get('/links/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM short_links WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/links');
+}));
+
+// ============================================================
+// FEATURE 8: WEBHOOK MANAGEMENT & RETRY
+// ============================================================
+app.get('/webhooks', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const endpoints = (await pool.query('SELECT * FROM webhook_endpoints WHERE tenant_id=$1 ORDER BY created_at DESC', [tid])).rows;
+  const recent = (await pool.query('SELECT wd.*,we.url FROM webhook_deliveries wd JOIN webhook_endpoints we ON we.id=wd.endpoint_id WHERE wd.tenant_id=$1 ORDER BY wd.created_at DESC LIMIT 20', [tid])).rows;
+  const html = `<div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+    <h1>Webhook Management</h1><p>Configure endpoints, track deliveries, auto-retry failures</p>
+    <a href="/webhooks/new" class="btn" style="background:white;color:#8b5cf6;margin-top:10px;display:inline-block">+ Add Endpoint</a>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div class="card"><h3>Endpoints (${endpoints.length})</h3>
+      ${endpoints.map(e => '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px"><div style="display:flex;justify-content:space-between"><strong>' + esc(e.url) + '</strong>' + (e.is_active ? '<span style="color:#22c55e;font-size:12px">Active</span>' : '<span style="color:#94a3b8;font-size:12px">Disabled</span>') + '</div><div style="font-size:12px;color:#64748b;margin-top:4px">Events: ' + esc((e.events || []).join(', ')) + ' | Delivered: ' + e.total_deliveries + ' | Failed: ' + e.total_failures + '</div><div style="margin-top:8px"><a href="/webhooks/' + e.id + '/toggle" class="btn btn-sm">' + (e.is_active ? 'Disable' : 'Enable') + '</a> <a href="/webhooks/' + e.id + '/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete?\')">Delete</a></div></div>').join('')}
+      ${endpoints.length === 0 ? '<p class="muted">No webhook endpoints configured.</p>' : ''}
+    </div>
+    <div class="card"><h3>Recent Deliveries</h3>
+      ${recent.map(d => '<div style="border-bottom:1px solid #f1f5f9;padding:6px 0;font-size:13px"><span style="color:' + (d.status==='delivered'?'#22c55e':'#ef4444') + '">' + d.status + '</span> <strong>' + esc(d.event_type) + '</strong> to ' + esc((d.url||'').substring(0,30)) + '... (' + d.attempts + ' attempts)</div>').join('')}
+      ${recent.length === 0 ? '<p class="muted">No deliveries yet.</p>' : ''}
+    </div>
+  </div>`;
+  res.send(renderPage('Webhooks', html, req.session.user));
+}));
+
+app.get('/webhooks/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Webhook', `<div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);padding:24px;border-radius:16px;margin-bottom:20px;color:white"><h1>Add Webhook Endpoint</h1></div>
+  <div class="card"><form method="POST" action="/webhooks/save" style="display:grid;gap:12px;max-width:500px">
+    <div><label>Endpoint URL *</label><input name="url" required placeholder="https://example.com/webhook" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+    <div><label>Events (comma-separated)</label><input name="events" placeholder="payment.created,student.enrolled" value="payment.created,student.enrolled,attendance.marked" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+    <div><label>Secret (for signature verification)</label><input name="secret" placeholder="whsec_..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px"></div>
+    <input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}">
+    <button class="btn btn-green" type="submit">Save Endpoint</button>
+    <a href="/webhooks" class="btn" style="background:#94a3b8;color:white">Cancel</a>
+  </form></div>`, req.session.user));
+});
+
+app.post('/webhooks/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { url, events, secret } = req.body;
+  const eventList = (events || '').split(',').map(e => e.trim()).filter(Boolean);
+  await pool.query('INSERT INTO webhook_endpoints (tenant_id,url,events,secret) VALUES ($1,$2,$3,$4)', [tid, url, JSON.stringify(eventList), secret || null]);
+  audit(req.session.user.email, 'webhook_created', url);
+  res.redirect('/webhooks');
+}));
+
+app.get('/webhooks/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE webhook_endpoints SET is_active=NOT is_active WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/webhooks');
+}));
+
+app.get('/webhooks/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM webhook_endpoints WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/webhooks');
+}));
+
+// Webhook retry runner (every 2 minutes)
+setInterval(async () => {
+  try {
+    const due = (await pool.query(`SELECT wd.*,we.url,we.secret FROM webhook_deliveries wd JOIN webhook_endpoints we ON we.id=wd.endpoint_id WHERE wd.status='failed' AND wd.next_retry <= NOW() AND wd.attempts < wd.max_attempts`)).rows;
+    for (const d of due) {
+      try {
+        const resp = await fetch(d.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': d.secret || '' }, body: JSON.stringify(d.payload || {}) });
+        const code = resp.status;
+        if (code >= 200 && code < 300) {
+          await pool.query(`UPDATE webhook_deliveries SET status='delivered',response_code=$1,delivered_at=NOW() WHERE id=$2`, [code, d.id]);
+          await pool.query(`UPDATE webhook_endpoints SET total_deliveries=total_deliveries+1 WHERE id=$1`, [d.endpoint_id]);
+        } else {
+          await pool.query(`UPDATE webhook_deliveries SET attempts=attempts+1,response_code=$1,last_error='HTTP $1',next_retry=NOW() + INTERVAL '5 minutes' * attempts WHERE id=$2`, [code, d.id]);
+        }
+      } catch (err) {
+        await pool.query(`UPDATE webhook_deliveries SET attempts=attempts+1,last_error=$1,next_retry=NOW() + INTERVAL '5 minutes' * attempts WHERE id=$2`, [err.message.substring(0,200), d.id]);
+      }
+    }
+  } catch (e) { /* retry scheduler error */ }
+}, 120000);
+
+// ============================================================
+// FEATURE 9: PLUGIN MARKETPLACE
+// ============================================================
+const AVAILABLE_PLUGINS = [
+  { key: 'google_sheets', name: 'Google Sheets Sync', desc: 'Sync student/staff data to Google Sheets', icon: '📊', category: 'productivity', version: '1.0' },
+  { key: 'slack_notify', name: 'Slack Notifications', desc: 'Send alerts to Slack channels', icon: '💬', category: 'communication', version: '1.0' },
+  { key: 'quickbooks', name: 'QuickBooks Sync', desc: 'Sync financial data to QuickBooks', icon: '💰', category: 'finance', version: '1.0' },
+  { key: 'calendar_sync', name: 'Calendar Sync', desc: 'Sync events to Google Calendar / Outlook', icon: '📅', category: 'productivity', version: '1.0' },
+  { key: 'sms_twilio', name: 'Twilio SMS', desc: 'Send SMS via Twilio API', icon: '📱', category: 'communication', version: '1.0' },
+  { key: 'mticket', name: 'MTicket Payments', desc: 'Mobile ticket payments for events', icon: '🎫', category: 'payments', version: '1.0' },
+  { key: 'paystack', name: 'Paystack', desc: 'Card and bank payments via Paystack', icon: '💳', category: 'payments', version: '1.0' },
+  { key: 'flutterwave', name: 'Flutterwave', desc: 'Multi-currency payments', icon: '🌐', category: 'payments', version: '1.0' },
+  { key: 'auto_attendance', name: 'Auto Attendance (QR)', desc: 'Students scan QR code to mark attendance', icon: '📷', category: 'school', version: '1.0' },
+  { key: 'parent_portal', name: 'Parent Portal+', desc: 'Enhanced parent notifications and progress', icon: '👨‍👩‍👧', category: 'school', version: '1.0' },
+  { key: 'church_live', name: 'Church Live Stream', desc: 'Embed YouTube/Facebook live streams', icon: '🛐', category: 'church', version: '1.0' },
+  { key: 'inventory_alerts', name: 'Inventory Alerts', desc: 'Low stock and reorder point notifications', icon: '📦', category: 'business', version: '1.0' },
+  { key: 'receipt_print', name: 'Receipt Printing', desc: 'Thermal printer formatted receipts', icon: '🧾', category: 'business', version: '1.0' },
+  { key: 'report_builder', name: 'Report Builder', desc: 'Drag-and-drop custom report designer', icon: '📝', category: 'reporting', version: '1.0' },
+  { key: 'data_viz', name: 'Data Visualization', desc: 'Advanced charts and dashboards', icon: '📈', category: 'reporting', version: '1.0' },
+  { key: 'backup_cloud', name: 'Cloud Backup', desc: 'Auto-backup to Google Drive / Dropbox', icon: '☁️', category: 'admin', version: '1.0' },
+  { key: 'bulk_sms', name: 'Bulk SMS Pro', desc: 'Advanced SMS campaigns with templates', icon: '📡', category: 'communication', version: '1.0' },
+  { key: 'pos_integration', name: 'POS Integration', desc: 'Connect to hardware POS terminals', icon: '🖥️', category: 'business', version: '1.0' }
+];
+
+app.get('/marketplace', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const installed = (await pool.query('SELECT plugin_key FROM installed_plugins WHERE tenant_id=$1', [tid])).rows.map(r => r.plugin_key);
+  const cats = {};
+  AVAILABLE_PLUGINS.forEach(p => { if (!cats[p.category]) cats[p.category] = []; cats[p.category].push(p); });
+  const catNames = { productivity: 'Productivity', communication: 'Communication', finance: 'Finance', payments: 'Payments', school: 'School', church: 'Church', business: 'Business', reporting: 'Reporting', admin: 'Admin' };
+  const html = `<div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+    <h1>Plugin Marketplace</h1><p>Browse and install integrations to extend your platform</p>
+  </div>
+  <div class="stats"><div class="stat-card"><div class="stat-num">${AVAILABLE_PLUGINS.length}</div><div>Available</div></div><div class="stat-card"><div class="stat-num" style="color:#22c55e">${installed.length}</div><div>Installed</div></div></div>
+  ${Object.entries(cats).map(([cat, plugins]) => '<div class="card"><h2 style="margin-bottom:15px">' + (catNames[cat]||cat) + ' <span class="tag">' + plugins.length + '</span></h2><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">' +
+    plugins.map(p => '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:16px;' + (installed.includes(p.key) ? 'border-color:#22c55e;background:#f0fdf4' : '') + '"><div style="font-size:32px;margin-bottom:8px">' + p.icon + '</div><h4 style="margin:0 0 4px">' + esc(p.name) + ' <span style="font-size:11px;color:#94a3b8">v' + p.version + '</span></h4><p style="font-size:13px;color:#64748b;margin:0 0 12px">' + esc(p.desc) + '</p>' +
+    (installed.includes(p.key) ? '<span style="color:#22c55e;font-weight:bold;font-size:13px">&#10003; Installed</span>' : '<form method="POST" action="/marketplace/install" style="display:inline"><input type="hidden" name="plugin_key" value="' + p.key + '"><input type="hidden" name="_csrf" value="' + esc(req.csrfToken||'') + '"><button type="submit" class="btn btn-sm btn-green">Install</button></form>') +
+    '</div>').join('') + '</div></div>'
+  ).join('')}`;
+  res.send(renderPage('Plugin Marketplace', html, req.session.user));
+}));
+
+app.post('/marketplace/install', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { plugin_key } = req.body;
+  if (!AVAILABLE_PLUGINS.find(p => p.key === plugin_key)) return res.status(400).send('Invalid plugin');
+  await pool.query('INSERT INTO installed_plugins (tenant_id, plugin_key) VALUES ($1, $2) ON CONFLICT DO NOTHING', [tid, plugin_key]);
+  audit(req.session.user.email, 'plugin_installed', plugin_key);
+  res.redirect('/marketplace');
+}));
+
+app.post('/marketplace/uninstall', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { plugin_key } = req.body;
+  await pool.query('DELETE FROM installed_plugins WHERE tenant_id=$1 AND plugin_key=$2', [tid, plugin_key]);
+  audit(req.session.user.email, 'plugin_uninstalled', plugin_key);
+  res.redirect('/marketplace');
+}));
+
+// ============================================================
+// FEATURE 10: AUTO BACKUP SCHEDULER
+// ============================================================
+app.get('/backup', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const logs = (await pool.query('SELECT * FROM backup_log WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [tid])).rows;
+  const lastBackup = logs[0];
+  const html = `<div class="hero" style="background:linear-gradient(135deg,#64748b,#475569);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+    <h1>Backup Center</h1><p>Automatic daily backups and manual exports</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+    <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#3b82f6">${logs.length}</div><div style="color:#64748b">Total Backups</div></div>
+    <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#22c55e">${lastBackup ? lastBackup.created_at.toISOString().slice(0,16) : 'Never'}</div><div style="color:#64748b">Last Backup</div></div>
+    <div class="card" style="text-align:center"><div style="font-size:28px;font-weight:bold;color:#f59e0b">${logs.reduce((s,l) => s + (parseInt(l.size_bytes)||0), 0)}</div><div style="color:#64748b">Total Size (bytes)</div></div>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
+    <form method="POST" action="/backup/trigger"><input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}"><button type="submit" class="btn btn-green">Backup Now</button></form>
+    <a href="/settings/backup/download" class="btn">Download Latest</a>
+    <a href="/settings/backup/csv" class="btn">Export CSV</a>
+    <a href="/settings/branding" class="btn">Branding Settings</a>
+  </div>
+  <div class="card"><h3>Backup History</h3><table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #e2e8f0"><th>Date</th><th>Status</th><th>Size</th><th>URL</th></tr></thead>
+  <tbody>${logs.map(l => '<tr style="border-bottom:1px solid #f1f5f9"><td>' + l.created_at.toISOString().slice(0,19) + '</td><td><span style="color:' + (l.status==='completed'?'#22c55e':'#ef4444') + '">' + l.status + '</span></td><td>' + (l.size_bytes ? l.size_bytes + ' B' : '-') + '</td><td>' + (l.backup_url ? '<a href="' + esc(l.backup_url) + '" target="_blank" class="btn btn-sm">Download</a>' : '-') + '</td></tr>').join('')}</tbody></table>
+  ${logs.length === 0 ? '<p class="muted">No backups yet. Click "Backup Now" to create your first backup.</p>' : ''}</div>`;
+  res.send(renderPage('Backup Center', html, req.session.user));
+}));
+
+app.post('/backup/trigger', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const tenantName = req.session.user.tenant_name || 'backup';
+  const filename = `${tenantName.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0,10)}.json`;
+  try {
+    const tables = (await pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")).rows.map(r => r.table_name);
+    const data = {};
+    for (const table of tables) {
+      try {
+        const rows = (await pool.query('SELECT * FROM ' + table + ' WHERE tenant_id=$1 LIMIT 5000', [tid])).rows;
+        if (rows.length > 0) data[table] = rows;
+      } catch (e) { /* skip tables without tenant_id */ }
+    }
+    const jsonStr = JSON.stringify(data, null, 2);
+    const sizeBytes = Buffer.byteLength(jsonStr, 'utf8');
+    await pool.query('INSERT INTO backup_log (tenant_id, status, size_bytes) VALUES ($1, $2, $3)', [tid, 'completed', sizeBytes]);
+    audit(req.session.user.email, 'backup_triggered', 'Size: ' + sizeBytes + ' bytes');
+    req.session.flash = { type: 'success', msg: 'Backup completed! ' + Object.keys(data).length + ' tables, ' + sizeBytes + ' bytes' };
+  } catch (e) {
+    await pool.query('INSERT INTO backup_log (tenant_id, status) VALUES ($1, $2)', [tid, 'failed']);
+    req.session.flash = { type: 'error', msg: 'Backup failed: ' + e.message };
+  }
+  res.redirect('/backup');
 }));
 
 // === END FEATURE BLOCK ===
