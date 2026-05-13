@@ -2602,7 +2602,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       let publicPosts = [];
       try {
         publicPosts = (await pool.query(`
-          SELECT id, title, created_at, category FROM public_posts ORDER BY created_at DESC LIMIT 100
+          SELECT slug, title, published_at, category FROM blog_posts WHERE is_published = true ORDER BY published_at DESC LIMIT 100
         `)).rows;
       } catch (e) { /* no posts yet */ }
 
@@ -2612,7 +2612,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
         { url: '/', priority: '1.0', changefreq: 'daily' },
         { url: '/register', priority: '0.9', changefreq: 'monthly' },
         { url: '/login', priority: '0.8', changefreq: 'monthly' },
-        { url: '/blog', priority: '0.9', changefreq: 'daily' },
+        { url: '/blog/posts', priority: '0.9', changefreq: 'daily' },
         { url: '/p/entertainment', priority: '0.7', changefreq: 'daily' },
         { url: '/p/fundraising', priority: '0.7', changefreq: 'weekly' },
         { url: '/links', priority: '0.6', changefreq: 'monthly' },
@@ -2651,8 +2651,8 @@ Sitemap: ${BASE_URL}/sitemap.xml
       for (const post of publicPosts) {
         xml += `
   <url>
-    <loc>${BASE_URL}/blog/${post.id}</loc>
-    <lastmod>${post.created_at ? new Date(post.created_at).toISOString().split('T')[0] : now}</lastmod>
+    <loc>${BASE_URL}/blog/posts/${post.slug}</loc>
+    <lastmod>${post.published_at ? new Date(post.published_at).toISOString().split('T')[0] : now}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>`;
