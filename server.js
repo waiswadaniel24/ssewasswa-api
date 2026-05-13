@@ -20602,7 +20602,7 @@ app.use((req, res, next) => {
 app.use((err, req, res, next) => {
   console.error(`[Error] ${req.method} ${req.path}:`, err.message);
   // Don't leak stack traces in production
-  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message;
+  const msg = err.message; // Show actual error for debugging
   if (req.accepts('json')) {
     return res.status(500).json({ error: msg });
   }
