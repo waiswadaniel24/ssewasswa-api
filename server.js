@@ -1063,12 +1063,12 @@ const migrations = [
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'name', 'Erinnya') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'email', 'Imeeli') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'phone', 'Namba ya simu') ON CONFLICT DO NOTHING`,
-  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'password', 'Kasita y'okusinga') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'password', 'Kasita y''okusinga') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'amount', 'Omundu') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'date', 'Olunaku') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'description', 'Ekiwandiiko') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'status', 'Embeera') ON CONFLICT DO NOTHING`,
-  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'actions', 'Eby'okukola') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'actions', 'Eby''okukola') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'no_data', 'Tewali data') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'success', 'Kyetuuse') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'error', 'Kiremya') ON CONFLICT DO NOTHING`,
@@ -1114,6 +1114,11 @@ const migrations = [
   `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
   `ALTER TABLE donations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
   `ALTER TABLE customers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+  `ALTER TABLE expenses ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+  `ALTER TABLE sales ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+  `ALTER TABLE fees ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+  `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+  `ALTER TABLE marks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
   // 3.10 Version history
   `CREATE TABLE IF NOT EXISTS version_history (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, action TEXT NOT NULL, old_data JSONB, new_data JSONB, changed_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // 3.11 DB Indexes for 10x faster queries
@@ -1787,12 +1792,12 @@ const uniqueConstraintMigrations = [
       for (const [name, display, desc, price, cycle, features, maxUsers, maxStudents, active, sort] of planSeeds) {
         const planKey = name.toLowerCase();
         try {
-          await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,is_active=EXCLUDED.is_active,sort_order=EXCLUDED.sort_order,plan_key=EXCLUDED.plan_key', [planKey, name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]);
+          await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(plan_key) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,is_active=EXCLUDED.is_active,sort_order=EXCLUDED.sort_order', [planKey, name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]);
         } catch (planErr) {
-          // UNIQUE constraint on name may not exist yet on older DBs - try plain INSERT
-          if (planErr.message.includes('ON CONFLICT')) {
-            try { await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [planKey, name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]); } catch(e2) { /* duplicate OK */ }
-          } else throw planErr;
+          // If plan_key constraint doesn't exist yet, try with name
+          try {
+            await pool.query('INSERT INTO subscription_plans(plan_key,name,display_name,description,price,currency,billing_cycle,features,max_users,max_students,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(name) DO UPDATE SET display_name=EXCLUDED.display_name,description=EXCLUDED.description,price=EXCLUDED.price,features=EXCLUDED.features,max_users=EXCLUDED.max_users,max_students=EXCLUDED.max_students,is_active=EXCLUDED.is_active,sort_order=EXCLUDED.sort_order,plan_key=EXCLUDED.plan_key', [planKey, name, display, desc, price, 'UGX', cycle, features, maxUsers, maxStudents, active, sort]);
+          } catch(e2) { /* duplicate OK - plan already seeded */ }
         }
       }
       // Phase 3 flags
@@ -10613,11 +10618,13 @@ const runAutoBackup = async () => {
     for (const t of tenants.slice(0, 5)) { // Max 5 per run to avoid timeout
       try {
         const tables = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff'];
+        const tablesWithDeletedAt = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff'];
         let backupData = {};
         for (const table of tables) {
           try {
             validateTable(table);
-            const rows = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 AND deleted_at IS NULL`, [t.id])).rows;
+            const hasDeletedAt = tablesWithDeletedAt.includes(table);
+            const rows = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1${hasDeletedAt ? ' AND deleted_at IS NULL' : ''}`, [t.id])).rows;
             backupData[table] = rows;
           } catch(e) { console.error('[Error]', e.message); } // Table might not have tenant_id
         }
@@ -12047,11 +12054,13 @@ app.post('/data-export/create', requireAuth, ah(async (req, res) => {
   // Generate export immediately
   try {
     const tables = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff','projects','events','campaigns','purchase_orders'];
+    const tablesWithDeletedAt = ['students','fees','attendance','marks','expenses','sales','invoices','donations','church_members','members','inventory','customers','staff'];
     const exportData = {};
     for (const table of tables) {
       try {
         validateTable(table);
-        const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 AND deleted_at IS NULL`, [t]);
+        const hasDeletedAt = tablesWithDeletedAt.includes(table);
+        const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1${hasDeletedAt ? ' AND deleted_at IS NULL' : ''}`, [t]);
         if (result.rows.length) exportData[table] = result.rows;
       } catch(e) { console.error('[Error]', e.message); } // Table may not have tenant_id
     }
