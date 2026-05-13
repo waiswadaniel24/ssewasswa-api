@@ -20600,14 +20600,14 @@ app.use((req, res, next) => {
 
 // === CENTRALIZED ERROR HANDLER ===
 app.use((err, req, res, next) => {
-  console.error(`[Error] ${req.method} ${req.path}:`, err.message);
+  console.error(`[Error] ${req.method} ${req.path}:`, err.message, err.stack);
   // Don't leak stack traces in production
   const msg = err.message; // Show actual error for debugging
   if (req.accepts('json')) {
-    return res.status(500).json({ error: msg });
+    return res.status(500).json({ error: msg, stack: err.stack });
   }
   const user = req.session?.user || null;
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
+  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p><pre style="font-size:11px;margin-top:10px;white-space:pre-wrap">${esc(err.stack || '')}</pre></div><a href="/" class="btn">Go Home</a></div>`, user));
 });
 
 const PORT = process.env.PORT || 3000;
