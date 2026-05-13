@@ -298,7 +298,12 @@ const VALID_TABLES = new Set([
   'plugin_registry', 'tenant_plugins', 'sms_opt_outs', 'session',
   'leave_requests', 'expense_claims', 'visitors', 'assets', 'feedback_entries', 'user_notes', 'announcements',
   'employee_directory', 'room_bookings', 'purchase_requisitions', 'incident_reports',
-  'fleet_vehicles', 'support_tickets', 'knowledge_base'
+  'fleet_vehicles', 'support_tickets', 'knowledge_base',
+  'sales', 'sale_items', 'expenses', 'staff', 'church_members', 'customers',
+  'org_finance', 'timetable', 'grading_scales', 'fee_structures', 'sign_in_out',
+  'fee_receipts', 'purchase_orders', 'tax_records', 'income_records',
+  'projects', 'budget_items', 'goals', 'personal_notes', 'meeting_minutes',
+  'notice_board', 'sermons', 'prayer_requests', 'service_schedule'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -1108,12 +1113,12 @@ const migrations = [
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'name', 'Erinnya') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'email', 'Imeeli') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'phone', 'Namba ya simu') ON CONFLICT DO NOTHING`,
-  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'password', 'Kasita y'okusinga') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'password', 'Kasita y''okusinga') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'amount', 'Omundu') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'date', 'Olunaku') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'description', 'Ekiwandiiko') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'status', 'Embeera') ON CONFLICT DO NOTHING`,
-  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'actions', 'Eby'okukola') ON CONFLICT DO NOTHING`,
+  `INSERT INTO translations (lang, key, value) VALUES ('lg', 'actions', 'Eby''okukola') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'no_data', 'Tewali data') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'success', 'Kyetuuse') ON CONFLICT DO NOTHING`,
   `INSERT INTO translations (lang, key, value) VALUES ('lg', 'error', 'Kiremya') ON CONFLICT DO NOTHING`,
@@ -1566,6 +1571,9 @@ const migrations = [
   `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS description TEXT`,
   `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS details TEXT`,
   `ALTER TABLE developer_revenue ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
+  // Fix legacy subscription_plans table that may have plan_key NOT NULL from older schema
+  `ALTER TABLE subscription_plans DROP COLUMN IF EXISTS plan_key`,
+  `ALTER TABLE subscription_plans DROP COLUMN IF EXISTS key`,
   // daily_adverts: ensure all columns exist even if table was created with different schema
   `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS title TEXT`,
   `ALTER TABLE daily_adverts ADD COLUMN IF NOT EXISTS image_url TEXT`,
@@ -1591,7 +1599,7 @@ const migrations = [
   `INSERT INTO platform_settings (key, value) VALUES ('support_phone', '') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('google_verification', 'ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
   `INSERT INTO platform_settings (key, value) VALUES ('developer_phone', '') ON CONFLICT (key) DO NOTHING`,
-  `INSERT INTO platform_settings (key, value) VALUES ('developer_email', $1) ON CONFLICT (key) DO NOTHING`, [process.env.DEV_EMAIL || 'admin@ssewasswa.com'],
+  `INSERT INTO platform_settings (key, value) VALUES ('developer_email', 'admin@ssewasswa.com') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('whatsapp_link', '') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('twitter_link', '') ON CONFLICT (key) DO NOTHING`,
   `INSERT INTO platform_settings (key, value) VALUES ('facebook_link', '') ON CONFLICT (key) DO NOTHING`,
