@@ -113,6 +113,15 @@ module.exports = function calendarScheduler(app, pool, requireAuth, logger, audi
         user_email VARCHAR(255) NOT NULL, response VARCHAR(20) DEFAULT 'pending',
         comment TEXT, responded_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
+      // Ensure columns exist even if table was created with older schema
+      const eaCols = [
+        `ALTER TABLE event_attendees ADD COLUMN IF NOT EXISTS user_email VARCHAR(255)`,
+        `ALTER TABLE event_attendees ADD COLUMN IF NOT EXISTS response VARCHAR(20) DEFAULT 'pending'`,
+        `ALTER TABLE event_attendees ADD COLUMN IF NOT EXISTS comment TEXT`,
+        `ALTER TABLE event_attendees ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ`,
+        `ALTER TABLE event_attendees ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
+      ];
+      for (const sql of eaCols) { try { await c.query(sql); } catch(e2) { /* ok */ } }
       await c.query(`CREATE TABLE IF NOT EXISTS event_reminders (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         event_id INTEGER NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,

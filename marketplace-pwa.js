@@ -345,7 +345,7 @@ ${safeContent}
           INSERT INTO marketplace_plugins (slug, name, description, version, author, category,
             icon_url, banner_url, pricing_model, price_monthly, is_official, is_verified,
             tags, min_plan, permissions, installs_count, rating, review_count)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
           [plugin.slug, plugin.name, plugin.description, plugin.version, plugin.author, plugin.category,
             plugin.icon_url, plugin.banner_url, plugin.pricing_model, plugin.price_monthly,
             plugin.is_official, plugin.is_verified, plugin.tags, plugin.min_plan, plugin.permissions,

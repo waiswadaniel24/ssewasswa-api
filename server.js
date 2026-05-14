@@ -2372,6 +2372,7 @@ app.post('/login/2fa', ah(async (req, res) => {
 }));
 
 app.get('/register', (req, res) => {
+  const preType = req.query.type || '';
   res.send(renderPage('Register', `
     <div class="card" style="max-width:450px;margin:40px auto">
       <h2 style="text-align:center;margin-bottom:20px">Create Account</h2>
@@ -2379,11 +2380,12 @@ app.get('/register', (req, res) => {
         <input name="org_name" placeholder="Organization/School/Business Name" required>
         <select name="type" required>
           <option value="">Select Type</option>
-          <option value="school">School</option>
-          <option value="organization">Organization</option>
-          <option value="church">Church</option>
-          <option value="business">Business</option>
-          <option value="individual">Individual</option>
+          <option value="school" ${preType==='school'?'selected':''}>School</option>
+          <option value="clinic" ${preType==='clinic'?'selected':''}>Clinic / Hospital</option>
+          <option value="organization" ${preType==='organization'?'selected':''}>Organization / NGO</option>
+          <option value="church" ${preType==='church'?'selected':''}>Church</option>
+          <option value="business" ${preType==='business'?'selected':''}>Business</option>
+          <option value="individual" ${preType==='individual'?'selected':''}>Individual</option>
         </select>
         <input name="email" type="email" placeholder="Your Email" required>
         <input name="phone" placeholder="Phone +256..." required>
@@ -2404,7 +2406,7 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   if (password && !/[0-9]/.test(password)) passwordErrors.push('Password must contain at least 1 number');
   if (password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) {
-    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="organization" ${type==='organization'?'selected':''}>Organization</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
+    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="clinic" ${type==='clinic'?'selected':''}>Clinic / Hospital</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
   }
   const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
@@ -5779,6 +5781,45 @@ app.get('/business/monthly-report', requireAuth, requireNotBanned, requireTenant
   const buffer = await Packer.toBuffer(doc);
   res.setHeader('Content-Disposition', `attachment; filename=MonthlyReport-${monthName.replace(/\s/g, '-')}.docx`);
   res.send(buffer);
+}));
+
+// === CLINIC PORTAL ===
+app.get('/portal/clinic', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [staffCount, queueCount, consultCount, rxCount, labCount, invCount] = await Promise.all([
+    pool.query('SELECT COUNT(*) FROM clinic_staff WHERE tenant_id=$1', [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
+    pool.query("SELECT COUNT(*) FROM patient_queue WHERE tenant_id=$1 AND status='waiting'", [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
+    pool.query('SELECT COUNT(*) FROM consultations WHERE tenant_id=$1 AND created_at>DATE_TRUNC(\'day\',NOW())', [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
+    pool.query('SELECT COUNT(*) FROM prescriptions WHERE tenant_id=$1 AND created_at>DATE_TRUNC(\'day\',NOW())', [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
+    pool.query("SELECT COUNT(*) FROM lab_requests WHERE tenant_id=$1 AND status='pending'", [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
+    pool.query('SELECT COUNT(*) FROM pharmacy_inventory WHERE tenant_id=$1 AND quantity<=reorder_level', [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0)
+  ]);
+  const recentQueue = (await pool.query("SELECT * FROM patient_queue WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5", [t])).rows || [];
+  res.send(renderPage('Clinic Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
+      <h1>Clinic / Hospital Portal</h1><p>Patient management, consultations, pharmacy & lab</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${staffCount}</div><div>Staff</div></div>
+      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num">${queueCount}</div><div>Waiting</div></div>
+      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num">${consultCount}</div><div>Today Consults</div></div>
+      <div class="stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-num">${rxCount}</div><div>Today Rx</div></div>
+      <div class="stat-card" style="border-left:4px solid #ec4899"><div class="stat-num">${labCount}</div><div>Pending Labs</div></div>
+      <div class="stat-card" style="border-left:4px solid #dc2626"><div class="stat-num">${invCount}</div><div>Low Stock</div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Staff Management</h3><p class="muted">Doctors, nurses, pharmacists</p><a href="/clinic/staff" class="btn btn-sm">Manage Staff</a></div>
+      <div class="card" style="border-left:4px solid #f59e0b"><h3>Patient Queue</h3><p class="muted">${queueCount} patients waiting</p><a href="/clinic/queue" class="btn btn-sm">View Queue</a></div>
+      <div class="card"><h3>Consultations</h3><p class="muted">Diagnose & treat patients</p><a href="/clinic/consultation/new" class="btn btn-sm">New Consultation</a></div>
+      <div class="card"><h3>Prescriptions</h3><p class="muted">${rxCount} prescriptions today</p><a href="/clinic/prescriptions" class="btn btn-sm">View Prescriptions</a></div>
+      <div class="card"><h3>Lab Requests</h3><p class="muted">${labCount} pending tests</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a></div>
+      <div class="card"><h3>Pharmacy Inventory</h3><p class="muted">${invCount} items low stock</p><a href="/clinic-enhanced" class="btn btn-sm">Pharmacy</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Prescribe</h3><p class="muted">Write new prescription</p><a href="/clinic/prescription/new" class="btn btn-sm btn-red">New Prescription</a></div>
+      <div class="card"><h3>Calendar</h3><p class="muted">Schedule & appointments</p><a href="/calendar" class="btn btn-sm">Calendar</a></div>
+      <div class="card"><h3>Reports</h3><p class="muted">Clinic analytics</p><a href="/reports" class="btn btn-sm">View Reports</a></div>
+    </div>
+    ${recentQueue.length ? `<div class="card"><h3>Recent Queue Entries</h3><table><tr><th>Patient</th><th>Complaint</th><th>Status</th><th>Time</th></tr>${recentQueue.map(q => `<tr><td>${esc(q.patient_name||'N/A')}</td><td>${esc(q.complaint||'N/A')}</td><td><span class="badge ${q.status==='waiting'?'badge-warning':q.status==='seeing'?'badge-info':q.status==='done'?'badge-success':'badge-error'}">${esc(q.status||'unknown')}</span></td><td>${q.created_at ? new Date(q.created_at).toLocaleString() : ''}</td></tr>`).join('')}</table></div>` : ''}
+  `, req.session.user));
 }));
 
 // ============================================================
@@ -24199,8 +24240,8 @@ app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const devEmail = current.email;
   // AUTO-CREATE all missing demo tenants
   for (const p of DEV_PORTAL_TYPES) {
-    const tenantName = p.type === 'clinic' ? 'Dev Clinic Portal' : p.type === 'public' ? 'Dev Public Portal' : 'Dev ' + p.type.charAt(0).toUpperCase() + p.type.slice(1) + 'Portal';
-    const tenantType = p.type === 'clinic' ? 'organization' : p.type === 'public' ? 'public' : p.type;
+    const tenantName = p.type === 'public' ? 'Dev Public Portal' : 'Dev ' + p.type.charAt(0).toUpperCase() + p.type.slice(1) + 'Portal';
+    const tenantType = p.type === 'public' ? 'public' : p.type;
     const exists = (await pool.query(`SELECT id FROM tenants WHERE email=$1 AND name=$2`, [devEmail, tenantName])).rows[0];
     if (!exists) {
       const devSubdomain = 'dev-' + tenantType + '-' + Math.floor(Math.random() * 9999);
@@ -24244,8 +24285,8 @@ app.post('/dev/switch-tenant', requireAuth, requireSuperAdmin, ah(async (req, re
   if (!req.session._original_tenant) {
     req.session._original_tenant = { id: user.tenant_id, name: user.tenant_name, type: user.tenant_type };
   }
-  const tenantName = type === 'clinic' ? 'Dev Clinic Portal' : type === 'public' ? 'Dev Public Portal' : 'Dev ' + type.charAt(0).toUpperCase() + type.slice(1) + 'Portal';
-  const tenantType = type === 'clinic' ? 'organization' : type === 'public' ? 'public' : type;
+  const tenantName = type === 'public' ? 'Dev Public Portal' : 'Dev ' + type.charAt(0).toUpperCase() + type.slice(1) + 'Portal';
+  const tenantType = type === 'public' ? 'public' : type;
   let tenant = (await pool.query(
     `SELECT id, name, type FROM tenants WHERE email = $1 AND name = $2`,
     [user.email, tenantName]
@@ -27869,6 +27910,50 @@ try {
   console.log('[Backup] Backup, restore & data export loaded');
 } catch (e) {
   console.warn('[Backup] Failed to load backup-restore:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: NOTIFICATION CENTER (Inbox, Preferences, Announcements)
+// ============================================================
+try {
+  const notificationCenter = require('./notification-center');
+  notificationCenter(app, db, pool, renderPage, esc);
+  console.log('[Notifications] Notification center loaded');
+} catch (e) {
+  console.warn('[Notifications] Failed to load notification-center:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: TEMPLATE LIBRARY (Documents, Emails, Reports)
+// ============================================================
+try {
+  const templateLibrary = require('./template-library');
+  templateLibrary(app, db, pool, renderPage, esc);
+  console.log('[Templates] Template library loaded');
+} catch (e) {
+  console.warn('[Templates] Failed to load template-library:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: DATA IMPORT/EXPORT WIZARD
+// ============================================================
+try {
+  const dataImport = require('./data-import');
+  dataImport(app, db, pool, renderPage, esc);
+  console.log('[Import] Data import/export wizard loaded');
+} catch (e) {
+  console.warn('[Import] Failed to load data-import:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: ADVANCED SETTINGS & SYSTEM CONFIGURATION
+// ============================================================
+try {
+  const advancedSettings = require('./advanced-settings');
+  advancedSettings(app, db, pool, renderPage, esc);
+  console.log('[Settings] Advanced settings & system configuration loaded');
+} catch (e) {
+  console.warn('[Settings] Failed to load advanced-settings:', e.message);
 }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
