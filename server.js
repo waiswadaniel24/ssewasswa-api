@@ -27752,6 +27752,61 @@ try {
   console.warn('[Dropdowns] Failed to load dropdown-enhancements:', e.message);
 }
 
+// ============================================================
+// NEW MODULE: INTERNAL MESSAGING & CHAT SYSTEM
+// ============================================================
+try {
+  const messagingChat = require('./messaging-chat');
+  messagingChat(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Chat] Internal messaging & chat system loaded');
+} catch (e) {
+  console.warn('[Chat] Failed to load messaging-chat:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: FILE & DOCUMENT MANAGER
+// ============================================================
+try {
+  const fileManager = require('./file-manager');
+  fileManager(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Files] File & document manager loaded');
+} catch (e) {
+  console.warn('[Files] Failed to load file-manager:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: REPORTS & EXPORT CENTER
+// ============================================================
+try {
+  const reportsCenter = require('./reports-center');
+  reportsCenter(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Reports] Reports & export center loaded');
+} catch (e) {
+  console.warn('[Reports] Failed to load reports-center:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: PAYMENT GATEWAY INTEGRATION
+// ============================================================
+try {
+  const paymentGateway = require('./payment-gateway');
+  paymentGateway(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Payments] Payment gateway integration loaded');
+} catch (e) {
+  console.warn('[Payments] Failed to load payment-gateway:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: GLOBAL SEARCH & AUDIT LOG VIEWER
+// ============================================================
+try {
+  const searchAudit = require('./search-audit');
+  searchAudit(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Search] Global search & audit log viewer loaded');
+} catch (e) {
+  console.warn('[Search] Failed to load search-audit:', e.message);
+}
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
