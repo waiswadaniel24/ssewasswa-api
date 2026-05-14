@@ -1,0 +1,18 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">services:\n  - type: web\n    name: ssewasswa-api\n    env: node\n    plan: starter\n    buildCommand: npm install\n    startCommand: npm start\n    envVars:\n      - key: NODE_ENV\n        value: production\n      - key: DATABASE_URL\n        fromDatabase:\n          name: ssewasswa-db\n          property: connectionString\n      - key: SESSION_SECRET\n        generateValue: true\n      - key: BASE_URL\n        value: https://ssewasswa.onrender.com\n      - key: GOOGLE_SITE_VERIFICATION\n        value: ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ\n      - key: GA_TRACKING_ID\n        value: G-S0HQRDMMCS\n\ndatabases:\n  - name: ssewasswa-db\n    plan: free\n</pre></body></html>",
+    "title": "",
+    "url": "https://raw.githubusercontent.com/ssewasswa/ssewasswa-api/main/render.yaml",
+    "usage": {
+      "tokens": 239
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 239
+    }
+  },
+  "status": 20000
+}

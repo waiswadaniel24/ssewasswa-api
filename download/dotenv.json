@@ -1,0 +1,18 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">NODE_ENV=production\nPORT=10000\nDATABASE_URL=postgresql://user:pass@host:5432/db\nSESSION_SECRET=change_this_32_char_min_secret_key\nENCRYPTION_SECRET=32_character_encryption_key_12345\n\n# Redis v9.0 - uncomment when ready\nREDIS_URL=redis://default:pass@host:6379\n\n# Cloudinary\nCLOUDINARY_CLOUD=your_cloud_name\nCLOUDINARY_KEY=your_key\nCLOUDINARY_SECRET=your_secret\n\n# Gmail\nGMAIL_USER=your@gmail.com\nGMAIL_PASS=your_app_password\n\n# Africa's Talking\nAT_USERNAME=sandbox\nAT_API_KEY=your_key\n\n# OpenAI\nOPENAI_API_KEY=sk-your_key\n\n# Sentry\nSENTRY_DSN=https://your_dsn@sentry.io/project\n\n# Payment Gateways\nMTN_COLLECTION_USER_ID=\nMTN_COLLECTION_API_KEY=\nAIRTEL_CLIENT_ID=\nAIRTEL_CLIENT_SECRET=\nFLUTTERWAVE_SECRET_KEY=\n\n# App URLs\nRENDER_EXTERNAL_URL=https://ssewasswa-api.onrender.com\nFRONTEND_URL=https://ssewasswa.com\nBASE_URL=https://ssewasswa.onrender.com\nGOOGLE_SITE_VERIFICATION=ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ\nGA_TRACKING_ID=G-S0HQRDMMCS\n</pre></body></html>",
+    "title": "",
+    "url": "https://raw.githubusercontent.com/ssewasswa/ssewasswa-api/main/.env",
+    "usage": {
+      "tokens": 339
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 339
+    }
+  },
+  "status": 20000
+}

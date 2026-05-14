@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: ssewasswa-api
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ssewasswa-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BASE_URL
+        value: https://ssewasswa.onrender.com
+      - key: GOOGLE_SITE_VERIFICATION
+        value: ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ
+      - key: GA_TRACKING_ID
+        value: G-S0HQRDMMCS
+
+databases:
+  - name: ssewasswa-db
+    plan: free

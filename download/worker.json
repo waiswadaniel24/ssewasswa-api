@@ -1,0 +1,18 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">require('dotenv').config();\nconst { Worker, Queue } = require('bullmq');\nconst IORedis = require('ioredis');\nconst { Pool } = require('pg');\nconst nodemailer = require('nodemailer');\n\nconst pool = new Pool({\n  connectionString: process.env.DATABASE_URL,\n  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false\n});\n\nconst redisUrl = process.env.REDIS_URL;\nif (!redisUrl) {\n  console.log('No REDIS_URL set. Workers require Redis. Exiting.');\n  process.exit(0);\n}\n\nconst redis = new IORedis(redisUrl, { maxRetriesPerRequest: null });\n\nconst emailQueue = new Queue('email', { connection: redis });\nconst smsQueue = new Queue('sms', { connection: redis });\nconst backupQueue = new Queue('backup', { connection: redis });\n\nconst transporter = nodemailer.createTransport({\n  service: 'gmail',\n  auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }\n});\n\n// Email Worker\nnew Worker('email', async job => {\n  await transporter.sendMail(job.data);\n}, { connection: redis });\n\n// SMS Worker\nnew Worker('sms', async job => {\n  console.log('SMS Worker:', job.data.phone, job.data.message);\n  // Add Africa's Talking or other SMS provider here\n}, { connection: redis });\n\n// Backup Worker\nnew Worker('backup', async job => {\n  const tables = ['tenants', 'users', 'students', 'marks', 'fees', 'attendance', 'exams'];\n  for (const table of tables) {\n    try {\n      const data = (await pool.query(`SELECT * FROM ${table} LIMIT 10000`)).rows;\n      console.log(`Backed up ${table}: ${data.length} rows`);\n    } catch (e) {\n      console.warn(`Skip ${table}: ${e.message}`);\n    }\n  }\n}, { connection: redis });\n\nconsole.log('SSEWASSWA Workers v9.0 Running');\n</pre></body></html>",
+    "title": "",
+    "url": "https://raw.githubusercontent.com/ssewasswa/ssewasswa-api/main/worker.js",
+    "usage": {
+      "tokens": 470
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 470
+    }
+  },
+  "status": 20000
+}
