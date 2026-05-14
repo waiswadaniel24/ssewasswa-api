@@ -27666,6 +27666,74 @@ app.post('/backup/trigger', requireAuth, requireNotBanned, ah(async (req, res) =
 
 // === END FEATURE BLOCK ===
 
+// ============================================================
+// NEW MODULE: REST API LAYER (JWT-based JSON API)
+// ============================================================
+try {
+  const apiRoutes = require('./api-routes');
+  apiRoutes(app, pool, requireAuth, requireTenantAccess, validateTable, VALID_TABLES, audit, logger);
+  console.log('[API] REST API v1 routes loaded');
+} catch (e) {
+  console.warn('[API] Failed to load API routes:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: SECURITY & OPERATIONS (2FA, Audit Logging, Backups)
+// ============================================================
+try {
+  const securityOpsInit = require('./security-ops');
+  const securityUtils = securityOpsInit(app, pool, requireAuth, logger, audit, renderPage, esc, ah, bcrypt);
+  console.log('[Security] 2FA, Audit Logging, Backup system loaded');
+} catch (e) {
+  console.warn('[Security] Failed to load security-ops:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: BRANDING & MULTI-CURRENCY
+// ============================================================
+try {
+  const brandingCurrency = require('./branding-currency');
+  brandingCurrency(app, pool, requireAuth, logger);
+  console.log('[Branding] White-label branding & multi-currency loaded');
+} catch (e) {
+  console.warn('[Branding] Failed to load branding-currency:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: PARENT PORTAL & ADVANCED ANALYTICS
+// ============================================================
+try {
+  const parentAnalytics = require('./parent-analytics');
+  parentAnalytics(app, pool, requireAuth, logger, audit, notify, wsBroadcast);
+  console.log('[Parent] Parent portal & analytics dashboard loaded');
+} catch (e) {
+  console.warn('[Parent] Failed to load parent-analytics:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: MARKETPLACE & ENHANCED PWA
+// ============================================================
+(async () => {
+  try {
+    const marketplacePWA = require('./marketplace-pwa');
+    await marketplacePWA(app, pool, requireAuth, logger, audit);
+    console.log('[Marketplace] Plugin marketplace & PWA enhancements loaded');
+  } catch (e) {
+    console.warn('[Marketplace] Failed to load marketplace-pwa:', e.message);
+  }
+})();
+
+// ============================================================
+// NEW MODULE: DROPDOWN SELECTS (Smart dropdowns for all forms)
+// ============================================================
+try {
+  const dropdownEnhancements = require('./dropdown-enhancements');
+  dropdownEnhancements(app, pool, logger);
+  console.log('[Dropdowns] Smart dropdown system loaded');
+} catch (e) {
+  console.warn('[Dropdowns] Failed to load dropdown-enhancements:', e.message);
+}
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
