@@ -304,7 +304,12 @@ const VALID_TABLES = new Set([
   'org_finance', 'timetable', 'grading_scales', 'fee_structures', 'sign_in_out',
   'fee_receipts', 'purchase_orders', 'tax_records', 'income_records',
   'projects', 'budget_items', 'goals', 'personal_notes', 'meeting_minutes',
-  'notice_board', 'sermons', 'prayer_requests', 'service_schedule'
+  'notice_board', 'sermons', 'prayer_requests', 'service_schedule',
+  'hr_employees', 'hr_payroll', 'hr_leave', 'hr_departments', 'hr_appraisals',
+  'crm_leads', 'crm_pipeline', 'crm_activities', 'crm_contacts',
+  'task_items', 'task_columns', 'task_assignees',
+  'asset_register', 'asset_maintenance', 'asset_depreciation',
+  'event_tickets', 'event_registrations', 'ticket_orders'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -2686,6 +2691,11 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#f0f9ff;border:2px solid #0284c7"><h3 style="color:#0284c7">NEW: QR Attendance</h3><a href="/qr-attendance" class="btn btn-sm">Check-In</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Finance</h3><a href="/finance" class="btn btn-sm">Chart of Accounts</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">NEW: Appraisals</h3><a href="/appraisals" class="btn btn-sm">Staff Review</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: HR & Payroll</h3><a href="/hr" class="btn btn-sm">Employees & Salary</a></div>
+      <div class="card" style="background:#ecfdf5;border:2px solid #059669"><h3 style="color:#059669">NEW: CRM & Leads</h3><a href="/crm" class="btn btn-sm">Lead Pipeline</a></div>
+      <div class="card" style="background:#fef3c7;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Task Manager</h3><a href="/tasks" class="btn btn-sm">Kanban Board</a></div>
+      <div class="card" style="background:#f1f5f9;border:2px solid #475569"><h3 style="color:#475569">NEW: Asset Tracker</h3><a href="/assets" class="btn btn-sm">Equipment & Depreciation</a></div>
+      <div class="card" style="background:#fdf2f8;border:2px solid #be185d"><h3 style="color:#be185d">NEW: Event Tickets</h3><a href="/event-tickets" class="btn btn-sm">Sell Tickets Online</a></div>
       <div class="card"><h3>Suggestions</h3><a href="/suggestions" class="btn btn-sm">Feedback</a></div>
       <div class="card"><h3>Forums</h3><a href="/forums" class="btn btn-sm">Discussions</a></div>
       <div class="card"><h3>Login History</h3><a href="/login-history" class="btn btn-sm">Security</a></div>
@@ -3433,6 +3443,11 @@ app.get('/school/grading/:id/delete', requireAuth, requireNotBanned, ah(async (r
 app.get('/school/fee-structures', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const structures = (await pool.query('SELECT * FROM fee_structures WHERE tenant_id=$1 ORDER BY class,term', [t])).rows;
+  const [classes, terms] = await Promise.all([
+    pool.query('SELECT DISTINCT class FROM students WHERE tenant_id=$1 AND class IS NOT NULL ORDER BY class', [t]),
+    pool.query("SELECT DISTINCT term FROM fee_structures WHERE tenant_id=$1 AND term IS NOT NULL ORDER BY term", [t])
+  ]);
+  const curYear = new Date().getFullYear();
   res.send(renderPage('Fee Structures', `
     <div class="card"><h3>Fee Structures</h3>
       <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
@@ -3448,9 +3463,9 @@ app.get('/school/fee-structures', requireAuth, requireNotBanned, ah(async (req, 
       <p class="muted">Generate fee records for all students in a class based on fee structures.</p>
       <form method="POST" action="/school/fee-structures/generate">
         <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
-          <input name="class" placeholder="Class (e.g. S1)" required>
-          <input name="term" placeholder="Term (e.g. Term 1)" required>
-          <input name="year" type="number" placeholder="Year (e.g. 2025)" required>
+          <select name="class" required><option value="">Select Class</option>${classes.rows.map(c => '<option>'+esc(c.class)+'</option>').join('')}</select>
+          <select name="term" required><option value="">Select Term</option>${terms.rows.map(r => '<option>'+esc(r.term)+'</option>').join('')}</select>
+          <select name="year" required><option value="">Select Year</option>${[curYear, curYear+1, curYear-1].map(y => '<option value="'+y+'">'+y+'</option>').join('')}</select>
         </div>
         <button class="btn btn-gold">Generate Fee Records</button>
       </form>
@@ -5830,10 +5845,10 @@ app.get('/individual/budget', requireAuth, requireNotBanned, ah(async (req, res)
     <div class="card"><h3>Add Budget Item</h3>
       <form method="POST" action="/individual/budget/save">
         <div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
-          <input name="category" placeholder="Category (e.g. Food)" required>
+          <select name="category" required><option value="">Select Category</option><option value="Food & Groceries">Food & Groceries</option><option value="Transport">Transport</option><option value="Utilities">Utilities</option><option value="Rent">Rent</option><option value="Healthcare">Healthcare</option><option value="Entertainment">Entertainment</option><option value="Education">Education</option><option value="Savings">Savings</option><option value="Clothing">Clothing</option><option value="Communication">Communication</option><option value="Other">Other</option></select>
           <input name="planned" type="number" placeholder="Planned UGX" required>
           <input name="actual" type="number" placeholder="Actual UGX" value="0">
-          <input name="month" placeholder="Month (e.g. Jan 2025)">
+          <select name="month"><option value="">Select Month</option>${(() => { const m = ['January','February','March','April','May','June','July','August','September','October','November','December']; const y = new Date().getFullYear(); let o = ''; for (let yi = y; yi >= y-1; yi--) { m.forEach((mn,mi) => { o += '<option value="'+mn+' '+yi+'">'+mn+' '+yi+'</option>'; }); } return o; })()}</select>
         </div>
         <button class="btn btn-green">Add Item</button>
       </form>
@@ -8623,7 +8638,7 @@ app.get('/documents/upload', requireAuth, requireNotBanned, (req, res) => {
         </div>
         <div style="text-align:center;margin:10px 0;color:#94a3b8;font-size:13px">— OR —</div>
         <input name="file_url" type="url" placeholder="Paste file URL (Google Drive, Dropbox, etc.)" style="margin-bottom:10px">
-        <input name="file_type" placeholder="File type (auto-detected from upload)" value="PDF">
+        <select name="file_type"><option value="PDF">PDF</option><option value="DOC">DOC/DOCX</option><option value="XLS">XLS/XLSX</option><option value="PPT">PPT/PPTX</option><option value="Image">Image (JPG/PNG)</option><option value="Video">Video</option><option value="Audio">Audio</option><option value="Text">Text/CSV</option><option value="Other">Other</option></select>
         <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Upload Document</button>
       </form>
     </div>
@@ -22962,8 +22977,8 @@ app.get('/hr/new', requireAuth, requireNotBanned, (req, res) => {
       <label>Full Name *</label><input name="name" required>
       <label>Email *</label><input name="email" type="email" required>
       <label>Phone</label><input name="phone">
-      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Department</label><input name="department"></div><div><label>Position</label><input name="position"></div></div>
-      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Salary Band</label><input name="salary_band"></div><div><label>Start Date</label><input name="start_date" type="date"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Department</label><select name="department"><option value="">Select Department</option><option value="Administration">Administration</option><option value="Academics">Academics</option><option value="Finance">Finance</option><option value="HR">HR</option><option value="IT">IT</option><option value="Operations">Operations</option><option value="Marketing">Marketing</option><option value="Sales">Sales</option><option value="Clinic">Clinic</option><option value="Transport">Transport</option><option value="Security">Security</option><option value="Other">Other</option></select></div><div><label>Position</label><select name="position"><option value="">Select Position</option><option value="Director">Director</option><option value="Manager">Manager</option><option value="Supervisor">Supervisor</option><option value="Officer">Officer</option><option value="Teacher">Teacher</option><option value="Accountant">Accountant</option><option value="Developer">Developer</option><option value="Nurse">Nurse</option><option value="Driver">Driver</option><option value="Secretary">Secretary</option><option value="Guard">Guard</option><option value="Intern">Intern</option><option value="Other">Other</option></select></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Salary Band</label><select name="salary_band"><option value="">Select Band</option><option value="U1">U1 (Executive)</option><option value="U2">U2 (Senior Management)</option><option value="U3">U3 (Management)</option><option value="U4">U4 (Senior Staff)</option><option value="U5">U5 (Middle Staff)</option><option value="U6">U6 (Junior Staff)</option><option value="U7">U7 (Support Staff)</option><option value="U8">U8 (Casual)</option></select></div><div><label>Start Date</label><input name="start_date" type="date"></div></div>
       <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Emergency Contact</label><input name="emergency_contact"></div><div><label>Emergency Phone</label><input name="emergency_phone"></div></div>
       <button type="submit" class="btn btn-green">Save Employee</button> <a href="/hr" class="btn" style="background:#999;color:#fff">Cancel</a>
     </form></div>`, req.session.user));
@@ -22985,8 +23000,8 @@ app.get('/hr/edit/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
       <label>Full Name *</label><input name="name" value="${esc(row.name)}" required>
       <label>Email *</label><input name="email" type="email" value="${esc(row.email)}" required>
       <label>Phone</label><input name="phone" value="${esc(row.phone || '')}">
-      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Department</label><input name="department" value="${esc(row.department || '')}"></div><div><label>Position</label><input name="position" value="${esc(row.position || '')}"></div></div>
-      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Salary Band</label><input name="salary_band" value="${esc(row.salary_band || '')}"></div><div><label>Start Date</label><input name="start_date" type="date" value="${row.start_date || ''}"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Department</label><select name="department"><option value="">Select Department</option><option value="Administration" ${row.department==='Administration'?'selected':''}>Administration</option><option value="Academics" ${row.department==='Academics'?'selected':''}>Academics</option><option value="Finance" ${row.department==='Finance'?'selected':''}>Finance</option><option value="HR" ${row.department==='HR'?'selected':''}>HR</option><option value="IT" ${row.department==='IT'?'selected':''}>IT</option><option value="Operations" ${row.department==='Operations'?'selected':''}>Operations</option><option value="Marketing" ${row.department==='Marketing'?'selected':''}>Marketing</option><option value="Sales" ${row.department==='Sales'?'selected':''}>Sales</option><option value="Clinic" ${row.department==='Clinic'?'selected':''}>Clinic</option><option value="Transport" ${row.department==='Transport'?'selected':''}>Transport</option><option value="Security" ${row.department==='Security'?'selected':''}>Security</option><option value="Other" ${row.department==='Other'?'selected':''}>Other</option></select></div><div><label>Position</label><select name="position"><option value="">Select Position</option><option value="Director" ${row.position==='Director'?'selected':''}>Director</option><option value="Manager" ${row.position==='Manager'?'selected':''}>Manager</option><option value="Supervisor" ${row.position==='Supervisor'?'selected':''}>Supervisor</option><option value="Officer" ${row.position==='Officer'?'selected':''}>Officer</option><option value="Teacher" ${row.position==='Teacher'?'selected':''}>Teacher</option><option value="Accountant" ${row.position==='Accountant'?'selected':''}>Accountant</option><option value="Developer" ${row.position==='Developer'?'selected':''}>Developer</option><option value="Nurse" ${row.position==='Nurse'?'selected':''}>Nurse</option><option value="Driver" ${row.position==='Driver'?'selected':''}>Driver</option><option value="Secretary" ${row.position==='Secretary'?'selected':''}>Secretary</option><option value="Guard" ${row.position==='Guard'?'selected':''}>Guard</option><option value="Intern" ${row.position==='Intern'?'selected':''}>Intern</option><option value="Other" ${row.position==='Other'?'selected':''}>Other</option></select></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Salary Band</label><select name="salary_band"><option value="">Select Band</option><option value="U1" ${row.salary_band==='U1'?'selected':''}>U1 (Executive)</option><option value="U2" ${row.salary_band==='U2'?'selected':''}>U2 (Senior Management)</option><option value="U3" ${row.salary_band==='U3'?'selected':''}>U3 (Management)</option><option value="U4" ${row.salary_band==='U4'?'selected':''}>U4 (Senior Staff)</option><option value="U5" ${row.salary_band==='U5'?'selected':''}>U5 (Middle Staff)</option><option value="U6" ${row.salary_band==='U6'?'selected':''}>U6 (Junior Staff)</option><option value="U7" ${row.salary_band==='U7'?'selected':''}>U7 (Support Staff)</option><option value="U8" ${row.salary_band==='U8'?'selected':''}>U8 (Casual)</option></select></div><div><label>Start Date</label><input name="start_date" type="date" value="${row.start_date || ''}"></div></div>
       <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Emergency Contact</label><input name="emergency_contact" value="${esc(row.emergency_contact || '')}"></div><div><label>Emergency Phone</label><input name="emergency_phone" value="${esc(row.emergency_phone || '')}"></div></div>
       <label>Status</label><select name="status"><option value="active" ${row.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${row.status === 'inactive' ? 'selected' : ''}>Inactive</option></select>
       <button type="submit" class="btn btn-green">Update</button> <a href="/hr" class="btn" style="background:#999;color:#fff">Cancel</a>
@@ -23700,6 +23715,449 @@ parentPortalMigrations.forEach(m => migrations.push(m));
 ['quizzes','quiz_questions','quiz_attempts','whatsapp_config','whatsapp_messages','whatsapp_templates','scheduled_reports','report_history','branches','branch_transfers','clinic_patients','clinic_appointments','clinic_consultations','clinic_prescriptions','clinic_prescription_items'].forEach(t => VALID_TABLES.add(t));
 
 // ============================================================
+// FEATURE 11: CRM & LEAD TRACKING
+// ============================================================
+migrations.push(
+  `CREATE TABLE IF NOT EXISTS crm_leads (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL, email VARCHAR(255), phone VARCHAR(50),
+    company VARCHAR(255), source VARCHAR(100), status VARCHAR(50) DEFAULT 'new',
+    priority VARCHAR(20) DEFAULT 'medium', estimated_value DECIMAL(12,2) DEFAULT 0,
+    assigned_to VARCHAR(255), notes TEXT, last_contact TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS crm_activities (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    lead_id INTEGER REFERENCES crm_leads(id) ON DELETE CASCADE,
+    activity_type VARCHAR(50) NOT NULL, subject TEXT NOT NULL, notes TEXT,
+    created_by VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS crm_contacts (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL, email VARCHAR(255), phone VARCHAR(50),
+    company VARCHAR(255), type VARCHAR(50) DEFAULT 'prospect',
+    address TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`
+);
+
+const CRM_SOURCES = ['Website','Referral','Social Media','Cold Call','Email Campaign','Event','Walk-in','WhatsApp','Other'];
+const CRM_STATUSES = ['new','contacted','qualified','proposal','negotiation','won','lost'];
+const CRM_PRIORITIES = ['low','medium','high','urgent'];
+const CRM_ACTIVITY_TYPES = ['call','email','meeting','note','follow_up','proposal','demo','other'];
+
+function crmStatusBadge(s) {
+  const c = { new:'#6b7280', contacted:'#3b82f6', qualified:'#8b5cf6', proposal:'#f59e0b', negotiation:'#ec4899', won:'#059669', lost:'#dc2626' };
+  return '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:'+(c[s]||'#6b7280')+'">'+esc(s)+'</span>';
+}
+
+app.get('/crm', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { status: sf, source: srcf, priority: pf } = req.query;
+  let where = 'WHERE tenant_id=$1';
+  const params = [t];
+  if (sf) { where += ' AND status=$'+(params.length+1); params.push(sf); }
+  if (srcf) { where += ' AND source=$'+(params.length+1); params.push(srcf); }
+  if (pf) { where += ' AND priority=$'+(params.length+1); params.push(pf); }
+  const leads = (await pool.query('SELECT * FROM crm_leads '+where+' ORDER BY CASE WHEN priority=\'urgent\' THEN 0 WHEN priority=\'high\' THEN 1 WHEN priority=\'medium\' THEN 2 ELSE 3 END, created_at DESC', params)).rows;
+  const allLeads = (await pool.query('SELECT * FROM crm_leads WHERE tenant_id=$1', [t])).rows;
+  const pipelineValue = allLeads.filter(l => !['won','lost'].includes(l.status)).reduce((s,l) => s + parseFloat(l.estimated_value||0), 0);
+  const wonValue = allLeads.filter(l => l.status === 'won').reduce((s,l) => s + parseFloat(l.estimated_value||0), 0);
+  res.send(renderPage('CRM & Leads', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>CRM & Lead Tracking</h1><p>Manage leads, pipeline, and conversions</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${allLeads.length}</div><div>Total Leads</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${allLeads.filter(l=>l.status==='new').length}</div><div>New</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">UGX ${pipelineValue.toLocaleString()}</div><div>Pipeline Value</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${wonValue.toLocaleString()}</div><div>Won Deals</div></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <form method="GET" action="/crm" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select name="status"><option value="">All Status</option>${CRM_STATUSES.map(s => '<option value="'+s+'" '+(sf===s?'selected':'')+'>'+s.charAt(0).toUpperCase()+s.slice(1)+'</option>').join('')}</select>
+        <select name="source"><option value="">All Source</option>${CRM_SOURCES.map(s => '<option value="'+s+'" '+(srcf===s?'selected':'')+'>'+s+'</option>').join('')}</select>
+        <select name="priority"><option value="">All Priority</option>${CRM_PRIORITIES.map(p => '<option value="'+p+'" '+(pf===p?'selected':'')+'>'+p.charAt(0).toUpperCase()+p.slice(1)+'</option>').join('')}</select>
+        <button class="btn">Filter</button>
+        <a href="/crm" class="btn" style="background:#999;color:#fff">Clear</a>
+        <a href="/crm/new" class="btn btn-green" style="margin-left:auto">+ New Lead</a>
+      </form>
+    </div>
+    <div class="card">
+      <h3>Pipeline Overview</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+        ${CRM_STATUSES.filter(s=>!['won','lost'].includes(s)).map(s => {
+          const cnt = allLeads.filter(l=>l.status===s).length;
+          const val = allLeads.filter(l=>l.status===s).reduce((a,l)=>a+parseFloat(l.estimated_value||0),0);
+          return '<div style="flex:1;min-width:120px;padding:12px;border-radius:10px;text-align:center;background:#f8fafc;border:1px solid #e2e8f0"><div style="font-weight:700;font-size:18px;color:#334155">'+cnt+'</div><div style="font-size:12px;color:#64748b">'+s.charAt(0).toUpperCase()+s.slice(1)+'</div><div style="font-size:11px;color:#059669;margin-top:4px">UGX '+val.toLocaleString()+'</div></div>';
+        }).join('')}
+      </div>
+      ${leads.length ? '<table><tr><th>Name</th><th>Company</th><th>Source</th><th>Status</th><th>Priority</th><th>Est. Value</th><th>Actions</th></tr>' + leads.map(l => '<tr><td><strong>'+esc(l.name)+'</strong><br><span class="muted">'+esc(l.email||'')+'</span></td><td>'+esc(l.company||'-')+'</td><td>'+esc(l.source||'-')+'</td><td>'+crmStatusBadge(l.status)+'</td><td><span class="tag" style="background:'+(l.priority==='urgent'?'#fee2e2':l.priority==='high'?'#fef3c7':'#f1f5f9')+'">'+esc(l.priority)+'</span></td><td style="font-weight:600">UGX '+Number(l.estimated_value||0).toLocaleString()+'</td><td><a href="/crm/'+l.id+'" class="btn btn-sm">View</a> <a href="/crm/'+l.id+'/edit" class="btn btn-sm">Edit</a> <a href="/crm/'+l.id+'/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete?\')">Del</a></td></tr>').join('') + '</table>' : '<p class="muted">No leads found</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/crm/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Lead', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Add New Lead</h2>
+    <form method="POST" action="/crm/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Name *</label><input name="name" required></div><div><label>Company</label><input name="company"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Email</label><input name="email" type="email"></div><div><label>Phone</label><input name="phone"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+        <div><label>Source</label><select name="source">${CRM_SOURCES.map(s => '<option value="'+s+'">'+s+'</option>').join('')}</select></div>
+        <div><label>Status</label><select name="status">${CRM_STATUSES.map(s => '<option value="'+s+'"'+(s==='new'?' selected':'')+'>'+s.charAt(0).toUpperCase()+s.slice(1)+'</option>').join('')}</select></div>
+        <div><label>Priority</label><select name="priority">${CRM_PRIORITIES.map(p => '<option value="'+p+'"'+(p==='medium'?' selected':'')+'>'+p.charAt(0).toUpperCase()+p.slice(1)+'</option>').join('')}</select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Estimated Value (UGX)</label><input name="estimated_value" type="number" step="0.01" min="0" value="0"></div><div><label>Assigned To</label><input name="assigned_to" placeholder="Email of assignee"></div></div>
+      <label>Notes</label><textarea name="notes" rows="3"></textarea>
+      <button type="submit" class="btn btn-green">Save Lead</button> <a href="/crm" class="btn" style="background:#999;color:#fff">Cancel</a>
+    </form></div>`, req.session.user));
+});
+
+app.post('/crm/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO crm_leads (tenant_id,name,email,phone,company,source,status,priority,estimated_value,assigned_to,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.body.name, req.body.email, req.body.phone, req.body.company, req.body.source, req.body.status, req.body.priority, parseFloat(req.body.estimated_value)||0, req.body.assigned_to, req.body.notes]);
+  audit(req.session.user.email, 'lead_created', req.body.name);
+  res.redirect('/crm');
+}));
+
+app.get('/crm/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const lead = (await pool.query('SELECT * FROM crm_leads WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!lead) return res.status(404).send('Not found');
+  const activities = (await pool.query('SELECT * FROM crm_activities WHERE lead_id=$1 ORDER BY created_at DESC LIMIT 50', [req.params.id])).rows;
+  res.send(renderPage('Lead: '+lead.name, `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px">
+        <div><h2>${esc(lead.name)}</h2><p class="muted">${esc(lead.company||'')} - ${esc(lead.email||'')} - ${esc(lead.phone||'')}</p></div>
+        <div style="display:flex;gap:8px">${crmStatusBadge(lead.status)} <a href="/crm/${lead.id}/edit" class="btn btn-sm">Edit</a></div>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px">
+        <div style="padding:12px;border-radius:8px;background:#f8fafc;text-align:center"><div style="font-weight:700;color:#334155">UGX ${Number(lead.estimated_value||0).toLocaleString()}</div><div style="font-size:12px;color:#64748b">Est. Value</div></div>
+        <div style="padding:12px;border-radius:8px;background:#f8fafc;text-align:center"><div style="font-weight:700;color:#334155">${esc(lead.source||'-')}</div><div style="font-size:12px;color:#64748b">Source</div></div>
+        <div style="padding:12px;border-radius:8px;background:#f8fafc;text-align:center"><div style="font-weight:700;color:#334155">${esc(lead.priority||'-')}</div><div style="font-size:12px;color:#64748b">Priority</div></div>
+        <div style="padding:12px;border-radius:8px;background:#f8fafc;text-align:center"><div style="font-weight:700;color:#334155">${esc(lead.assigned_to||'Unassigned')}</div><div style="font-size:12px;color:#64748b">Assigned To</div></div>
+      </div>
+      ${lead.notes ? '<div style="margin-top:12px;padding:12px;background:#fffbeb;border-radius:8px;font-size:14px"><strong>Notes:</strong> '+esc(lead.notes)+'</div>' : ''}
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3>Update Status</h3>
+      <form method="POST" action="/crm/${lead.id}/status" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select name="status">${CRM_STATUSES.map(s => '<option value="'+s+'" '+(lead.status===s?'selected':'')+'>'+s.charAt(0).toUpperCase()+s.slice(1)+'</option>').join('')}</select>
+        <button class="btn btn-green">Update</button>
+      </form>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3>Log Activity</h3>
+      <form method="POST" action="/crm/${lead.id}/activity" style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;align-items:end">
+        <div><label>Type</label><select name="activity_type">${CRM_ACTIVITY_TYPES.map(a => '<option value="'+a+'">'+a.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase())+'</option>').join('')}</select></div>
+        <div><label>Subject</label><input name="subject" required></div>
+        <button class="btn btn-green">Log</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3>Activity History (${activities.length})</h3>
+      ${activities.length ? '<div style="border-left:2px solid #e2e8f0;margin-left:10px;padding-left:20px">' + activities.map(a => '<div style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center"><span class="tag">'+esc(a.activity_type)+'</span><strong>'+esc(a.subject)+'</strong><span class="muted" style="margin-left:auto">'+new Date(a.created_at).toLocaleDateString()+'</span></div>'+(a.notes?'<p style="font-size:13px;color:#64748b;margin:4px 0 0">'+esc(a.notes)+'</p>':'')+'</div>').join('') + '</div>' : '<p class="muted">No activities logged yet</p>'}
+    </div>
+    <div style="margin-top:16px"><a href="/crm" class="btn">&larr; Back to Leads</a></div>
+  `, req.session.user));
+}));
+
+app.post('/crm/:id/status', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE crm_leads SET status=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', [req.body.status, req.params.id, req.session.user.tenant_id]);
+  audit(req.session.user.email, 'lead_status', 'Lead #'+req.params.id+' -> '+req.body.status);
+  res.redirect('/crm/' + req.params.id);
+}));
+
+app.post('/crm/:id/activity', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('INSERT INTO crm_activities (tenant_id,lead_id,activity_type,subject,notes,created_by) VALUES ($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, req.params.id, req.body.activity_type, req.body.subject, req.body.notes||'', req.session.user.email]);
+  res.redirect('/crm/' + req.params.id);
+}));
+
+app.get('/crm/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const lead = (await pool.query('SELECT * FROM crm_leads WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!lead) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Lead', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Edit Lead: ${esc(lead.name)}</h2>
+    <form method="POST" action="/crm/${lead.id}/update">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Name *</label><input name="name" value="${esc(lead.name)}" required></div><div><label>Company</label><input name="company" value="${esc(lead.company||'')}"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Email</label><input name="email" type="email" value="${esc(lead.email||'')}"></div><div><label>Phone</label><input name="phone" value="${esc(lead.phone||'')}"></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+        <div><label>Source</label><select name="source">${CRM_SOURCES.map(s => '<option value="'+s+'" '+(lead.source===s?'selected':'')+'>'+s+'</option>').join('')}</select></div>
+        <div><label>Status</label><select name="status">${CRM_STATUSES.map(s => '<option value="'+s+'" '+(lead.status===s?'selected':'')+'>'+s.charAt(0).toUpperCase()+s.slice(1)+'</option>').join('')}</select></div>
+        <div><label>Priority</label><select name="priority">${CRM_PRIORITIES.map(p => '<option value="'+p+'" '+(lead.priority===p?'selected':'')+'>'+p.charAt(0).toUpperCase()+p.slice(1)+'</option>').join('')}</select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Estimated Value (UGX)</label><input name="estimated_value" type="number" step="0.01" value="${lead.estimated_value||0}"></div><div><label>Assigned To</label><input name="assigned_to" value="${esc(lead.assigned_to||'')}"></div></div>
+      <label>Notes</label><textarea name="notes" rows="3">${esc(lead.notes||'')}</textarea>
+      <button type="submit" class="btn btn-green">Update Lead</button> <a href="/crm" class="btn" style="background:#999;color:#fff">Cancel</a>
+    </form></div>`, req.session.user));
+}));
+
+app.post('/crm/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE crm_leads SET name=$1,email=$2,phone=$3,company=$4,source=$5,status=$6,priority=$7,estimated_value=$8,assigned_to=$9,notes=$10,updated_at=NOW() WHERE id=$11 AND tenant_id=$12', [req.body.name, req.body.email, req.body.phone, req.body.company, req.body.source, req.body.status, req.body.priority, parseFloat(req.body.estimated_value)||0, req.body.assigned_to, req.body.notes, req.params.id, req.session.user.tenant_id]);
+  res.redirect('/crm');
+}));
+
+app.get('/crm/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM crm_leads WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/crm');
+}));
+
+app.get('/crm/contacts', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const contacts = (await pool.query('SELECT * FROM crm_contacts WHERE tenant_id=$1 ORDER BY name', [req.session.user.tenant_id])).rows;
+  res.send(renderPage('CRM Contacts', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Contact Directory</h1><p>All your business contacts in one place</p></div>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h3>Contacts (${contacts.length})</h3><a href="/crm/contacts/new" class="btn btn-green btn-sm">+ Add Contact</a></div>
+      ${contacts.length ? '<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Company</th><th>Type</th><th>Actions</th></tr>' + contacts.map(c => '<tr><td><strong>'+esc(c.name)+'</strong></td><td>'+esc(c.email||'-')+'</td><td>'+esc(c.phone||'-')+'</td><td>'+esc(c.company||'-')+'</td><td><span class="tag">'+esc(c.type)+'</span></td><td><a href="/crm/contacts/'+c.id+'/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete?\')">Del</a></td></tr>').join('') + '</table>' : '<p class="muted">No contacts yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/crm/contacts/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Contact', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Add Contact</h2>
+    <form method="POST" action="/crm/contacts/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Name *</label><input name="name" required></div><div><label>Type</label><select name="type"><option value="prospect">Prospect</option><option value="customer">Customer</option><option value="vendor">Vendor</option><option value="partner">Partner</option><option value="other">Other</option></select></div></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Email</label><input name="email" type="email"></div><div><label>Phone</label><input name="phone"></div></div>
+      <label>Company</label><input name="company">
+      <label>Address</label><textarea name="address" rows="2"></textarea>
+      <label>Notes</label><textarea name="notes" rows="2"></textarea>
+      <button type="submit" class="btn btn-green">Save Contact</button> <a href="/crm/contacts" class="btn" style="background:#999;color:#fff">Cancel</a>
+    </form></div>`, req.session.user));
+});
+
+app.post('/crm/contacts/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('INSERT INTO crm_contacts (tenant_id,name,email,phone,company,type,address,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [req.session.user.tenant_id, req.body.name, req.body.email, req.body.phone, req.body.company, req.body.type, req.body.address, req.body.notes]);
+  res.redirect('/crm/contacts');
+}));
+
+app.get('/crm/contacts/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM crm_contacts WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/crm/contacts');
+}));
+
+// ============================================================
+// FEATURE 12: EVENT TICKETING
+// ============================================================
+const TICKET_CATEGORIES = ['Conference','Workshop','Seminar','Concert','Sports','Fundraiser','Exhibition','Meeting','Party','Other'];
+const TICKET_STATUSES = ['draft','published','sold_out','cancelled','completed'];
+
+migrations.push(
+  `CREATE TABLE IF NOT EXISTS event_tickets (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL, description TEXT, category VARCHAR(100),
+    venue VARCHAR(255), event_date DATE, event_time TIME,
+    total_tickets INTEGER DEFAULT 100, tickets_sold INTEGER DEFAULT 0,
+    price DECIMAL(10,2) DEFAULT 0, currency VARCHAR(10) DEFAULT 'UGX',
+    status VARCHAR(50) DEFAULT 'draft', image_url TEXT,
+    created_by VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS event_registrations (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    event_id INTEGER REFERENCES event_tickets(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL, email VARCHAR(255), phone VARCHAR(50),
+    ticket_type VARCHAR(50) DEFAULT 'general', quantity INTEGER DEFAULT 1,
+    amount_paid DECIMAL(10,2) DEFAULT 0, payment_ref VARCHAR(255),
+    status VARCHAR(50) DEFAULT 'confirmed', checked_in BOOLEAN DEFAULT false,
+    qr_code TEXT, registered_at TIMESTAMPTZ DEFAULT NOW()
+  )`
+);
+['crm_leads','crm_activities','crm_contacts','event_tickets','event_registrations'].forEach(t => VALID_TABLES.add(t));
+
+app.get('/event-tickets', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { status: sf } = req.query;
+  let where = 'WHERE tenant_id=$1';
+  const params = [t];
+  if (sf) { where += ' AND status=$'+(params.length+1); params.push(sf); }
+  const events = (await pool.query('SELECT * FROM event_tickets '+where+' ORDER BY event_date DESC, created_at DESC', params)).rows;
+  const allEvents = (await pool.query('SELECT * FROM event_tickets WHERE tenant_id=$1', [t])).rows;
+  const totalTickets = allEvents.reduce((a,e)=>a+parseInt(e.total_tickets||0),0);
+  const totalSold = allEvents.reduce((a,e)=>a+parseInt(e.tickets_sold||0),0);
+  const totalRevenue = allEvents.reduce((a,e)=>a+parseFloat(e.price||0)*parseInt(e.tickets_sold||0),0);
+  res.send(renderPage('Event Tickets', `
+    <div class="hero" style="background:linear-gradient(135deg,#be185d,#ec4899)"><h1>Event Ticketing</h1><p>Create events, sell tickets, and manage check-ins</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${allEvents.length}</div><div>Events</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${totalSold} / ${totalTickets}</div><div>Tickets Sold</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalRevenue.toLocaleString()}</div><div>Total Revenue</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${allEvents.filter(e=>e.status==='published').length}</div><div>Active Events</div></div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <form method="GET" action="/event-tickets" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select name="status"><option value="">All Status</option>${TICKET_STATUSES.map(s => '<option value="'+s+'" '+(sf===s?'selected':'')+'>'+s.charAt(0).toUpperCase()+s.slice(1)+'</option>').join('')}</select>
+        <button class="btn">Filter</button>
+        <a href="/event-tickets" class="btn" style="background:#999;color:#fff">Clear</a>
+        <a href="/event-tickets/new" class="btn btn-green" style="margin-left:auto">+ Create Event</a>
+      </form>
+    </div>
+    <div class="grid">${events.map(e => {
+      const pct = e.total_tickets > 0 ? Math.min(100, Math.round(e.tickets_sold/e.total_tickets*100)) : 0;
+      const rev = parseFloat(e.price||0) * parseInt(e.tickets_sold||0);
+      const sc = { published:'#059669', cancelled:'#dc2626', completed:'#3b82f6', sold_out:'#f59e0b' };
+      return '<div class="card" style="border-left:4px solid '+(sc[e.status]||'#6b7280')+'"><h3>'+esc(e.title)+'</h3><div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0"><span class="tag">'+esc(e.category||'General')+'</span><span class="tag" style="background:'+(e.status==='published'?'#d1fae5;color:#065f46':e.status==='cancelled'?'#fee2e2;color:#991b1b':'#f1f5f9')+'">'+esc(e.status)+'</span></div><p class="muted">'+(e.event_date?new Date(e.event_date).toLocaleDateString():'TBD')+' at '+(e.venue||'TBD')+'</p><div style="margin:8px 0"><div style="background:#e2e8f0;border-radius:4px;height:8px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:linear-gradient(90deg,#059669,#10b981);border-radius:4px"></div></div><p style="font-size:12px;color:#64748b;margin-top:4px">'+e.tickets_sold+'/'+e.total_tickets+' tickets sold ('+pct+'%)</p></div><p style="font-weight:700;color:#059669">UGX '+rev.toLocaleString()+' revenue</p><div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"><a href="/event-tickets/'+e.id+'" class="btn btn-sm">View</a><a href="/event-tickets/'+e.id+'/registrations" class="btn btn-sm">Registrations</a><a href="/event-tickets/'+e.id+'/checkin" class="btn btn-sm btn-green">Check-in</a></div></div>';
+    }).join('')}</div>
+  `, req.session.user));
+}));
+
+app.get('/event-tickets/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Event', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create New Event</h2>
+    <form method="POST" action="/event-tickets/save">
+      <label>Event Title *</label><input name="title" required>
+      <label>Description</label><textarea name="description" rows="3"></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Category</label><select name="category">${TICKET_CATEGORIES.map(c => '<option value="'+c+'">'+c+'</option>').join('')}</select></div>
+        <div><label>Status</label><select name="status"><option value="draft">Draft</option><option value="published">Published</option></select></div>
+      </div>
+      <label>Venue *</label><input name="venue" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Event Date *</label><input name="event_date" type="date" required></div>
+        <div><label>Event Time</label><input name="event_time" type="time"></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Total Tickets *</label><input name="total_tickets" type="number" min="1" value="100" required></div>
+        <div><label>Price (UGX)</label><input name="price" type="number" min="0" value="0" step="100"></div>
+      </div>
+      <button type="submit" class="btn btn-green">Create Event</button> <a href="/event-tickets" class="btn" style="background:#999;color:#fff">Cancel</a>
+    </form></div>`, req.session.user));
+});
+
+app.post('/event-tickets/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO event_tickets (tenant_id,title,description,category,venue,event_date,event_time,total_tickets,price,status,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.body.title, req.body.description, req.body.category, req.body.venue, req.body.event_date, req.body.event_time||null, parseInt(req.body.total_tickets)||100, parseFloat(req.body.price)||0, req.body.status, req.session.user.email]);
+  audit(req.session.user.email, 'event_created', req.body.title);
+  res.redirect('/event-tickets');
+}));
+
+app.get('/event-tickets/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const ev = (await pool.query('SELECT * FROM event_tickets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!ev) return res.status(404).send('Not found');
+  const regCount = (await pool.query('SELECT COUNT(*) FROM event_registrations WHERE event_id=$1', [req.params.id])).rows[0].count;
+  const checkinCount = (await pool.query('SELECT COUNT(*) FROM event_registrations WHERE event_id=$1 AND checked_in=true', [req.params.id])).rows[0].count;
+  res.send(renderPage(ev.title, `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px">
+        <div><h2>${esc(ev.title)}</h2><p class="muted">${esc(ev.category||'')} | ${esc(ev.venue)} | ${ev.event_date?new Date(ev.event_date).toLocaleDateString():'TBD'} ${ev.event_time?'at '+ev.event_time:''}</p></div>
+        <div style="display:flex;gap:8px"><a href="/event-tickets/${ev.id}/edit" class="btn btn-sm">Edit</a> <a href="/event-tickets/${ev.id}/publish" class="btn btn-sm btn-green">${ev.status==='published'?'Unpublish':'Publish'}</a></div>
+      </div>
+      ${ev.description ? '<p style="margin-top:12px;line-height:1.6">'+esc(ev.description)+'</p>' : ''}
+      <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px">
+        <div style="padding:12px;border-radius:8px;background:#f8fafc;text-align:center"><div style="font-weight:700;color:#334155">${ev.total_tickets}</div><div style="font-size:12px;color:#64748b">Total Tickets</div></div>
+        <div style="padding:12px;border-radius:8px;background:#f8fafc;text-align:center"><div style="font-weight:700;color:#059669">${ev.tickets_sold}</div><div style="font-size:12px;color:#64748b">Sold</div></div>
+        <div style="padding:12px;border-radius:8px;background:#f8fafc;text-align:center"><div style="font-weight:700;color:#3b82f6">${checkinCount} / ${regCount}</div><div style="font-size:12px;color:#64748b">Checked In</div></div>
+        <div style="padding:12px;border-radius:8px;background:#f8fafc;text-align:center"><div style="font-weight:700;color:#334155">UGX ${Number(ev.price).toLocaleString()}</div><div style="font-size:12px;color:#64748b">Price</div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3>Register Attendee</h3>
+      <form method="POST" action="/event-tickets/${ev.id}/register" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end">
+        <div><label>Name *</label><input name="name" required></div>
+        <div><label>Email</label><input name="email" type="email"></div>
+        <div><label>Phone</label><input name="phone"></div>
+        <button class="btn btn-green">Register</button>
+      </form>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <a href="/event-tickets/${ev.id}/registrations" class="btn">View All Registrations</a>
+      <a href="/event-tickets/${ev.id}/checkin" class="btn btn-green">Check-in Page</a>
+      <a href="/event-tickets/${ev.id}/delete" class="btn btn-red" onclick="return confirm('Delete this event?')">Delete Event</a>
+    </div>
+    <div style="margin-top:8px"><a href="/event-tickets" class="btn">&larr; Back to Events</a></div>
+  `, req.session.user));
+}));
+
+app.post('/event-tickets/:id/register', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const ev = (await pool.query('SELECT * FROM event_tickets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!ev) return res.status(404).send('Not found');
+  if (parseInt(ev.tickets_sold) >= parseInt(ev.total_tickets)) return res.send(renderPage('Sold Out', '<div class="card"><div class="alert alert-error">This event is sold out!</div><a href="/event-tickets/'+req.params.id+'" class="btn">Back</a></div>', req.session.user));
+  const qr = 'EVT-'+req.params.id+'-'+Date.now();
+  await pool.query('INSERT INTO event_registrations (tenant_id,event_id,name,email,phone,amount_paid,qr_code) VALUES ($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, req.params.id, req.body.name, req.body.email, req.body.phone, parseFloat(ev.price)||0, qr]);
+  await pool.query('UPDATE event_tickets SET tickets_sold=tickets_sold+1 WHERE id=$1', [req.params.id]);
+  res.redirect('/event-tickets/' + req.params.id);
+}));
+
+app.get('/event-tickets/:id/registrations', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const ev = (await pool.query('SELECT title FROM event_tickets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!ev) return res.status(404).send('Not found');
+  const regs = (await pool.query('SELECT * FROM event_registrations WHERE event_id=$1 ORDER BY registered_at DESC', [req.params.id])).rows;
+  res.send(renderPage('Registrations: '+ev.title, `
+    <div style="margin-bottom:16px"><a href="/event-tickets/${req.params.id}" class="btn">&larr; Back to Event</a></div>
+    <div class="card">
+      <h3>Registrations (${regs.length})</h3>
+      ${regs.length ? '<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Amount</th><th>QR Code</th><th>Checked In</th><th>Actions</th></tr>' + regs.map(r => '<tr><td><strong>'+esc(r.name)+'</strong></td><td>'+esc(r.email||'-')+'</td><td>'+esc(r.phone||'-')+'</td><td>UGX '+Number(r.amount_paid||0).toLocaleString()+'</td><td><code style="font-size:11px">'+esc(r.qr_code||'-')+'</code></td><td>'+(r.checked_in?'<span style="color:#059669;font-weight:700">Yes</span>':'No')+'</td><td>'+(r.checked_in?'':'<a href="/event-tickets/'+req.params.id+'/checkin/'+r.id+'" class="btn btn-sm btn-green">Check In</a>')+'</td></tr>').join('') + '</table>' : '<p class="muted">No registrations yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/event-tickets/:id/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const ev = (await pool.query('SELECT title, tickets_sold, total_tickets FROM event_tickets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!ev) return res.status(404).send('Not found');
+  const regs = (await pool.query('SELECT * FROM event_registrations WHERE event_id=$1 AND checked_in=false ORDER BY registered_at', [req.params.id])).rows;
+  const checked = (await pool.query('SELECT COUNT(*) FROM event_registrations WHERE event_id=$1 AND checked_in=true', [req.params.id])).rows[0].count;
+  res.send(renderPage('Check-in: '+ev.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Event Check-in</h1><p>${esc(ev.title)} | ${checked}/${ev.tickets_sold} checked in</p></div>
+    <div class="card" style="margin-bottom:16px">
+      <form method="POST" action="/event-tickets/${req.params.id}/checkin-qr" style="display:flex;gap:8px;align-items:end">
+        <div style="flex:1"><label>Scan QR / Enter Code</label><input name="qr_code" placeholder="EVT-123-4567890" required></div>
+        <button class="btn btn-green" style="height:42px">Check In</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3>Pending Check-ins (${regs.length})</h3>
+      ${regs.length ? '<table><tr><th>Name</th><th>Phone</th><th>Code</th><th>Action</th></tr>' + regs.map(r => '<tr><td><strong>'+esc(r.name)+'</strong></td><td>'+esc(r.phone||'-')+'</td><td><code>'+esc(r.qr_code)+'</code></td><td><a href="/event-tickets/'+req.params.id+'/checkin/'+r.id+'" class="btn btn-sm btn-green">Check In</a></td></tr>').join('') + '</table>' : '<p class="muted">All attendees checked in!</p>'}
+    </div>
+    <div style="margin-top:16px"><a href="/event-tickets/${req.params.id}" class="btn">&larr; Back to Event</a></div>
+  `, req.session.user));
+}));
+
+app.post('/event-tickets/:id/checkin-qr', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const reg = (await pool.query('SELECT id FROM event_registrations WHERE event_id=$1 AND qr_code=$2 AND checked_in=false', [req.params.id, req.body.qr_code])).rows[0];
+  if (!reg) return res.send(renderPage('Not Found', '<div class="card"><div class="alert alert-error">QR code not found or already checked in.</div><a href="/event-tickets/'+req.params.id+'/checkin" class="btn">Back</a></div>', req.session.user));
+  await pool.query('UPDATE event_registrations SET checked_in=true WHERE id=$1', [reg.id]);
+  res.redirect('/event-tickets/' + req.params.id + '/checkin');
+}));
+
+app.get('/event-tickets/:id/checkin/:regId', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE event_registrations SET checked_in=true WHERE id=$1 AND event_id=$2', [req.params.regId, req.params.id]);
+  res.redirect('/event-tickets/' + req.params.id + '/checkin');
+}));
+
+app.get('/event-tickets/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const ev = (await pool.query('SELECT * FROM event_tickets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!ev) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Event', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Edit: ${esc(ev.title)}</h2>
+    <form method="POST" action="/event-tickets/${ev.id}/update">
+      <label>Event Title *</label><input name="title" value="${esc(ev.title)}" required>
+      <label>Description</label><textarea name="description" rows="3">${esc(ev.description||'')}</textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Category</label><select name="category">${TICKET_CATEGORIES.map(c => '<option value="'+c+'" '+(ev.category===c?'selected':'')+'>'+c+'</option>').join('')}</select></div>
+        <div><label>Status</label><select name="status">${TICKET_STATUSES.map(s => '<option value="'+s+'" '+(ev.status===s?'selected':'')+'>'+s.charAt(0).toUpperCase()+s.slice(1)+'</option>').join('')}</select></div>
+      </div>
+      <label>Venue *</label><input name="venue" value="${esc(ev.venue)}" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Event Date *</label><input name="event_date" type="date" value="${ev.event_date||''}" required></div>
+        <div><label>Event Time</label><input name="event_time" type="time" value="${ev.event_time||''}"></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Total Tickets</label><input name="total_tickets" type="number" min="1" value="${ev.total_tickets}"></div>
+        <div><label>Price (UGX)</label><input name="price" type="number" min="0" value="${ev.price}" step="100"></div>
+      </div>
+      <button type="submit" class="btn btn-green">Update Event</button> <a href="/event-tickets/${ev.id}" class="btn" style="background:#999;color:#fff">Cancel</a>
+    </form></div>`, req.session.user));
+}));
+
+app.post('/event-tickets/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE event_tickets SET title=$1,description=$2,category=$3,venue=$4,event_date=$5,event_time=$6,total_tickets=$7,price=$8,status=$9 WHERE id=$10 AND tenant_id=$11', [req.body.title, req.body.description, req.body.category, req.body.venue, req.body.event_date, req.body.event_time||null, parseInt(req.body.total_tickets)||100, parseFloat(req.body.price)||0, req.body.status, req.params.id, req.session.user.tenant_id]);
+  res.redirect('/event-tickets/' + req.params.id);
+}));
+
+app.get('/event-tickets/:id/publish', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const ev = (await pool.query('SELECT status FROM event_tickets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!ev) return res.status(404).send('Not found');
+  const newStatus = ev.status === 'published' ? 'draft' : 'published';
+  await pool.query('UPDATE event_tickets SET status=$1 WHERE id=$2', [newStatus, req.params.id]);
+  res.redirect('/event-tickets/' + req.params.id);
+}));
+
+app.get('/event-tickets/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM event_tickets WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/event-tickets');
+}));
+
+// ============================================================
 // FEATURE 0: UNIVERSAL DEV ACCESS (Portal Switcher)
 // ============================================================
 const DEV_PORTAL_TYPES = [
@@ -23716,6 +24174,17 @@ app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const original = req.session._original_tenant;
   const current = req.session.user;
   const devEmail = current.email;
+  // AUTO-CREATE all missing demo tenants
+  for (const p of DEV_PORTAL_TYPES) {
+    const tenantName = p.type === 'clinic' ? 'Dev Clinic Portal' : p.type === 'public' ? 'Dev Public Portal' : 'Dev ' + p.type.charAt(0).toUpperCase() + p.type.slice(1) + 'Portal';
+    const tenantType = p.type === 'clinic' ? 'organization' : p.type === 'public' ? 'public' : p.type;
+    const exists = (await pool.query(`SELECT id FROM tenants WHERE email=$1 AND name=$2`, [devEmail, tenantName])).rows[0];
+    if (!exists) {
+      const created = (await pool.query(`INSERT INTO tenants (name, type, email, verified, approved) VALUES ($1,$2,$3,true,true) RETURNING id`, [tenantName, tenantType, devEmail])).rows[0];
+      await pool.query(`INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1,'enterprise','active') ON CONFLICT DO NOTHING`, [created.id]);
+      audit(devEmail, 'dev_auto_create', 'Auto-created tenant: ' + tenantName + ' (#' + created.id + ')');
+    }
+  }
   const existing = (await pool.query(
     `SELECT id, name, type FROM tenants WHERE email = $1 AND name ILIKE 'Dev %'`,
     [devEmail]
@@ -27275,4 +27744,4 @@ server.listen(PORT, () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`WebSocket: ws${process.env.NODE_ENV === 'production' ? 's' : ''}://localhost:${PORT}/ws/notifications`);
 });
-// Deploy trigger 1783412000
+// Deploy trigger 1783498400
