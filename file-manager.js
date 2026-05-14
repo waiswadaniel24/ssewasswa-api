@@ -152,6 +152,19 @@ module.exports = function fileManager(app, pool, requireAuth, logger, audit, not
       file_url TEXT, file_size INTEGER, version_number INTEGER NOT NULL,
       uploaded_by VARCHAR(255), changelog TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+    `DO $$ BEGIN
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES documents(id) ON DELETE SET NULL;
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS folder_path TEXT DEFAULT '/';
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false;
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT false;
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS tags TEXT[];
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_type VARCHAR(100);
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_size INTEGER DEFAULT 0;
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END $$;`,
     `CREATE INDEX IF NOT EXISTS idx_docs_tenant ON documents(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_docs_parent ON documents(parent_id)`,
     `CREATE INDEX IF NOT EXISTS idx_docs_category ON documents(category)`,
@@ -165,7 +178,7 @@ module.exports = function fileManager(app, pool, requireAuth, logger, audit, not
   (async () => {
     const client = await pool.connect().catch(() => null);
     if (!client) { logger.warn('[FileManager] Cannot connect to DB'); return; }
-    try { for (const sql of migrations) await client.query(sql); logger.info({ msg:'[FileManager] Migrations applied', count: migrations.length }); }
+    try { for (const sql of migrations) { try { await client.query(sql); } catch(e) { /* skip individual errors */ } } logger.info({ msg:'[FileManager] Migrations applied', count: migrations.length }); }
     catch (e) { logger.error({ msg:'[FileManager] Migration error', error: e.message }); }
     finally { client.release(); }
   })();

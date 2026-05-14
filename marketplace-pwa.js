@@ -340,20 +340,19 @@ ${safeContent}
             plugin.pricing_model, plugin.price_monthly, plugin.is_official, plugin.is_verified,
             plugin.tags, plugin.min_plan, plugin.permissions]);
       } else {
+        const rating = (3.5 + Math.random() * 1.5).toFixed(1);
         await pool.query(`
           INSERT INTO marketplace_plugins (slug, name, description, version, author, category,
             icon_url, banner_url, pricing_model, price_monthly, is_official, is_verified,
-            tags, min_plan, permissions, installs_count, rating)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+            tags, min_plan, permissions, installs_count, rating, review_count)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
           [plugin.slug, plugin.name, plugin.description, plugin.version, plugin.author, plugin.category,
             plugin.icon_url, plugin.banner_url, plugin.pricing_model, plugin.price_monthly,
             plugin.is_official, plugin.is_verified, plugin.tags, plugin.min_plan, plugin.permissions,
             Math.floor(Math.random() * 200) + 10, // realistic install counts
+            parseFloat(rating),
+            Math.floor(Math.random() * 50) + 5  // realistic review count
           ]);
-        // Set realistic ratings for demo
-        const rating = (3.5 + Math.random() * 1.5).toFixed(1);
-        await pool.query('UPDATE marketplace_plugins SET rating=$1, review_count=$2 WHERE slug=$3',
-          [rating, Math.floor(Math.random() * 50) + 5, plugin.slug]);
       }
     } catch (e) {
       logger.warn(`[Marketplace] Seed error for ${plugin.slug}: ${e.message}`);
