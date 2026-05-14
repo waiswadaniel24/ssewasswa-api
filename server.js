@@ -813,6 +813,11 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subdomain TEXT`,
+  `DO $$ BEGIN
+    UPDATE tenants SET subdomain = 'tenant-' || id || '-' || floor(random() * 9999) WHERE subdomain IS NULL OR subdomain = '';
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END $$;`,
+  `ALTER TABLE tenants ALTER COLUMN subdomain SET NOT NULL`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT false`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT false`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT false`,
@@ -24198,7 +24203,8 @@ app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     const tenantType = p.type === 'clinic' ? 'organization' : p.type === 'public' ? 'public' : p.type;
     const exists = (await pool.query(`SELECT id FROM tenants WHERE email=$1 AND name=$2`, [devEmail, tenantName])).rows[0];
     if (!exists) {
-      const created = (await pool.query(`INSERT INTO tenants (name, type, email, verified, approved) VALUES ($1,$2,$3,true,true) RETURNING id`, [tenantName, tenantType, devEmail])).rows[0];
+      const devSubdomain = 'dev-' + tenantType + '-' + Math.floor(Math.random() * 9999);
+      const created = (await pool.query(`INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1,$2,$3,true,true,$4) RETURNING id`, [tenantName, tenantType, devEmail, devSubdomain])).rows[0];
       await pool.query(`INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1,'enterprise','active') ON CONFLICT DO NOTHING`, [created.id]);
       audit(devEmail, 'dev_auto_create', 'Auto-created tenant: ' + tenantName + ' (#' + created.id + ')');
     }
@@ -24245,9 +24251,10 @@ app.post('/dev/switch-tenant', requireAuth, requireSuperAdmin, ah(async (req, re
     [user.email, tenantName]
   )).rows[0];
   if (!tenant) {
+    const portalSubdomain = 'portal-' + tenantType + '-' + Math.floor(Math.random() * 9999);
     tenant = (await pool.query(
-      `INSERT INTO tenants (name, type, email, verified, approved) VALUES ($1, $2, $3, true, true) RETURNING id, name, type`,
-      [tenantName, tenantType, user.email]
+      `INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1, $2, $3, true, true, $4) RETURNING id, name, type`,
+      [tenantName, tenantType, user.email, portalSubdomain]
     )).rows[0];
     await pool.query(`INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1, 'enterprise', 'active')`, [tenant.id]);
     audit(user.email, 'dev_create_tenant', 'Created demo tenant: ' + tenantName + ' (#' + tenant.id + ')');
@@ -27296,7 +27303,8 @@ app.get('/auth/google/callback', ah(async (req, res) => {
     let u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [profile.email])).rows[0];
     if (!u) {
       // Auto-create account via OAuth2
-      const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved) VALUES ($1, $2, $3, true, true) RETURNING id', [profile.name || 'Google User', 'individual', profile.email]);
+      const googleSubdomain = 'google-' + Math.floor(Math.random() * 9999);
+      const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1, $2, $3, true, true, $4) RETURNING id', [profile.name || 'Google User', 'individual', profile.email, googleSubdomain]);
       const tenantId = tenantResult.rows[0].id;
       const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
       u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, profile.email, hash, 'admin'])).rows[0];
@@ -27338,7 +27346,8 @@ app.get('/auth/microsoft/callback', ah(async (req, res) => {
     if (!email) return res.redirect('/login');
     let u = (await pool.query('SELECT u.*,t.name as tenant_name,t.type as tenant_type FROM users u LEFT JOIN tenants t ON u.tenant_id=t.id WHERE u.email=$1', [email])).rows[0];
     if (!u) {
-      const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved) VALUES ($1, $2, $3, true, true) RETURNING id', [profile.displayName || 'Microsoft User', 'individual', email]);
+      const msSubdomain = 'ms-' + Math.floor(Math.random() * 9999);
+      const tenantResult = await pool.query('INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1, $2, $3, true, true, $4) RETURNING id', [profile.displayName || 'Microsoft User', 'individual', email, msSubdomain]);
       const tenantId = tenantResult.rows[0].id;
       const hash = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
       u = (await pool.query('INSERT INTO users (tenant_id, email, password, role, approved) VALUES ($1, $2, $3, $4, true) RETURNING id, tenant_id, email, role, approved, dark_mode, created_at', [tenantId, email, hash, 'admin'])).rows[0];
@@ -27805,6 +27814,61 @@ try {
   console.log('[Search] Global search & audit log viewer loaded');
 } catch (e) {
   console.warn('[Search] Failed to load search-audit:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: TASK MANAGER (Kanban + Projects + Timeline)
+// ============================================================
+try {
+  const taskManager = require('./task-manager');
+  taskManager(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Tasks] Task manager & project boards loaded');
+} catch (e) {
+  console.warn('[Tasks] Failed to load task-manager:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: WORKFLOW AUTOMATION & APPROVALS
+// ============================================================
+try {
+  const workflowAutomation = require('./workflow-automation');
+  workflowAutomation(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Workflow] Workflow automation & approvals loaded');
+} catch (e) {
+  console.warn('[Workflow] Failed to load workflow-automation:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: SURVEY & FORM BUILDER
+// ============================================================
+try {
+  const surveyBuilder = require('./survey-builder');
+  surveyBuilder(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Survey] Survey & form builder loaded');
+} catch (e) {
+  console.warn('[Survey] Failed to load survey-builder:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: ADVANCED CALENDAR & SCHEDULING
+// ============================================================
+try {
+  const calendarScheduler = require('./calendar-scheduler');
+  calendarScheduler(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Calendar] Advanced calendar & scheduling loaded');
+} catch (e) {
+  console.warn('[Calendar] Failed to load calendar-scheduler:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: BACKUP, RESTORE & DATA EXPORT
+// ============================================================
+try {
+  const backupRestore = require('./backup-restore');
+  backupRestore(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[Backup] Backup, restore & data export loaded');
+} catch (e) {
+  console.warn('[Backup] Failed to load backup-restore:', e.message);
 }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
