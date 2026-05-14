@@ -22494,6 +22494,24 @@ app.post('/worker/profile/password', requireWorkerAuth, ah(async (req, res) => {
   res.redirect('/worker/profile');
 }));
 
+// === PUBLIC PORTAL (landing page, register, public pages — MUST be before launch-routes) ===
+try {
+  const publicPortal = require('./public-portal');
+  publicPortal(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger);
+  console.log('[PublicPortal] Landing page, registration, and public pages loaded');
+} catch (e) {
+  console.warn('[PublicPortal] Failed to load public portal:', e.message);
+}
+
+// === BUSINESS SPECIALIZATIONS (hotel, restaurant, retail, salon, pharmacy, gym, hardware, supermarket, transport, electronics) ===
+try {
+  const bizSpec = require('./business-specializations');
+  bizSpec(app, pool, requireAuth, logger, audit, notify, ah, esc, renderPage, bcrypt);
+  console.log('[BizSpec] All 10 business specializations loaded');
+} catch (e) {
+  console.warn('[BizSpec] Failed to load business specializations:', e.message);
+}
+
 // === LAUNCH ROUTES (public site, scraping, entertainment, fundraising, etc.) ===
 try {
   const launchRoutes = require('./launch-routes');

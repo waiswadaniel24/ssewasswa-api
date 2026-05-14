@@ -171,6 +171,7 @@ ${safeContent}
       ALTER TABLE marketplace_plugins ADD COLUMN IF NOT EXISTS tags TEXT[];
       ALTER TABLE marketplace_plugins ADD COLUMN IF NOT EXISTS min_plan VARCHAR(50) DEFAULT 'free';
       ALTER TABLE marketplace_plugins ADD COLUMN IF NOT EXISTS permissions TEXT[];
+      ALTER TABLE marketplace_plugins ADD COLUMN IF NOT EXISTS installs_count INTEGER DEFAULT 0;
       ALTER TABLE marketplace_plugins ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
     EXCEPTION WHEN OTHERS THEN NULL;
     END $$;`,
