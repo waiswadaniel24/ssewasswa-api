@@ -309,7 +309,8 @@ const VALID_TABLES = new Set([
   'crm_leads', 'crm_pipeline', 'crm_activities', 'crm_contacts',
   'task_items', 'task_columns', 'task_assignees',
   'asset_register', 'asset_maintenance', 'asset_depreciation',
-  'event_tickets', 'event_registrations', 'ticket_orders'
+  'event_tickets', 'event_registrations', 'ticket_orders',
+  'invoice_items', 'recurring_invoices', 'recurring_invoice_items'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -27954,6 +27955,17 @@ try {
   console.log('[Settings] Advanced settings & system configuration loaded');
 } catch (e) {
   console.warn('[Settings] Failed to load advanced-settings:', e.message);
+}
+
+// ============================================================
+// NEW MODULE: INVOICING & BILLING (Invoices, Payments, Recurring)
+// ============================================================
+try {
+  const invoicingBilling = require('./invoicing-billing');
+  invoicingBilling(app, db, pool, renderPage, esc);
+  console.log('[Invoicing] Invoicing & Billing module loaded');
+} catch (e) {
+  console.warn('[Invoicing] Failed to load invoicing-billing:', e.message);
 }
 
 // ============================================================
