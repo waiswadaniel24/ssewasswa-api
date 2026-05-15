@@ -27956,6 +27956,106 @@ try {
   console.warn('[Settings] Failed to load advanced-settings:', e.message);
 }
 
+// ============================================================
+// NEW MODULE: ATTENDANCE TRACKER (QR, Manual, Reports)
+// ============================================================
+try { const m = require('./attendance-tracker'); m(app, db, pool, renderPage, esc); console.log('[Attendance] Module loaded'); } catch(e) { console.warn('[Attendance] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: HELPDESK / TICKET SYSTEM
+// ============================================================
+try { const m = require('./helpdesk'); m(app, db, pool, renderPage, esc); console.log('[Helpdesk] Module loaded'); } catch(e) { console.warn('[Helpdesk] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: ONLINE EXAMS & QUIZZES
+// ============================================================
+try { const m = require('./online-exams'); m(app, db, pool, renderPage, esc); console.log('[Exams] Module loaded'); } catch(e) { console.warn('[Exams] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: EVENT MANAGEMENT & RSVP
+// ============================================================
+try { const m = require('./event-manager'); m(app, db, pool, renderPage, esc); console.log('[Events] Module loaded'); } catch(e) { console.warn('[Events] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: ADVANCED INVENTORY MANAGEMENT
+// ============================================================
+try { const m = require('./inventory-pro'); m(app, db, pool, renderPage, esc); console.log('[Inventory] Module loaded'); } catch(e) { console.warn('[Inventory] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: VISITOR MANAGEMENT
+// ============================================================
+try { const m = require('./visitor-log'); m(app, db, pool, renderPage, esc); console.log('[Visitors] Module loaded'); } catch(e) { console.warn('[Visitors] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: LIBRARY MANAGEMENT
+// ============================================================
+try { const m = require('./library'); m(app, db, pool, renderPage, esc); console.log('[Library] Module loaded'); } catch(e) { console.warn('[Library] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: PAYROLL MANAGEMENT
+// ============================================================
+try { const m = require('./payroll'); m(app, db, pool, renderPage, esc); console.log('[Payroll] Module loaded'); } catch(e) { console.warn('[Payroll] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: ALUMNI NETWORK
+// ============================================================
+try { const m = require('./alumni-network'); m(app, db, pool, renderPage, esc); console.log('[Alumni] Module loaded'); } catch(e) { console.warn('[Alumni] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: HOSTEL / ACCOMMODATION MANAGEMENT
+// ============================================================
+try { const m = require('./hostel-manager'); m(app, db, pool, renderPage, esc); console.log('[Hostel] Module loaded'); } catch(e) { console.warn('[Hostel] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: TRANSPORT MANAGEMENT
+// ============================================================
+try { const m = require('./transport'); m(app, db, pool, renderPage, esc); console.log('[Transport] Module loaded'); } catch(e) { console.warn('[Transport] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: CANTEEN / MEAL MANAGEMENT
+// ============================================================
+try { const m = require('./canteen'); m(app, db, pool, renderPage, esc); console.log('[Canteen] Module loaded'); } catch(e) { console.warn('[Canteen] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: SPORTS LEAGUE MANAGEMENT
+// ============================================================
+try { const m = require('./sports'); m(app, db, pool, renderPage, esc); console.log('[Sports] Module loaded'); } catch(e) { console.warn('[Sports] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: CERTIFICATE GENERATOR
+// ============================================================
+try { const m = require('./certificates'); m(app, db, pool, renderPage, esc); console.log('[Certificates] Module loaded'); } catch(e) { console.warn('[Certificates] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: FEEDBACK & RATING SYSTEM
+// ============================================================
+try { const m = require('./feedback'); m(app, db, pool, renderPage, esc); console.log('[Feedback] Module loaded'); } catch(e) { console.warn('[Feedback] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: ASSET TRACKER
+// ============================================================
+try { const m = require('./asset-tracker'); m(app, db, pool, renderPage, esc); console.log('[Assets] Module loaded'); } catch(e) { console.warn('[Assets] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: CRM & CONTACT MANAGEMENT
+// ============================================================
+try { const m = require('./crm'); m(app, db, pool, renderPage, esc); console.log('[CRM] Module loaded'); } catch(e) { console.warn('[CRM] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: BLOG CMS
+// ============================================================
+try { const m = require('./blog-cms'); m(app, db, pool, renderPage, esc); console.log('[Blog] Module loaded'); } catch(e) { console.warn('[Blog] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: BULK SMS & COMMUNICATION
+// ============================================================
+try { const m = require('./sms-blast'); m(app, db, pool, renderPage, esc); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: AI ASSISTANT
+// ============================================================
+try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
