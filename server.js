@@ -211,7 +211,10 @@ app.use((req, res, next) => {
     }
     // Skip CSRF validation if session is not available yet
     if (!req.session || !req.session.csrfToken) return next();
-    const token = req.body?._csrf || req.headers['x-csrf-token'] || req.query?._csrf;
+    // Handle _csrf as both string and array (from duplicate hidden inputs)
+    let token = req.body?._csrf || req.headers['x-csrf-token'] || req.query?._csrf;
+    if (Array.isArray(token)) token = token[0];
+    token = String(token || '');
     // ENFORCE on ALL authenticated mutation routes
     if (!token || hashCSRFToken(token) !== hashCSRFToken(req.session.csrfToken)) {
       console.warn(`[CSRF BLOCKED] ${req.method} ${path} from IP: ${req.ip}`);
@@ -2059,10 +2062,20 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
   // Extract CSRF token from either a string or a request object
   const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || null);
-  // Auto-inject CSRF token into all forms in the content
+  // Auto-inject CSRF token into forms that don't already have one
   let safeContent = content || '';
   if (csrfToken && safeContent.includes('<form')) {
-    safeContent = safeContent.replace(/<form([^>]*)>/g, `<form$1><input type="hidden" name="_csrf" value="${csrfToken}">`);
+    // Split by form tags, check each form for existing _csrf, inject if missing
+    safeContent = safeContent.replace(/<form\b([^>]*)>/gi, (formTag, attrs) => {
+      // Find the next </form> or end of string, check for _csrf in between
+      const afterForm = safeContent.substring(safeContent.indexOf(formTag) + formTag.length);
+      const formEnd = afterForm.indexOf('</form>');
+      const formBody = formEnd >= 0 ? afterForm.substring(0, formEnd) : afterForm.substring(0, 500);
+      if (formBody.includes('name="_csrf"') || formBody.includes("name='_csrf'")) {
+        return formTag; // Already has CSRF token, skip injection
+      }
+      return formTag + '<input type="hidden" name="_csrf" value="' + csrfToken + '">';
+    });
   }
   return `<!DOCTYPE html>
 <html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -24269,13 +24282,15 @@ app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const cards = DEV_PORTAL_TYPES.map(p => {
     const demo = existingMap[p.type];
     const isActive = current.tenant_type === p.type && (original || current.tenant_name && current.tenant_name.startsWith('Dev'));
-    return `<div style="border:2px solid ${isActive ? '#22c55e' : '#e2e8f0'};border-radius:12px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : '#fff'}" onclick="document.getElementById('switch-${p.type}').submit()">
-      <div style="font-size:48px;margin-bottom:8px">${p.icon}</div>
-      <h3 style="margin:0 0 4px">${esc(p.label)}</h3>
-      <p style="font-size:13px;color:#64748b;margin:0 0 12px">${demo ? 'Tenant #' + demo.id + ' exists' : 'Not yet created'}</p>
-      ${isActive ? '<span style="color:#22c55e;font-weight:bold;font-size:13px">● ACTIVE</span>' : '<button class="btn" style="background:' + p.color + ';color:#fff;font-size:13px">Switch to ' + esc(p.type) + '</button>'}
-      <form id="switch-${p.type}" method="POST" action="/dev/switch-tenant" style="display:none"><input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}"><input name="type" value="${esc(p.type)}"></form>
-    </div>`;
+    const csrfVal = req.csrfToken || req.session?.csrfToken || '';
+    return `<form method="POST" action="/dev/switch-tenant" style="border:2px solid ${isActive ? '#22c55e' : '#e2e8f0'};border-radius:12px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : '#fff'};margin:0;display:block;transition:all 0.2s" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(0,0,0,0.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+      <input type="hidden" name="_csrf" value="${esc(csrfVal)}">
+      <input type="hidden" name="type" value="${esc(p.type)}">
+      <div style="font-size:48px;margin-bottom:8px;pointer-events:none">${p.icon}</div>
+      <h3 style="margin:0 0 4px;pointer-events:none">${esc(p.label)}</h3>
+      <p style="font-size:13px;color:#64748b;margin:0 0 12px;pointer-events:none">${demo ? 'Tenant #' + demo.id + ' exists' : 'Not yet created'}</p>
+      ${isActive ? '<span style="color:#22c55e;font-weight:bold;font-size:13px;pointer-events:none">&#9679; ACTIVE</span>' : '<button type="submit" class="btn" style="background:' + p.color + ';color:#fff;font-size:13px;pointer-events:none">Switch to ' + esc(p.type) + '</button>'}
+    </form>`;
   }).join('');
   res.send(renderPage('Dev Portal Switcher', `
     <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
@@ -24289,8 +24304,13 @@ app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
 }));
 
 app.post('/dev/switch-tenant', requireAuth, requireSuperAdmin, ah(async (req, res) => {
-  const { type } = req.body;
-  if (!DEV_PORTAL_TYPES.find(p => p.type === type)) return res.status(400).send('Invalid portal type');
+  // Handle both string and array _csrf values (from duplicate inputs)
+  const rawType = Array.isArray(req.body.type) ? req.body.type[0] : req.body.type;
+  const type = String(rawType || '').trim().toLowerCase();
+  if (!DEV_PORTAL_TYPES.find(p => p.type === type)) {
+    console.warn('[Portal Switch] Invalid type:', rawType, 'body:', JSON.stringify(req.body).substring(0, 200));
+    return res.status(400).send('Invalid portal type: ' + esc(type));
+  }
   const user = req.session.user;
   if (!req.session._original_tenant) {
     req.session._original_tenant = { id: user.tenant_id, name: user.tenant_name, type: user.tenant_type };
