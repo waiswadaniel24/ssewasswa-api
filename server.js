@@ -28180,6 +28180,53 @@ try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log
 ['admission_applications','admission_settings'].forEach(t => VALID_TABLES.add(t));
 try { const m = require('./admissions'); m(app, db, pool, renderPage, esc); console.log('[Admissions] Admissions module loaded'); } catch(e) { console.warn('[Admissions] Error:', e.message); }
 
+// ============================================================
+// NEW MODULES — (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) pattern
+// Uses adapter to bridge from existing (app, db, pool, renderPage, esc) architecture
+// ============================================================
+
+// Adapter: maps existing session-based auth to new module middleware pattern
+const _tenantMw = (req, res, next) => {
+  if (!req.session?.user) return res.status(401).json({ error: 'Authentication required' });
+  req.tenant = { id: req.session.user.tenant_id };
+  req.user = req.session.user;
+  next();
+};
+const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth: requireAuth, wsBroadcast, redis: redisCache };
+
+// Batch 1: Old-style modules (app, db, pool, renderPage, esc)
+['approval_requests','approval_actions','approval_notifications','approval_steps','approval_workflow_templates','approval_workflows'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./approvals'); m(app, db, pool, renderPage, esc); console.log('[Approvals] Approvals workflow module loaded'); } catch(e) { console.warn('[Approvals] Error:', e.message); }
+
+['clinic_patients','clinic_appointments','clinic_consultations','clinic_prescriptions','clinic_prescription_items','clinic_staff','clinic_visit_history','immunization_records','lab_requests','lab_results','patient_allergies','patient_chronic_conditions','patient_medications','patient_queue','patient_vitals','pharmacy_dispensing','pharmacy_inventory'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./clinic-management'); m(app, db, pool, renderPage, esc); console.log('[Clinic] Clinic management module loaded'); } catch(e) { console.warn('[Clinic] Error:', e.message); }
+
+['custom_forms','custom_fields','custom_field_values','form_field_options','form_submissions'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./custom-forms'); m(app, db, pool, renderPage, esc); console.log('[CustomForms] Custom form builder module loaded'); } catch(e) { console.warn('[CustomForms] Error:', e.message); }
+
+['forum_categories','forum_topics','forum_replies','forum_likes'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./forum'); m(app, db, pool, renderPage, esc); console.log('[Forum] Discussion forum module loaded'); } catch(e) { console.warn('[Forum] Error:', e.message); }
+
+['gallery_albums','gallery_photos','gallery_tags'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./gallery'); m(app, db, pool, renderPage, esc); console.log('[Gallery] Media gallery module loaded'); } catch(e) { console.warn('[Gallery] Error:', e.message); }
+
+// Batch 2: New-style modules (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis })
+[
+  'ecommerce_products','ecommerce_categories','ecommerce_cart','ecommerce_orders','ecommerce_order_items',
+  'ecommerce_coupons','ecommerce_reviews','ecommerce_shipping_zones','ecommerce_store_settings',
+  'scholarship_programs','scholarship_applications','scholarship_awards','scholarship_sponsors','scholarship_evaluations',
+  'homework_assignments','homework_submissions','homework_rubric','homework_parent_notifications',
+  'discipline_incidents','discipline_consequences','discipline_merits','discipline_offense_types',
+  'discipline_settings','discipline_committee','discipline_demerit_history',
+  'branch_inter_requests','branch_kpis','branch_holidays','audit_logs'
+].forEach(t => VALID_TABLES.add(t));
+
+try { const m = require('./e-commerce'); m(app, pool, _newModOpts); console.log('[ECommerce] E-commerce module loaded'); } catch(e) { console.warn('[ECommerce] Error:', e.message); }
+try { const m = require('./scholarships'); m(app, pool, _newModOpts); console.log('[Scholarships] Scholarships module loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
+try { const m = require('./homework'); m(app, pool, _newModOpts); console.log('[Homework] Homework module loaded'); } catch(e) { console.warn('[Homework] Error:', e.message); }
+try { const m = require('./discipline'); m(app, pool, _newModOpts); console.log('[Discipline] Discipline module loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
+try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.log('[MultiBranch] Multi-branch module loaded'); } catch(e) { console.warn('[MultiBranch] Error:', e.message); }
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
