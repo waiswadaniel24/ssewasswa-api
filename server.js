@@ -6159,24 +6159,24 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
   if (!tenant) return res.redirect('/portal/health');
   const currentType = tenant.health_institution_type || 'general_hospital';
   const types = [
-    { value:'general_hospital', label:'General Hospital', desc:'Full-service hospital with all departments', icon:'🏥', tier:'hospital' },
-    { value:'referral_hospital', label:'Referral Hospital', desc:'Regional/national referral hospital', icon:'🏥', tier:'hospital' },
-    { value:'health_center_4', label:'Health Center IV', desc:'Sub-district hospital level', icon:'🏥', tier:'hospital' },
-    { value:'health_center_3', label:'Health Center III', desc:'County-level with maternity & surgery', icon:'🏥', tier:'hospital' },
-    { value:'health_center_2', label:'Health Center II', desc:'Parish-level outpatient', icon:'🏥', tier:'clinic' },
-    { value:'health_center_1', label:'Health Center I', desc:'Village-level basic care', icon:'🏥', tier:'clinic' },
-    { value:'clinic', label:'Clinic', desc:'Private clinic / polyclinic', icon:'🏥', tier:'clinic' },
-    { value:'drugshop', label:'Drugshop / Pharmacy', desc:'Retail pharmaceutical outlet', icon:'💊', tier:'pharmacy' },
-    { value:'pharmacy', label:'Pharmacy / Chemist', desc:'Licensed pharmacy', icon:'💊', tier:'pharmacy' },
-    { value:'dental', label:'Dental Clinic', desc:'Dental and oral health', icon:'🦷', tier:'clinic' },
-    { value:'eye_clinic', label:'Eye Clinic', desc:'Optometry and ophthalmology', icon:'👁️', tier:'clinic' },
-    { value:'mental_health', label:'Mental Health Facility', desc:'Psychiatric and counseling', icon:'🧠', tier:'clinic' },
-    { value:'physiotherapy', label:'Physiotherapy Center', desc:'Rehabilitation services', icon:'🏃', tier:'clinic' },
-    { value:'lab', label:'Diagnostic Laboratory', desc:'Pathology and diagnostics', icon:'🔬', tier:'lab' },
-    { value:'imaging', label:'Imaging / Radiology Center', desc:'X-ray, ultrasound, CT scan', icon:'📡', tier:'lab' },
-    { value:'maternity', label:'Maternity / Nursing Home', desc:'Maternal and newborn care', icon:'👶', tier:'hospital' },
-    { value:'veterinary', label:'Veterinary Clinic', desc:'Animal health services', icon:'🐾', tier:'clinic' },
-    { value:'special', label:'Specialized Hospital', desc:'Specialized (e.g. Cancer, Heart, Orthopedic)', icon:'🏥', tier:'hospital' }
+    { value:'general_hospital', label:'General Hospital', desc:'Full-service hospital with all departments', icon:'/icons/icon_hospital_general.png', tier:'hospital' },
+    { value:'referral_hospital', label:'Referral Hospital', desc:'Regional/national referral hospital', icon:'/icons/icon_hospital_referral.png', tier:'hospital' },
+    { value:'health_center_4', label:'Health Center IV', desc:'Sub-district hospital level', icon:'/icons/icon_health_center.png', tier:'hospital' },
+    { value:'health_center_3', label:'Health Center III', desc:'County-level with maternity & surgery', icon:'/icons/icon_health_center.png', tier:'hospital' },
+    { value:'health_center_2', label:'Health Center II', desc:'Parish-level outpatient', icon:'/icons/icon_health_center.png', tier:'clinic' },
+    { value:'health_center_1', label:'Health Center I', desc:'Village-level basic care', icon:'/icons/icon_health_center.png', tier:'clinic' },
+    { value:'clinic', label:'Clinic', desc:'Private clinic / polyclinic', icon:'/icons/icon_clinic.png', tier:'clinic' },
+    { value:'drugshop', label:'Drugshop / Pharmacy', desc:'Retail pharmaceutical outlet', icon:'/icons/icon_pharmacy.png', tier:'pharmacy' },
+    { value:'pharmacy', label:'Pharmacy / Chemist', desc:'Licensed pharmacy', icon:'/icons/icon_pharmacy.png', tier:'pharmacy' },
+    { value:'dental', label:'Dental Clinic', desc:'Dental and oral health', icon:'/icons/icon_dental.png', tier:'clinic' },
+    { value:'eye_clinic', label:'Eye Clinic', desc:'Optometry and ophthalmology', icon:'/icons/icon_eye_clinic.png', tier:'clinic' },
+    { value:'mental_health', label:'Mental Health Facility', desc:'Psychiatric and counseling', icon:'/icons/icon_mental_health.png', tier:'clinic' },
+    { value:'physiotherapy', label:'Physiotherapy Center', desc:'Rehabilitation services', icon:'/icons/icon_physiotherapy.png', tier:'clinic' },
+    { value:'lab', label:'Diagnostic Laboratory', desc:'Pathology and diagnostics', icon:'/icons/icon_lab.png', tier:'lab' },
+    { value:'imaging', label:'Imaging / Radiology Center', desc:'X-ray, ultrasound, CT scan', icon:'/icons/icon_imaging.png', tier:'lab' },
+    { value:'maternity', label:'Maternity / Nursing Home', desc:'Maternal and newborn care', icon:'/icons/icon_maternity.png', tier:'hospital' },
+    { value:'veterinary', label:'Veterinary Clinic', desc:'Animal health services', icon:'/icons/icon_veterinary.png', tier:'clinic' },
+    { value:'special', label:'Specialized Hospital', desc:'Specialized (e.g. Cancer, Heart, Orthopedic)', icon:'/icons/icon_special_hospital.png', tier:'hospital' }
   ];
   res.send(renderPage('Health Institution Settings', `
     <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6);color:white"><h1>Health Institution Type</h1><p>Set what type of health facility ${esc(tenant.name||'')} is</p></div>
@@ -6187,14 +6187,15 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
     <form method="POST" action="/health/settings/save">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">
         ${types.map(tp => `
-          <div class="card" style="border-top:4px solid ${tp.tier==='hospital'?'#1e40af':tp.tier==='clinic'?'#059669':tp.tier==='pharmacy'?'#2563eb':'#6366f1'};cursor:pointer;${currentType===tp.value?'background:#f0fdf4;border-width:4px':''}" onclick="document.getElementById('sel_${tp.value}').checked=true">
-            <label style="display:flex;align-items:start;gap:10px;cursor:pointer">
-              <input type="radio" name="health_institution_type" id="sel_${tp.value}" value="${tp.value}" ${currentType===tp.value?'checked':''} style="margin-top:4px">
-              <div>
-                <div style="font-size:24px">${tp.icon}</div>
-                <strong style="font-size:15px">${tp.label}</strong>
-                <p class="muted" style="font-size:12px;margin:2px 0 0">${tp.desc}</p>
+          <div class="card" style="border-top:4px solid ${tp.tier==='hospital'?'#1e40af':tp.tier==='clinic'?'#059669':tp.tier==='pharmacy'?'#2563eb':'#6366f1'};cursor:pointer;${currentType===tp.value?'background:#f0fdf4;border-width:4px;box-shadow:0 0 0 3px #22c55e':''}" onclick="document.getElementById('sel_${tp.value}').checked=true" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,0.1)'" onmouseout="this.style.transform='';this.style.boxShadow='${currentType===tp.value?'0 0 0 3px #22c55e':''}">
+            <label style="display:flex;align-items:center;gap:14px;cursor:pointer">
+              <input type="radio" name="health_institution_type" id="sel_${tp.value}" value="${tp.value}" ${currentType===tp.value?'checked':''} style="display:none">
+              <img src="${tp.icon}" alt="${tp.label}" style="width:64px;height:64px;border-radius:12px;object-fit:cover;flex-shrink:0">
+              <div style="flex:1;min-width:0">
+                <strong style="font-size:15px;display:block">${tp.label}</strong>
+                <p class="muted" style="font-size:12px;margin:3px 0 0;line-height:1.4">${tp.desc}</p>
               </div>
+              ${currentType===tp.value?'<span style="color:#22c55e;font-size:22px;flex-shrink:0">\u2713</span>':''}
             </label>
           </div>
         `).join('')}
@@ -6214,16 +6215,16 @@ app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, 
 
 // === BUSINESS TYPE SETTINGS ===
 const BUSINESS_TYPES = [
-  { value:'general', label:'General Business', desc:'POS, invoices, inventory, payroll — for any business', icon:'\U0001f3e2', tier:'general' },
-  { value:'hotel', label:'Hotel & Lodge', desc:'Room management, reservations, check-in/out, housekeeping, guest services', icon:'\U0001f3e8', tier:'hospitality' },
-  { value:'restaurant', label:'Restaurant', desc:'Menu management, orders, kitchen display, tables, deliveries', icon:'\U0001f37d\ufe0f', tier:'food' },
-  { value:'retail', label:'Retail Shop', desc:'POS, barcode scanning, purchases, loyalty points, promotions', icon:'\U0001f6cd\ufe0f', tier:'retail' },
-  { value:'salon', label:'Salon & Spa', desc:'Appointments, services, stylists, commissions, packages', icon:'\U0001f487', tier:'services' },
-  { value:'gym', label:'Gym & Fitness', desc:'Memberships, check-ins, classes, trainers, equipment', icon:'\U0001f3cb\ufe0f', tier:'services' },
-  { value:'hardware', label:'Hardware Store', desc:'Products, quotations, bulk pricing, supplier management', icon:'\U0001f527', tier:'retail' },
-  { value:'supermarket', label:'Supermarket', desc:'POS, perishables, shelves, bulk pricing, daily sales', icon:'\U0001f6d2', tier:'retail' },
-  { value:'transport', label:'Transport & Logistics', desc:'Fleet management, bookings, routes, drivers, maintenance', icon:'\U0001f697', tier:'services' },
-  { value:'electronics', label:'Electronics Shop', desc:'Products, repairs, warranties, IMEI tracking', icon:'\U0001f4f1', tier:'retail' }
+  { value:'general', label:'General Business', desc:'POS, invoices, inventory, payroll — for any business', icon:'/icons/icon_general.png', tier:'general' },
+  { value:'hotel', label:'Hotel & Lodge', desc:'Room management, reservations, check-in/out, housekeeping, guest services', icon:'/icons/icon_hotel.png', tier:'hospitality' },
+  { value:'restaurant', label:'Restaurant', desc:'Menu management, orders, kitchen display, tables, deliveries', icon:'/icons/icon_restaurant.png', tier:'food' },
+  { value:'retail', label:'Retail Shop', desc:'POS, barcode scanning, purchases, loyalty points, promotions', icon:'/icons/icon_retail.png', tier:'retail' },
+  { value:'salon', label:'Salon & Spa', desc:'Appointments, services, stylists, commissions, packages', icon:'/icons/icon_salon.png', tier:'services' },
+  { value:'gym', label:'Gym & Fitness', desc:'Memberships, check-ins, classes, trainers, equipment', icon:'/icons/icon_gym.png', tier:'services' },
+  { value:'hardware', label:'Hardware Store', desc:'Products, quotations, bulk pricing, supplier management', icon:'/icons/icon_hardware.png', tier:'retail' },
+  { value:'supermarket', label:'Supermarket', desc:'POS, perishables, shelves, bulk pricing, daily sales', icon:'/icons/icon_supermarket.png', tier:'retail' },
+  { value:'transport', label:'Transport & Logistics', desc:'Fleet management, bookings, routes, drivers, maintenance', icon:'/icons/icon_transport.png', tier:'services' },
+  { value:'electronics', label:'Electronics Shop', desc:'Products, repairs, warranties, IMEI tracking', icon:'/icons/icon_electronics.png', tier:'retail' }
 ];
 
 app.get('/business/settings', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -6241,14 +6242,15 @@ app.get('/business/settings', requireAuth, requireNotBanned, ah(async (req, res)
     <form method="POST" action="/business/settings/save">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">
         ${BUSINESS_TYPES.map(bt => `
-          <div class="card" style="border-top:4px solid ${tierColors[bt.tier]||'#0891b2'};cursor:pointer;${currentType===bt.value?'background:#f0fdf4;border-width:4px':''}" onclick="document.getElementById('biz_${bt.value}').checked=true">
-            <label style="display:flex;align-items:start;gap:10px;cursor:pointer">
-              <input type="radio" name="business_type" id="biz_${bt.value}" value="${bt.value}" ${currentType===bt.value?'checked':''} style="margin-top:4px">
-              <div>
-                <div style="font-size:24px">${bt.icon}</div>
-                <strong style="font-size:15px">${bt.label}</strong>
-                <p class="muted" style="font-size:12px;margin:2px 0 0">${bt.desc}</p>
+          <div class="card" style="border-top:4px solid ${tierColors[bt.tier]||'#0891b2'};cursor:pointer;${currentType===bt.value?'background:#f0fdf4;border-width:4px;box-shadow:0 0 0 3px #22c55e':''}" onclick="document.getElementById('biz_${bt.value}').checked=true" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,0.1)'" onmouseout="this.style.transform='';this.style.boxShadow='${currentType===bt.value?'0 0 0 3px #22c55e':''}">
+            <label style="display:flex;align-items:center;gap:14px;cursor:pointer">
+              <input type="radio" name="business_type" id="biz_${bt.value}" value="${bt.value}" ${currentType===bt.value?'checked':''} style="display:none">
+              <img src="${bt.icon}" alt="${bt.label}" style="width:64px;height:64px;border-radius:12px;object-fit:cover;flex-shrink:0">
+              <div style="flex:1;min-width:0">
+                <strong style="font-size:15px;display:block">${bt.label}</strong>
+                <p class="muted" style="font-size:12px;margin:3px 0 0;line-height:1.4">${bt.desc}</p>
               </div>
+              ${currentType===bt.value?'<span style="color:#22c55e;font-size:22px;flex-shrink:0">\u2713</span>':''}
             </label>
           </div>
         `).join('')}
