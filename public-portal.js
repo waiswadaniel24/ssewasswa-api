@@ -547,6 +547,10 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
 
   // Tenant public profile
   app.get('/portal/:subdomain', ah(async (req, res) => {
+    // Skip reserved system routes to prevent conflicts
+    const subdomain = req.params.subdomain;
+    const reserved = ['login','register','dashboard','settings','billing','admin','api','static','public','news','blog','about','contact','privacy','terms','help','faq','features','pricing','test','assets','css','js','images','icon','favicon','manifest','sw','p','entertainment','fundraising','dev'];
+    if (reserved.includes(subdomain)) return res.redirect('/' + subdomain);
     const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.subdomain])).rows[0];
     if (!tenant) return res.status(404).send('<div style="text-align:center;padding:60px"><h1>Institution Not Found</h1><p style="color:#64748b">This institution does not exist or is not approved.</p><a href="/">Go to Comfort Home</a></div>');
     const typeLabels = {school:'School',clinic:'Clinic',church:'Church',hotel:'Hotel/Lodge',restaurant:'Restaurant',retail:'Retail Shop',salon:'Salon/Spa',pharmacy:'Pharmacy',gym:'Gym/Fitness',hardware:'Hardware Store',supermarket:'Supermarket',transport:'Transport',electronics:'Electronics Shop',business:'Business',individual:'Individual',organization:'Organization'};
