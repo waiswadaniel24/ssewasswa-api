@@ -782,7 +782,7 @@ const evaluateAutomations = async (tenantId, triggerEvent, context) => {
 
 // === MIGRATIONS ===
 const migrations = [
-  `CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, email TEXT, phone TEXT, subdomain TEXT UNIQUE, verified BOOLEAN DEFAULT false, approved BOOLEAN DEFAULT false, banned BOOLEAN DEFAULT false, ban_reason TEXT, has_fundraising BOOLEAN DEFAULT false, wallet_balance INTEGER DEFAULT 0, description TEXT, address TEXT, logo_url TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS tenants (id SERIAL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, email TEXT, phone TEXT, subdomain TEXT UNIQUE, verified BOOLEAN DEFAULT false, approved BOOLEAN DEFAULT false, banned BOOLEAN DEFAULT false, ban_reason TEXT, has_fundraising BOOLEAN DEFAULT false, wallet_balance INTEGER DEFAULT 0, description TEXT, address TEXT, logo_url TEXT, health_institution_type TEXT DEFAULT NULL, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, email TEXT UNIQUE NOT NULL, password TEXT, password_hash TEXT, role TEXT DEFAULT 'user', approved BOOLEAN DEFAULT false, banned BOOLEAN DEFAULT false, ban_reason TEXT, dark_mode BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, admission_no TEXT, name TEXT NOT NULL, class TEXT, stream TEXT, guardian_name TEXT, guardian_phone TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, amount INTEGER NOT NULL, paid INTEGER DEFAULT 0, term TEXT, year INTEGER, created_at TIMESTAMP DEFAULT NOW())`,
@@ -851,6 +851,7 @@ const migrations = [
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS favicon_url TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS custom_css TEXT`,
+  `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS health_institution_type TEXT DEFAULT NULL`,
   // users: add ALL columns that might be missing from old schema
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
@@ -2440,7 +2441,7 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   if (password && !/[0-9]/.test(password)) passwordErrors.push('Password must contain at least 1 number');
   if (password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) {
-    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="clinic" ${type==='clinic'?'selected':''}>Clinic / Hospital</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
+    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="health" ${type==='health'?'selected':''}>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business</option><option value="hotel" ${type==='hotel'?'selected':''}>Hotel & Lodge</option><option value="restaurant" ${type==='restaurant'?'selected':''}>Restaurant</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
   }
   const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
@@ -2715,7 +2716,7 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Discipline</h3><a href="/school/discipline" class="btn btn-sm">Incidents</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Homework</h3><a href="/school/homework" class="btn btn-sm">Assignments</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Calendar</h3><a href="/school/calendar" class="btn btn-sm">Events & Terms</a></div>
-      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">NEW: Health</h3><a href="/school/health" class="btn btn-sm">Medical Records</a><a href="/school/sickbay" class="btn btn-sm" style="margin-top:6px">Sick Bay</a></div>
+      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid & minor illness for students</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a><a href="/sickbay/units" class="btn btn-sm" style="margin-top:6px">Manage Units</a><a href="/school/health" class="btn btn-sm" style="margin-top:6px">Medical Records</a></div>
       <div class="card" style="background:#eff6ff;border:2px solid #3b82f6"><h3 style="color:#3b82f6">NEW: Alumni</h3><a href="/school/alumni" class="btn btn-sm">Graduates</a></div>
       <div class="card" style="background:#f7fee7;border:2px solid #65a30d"><h3 style="color:#65a30d">NEW: Library</h3><a href="/school/library" class="btn btn-sm">Books & Borrow</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Levels</h3><a href="/school/levels" class="btn btn-sm">K-University</a></div>
@@ -5833,8 +5834,8 @@ app.get('/business/monthly-report', requireAuth, requireNotBanned, requireTenant
   res.send(buffer);
 }));
 
-// === CLINIC PORTAL (Upgraded for Health Centers & Hospitals) ===
-app.get('/portal/clinic', requireAuth, requireNotBanned, ah(async (req, res) => {
+// === HEALTH PORTAL (Upgraded for Health Centers & Hospitals) ===
+app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const today = new Date().toISOString().split('T')[0];
   const [staffRow, queueRow, consultRow, rxRow, labRow, invRow, apptRow, patientRow, revenueRow, bedsRow, emergencyRow, completedRow] = await Promise.all([
@@ -5869,10 +5870,11 @@ app.get('/portal/clinic', requireAuth, requireNotBanned, ah(async (req, res) => 
 
   const recentQueue = (await pool.query("SELECT * FROM patient_queue WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 8", [t])).rows || [];
 
-  res.send(renderPage('Health Center Dashboard', `
+  res.send(renderPage('Health Portal', `
     <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
-      <h1>Health Center / Hospital Portal</h1>
+      <h1>Health Portal</h1>
       <p>Full patient management, departments, pharmacy, lab, billing & bed management</p>
+      <a href="/health/settings" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);font-size:13px">Change Institution Type</a>
     </div>
 
     ${emergencies > 0 ? `<div style="background:#fef2f2;border:2px solid #dc2626;border-radius:12px;padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
@@ -5941,6 +5943,250 @@ app.get('/portal/clinic', requireAuth, requireNotBanned, ah(async (req, res) => 
       </table></div>
     </div>` : ''}
   `, req.session.user));
+}));
+
+app.get('/portal/clinic', requireAuth, requireNotBanned, (req, res) => { res.redirect('/portal/health'); });
+
+// === HEALTH INSTITUTION TYPE SETTINGS ===
+app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name, health_institution_type FROM tenants WHERE id=$1', [t])).rows[0];
+  if (!tenant) return res.redirect('/portal/health');
+  const currentType = tenant.health_institution_type || 'general_hospital';
+  const types = [
+    { value:'general_hospital', label:'General Hospital', desc:'Full-service hospital with all departments', icon:'🏥', tier:'hospital' },
+    { value:'referral_hospital', label:'Referral Hospital', desc:'Regional/national referral hospital', icon:'🏥', tier:'hospital' },
+    { value:'health_center_4', label:'Health Center IV', desc:'Sub-district hospital level', icon:'🏥', tier:'hospital' },
+    { value:'health_center_3', label:'Health Center III', desc:'County-level with maternity & surgery', icon:'🏥', tier:'hospital' },
+    { value:'health_center_2', label:'Health Center II', desc:'Parish-level outpatient', icon:'🏥', tier:'clinic' },
+    { value:'health_center_1', label:'Health Center I', desc:'Village-level basic care', icon:'🏥', tier:'clinic' },
+    { value:'clinic', label:'Clinic', desc:'Private clinic / polyclinic', icon:'🏥', tier:'clinic' },
+    { value:'drugshop', label:'Drugshop / Pharmacy', desc:'Retail pharmaceutical outlet', icon:'💊', tier:'pharmacy' },
+    { value:'pharmacy', label:'Pharmacy / Chemist', desc:'Licensed pharmacy', icon:'💊', tier:'pharmacy' },
+    { value:'dental', label:'Dental Clinic', desc:'Dental and oral health', icon:'🦷', tier:'clinic' },
+    { value:'eye_clinic', label:'Eye Clinic', desc:'Optometry and ophthalmology', icon:'👁️', tier:'clinic' },
+    { value:'mental_health', label:'Mental Health Facility', desc:'Psychiatric and counseling', icon:'🧠', tier:'clinic' },
+    { value:'physiotherapy', label:'Physiotherapy Center', desc:'Rehabilitation services', icon:'🏃', tier:'clinic' },
+    { value:'lab', label:'Diagnostic Laboratory', desc:'Pathology and diagnostics', icon:'🔬', tier:'lab' },
+    { value:'imaging', label:'Imaging / Radiology Center', desc:'X-ray, ultrasound, CT scan', icon:'📡', tier:'lab' },
+    { value:'maternity', label:'Maternity / Nursing Home', desc:'Maternal and newborn care', icon:'👶', tier:'hospital' },
+    { value:'veterinary', label:'Veterinary Clinic', desc:'Animal health services', icon:'🐾', tier:'clinic' },
+    { value:'special', label:'Specialized Hospital', desc:'Specialized (e.g. Cancer, Heart, Orthopedic)', icon:'🏥', tier:'hospital' }
+  ];
+  res.send(renderPage('Health Institution Settings', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6);color:white"><h1>Health Institution Type</h1><p>Set what type of health facility ${esc(tenant.name||'')} is</p></div>
+    <div class="card" style="margin-bottom:20px;background:#f0fdf4;border:2px solid #22c55e">
+      <h3 style="color:#22c55e">Current Type: ${types.find(t=>t.value===currentType)?.label || currentType}</h3>
+      <p class="muted">Features on the Health Portal will adapt based on the institution type you select below.</p>
+    </div>
+    <form method="POST" action="/health/settings/save">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">
+        ${types.map(tp => `
+          <div class="card" style="border-top:4px solid ${tp.tier==='hospital'?'#1e40af':tp.tier==='clinic'?'#059669':tp.tier==='pharmacy'?'#2563eb':'#6366f1'};cursor:pointer;${currentType===tp.value?'background:#f0fdf4;border-width:4px':''}" onclick="document.getElementById('sel_${tp.value}').checked=true">
+            <label style="display:flex;align-items:start;gap:10px;cursor:pointer">
+              <input type="radio" name="health_institution_type" id="sel_${tp.value}" value="${tp.value}" ${currentType===tp.value?'checked':''} style="margin-top:4px">
+              <div>
+                <div style="font-size:24px">${tp.icon}</div>
+                <strong style="font-size:15px">${tp.label}</strong>
+                <p class="muted" style="font-size:12px;margin:2px 0 0">${tp.desc}</p>
+              </div>
+            </label>
+          </div>
+        `).join('')}
+      </div>
+      <div style="margin-top:20px"><button class="btn btn-green" style="width:100%;max-width:400px">Save Institution Type</button></div>
+    </form>
+  `, req.session.user));
+}));
+
+app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { health_institution_type } = req.body;
+  await pool.query('UPDATE tenants SET health_institution_type=$1 WHERE id=$2', [health_institution_type || 'general_hospital', t]);
+  await audit(req.session.user.email, 'update_health_type', health_institution_type);
+  res.redirect('/portal/health');
+}));
+
+// === UNIVERSAL SICKBAY (for schools, hotels, churches, businesses - first aid only) ===
+app.get('/sickbay', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const todayVisits = (await pool.query("SELECT sv.*, sb.name as sickbay_name FROM sickbay_visits sv LEFT JOIN sickbay_units sb ON sb.id=sv.sickbay_id WHERE sv.tenant_id=$1 AND sv.visit_date=CURRENT_DATE ORDER BY sv.visit_time DESC", [t])).rows;
+  const pastVisits = (await pool.query("SELECT sv.*, sb.name as sickbay_name FROM sickbay_visits sv LEFT JOIN sickbay_units sb ON sb.id=sv.sickbay_id WHERE sv.tenant_id=$1 AND sv.visit_date < CURRENT_DATE ORDER BY sv.visit_date DESC LIMIT 15", [t])).rows;
+  const units = (await pool.query('SELECT * FROM sickbay_units WHERE tenant_id=$1 AND is_active=true ORDER BY name', [t])).rows;
+  const todayCount = todayVisits.length;
+  res.send(renderPage('Sick Bay', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#f43f5e);color:white"><h1>Sick Bay</h1><p>First aid and minor illness management for your organization</p></div>
+    <div class="stats">
+      <div class="stat-card" style="border-left:4px solid #ec4899"><div class="stat-num" style="color:#ec4899">${todayCount}</div><div>Visits Today</div></div>
+      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num" style="color:#f59e0b">${todayVisits.filter(v=>v.status==='active').length}</div><div>Currently Active</div></div>
+      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num" style="color:#3b82f6">${units.length}</div><div>Sick Bay Units</div></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/sickbay/new" class="btn btn-green">+ Record Visit</a>
+      <a href="/sickbay/units" class="btn" style="background:#ec4899;color:white">Manage Units</a>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:12px">Today's Visits (${todayCount})</h3>
+      ${todayCount > 0 ? `<table><tr><th>Time</th><th>Patient</th><th>Unit</th><th>Complaint</th><th>Treatment</th><th>Seen By</th><th>Status</th><th>Actions</th></tr>
+        ${todayVisits.map(v => `<tr><td>${v.visit_time ? v.visit_time.toISOString().slice(11,16) : '—'}</td><td><strong>${esc(v.patient_name)}</strong></td><td>${esc(v.sickbay_name||'Main')}</td><td>${esc(v.complaint||'—')}</td><td>${esc(v.treatment||'—')}</td><td>${esc(v.seen_by||'—')}</td><td><span style="color:${v.status==='active'?'#f59e0b':'#22c55e'}">${v.status}</span></td><td><a href="/sickbay/visits/${v.id}/edit" class="btn btn-sm">Edit</a> ${v.status==='active' ? `<a href="/sickbay/visits/${v.id}/discharge" class="btn btn-sm btn-green">Discharge</a>` : ''}</td></tr>`).join('')}
+      </table>` : '<p class="muted">No sick bay visits today.</p>'}
+    </div>
+    ${pastVisits.length > 0 ? `<div class="card" style="margin-top:16px"><h3 style="margin-bottom:12px">Previous Visits</h3>
+      <table><tr><th>Date</th><th>Patient</th><th>Complaint</th><th>Treatment</th></tr>
+        ${pastVisits.map(v => `<tr style="opacity:0.85"><td>${v.visit_date}</td><td>${esc(v.patient_name)}</td><td>${esc(v.complaint||'—')}</td><td>${esc(v.treatment||'—')}</td></tr>`).join('')}
+      </table></div>` : ''}
+  `, req.session.user));
+}));
+
+app.get('/sickbay/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Record Sick Bay Visit', `
+    <div class="card" style="max-width:650px;margin:0 auto"><h2 style="margin-bottom:16px">Record Sick Bay Visit</h2>
+    <form method="POST" action="/sickbay/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Patient Name *</label><input name="patient_name" placeholder="Person's name" required></div>
+        <div><label>Visit Type</label><select name="visit_type"><option value="first_aid">First Aid</option><option value="illness">Minor Illness</option><option value="injury">Injury</option><option value="headache">Headache</option><option value="stomach">Stomach Pain</option><option value="fever">Fever</option><option value="allergic_reaction">Allergic Reaction</option><option value="eye_issue">Eye Issue</option><option value="other">Other</option></select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Seen By</label><input name="seen_by" placeholder="Nurse / First aider name"></div>
+        <div><label>Visit Date</label><input name="visit_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      </div>
+      <div><label>Complaint / Symptoms *</label><textarea name="complaint" rows="2" required placeholder="What is the patient complaining of?"></textarea></div>
+      <div><label>Treatment Given</label><textarea name="treatment" rows="2" placeholder="First aid, medication, rest, ice pack, etc."></textarea></div>
+      <div><label>Action Needed?</label><select name="action"><option value="none">None - returned to normal activity</option><option value="rest">Rest in sick bay</option><option value="parent">Contact parent/guardian</option><option value="hospital">Refer to hospital / clinic</option><option value="self_medicate">Self-medicate (OTC)</option></select></div>
+      <div><label>Notes</label><textarea name="notes" rows="2" placeholder="Any additional notes"></textarea></div>
+      <button class="btn btn-green" style="width:100%">Save Visit</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/sickbay/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, action, notes } = req.body;
+  const complaintText = complaint + (action && action !== 'none' ? ` [Action: ${action}]` : '');
+  await pool.query('INSERT INTO sickbay_visits(tenant_id,patient_name,visit_type,seen_by,visit_date,complaint,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaintText, treatment||null, notes||null]);
+  await audit(req.session.user.email, 'sickbay_visit', `${patient_name}: ${visit_type||'first_aid'}`);
+  res.redirect('/sickbay');
+}));
+
+app.get('/sickbay/visits/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const v = (await pool.query('SELECT * FROM sickbay_visits WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!v) return res.redirect('/sickbay');
+  res.send(renderPage('Edit Sick Bay Visit', `
+    <div class="card" style="max-width:650px;margin:0 auto"><h2 style="margin-bottom:16px">Edit Visit — ${esc(v.patient_name)}</h2>
+    <form method="POST" action="/sickbay/visits/${v.id}/update">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Patient Name *</label><input name="patient_name" value="${esc(v.patient_name)}" required></div>
+        <div><label>Visit Type</label><select name="visit_type"><option value="first_aid" ${v.visit_type==='first_aid'?'selected':''}>First Aid</option><option value="illness" ${v.visit_type==='illness'?'selected':''}>Minor Illness</option><option value="injury" ${v.visit_type==='injury'?'selected':''}>Injury</option><option value="headache" ${v.visit_type==='headache'?'selected':''}>Headache</option><option value="stomach" ${v.visit_type==='stomach'?'selected':''}>Stomach Pain</option><option value="fever" ${v.visit_type==='fever'?'selected':''}>Fever</option><option value="allergic_reaction" ${v.visit_type==='allergic_reaction'?'selected':''}>Allergic Reaction</option><option value="other" ${v.visit_type==='other'?'selected':''}>Other</option></select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Seen By</label><input name="seen_by" value="${esc(v.seen_by||'')}"></div>
+        <div><label>Visit Date</label><input name="visit_date" type="date" value="${v.visit_date?v.visit_date.toISOString().slice(0,10):''}"></div>
+      </div>
+      <div><label>Complaint / Symptoms *</label><textarea name="complaint" rows="2" required>${esc(v.complaint||'')}</textarea></div>
+      <div><label>Treatment Given</label><textarea name="treatment" rows="2">${esc(v.treatment||'')}</textarea></div>
+      <div><label>Status</label><select name="status"><option value="active" ${v.status==='active'?'selected':''}>Active</option><option value="discharged" ${v.status==='discharged'?'selected':''}>Discharged</option><option value="referred" ${v.status==='referred'?'selected':''}>Referred</option></select></div>
+      <div><label>Notes</label><textarea name="notes" rows="2">${esc(v.notes||'')}</textarea></div>
+      <button class="btn btn-green" style="width:100%">Update Visit</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/sickbay/visits/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, status, notes } = req.body;
+  await pool.query('UPDATE sickbay_visits SET patient_name=$1,visit_type=$2,seen_by=$3,visit_date=$4,complaint=$5,treatment=$6,status=$7,notes=$8 WHERE tenant_id=$9 AND id=$10', [patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaint, treatment||null, status||'active', notes||null, t, req.params.id]);
+  res.redirect('/sickbay');
+}));
+
+app.get('/sickbay/visits/:id/discharge', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const v = (await pool.query('SELECT * FROM sickbay_visits WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!v || v.status === 'discharged') return res.redirect('/sickbay');
+  await pool.query("UPDATE sickbay_visits SET status='discharged' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
+  res.redirect('/sickbay');
+}));
+
+// === SICKBAY UNITS MANAGEMENT ===
+app.get('/sickbay/units', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const units = (await pool.query('SELECT * FROM sickbay_units WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Sick Bay Units', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#f43f5e);color:white"><h1>Sick Bay Units</h1><p>Manage first aid posts, sick bays, and mini-clinics across your organization</p></div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/sickbay/units/new" class="btn btn-green">+ Add Unit</a>
+      <a href="/sickbay" class="btn btn-sm">&larr; Back to Sick Bay</a>
+    </div>
+    <div class="card">
+      ${units.length > 0 ? `<table><tr><th>Name</th><th>Location</th><th>In Charge</th><th>Phone</th><th>Hours</th><th>Status</th><th>Actions</th></tr>
+        ${units.map(u => `<tr><td><strong>${esc(u.name)}</strong></td><td>${esc(u.location||'—')}</td><td>${esc(u.in_charge||'—')}</td><td>${esc(u.phone||'—')}</td><td>${esc(u.operating_hours||'—')}</td><td>${u.is_active?'<span style="color:#22c55e">Active</span>':'<span style="color:#dc2626">Inactive</span>'}</td><td><a href="/sickbay/units/${u.id}/edit" class="btn btn-sm">Edit</a> <a href="/sickbay/units/${u.id}/toggle" class="btn btn-sm btn-red">${u.is_active?'Deactivate':'Activate'}</a></td></tr>`).join('')}
+      </table>` : '<p class="muted">No sick bay units yet. Click "+ Add Unit" to create your first one.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/sickbay/units/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Sick Bay Unit', `
+    <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Sick Bay Unit</h2>
+    <form method="POST" action="/sickbay/units/save">
+      <div><label>Unit Name *</label><input name="name" placeholder="e.g. Main Sick Bay, Block A First Aid Post" required></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Location</label><input name="location" placeholder="e.g. Administration Block, Dorm A"></div>
+        <div><label>Capacity</label><input name="capacity" type="number" min="1" value="5"></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>In Charge</label><input name="in_charge" placeholder="Person in charge"></div>
+        <div><label>Phone</label><input name="phone" placeholder="Contact number"></div>
+      </div>
+      <div><label>Operating Hours</label><input name="operating_hours" placeholder="e.g. Mon-Fri 8am-5pm"></div>
+      <div><label>Description</label><textarea name="description" rows="2" placeholder="What services this unit provides"></textarea></div>
+      <button class="btn btn-green" style="width:100%">Add Unit</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/sickbay/units/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, location, capacity, in_charge, phone, operating_hours, description } = req.body;
+  await pool.query('INSERT INTO sickbay_units(tenant_id,name,location,capacity,in_charge,phone,operating_hours,description) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name, location||null, capacity||5, in_charge||null, phone||null, operating_hours||null, description||null]);
+  await audit(req.session.user.email, 'create_sickbay_unit', name);
+  res.redirect('/sickbay/units');
+}));
+
+app.get('/sickbay/units/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const u = (await pool.query('SELECT * FROM sickbay_units WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!u) return res.redirect('/sickbay/units');
+  res.send(renderPage('Edit Sick Bay Unit', `
+    <div class="card" style="max-width:600px;margin:0 auto"><h2>Edit: ${esc(u.name)}</h2>
+    <form method="POST" action="/sickbay/units/${u.id}/update">
+      <div><label>Unit Name *</label><input name="name" value="${esc(u.name)}" required></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Location</label><input name="location" value="${esc(u.location||'')}"></div>
+        <div><label>Capacity</label><input name="capacity" type="number" min="1" value="${u.capacity||5}"></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>In Charge</label><input name="in_charge" value="${esc(u.in_charge||'')}"></div>
+        <div><label>Phone</label><input name="phone" value="${esc(u.phone||'')}"></div>
+      </div>
+      <div><label>Operating Hours</label><input name="operating_hours" value="${esc(u.operating_hours||'')}"></div>
+      <div><label>Description</label><textarea name="description" rows="2">${esc(u.description||'')}</textarea></div>
+      <button class="btn btn-green" style="width:100%">Update</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/sickbay/units/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, location, capacity, in_charge, phone, operating_hours, description } = req.body;
+  await pool.query('UPDATE sickbay_units SET name=$1,location=$2,capacity=$3,in_charge=$4,phone=$5,operating_hours=$6,description=$7 WHERE tenant_id=$8 AND id=$9', [name, location||null, capacity||5, in_charge||null, phone||null, operating_hours||null, description||null, t, req.params.id]);
+  res.redirect('/sickbay/units');
+}));
+
+app.get('/sickbay/units/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE sickbay_units SET is_active=NOT is_active WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  res.redirect('/sickbay/units');
 }));
 
 // === CLINIC: BED MANAGEMENT (for hospitals/health centers) ===
@@ -7234,7 +7480,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/whatsapp" style="background:#22c55e;color:white">WhatsApp</a>
       <a href="/scheduled-reports" style="background:#f59e0b;color:white">Reports</a>
       <a href="/branches" style="background:#8b5cf6;color:white">Branches</a>
-      <a href="/clinic-enhanced" style="background:#ef4444;color:white">Clinic</a>
+      <a href="/clinic-enhanced" style="background:#ef4444;color:white">Health Portal</a>
       <a href="/links" style="background:#0ea5e9;color:white">Deep Links</a>
       <a href="/webhooks" style="background:#8b5cf6;color:white">Webhooks</a>
       <a href="/marketplace" style="background:#d97706;color:white">Plugins</a>
@@ -24494,7 +24740,21 @@ const featureMigrations = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_clinic_sickbays_tenant ON clinic_sickbays(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_clinic_sickbay_visits_tenant ON clinic_sickbay_visits(tenant_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_clinic_sickbay_visits_date ON clinic_sickbay_visits(visit_date)`
+  `CREATE INDEX IF NOT EXISTS idx_clinic_sickbay_visits_date ON clinic_sickbay_visits(visit_date)`,
+  `CREATE TABLE IF NOT EXISTS sickbay_units (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, location TEXT, capacity INTEGER DEFAULT 5, in_charge TEXT, phone TEXT,
+    description TEXT, operating_hours TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS sickbay_visits (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    sickbay_id INTEGER REFERENCES sickbay_units(id) ON DELETE SET NULL,
+    patient_name TEXT NOT NULL, visit_type TEXT DEFAULT 'first_aid',
+    seen_by TEXT, visit_date DATE DEFAULT CURRENT_DATE, visit_time TIME DEFAULT CURRENT_TIME,
+    complaint TEXT, treatment TEXT, status TEXT DEFAULT 'active', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sickbay_units_tenant ON sickbay_units(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_sickbay_visits_tenant ON sickbay_visits(tenant_id)`
 ];
 featureMigrations.forEach(m => migrations.push(m));
 
@@ -24976,7 +25236,7 @@ const DEV_PORTAL_TYPES = [
   { type: 'business', label: 'Business Portal', icon: '🏢', color: '#f59e0b' },
   { type: 'organization', label: 'Organization Portal', icon: '🤝', color: '#10b981' },
   { type: 'individual', label: 'Individual Portal', icon: '👤', color: '#ec4899' },
-  { type: 'clinic', label: 'Clinic Portal', icon: '🏥', color: '#ef4444' },
+  { type: 'health', label: 'Health Portal', icon: '🏥', color: '#ef4444' },
   { type: 'hotel', label: 'Hotel & Lodge', icon: '🏨', color: '#dc2626' },
   { type: 'restaurant', label: 'Restaurant', icon: '🍽️', color: '#ea580c' },
   { type: 'retail', label: 'Retail Shop', icon: '🛍️', color: '#e11d48' },
