@@ -318,7 +318,8 @@ const VALID_TABLES = new Set([
   'email_campaigns_list', 'email_subscribers', 'email_tracking',
   'reorder_rules', 'reorder_alerts',
   'appraisals', 'appraisal_criteria', 'appraisal_scores',
-  'health_visits', 'health_screenings'
+  'health_visits', 'health_screenings',
+  'tithes_records', 'giving_campaigns', 'analytics_snapshots', 'student_submissions'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -28127,6 +28128,57 @@ try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc)
 // NEW MODULE: STUDENT HEALTH RECORDS
 // ============================================================
 try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
+
+// ============================================================
+// MODULE: TITHES & OFFERINGS (Church Giving Management)
+// ============================================================
+try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
+
+// ============================================================
+// MODULE: ANALYTICS DASHBOARD (Platform-wide Analytics)
+// ============================================================
+try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
+
+// ============================================================
+// MODULE: STUDENT PORTAL (Student Self-Service)
+// ============================================================
+try { const m = require('./student-portal'); m(app, db, pool, renderPage, esc); console.log('[StudentPortal] Student portal module loaded'); } catch(e) { console.warn('[StudentPortal] Error:', e.message); }
+
+// ============================================================
+// MODULE: GRADEBOOK (Academic Grades Management)
+// ============================================================
+['grades','marks','marksheets','grading_scales','class_subjects'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./gradebook'); m(app, db, pool, renderPage, esc); console.log('[Gradebook] Gradebook module loaded'); } catch(e) { console.warn('[Gradebook] Error:', e.message); }
+
+// ============================================================
+// MODULE: FEE MANAGEMENT (Fee Structures, Collection, Receipts)
+// ============================================================
+['fee_structures','fees_structure','fee_receipts','fee_reminder_settings','class_payments','payment_methods','payment_requests','payment_transactions'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./fee-management'); m(app, db, pool, renderPage, esc); console.log('[FeeManagement] Fee management module loaded'); } catch(e) { console.warn('[FeeManagement] Error:', e.message); }
+
+// ============================================================
+// MODULE: POS TERMINAL (Point of Sale, Inventory, Reports)
+// ============================================================
+['retail_products','retail_sales','retail_sale_items','school_shop_sales','supermarket_daily_sales','supermarket_products','stock_adjustments','stock_movements','stock_takes','stock_take_items','stock_transfers'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./pos-terminal'); m(app, db, pool, renderPage, esc); console.log('[POS] POS terminal module loaded'); } catch(e) { console.warn('[POS] Error:', e.message); }
+
+// ============================================================
+// MODULE: TIMETABLE BUILDER (Scheduling, Lessons, Conflicts)
+// ============================================================
+['timetable_periods','timetable_conflicts','lesson_plans','live_classes'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./timetable-builder'); m(app, db, pool, renderPage, esc); console.log('[Timetable] Timetable builder module loaded'); } catch(e) { console.warn('[Timetable] Error:', e.message); }
+
+// ============================================================
+// MODULE: LMS (Learning Management System)
+// ============================================================
+['lms_enrollments','lms_content','lms_assignments','lms_submissions','courses','quiz_questions','quizzes','quiz_attempts'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log('[LMS] Learning management system loaded'); } catch(e) { console.warn('[LMS] Error:', e.message); }
+
+// ============================================================
+// MODULE: ADMISSIONS (Application, Review, Enrollment)
+// ============================================================
+['admission_applications','admission_settings'].forEach(t => VALID_TABLES.add(t));
+try { const m = require('./admissions'); m(app, db, pool, renderPage, esc); console.log('[Admissions] Admissions module loaded'); } catch(e) { console.warn('[Admissions] Error:', e.message); }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
