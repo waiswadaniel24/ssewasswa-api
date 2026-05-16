@@ -2203,6 +2203,7 @@ if ('serviceWorker' in navigator && window.__VAPID_KEY) {
         </div>
       </div>
       <a href="/search">Search</a>
+      <a href="/switch-portal" style="color:#c084fc;font-weight:600" title="Switch Portal Type">&#127760; Portal</a>
       <a href="/settings/profile">Settings</a>
       <a href="/parent/login" style="font-size:12px">Parent</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
@@ -6336,6 +6337,10 @@ app.get('/settings/profile', requireAuth, ah(async (req, res) => {
       <a href="/audit-logs" class="btn btn-sm" style="margin-top:8px">Audit Logs</a>
       <a href="/api-docs" class="btn btn-sm" style="margin-top:8px">API Docs</a>
       <a href="/status" class="btn btn-sm" style="margin-top:8px">Platform Status</a>
+      <hr style="margin:16px 0">
+      <h3>Switch Portal Type</h3>
+      <p class="muted" style="margin-bottom:10px">Currently: <strong style="color:#4f46e5">${esc(tenant.type || 'school')}</strong></p>
+      <a href="/switch-portal" class="btn btn-sm" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white">Switch Portal</a>
     </div>
   `, req.session.user));
 }));
@@ -10561,6 +10566,7 @@ app.get('/settings', requireAuth, ah(async (req, res) => {
     <div class="hero"><h1>Settings</h1><p>Configure your platform</p></div>
     <div class="grid">
       <div class="card"><h3>Profile</h3><p>Change password, email</p><a href="/settings/profile" class="btn btn-sm">Manage</a></div>
+      <div class="card" style="border:2px solid #8b5cf6"><h3>Switch Portal</h3><p>School, Church, Clinic, Business & more</p><a href="/switch-portal" class="btn btn-sm" style="background:#8b5cf6;color:white">Switch Now</a></div>
       <div class="card"><h3>Theme</h3><p>Colors, fonts, CSS</p><a href="/settings/theme" class="btn btn-sm">Customize</a></div>
       <div class="card"><h3>2FA Security</h3><p>Two-factor authentication</p><a href="/settings/2fa" class="btn btn-sm">Configure</a></div>
       <div class="card"><h3>Billing</h3><p>Plans & payments</p><a href="/billing" class="btn btn-sm btn-gold">Manage</a></div>
@@ -24349,6 +24355,75 @@ app.get('/dev/restore-session', requireAuth, requireSuperAdmin, ah(async (req, r
   delete req.session._original_tenant;
   audit(user.email, 'dev_restore_session', 'Restored to ' + orig.name + ' (#' + orig.id + ')');
   req.session.save(() => { res.redirect('/dashboard'); });
+}));
+
+// === USER PORTAL SWITCHER (available to ALL users, not just super_admin) ===
+const USER_PORTAL_TYPES = [
+  { type: 'school', label: 'School', icon: '🏫', color: '#059669', desc: 'Students, fees, exams, attendance, report cards' },
+  { type: 'church', label: 'Church', icon: '⛪', color: '#7c3aed', desc: 'Members, tithes, sermons, events, groups' },
+  { type: 'clinic', label: 'Clinic', icon: '🏥', color: '#0891b2', desc: 'Patients, prescriptions, lab, appointments, billing' },
+  { type: 'business', label: 'Business', icon: '🏢', color: '#475569', desc: 'CRM, invoices, payroll, expenses, inventory' },
+  { type: 'hotel', label: 'Hotel & Lodge', icon: '🏨', color: '#dc2626', desc: 'Rooms, reservations, check-in, housekeeping' },
+  { type: 'restaurant', label: 'Restaurant', icon: '🍽️', color: '#ea580c', desc: 'Menu, orders, tables, kitchen, delivery' },
+  { type: 'retail', label: 'Retail Shop', icon: '🛍️', color: '#e11d48', desc: 'POS, inventory, barcode, purchases, loyalty' },
+  { type: 'salon', label: 'Salon & Spa', icon: '💇', color: '#db2777', desc: 'Appointments, services, staff, commissions' },
+  { type: 'pharmacy', label: 'Pharmacy', icon: '💊', color: '#2563eb', desc: 'Drug inventory, prescriptions, expiry alerts' },
+  { type: 'gym', label: 'Gym & Fitness', icon: '🏋️', color: '#16a34a', desc: 'Memberships, check-ins, classes, training' },
+  { type: 'hardware', label: 'Hardware Store', icon: '🔧', color: '#ca8a04', desc: 'Products, quotations, stock, suppliers' },
+  { type: 'supermarket', label: 'Supermarket', icon: '🛒', color: '#0d9488', desc: 'POS, perishables, bulk pricing, daily sales' },
+  { type: 'transport', label: 'Transport', icon: '🚗', color: '#4f46e5', desc: 'Fleet, bookings, routes, drivers, maintenance' },
+  { type: 'electronics', label: 'Electronics Shop', icon: '📱', color: '#6366f1', desc: 'Products, repairs, warranties, IMEI tracking' },
+  { type: 'individual', label: 'Individual', icon: '👤', color: '#8b5cf6', desc: 'Personal notes, goals, finance, tasks' }
+];
+
+app.get('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const user = req.session.user;
+  const currentType = user.tenant_type || 'school';
+  const csrfVal = req.csrfToken || req.session?.csrfToken || '';
+  const cards = USER_PORTAL_TYPES.map(p => {
+    const isActive = currentType === p.type;
+    return `<form method="POST" action="/switch-portal" style="border:2px solid ${isActive ? '#22c55e' : (dark ? '#334155' : '#e2e8f0')};border-radius:14px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : (dark ? '#1e293b' : '#fff')};margin:0;display:block;transition:all 0.2s" onmouseover="if(!${isActive}){this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(0,0,0,0.12)'}" onmouseout="this.style.transform='';this.style.boxShadow=''">
+      <input type="hidden" name="_csrf" value="${esc(csrfVal)}">
+      <input type="hidden" name="type" value="${esc(p.type)}">
+      <div style="font-size:44px;margin-bottom:8px;pointer-events:none">${p.icon}</div>
+      <h3 style="margin:0 0 4px;pointer-events:none;color:${isActive ? '#16a34a' : (dark ? '#e2e8f0' : '#1e293b')}">${esc(p.label)}</h3>
+      <p style="font-size:12px;color:#64748b;margin:0 0 12px;pointer-events:none">${esc(p.desc)}</p>
+      ${isActive ? '<span style="color:#22c55e;font-weight:700;font-size:14px;pointer-events:none">&#10003; CURRENT PORTAL</span>' : '<button type="submit" class="btn" style="background:' + p.color + ';color:#fff;font-size:13px;pointer-events:none">Switch to ' + esc(p.label) + '</button>'}
+    </form>`;
+  }).join('');
+  res.send(renderPage('Switch Portal', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>Switch Portal</h1>
+      <p style="opacity:0.9;margin-top:4px">Change your organization type. All your data stays — you'll just see different dashboard modules.</p>
+    </div>
+    <div style="background:#fefce8;border:1px solid #facc15;border-radius:10px;padding:14px 18px;margin-bottom:20px;font-size:14px;color:#854d0e">
+      <strong>Current portal:</strong> ${esc(currentType.charAt(0).toUpperCase() + currentType.slice(1))} — Switching will update your dashboard to show modules relevant to the new portal type. Your existing data is preserved.
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px">${cards}</div>
+  `, req.session.user));
+}));
+
+app.post('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const rawType = Array.isArray(req.body.type) ? req.body.type[0] : req.body.type;
+  const newType = String(rawType || '').trim().toLowerCase();
+  if (!USER_PORTAL_TYPES.find(p => p.type === newType)) {
+    return res.status(400).send('Invalid portal type.');
+  }
+  const user = req.session.user;
+  const tid = user.tenant_id;
+  // Update the tenant type in the database
+  await pool.query('UPDATE tenants SET type = $1 WHERE id = $2', [newType, tid]);
+  // Update user role to match new portal type (unless super_admin)
+  if (user.role !== 'super_admin') {
+    await pool.query('UPDATE users SET role = $1 WHERE id = $2', [newType, user.id]);
+  }
+  // Update session
+  req.session.user.tenant_type = newType;
+  if (user.role !== 'super_admin') {
+    req.session.user.role = newType;
+  }
+  await audit(user.email, 'portal_switch', 'Switched portal type from ' + (user.tenant_type || 'unknown') + ' to ' + newType);
+  req.session.save(() => { res.redirect('/portal/' + newType); });
 }));
 
 // === PUBLIC PORTAL ===
