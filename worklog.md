@@ -62,3 +62,29 @@ Stage Summary:
 - Dashboard organized into 4 clear health facility sections with descriptions
 - All routes use parameterized queries, no SQL injection
 - Deployed to Render via git push
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Rename clinic to Health Portal, add universal Sickbay for non-health tenants
+
+Work Log:
+- Analyzed tenant types, portal routing, and navigation structure
+- Added health_institution_type column to tenants table + ALTER TABLE migration
+- Renamed DEV_PORTAL_TYPES 'clinic' → 'health' with label 'Health Portal'
+- Updated registration form: 'Clinic / Hospital' → 'Health Institution (Hospital/Clinic/Pharmacy)'
+- Updated dev nav bar: 'Clinic' → 'Health Portal'
+- Renamed /portal/clinic to /portal/health with institution type badge and settings link
+- Added /portal/clinic → /portal/health redirect for backward compatibility
+- Created /health/settings page with 18 institution types (General Hospital, Referral Hospital, HC I/II/III/IV, Clinic, Drugshop, Pharmacy, Dental, Eye, Mental Health, Physiotherapy, Lab, Imaging, Maternity, Veterinary, Specialized)
+- Created universal /sickbay module with 12 routes (dashboard, visits, units management)
+- Created sickbay_units and sickbay_visits DB tables with indexes
+- Updated school portal Health card to use universal /sickbay
+- Migrated tenant #309 from type=clinic to type=health in production DB
+- Pushed commit da3374f
+
+Stage Summary:
+- Health Portal replaces Clinic Portal with 18 institution types
+- Non-health tenants (schools, hotels, churches, businesses) now have universal /sickbay
+- Health institutions can specialize as Hospital, Clinic, Pharmacy, Drugshop, etc.
+- All backward compatible (old /portal/clinic redirects to /portal/health)
