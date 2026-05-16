@@ -6201,7 +6201,7 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
       </div>
       <div style="margin-top:20px"><button class="btn btn-green" style="width:100%;max-width:400px">Save Institution Type</button></div>
     </form>
-  `, req.session.user));
+  `, req.session.user, req));
 }));
 
 app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -6255,7 +6255,7 @@ app.get('/business/settings', requireAuth, requireNotBanned, ah(async (req, res)
       </div>
       <div style="margin-top:20px"><button class="btn btn-green" style="width:100%;max-width:400px">Save Business Type</button></div>
     </form>
-  `, req.session.user));
+  `, req.session.user, req));
 }));
 
 app.post('/business/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
