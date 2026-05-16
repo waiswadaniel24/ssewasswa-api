@@ -7,6 +7,11 @@
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
+  <url>
+    <loc>https://ssewasswa.github.io/ssewasswa-api/sitemap.xml</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>
 
   <!-- Platform Feature Pages (served by Comfort Zone on Render) -->
   <url>
