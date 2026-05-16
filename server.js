@@ -6208,7 +6208,7 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
 app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { health_institution_type } = req.body;
-  await pool.query('UPDATE tenants SET health_institution_type=$1 WHERE id=$2', [health_institution_type || 'general_hospital', t]);
+  await pool.query('UPDATE tenants SET health_institution_type=$1 WHERE id=$2', [hhealth_institution_type || 'general_hospital', t]);
   await audit(req.session.user.email, 'update_health_type', health_institution_type);
   res.redirect('/portal/health');
 }));

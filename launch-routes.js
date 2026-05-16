@@ -206,12 +206,78 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   // =========================================================================
 
   // =========================================================================
-  // SECTION 3: WEB SCRAPING ENGINE
+  // SECTION 3: ENHANCED WEB SCRAPING ENGINE (RSS + HTML + YouTube)
   // =========================================================================
+
+  const Parser = require('rss-parser');
+  const rssParser = new Parser({
+    timeout: 15000,
+    headers: { 'User-Agent': 'ComfortBot/2.0 (compatible; +https://ssewasswa.onrender.com)' },
+    customFields: { item: ['media:content', 'media:thumbnail', 'enclosure'] }
+  });
 
   const SCRAPE_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
   let lastScrapeTime = null;
   let scrapeInProgress = false;
+  let scrapeStats = { totalSources: 0, successSources: 0, failedSources: 0, totalItems: 0, lastRun: null };
+
+  // RSS feed sources organized by category
+  const RSS_FEEDS = {
+    news: [
+      { url: 'https://www.newvision.co.ug/rss.xml', source: 'New Vision', maxItems: 15 },
+      { url: 'https://www.monitor.co.ug/uganda/rss.xml', source: 'Daily Monitor', maxItems: 15 },
+      { url: 'https://www.independent.co.ug/feed/', source: 'The Independent', maxItems: 10 },
+      { url: 'https://chimpreports.com/feed/', source: 'Chimp Reports', maxItems: 10 },
+      { url: 'https://eagle.co.ug/feed/', source: 'The Eagle Online', maxItems: 8 },
+      { url: 'https://pmlive.co.ug/feed/', source: 'PMLive', maxItems: 8 },
+      { url: 'https://www.bbc.com/news/world/africa/rss.xml', source: 'BBC Africa', maxItems: 10 },
+      { url: 'https://www.aljazeera.com/xml/rss/all.xml', source: 'Al Jazeera', maxItems: 8 },
+      { url: 'https://rss.nytimes.com/services/xml/rss/nyt/Africa.xml', source: 'NYT Africa', maxItems: 5 },
+      { url: 'https://www.reuters.com/world/africa/rss', source: 'Reuters Africa', maxItems: 8 },
+      { url: 'https://www.theguardian.com/world/africa/rss', source: 'The Guardian Africa', maxItems: 8 },
+    ],
+    sports: [
+      { url: 'https://www.newvision.co.ug/sports/rss.xml', source: 'New Vision Sports', maxItems: 10 },
+      { url: 'https://www.monitor.co.ug/sports/rss.xml', source: 'Monitor Sports', maxItems: 10 },
+      { url: 'https://www.bbc.com/sport/africa/rss.xml', source: 'BBC Sport Africa', maxItems: 8 },
+      { url: 'https://espn.com/espn/rss/news', source: 'ESPN', maxItems: 5 },
+    ],
+    entertainment: [
+      { url: 'https://www.boredpanda.com/feed/', source: 'Bored Panda', maxItems: 8 },
+      { url: 'https://www.bbc.com/news/entertainment_and_arts/rss.xml', source: 'BBC Entertainment', maxItems: 5 },
+    ],
+    technology: [
+      { url: 'https://techcrunch.com/feed/', source: 'TechCrunch', maxItems: 8 },
+      { url: 'https://www.theverge.com/rss/index.xml', source: 'The Verge', maxItems: 8 },
+      { url: 'https://feeds.arstechnica.com/arstechnica/technology-lab', source: 'Ars Technica', maxItems: 5 },
+      { url: 'https://www.wired.com/feed/rss', source: 'Wired', maxItems: 5 },
+    ],
+    business: [
+      { url: 'https://www.monitor.co.ug/uganda/business/rss.xml', source: 'Monitor Business', maxItems: 10 },
+      { url: 'https://www.newvision.co.ug/business/rss.xml', source: 'New Vision Business', maxItems: 10 },
+      { url: 'https://www.bbc.com/news/business/rss.xml', source: 'BBC Business', maxItems: 5 },
+      { url: 'https://feeds.reuters.com/reuters/businessNews', source: 'Reuters Business', maxItems: 5 },
+    ],
+    education: [
+      { url: 'https://www.newvision.co.ug/education/rss.xml', source: 'New Vision Education', maxItems: 10 },
+      { url: 'https://www.monitor.co.ug/uganda/education/rss.xml', source: 'Monitor Education', maxItems: 10 },
+    ],
+    health: [
+      { url: 'https://www.newvision.co.ug/health/rss.xml', source: 'New Vision Health', maxItems: 10 },
+      { url: 'https://www.bbc.com/news/health/rss.xml', source: 'BBC Health', maxItems: 5 },
+      { url: 'https://www.who.int/rss-feeds/news-articles/rss.xml', source: 'WHO News', maxItems: 5 },
+    ],
+  };
+
+  // YouTube search queries
+  const YOUTUBE_QUERIES = [
+    { query: 'Uganda music 2025', category: 'entertainment', label: 'YouTube Music' },
+    { query: 'Uganda comedy 2025', category: 'entertainment', label: 'YouTube Comedy' },
+    { query: 'Uganda news today', category: 'news', label: 'YouTube News' },
+    { query: 'Uganda sports highlights', category: 'sports', label: 'YouTube Sports' },
+    { query: 'Uganda gospel music', category: 'entertainment', label: 'YouTube Gospel' },
+    { query: 'Uganda movies 2025', category: 'entertainment', label: 'YouTube Movies' },
+  ];
 
   const FALLBACK_DATA = {
     news: [
@@ -241,115 +307,181 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     ],
   };
 
-  async function scrapeSite(url, label) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      const resp = await fetch(url, {
-        signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Comfort-Bot/1.0)' }
-      });
-      clearTimeout(timeout);
-      if (!resp.ok) return [];
-      const html = await resp.text();
-      const items = [];
-      // Extract titles from HTML
-      const titleRegex = /<title[^>]*>([^<]+)<\/title>/i;
-      const headingRegex = /<h[1-3][^>]*>([^<]+)<\/h[1-3]>/gi;
-      const linkRegex = /<a[^>]+href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
+  // Extract first image from RSS item
+  function extractImage(item) {
+    const mc = item['media:content'] || item['media:thumbnail'];
+    if (mc) {
+      if (Array.isArray(mc) && mc[0] && mc[0].$.url) return mc[0].$.url;
+      if (mc && mc.$ && mc.$.url) return mc.$.url;
+    }
+    if (item.enclosure && item.enclosure.url && item.enclosure.type && item.enclosure.type.startsWith('image')) {
+      return item.enclosure.url;
+    }
+    if (item.content) {
+      const imgMatch = item.content.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (imgMatch) return imgMatch[1];
+    }
+    if (item['content:encoded']) {
+      const imgMatch = item['content:encoded'].match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (imgMatch) return imgMatch[1];
+    }
+    return '';
+  }
 
-      let match;
-      while ((match = headingRegex.exec(html)) !== null) {
-        const text = match[1].trim().replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-        if (text.length > 10 && text.length < 200) {
-          items.push({ title: text, url: url, source: label, category: 'news' });
-        }
-        if (items.length >= 10) break;
+  // Clean HTML from text
+  function stripHTML(html) {
+    if (!html) return '';
+    return html.replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'").replace(/\s+/g, ' ').trim();
+  }
+
+  // Scrape a single RSS feed
+  async function scrapeRSSFeed(feedConfig, category) {
+    try {
+      const result = await rssParser.parseURL(feedConfig.url);
+      const items = [];
+      const max = feedConfig.maxItems || 10;
+      for (const entry of (result.items || []).slice(0, max)) {
+        items.push({
+          title: stripHTML(entry.title || '').substring(0, 300),
+          url: entry.link || entry.guid || '',
+          source: feedConfig.source,
+          category: category,
+          image_url: extractImage(entry),
+          summary: stripHTML(entry.contentSnippet || entry.summary || '').substring(0, 500),
+          pub_date: entry.pubDate || entry.isoDate || null,
+        });
       }
       return items;
     } catch (e) {
-      console.warn(`[Scrape] ${label} failed:`, e.message);
+      console.warn('[Scrape-RSS] ' + feedConfig.source + ' (' + feedConfig.url + ') failed:', e.message);
       return [];
     }
   }
 
-  async function scrapeYouTube(query, category) {
+  // Scrape YouTube via HTML (fallback when no RSS available)
+  async function scrapeYouTubeEnhanced(query, category, label) {
     try {
-      const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+      const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
       const resp = await fetch(url, {
         signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Comfort-Bot/1.0)' }
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ComfortBot/2.0)' }
       });
       clearTimeout(timeout);
       if (!resp.ok) return [];
       const html = await resp.text();
       const items = [];
-      // Extract video titles from YouTube search results
-      const titleRegex = /"title":{"runs":\[{"text":"([^"]+)"\}/g;
+      const titleRegex = /"title":\{"runs":\[{"text":"([^"]+)"}/g;
+      const thumbRegex = /"thumbnails":\[{"url":"(https?:[^"]+)"/g;
       let match;
+      let titles = [];
+      let thumbs = [];
       while ((match = titleRegex.exec(html)) !== null) {
-        const text = match[1].trim();
-        if (text.length > 3 && text.length < 200) {
-          items.push({
-            title: text,
-            url: `https://www.youtube.com/results?search_query=${encodeURIComponent(text)}`,
-            source: 'YouTube',
-            category: category
-          });
-        }
-        if (items.length >= 8) break;
+        if (match[1].length > 5 && match[1].length < 200) titles.push(match[1]);
+        if (titles.length >= 8) break;
+      }
+      while ((match = thumbRegex.exec(html)) !== null) {
+        if (match[1].includes('yt3') || match[1].includes('i.ytimg')) thumbs.push(match[1]);
+      }
+      for (let i = 0; i < titles.length; i++) {
+        items.push({
+          title: titles[i],
+          url: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(titles[i]),
+          source: label || 'YouTube',
+          category: category,
+          image_url: thumbs[i] || '',
+          summary: 'Watch: ' + titles[i] + ' on YouTube',
+        });
       }
       return items;
     } catch (e) {
-      console.warn(`[Scrape] YouTube ${query} failed:`, e.message);
+      console.warn('[Scrape] YouTube ' + query + ' failed:', e.message);
       return [];
     }
   }
 
+  // Main scraping orchestration - RSS feeds + YouTube
   async function runFullScrape() {
     if (scrapeInProgress) return;
     scrapeInProgress = true;
-    console.log('[Scrape] Starting full scrape...');
+    console.log('[Scrape] Starting enhanced full scrape with RSS feeds...');
+    scrapeStats = { totalSources: 0, successSources: 0, failedSources: 0, totalItems: 0, lastRun: new Date().toISOString() };
     try {
       let allItems = [];
 
-      // Scrape New Vision
-      const nv = await scrapeSite('https://www.newvision.co.ug', 'New Vision');
-      allItems = allItems.concat(nv.map(i => ({ ...i, category: 'news' })));
-
-      // Scrape Daily Monitor
-      const dm = await scrapeSite('https://www.monitor.co.ug', 'Daily Monitor');
-      allItems = allItems.concat(dm.map(i => ({ ...i, category: 'news' })));
-
-      // Scrape YouTube for entertainment
-      const ytMusic = await scrapeYouTube('Uganda music 2024', 'entertainment');
-      allItems = allItems.concat(ytMusic);
-
-      const ytComedy = await scrapeYouTube('Uganda comedy', 'entertainment');
-      allItems = allItems.concat(ytComedy);
-
-      const ytSports = await scrapeYouTube('Uganda sports', 'sports');
-      allItems = allItems.concat(ytSports);
-
-      // Store scraped content
-      for (const item of allItems) {
-        try {
-          await pool.query(
-            'INSERT INTO scraped_content (title, url, source, category, image_url, summary) VALUES ($1, $2, $3, $4, $5, $6)',
-            [item.title, item.url, item.source, item.category, item.image_url || '', item.summary || '']
-          );
-        } catch (e) { /* skip duplicates */ }
+      // Phase 1: RSS feeds (parallel within each category)
+      for (const [category, feeds] of Object.entries(RSS_FEEDS)) {
+        const feedPromises = feeds.map(async (feed) => {
+          scrapeStats.totalSources++;
+          try {
+            const items = await scrapeRSSFeed(feed, category);
+            if (items.length > 0) {
+              scrapeStats.successSources++;
+              scrapeStats.totalItems += items.length;
+              return items;
+            } else {
+              scrapeStats.failedSources++;
+              return [];
+            }
+          } catch (e) {
+            scrapeStats.failedSources++;
+            return [];
+          }
+        });
+        const results = await Promise.allSettled(feedPromises);
+        for (const r of results) {
+          if (r.status === 'fulfilled') allItems = allItems.concat(r.value);
+        }
       }
 
-      // Clean up old entries (keep last 7 days)
-      await pool.query("DELETE FROM scraped_content WHERE scraped_at < NOW() - INTERVAL '7 days'");
+      // Phase 2: YouTube (sequential to avoid rate limiting)
+      for (const yt of YOUTUBE_QUERIES) {
+        scrapeStats.totalSources++;
+        try {
+          const items = await scrapeYouTubeEnhanced(yt.query, yt.category, yt.label);
+          if (items.length > 0) {
+            scrapeStats.successSources++;
+            scrapeStats.totalItems += items.length;
+            allItems = allItems.concat(items);
+          } else {
+            scrapeStats.failedSources++;
+          }
+        } catch (e) {
+          scrapeStats.failedSources++;
+        }
+      }
+
+      // Store scraped content with deduplication
+      let stored = 0;
+      for (const item of allItems) {
+        try {
+          const existing = await pool.query(
+            'SELECT id FROM scraped_content WHERE title = $1 AND source = $2 AND category = $3',
+            [item.title, item.source, item.category]
+          );
+          if (existing.rows.length > 0) {
+            await pool.query(
+              'UPDATE scraped_content SET url = $1, image_url = $2, summary = $3, scraped_at = NOW() WHERE id = $4',
+              [item.url, item.image_url || '', item.summary || '', existing.rows[0].id]
+            );
+          } else {
+            await pool.query(
+              'INSERT INTO scraped_content (title, url, source, category, image_url, summary) VALUES ($1, $2, $3, $4, $5, $6)',
+              [item.title, item.url, item.source, item.category, item.image_url || '', item.summary || '']
+            );
+            stored++;
+          }
+        } catch (e) { /* skip errors */ }
+      }
+
+      // Clean up old entries (keep last 14 days for more content)
+      await pool.query("DELETE FROM scraped_content WHERE scraped_at < NOW() - INTERVAL '14 days'");
 
       lastScrapeTime = new Date();
-      console.log(`[Scrape] Complete. Stored ${allItems.length} items.`);
+      console.log('[Scrape] Complete! Sources: ' + scrapeStats.successSources + '/' + scrapeStats.totalSources + ' ok. New: ' + stored + ', Total: ' + scrapeStats.totalItems + '.');
     } catch (e) {
-      console.error('[Scrape] Error:', e.message);
+      console.error('[Scrape] Fatal error:', e.message);
     } finally {
       scrapeInProgress = false;
     }
@@ -373,6 +505,21 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       if (result.rows.length > 0) return result.rows;
     } catch (e) { /* fall through */ }
     return FALLBACK_DATA[category] || [];
+  }
+
+  // Get all scraped content across categories (for news hub)
+  async function getAllScrapedContent(limitPerCategory = 10) {
+    const categories = ['news', 'sports', 'entertainment', 'technology', 'business', 'education', 'health'];
+    const allContent = {};
+    for (const cat of categories) {
+      allContent[cat] = await getScrapedContent(cat, limitPerCategory);
+    }
+    return allContent;
+  }
+
+  // Get scrape statistics
+  function getScrapeStats() {
+    return scrapeStats;
   }
 
   async function getPublicPosts(category, limit = 20) {
@@ -463,7 +610,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ${allNews.length > 0 ? `
       <div style="background:#1e293b;color:white;overflow:hidden;padding:10px 0;font-size:14px">
         <div style="display:flex;align-items:center">
-          <span style="background:#ef4444;color:white;padding:4px 14px;font-weight:700;font-size:12px;margin-right:12px;white-space:nowrap">BREAKING</span>
+          <span style="background:#ef4444;color:white;padding:4px 14px;font-weight:700;font-size:12px;margin-right:12px;white-space:nowrap"><a href="/news" style="color:white;text-decoration:none">NEWS</a></span>
           <marquee behavior="scroll" direction="left" scrollamount="4">${newsTickerHTML}</marquee>
         </div>
       </div>
@@ -1226,6 +1373,161 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   }));
 
   // =========================================================================
+  // SECTION 6.4: PUBLIC NEWS HUB - SEO-optimized content aggregation page
+  // =========================================================================
+
+  app.get('/news', ah(async (req, res) => {
+    const allContent = await getAllScrapedContent(12);
+    const publicNews = await getPublicPosts('news', 5);
+    const adverts = await getActiveAdverts();
+    const stats = getScrapeStats();
+
+    // Category configuration
+    const categories = [
+      { key: 'news', label: 'News Headlines', emoji: '128240', color: '#0891b2', gradient: 'linear-gradient(135deg,#0891b2,#06b6d4)' },
+      { key: 'sports', label: 'Sports', emoji: '9917', color: '#059669', gradient: 'linear-gradient(135deg,#059669,#10b981)' },
+      { key: 'entertainment', label: 'Entertainment', emoji: '127916', color: '#7c3aed', gradient: 'linear-gradient(135deg,#7c3aed,#a855f7)' },
+      { key: 'technology', label: 'Technology', emoji: '128187', color: '#2563eb', gradient: 'linear-gradient(135deg,#2563eb,#3b82f6)' },
+      { key: 'business', label: 'Business & Finance', emoji: '128200', color: '#d97706', gradient: 'linear-gradient(135deg,#d97706,#f59e0b)' },
+      { key: 'education', label: 'Education', emoji: '127891', color: '#4f46e5', gradient: 'linear-gradient(135deg,#4f46e5,#6366f1)' },
+      { key: 'health', label: 'Health', emoji: '129657', color: '#dc2626', gradient: 'linear-gradient(135deg,#dc2626,#ef4444)' },
+    ];
+
+    // Count total items
+    let totalItems = 0;
+    for (const cat of Object.values(allContent)) totalItems += cat.length;
+
+    // Build category tabs
+    const categoryTabs = categories.map((cat, idx) => {
+      const count = (allContent[cat.key] || []).length;
+      return '<button onclick="showCategory(\'' + cat.key + '\')" id="tab-' + cat.key + '" style="padding:10px 20px;border:none;border-radius:10px 10px 0 0;font-weight:600;font-size:14px;cursor:pointer;transition:all 0.2s;' + (idx === 0 ? 'background:white;color:' + cat.color + ';box-shadow:0 -2px 8px rgba(0,0,0,0.08)' : 'background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.8)') + '">' + String.fromCodePoint(parseInt(cat.emoji)) + ' ' + cat.label + ' (' + count + ')</button>';
+    }).join('');
+
+    // Build content sections for each category
+    const categorySections = categories.map((cat, idx) => {
+      const items = allContent[cat.key] || [];
+      const cards = items.map(item => {
+        const date = item.scraped_at ? new Date(item.scraped_at).toLocaleDateString('en-UG', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+        const excerpt = (item.summary || '').substring(0, 150) + ((item.summary || '').length > 150 ? '...' : '');
+        const imgHTML = item.image_url ? '<img src="' + esc(item.image_url) + '" alt="' + esc(item.title) + '" style="width:100%;height:180px;object-fit:cover" loading="lazy" onerror="this.style.display=\'none\'">' : '<div style="width:100%;height:120px;background:' + cat.gradient + ';display:flex;align-items:center;justify-content:center;color:white;font-size:32px;opacity:0.6">' + String.fromCodePoint(parseInt(cat.emoji)) + '</div>';
+        return '<div style="background:white;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0;transition:transform 0.2s,box-shadow 0.2s;cursor:pointer" onmouseover="this.style.transform=\'translateY(-3px)\';this.style.boxShadow=\'0 8px 24px rgba(0,0,0,0.12)\'" onmouseout="this.style.transform=\'translateY(0)\';this.style.boxShadow=\'0 2px 12px rgba(0,0,0,0.06)\'">' +
+          imgHTML +
+          '<div style="padding:16px 18px">' +
+            '<h3 style="font-size:16px;font-weight:700;color:#1e293b;line-height:1.4;margin:0 0 8px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">' + esc(item.title) + '</h3>' +
+            (excerpt ? '<p style="font-size:13px;color:#64748b;line-height:1.6;margin:0 0 10px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">' + esc(excerpt) + '</p>' : '') +
+            '<div style="display:flex;justify-content:space-between;align-items:center">' +
+              '<div style="display:flex;align-items:center;gap:8px">' +
+                '<span style="font-size:11px;color:' + cat.color + ';font-weight:700;background:' + cat.color + '15;padding:3px 8px;border-radius:6px">' + esc(item.source || 'Comfort') + '</span>' +
+                (date ? '<span style="font-size:11px;color:#94a3b8">' + date + '</span>' : '') +
+              '</div>' +
+              (item.url ? '<a href="' + esc(item.url) + '" target="_blank" rel="noopener" style="color:' + cat.color + ';font-weight:700;font-size:12px;text-decoration:none">Read &rarr;</a>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      return '<div id="section-' + cat.key + '" style="display:' + (idx === 0 ? 'block' : 'none') + '">' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px">' + (cards || '<p style="color:#94a3b8;grid-column:1/-1;text-align:center;padding:40px">No content available yet. Check back soon!</p>') + '</div>' +
+      '</div>';
+    }).join('');
+
+    // Build sidebar
+    const sidebarNews = (allContent.news || []).slice(0, 8).map(n => {
+      const date = n.scraped_at ? new Date(n.scraped_at).toLocaleDateString('en-UG', { month: 'short', day: 'numeric' }) : '';
+      return '<a href="' + esc(n.url || '#') + '" target="_blank" rel="noopener" style="display:block;padding:10px 0;border-bottom:1px solid #f1f5f9;text-decoration:none;color:inherit">' +
+        '<div style="font-size:13px;font-weight:600;color:#1e293b;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">' + esc(n.title) + '</div>' +
+        '<div style="font-size:11px;color:#94a3b8;margin-top:3px">' + esc(n.source || '') + (date ? ' &bull; ' + date : '') + '</div>' +
+      '</a>';
+    }).join('');
+
+    // Advert banner
+    const advertBanner = adverts.length > 0 ? '<div style="background:linear-gradient(90deg,#f59e0b,#d97706);padding:14px 20px;border-radius:12px;margin-bottom:20px;text-align:center"><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-bottom:4px">SPONSORED</span><a href="' + esc(adverts[0].link_url || '#') + '" style="color:white;font-weight:700;font-size:15px;text-decoration:underline">' + esc(adverts[0].title) + '</a>' + (adverts[0].content ? ' <span style="color:rgba(255,255,255,0.9);font-size:13px">' + esc(adverts[0].content) + '</span>' : '') + '</div>' : '';
+
+    // Scrape status
+    const statusHTML = stats.lastRun ? '<div style="font-size:11px;color:#94a3b8;margin-top:12px;text-align:center">Last updated: ' + new Date(stats.lastRun).toLocaleString('en-UG') + ' &bull; ' + (stats.totalItems || 0) + ' articles from ' + (stats.successSources || 0) + ' sources</div>' : '';
+
+    const content = '<div style="padding:20px 0">' +
+      advertBanner +
+      // Hero header
+      '<div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0891b2 100%);padding:50px 20px 40px;text-align:center;border-radius:0 0 24px 24px;margin-bottom:32px;position:relative;overflow:hidden">' +
+        '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(circle at 20% 50%,rgba(8,145,178,0.15),transparent 60%)"></div>' +
+        '<div style="position:relative;z-index:2">' +
+          '<div style="font-size:14px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#06b6d4;margin-bottom:10px">Your Daily Source for</div>' +
+          '<h1 style="font-size:clamp(28px,5vw,44px);font-weight:900;color:white;margin-bottom:10px;line-height:1.15">News, Sports, Tech &amp; More</h1>' +
+          '<p style="color:#94a3b8;font-size:16px;margin-bottom:6px">Aggregated from 30+ sources across Africa and the world</p>' +
+          '<div style="display:flex;gap:12px;justify-content:center;margin-top:16px;flex-wrap:wrap">' +
+            '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.1);padding:6px 14px;border-radius:20px;font-size:13px;color:#cbd5e1">' + String.fromCodePoint(128240) + ' ' + totalItems + '+ Articles</span>' +
+            '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.1);padding:6px 14px;border-radius:20px;font-size:13px;color:#cbd5e1">' + String.fromCodePoint(127760) + ' ' + categories.length + ' Categories</span>' +
+            '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.1);padding:6px 14px;border-radius:20px;font-size:13px;color:#cbd5e1">' + String.fromCodePoint(128337) + ' 30+ Sources</span>' +
+            '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.1);padding:6px 14px;border-radius:20px;font-size:13px;color:#cbd5e1">' + String.fromCodePoint(128339) + ' Updated Every 6h</span>' +
+          '</div>' +
+          statusHTML +
+        '</div>' +
+      '</div>' +
+      // Main layout
+      '<div style="display:grid;grid-template-columns:1fr 340px;gap:28px;align-items:start">' +
+        '<div>' +
+          // Category tabs
+          '<div style="display:flex;gap:4px;margin-bottom:0;flex-wrap:wrap;background:#1e293b;padding:6px 6px 0;border-radius:14px 14px 0 0">' + categoryTabs + '</div>' +
+          // Content area with white background
+          '<div style="background:#f8fafc;padding:24px;border-radius:0 14px 14px 14px;min-height:400px;border:1px solid #e2e8f0;border-top:none">' + categorySections + '</div>' +
+        '</div>' +
+        // Sidebar
+        '<div>' +
+          // Trending now
+          '<div style="background:white;border-radius:16px;padding:20px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0;margin-bottom:20px">' +
+            '<h3 style="font-size:16px;font-weight:700;margin-bottom:12px;color:#1e293b;display:flex;align-items:center;gap:6px">' + String.fromCodePoint(128293) + ' Trending Now</h3>' +
+            (sidebarNews || '<p style="color:#94a3b8;font-size:13px">Loading latest news...</p>') +
+          '</div>' +
+          // Share on WhatsApp
+          '<div style="background:linear-gradient(135deg,#25D366,#128C7E);border-radius:16px;padding:20px;text-align:center;margin-bottom:20px">' +
+            '<div style="color:white;font-weight:700;margin-bottom:8px;font-size:15px">' + String.fromCodePoint(128172) + ' Share with Friends</div>' +
+            '<a href="https://api.whatsapp.com/send?text=' + encodeURIComponent('Check out Comfort News - Latest Uganda & Africa news, sports, tech and more! ' + BASE_URL + '/news') + '" target="_blank" rel="noopener" style="display:inline-block;padding:10px 24px;background:white;color:#25D366;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Share on WhatsApp</a>' +
+          '</div>' +
+          // Join CTA
+          '<div style="background:linear-gradient(135deg,#059669,#0891b2);border-radius:16px;padding:20px;text-align:center;color:white">' +
+            '<h3 style="font-size:16px;font-weight:700;margin-bottom:6px">' + String.fromCodePoint(127775) + ' Join Comfort Platform</h3>' +
+            '<p style="font-size:13px;opacity:0.9;margin-bottom:14px">Manage your school, church, clinic or business all in one place.</p>' +
+            '<a href="/register" style="display:inline-block;padding:10px 24px;background:white;color:#059669;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Sign Up Free</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      // Mobile responsive
+      '<style>' +
+        '@media(max-width:900px){div[style*="grid-template-columns:1fr 340px"]{grid-template-columns:1fr!important}}' +
+        '@media(max-width:600px){#category-tabs button{padding:8px 12px!important;font-size:12px!important}}' +
+      '</style>' +
+      // Category switching script
+      '<script>' +
+        'function showCategory(cat){' +
+          'var sections=document.querySelectorAll("[id^=section-]");' +
+          'var tabs=document.querySelectorAll("[id^=tab-]");' +
+          'sections.forEach(function(s){s.style.display="none"});' +
+          'tabs.forEach(function(t){t.style.background="rgba(255,255,255,0.1)";t.style.color="rgba(255,255,255,0.8)";t.style.boxShadow="none"});' +
+          'var sec=document.getElementById("section-"+cat);' +
+          'var tab=document.getElementById("tab-"+cat);' +
+          'if(sec)sec.style.display="block";' +
+          'if(tab){tab.style.background="white";tab.style.color="#1e293b";tab.style.boxShadow="0 -2px 8px rgba(0,0,0,0.08)"}' +
+        '}' +
+      '</script>' +
+      // SEO structured data
+      '<script type="application/ld+json">' +
+        JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'NewsMediaOrganization',
+          'name': 'Comfort News Hub',
+          'url': BASE_URL + '/news',
+          'logo': BASE_URL + '/icon.png',
+          'description': 'Aggregated news, sports, technology, business and entertainment from Uganda and Africa',
+          'address': { '@type': 'PostalAddress', 'addressLocality': 'Kampala', 'addressCountry': 'UG' }
+        }) +
+      '</script>' +
+    '</div>';
+
+    res.send(renderPage('News Hub - Uganda & Africa News, Sports, Tech | Comfort', content, req.session.user || null, '/news'));
+  }));
+
+  // =========================================================================
   // SECTION 6.5: BLOG & NEWS SECTION
   // =========================================================================
 
@@ -1826,6 +2128,69 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       res.json({ ok: true, entertainment: [...pubEnt.map(p => ({ ...p, source: 'Comfort' })), ...dbEnt] });
     } catch (e) {
       res.json({ ok: true, entertainment: FALLBACK_DATA.entertainment || [] });
+    }
+  }));
+
+  // New category API endpoints
+  app.get('/api/public/sports', ah(async (req, res) => {
+    try {
+      const data = await getScrapedContent('sports', 30);
+      res.json({ ok: true, sports: data.length > 0 ? data : FALLBACK_DATA.sports || [] });
+    } catch (e) {
+      res.json({ ok: true, sports: FALLBACK_DATA.sports || [] });
+    }
+  }));
+
+  app.get('/api/public/technology', ah(async (req, res) => {
+    try {
+      const data = await getScrapedContent('technology', 30);
+      res.json({ ok: true, technology: data.length > 0 ? data : FALLBACK_DATA.technology || [] });
+    } catch (e) {
+      res.json({ ok: true, technology: FALLBACK_DATA.technology || [] });
+    }
+  }));
+
+  app.get('/api/public/business-news', ah(async (req, res) => {
+    try {
+      const data = await getScrapedContent('business', 30);
+      res.json({ ok: true, business: data.length > 0 ? data : FALLBACK_DATA.business || [] });
+    } catch (e) {
+      res.json({ ok: true, business: FALLBACK_DATA.business || [] });
+    }
+  }));
+
+  app.get('/api/public/education-news', ah(async (req, res) => {
+    try {
+      const data = await getScrapedContent('education', 30);
+      res.json({ ok: true, education: data.length > 0 ? data : FALLBACK_DATA.education || [] });
+    } catch (e) {
+      res.json({ ok: true, education: FALLBACK_DATA.education || [] });
+    }
+  }));
+
+  app.get('/api/public/health-news', ah(async (req, res) => {
+    try {
+      const data = await getScrapedContent('health', 30);
+      res.json({ ok: true, health: data.length > 0 ? data : FALLBACK_DATA.health || [] });
+    } catch (e) {
+      res.json({ ok: true, health: FALLBACK_DATA.health || [] });
+    }
+  }));
+
+  // Scrape status endpoint (for super admin dashboard)
+  app.get('/api/public/scrape-status', ah(async (req, res) => {
+    try {
+      const stats = getScrapeStats();
+      const counts = {};
+      const cats = ['news', 'sports', 'entertainment', 'technology', 'business', 'education', 'health'];
+      for (const cat of cats) {
+        const r = await pool.query('SELECT COUNT(*) as cnt FROM scraped_content WHERE category = $1', [cat]);
+        counts[cat] = parseInt(r.rows[0].cnt);
+      }
+      const totalR = await pool.query('SELECT COUNT(*) as cnt FROM scraped_content');
+      res.json({ ok: true, stats, counts, totalItems: parseInt(totalR.rows[0].cnt), lastScrape: lastScrapeTime, sourceCount: Object.values(RSS_FEEDS).flat().length + YOUTUBE_QUERIES.length });
+    } catch (e) {
+      res.json({ ok: false, error: e.message });
     }
   }));
 
