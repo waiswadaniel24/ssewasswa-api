@@ -28255,6 +28255,11 @@ try { const m = require('./volunteer-manager'); m(app, db, pool, renderPage, esc
 try { const m = require('./dev-team-manager'); m(app, db, pool, renderPage, esc); console.log('[DevTeam] Dev team manager loaded'); } catch(e) { console.warn('[DevTeam] Error:', e.message); }
 
 // ============================================================
+// NEW MODULE: STAFF & ACCESS CONTROL (RBAC for Subscribers)
+// ============================================================
+try { const m = require('./staff-access-control'); m(app, db, pool, renderPage, esc); console.log('[StaffAccess] Staff & access control loaded'); } catch(e) { console.warn('[StaffAccess] Error:', e.message); }
+
+// ============================================================
 // MODULE: TITHES & OFFERINGS (Church Giving Management)
 // ============================================================
 try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
@@ -28316,6 +28321,8 @@ try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log
 ['volunteers','volunteer_events','volunteer_assignments'].forEach(t => VALID_TABLES.add(t));
 // === TABLE ALLOWLIST: Dev Team Manager ===
 ['dev_team_members','dev_tasks','dev_activity_log','dev_sprints'].forEach(t => VALID_TABLES.add(t));
+// === TABLE ALLOWLIST: Staff & Access Control ===
+['staff_positions','staff_audit_log'].forEach(t => VALID_TABLES.add(t));
 
 try { const m = require('./admissions'); m(app, db, pool, renderPage, esc); console.log('[Admissions] Admissions module loaded'); } catch(e) { console.warn('[Admissions] Error:', e.message); }
 
