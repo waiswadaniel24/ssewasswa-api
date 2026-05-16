@@ -6058,6 +6058,308 @@ app.get('/clinic/departments', requireAuth, requireNotBanned, ah(async (req, res
   `, req.session.user));
 }));
 
+// === CLINIC: SICKBAYS / SUB-CLINICS ===
+app.get('/clinic/sickbays', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sickbays = (await pool.query('SELECT sb.*, (SELECT COUNT(*) FROM clinic_sickbay_visits sv WHERE sv.sickbay_id=sb.id AND sv.visit_date=CURRENT_DATE AND sv.status=$2) as today_visits FROM clinic_sickbays sb WHERE sb.tenant_id=$1 ORDER BY sb.name', [t, 'active'])).rows;
+  const typeLabels = { general:'General Sickbay', maternity:'Maternity Unit', pediatric:'Pediatric Bay', emergency:'Emergency Bay', dental:'Dental Unit', eye:'Eye Clinic', vct:'VCT Corner', mental_health:'Mental Health Unit', physiotherapy:'Physiotherapy Bay', pharmacy:'Pharmacy Post', lab:'Lab Collection Point', outreach:'Outreach Post', first_aid:'First Aid Post', isolation:'Isolation Ward', icu:'ICU/HDU', antenatal:'Antenatal Clinic', art:'ART Clinic', tb:'TB Clinic', vaccination:'Vaccination Post', nutrition:'Nutrition Unit' };
+  const typeColors = { general:'#3b82f6', maternity:'#ec4899', pediatric:'#f97316', emergency:'#dc2626', dental:'#eab308', eye:'#14b8a6', vct:'#ef4444', mental_health:'#a855f7', physiotherapy:'#0ea5e9', pharmacy:'#22c55e', lab:'#06b6d4', outreach:'#8b5cf6', first_aid:'#f59e0b', isolation:'#64748b', icu:'#991b1b', antenatal:'#f472b6', art:'#b91c1c', tb:'#78350f', vaccination:'#10b981', nutrition:'#84cc16' };
+  const typeIcons = { general:'🏥', maternity:'👶', pediatric:'🧒', emergency:'🚨', dental:'🦷', eye:'👁️', vct:'🩸', mental_health:'🧠', physiotherapy:'🏃', pharmacy:'💊', lab:'🔬', outreach:'🚗', first_aid:'🩹', isolation:'⚠️', icu:'💓', antenatal:'🤰', art:'💉', tb:'🫁', vaccination:'💉', nutrition:'🥗' };
+  res.send(renderPage('Sickbays & Sub-Clinics', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:white"><h1>Sickbays & Sub-Clinics</h1><p>Manage satellite clinics, sickbays, and specialized care units across different settings</p></div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/clinic/sickbays/new" class="btn btn-green">+ Add Sickbay / Sub-Clinic</a>
+      <a href="/clinic/sickbays/visits" class="btn" style="background:#8b5cf6;color:white">All Visit Records</a>
+      <a href="/clinic" class="btn btn-sm">&larr; Back to Clinic</a>
+    </div>
+    <div class="stats">
+      <div class="stat-card" style="border-left:4px solid #7c3aed"><div class="stat-num" style="color:#7c3aed">${sickbays.filter(s=>s.is_active).length}</div><div>Active Sickbays</div></div>
+      <div class="stat-card" style="border-left:4px solid #22c55e"><div class="stat-num" style="color:#22c55e">${sickbays.reduce((a,s)=>a+parseInt(s.today_visits||0),0)}</div><div>Total Visits Today</div></div>
+      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num" style="color:#3b82f6">${sickbays.reduce((a,s)=>a+parseInt(s.capacity||0),0)}</div><div>Total Capacity</div></div>
+      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num" style="color:#f59e0b">${new Set(sickbays.map(s=>s.sickbay_type)).size}</div><div>Unit Types</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">
+      ${sickbays.length > 0 ? sickbays.map(sb => `
+        <div class="card" style="border-top:4px solid ${typeColors[sb.sickbay_type]||'#6b7280'}">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px">
+            <div>
+              <span style="font-size:24px">${typeIcons[sb.sickbay_type]||'🏥'}</span>
+              <h3 style="margin:4px 0">${esc(sb.name)}</h3>
+              <span class="tag" style="background:${typeColors[sb.sickbay_type]||'#6b7280'};color:white">${typeLabels[sb.sickbay_type]||sb.sickbay_type}</span>
+            </div>
+            <span style="font-size:12px;padding:3px 8px;border-radius:12px;background:${sb.is_active?'#dcfce7':'#fef2f2'};color:${sb.is_active?'#166534':'#991b1b'}">${sb.is_active?'Active':'Inactive'}</span>
+          </div>
+          ${sb.location ? `<p class="muted" style="font-size:13px;margin-bottom:6px">📍 ${esc(sb.location)}</p>` : ''}
+          ${sb.in_charge ? `<p class="muted" style="font-size:13px">👤 In Charge: ${esc(sb.in_charge)}</p>` : ''}
+          ${sb.operating_hours ? `<p class="muted" style="font-size:13px">🕐 ${esc(sb.operating_hours)}</p>` : ''}
+          <div style="display:flex;gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb">
+            <div><span style="font-weight:bold;color:#22c55e">${sb.today_visits||0}</span> <span class="muted" style="font-size:12px">visits today</span></div>
+            <div><span style="font-weight:bold;color:#3b82f6">${sb.current_patients||0}</span><span class="muted" style="font-size:12px">/${sb.capacity||'—'}</span> <span class="muted" style="font-size:12px">patients</span></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <a href="/clinic/sickbays/${sb.id}" class="btn btn-sm btn-green">View & Manage</a>
+            <a href="/clinic/sickbays/${sb.id}/visit/new" class="btn btn-sm" style="background:#8b5cf6;color:white">+ New Visit</a>
+            <a href="/clinic/sickbays/${sb.id}/edit" class="btn btn-sm">Edit</a>
+          </div>
+        </div>
+      `).join('') : '<div class="card" style="grid-column:1/-1;text-align:center;padding:40px"><p class="muted" style="font-size:16px">No sickbays or sub-clinics created yet.</p><p class="muted">Click "+ Add Sickbay / Sub-Clinic" to set up your first health unit.</p></div>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/clinic/sickbays/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Sickbay / Sub-Clinic', `
+    <div class="card" style="max-width:650px;margin:0 auto"><h2 style="margin-bottom:16px">Register New Sickbay / Sub-Clinic</h2>
+    <form method="POST" action="/clinic/sickbays/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Unit Name *</label><input name="name" placeholder="e.g. Main Sickbay, Outreach Post A" required></div>
+        <div><label>Unit Type *</label><select name="sickbay_type" required>
+          <option value="general">General Sickbay</option><option value="maternity">Maternity Unit</option><option value="pediatric">Pediatric Bay</option>
+          <option value="emergency">Emergency Bay</option><option value="dental">Dental Unit</option><option value="eye">Eye Clinic</option>
+          <option value="vct">VCT Corner (HIV Testing)</option><option value="mental_health">Mental Health Unit</option><option value="physiotherapy">Physiotherapy Bay</option>
+          <option value="pharmacy">Pharmacy Post</option><option value="lab">Lab Collection Point</option><option value="outreach">Outreach Post</option>
+          <option value="first_aid">First Aid Post</option><option value="isolation">Isolation Ward</option><option value="icu">ICU/High Dependency</option>
+          <option value="antenatal">Antenatal Clinic</option><option value="art">ART Clinic</option><option value="tb">TB Clinic</option>
+          <option value="vaccination">Vaccination Post</option><option value="nutrition">Nutrition Unit</option>
+        </select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Location / Setting</label><input name="location" placeholder="e.g. Building A, Floor 2, Outreach Zone B"></div>
+        <div><label>Capacity</label><input name="capacity" type="number" min="1" value="10"></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>In Charge</label><input name="in_charge" placeholder="Person in charge"></div>
+        <div><label>Phone</label><input name="phone" placeholder="Contact number"></div>
+      </div>
+      <div><label>Operating Hours</label><input name="operating_hours" placeholder="e.g. Mon-Fri 8am-5pm, 24/7 Emergency"></div>
+      <div><label>Description</label><textarea name="description" rows="3" placeholder="Brief description of this unit, services offered, target population, etc."></textarea></div>
+      <button class="btn btn-green" style="width:100%">Register Sickbay / Sub-Clinic</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/clinic/sickbays/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, sickbay_type, location, capacity, in_charge, phone, description, operating_hours } = req.body;
+  await pool.query('INSERT INTO clinic_sickbays(tenant_id,name,sickbay_type,location,capacity,in_charge,phone,description,operating_hours) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, name, sickbay_type||'general', location||null, capacity||10, in_charge||null, phone||null, description||null, operating_hours||null]);
+  await audit(req.session.user.email, 'create_sickbay', name);
+  res.redirect('/clinic/sickbays');
+}));
+
+// ALL VISIT RECORDS — must be before :id routes to avoid "visits" being matched as :id
+app.get('/clinic/sickbays/visits', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const dateFrom = req.query.from || '';
+  const dateTo = req.query.to || '';
+  let where = 'WHERE sv.tenant_id=$1';
+  const params = [t];
+  if (dateFrom) { where += ' AND sv.visit_date >= $2'; params.push(dateFrom); }
+  if (dateTo) { where += ` AND sv.visit_date <= $${params.length+1}`; params.push(dateTo); }
+  const visits = (await pool.query(`SELECT sv.*, sb.name as sickbay_name, sb.sickbay_type FROM clinic_sickbay_visits sv JOIN clinic_sickbays sb ON sb.id=sv.sickbay_id ${where} ORDER BY sv.visit_date DESC, sv.visit_time DESC LIMIT 100`, params)).rows;
+  const sickbays = (await pool.query('SELECT id, name FROM clinic_sickbays WHERE tenant_id=$1 AND is_active=true ORDER BY name', [t])).rows;
+  res.send(renderPage('All Sickbay Visit Records', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:white"><h1>Sickbay Visit Records</h1><p>Cross-all-units visit log with filtering</p></div>
+    <div class="card" style="margin-bottom:16px">
+      <form method="GET" action="/clinic/sickbays/visits" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+        <div><label style="font-size:12px">From</label><input name="from" type="date" value="${esc(dateFrom)}"></div>
+        <div><label style="font-size:12px">To</label><input name="to" type="date" value="${esc(dateTo)}"></div>
+        <button class="btn btn-sm" type="submit">Filter</button>
+        ${dateFrom||dateTo ? '<a href="/clinic/sickbays/visits" class="btn btn-sm" style="background:#94a3b8;color:white">Clear</a>' : ''}
+      </form>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${visits.length}</div><div>Visits Shown</div></div>
+      <div class="stat-card"><div class="stat-num">${sickbays.length}</div><div>Active Units</div></div>
+    </div>
+    <div class="card">
+      <table><tr><th>Date</th><th>Time</th><th>Sickbay</th><th>Patient</th><th>Type</th><th>Complaint</th><th>Diagnosis</th><th>Treatment</th><th>Seen By</th><th>Status</th><th>Actions</th></tr>
+        ${visits.length > 0 ? visits.map(v => `<tr>
+          <td>${v.visit_date}</td><td>${v.visit_time ? v.visit_time.toISOString().slice(11,16) : '—'}</td>
+          <td><a href="/clinic/sickbays/${v.sickbay_id}" style="color:#7c3aed">${esc(v.sickbay_name)}</a></td>
+          <td><strong>${esc(v.patient_name)}</strong></td><td>${esc(v.patient_type)}</td>
+          <td>${esc((v.complaint||'').slice(0,50))}</td><td>${esc((v.diagnosis||'').slice(0,40))}</td>
+          <td>${esc((v.treatment||'').slice(0,40))}</td><td>${esc(v.seen_by||'—')}</td>
+          <td><span style="color:${v.status==='active'?'#f59e0b':v.status==='discharged'?'#22c55e':'#3b82f6'}">${v.status}</span></td>
+          <td><a href="/clinic/sickbay-visits/${v.id}/edit" class="btn btn-sm">Edit</a> ${v.status==='active' ? `<a href="/clinic/sickbay-visits/${v.id}/discharge" class="btn btn-sm btn-green">DC</a>` : ''}</td>
+        </tr>`).join('') : '<tr><td colspan="11" style="text-align:center;padding:20px">No visit records found.</td></tr>'}
+      </table>
+    </div>
+    <div style="margin-top:12px"><a href="/clinic/sickbays" class="btn">&larr; All Sickbays</a></div>
+  `, req.session.user));
+}));
+
+app.get('/clinic/sickbays/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sb = (await pool.query('SELECT * FROM clinic_sickbays WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!sb) return res.redirect('/clinic/sickbays');
+  const todayVisits = (await pool.query('SELECT * FROM clinic_sickbay_visits WHERE tenant_id=$1 AND sickbay_id=$2 AND visit_date=CURRENT_DATE ORDER BY visit_time DESC', [t, sb.id])).rows;
+  const pastVisits = (await pool.query('SELECT * FROM clinic_sickbay_visits WHERE tenant_id=$1 AND sickbay_id=$2 AND visit_date < CURRENT_DATE ORDER BY visit_date DESC, visit_time DESC LIMIT 20', [t, sb.id])).rows;
+  const totalAll = (await pool.query('SELECT COUNT(*) FROM clinic_sickbay_visits WHERE tenant_id=$1 AND sickbay_id=$2', [t, sb.id])).rows[0].count;
+  const typeLabels = { general:'General Sickbay', maternity:'Maternity Unit', pediatric:'Pediatric Bay', emergency:'Emergency Bay', dental:'Dental Unit', eye:'Eye Clinic', vct:'VCT Corner', mental_health:'Mental Health Unit', physiotherapy:'Physiotherapy Bay', pharmacy:'Pharmacy Post', lab:'Lab Collection Point', outreach:'Outreach Post', first_aid:'First Aid Post', isolation:'Isolation Ward', icu:'ICU/HDU', antenatal:'Antenatal Clinic', art:'ART Clinic', tb:'TB Clinic', vaccination:'Vaccination Post', nutrition:'Nutrition Unit' };
+  res.send(renderPage('Sickbay: ' + sb.name, `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:white">
+      <h1>${esc(sb.name)}</h1>
+      <p>${typeLabels[sb.sickbay_type]||sb.sickbay_type} &bull; ${esc(sb.location||'No location set')} &bull; Capacity: ${sb.capacity||'—'}</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card" style="border-left:4px solid #22c55e"><div class="stat-num" style="color:#22c55e">${todayVisits.length}</div><div>Visits Today</div></div>
+      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num" style="color:#3b82f6">${totalAll}</div><div>Total All-Time Visits</div></div>
+      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num" style="color:#f59e0b">${sb.current_patients||0}</div><div>Current Patients</div></div>
+      <div class="stat-card"><div class="stat-num">${sb.capacity||'—'}</div><div>Max Capacity</div></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/clinic/sickbays/${sb.id}/visit/new" class="btn btn-green">+ Record New Visit</a>
+      <a href="/clinic/sickbays/${sb.id}/edit" class="btn btn-sm">Edit Unit</a>
+      <a href="/clinic/sickbays/${sb.id}/toggle" class="btn btn-sm btn-red">${sb.is_active?'Deactivate':'Activate'}</a>
+      <a href="/clinic/sickbays" class="btn btn-sm">&larr; All Sickbays</a>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:12px">Today's Visits (${todayVisits.length})</h3>
+      ${todayVisits.length > 0 ? `<table><tr><th>Time</th><th>Patient</th><th>Type</th><th>Complaint</th><th>Treatment</th><th>Seen By</th><th>Status</th><th>Actions</th></tr>
+        ${todayVisits.map(v => `<tr><td>${v.visit_time ? v.visit_time.toISOString().slice(11,16) : '—'}</td><td><strong>${esc(v.patient_name)}</strong></td><td><span class="tag">${esc(v.patient_type||'walk_in')}</span></td><td>${esc(v.complaint||'—')}</td><td>${esc(v.treatment||'—')}</td><td>${esc(v.seen_by||'—')}</td><td><span style="color:${v.status==='active'?'#f59e0b':'#22c55e'}">${v.status}</span></td><td><a href="/clinic/sickbay-visits/${v.id}/edit" class="btn btn-sm">Edit</a> <a href="/clinic/sickbay-visits/${v.id}/discharge" class="btn btn-sm btn-green">Discharge</a></td></tr>`).join('')}
+      </table>` : '<p class="muted">No visits today.</p>'}
+    </div>
+    ${pastVisits.length > 0 ? `<div class="card" style="margin-top:16px"><h3 style="margin-bottom:12px">Previous Visits</h3>
+      <table><tr><th>Date</th><th>Patient</th><th>Complaint</th><th>Diagnosis</th><th>Treatment</th></tr>
+        ${pastVisits.map(v => `<tr style="opacity:0.85"><td>${v.visit_date}</td><td>${esc(v.patient_name)}</td><td>${esc(v.complaint||'—')}</td><td>${esc(v.diagnosis||'—')}</td><td>${esc(v.treatment||'—')}</td></tr>`).join('')}
+      </table></div>` : ''}
+  `, req.session.user));
+}));
+
+app.get('/clinic/sickbays/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sb = (await pool.query('SELECT * FROM clinic_sickbays WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!sb) return res.redirect('/clinic/sickbays');
+  const types = ['general','maternity','pediatric','emergency','dental','eye','vct','mental_health','physiotherapy','pharmacy','lab','outreach','first_aid','isolation','icu','antenatal','art','tb','vaccination','nutrition'];
+  const typeOpts = types.map(tp => `<option value="${tp}" ${sb.sickbay_type===tp?'selected':''}>${tp.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</option>`).join('');
+  res.send(renderPage('Edit Sickbay', `
+    <div class="card" style="max-width:650px;margin:0 auto"><h2 style="margin-bottom:16px">Edit: ${esc(sb.name)}</h2>
+    <form method="POST" action="/clinic/sickbays/${sb.id}/update">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Unit Name *</label><input name="name" value="${esc(sb.name)}" required></div>
+        <div><label>Unit Type *</label><select name="sickbay_type" required>${typeOpts}</select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Location / Setting</label><input name="location" value="${esc(sb.location||'')}"></div>
+        <div><label>Capacity</label><input name="capacity" type="number" min="1" value="${sb.capacity||10}"></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>In Charge</label><input name="in_charge" value="${esc(sb.in_charge||'')}"></div>
+        <div><label>Phone</label><input name="phone" value="${esc(sb.phone||'')}"></div>
+      </div>
+      <div><label>Operating Hours</label><input name="operating_hours" value="${esc(sb.operating_hours||'')}"></div>
+      <div><label>Description</label><textarea name="description" rows="3">${esc(sb.description||'')}</textarea></div>
+      <button class="btn btn-green" style="width:100%">Update Sickbay</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/sickbays/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, sickbay_type, location, capacity, in_charge, phone, description, operating_hours } = req.body;
+  await pool.query('UPDATE clinic_sickbays SET name=$1,sickbay_type=$2,location=$3,capacity=$4,in_charge=$5,phone=$6,description=$7,operating_hours=$8 WHERE tenant_id=$9 AND id=$10', [name, sickbay_type||'general', location||null, capacity||10, in_charge||null, phone||null, description||null, operating_hours||null, t, req.params.id]);
+  await audit(req.session.user.email, 'update_sickbay', name);
+  res.redirect('/clinic/sickbays');
+}));
+
+app.get('/clinic/sickbays/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE clinic_sickbays SET is_active=NOT is_active WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  res.redirect('/clinic/sickbays');
+}));
+
+app.get('/clinic/sickbays/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM clinic_sickbay_visits WHERE tenant_id=$1 AND sickbay_id=$2', [t, req.params.id]);
+  await pool.query('DELETE FROM clinic_sickbays WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  await audit(req.session.user.email, 'delete_sickbay', req.params.id);
+  res.redirect('/clinic/sickbays');
+}));
+
+// === SICKBAY VISITS ===
+app.get('/clinic/sickbays/:id/visit/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sb = (await pool.query('SELECT name FROM clinic_sickbays WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!sb) return res.redirect('/clinic/sickbays');
+  res.send(renderPage('Record Visit: ' + sb.name, `
+    <div class="card" style="max-width:650px;margin:0 auto"><h2 style="margin-bottom:16px">Record New Visit — ${esc(sb.name)}</h2>
+    <form method="POST" action="/clinic/sickbay-visits/save">
+      <input type="hidden" name="sickbay_id" value="${req.params.id}">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Patient Name *</label><input name="patient_name" placeholder="Patient full name" required></div>
+        <div><label>Patient Type</label><select name="patient_type"><option value="walk_in">Walk-In</option><option value="student">Student</option><option value="staff">Staff</option><option value="inpatient">Inpatient</option><option value="referral">Referral</option><option value="follow_up">Follow-Up</option></select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Seen By</label><input name="seen_by" placeholder="Clinician / Nurse name"></div>
+        <div><label>Visit Date</label><input name="visit_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      </div>
+      <div><label>Complaint / Symptoms *</label><textarea name="complaint" rows="2" required placeholder="What is the patient complaining of?"></textarea></div>
+      <div><label>Diagnosis</label><textarea name="diagnosis" rows="2" placeholder="Clinical diagnosis if available"></textarea></div>
+      <div><label>Treatment Given</label><textarea name="treatment" rows="2" placeholder="Medication, procedure, advice given"></textarea></div>
+      <div><label>Notes</label><textarea name="notes" rows="2" placeholder="Any additional notes, referral needed, follow-up date, etc."></textarea></div>
+      <button class="btn btn-green" style="width:100%">Save Visit Record</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/sickbay-visits/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { sickbay_id, patient_name, patient_type, seen_by, visit_date, complaint, diagnosis, treatment, notes } = req.body;
+  await pool.query('INSERT INTO clinic_sickbay_visits(tenant_id,sickbay_id,patient_name,patient_type,seen_by,visit_date,complaint,diagnosis,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, sickbay_id, patient_name, patient_type||'walk_in', seen_by||null, visit_date||'CURRENT_DATE', complaint, diagnosis||null, treatment||null, notes||null]);
+  // increment current_patients
+  await pool.query('UPDATE clinic_sickbays SET current_patients = current_patients + 1 WHERE tenant_id=$1 AND id=$2', [t, sickbay_id]);
+  await audit(req.session.user.email, 'sickbay_visit', `${patient_name} at sickbay #${sickbay_id}`);
+  res.redirect('/clinic/sickbays/' + sickbay_id);
+}));
+
+app.get('/clinic/sickbay-visits/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const v = (await pool.query('SELECT sv.*, sb.name as sickbay_name FROM clinic_sickbay_visits sv JOIN clinic_sickbays sb ON sb.id=sv.sickbay_id WHERE sv.tenant_id=$1 AND sv.id=$2', [t, req.params.id])).rows[0];
+  if (!v) return res.redirect('/clinic/sickbays');
+  res.send(renderPage('Edit Visit', `
+    <div class="card" style="max-width:650px;margin:0 auto"><h2 style="margin-bottom:16px">Edit Visit — ${esc(v.patient_name)}</h2>
+    <form method="POST" action="/clinic/sickbay-visits/${v.id}/update">
+      <input type="hidden" name="sickbay_id" value="${v.sickbay_id}">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Patient Name *</label><input name="patient_name" value="${esc(v.patient_name)}" required></div>
+        <div><label>Patient Type</label><select name="patient_type"><option value="walk_in" ${v.patient_type==='walk_in'?'selected':''}>Walk-In</option><option value="student" ${v.patient_type==='student'?'selected':''}>Student</option><option value="staff" ${v.patient_type==='staff'?'selected':''}>Staff</option><option value="inpatient" ${v.patient_type==='inpatient'?'selected':''}>Inpatient</option><option value="referral" ${v.patient_type==='referral'?'selected':''}>Referral</option><option value="follow_up" ${v.patient_type==='follow_up'?'selected':''}>Follow-Up</option></select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Seen By</label><input name="seen_by" value="${esc(v.seen_by||'')}"></div>
+        <div><label>Visit Date</label><input name="visit_date" type="date" value="${v.visit_date?v.visit_date.toISOString().slice(0,10):''}"></div>
+      </div>
+      <div><label>Complaint / Symptoms *</label><textarea name="complaint" rows="2" required>${esc(v.complaint||'')}</textarea></div>
+      <div><label>Diagnosis</label><textarea name="diagnosis" rows="2">${esc(v.diagnosis||'')}</textarea></div>
+      <div><label>Treatment Given</label><textarea name="treatment" rows="2">${esc(v.treatment||'')}</textarea></div>
+      <div><label>Status</label><select name="status"><option value="active" ${v.status==='active'?'selected':''}>Active</option><option value="discharged" ${v.status==='discharged'?'selected':''}>Discharged</option><option value="referred" ${v.status==='referred'?'selected':''}>Referred</option><option value="admitted" ${v.status==='admitted'?'selected':''}>Admitted</option></select></div>
+      <div><label>Notes</label><textarea name="notes" rows="2">${esc(v.notes||'')}</textarea></div>
+      <button class="btn btn-green" style="width:100%">Update Visit</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/sickbay-visits/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { sickbay_id, patient_name, patient_type, seen_by, visit_date, complaint, diagnosis, treatment, status, notes } = req.body;
+  const oldVisit = (await pool.query('SELECT status, sickbay_id FROM clinic_sickbay_visits WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  await pool.query('UPDATE clinic_sickbay_visits SET patient_name=$1,patient_type=$2,seen_by=$3,visit_date=$4,complaint=$5,diagnosis=$6,treatment=$7,status=$8,notes=$9 WHERE tenant_id=$10 AND id=$11', [patient_name, patient_type||'walk_in', seen_by||null, visit_date||'CURRENT_DATE', complaint, diagnosis||null, treatment||null, status||'active', notes||null, t, req.params.id]);
+  // adjust current_patients count on discharge
+  if (oldVisit && oldVisit.status === 'active' && status === 'discharged') {
+    await pool.query('UPDATE clinic_sickbays SET current_patients = GREATEST(current_patients - 1, 0) WHERE tenant_id=$1 AND id=$2', [t, oldVisit.sickbay_id]);
+  }
+  res.redirect('/clinic/sickbays/' + sickbay_id);
+}));
+
+app.get('/clinic/sickbay-visits/:id/discharge', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const v = (await pool.query('SELECT * FROM clinic_sickbay_visits WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!v) return res.redirect('/clinic/sickbays');
+  if (v.status === 'discharged') return res.redirect('/clinic/sickbays/' + v.sickbay_id);
+  await pool.query("UPDATE clinic_sickbay_visits SET status='discharged' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
+  await pool.query('UPDATE clinic_sickbays SET current_patients = GREATEST(current_patients - 1, 0) WHERE tenant_id=$1 AND id=$2', [t, v.sickbay_id]);
+  res.redirect('/clinic/sickbays/' + v.sickbay_id);
+}));
+
 // ============================================================
 // ============================================================
 // PHASE 3: INDIVIDUAL / PLATFORM-WIDE / DEV / ETC
@@ -16293,11 +16595,13 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
 // CLINIC: Staff Management
 app.get('/clinic', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const [doctors, pharmacists, labTechs, nurses] = await Promise.all([
+  const [doctors, pharmacists, labTechs, nurses, sickbayCount, sickbayToday] = await Promise.all([
     pool.query("SELECT * FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true", [t]),
     pool.query("SELECT * FROM clinic_staff WHERE tenant_id=$1 AND role='pharmacist' AND is_active=true", [t]),
     pool.query("SELECT * FROM clinic_staff WHERE tenant_id=$1 AND role='lab_technician' AND is_active=true", [t]),
-    pool.query("SELECT * FROM clinic_staff WHERE tenant_id=$1 AND role='nurse' AND is_active=true", [t])
+    pool.query("SELECT * FROM clinic_staff WHERE tenant_id=$1 AND role='nurse' AND is_active=true", [t]),
+    pool.query("SELECT COUNT(*) FROM clinic_sickbays WHERE tenant_id=$1 AND is_active=true", [t]),
+    pool.query("SELECT COUNT(*) FROM clinic_sickbay_visits WHERE tenant_id=$1 AND visit_date=CURRENT_DATE", [t])
   ]);
   const [pendingRx, pendingLab, waitingPatients] = await Promise.all([
     pool.query("SELECT COUNT(*) FROM prescriptions WHERE tenant_id=$1 AND status='pending'", [t]),
@@ -16305,23 +16609,45 @@ app.get('/clinic', requireAuth, requireNotBanned, requireFeature('clinic_workflo
     pool.query("SELECT COUNT(*) FROM patient_queue WHERE tenant_id=$1 AND status='waiting'", [t])
   ]);
   res.send(renderPage('Clinic Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Clinic & Medical</h1><p>Doctor → Pharmacist → Lab workflow with role specialization</p></div>
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#0d9488);color:white"><h1>Clinic & Health Facility</h1><p>Complete healthcare management — staff, patients, sickbays, departments, pharmacy, lab & billing</p></div>
     <div class="stats">
       <div class="stat-card" style="border-left:4px solid #dc2626"><div class="stat-num" style="color:#dc2626">${waitingPatients.rows[0].count}</div><div>Waiting Patients</div></div>
       <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num" style="color:#f59e0b">${pendingRx.rows[0].count}</div><div>Pending Prescriptions</div></div>
       <div class="stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-num" style="color:#8b5cf6">${pendingLab.rows[0].count}</div><div>Pending Lab Tests</div></div>
-      <div class="stat-card" style="border-left:4px solid #059669"><div class="stat-num" style="color:#059669">${doctors.rows.length}</div><div>Doctors</div></div>
+      <div class="stat-card" style="border-left:4px solid #059669"><div class="stat-num" style="color:#059669">${doctors.rows.length + pharmacists.rows.length + labTechs.rows.length + nurses.rows.length}</div><div>Total Staff</div></div>
+      <div class="stat-card" style="border-left:4px solid #7c3aed"><div class="stat-num" style="color:#7c3aed">${sickbayCount.rows[0].count}</div><div>Active Sickbays</div></div>
+      <div class="stat-card" style="border-left:4px solid #14b8a6"><div class="stat-num" style="color:#14b8a6">${sickbayToday.rows[0].count}</div><div>Sickbay Visits Today</div></div>
     </div>
+
+    <h2 style="font-size:18px;margin:20px 0 12px;color:#059669;border-bottom:2px solid #059669;padding-bottom:4px">Sickbays & Sub-Clinics</h2>
     <div class="grid">
-      <div class="card" style="border-top:4px solid #059669"><h3 style="color:#059669">Doctors (${doctors.rows.length})</h3><a href="/clinic/staff?role=doctor" class="btn btn-sm btn-green">Manage Doctors</a><a href="/clinic/staff/new?role=doctor" class="btn btn-sm" style="margin-top:8px">+ Add Doctor</a></div>
-      <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Pharmacists (${pharmacists.rows.length})</h3><a href="/clinic/staff?role=pharmacist" class="btn btn-sm btn-green">Manage Pharmacists</a><a href="/clinic/staff/new?role=pharmacist" class="btn btn-sm" style="margin-top:8px">+ Add Pharmacist</a></div>
-      <div class="card" style="border-top:4px solid #8b5cf6"><h3 style="color:#8b5cf6">Lab Technicians (${labTechs.rows.length})</h3><a href="/clinic/staff?role=lab_technician" class="btn btn-sm btn-green">Manage Lab Staff</a><a href="/clinic/staff/new?role=lab_technician" class="btn btn-sm" style="margin-top:8px">+ Add Lab Tech</a></div>
-      <div class="card" style="border-top:4px solid #ec4899"><h3 style="color:#ec4899">Nurses (${nurses.rows.length})</h3><a href="/clinic/staff?role=nurse" class="btn btn-sm btn-green">Manage Nurses</a><a href="/clinic/staff/new?role=nurse" class="btn btn-sm" style="margin-top:8px">+ Add Nurse</a></div>
-      <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Appointments</h3><a href="/clinic/appointments" class="btn btn-sm">Manage Appointments</a><a href="/clinic/appointments/new" class="btn btn-sm btn-green" style="margin-top:8px">+ Book Appointment</a></div>
-      <div class="card" style="background:#fef3c7;border:2px solid #f59e0b"><h3 style="color:#f59e0b">Patient Queue</h3><a href="/clinic/queue" class="btn btn-sm btn-gold">View Queue</a><a href="/clinic/queue/new" class="btn btn-sm" style="margin-top:8px">+ Add Patient</a></div>
-      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Prescriptions</h3><a href="/clinic/prescriptions" class="btn btn-sm btn-red">Pending Rx</a><a href="/clinic/pharmacy" class="btn btn-sm" style="margin-top:8px">Pharmacy</a></div>
-      <div class="card" style="background:#f5f3ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Laboratory</h3><a href="/clinic/lab" class="btn btn-sm">Lab Requests</a><a href="/clinic/lab/results" class="btn btn-sm" style="margin-top:8px">Results</a></div>
-      <div class="card"><h3>Pharmacy Stock</h3><a href="/clinic/pharmacy/inventory" class="btn btn-sm">Medicine Inventory</a></div>
+      <div class="card" style="border-top:4px solid #7c3aed;background:#faf5ff"><h3 style="color:#7c3aed">Sickbays & Sub-Clinics</h3><p class="muted" style="font-size:13px">Satellite clinics, maternity units, dental units, VCT corners, outreach posts and more</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/sickbays" class="btn btn-sm" style="background:#7c3aed;color:white">View All Units</a><a href="/clinic/sickbays/new" class="btn btn-sm btn-green">+ Add Unit</a><a href="/clinic/sickbays/visits" class="btn btn-sm">Visit Records</a></div></div>
+      <div class="card" style="border-top:4px solid #1e40af"><h3 style="color:#1e40af">Hospital Departments</h3><p class="muted" style="font-size:13px">Outpatient, Inpatient, Emergency, Maternity, Pediatrics, Surgery, Radiology & more</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/departments" class="btn btn-sm" style="background:#1e40af;color:white">View Departments</a></div></div>
+      <div class="card" style="border-top:4px solid #0ea5e9"><h3 style="color:#0ea5e9">Wards & Bed Management</h3><p class="muted" style="font-size:13px">Bed allocation, ward overview, patient admission and discharge</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/beds" class="btn btn-sm" style="background:#0ea5e9;color:white">Beds & Wards</a><a href="/clinic/beds/new" class="btn btn-sm btn-green">+ Add Bed</a></div></div>
+    </div>
+
+    <h2 style="font-size:18px;margin:20px 0 12px;color:#3b82f6;border-bottom:2px solid #3b82f6;padding-bottom:4px">Clinical Workflow</h2>
+    <div class="grid">
+      <div class="card" style="border-top:4px solid #f59e0b;background:#fffbeb"><h3 style="color:#f59e0b">Patient Queue</h3><p class="muted" style="font-size:13px">${waitingPatients.rows[0].count} patients waiting</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/queue" class="btn btn-sm" style="background:#f59e0b;color:white">View Queue</a><a href="/clinic/queue/new" class="btn btn-sm btn-green">+ Add Patient</a></div></div>
+      <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Appointments</h3><p class="muted" style="font-size:13px">Schedule and manage patient appointments</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/appointments" class="btn btn-sm">Manage</a><a href="/clinic/appointments/new" class="btn btn-sm btn-green">+ Book</a></div></div>
+      <div class="card" style="border-top:4px solid #dc2626"><h3 style="color:#dc2626">Prescriptions</h3><p class="muted" style="font-size:13px">${pendingRx.rows[0].count} pending</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/prescriptions" class="btn btn-sm">Pending Rx</a><a href="/clinic/prescription/new" class="btn btn-sm btn-green">+ New Rx</a></div></div>
+      <div class="card" style="border-top:4px solid #8b5cf6"><h3 style="color:#8b5cf6">Laboratory</h3><p class="muted" style="font-size:13px">${pendingLab.rows[0].count} pending tests</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/lab" class="btn btn-sm">Lab Requests</a><a href="/clinic/lab/new" class="btn btn-sm btn-green">+ New Test</a></div></div>
+    </div>
+
+    <h2 style="font-size:18px;margin:20px 0 12px;color:#8b5cf6;border-bottom:2px solid #8b5cf6;padding-bottom:4px">Staff & Pharmacy</h2>
+    <div class="grid">
+      <div class="card" style="border-top:4px solid #059669"><h3 style="color:#059669">Doctors (${doctors.rows.length})</h3><a href="/clinic/staff?role=doctor" class="btn btn-sm btn-green">Manage</a><a href="/clinic/staff/new?role=doctor" class="btn btn-sm" style="margin-top:8px">+ Add Doctor</a></div>
+      <div class="card" style="border-top:4px solid #3b82f6"><h3 style="color:#3b82f6">Pharmacists (${pharmacists.rows.length})</h3><a href="/clinic/staff?role=pharmacist" class="btn btn-sm btn-green">Manage</a><a href="/clinic/staff/new?role=pharmacist" class="btn btn-sm" style="margin-top:8px">+ Add Pharmacist</a></div>
+      <div class="card" style="border-top:4px solid #8b5cf6"><h3 style="color:#8b5cf6">Lab Technicians (${labTechs.rows.length})</h3><a href="/clinic/staff?role=lab_technician" class="btn btn-sm btn-green">Manage</a><a href="/clinic/staff/new?role=lab_technician" class="btn btn-sm" style="margin-top:8px">+ Add Lab Tech</a></div>
+      <div class="card" style="border-top:4px solid #ec4899"><h3 style="color:#ec4899">Nurses (${nurses.rows.length})</h3><a href="/clinic/staff?role=nurse" class="btn btn-sm btn-green">Manage</a><a href="/clinic/staff/new?role=nurse" class="btn btn-sm" style="margin-top:8px">+ Add Nurse</a></div>
+      <div class="card" style="border-top:4px solid #22c55e"><h3 style="color:#22c55e">Pharmacy Inventory</h3><p class="muted" style="font-size:13px">Medicine stock management & dispensing</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/pharmacy/inventory" class="btn btn-sm">Inventory</a><a href="/clinic/pharmacy/inventory/new" class="btn btn-sm btn-green">+ Add Medicine</a></div></div>
+    </div>
+
+    <h2 style="font-size:18px;margin:20px 0 12px;color:#6366f1;border-bottom:2px solid #6366f1;padding-bottom:4px">Patient Records & Advanced Features</h2>
+    <div class="grid">
+      <div class="card" style="border-top:4px solid #6366f1"><h3 style="color:#6366f1">Patient EHR</h3><p class="muted" style="font-size:13px">Allergies, vitals, immunizations, chronic conditions</p><a href="/clinic/ehr-search" class="btn btn-sm" style="margin-top:10px">Search EHR</a></div>
+      <div class="card" style="border-top:4px solid #dc2626"><h3 style="color:#dc2626">Clinical Decision Support</h3><p class="muted" style="font-size:13px">Allergy checks, dosage calculators, drug interactions</p><a href="/clinic/cds" class="btn btn-sm" style="margin-top:10px">CDS Tools</a></div>
+      <div class="card" style="border-top:4px solid #4f46e5"><h3 style="color:#4f46e5">Billing & Insurance</h3><p class="muted" style="font-size:13px">Invoicing, insurance providers, claims management</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/insurance" class="btn btn-sm">Insurance</a><a href="/clinic/claims" class="btn btn-sm">Claims</a></div></div>
     </div>
   `, req.session.user));
 }));
@@ -24150,7 +24476,25 @@ const featureMigrations = [
     id SERIAL PRIMARY KEY, prescription_id INTEGER NOT NULL REFERENCES clinic_prescriptions(id) ON DELETE CASCADE,
     medication_name VARCHAR(255) NOT NULL, dosage VARCHAR(100),
     frequency VARCHAR(100), duration VARCHAR(100), instructions TEXT
-  )`
+  )`,
+  `CREATE TABLE IF NOT EXISTS clinic_sickbays (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, sickbay_type TEXT NOT NULL DEFAULT 'general',
+    location TEXT, capacity INTEGER DEFAULT 10, current_patients INTEGER DEFAULT 0,
+    in_charge TEXT, phone TEXT, description TEXT, operating_hours TEXT,
+    is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS clinic_sickbay_visits (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    sickbay_id INTEGER NOT NULL REFERENCES clinic_sickbays(id) ON DELETE CASCADE,
+    patient_name TEXT NOT NULL, patient_type TEXT DEFAULT 'walk_in',
+    patient_id INTEGER, complaint TEXT, diagnosis TEXT, treatment TEXT,
+    seen_by TEXT, visit_date DATE DEFAULT CURRENT_DATE, visit_time TIME DEFAULT CURRENT_TIME,
+    status TEXT DEFAULT 'active', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_clinic_sickbays_tenant ON clinic_sickbays(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_clinic_sickbay_visits_tenant ON clinic_sickbay_visits(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_clinic_sickbay_visits_date ON clinic_sickbay_visits(visit_date)`
 ];
 featureMigrations.forEach(m => migrations.push(m));
 
