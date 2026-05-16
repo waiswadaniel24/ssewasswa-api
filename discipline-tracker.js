@@ -186,8 +186,14 @@ module.exports = function disciplineTracker(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Discipline] Cannot connect to DB for migrations'); return; }
+    let c = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      c = await pool.connect().catch(() => null);
+      if (c) break;
+      console.warn(`[DisciplineTracker] DB connection attempt ${attempt}/3 failed, retrying in 3s...`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    if (!c) { console.error('[DisciplineTracker] Cannot connect to DB for migrations after 3 attempts'); return; }
     try {
       // -- Table 1: behavior_categories ---------------------------------
       await c.query(`CREATE TABLE IF NOT EXISTS behavior_categories (

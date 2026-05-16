@@ -510,8 +510,9 @@ const fireWebhook = async (tenantId, event, payload) => {
 
 // Plan limits
 const PLAN_LIMITS = { free: 50, basic: 500, pro: 50000, enterprise: Infinity };
-const checkPlanLimit = async (tenantId, table) => {
+const checkPlanLimit = async (tenantId, table, userRole) => {
   validateTable(table);
+  if (userRole === 'super_admin') return { plan: 'enterprise', limit: Infinity, count: 0, allowed: true };
   const sub = (await pool.query('SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT 1', [tenantId, 'active'])).rows[0];
   const plan = sub?.plan || 'free';
   const limit = PLAN_LIMITS[plan] || 50;
@@ -519,6 +520,7 @@ const checkPlanLimit = async (tenantId, table) => {
   return { plan, limit, count: parseInt(count), allowed: parseInt(count) < limit };
 };
 const requirePlanLimit = (table) => async (req, res, next) => {
+  if (req.session.user?.role === 'super_admin') return next();
   const check = await checkPlanLimit(req.session.user.tenant_id, table);
   if (!check.allowed) return res.send(renderPage('Plan Limit', `<div class="card"><div class="alert alert-error"><h2>Plan Limit Reached</h2><p>You have ${check.count} records on the ${check.plan} plan (limit: ${check.limit}).</p><p>Upgrade to add more records.</p></div><a href="/billing" class="btn btn-gold">Upgrade Plan</a></div>`, req.session.user));
   next();
@@ -4527,9 +4529,8 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
         <a href="/org/notices" class="btn btn-sm">Notice Board</a>
         <span class="muted">${notices.rows[0].count} posted</span>
       </div>
-      <div class="card"><h3>Public</h3>
-        <a href="/settings/profile" class="btn btn-sm">Edit Public Profile</a>
-        ${tenant.has_fundraising ? '<a href="/fundraising" class="btn btn-gold btn-sm" style="margin-top:8px">Fundraising</a>' : '<a href="/upgrade/fundraising" class="btn btn-sm" style="margin-top:8px">+ Add Fundraising</a>'}
+      <div class="card"><h3>Fundraising</h3>
+        ${tenant.has_fundraising ? '<a href="/fundraising" class="btn btn-gold btn-sm" style="margin-top:8px">Fundraising Hub</a><br><a href="/fundraising/analytics" class="btn btn-sm" style="margin-top:4px">Analytics</a><br><a href="/discover" class="btn btn-sm" style="margin-top:4px;background:#4f46e5;color:white">Public Discovery</a>' : '<a href="/upgrade/fundraising" class="btn btn-sm" style="margin-top:8px">+ Add Fundraising</a>'}
       </div>
       <div class="card"><h3>Campaigns</h3>
         <a href="/campaigns" class="btn btn-sm btn-gold">Fundraising</a>
@@ -16762,6 +16763,21 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
     `CREATE TABLE IF NOT EXISTS scrape_sources (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, url TEXT NOT NULL, category TEXT DEFAULT 'news', scrape_type TEXT DEFAULT 'rss', selector TEXT, max_items INTEGER DEFAULT 20, is_active BOOLEAN DEFAULT true, last_scraped_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS shop_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, order_no TEXT NOT NULL, buyer_email TEXT, buyer_name TEXT, buyer_phone TEXT, items JSONB NOT NULL, total INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', payment_method TEXT, payment_ref TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(order_no))`,
     `CREATE TABLE IF NOT EXISTS recurring_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, donor_name TEXT NOT NULL, donor_email TEXT, donor_phone TEXT, amount INTEGER NOT NULL, currency TEXT DEFAULT 'UGX', schedule TEXT DEFAULT 'monthly', next_date DATE, last_processed DATE, campaign_id INTEGER REFERENCES fundraising_campaigns(id), payment_method TEXT, status TEXT DEFAULT 'active', total_donated INTEGER DEFAULT 0, donation_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS fundraising_investors (id SERIAL PRIMARY KEY, user_email TEXT UNIQUE NOT NULL, full_name TEXT NOT NULL, phone TEXT, organization TEXT, investor_type TEXT DEFAULT 'individual' CHECK (investor_type IN ('individual','corporate','ngo','foundation','angel','venture')), interests TEXT[] DEFAULT '{}', total_invested INTEGER DEFAULT 0, campaigns_supported INTEGER DEFAULT 0, is_verified BOOLEAN DEFAULT false, bio TEXT, website TEXT, profile_image TEXT, preferred_categories TEXT[] DEFAULT '{}', min_investment INTEGER DEFAULT 0, max_investment INTEGER DEFAULT 0, preferred_currency TEXT DEFAULT 'UGX', notification_prefs JSONB DEFAULT '{"email":true,"in_app":true,"sms":false}', created_at TIMESTAMPTZ DEFAULT NOW(), last_active TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS investor_offers (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, investor_email TEXT REFERENCES fundraising_investors(user_email) ON DELETE CASCADE, amount_offered INTEGER NOT NULL, offer_status TEXT DEFAULT 'pending' CHECK (offer_status IN ('pending','accepted','countered','declined','withdrawn')), message TEXT, counter_amount INTEGER, terms TEXT, offered_at TIMESTAMPTZ DEFAULT NOW(), responded_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS investment_transactions (id SERIAL PRIMARY KEY, offer_id INTEGER REFERENCES investor_offers(id) ON DELETE CASCADE, investor_email TEXT REFERENCES fundraising_investors(user_email), campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, amount INTEGER NOT NULL, transaction_type TEXT DEFAULT 'donation' CHECK (transaction_type IN ('donation','investment','grant','loan','pledge_payment')), payment_method TEXT DEFAULT 'mobile_money', payment_ref TEXT, status TEXT DEFAULT 'completed' CHECK (status IN ('completed','pending','failed','refunded')), platform_fee INTEGER DEFAULT 0, net_amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX', created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS campaign_updates (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, update_type TEXT DEFAULT 'general' CHECK (update_type IN ('general','milestone','urgent','financial','thank_you','media')), is_public BOOLEAN DEFAULT true, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS image_url TEXT`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS video_url TEXT`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS location TEXT`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS investment_tiers JSONB DEFAULT '[]'`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS min_investment INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}'`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS urgency_level TEXT DEFAULT 'normal' CHECK (urgency_level IN ('low','normal','high','urgent','critical'))`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS views_count INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS investor_count INTEGER DEFAULT 0`,
     `ALTER TABLE public_pages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
     `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS image_url TEXT`,
     `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
@@ -19795,82 +19811,348 @@ app.get('/s/:slug', ah(async (req, res) => {
 }));
 
 // ============================================================
-// === FUNDRAISING / CROWDFUNDING ===
+// === FUNDRAISING / CROWDFUNDING / INVESTOR DISCOVERY ===
 // ============================================================
 app.get('/fundraising', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const campaigns = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised FROM fundraising_campaigns c WHERE c.tenant_id=$1 ORDER BY c.created_at DESC', [t])).rows;
-  res.send(renderPage('Fundraising', `<div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>🎯 Fundraising</h1><p>Launch campaigns, collect donations, track progress</p></div>
+  const campaigns = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=c.id) as donation_count, (SELECT COUNT(*) FROM investor_offers WHERE campaign_id=c.id AND offer_status IN (\'pending\',\'accepted\')) as offer_count FROM fundraising_campaigns c WHERE c.tenant_id=$1 ORDER BY c.created_at DESC', [t])).rows;
+  const totalRaised = campaigns.reduce((a,c)=>a+parseInt(c.raised||0),0);
+  const totalOffers = campaigns.reduce((a,c)=>a+parseInt(c.offer_count||0),0);
+  const publicCount = campaigns.filter(c=>c.is_public!==false).length;
+  res.send(renderPage('Fundraising Hub', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981,#0d9488)">
+      <h1>Fundraising Hub</h1>
+      <p>Launch campaigns, attract donors & investors, track progress</p>
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+        <a href="/fundraising/new" class="btn btn-green" style="background:white;color:#059669;font-weight:700">+ New Campaign</a>
+        <a href="/fundraising/investors" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">View Investors</a>
+        <a href="/fundraising/analytics" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Analytics</a>
+      </div>
+    </div>
     <div class="stats">
-      <div class="stat-card"><div class="stat-num">${campaigns.length}</div><div>Campaigns</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${campaigns.reduce((a,c)=>a+parseInt(c.raised||0),0).toLocaleString()}</div><div>Total Raised</div></div>
-      <div class="stat-card"><div class="stat-num">${campaigns.filter(c=>c.status==='active').length}</div><div>Active</div></div>
+      <div class="stat-card"><div class="stat-num">${campaigns.length}</div><div>Total Campaigns</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalRaised.toLocaleString()}</div><div>Total Raised</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#4f46e5">${campaigns.filter(c=>c.status==='active').length}</div><div>Active</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${totalOffers}</div><div>Investor Offers</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#ec4899">${publicCount}</div><div>Public Campaigns</div></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn btn-sm" onclick="filterCampaigns('all')" style="background:#4f46e5;color:white">All</button>
+      <button class="btn btn-sm" onclick="filterCampaigns('active')" style="background:#059669;color:white">Active</button>
+      <button class="btn btn-sm" onclick="filterCampaigns('completed')" style="background:#64748b;color:white">Completed</button>
+      <button class="btn btn-sm" onclick="filterCampaigns('featured')" style="background:#f59e0b;color:white">Featured</button>
     </div>
     <div class="card"><h3>Campaigns</h3>
-    <a href="/fundraising/new" class="btn btn-green" style="margin:10px 0">+ New Campaign</a>
-    <table><tr><th>Campaign</th><th>Goal (UGX)</th><th>Raised (UGX)</th><th>Progress</th><th>Status</th><th>Actions</th></tr>
-    ${campaigns.map(c=>{const pct=c.target>0?Math.min(100,Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)):0;return `<tr><td><strong>${esc(c.title)}</strong><br><span class="muted">${esc((c.description||'').substring(0,60))}</span></td><td>${parseInt(c.target||0).toLocaleString()}</td><td style="color:#059669">${parseInt(c.raised||0).toLocaleString()}</td><td><div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${pct>=100?'#059669':'#4f46e5'}">${pct}%</div></div></td><td><span class="tag" style="background:${c.status==='active'?'#d1fae5;color:#065f46':c.status==='completed'?'#e0e7ff;color:#3730a3':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td><a href="/fundraising/${c.id}" class="btn btn-sm">View</a> <a href="/fundraising/${c.id}/donate" class="btn btn-sm btn-green">Donate</a> <a href="/fundraising/${c.id}/close" class="btn btn-sm">Close</a> <a href="/fundraising/${c.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete?')">Del</a></td></tr>`}).join('')||'<tr><td colspan="6">No campaigns yet</td></tr>'}</table></div>`, req.session.user));
+    <div class="grid">${campaigns.map(c=>{
+      const pct=c.target>0?Math.min(100,Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)):0;
+      const urgColors={low:'#94a3b8',normal:'#0891b2',high:'#f59e0b',urgent:'#ef4444',critical:'#dc2626'};
+      const urgColor=urgColors[c.urgency_level]||'#0891b2';
+      return '<div class="card" data-status="'+esc(c.status)+'" data-featured="'+(c.featured?'true':'false')+'" style="border-top:4px solid '+(c.featured?'#f59e0b':c.status==='active'?'#059669':'#94a3b8')+';padding:20px">'+
+        (c.featured?'<div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:white;font-size:11px;padding:3px 10px;border-radius:20px;font-weight:700">Featured</div>':'')+
+        '<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px"><h3 style="margin:0;font-size:17px">'+esc(c.title)+'</h3>'+
+        '<span class="tag" style="background:'+(c.status==='active'?'#d1fae5;color:#065f46':c.status==='completed'?'#e0e7ff;color:#3730a3':'#fef3c7;color:#92400e')+';white-space:nowrap">'+esc(c.status)+'</span></div>'+
+        '<p class="muted" style="font-size:13px;margin-bottom:10px">'+esc((c.description||'').substring(0,80))+(c.description&&c.description.length>80?'...':'')+'</p>'+
+        (c.urgency_level&&c.urgency_level!=='normal'?'<span style="display:inline-block;background:'+urgColor+'20;color:'+urgColor+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;margin-bottom:8px">'+esc(c.urgency_level.toUpperCase())+'</span> ':'')+
+        '<div class="progress-bar" style="height:14px;margin:10px 0"><div class="progress-fill" style="width:'+pct+'%;background:linear-gradient(90deg,'+(pct>=75?'#059669,#10b981':pct>=40?'#f59e0b,#fbbf24':'#4f46e5,#818cf8')+')">'+pct+'%</div></div>'+
+        '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px"><span style="font-weight:700;color:#059669">UGX '+(parseInt(c.raised||0)).toLocaleString()+'</span><span class="muted">of UGX '+(parseInt(c.target||0)).toLocaleString()+'</span></div>'+
+        '<div style="display:flex;gap:6px;font-size:11px;color:#64748b;flex-wrap:wrap;margin-bottom:12px">'+
+        '<span>'+esc(c.category)+'</span>'+
+        (c.investor_count>0?'<span>&bull; '+(c.investor_count)+' investors</span>':'')+
+        (c.views_count>0?'<span>&bull; '+(c.views_count)+' views</span>':'')+
+        (c.offer_count>0?'<span>&bull; '+(c.offer_count)+' offers</span>':'')+
+        '</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap"><a href="/fundraising/'+c.id+'" class="btn btn-sm">View</a><a href="/fundraising/'+c.id+'/donate" class="btn btn-sm btn-green">Donate</a>'+
+        (c.status==='active'?'<a href="/fundraising/'+c.id+'/close" class="btn btn-sm">Close</a>':'')+
+        '<a href="/fundraising/'+c.id+'/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete this campaign?\')">Del</a></div></div>';
+    }).join('')||'<p class="muted" style="text-align:center;padding:40px">No campaigns yet. <a href="/fundraising/new" class="btn btn-green">Create Your First Campaign</a></p>'}</div></div>
+    <script>
+    function filterCampaigns(filter){
+      document.querySelectorAll('[data-status]').forEach(function(card){
+        var status=card.getAttribute('data-status');
+        var featured=card.getAttribute('data-featured')==='true';
+        if(filter==='all')card.style.display='';
+        else if(filter==='featured')card.style.display=featured?'':'none';
+        else card.style.display=status===filter?'':'none';
+      });
+    }
+    </script>
+  `, req.session.user));
 }));
 
 app.get('/fundraising/new', requireAuth, requireNotBanned, (req, res) => {
-  res.send(renderPage('New Campaign', `<div class="card" style="max-width:650px;margin:40px auto"><h2>🎯 Create Fundraising Campaign</h2>
-    <form method="POST" action="/fundraising/save">
-      <input name="title" placeholder="Campaign Title (e.g. Build New Classroom)" required>
-      <textarea name="description" rows="4" placeholder="Campaign description - tell your story" required></textarea>
-      <input name="target" type="number" placeholder="Fundraising Goal (UGX)" required>
-      <input name="deadline" type="date" placeholder="Campaign Deadline">
-      <select name="category"><option value="general">General</option><option value="building">Building Fund</option><option value="education">Education</option><option value="medical">Medical</option><option value="church">Church Project</option><option value="community">Community</option><option value="emergency">Emergency Relief</option></select>
-      <input name="organizer" placeholder="Organizer Name">
-      <input name="contact_phone" placeholder="Contact Phone">
-      <textarea name="updates" rows="3" placeholder="Initial update / campaign pitch"></textarea>
-      <button class="btn btn-green" style="width:100%">Launch Campaign</button>
-    </form></div>`, req.session.user));
+  res.send(renderPage('New Campaign', `
+    <div class="card" style="max-width:750px;margin:40px auto">
+      <h2>Create Fundraising Campaign</h2>
+      <p class="muted" style="margin-bottom:20px">Fill in the details below. Make it compelling to attract donors and investors.</p>
+      <form method="POST" action="/fundraising/save" enctype="multipart/form-data">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Campaign Title *</label><input name="title" placeholder="e.g. Build New Classroom Block" required style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Category *</label><select name="category" style="width:100%"><option value="general">General</option><option value="building">Building Fund</option><option value="education">Education</option><option value="medical">Medical / Health</option><option value="church">Church Project</option><option value="community">Community Development</option><option value="emergency">Emergency Relief</option><option value="technology">Technology</option><option value="agriculture">Agriculture</option><option value="environment">Environment</option><option value="arts_culture">Arts & Culture</option><option value="sports">Sports</option></select></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Fundraising Goal (UGX) *</label><input name="target" type="number" placeholder="5000000" required style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Deadline</label><input name="deadline" type="date" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Minimum Investment (UGX)</label><input name="min_investment" type="number" placeholder="10000" value="0" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Urgency Level</label><select name="urgency_level" style="width:100%"><option value="low">Low - Long term</option><option value="normal" selected>Normal</option><option value="high">High - Needs attention</option><option value="urgent">Urgent - Time sensitive</option><option value="critical">Critical - Emergency</option></select></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Organizer Name</label><input name="organizer" placeholder="John Mukasa" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Contact Phone</label><input name="contact_phone" placeholder="256700000000" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Location</label><input name="location" placeholder="Kampala, Uganda" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Campaign Image URL</label><input name="image_url" placeholder="https://..." style="width:100%"></div>
+        </div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Campaign Description * (Tell your story)</label><textarea name="description" rows="5" placeholder="Describe the problem you are solving, who benefits, and how the funds will be used. Be specific and compelling." required style="width:100%"></textarea></div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Tags (comma separated)</label><input name="tags" placeholder="education, youth, community, kampala" style="width:100%"></div>
+        <div style="margin-top:16px;display:flex;gap:20px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="is_public" value="true" checked> Make campaign public (visible to investors)</label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="featured" value="true"> Feature this campaign</label>
+        </div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Investment Tiers (optional)</label>
+          <div id="tiers-container" style="border:1px dashed #cbd5e1;border-radius:10px;padding:16px">
+            <div class="tier-row" style="display:flex;gap:10px;margin-bottom:10px;align-items:end">
+              <div style="flex:1"><label style="font-size:12px;font-weight:600">Tier Name</label><input class="tier-name" placeholder="Bronze Sponsor" style="width:100%"></div>
+              <div style="flex:1"><label style="font-size:12px;font-weight:600">Min Amount (UGX)</label><input class="tier-amount" type="number" placeholder="50000" style="width:100%"></div>
+              <div style="flex:1"><label style="font-size:12px;font-weight:600">Benefits</label><input class="tier-benefits" placeholder="Certificate + Thank you" style="width:100%"></div>
+              <button type="button" onclick="this.parentElement.remove()" class="btn btn-sm btn-red">X</button>
+            </div>
+          </div>
+          <button type="button" onclick="addTier()" class="btn btn-sm" style="margin-top:8px">+ Add Tier</button>
+        </div>
+        <button type="submit" class="btn btn-green" style="width:100%;margin-top:20px;padding:14px;font-size:16px">Launch Campaign</button>
+      </form>
+    </div>
+    <script>
+    function addTier(){
+      var c=document.getElementById('tiers-container');
+      var d=document.createElement('div');d.className='tier-row';d.style.cssText='display:flex;gap:10px;margin-bottom:10px;align-items:end';
+      d.innerHTML='<div style="flex:1"><label style="font-size:12px;font-weight:600">Tier Name</label><input class="tier-name" placeholder="Silver Sponsor" style="width:100%"></div><div style="flex:1"><label style="font-size:12px;font-weight:600">Min Amount</label><input class="tier-amount" type="number" placeholder="100000" style="width:100%"></div><div style="flex:1"><label style="font-size:12px;font-weight:600">Benefits</label><input class="tier-benefits" placeholder="Logo on website" style="width:100%"></div><button type="button" onclick="this.parentElement.remove()" class="btn btn-sm btn-red">X</button>';
+      c.appendChild(d);
+    }
+    </script>
+  `, req.session.user));
 });
 
 app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const { title, description, target, deadline, category, organizer, contact_phone, updates } = req.body;
-  await pool.query('INSERT INTO fundraising_campaigns(tenant_id,title,description,target,deadline,category,organizer,contact_phone) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, title, description, target||0, deadline||null, category||'general', organizer||'', contact_phone||'']);
+  const { title, description, target, deadline, category, organizer, contact_phone, location, image_url, min_investment, urgency_level, tags, is_public, featured } = req.body;
+  // Build investment tiers from form fields
+  const tiers = [];
+  if (Array.isArray(req.body.tier_name)) {
+    req.body.tier_name.forEach((name, i) => {
+      if (name && req.body.tier_amount && req.body.tier_amount[i]) {
+        tiers.push({ name, amount: parseInt(req.body.tier_amount[i]) || 0, benefits: req.body.tier_benefits?.[i] || '' });
+      }
+    });
+  } else if (req.body.tier_name) {
+    tiers.push({ name: req.body.tier_name, amount: parseInt(req.body.tier_amount) || 0, benefits: req.body.tier_benefits || '' });
+  }
+  const tagsArr = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [];
+  await pool.query('INSERT INTO fundraising_campaigns(tenant_id,title,description,target,deadline,category,organizer,contact_phone,location,image_url,min_investment,urgency_level,is_public,featured,tags,investment_tiers) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)',
+    [t, title, description, target||0, deadline||null, category||'general', organizer||'', contact_phone||'', location||'', image_url||'', min_investment||0, urgency_level||'normal', is_public==='true', featured==='true', tagsArr, JSON.stringify(tiers)]);
+  // Notify matching investors
+  try {
+    const matchingInvestors = (await pool.query("SELECT user_email FROM fundraising_investors WHERE ($1 = '{}' OR preferred_categories && $1) AND notification_prefs->>'in_app' = 'true'", [tagsArr.length > 0 ? tagsArr : [category || 'general']])).rows;
+    for (const inv of matchingInvestors) {
+      notify(t, inv.user_email, 'New Campaign: ' + title, 'A new ' + (category||'') + ' campaign "' + title + '" has been launched. Check it out on the Investor Discovery page!', 'fundraising');
+    }
+  } catch(e) { console.warn('[Investor Notify]', e.message); }
   res.redirect('/fundraising');
+}));
+
+app.get('/fundraising/analytics', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [campaigns, donations, offers, investors] = await Promise.all([
+    pool.query('SELECT id,title,raised::integer,target::integer,status,created_at FROM (SELECT c.id,c.title,c.target,c.status,c.created_at,(SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised FROM fundraising_campaigns c WHERE c.tenant_id=$1) sub', [t]),
+    pool.query('SELECT d.*,fc.title as campaign_title FROM campaign_donations d JOIN fundraising_campaigns fc ON d.campaign_id=fc.id WHERE fc.tenant_id=$1 ORDER BY d.donated_at DESC LIMIT 50', [t]),
+    pool.query('SELECT o.*,fc.title as campaign_title FROM investor_offers o JOIN fundraising_campaigns fc ON o.campaign_id=fc.id WHERE fc.tenant_id=$1 ORDER BY o.offered_at DESC', [t]),
+    pool.query('SELECT DISTINCT i.user_email,i.full_name,i.investor_type,i.total_invested FROM fundraising_investors i JOIN investor_offers o ON o.investor_email=i.user_email JOIN fundraising_campaigns fc ON o.campaign_id=fc.id WHERE fc.tenant_id=$1', [t])
+  ]);
+  const totalRaised = campaigns.rows.reduce((a,c)=>a+(parseInt(c.raised)||0),0);
+  const totalTarget = campaigns.rows.reduce((a,c)=>a+(parseInt(c.target)||0),0);
+  const avgDonation = donations.rows.length > 0 ? Math.round(totalRaised / donations.rows.length) : 0;
+  const methodBreakdown = {};
+  donations.rows.forEach(d => { const m = d.method||'cash'; methodBreakdown[m] = (methodBreakdown[m]||0) + parseInt(d.amount||0); });
+  res.send(renderPage('Fundraising Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>Fundraising Analytics</h1><p>Track your fundraising performance</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalRaised.toLocaleString()}</div><div>Total Raised</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${totalTarget.toLocaleString()}</div><div>Total Goal</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#4f46e5">${totalTarget>0?Math.round(totalRaised/totalTarget*100):0}%</div><div>Overall Progress</div></div>
+      <div class="stat-card"><div class="stat-num">${donations.rows.length}</div><div>Total Donations</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">UGX ${avgDonation.toLocaleString()}</div><div>Avg Donation</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#ec4899">${offers.rows.length}</div><div>Investor Offers</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div class="card"><h3>Donations by Method</h3>
+        ${Object.keys(methodBreakdown).map(m=>'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span>'+esc(m)+'</span><span style="font-weight:700;color:#059669">UGX '+(methodBreakdown[m]).toLocaleString()+'</span></div>').join('')||'<p class="muted">No donations yet</p>'}
+      </div>
+      <div class="card"><h3>Top Investors</h3>
+        ${investors.rows.slice(0,10).map(i=>'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span>'+esc(i.full_name||i.user_email)+'</span><span class="tag">'+esc(i.investor_type)+'</span></div>').join('')||'<p class="muted">No investors yet</p>'}
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Recent Donations</h3>
+      <table><tr><th>Donor</th><th>Campaign</th><th>Amount</th><th>Method</th><th>Date</th></tr>
+      ${donations.rows.map(d=>'<tr><td>'+esc(d.donor_name||'Anonymous')+'</td><td>'+esc(d.campaign_title)+'</td><td style="color:#059669;font-weight:700">UGX '+(parseInt(d.amount)||0).toLocaleString()+'</td><td>'+esc(d.method)+'</td><td>'+(d.donated_at?new Date(d.donated_at).toLocaleDateString():'')+'</td></tr>').join('')||'<tr><td colspan="5">No donations yet</td></tr>'}
+      </table>
+    </div>
+    ${offers.rows.length > 0 ? '<div class="card" style="margin-top:20px"><h3>Investor Offers</h3><table><tr><th>Investor</th><th>Campaign</th><th>Amount</th><th>Status</th><th>Date</th></tr>'+offers.rows.map(o=>'<tr><td>'+esc(o.investor_email)+'</td><td>'+esc(o.campaign_title)+'</td><td style="font-weight:700">UGX '+(parseInt(o.amount_offered)||0).toLocaleString()+'</td><td><span class="tag" style="background:'+(o.offer_status==='accepted'?'#d1fae5;color:#065f46':o.offer_status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+esc(o.offer_status)+'</span></td><td>'+(o.offered_at?new Date(o.offered_at).toLocaleDateString():'')+'</td></tr>').join('')+'</table></div>' : ''}
+  `, req.session.user));
+}));
+
+app.get('/fundraising/investors', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const investors = (await pool.query('SELECT i.*, (SELECT COUNT(*) FROM investment_transactions WHERE investor_email=i.user_email AND campaign_id IN (SELECT id FROM fundraising_campaigns WHERE tenant_id=$1)) as transactions_with_us, (SELECT COALESCE(SUM(amount),0) FROM investment_transactions WHERE investor_email=i.user_email AND campaign_id IN (SELECT id FROM fundraising_campaigns WHERE tenant_id=$1)) as invested_with_us FROM fundraising_investors i ORDER BY i.total_invested DESC, i.created_at DESC', [t])).rows;
+  res.send(renderPage('Investors', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Investors & Donors</h1><p>View and manage people interested in funding your campaigns</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${investors.length}</div><div>Total Investors</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${investors.reduce((a,i)=>a+(parseInt(i.invested_with_us)||0),0).toLocaleString()}</div><div>Invested With You</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#4f46e5">${investors.filter(i=>i.is_verified).length}</div><div>Verified</div></div>
+    </div>
+    <div class="card"><h3>Investor Directory</h3>
+      <div class="grid">${investors.map(i=>'<div class="card" style="padding:16px;border-left:4px solid '+(i.is_verified?'#059669':'#cbd5e1')+'">'+
+        '<div style="display:flex;justify-content:space-between;align-items:start"><h4 style="margin:0">'+esc(i.full_name)+'</h4>'+(i.is_verified?'<span style="color:#059669;font-size:12px;font-weight:700">Verified</span>':'')+'</div>'+
+        '<p class="muted" style="font-size:12px">'+esc(i.investor_type)+'</p>'+
+        (i.organization?'<p style="font-size:13px;margin:4px 0">'+esc(i.organization)+'</p>':'')+
+        (i.bio?'<p style="font-size:13px;margin:4px 0;color:#475569">'+esc(i.bio.substring(0,100))+(i.bio.length>100?'...':'')+'</p>':'')+
+        '<div style="display:flex;gap:10px;font-size:12px;color:#64748b;margin-top:8px;flex-wrap:wrap">'+
+        '<span>UGX '+(parseInt(i.invested_with_us)||0).toLocaleString()+' with you</span>'+
+        '<span>'+(parseInt(i.total_invested)||0).toLocaleString()+' total</span>'+
+        (i.preferred_categories&&i.preferred_categories.length>0?'<span>Interests: '+i.preferred_categories.slice(0,3).join(', ')+'</span>':'')+
+        '</div></div>').join('')||'<p class="muted" style="text-align:center;padding:40px">No investors have shown interest in your campaigns yet. Share your public campaigns to attract donors!</p>'}</div>
+    </div>
+  `, req.session.user));
 }));
 
 app.get('/fundraising/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const c = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised FROM fundraising_campaigns c WHERE c.id=$1 AND c.tenant_id=$2', [req.params.id, t])).rows[0];
+  const c = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=c.id) as donation_count, (SELECT COUNT(*) FROM investor_offers WHERE campaign_id=c.id AND offer_status IN (\'pending\',\'accepted\')) as offer_count FROM fundraising_campaigns c WHERE c.id=$1 AND c.tenant_id=$2', [req.params.id, t])).rows[0];
   if (!c) return res.status(404).send('Not found');
-  const donations = (await pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 ORDER BY donated_at DESC', [c.id])).rows;
+  await pool.query('UPDATE fundraising_campaigns SET views_count=COALESCE(views_count,0)+1 WHERE id=$1', [c.id]);
+  const [donations, offers, updates] = await Promise.all([
+    pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 ORDER BY donated_at DESC LIMIT 50', c.id),
+    pool.query('SELECT o.*,i.full_name,i.investor_type FROM investor_offers o LEFT JOIN fundraising_investors i ON o.investor_email=i.user_email WHERE o.campaign_id=$1 ORDER BY o.offered_at DESC', c.id),
+    pool.query('SELECT * FROM campaign_updates WHERE campaign_id=$1 ORDER BY created_at DESC', c.id)
+  ]);
   const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
-  res.send(renderPage('Campaign: '+c.title, `<div class="card"><h2>🎯 ${esc(c.title)}</h2>
-    <p class="muted">${esc(c.category)} | by ${esc(c.organizer||'Admin')}</p>
-    <p style="margin:15px 0">${esc(c.description||'')}</p>
-    <div class="progress-bar" style="height:30px;margin:15px 0"><div class="progress-fill" style="width:${pct}%;background:${pct>=100?'#059669':'#4f46e5'};display:flex;align-items:center;justify-content:center;color:white;font-weight:700">${pct}%</div></div>
-    <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
-      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${parseInt(c.raised||0).toLocaleString()}</div><div>Raised</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(c.target||0).toLocaleString()}</div><div>Goal</div></div>
-      <div class="stat-card"><div class="stat-num">${donations.length}</div><div>Donations</div></div>
+  const tiers = (typeof c.investment_tiers === 'string' ? JSON.parse(c.investment_tiers) : c.investment_tiers) || [];
+  res.send(renderPage('Campaign: '+c.title, `
+    ${c.image_url?'<div style="max-width:900px;margin:0 auto 20px;border-radius:16px;overflow:hidden"><img src="'+esc(c.image_url)+'" style="width:100%;max-height:350px;object-fit:cover" onerror="this.parentElement.style.display=\'none\'"></div>':''}
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+        <h2>${c.featured?'<span style="background:#f59e0b;color:white;padding:2px 8px;border-radius:6px;font-size:12px;margin-right:8px">Featured</span>':''} ${esc(c.title)}</h2>
+        <div style="display:flex;gap:6px">
+          <a href="/fundraising/${c.id}/donate" class="btn btn-green">Donate Now</a>
+          <a href="/fundraising/${c.id}/update" class="btn btn-sm">Post Update</a>
+          <a href="/fundraising/${c.id}/offers" class="btn btn-sm" style="background:#f59e0b;color:white">Offers (${offers.rows.filter(o=>o.offer_status==='pending').length})</a>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <span class="tag">${esc(c.category)}</span>
+        ${c.location?'<span class="tag" style="background:#f1f5f9">'+esc(c.location)+'</span>':''}
+        <span class="tag" style="background:${c.urgency_level==='urgent'||c.urgency_level==='critical'?'#fee2e2;color:#991b1b':c.urgency_level==='high'?'#fef3c7;color:#92400e':'#e0e7ff;color:#3730a3'}">${esc(c.urgency_level||'normal')}</span>
+        ${c.is_public!==false?'<span class="tag" style="background:#d1fae5;color:#065f46">Public</span>':'<span class="tag" style="background:#fee2e2;color:#991b1b">Private</span>'}
+      </div>
+      ${c.tags&&c.tags.length>0?'<div style="margin-bottom:12px">'+c.tags.map(tag=>'<span style="background:#f1f5f9;padding:3px 10px;border-radius:20px;font-size:12px;margin-right:6px">'+esc(tag)+'</span>').join('')+'</div>':''}
+      <p style="margin:12px 0;line-height:1.8">${esc(c.description||'').replace(/\n/g,'<br>')}</p>
+      <div class="progress-bar" style="height:32px;margin:16px 0"><div class="progress-fill" style="width:${pct}%;background:${pct>=100?'linear-gradient(90deg,#059669,#10b981)':'linear-gradient(90deg,#4f46e5,#818cf8)'};display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:15px">${pct}% Funded</div></div>
+      <div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin:16px 0">
+        <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${parseInt(c.raised||0).toLocaleString()}</div><div>Raised</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(c.target||0).toLocaleString()}</div><div>Goal</div></div>
+        <div class="stat-card"><div class="stat-num">${donations.rows.length}</div><div>Donations</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${offers.rows.filter(o=>o.offer_status==='pending').length}</div><div>Pending Offers</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#4f46e5">${parseInt(c.views_count||0)}</div><div>Views</div></div>
+      </div>
+      ${tiers.length > 0 ? '<div class="card" style="background:#f8fafc;border:1px dashed #cbd5e1;margin:16px 0"><h4>Investment Tiers</h4>'+tiers.map(tier=>'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="font-weight:700">'+esc(tier.name)+'</span><span style="color:#059669">UGX '+(parseInt(tier.amount)||0).toLocaleString()+'</span><span class="muted">'+esc(tier.benefits||'')+'</span></div>').join('')+'</div>' : ''}
+      <h3 style="margin-top:20px">Recent Donations (${donations.rows.length})</h3>
+      ${donations.rows.length ? '<table><tr><th>Donor</th><th>Amount</th><th>Method</th><th>Message</th><th>Date</th></tr>'+donations.rows.map(d=>'<tr><td>'+esc(d.donor_name||'Anonymous')+'</td><td style="color:#059669;font-weight:700">UGX '+(parseInt(d.amount)||0).toLocaleString()+'</td><td>'+esc(d.method)+'</td><td class="muted">'+esc(d.message||'-').substring(0,40)+'</td><td>'+(d.donated_at?new Date(d.donated_at).toLocaleDateString():'')+'</td></tr>').join('')+'</table>' : '<p class="muted">No donations yet. Share this campaign to start receiving donations!</p>'}
+      ${updates.rows.length > 0 ? '<h3 style="margin-top:20px">Campaign Updates</h3>'+updates.rows.map(u=>'<div style="background:#f8fafc;border-radius:10px;padding:14px;margin:8px 0;border-left:4px solid '+(u.update_type==='milestone'?'#059669':u.update_type==='urgent'?'#ef4444':u.update_type==='financial'?'#4f46e5':'#64748b')+'"><strong>'+esc(u.title)+'</strong><span class="muted" style="margin-left:10px;font-size:12px">'+(u.created_at?new Date(u.created_at).toLocaleDateString():'')+'</span>'+(u.content?'<p style="margin:6px 0;font-size:14px">'+esc(u.content).replace(/\n/g,'<br>')+'</p>':'')+'</div>').join('') : ''}
     </div>
-    <div style="margin:15px 0"><a href="/fundraising/${c.id}/donate" class="btn btn-green">💰 Donate Now</a></div>
-    <h3>Recent Donations</h3>
-    ${donations.length?`<table><tr><th>Donor</th><th>Amount</th><th>Method</th><th>Date</th></tr>${donations.map(d=>`<tr><td>${esc(d.donor_name||'Anonymous')}</td><td>UGX ${parseInt(d.amount||0).toLocaleString()}</td><td>${esc(d.method||'Cash')}</td><td>${d.donated_at?new Date(d.donated_at).toLocaleDateString():''}</td></tr>`).join('')}</table>`:'<p class="muted">No donations yet</p>'}
-    </div>`, req.session.user));
+  `, req.session.user));
+}));
+
+// Campaign update post
+app.get('/fundraising/:id/update', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Post Update', `<div class="card" style="max-width:600px;margin:40px auto"><h2>Post Campaign Update</h2>
+    <form method="POST" action="/fundraising/${req.params.id}/update-save">
+      <input name="title" placeholder="Update title" required>
+      <select name="update_type"><option value="general">General Update</option><option value="milestone">Milestone</option><option value="financial">Financial Report</option><option value="urgent">Urgent</option><option value="thank_you">Thank You</option><option value="media">Media / Photos</option></select>
+      <textarea name="content" rows="4" placeholder="What is new with this campaign?"></textarea>
+      <button class="btn btn-green" style="width:100%">Post Update</button>
+    </form></div>`, req.session.user));
+});
+
+app.post('/fundraising/:id/update-save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { title, content, update_type } = req.body;
+  await pool.query('INSERT INTO campaign_updates(campaign_id,title,content,update_type,created_by) VALUES($1,$2,$3,$4,$5)', [req.params.id, title, content||'', update_type||'general', req.session.user.email]);
+  res.redirect('/fundraising/'+req.params.id);
+}));
+
+// Campaign offer management
+app.get('/fundraising/:id/offers', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!c) return res.status(404).send('Not found');
+  const offers = (await pool.query('SELECT o.*,i.full_name,i.investor_type,i.organization FROM investor_offers o LEFT JOIN fundraising_investors i ON o.investor_email=i.user_email WHERE o.campaign_id=$1 ORDER BY o.offered_at DESC', [c.id])).rows;
+  res.send(renderPage('Offers: '+c.title, `
+    <div class="card"><h2>Investment Offers - ${esc(c.title)}</h2>
+      <p class="muted">Manage offers from interested donors and investors</p>
+      ${offers.length ? '<table><tr><th>Investor</th><th>Type</th><th>Amount</th><th>Message</th><th>Status</th><th>Actions</th></tr>'+
+        offers.map(o=>'<tr><td><strong>'+esc(o.full_name||o.investor_email)+'</strong>'+(o.organization?'<br><span class="muted">'+esc(o.organization)+'</span>':'')+'</td><td><span class="tag">'+esc(o.investor_type||'donor')+'</span></td><td style="font-weight:700">UGX '+(parseInt(o.amount_offered)||0).toLocaleString()+'</td><td class="muted">'+esc((o.message||'').substring(0,60))+'</td><td><span class="tag" style="background:'+(o.offer_status==='accepted'?'#d1fae5;color:#065f46':o.offer_status==='pending'?'#fef3c7;color:#92400e':o.offer_status==='countered'?'#dbeafe;color:#1e40af':'#fee2e2;color:#991b1b')+'">'+esc(o.offer_status)+'</span></td><td>'+
+          (o.offer_status==='pending'?'<a href="/fundraising/offers/'+o.id+'/accept" class="btn btn-sm btn-green">Accept</a> <a href="/fundraising/offers/'+o.id+'/decline" class="btn btn-sm btn-red">Decline</a>':'')+
+          '</td></tr>').join('')+'</table>' : '<p class="muted" style="text-align:center;padding:40px">No offers yet. Share your campaign on the public discovery page to attract investors!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/fundraising/offers/:id/accept', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const offer = (await pool.query('SELECT o.*,fc.tenant_id FROM investor_offers o JOIN fundraising_campaigns fc ON o.campaign_id=fc.id WHERE o.id=$1', [req.params.id])).rows[0];
+  if (!offer || offer.tenant_id !== req.session.user.tenant_id) return res.status(403).send('Forbidden');
+  await pool.query('UPDATE investor_offers SET offer_status=$1,responded_at=NOW() WHERE id=$2', ['accepted', req.params.id]);
+  // Create transaction record
+  const fee = Math.round(parseInt(offer.amount_offered) * 0.05);
+  const net = parseInt(offer.amount_offered) - fee;
+  await pool.query('INSERT INTO investment_transactions(offer_id,investor_email,campaign_id,amount,transaction_type,status,platform_fee,net_amount) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [offer.id, offer.investor_email, offer.campaign_id, offer.amount_offered, 'investment', 'completed', fee, net]);
+  // Also record as donation
+  await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [offer.campaign_id, offer.investor_email, offer.amount_offered, 'investment', 'Investment offer accepted']);
+  // Update platform wallet
+  await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
+  await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Investment fee - Campaign #'+offer.campaign_id]);
+  // Update investor stats
+  await pool.query('UPDATE fundraising_investors SET total_invested=total_invested+$1,campaigns_supported=campaigns_supported+1 WHERE user_email=$2', [offer.amount_offered, offer.investor_email]);
+  // Update campaign investor count
+  await pool.query('UPDATE fundraising_campaigns SET investor_count=COALESCE(investor_count,0)+1 WHERE id=$1', [offer.campaign_id]);
+  // Notify
+  notify(offer.tenant_id, offer.investor_email, 'Offer Accepted!', 'Your investment of UGX '+(parseInt(offer.amount_offered)).toLocaleString()+' has been accepted for the campaign.', 'fundraising');
+  res.redirect('/fundraising/'+offer.campaign_id+'/offers');
+}));
+
+app.get('/fundraising/offers/:id/decline', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const offer = (await pool.query('SELECT o.*,fc.tenant_id FROM investor_offers o JOIN fundraising_campaigns fc ON o.campaign_id=fc.id WHERE o.id=$1', [req.params.id])).rows[0];
+  if (!offer || offer.tenant_id !== req.session.user.tenant_id) return res.status(403).send('Forbidden');
+  await pool.query('UPDATE investor_offers SET offer_status=$1,responded_at=NOW() WHERE id=$2', ['declined', req.params.id]);
+  notify(offer.tenant_id, offer.investor_email, 'Offer Update', 'Your offer for the campaign was not accepted at this time. Thank you for your interest!', 'fundraising');
+  res.redirect('/fundraising/'+offer.campaign_id+'/offers');
 }));
 
 app.get('/fundraising/:id/donate', requireAuth, requireNotBanned, ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
   if (!c) return res.status(404).send('Not found');
-  res.send(renderPage('Donate', `<div class="card" style="max-width:500px;margin:40px auto"><h2>💰 Donate to: ${esc(c.title)}</h2>
+  res.send(renderPage('Donate', `<div class="card" style="max-width:550px;margin:40px auto"><h2>Donate to: ${esc(c.title)}</h2>
     <form method="POST" action="/fundraising/${c.id}/donate-save">
       <input name="donor_name" placeholder="Your Name (or leave blank for anonymous)">
       <input name="amount" type="number" placeholder="Amount (UGX)" required>
-      <select name="method"><option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card</option><option value="online">Online</option></select>
+      <select name="method"><option value="cash">Cash</option><option value="mobile_money">Mobile Money (MTN)</option><option value="airtel_money">Airtel Money</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card Payment</option><option value="online">Online</option></select>
       <textarea name="message" rows="2" placeholder="Message of support (optional)"></textarea>
-      <button class="btn btn-green" style="width:100%">Donate</button>
+      <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Complete Donation</button>
     </form></div>`, req.session.user));
 }));
 
 app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { donor_name, amount, method, message } = req.body;
   await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [req.params.id, donor_name||'Anonymous', amount||0, method||'cash', message||'']);
+  // 5% platform fee
+  const fee = Math.round(parseInt(amount||0) * 0.05);
+  if (fee > 0) {
+    await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
+    await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Donation fee - Campaign #'+req.params.id]);
+  }
   res.redirect('/fundraising/'+req.params.id);
 }));
 
@@ -19882,6 +20164,347 @@ app.get('/fundraising/:id/close', requireAuth, requireNotBanned, ah(async (req, 
 app.get('/fundraising/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   res.redirect('/fundraising');
+}));
+
+// ============================================================
+// === PUBLIC INVESTOR DISCOVERY PORTAL ===
+// ============================================================
+app.get('/discover', ah(async (req, res) => {
+  const { q, category, urgency, sort } = req.query;
+  let where = "WHERE fc.is_public = true AND fc.status = 'active'";
+  const params = [];
+  if (category && category !== 'all') { params.push(category); where += ` AND fc.category = $${params.length}`; }
+  if (urgency && urgency !== 'all') { params.push(urgency); where += ` AND fc.urgency_level = $${params.length}`; }
+  if (q) { params.push('%'+q+'%'); where += ` AND (fc.title ILIKE $${params.length} OR fc.description ILIKE $${params.length} OR fc.location ILIKE $${params.length})`; }
+  let orderBy = 'ORDER BY fc.created_at DESC';
+  if (sort === 'most_raised') orderBy = 'ORDER BY raised DESC';
+  else if (sort === 'urgent') orderBy = "ORDER BY CASE fc.urgency_level WHEN 'critical' THEN 5 WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'normal' THEN 2 WHEN 'low' THEN 1 END DESC";
+  else if (sort === 'featured') orderBy = 'ORDER BY fc.featured DESC, fc.created_at DESC';
+
+  const [campaigns, categoryStats] = await Promise.all([
+    pool.query(`SELECT fc.*, t.name as org_name, t.type as org_type, t.subdomain, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id) as donor_count FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id = t.id ${where} ${orderBy} LIMIT 60`, params),
+    pool.query("SELECT category, COUNT(*) as count, SUM((SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fundraising_campaigns.id)) as total_raised FROM fundraising_campaigns WHERE is_public=true AND status='active' GROUP BY category ORDER BY count DESC")
+  ]);
+  const totalRaised = campaigns.rows.reduce((a,c) => a + parseInt(c.raised||0), 0);
+  const totalCampaigns = campaigns.rows.length;
+
+  const investorProfile = req.session.user ? (await pool.query('SELECT * FROM fundraising_investors WHERE user_email=$1', [req.session.user.email])).rows[0] : null;
+
+  const content = `
+    <div style="background:linear-gradient(135deg,#059669 0%,#0d9488 50%,#0891b2 100%);padding:60px 20px;text-align:center;color:white;position:relative">
+      <h1 style="font-size:clamp(28px,5vw,48px);font-weight:900;margin-bottom:12px">Discover Campaigns to Fund</h1>
+      <p style="font-size:18px;opacity:0.9;margin-bottom:24px;max-width:700px;margin-left:auto;margin-right:auto">Find impactful campaigns from schools, churches, NGOs, and organizations across Uganda. Invest in causes that matter.</p>
+      <form method="GET" action="/discover" style="max-width:600px;margin:0 auto;display:flex;gap:8px">
+        <input name="q" placeholder="Search campaigns..." value="${esc(q||'')}" style="flex:1;padding:14px 20px;border-radius:12px;border:none;font-size:16px">
+        <button type="submit" style="padding:14px 28px;background:#f59e0b;color:white;border:none;border-radius:12px;font-weight:700;font-size:16px;cursor:pointer">Search</button>
+      </form>
+      <div style="display:flex;gap:12px;justify-content:center;margin-top:16px;flex-wrap:wrap">
+        ${categoryStats.rows.slice(0,8).map(cat=>'<a href="/discover?category='+esc(cat.category)+'" style="background:rgba(255,255,255,0.15);padding:6px 16px;border-radius:20px;color:white;text-decoration:none;font-size:13px;font-weight:600">'+esc(cat.category)+' ('+cat.count+')</a>').join('')}
+      </div>
+    </div>
+
+    <div style="max-width:1200px;margin:0 auto;padding:24px 20px">
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <a href="/discover" class="btn btn-sm" style="${!category?'background:#4f46e5;color:white':''}">All</a>
+          <a href="/discover?category=education" class="btn btn-sm" style="${category==='education'?'background:#4f46e5;color:white':''}">Education</a>
+          <a href="/discover?category=building" class="btn btn-sm" style="${category==='building'?'background:#4f46e5;color:white':''}">Building</a>
+          <a href="/discover?category=medical" class="btn btn-sm" style="${category==='medical'?'background:#4f46e5;color:white':''}">Medical</a>
+          <a href="/discover?category=community" class="btn btn-sm" style="${category==='community'?'background:#4f46e5;color:white':''}">Community</a>
+          <a href="/discover?category=church" class="btn btn-sm" style="${category==='church'?'background:#4f46e5;color:white':''}">Church</a>
+          <a href="/discover?category=emergency" class="btn btn-sm" style="${category==='emergency'?'background:#ef4444;color:white':''}">Emergency</a>
+          <a href="/discover?category=technology" class="btn btn-sm" style="${category==='technology'?'background:#4f46e5;color:white':''}">Technology</a>
+          <a href="/discover?category=agriculture" class="btn btn-sm" style="${category==='agriculture'?'background:#4f46e5;color:white':''}">Agriculture</a>
+        </div>
+        <div style="display:flex;gap:8px">
+          <span style="font-size:13px;color:#64748b;align-self:center">Sort:</span>
+          <a href="/discover?${(q?'q='+encodeURIComponent(q)+'&':'')+(category?'category='+category+'&':'')}sort=featured" class="btn btn-sm" style="${sort==='featured'?'background:#f59e0b;color:white':''}">Featured</a>
+          <a href="/discover?${(q?'q='+encodeURIComponent(q)+'&':'')+(category?'category='+category+'&':'')}sort=urgent" class="btn btn-sm" style="${sort==='urgent'?'background:#ef4444;color:white':''}">Urgent</a>
+          <a href="/discover?${(q?'q='+encodeURIComponent(q)+'&':'')+(category?'category='+category+'&':'')}sort=most_raised" class="btn btn-sm" style="${sort==='most_raised'?'background:#059669;color:white':''}">Top Raised</a>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;font-size:14px;color:#475569">
+        <span style="font-weight:700">${totalCampaigns} campaigns</span> &bull;
+        <span style="color:#059669;font-weight:700">UGX ${totalRaised.toLocaleString()}</span> total goal &bull;
+        ${investorProfile ? '<a href="/investor/dashboard" style="color:#4f46e5;font-weight:700">My Investor Dashboard</a>' : '<a href="/investor/register" style="color:#4f46e5;font-weight:700">Become an Investor</a>'}
+      </div>
+
+      ${campaigns.rows.length > 0 ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:24px">' +
+        campaigns.rows.map(c => {
+          const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
+          const urgColors = {low:'#94a3b8',normal:'#0891b2',high:'#f59e0b',urgent:'#ef4444',critical:'#dc2626'};
+          const urgColor = urgColors[c.urgency_level]||'#0891b2';
+          return '<div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:1px solid #e2e8f0;transition:transform 0.2s,box-shadow 0.2s;cursor:pointer" onmouseover="this.style.transform=\'translateY(-4px)\';this.style.boxShadow=\'0 12px 40px rgba(0,0,0,0.15)\'" onmouseout="this.style.transform=\'\';this.style.boxShadow=\'0 4px 20px rgba(0,0,0,0.08)\'">'+
+            (c.image_url?'<div style="height:200px;overflow:hidden"><img src="'+esc(c.image_url)+'" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display=\'none\'"></div>':'')+
+            '<div style="padding:20px">'+
+              '<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px">'+
+                '<div><h3 style="font-size:18px;font-weight:700;color:#1e293b;margin:0 0 6px 0">'+esc(c.title)+'</h3>'+
+                '<span style="font-size:13px;color:#64748b">by '+esc(c.org_name||'Unknown')+' &bull; '+esc(c.org_type||'')+'</span></div>'+
+                '<div style="display:flex;flex-direction:column;gap:4px;align-items:end">'+
+                  (c.featured?'<span style="background:#f59e0b;color:white;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">Featured</span>':'')+
+                  '<span style="background:'+urgColor+'20;color:'+urgColor+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">'+esc(c.urgency_level||'normal')+'</span>'+
+                '</div>'+
+              '</div>'+
+              '<p style="font-size:14px;color:#475569;margin-bottom:14px;line-height:1.6;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">'+esc(c.description||'Help us reach our goal!')+'</p>'+
+              (c.location?'<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">'+esc(c.location)+'</div>':'')+
+              '<div style="margin-bottom:12px"><div style="background:#e2e8f0;height:10px;border-radius:5px;overflow:hidden"><div style="background:'+(pct>=75?'linear-gradient(90deg,#059669,#10b981)':pct>=40?'linear-gradient(90deg,#f59e0b,#fbbf24)':'linear-gradient(90deg,#4f46e5,#818cf8)')+';height:10px;border-radius:5px;width:'+pct+'%;transition:width 0.5s"></div></div></div>'+
+              '<div style="display:flex;justify-content:space-between;align-items:end">'+
+                '<div><span style="font-size:20px;font-weight:800;color:#059669">UGX '+(parseInt(c.raised)||0).toLocaleString()+'</span><br><span style="font-size:13px;color:#94a3b8">of UGX '+(parseInt(c.target)||0).toLocaleString()+' ('+pct+'%)</span></div>'+
+                '<div style="text-align:right"><span style="font-size:13px;color:#64748b">'+(parseInt(c.donor_count)||0)+' donors</span>'+(c.investor_count>0?'<br><span style="font-size:12px;color:#f59e0b">'+(parseInt(c.investor_count))+' investors</span>':'')+'</div>'+
+              '</div>'+
+              '<div style="margin-top:14px;display:flex;gap:8px">'+
+                (req.session.user ? '<a href="/discover/'+c.id+'" style="flex:1;display:block;text-align:center;padding:10px;background:#059669;color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">View & Invest</a><a href="/discover/'+c.id+'/offer" style="flex:1;display:block;text-align:center;padding:10px;background:#f59e0b;color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Make Offer</a>' : '<a href="/register" style="flex:1;display:block;text-align:center;padding:10px;background:#059669;color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Sign Up to Donate</a>')+
+              '</div>'+
+            '</div></div>';
+        }).join('') + '</div>' : '<div style="text-align:center;padding:80px 20px;background:white;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06)"><div style="font-size:48px;margin-bottom:16px">&#128269;</div><h2 style="font-size:24px;font-weight:700;margin-bottom:8px">No Campaigns Found</h2><p style="color:#64748b;margin-bottom:24px">Try adjusting your search or filters.</p><a href="/discover" style="display:inline-block;padding:14px 32px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none">View All Campaigns</a></div>'}
+    </div>
+
+    <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:20px;padding:40px;text-align:center;margin:40px 20px;color:white;max-width:1200px;margin-left:auto;margin-right:auto">
+      <h2 style="font-size:24px;font-weight:800;margin-bottom:12px">Are You a Donor or Investor?</h2>
+      <p style="opacity:0.9;margin-bottom:24px;max-width:600px;margin-left:auto;margin-right:auto">Create a free investor profile to track your donations, receive campaign alerts, and make investment offers directly to organizations.</p>
+      ${investorProfile ? '<a href="/investor/dashboard" style="display:inline-block;padding:14px 32px;background:white;color:#4f46e5;border-radius:12px;font-weight:700;text-decoration:none">Go to My Dashboard</a>' : '<a href="/investor/register" style="display:inline-block;padding:14px 32px;background:white;color:#4f46e5;border-radius:12px;font-weight:700;text-decoration:none">Create Investor Profile</a>'}
+    </div>
+  `;
+
+  res.send(renderPage('Discover Campaigns - Comfort Zone', content, req.session.user || null, '/discover'));
+}));
+
+// Public campaign detail page
+app.get('/discover/:id', ah(async (req, res) => {
+  const c = (await pool.query('SELECT fc.*, t.name as org_name, t.type as org_type, t.subdomain, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id) as donor_count FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id = t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
+  if (!c) return res.status(404).send('Campaign not found');
+  await pool.query('UPDATE fundraising_campaigns SET views_count=COALESCE(views_count,0)+1 WHERE id=$1', [c.id]);
+  const [donations, updates] = await Promise.all([
+    pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 ORDER BY donated_at DESC LIMIT 20', c.id),
+    pool.query("SELECT * FROM campaign_updates WHERE campaign_id=$1 AND is_public=true ORDER BY created_at DESC LIMIT 10", c.id)
+  ]);
+  const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
+  const tiers = (typeof c.investment_tiers === 'string' ? JSON.parse(c.investment_tiers) : c.investment_tiers) || [];
+
+  const content = `
+    <div style="max-width:900px;margin:0 auto;padding:20px">
+      ${c.image_url?'<div style="border-radius:16px;overflow:hidden;margin-bottom:24px"><img src="'+esc(c.image_url)+'" style="width:100%;max-height:400px;object-fit:cover" onerror="this.parentElement.style.display=\'none\'"></div>':''}
+      <div style="background:white;border-radius:16px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08)">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <span style="background:#05966920;color:#059669;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${esc(c.category)}</span>
+          ${c.urgent==='urgent'||c.urgent==='critical'?'<span style="background:#fee2e2;color:#991b1b;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">URGENT</span>':''}
+          ${c.featured?'<span style="background:#fef3c7;color:#92400e;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">Featured</span>':''}
+        </div>
+        <h1 style="font-size:32px;font-weight:900;color:#1e293b;margin:0 0 8px 0">${esc(c.title)}</h1>
+        <p style="color:#64748b;font-size:16px;margin-bottom:16px">by ${esc(c.org_name)} &bull; ${esc(c.org_type)} ${c.location?'&bull; '+esc(c.location):''}</p>
+        <p style="font-size:16px;color:#475569;line-height:1.8;margin-bottom:24px">${esc(c.description||'').replace(/\n/g,'<br>')}</p>
+        <div style="background:#f8fafc;border-radius:12px;padding:20px;margin-bottom:24px">
+          <div style="background:#e2e8f0;height:16px;border-radius:8px;overflow:hidden;margin-bottom:12px"><div style="background:linear-gradient(90deg,#059669,#10b981);height:16px;border-radius:8px;width:${pct}%;transition:width 0.5s"></div></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:16px;text-align:center">
+            <div><div style="font-size:24px;font-weight:800;color:#059669">UGX ${(parseInt(c.raised)||0).toLocaleString()}</div><div style="font-size:13px;color:#64748b">Raised</div></div>
+            <div><div style="font-size:24px;font-weight:800;color:#1e293b">UGX ${(parseInt(c.target)||0).toLocaleString()}</div><div style="font-size:13px;color:#64748b">Goal</div></div>
+            <div><div style="font-size:24px;font-weight:800;color:#4f46e5">${(parseInt(c.donor_count)||0)}</div><div style="font-size:13px;color:#64748b">Donors</div></div>
+            <div><div style="font-size:24px;font-weight:800;color:#f59e0b">${pct}%</div><div style="font-size:13px;color:#64748b">Funded</div></div>
+          </div>
+        </div>
+        ${tiers.length > 0 ? '<div style="margin-bottom:24px"><h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Investment Tiers</h3>'+tiers.map(tier=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:#f8fafc;border-radius:10px;margin-bottom:8px"><span style="font-weight:700;font-size:15px">'+esc(tier.name)+'</span><span style="color:#059669;font-weight:800;font-size:16px">UGX '+(parseInt(tier.amount)||0).toLocaleString()+'</span><span style="color:#64748b;font-size:13px">'+esc(tier.benefits||'')+'</span></div>').join('')+'</div>' : ''}
+        <div style="display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap">
+          ${req.session.user ? '<a href="/discover/'+c.id+'/offer" style="flex:1;display:block;text-align:center;padding:14px;background:#f59e0b;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Make Investment Offer</a><a href="/discover/'+c.id+'/donate" style="flex:1;display:block;text-align:center;padding:14px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Quick Donate</a>' : '<a href="/register" style="flex:1;display:block;text-align:center;padding:14px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Sign Up to Support</a>'}
+        </div>
+        ${updates.rows.length > 0 ? '<h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Campaign Updates</h3>'+updates.rows.map(u=>'<div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px;border-left:4px solid '+(u.update_type==='milestone'?'#059669':u.update_type==='urgent'?'#ef4444':'#64748b')+'"><strong>'+esc(u.title)+'</strong><span class="muted" style="margin-left:8px;font-size:12px">'+(u.created_at?new Date(u.created_at).toLocaleDateString():'')+'</span>'+(u.content?'<p style="margin:6px 0;font-size:14px;color:#475569">'+esc(u.content).replace(/\n/g,'<br>')+'</p>':'')+'</div>').join('') : ''}
+        ${donations.rows.length > 0 ? '<h3 style="font-size:18px;font-weight:700;margin:20px 0 12px">Recent Supporters ('+donations.rows.length+')</h3>'+donations.rows.slice(0,10).map(d=>'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9"><span>'+(d.donor_name==='Anonymous'?'Supporter':esc(d.donor_name))+'</span><span style="font-weight:700;color:#059669">UGX '+(parseInt(d.amount)||0).toLocaleString()+'</span></div>').join('') : ''}
+      </div>
+    </div>
+  `;
+  res.send(renderPage(c.title+' - Comfort Zone', content, req.session.user || null, '/discover/'+c.id));
+}));
+
+// Public donate page
+app.get('/discover/:id/donate', requireAuth, ah(async (req, res) => {
+  const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
+  if (!c) return res.status(404).send('Not found');
+  res.send(renderPage('Donate: '+c.title, `
+    <div class="card" style="max-width:550px;margin:40px auto"><h2>Support: ${esc(c.title)}</h2>
+      <p class="muted" style="margin-bottom:20px">by ${esc(c.org_name)}</p>
+      <form method="POST" action="/discover/${c.id}/donate-save">
+        <input name="donor_name" placeholder="Your Name (or leave blank for anonymous)">
+        <input name="donor_email" type="email" placeholder="Your Email" value="${esc(req.session.user.email||'')}">
+        <input name="amount" type="number" placeholder="Amount (UGX)" required>
+        <select name="method"><option value="mobile_money">MTN Mobile Money</option><option value="airtel_money">Airtel Money</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card Payment</option><option value="cash">Cash</option></select>
+        <textarea name="message" rows="2" placeholder="Message of support (optional)"></textarea>
+        <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Complete Donation</button>
+      </form></div>
+  `, req.session.user));
+}));
+
+app.post('/discover/:id/donate-save', requireAuth, ah(async (req, res) => {
+  const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
+  if (!c) return res.status(404).send('Not found');
+  const { donor_name, donor_email, amount, method, message } = req.body;
+  await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [c.id, donor_name||req.session.user.name||'Anonymous', amount||0, method||'mobile_money', message||'']);
+  const fee = Math.round(parseInt(amount||0) * 0.05);
+  if (fee > 0) {
+    await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
+    await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Public donation fee - Campaign #'+c.id]);
+  }
+  res.redirect('/discover/'+c.id);
+}));
+
+// Investment offer from discover page
+app.get('/discover/:id/offer', requireAuth, ah(async (req, res) => {
+  const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
+  if (!c) return res.status(404).send('Not found');
+  const investor = (await pool.query('SELECT * FROM fundraising_investors WHERE user_email=$1', [req.session.user.email])).rows[0];
+  res.send(renderPage('Make Offer: '+c.title, `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Make an Investment Offer</h2>
+      <p style="margin-bottom:4px"><strong>${esc(c.title)}</strong></p>
+      <p class="muted" style="margin-bottom:20px">by ${esc(c.org_name)} &bull; Goal: UGX ${(parseInt(c.target)||0).toLocaleString()}</p>
+      ${!investor ? '<div class="alert alert-info" style="margin-bottom:20px"><strong>Note:</strong> Creating this offer will also set up your investor profile so organizations can track your interest.</div>' : ''}
+      <form method="POST" action="/discover/${c.id}/offer-save">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Your Name *</label><input name="full_name" value="${esc(investor?.full_name||req.session.user.name||'')}" required style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Organization</label><input name="organization" value="${esc(investor?.organization||'')}" style="width:100%"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Phone</label><input name="phone" value="${esc(investor?.phone||'')}" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Investor Type</label><select name="investor_type" style="width:100%"><option value="individual" ${investor?.investor_type==='individual'?'selected':''}>Individual</option><option value="corporate" ${investor?.investor_type==='corporate'?'selected':''}>Corporate</option><option value="ngo" ${investor?.investor_type==='ngo'?'selected':''}>NGO</option><option value="foundation" ${investor?.investor_type==='foundation'?'selected':''}>Foundation</option><option value="angel" ${investor?.investor_type==='angel'?'selected':''}>Angel Investor</option><option value="venture" ${investor?.investor_type==='venture'?'selected':''}>Venture Capital</option></select></div>
+        </div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Offer Amount (UGX) *</label><input name="amount_offered" type="number" placeholder="500000" required style="width:100%"></div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Message to Organization</label><textarea name="message" rows="3" placeholder="Tell them why you want to invest and any conditions..." style="width:100%"></textarea></div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Your Interests (comma separated categories)</label><input name="interests" value="${esc(investor?.preferred_categories?.join(', ')||c.category||'')}" style="width:100%"></div>
+        <button type="submit" class="btn btn-green" style="width:100%;margin-top:20px;padding:14px;font-size:16px;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border:none;font-weight:700">Submit Investment Offer</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/discover/:id/offer-save', requireAuth, ah(async (req, res) => {
+  const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
+  if (!c) return res.status(404).send('Not found');
+  const { full_name, organization, phone, investor_type, amount_offered, message, interests } = req.body;
+  const interestsArr = interests ? interests.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  // Upsert investor profile
+  await pool.query(`INSERT INTO fundraising_investors (user_email,full_name,phone,organization,investor_type,preferred_categories,last_active) VALUES ($1,$2,$3,$4,$5,$6,NOW())
+    ON CONFLICT (user_email) DO UPDATE SET full_name=$2,phone=$3,organization=$4,investor_type=$5,preferred_categories=$6,last_active=NOW()`,
+    [req.session.user.email, full_name||req.session.user.name, phone||'', organization||'', investor_type||'individual', interestsArr]);
+  // Create offer
+  await pool.query('INSERT INTO investor_offers(campaign_id,investor_email,amount_offered,message,offer_status) VALUES($1,$2,$3,$4,$5)', [c.id, req.session.user.email, amount_offered||0, message||'', 'pending']);
+  // Notify the campaign organizer
+  try {
+    const orgUsers = (await pool.query('SELECT email FROM users WHERE tenant_id=$1 LIMIT 10', [c.tenant_id])).rows;
+    for (const u of orgUsers) {
+      notify(c.tenant_id, u.email, 'New Investment Offer: '+c.title, full_name+' offered UGX '+(parseInt(amount_offered)||0).toLocaleString()+' for your campaign "'+c.title+'". Review it now!', 'fundraising');
+    }
+  } catch(e) {}
+  res.redirect('/discover/'+c.id);
+}));
+
+// ============================================================
+// === INVESTOR DASHBOARD ===
+// ============================================================
+app.get('/investor/register', requireAuth, (req, res) => {
+  const existing = {}; // Will be filled if profile exists
+  res.send(renderPage('Become an Investor', `
+    <div class="card" style="max-width:650px;margin:40px auto">
+      <h2>Investor Profile</h2>
+      <p class="muted" style="margin-bottom:20px">Create your investor profile to discover campaigns, make offers, and track your impact.</p>
+      <form method="POST" action="/investor/register-save">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Full Name *</label><input name="full_name" placeholder="Your full name" required style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Organization</label><input name="organization" placeholder="Company / NGO name" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Phone</label><input name="phone" placeholder="256700000000" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Website</label><input name="website" placeholder="https://..." style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Investor Type *</label><select name="investor_type" style="width:100%"><option value="individual">Individual Donor</option><option value="corporate">Corporate / Business</option><option value="ngo">NGO / Foundation</option><option value="angel">Angel Investor</option><option value="venture">Venture Capital</option></select></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Preferred Currency</label><select name="preferred_currency" style="width:100%"><option value="UGX">UGX - Uganda Shillings</option><option value="USD">USD - US Dollars</option><option value="KES">KES - Kenya Shillings</option><option value="TZS">TZS - Tanzania Shillings</option></select></div>
+        </div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Bio / About You</label><textarea name="bio" rows="3" placeholder="Tell organizations about yourself and your investment interests..." style="width:100%"></textarea></div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Preferred Categories (comma separated)</label><input name="preferred_categories" placeholder="education, health, community, technology" style="width:100%"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Min Investment (UGX)</label><input name="min_investment" type="number" placeholder="10000" value="0" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Max Investment (UGX)</label><input name="max_investment" type="number" placeholder="10000000" style="width:100%"></div>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:20px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="notif_email" checked> Email notifications</label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="notif_inapp" checked> In-app notifications</label>
+        </div>
+        <button type="submit" class="btn btn-green" style="width:100%;margin-top:20px;padding:14px;font-size:16px">Create Investor Profile</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/investor/register-save', requireAuth, ah(async (req, res) => {
+  const { full_name, organization, phone, website, investor_type, preferred_currency, bio, preferred_categories, min_investment, max_investment, notif_email, notif_inapp } = req.body;
+  const cats = preferred_categories ? preferred_categories.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  const notifPrefs = JSON.stringify({ email: !!notif_email, in_app: !!notif_inapp, sms: false });
+  await pool.query(`INSERT INTO fundraising_investors (user_email,full_name,phone,organization,investor_type,website,bio,preferred_categories,min_investment,max_investment,preferred_currency,notification_prefs,last_active)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+    ON CONFLICT (user_email) DO UPDATE SET full_name=$2,phone=$3,organization=$4,investor_type=$5,website=$6,bio=$7,preferred_categories=$8,min_investment=$9,max_investment=$10,preferred_currency=$11,notification_prefs=$12,last_active=NOW()`,
+    [req.session.user.email, full_name, phone||'', organization||'', investor_type||'individual', website||'', bio||'', cats, min_investment||0, max_investment||0, preferred_currency||'UGX', notifPrefs]);
+  res.redirect('/investor/dashboard');
+}));
+
+app.get('/investor/dashboard', requireAuth, ah(async (req, res) => {
+  const email = req.session.user.email;
+  let investor = (await pool.query('SELECT * FROM fundraising_investors WHERE user_email=$1', [email])).rows[0];
+  if (!investor) return res.redirect('/investor/register');
+  await pool.query('UPDATE fundraising_investors SET last_active=NOW() WHERE user_email=$1', [email]);
+  const [offers, transactions, recommended] = await Promise.all([
+    pool.query('SELECT o.*,fc.title as campaign_title,fc.category,fc.status as campaign_status,t.name as org_name FROM investor_offers o JOIN fundraising_campaigns fc ON o.campaign_id=fc.id JOIN tenants t ON fc.tenant_id=t.id WHERE o.investor_email=$1 ORDER BY o.offered_at DESC', [email]),
+    pool.query('SELECT tx.*,fc.title as campaign_title,t.name as org_name FROM investment_transactions tx JOIN fundraising_campaigns fc ON tx.campaign_id=fc.id JOIN tenants t ON fc.tenant_id=t.id WHERE tx.investor_email=$1 ORDER BY tx.created_at DESC', [email]),
+    pool.query("SELECT fc.*, t.name as org_name, t.type as org_type, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) as raised FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.is_public=true AND fc.status='active' AND ($1 = '{}' OR fc.category = ANY($1) OR fc.tags && $1) ORDER BY fc.featured DESC, fc.created_at DESC LIMIT 6", [investor.preferred_categories?.length > 0 ? investor.preferred_categories : ['general']])
+  ]);
+  res.send(renderPage('Investor Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+      <h1>My Investor Dashboard</h1>
+      <p>${esc(investor.full_name)} &bull; ${esc(investor.investor_type)}</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${(parseInt(investor.total_invested)||0).toLocaleString()}</div><div>Total Invested</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#4f46e5">${investor.campaigns_supported||0}</div><div>Campaigns Supported</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${offers.rows.filter(o=>o.offer_status==='pending').length}</div><div>Pending Offers</div></div>
+      <div class="stat-card"><div class="stat-num">${transactions.rows.length}</div><div>Transactions</div></div>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <a href="/discover" class="btn btn-green">Discover Campaigns</a>
+      <a href="/investor/edit" class="btn btn-sm">Edit Profile</a>
+      <a href="/investor/notifications" class="btn btn-sm">Notifications</a>
+    </div>
+
+    ${recommended.rows.length > 0 ? '<div class="card"><h3>Recommended for You</h3><p class="muted">Based on your interests: '+(investor.preferred_categories?.length>0?investor.preferred_categories.join(', '):'general')+'</p>'+
+      '<div class="grid">'+recommended.rows.map(c=>{const p=c.target>0?Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100):0;return '<div class="card" style="padding:16px"><h4 style="margin:0 0 6px">'+esc(c.title)+'</h4><span class="muted" style="font-size:12px">'+esc(c.org_name)+'</span><div class="progress-bar" style="height:8px;margin:10px 0"><div class="progress-fill" style="width:'+p+'%;background:#059669">'+p+'%</div></div><div style="font-size:13px"><span style="color:#059669;font-weight:700">UGX '+(parseInt(c.raised)||0).toLocaleString()+'</span><span class="muted"> / UGX '+(parseInt(c.target)||0).toLocaleString()+'</span></div><a href="/discover/'+c.id+'/offer" class="btn btn-sm" style="margin-top:8px;background:#f59e0b;color:white">Make Offer</a></div>';}).join('')+'</div></div>' : ''}
+
+    <div class="card" style="margin-top:20px"><h3>My Offers (${offers.rows.length})</h3>
+      <table><tr><th>Campaign</th><th>Organization</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+      ${offers.rows.map(o=>'<tr><td>'+esc(o.campaign_title)+'</td><td class="muted">'+esc(o.org_name)+'</td><td style="font-weight:700">UGX '+(parseInt(o.amount_offered)||0).toLocaleString()+'</td><td><span class="tag" style="background:'+(o.offer_status==='accepted'?'#d1fae5;color:#065f46':o.offer_status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+esc(o.offer_status)+'</span></td><td>'+(o.offered_at?new Date(o.offered_at).toLocaleDateString():'')+'</td></tr>').join('')||'<tr><td colspan="5">No offers yet</td></tr>'}
+      </table>
+    </div>
+
+    ${transactions.rows.length > 0 ? '<div class="card" style="margin-top:20px"><h3>Transaction History</h3><table><tr><th>Campaign</th><th>Amount</th><th>Type</th><th>Status</th><th>Date</th></tr>'+transactions.rows.map(tx=>'<tr><td>'+esc(tx.campaign_title)+'</td><td style="font-weight:700">UGX '+(parseInt(tx.amount)||0).toLocaleString()+'</td><td><span class="tag">'+esc(tx.transaction_type)+'</span></td><td><span class="tag" style="background:'+(tx.status==='completed'?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b')+'">'+esc(tx.status)+'</span></td><td>'+(tx.created_at?new Date(tx.created_at).toLocaleDateString():'')+'</td></tr>').join('')+'</table></div>' : ''}
+  `, req.session.user));
+}));
+
+app.get('/investor/edit', requireAuth, ah(async (req, res) => {
+  const investor = (await pool.query('SELECT * FROM fundraising_investors WHERE user_email=$1', [req.session.user.email])).rows[0];
+  if (!investor) return res.redirect('/investor/register');
+  res.send(renderPage('Edit Investor Profile', `
+    <div class="card" style="max-width:650px;margin:40px auto"><h2>Edit Investor Profile</h2>
+      <form method="POST" action="/investor/register-save">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Full Name *</label><input name="full_name" value="${esc(investor.full_name)}" required style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Organization</label><input name="organization" value="${esc(investor.organization||'')}" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Phone</label><input name="phone" value="${esc(investor.phone||'')}" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Website</label><input name="website" value="${esc(investor.website||'')}" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Investor Type *</label><select name="investor_type" style="width:100%"><option value="individual" ${investor.investor_type==='individual'?'selected':''}>Individual Donor</option><option value="corporate" ${investor.investor_type==='corporate'?'selected':''}>Corporate</option><option value="ngo" ${investor.investor_type==='ngo'?'selected':''}>NGO</option><option value="angel" ${investor.investor_type==='angel'?'selected':''}>Angel</option><option value="venture" ${investor.investor_type==='venture'?'selected':''}>Venture</option></select></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Currency</label><select name="preferred_currency" style="width:100%"><option value="UGX" ${investor.preferred_currency==='UGX'?'selected':''}>UGX</option><option value="USD" ${investor.preferred_currency==='USD'?'selected':''}>USD</option><option value="KES" ${investor.preferred_currency==='KES'?'selected':''}>KES</option></select></div>
+        </div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Bio</label><textarea name="bio" rows="3" style="width:100%">${esc(investor.bio||'')}</textarea></div>
+        <div style="margin-top:16px"><label style="font-weight:600;display:block;margin-bottom:6px">Preferred Categories</label><input name="preferred_categories" value="${esc(investor.preferred_categories?.join(', ')||'')}" style="width:100%"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Min Investment</label><input name="min_investment" type="number" value="${investor.min_investment||0}" style="width:100%"></div>
+          <div><label style="font-weight:600;display:block;margin-bottom:6px">Max Investment</label><input name="max_investment" type="number" value="${investor.max_investment||0}" style="width:100%"></div>
+        </div>
+        <button type="submit" class="btn btn-green" style="width:100%;margin-top:20px">Save Changes</button>
+      </form>
+    </div>
+  `, req.session.user));
 }));
 
 // =============================================

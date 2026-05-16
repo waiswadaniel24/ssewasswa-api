@@ -32,8 +32,14 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
 
   // ─── Database Migrations ──────────────────────────────────
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Discipline] Cannot connect to DB for migrations'); return; }
+    let c = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      c = await pool.connect().catch(() => null);
+      if (c) break;
+      console.warn(`[Discipline] DB connection attempt ${attempt}/3 failed, retrying in 3s...`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    if (!c) { console.error('[Discipline] Cannot connect to DB for migrations after 3 attempts'); return; }
     try {
       await c.query(`CREATE TABLE IF NOT EXISTS discipline_incidents (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,

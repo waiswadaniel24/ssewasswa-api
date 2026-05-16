@@ -591,7 +591,10 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // AUTO-MIGRATION
   // ═════════════════════════════════════════════════════════════════════════════
   (async () => {
-    try {
+    // Retry logic for DB connection
+    let success = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS branch_inter_requests (
           id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -630,6 +633,16 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         'CREATE INDEX IF NOT EXISTS idx_bh_date ON branch_holidays(date)',
       ]) { try { await pool.query(sql); } catch {} }
       console.log('[MultiBranch] Tables and indexes ready');
-    } catch (err) { console.error('[MultiBranch] Migration error:', err.message); }
+      success = true;
+      break;
+      } catch (err) {
+        if (attempt < 3) {
+          console.warn(`[MultiBranch] Migration attempt ${attempt}/3 failed: ${err.message}, retrying in 3s...`);
+          await new Promise(r => setTimeout(r, 3000));
+          continue;
+        }
+        console.error('[MultiBranch] Migration error:', err.message);
+      }
+    }
   })();
 };

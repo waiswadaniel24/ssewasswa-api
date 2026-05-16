@@ -544,7 +544,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   async function getActiveCampaigns() {
     try {
       const result = await pool.query(
-        "SELECT c.*, t.name as tenant_name, t.type as tenant_type FROM campaigns c JOIN tenants t ON c.tenant_id = t.id WHERE c.status = 'active' ORDER BY c.created_at DESC"
+        "SELECT fc.*, t.name as tenant_name, t.type as tenant_type, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) as raised FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id = t.id WHERE fc.is_public = true AND fc.status = 'active' ORDER BY fc.created_at DESC"
       );
       return result.rows;
     } catch (e) { return []; }
@@ -1835,8 +1835,8 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             <span style="color:#64748b">of UGX ${Number(c.target || 0).toLocaleString()}</span>
           </div>
           <div style="margin-top:16px">
-            <a href="${req.session.user ? '/fundraising' : '/register'}" style="display:inline-block;padding:10px 24px;background:#059669;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">
-              ${req.session.user ? 'Donate' : 'Sign Up to Donate'}
+            <a href="${req.session.user ? '/discover/' + c.id : '/register'}" style="display:inline-block;padding:10px 24px;background:#059669;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">
+              ${req.session.user ? 'View & Invest' : 'Sign Up to Donate'}
             </a>
           </div>
         </div>
