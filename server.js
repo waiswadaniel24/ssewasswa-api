@@ -4493,6 +4493,11 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
     pool.query('SELECT COUNT(*) FROM meeting_minutes WHERE tenant_id=$1', [t])
   ]);
   const tenant = (await pool.query('SELECT has_fundraising FROM tenants WHERE id=$1', [t])).rows[0];
+  // Auto-enable fundraising for super_admin/developer
+  if (req.session.user.role === 'super_admin' && !tenant.has_fundraising) {
+    await pool.query('UPDATE tenants SET has_fundraising=true WHERE id=$1', [t]).catch(() => {});
+    tenant.has_fundraising = true;
+  }
   res.send(renderPage('Organization Dashboard', `
     <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#8b5cf6)">
       <h1>Organization Portal</h1><p>Manage members, projects, events, meetings, notices</p>
@@ -8896,14 +8901,29 @@ app.get('/upgrade/fundraising', requireAuth, (req, res) => {
 
 app.post('/upgrade/fundraising/activate', requireAuth, ah(async (req, res) => {
   await pool.query('UPDATE tenants SET has_fundraising=true WHERE id=$1', [req.session.user.tenant_id]);
-  res.redirect('/portal/organization');
+ res.redirect('/portal/organization');
 }));
+
+// === AUTO-ENABLE FUNDRAISING FOR SUPER_ADMIN ===
+app.use(async (req, res, next) => {
+  if (req.session.user?.role === 'super_admin' && req.session.user.tenant_id && (req.path.startsWith('/fundraising') || req.path.startsWith('/discover') || req.path.startsWith('/investor'))) {
+    try {
+      const t = (await pool.query('SELECT has_fundraising FROM tenants WHERE id=$1', [req.session.user.tenant_id])).rows[0];
+      if (t && !t.has_fundraising) await pool.query('UPDATE tenants SET has_fundraising=true WHERE id=$1', [req.session.user.tenant_id]);
+    } catch(e) {}
+  }
+  next();
+});
 
 // === FUNDRAISING PAGE ===
 app.get('/fundraising', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const tenant = (await pool.query('SELECT has_fundraising FROM tenants WHERE id=$1', [t])).rows[0];
-  if (!tenant.has_fundraising) return res.redirect('/upgrade/fundraising');
+  if (!tenant.has_fundraising && req.session.user.role !== 'super_admin') return res.redirect('/upgrade/fundraising');
+  // Auto-enable for super_admin
+  if (req.session.user.role === 'super_admin' && !tenant.has_fundraising) {
+    await pool.query('UPDATE tenants SET has_fundraising=true WHERE id=$1', [t]).catch(() => {});
+  }
   const donations = (await pool.query("SELECT * FROM org_finance WHERE tenant_id=$1 AND type='income' AND description ILIKE '%donation%' ORDER BY created_at DESC", [t])).rows;
   const total = donations.reduce((a, d) => a + parseInt(d.amount), 0);
   res.send(renderPage('Fundraising', `
