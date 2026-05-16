@@ -310,7 +310,11 @@ const VALID_TABLES = new Set([
   'task_items', 'task_columns', 'task_assignees',
   'asset_register', 'asset_maintenance', 'asset_depreciation',
   'event_tickets', 'event_registrations', 'ticket_orders',
-  'invoice_items', 'recurring_invoices', 'recurring_invoice_items'
+  'invoice_items', 'recurring_invoices', 'recurring_invoice_items',
+  'student_id_cards', 'qr_payments', 'qr_payment_scans',
+  'installment_plans', 'installment_payments',
+  'whatsapp_receipt_log', 'whatsapp_templates',
+  'ussd_sessions', 'ussd_menu_config'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -28069,6 +28073,31 @@ try { const m = require('./sms-blast'); m(app, db, pool, renderPage, esc); conso
 // NEW MODULE: AI ASSISTANT
 // ============================================================
 try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: STUDENT ID CARD GENERATOR
+// ============================================================
+try { const m = require('./student-id-cards'); m(app, db, pool, renderPage, esc); console.log('[IDCards] Student ID card generator loaded'); } catch(e) { console.warn('[IDCards] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: QR CODE PAYMENT SYSTEM
+// ============================================================
+try { const m = require('./qr-payments'); m(app, db, pool, renderPage, esc); console.log('[QRPayments] QR code payment system loaded'); } catch(e) { console.warn('[QRPayments] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: FEE INSTALLMENT PLANS
+// ============================================================
+try { const m = require('./fee-installments'); m(app, db, pool, renderPage, esc); console.log('[FeeInstallments] Fee installment plans loaded'); } catch(e) { console.warn('[FeeInstallments] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: WHATSAPP RECEIPT SHARING
+// ============================================================
+try { const m = require('./whatsapp-receipts'); m(app, db, pool, renderPage, esc); console.log('[WhatsAppReceipts] WhatsApp receipt sharing loaded'); } catch(e) { console.warn('[WhatsAppReceipts] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: USSD PORTAL (Feature Phone Access)
+// ============================================================
+try { const m = require('./ussd-portal'); m(app, db, pool, renderPage, esc); console.log('[USSD] USSD portal loaded'); } catch(e) { console.warn('[USSD] Error:', e.message); }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
