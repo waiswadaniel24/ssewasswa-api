@@ -2115,8 +2115,102 @@ setInterval(loadPlatformSettings, 60000);
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user, csrfTokenOrReq) => {
   const dark = user?.dark_mode || false;
+  const lang = user?.language || 'en';
   const siteName = platformSettings?.site_name || 'Comfort';
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
+  // Inline translation helper for UI text in renderPage
+  const uiT = (key) => {
+    const dict = {
+      // Navigation
+      'nav.dashboard': { lg: 'Olutimbe', sw: 'Dashibodi', fr: 'Tableau de bord' },
+      'nav.notifications': { lg: 'Ebyogerwa', sw: 'Arifa', fr: 'Notifications' },
+      'nav.modules': { lg: 'Amasomo', sw: 'Moduli', fr: 'Modules' },
+      'nav.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
+      'nav.portal': { lg: 'Akabinja', sw: 'Lango', fr: 'Portail' },
+      'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
+      'nav.parent': { lg: 'Muziro', sw: 'Mzazi', fr: 'Parent' },
+      'nav.logout': { lg: 'Woloka', sw: 'Toka', fr: 'Deconnexion' },
+      'nav.login': { lg: 'Yingira', sw: 'Ingia', fr: 'Connexion' },
+      'nav.register': { lg: 'Wandikira', sw: 'Jisajili', fr: 'Inscription' },
+      'nav.pricing': { lg: 'Enteekateeka', sw: 'Bei', fr: 'Tarifs' },
+      'nav.faq': { lg: 'Ebibuuzo', sw: 'Maswali', fr: 'FAQ' },
+      'nav.blog': { lg: 'Obulamwa', sw: 'Blogu', fr: 'Blog' },
+      'nav.library': { lg: 'Essomero', sw: 'Maktaba', fr: 'Bibliotheque' },
+      'nav.view_all': { lg: 'Labye Byonna', sw: 'Tazama Zote', fr: 'Voir tout' },
+      'nav.mark_all_read': { lg: 'Soma Byonna', sw: 'Soma Zote', fr: 'Tout marquer lu' },
+      'nav.no_notifications': { lg: 'Tewali Ebyogerwa', sw: 'Hakuna Arifa', fr: 'Pas de notifications' },
+      'nav.loading': { lg: 'Kutegereza...', sw: 'Inapakia...', fr: 'Chargement...' },
+      'nav.error_loading': { lg: 'Kiremya', sw: 'Hitilafu', fr: 'Erreur' },
+      // Modules
+      'mod.hr': { lg: 'Abakazzi', sw: 'Rasilimali', fr: 'RH' },
+      'mod.bookings': { lg: 'Okubooka', sw: 'Uhifadhi', fr: 'Reservations' },
+      'mod.procurement': { lg: 'Okugaba', sw: 'Manunuzi', fr: 'Approvisionnement' },
+      'mod.incidents': { lg: 'Ebintu', sw: 'Matukio', fr: 'Incidents' },
+      'mod.fleet': { lg: 'Emotoka', sw: 'Magari', fr: 'Flotte' },
+      'mod.tickets': { lg: 'Kaarata', sw: 'Tiketi', fr: 'Tickets' },
+      'mod.kb': { lg: 'Ebisomo', sw: 'Ujuzi', fr: 'Base de connaissances' },
+      // Bottom nav
+      'bottom.home': { lg: 'Awaka', sw: 'Nyumbani', fr: 'Accueil' },
+      'bottom.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
+      'bottom.alerts': { lg: 'Amakuru', sw: 'Arifa', fr: 'Alertes' },
+      'bottom.install': { lg: 'Tegeka', sw: 'Sakinisha', fr: 'Installer' },
+      'bottom.me': { lg: 'Anze', sw: 'Mimi', fr: 'Moi' },
+      // Common UI
+      'ui.save': { lg: 'Tereka', sw: 'Hifadhi', fr: 'Enregistrer' },
+      'ui.cancel': { lg: 'Sazaamu', sw: 'Ghairi', fr: 'Annuler' },
+      'ui.delete': { lg: 'Sangula', sw: 'Futa', fr: 'Supprimer' },
+      'ui.edit': { lg: 'Kyusa', sw: 'Hariri', fr: 'Modifier' },
+      'ui.add': { lg: 'Yongera', sw: 'Ongeza', fr: 'Ajouter' },
+      'ui.back': { lg: 'Dda', sw: 'Rudi', fr: 'Retour' },
+      'ui.submit': { lg: 'Tuma', sw: 'Wasilisha', fr: 'Soumettre' },
+      'ui.close': { lg: 'Gala', sw: 'Funga', fr: 'Fermer' },
+      'ui.no_data': { lg: 'Tewali Data', sw: 'Hakuna Data', fr: 'Aucune donnee' },
+      'ui.success': { lg: 'Kyetuuse', sw: 'Mafanikio', fr: 'Succes' },
+      'ui.error': { lg: 'Kiremya', sw: 'Hitilafu', fr: 'Erreur' },
+      'ui.loading': { lg: 'Kutegereza...', sw: 'Inapakia...', fr: 'Chargement...' },
+      'ui.confirm_delete': { lg: 'Sangula?,', sw: 'Futa?', fr: 'Confirmer la suppression?' },
+      'ui.actions': { lg: "Ebiy'okukola", sw: 'Vitendo', fr: 'Actions' },
+      'ui.status': { lg: 'Embeera', sw: 'Hali', fr: 'Statut' },
+      'ui.date': { lg: 'Olunaku', sw: 'Tarehe', fr: 'Date' },
+      'ui.name': { lg: 'Erinnya', sw: 'Jina', fr: 'Nom' },
+      'ui.email': { lg: 'Imeeli', sw: 'Barua', fr: 'Email' },
+      'ui.phone': { lg: 'Namba ya simu', sw: 'Nambari ya simu', fr: 'Telephone' },
+      'ui.password': { lg: "Kasita y'okusinga", sw: 'Nenosiri', fr: 'Mot de passe' },
+      'ui.amount': { lg: 'Omundu', sw: 'Kiasi', fr: 'Montant' },
+      'ui.description': { lg: 'Ekiwandiiko', sw: 'Maelezo', fr: 'Description' },
+      'ui.total': { lg: 'Ensengeka', sw: 'Jumla', fr: 'Total' },
+      'ui.type': { lg: 'Ekika', sw: 'Aina', fr: 'Type' },
+      'ui.from': { lg: 'Era', sw: 'Kutoka', fr: 'De' },
+      'ui.to': { lg: 'Gya', sw: 'Kwenda', fr: 'A' },
+      // Login/Register
+      'login.welcome_back': { lg: 'Oyize Omulimo', sw: 'Karibu Ten', fr: 'Bon retour' },
+      'login.email': { lg: 'Imeeli', sw: 'Barua pepe', fr: 'Email' },
+      'login.password': { lg: 'Kasita y\'okusinga', sw: 'Nenosiri', fr: 'Mot de passe' },
+      'login.button': { lg: 'Yingira', sw: 'Ingia', fr: 'Se connecter' },
+      'login.no_account': { lg: 'Tewali akaunti?', sw: 'Huna akaunti?', fr: 'Pas de compte?' },
+      'login.register': { lg: 'Wandikira', sw: 'Jisajili', fr: 'Inscrivez-vous' },
+      'login.forgot': { lg: 'Wawulire Kasita?', sw: 'Umesahau nenosiri?', fr: 'Mot de passe oublie?' },
+      'login.parent_portal': { lg: 'Omuziro Akabinja', sw: 'Lango la Mzazi', fr: 'Portail Parent' },
+      'login.or_continue': { lg: 'Oba Komaba', sw: 'Au endelea na', fr: 'Ou continuer avec' },
+      // Dashboard
+      'dash.welcome': { lg: 'Mukwano', sw: 'Karibu', fr: 'Bienvenue' },
+      'dash.overview': { lg: 'Okulaba', sw: 'Muhtasari', fr: 'Apercu' },
+      'dash.quick_actions': { lg: 'Ekikolwa', sw: 'Vitendo Haraka', fr: 'Actions rapides' },
+      'dash.recent_activity': { lg: 'Ebirowoozo Bipya', sw: 'Shughuli za Hivi Karibuni', fr: 'Activite recente' },
+      'dash.total_students': { lg: 'Abayizi Boona', sw: 'Wanafunzi Wote', fr: 'Total Eleves' },
+      'dash.total_members': { lg: 'Abamemba Boona', sw: 'Wajumbe Wote', fr: 'Total Membres' },
+      'dash.total_staff': { lg: 'Abakazzi Boona', sw: 'Wafanyakazi Wote', fr: 'Total Personnel' },
+      'dash.total_patients': { lg: 'Abalwadde Boona', sw: 'Wagonjwa Wote', fr: 'Total Patients' },
+      'dash.total_revenue': { lg: 'Ensasula Ennungi', sw: 'Mapato Yote', fr: 'Revenu Total' },
+      'dash.today': { lg: 'Leero', sw: 'Leo', fr: "Aujourd'hui" },
+      // Footer
+      'footer.tagline': { lg: 'Amasomero, Amatali, Amakyaala n\'Amakolero', sw: 'Shule, Vituo vya Afya, Makanisa na Biashara', fr: 'Ecoles, Cliniques, Eglises et Entreprises' },
+      'footer.rights': { lg: 'Eddembe Lyonna', sw: 'Haki Zote', fr: 'Tous droits reserves' },
+    };
+    const entry = dict[key];
+    if (!entry) return key;
+    return entry[lang] || key;
+  };
   // Extract CSRF token from either a string or a request object
   const csrfToken = typeof csrfTokenOrReq === 'string' ? csrfTokenOrReq : (csrfTokenOrReq?.csrfToken || null);
   // Auto-inject CSRF token into forms that don't already have one
@@ -2135,7 +2229,7 @@ const renderPage = (title, content, user, csrfTokenOrReq) => {
     });
   }
   return `<!DOCTYPE html>
-<html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html${dark ? ' class="dark"' : ''} lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} | ${esc(siteName)}</title>
 <meta name="description" content="${esc(siteDesc)}">
 <meta name="keywords" content="Comfort, school management, Uganda, church management, business management, clinic, fees, attendance, SMS, POS, fundraising">
@@ -2150,6 +2244,7 @@ ${platformSettings.google_verification ? `<meta name="google-site-verification" 
 <meta name="twitter:description" content="${esc(siteDesc)}">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
+<meta name="user-lang" content="${lang}">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:${dark ? '#0f172a' : '#f8fafc'};color:${dark ? '#e2e8f0' : '#1e293b'};line-height:1.6;transition:background 0.3s,color 0.3s}
@@ -2231,38 +2326,38 @@ if ('serviceWorker' in navigator && window.__VAPID_KEY) {
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
       <div style="position:relative;display:inline-block" id="notifDropdown">
-        <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="Notifications">
+        <button onclick="closeAllDropdowns('notif');toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="${esc(uiT('nav.notifications'))}">
           🔔
           <span id="notifBadge" style="position:absolute;top:-5px;right:-8px;background:#dc2626;color:white;font-size:10px;padding:1px 5px;border-radius:10px;display:none">0</span>
         </button>
         <div id="notifPanel" style="display:none;position:absolute;right:0;top:35px;width:350px;max-height:400px;overflow-y:auto;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000">
           <div style="padding:12px;border-bottom:1px solid ${dark ? '#334155' : '#e2e8f0'};display:flex;justify-content:space-between;align-items:center">
-            <strong>Notifications</strong>
-            <a href="#" onclick="markAllRead();return false" style="font-size:12px;color:#4f46e5">Mark all read</a>
+            <strong>${esc(uiT('nav.notifications'))}</strong>
+            <a href="#" onclick="markAllRead();return false" style="font-size:12px;color:#4f46e5">${esc(uiT('nav.mark_all_read'))}</a>
           </div>
-          <div id="notifList"><div style="padding:20px;text-align:center" class="muted">Loading...</div></div>
+          <div id="notifList"><div style="padding:20px;text-align:center" class="muted">${esc(uiT('nav.loading'))}</div></div>
           <div style="padding:10px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};text-align:center">
-            <a href="/notifications" style="font-size:13px;color:#4f46e5">View All Notifications</a>
+            <a href="/notifications" style="font-size:13px;color:#4f46e5">${esc(uiT('nav.view_all'))} ${esc(uiT('nav.notifications'))}</a>
           </div>
         </div>
       </div>
-      <a href="/dashboard">Dashboard</a>
+      <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
       <div style="position:relative;display:inline-block" id="modulesDropdown">
-        <button onclick="document.getElementById('modulesMenu').style.display=document.getElementById('modulesMenu').style.display==='none'?'block':'none'" style="background:none;border:none;cursor:pointer;color:white;font-size:14px;padding:4px 8px">Modules ▾</button>
+        <button onclick="closeAllDropdowns('modules');var m=document.getElementById('modulesMenu');m.style.display=m.style.display==='none'?'block':'none'" style="background:none;border:none;cursor:pointer;color:white;font-size:14px;padding:4px 8px">${esc(uiT('nav.modules'))} ▾</button>
         <div id="modulesMenu" style="display:none;position:absolute;right:0;top:30px;width:220px;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000;padding:6px 0">
-          <a href="/hr" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">👥 HR Directory</a>
-          <a href="/bookings" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">📅 Room Bookings</a>
-          <a href="/procurement" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🛒 Procurement</a>
-          <a href="/incidents" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🚨 Incidents</a>
-          <a href="/fleet" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🚗 Fleet</a>
-          <a href="/tickets" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🎫 Tickets</a>
-          <a href="/kb" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">📚 Knowledge Base</a>
+          <a href="/hr" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">👥 ${esc(uiT('mod.hr'))}</a>
+          <a href="/bookings" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">📅 ${esc(uiT('mod.bookings'))}</a>
+          <a href="/procurement" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">🛒 ${esc(uiT('mod.procurement'))}</a>
+          <a href="/incidents" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">🚨 ${esc(uiT('mod.incidents'))}</a>
+          <a href="/fleet" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">🚗 ${esc(uiT('mod.fleet'))}</a>
+          <a href="/tickets" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">🎫 ${esc(uiT('mod.tickets'))}</a>
+          <a href="/kb" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='${dark ? '#334155' : '#f1f5f9'}'" onmouseout="this.style.background='transparent'">📚 ${esc(uiT('mod.kb'))}</a>
         </div>
       </div>
-      <a href="/search">Search</a>
-      <a href="/switch-portal" style="color:#c084fc;font-weight:600" title="Switch Portal Type">&#127760; Portal</a>
-      <a href="/settings/profile">Settings</a>
-      <a href="/parent/login" style="font-size:12px">Parent</a>
+      <a href="/search">${esc(uiT('nav.search'))}</a>
+      <a href="/switch-portal" style="color:#c084fc;font-weight:600" title="Switch Portal Type">&#127760; ${esc(uiT('nav.portal'))}</a>
+      <a href="/settings/profile">${esc(uiT('nav.settings'))}</a>
+      <a href="/parent/login" style="font-size:12px">${esc(uiT('nav.parent'))}</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(csrfToken || '')}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer" title="Language">
         <option value="en" ${(user.language||'en')==='en'?'selected':''}>EN</option>
@@ -2270,15 +2365,15 @@ if ('serviceWorker' in navigator && window.__VAPID_KEY) {
         <option value="sw" ${user.language==='sw'?'selected':''}>SW</option>
         <option value="fr" ${user.language==='fr'?'selected':''}>FR</option>
       </select>
-      <a href="/logout">Logout</a>
-    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/#pricing" style="font-size:13px">Pricing</a><a href="/#faq" style="font-size:13px">FAQ</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
+      <a href="/logout">${esc(uiT('nav.logout'))}</a>
+    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
-${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? '#1e293b' : 'white'};border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};padding:8px 0;z-index:1000;justify-content:space-around"><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🏠</span>Home</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔍</span>Search</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔔</span>Alerts</a><a href="#" id="install-btn" style="display:none;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">&#128241;</span>Install</a><a href="/settings/profile" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">👤</span>Me</a></nav>` : ''}
+${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? '#1e293b' : 'white'};border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};padding:8px 0;z-index:1000;justify-content:space-around"><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🏠</span>${esc(uiT('bottom.home'))}</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔍</span>${esc(uiT('bottom.search'))}</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔔</span>${esc(uiT('bottom.alerts'))}</a><a href="#" id="install-btn" style="display:none;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">&#128241;</span>${esc(uiT('bottom.install'))}</a><a href="/settings/profile" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">👤</span>${esc(uiT('bottom.me'))}</a></nav>` : ''}
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
-    <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
+    <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - ${esc(uiT('footer.tagline'))}</p></div>
     <div><strong>Need Help?</strong>
       <p class="muted" style="margin-top:6px">Email: <a href="mailto:${esc(platformSettings.support_email)}" style="color:#4f46e5">${esc(platformSettings.support_email)}</a></p>
       ${platformSettings.support_phone ? `<p class="muted">Phone: <a href="tel:${esc(platformSettings.support_phone)}" style="color:#4f46e5">${esc(platformSettings.support_phone)}</a></p>` : ''}
@@ -2313,6 +2408,22 @@ function updateNotifBadge(count){ if(!_notifBadge) return; if(count>0){_notifBad
   } catch(e){ startPolling(); }
   function startPolling(){ setInterval(function(){ fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); }, 30000); }
 })();
+// Dropdown close manager — closes all dropdowns except the one being opened
+var _openDropdown = null;
+function closeAllDropdowns(except) {
+  var notifPanel = document.getElementById('notifPanel');
+  if (notifPanel && except !== 'notif') { notifPanel.style.display = 'none'; _notifPanelOpen = false; }
+  var modulesMenu = document.getElementById('modulesMenu');
+  if (modulesMenu && except !== 'modules') { modulesMenu.style.display = 'none'; }
+  _openDropdown = except || null;
+}
+// Close dropdowns when clicking outside any of them
+document.addEventListener('click', function(e) {
+  var notifDd = document.getElementById('notifDropdown');
+  var modulesDd = document.getElementById('modulesDropdown');
+  var clickedInside = (notifDd && notifDd.contains(e.target)) || (modulesDd && modulesDd.contains(e.target));
+  if (!clickedInside) { closeAllDropdowns(); }
+});
 // Notification dropdown panel
 var _notifPanelOpen = false;
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
@@ -2332,7 +2443,6 @@ function toggleNotifPanel(){
 }
 function markRead(id){fetch('/notifications/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
 function markAllRead(){fetch('/notifications/mark-all-read',{method:'POST'}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
-document.addEventListener('click',function(e){var dd=document.getElementById('notifDropdown');if(dd&&!dd.contains(e.target)){var p=document.getElementById('notifPanel');if(p&&_notifPanelOpen){p.style.display='none';_notifPanelOpen=false;}}});
 ` : ''}
 ${user ? `
 window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();var b=document.getElementById('install-btn');if(b){b.style.display='flex';b.addEventListener('click',function(){e.prompt();e.userChoice.then(function(c){if(c.outcome==='accepted')b.style.display='none'});});}
@@ -12590,6 +12700,33 @@ const paginationHtml = (currentPage, totalCount, perPage, baseUrl) => {
 // 3.14: SEO META TAGS (enhance renderPage)
 const renderPageV3 = (title, content, user, meta = {}) => {
   const dark = user?.dark_mode || false;
+  const lang = user?.language || 'en';
+  // Inline translation helper (same as renderPage)
+  const uiT = (key) => {
+    const dict = {
+      'nav.dashboard': { lg: 'Olutimbe', sw: 'Dashibodi', fr: 'Tableau de bord' },
+      'nav.notifications': { lg: 'Ebyogerwa', sw: 'Arifa', fr: 'Notifications' },
+      'nav.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
+      'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
+      'nav.parent': { lg: 'Muziro', sw: 'Mzazi', fr: 'Parent' },
+      'nav.worker': { lg: 'Mukazi', sw: 'Mfanyakazi', fr: 'Travailleur' },
+      'nav.guide': { lg: 'Enyamba', sw: 'Mwongozo', fr: 'Guide' },
+      'nav.logout': { lg: 'Woloka', sw: 'Toka', fr: 'Deconnexion' },
+      'nav.login': { lg: 'Yingira', sw: 'Ingia', fr: 'Connexion' },
+      'nav.register': { lg: 'Wandikira', sw: 'Jisajili', fr: 'Inscription' },
+      'nav.pricing': { lg: 'Enteekateeka', sw: 'Bei', fr: 'Tarifs' },
+      'nav.faq': { lg: 'Ebibuuzo', sw: 'Maswali', fr: 'FAQ' },
+      'nav.blog': { lg: 'Obulamwa', sw: 'Blogu', fr: 'Blog' },
+      'nav.library': { lg: 'Essomero', sw: 'Maktaba', fr: 'Bibliotheque' },
+      'nav.mark_all_read': { lg: 'Soma Byonna', sw: 'Soma Zote', fr: 'Tout marquer lu' },
+      'nav.view_all': { lg: 'Labye Byonna', sw: 'Tazama Zote', fr: 'Voir tout' },
+      'nav.loading': { lg: 'Kutegereza...', sw: 'Inapakia...', fr: 'Chargement...' },
+      'footer.tagline': { lg: "Amasomero, Amatali, Amakyaala n'Amakolero", sw: 'Shule, Vituo vya Afya, Makanisa na Biashara', fr: 'Ecoles, Cliniques, Eglises et Entreprises' },
+    };
+    const entry = dict[key];
+    if (!entry) return key;
+    return entry[lang] || key;
+  };
   const description = meta.description || `${title} - Comfort All-in-One Management Platform`;
   const keywords = meta.keywords || 'school management, church management, business management, Uganda, Comfort, clinic management, SaaS Africa';
   const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
@@ -12601,7 +12738,8 @@ const renderPageV3 = (title, content, user, meta = {}) => {
     safeContent = safeContent.replace(/<form([^>]*)>/g, `<form$1><input type="hidden" name="_csrf" value="${meta.csrfToken}">`);
   }
   return `<!DOCTYPE html>
-<html${dark ? ' class="dark"' : ''} lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html${dark ? ' class="dark"' : ''} lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)} | Comfort</title>
 ${googleVerification ? `<meta name="google-site-verification" content="${esc(googleVerification)}">` : ''}
 <meta name="description" content="${esc(description)}">
 <meta name="keywords" content="${esc(keywords)}">
@@ -12620,7 +12758,6 @@ ${googleVerification ? `<meta name="google-site-verification" content="${esc(goo
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
 <meta name="theme-color" content="#4f46e5">
-<title>${esc(title)} | Comfort</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:${dark ? '#0f172a' : '#f8fafc'};color:${dark ? '#e2e8f0' : '#1e293b'};line-height:1.6;transition:background 0.3s,color 0.3s}
@@ -12677,36 +12814,36 @@ ${process.env.GA_TRACKING_ID ? `
       <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
       <div style="position:relative;display:inline-block" id="notifDropdown">
-        <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="Notifications">
+        <button onclick="closeAllDropdowns('notif');toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="${esc(uiT('nav.notifications'))}">
           🔔
           <span id="notifBadge" style="position:absolute;top:-5px;right:-8px;background:#dc2626;color:white;font-size:10px;padding:1px 5px;border-radius:10px;display:none">0</span>
         </button>
         <div id="notifPanel" style="display:none;position:absolute;right:0;top:35px;width:350px;max-height:400px;overflow-y:auto;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000">
           <div style="padding:12px;border-bottom:1px solid ${dark ? '#334155' : '#e2e8f0'};display:flex;justify-content:space-between;align-items:center">
-            <strong>Notifications</strong>
-            <a href="#" onclick="markAllRead();return false" style="font-size:12px;color:#4f46e5">Mark all read</a>
+            <strong>${esc(uiT('nav.notifications'))}</strong>
+            <a href="#" onclick="markAllRead();return false" style="font-size:12px;color:#4f46e5">${esc(uiT('nav.mark_all_read'))}</a>
           </div>
-          <div id="notifList"><div style="padding:20px;text-align:center" class="muted">Loading...</div></div>
+          <div id="notifList"><div style="padding:20px;text-align:center" class="muted">${esc(uiT('nav.loading'))}</div></div>
           <div style="padding:10px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};text-align:center">
-            <a href="/notifications" style="font-size:13px;color:#4f46e5">View All Notifications</a>
+            <a href="/notifications" style="font-size:13px;color:#4f46e5">${esc(uiT('nav.view_all'))} ${esc(uiT('nav.notifications'))}</a>
           </div>
         </div>
       </div>
-      <a href="/dashboard">Dashboard</a>
-      <a href="/search">Search</a>
-      <a href="/settings/profile">Settings</a>
-      <a href="/guide" style="font-size:12px">Guide</a>
-      <a href="/parent/login" style="font-size:12px">Parent</a>
-      <a href="/worker/login" style="font-size:12px">Worker</a>
+      <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
+      <a href="/search">${esc(uiT('nav.search'))}</a>
+      <a href="/settings/profile">${esc(uiT('nav.settings'))}</a>
+      <a href="/guide" style="font-size:12px">${esc(uiT('nav.guide'))}</a>
+      <a href="/parent/login" style="font-size:12px">${esc(uiT('nav.parent'))}</a>
+      <a href="/worker/login" style="font-size:12px">${esc(uiT('nav.worker'))}</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
-      <a href="/logout">Logout</a>
-    ` : `<a href="/login">Login</a><a href="/register">Register</a><a href="/#pricing" style="font-size:13px">Pricing</a><a href="/#faq" style="font-size:13px">FAQ</a><a href="/blog" style="font-size:13px">Blog</a><a href="/library" style="font-size:13px">Library</a>`}
+      <a href="/logout">${esc(uiT('nav.logout'))}</a>
+    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
-    <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - Schools, Clinics, Churches & Businesses</p></div>
+    <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - ${esc(uiT('footer.tagline'))}</p></div>
     <div><strong>Need Help?</strong>
       <p class="muted" style="margin-top:6px">Email: <a href="mailto:${esc(platformSettings.support_email)}" style="color:#4f46e5">${esc(platformSettings.support_email)}</a></p>
       ${platformSettings.support_phone ? `<p class="muted">Phone: <a href="tel:${esc(platformSettings.support_phone)}" style="color:#4f46e5">${esc(platformSettings.support_phone)}</a></p>` : ''}
@@ -12740,6 +12877,17 @@ function updateNotifBadge(count){ if(!_notifBadge) return; if(count>0){_notifBad
   } catch(e){ startPolling(); }
   function startPolling(){ setInterval(function(){ fetch('/notifications/count').then(function(r){return r.json()}).then(function(d){updateBadge(d.count)}).catch(function(){}); }, 30000); }
 })();
+// Dropdown close manager (V3)
+var _openDropdown = null;
+function closeAllDropdowns(except) {
+  var notifPanel = document.getElementById('notifPanel');
+  if (notifPanel && except !== 'notif') { notifPanel.style.display = 'none'; _notifPanelOpen = false; }
+  _openDropdown = except || null;
+}
+document.addEventListener('click', function(e) {
+  var dd = document.getElementById('notifDropdown');
+  if (dd && !dd.contains(e.target)) { closeAllDropdowns(); }
+});
 var _notifPanelOpen = false;
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function timeAgo(d){var s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
@@ -12758,7 +12906,6 @@ function toggleNotifPanel(){
 }
 function markRead(id){fetch('/notifications/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
 function markAllRead(){fetch('/notifications/mark-all-read',{method:'POST'}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
-document.addEventListener('click',function(e){var dd=document.getElementById('notifDropdown');if(dd&&!dd.contains(e.target)){var p=document.getElementById('notifPanel');if(p&&_notifPanelOpen){p.style.display='none';_notifPanelOpen=false;}}});
 </script>` : ''}
 </body></html>`;
 };
