@@ -1,19 +1,22 @@
 # <img src="https://img.icons8.com/fluency/48/graduation-cap.png" width="28" alt="Comfort"> Comfort Zone — All-in-One Management Platform
 
-[![Live](https://img.shields.io/badge/platform-live-brightgreen?style=flat-square)](https://ssewasswa.onrender.com)
+[![Website](https://img.shields.io/badge/website-ssewasswa.github.io-blue?style=flat-square)](https://ssewasswa.github.io/ssewasswa-api/)
+[![Live App](https://img.shields.io/badge/app-live-brightgreen?style=flat-square)](https://ssewasswa.onrender.com)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791?style=flat-square&logo=postgresql&logoColor=white)](https://postgresql.org)
 [![License](https://img.shields.io/badge/license-Proprietary-blue?style=flat-square)](LICENSE)
 
 > **The complete school, church, and business management platform built for Africa.**
 
-Comfort Zone is a multi-tenant SaaS platform that helps schools, churches, businesses, clinics, and organizations manage everything from one dashboard. Built with Node.js, Express, and PostgreSQL, deployed on Render, and serving users across Uganda and East Africa.
+Comfort Zone is a multi-tenant SaaS platform by **Ssewasswa** that helps schools, churches, businesses, clinics, and organizations manage everything from one dashboard. Built with Node.js, Express, and PostgreSQL, deployed on Render, and serving users across Uganda and East Africa.
 
 ---
 
-## 🚀 Live Demo
+## 🚀 Live Platform
 
-🌐 **[https://ssewasswa.onrender.com](https://ssewasswa.onrender.com)**
+🌐 **Website & Documentation**: [https://ssewasswa.github.io/ssewasswa-api/](https://ssewasswa.github.io/ssewasswa-api/)
+
+🚀 **Launch the App**: [https://ssewasswa.onrender.com](https://ssewasswa.onrender.com)
 
 ---
 
