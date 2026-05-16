@@ -409,6 +409,14 @@ const requireTenantAccess = (req, res, next) => {
   return res.status(403).send('Access denied to this tenant');
 };
 const requireSuperAdmin = (req, res, next) => req.session.user?.role === 'super_admin' ? next() : res.status(403).send('Super admin only');
+
+// === SESSION-BASED TENANT IMPERSONATION (super_admin can access ANY tenant) ===
+app.use((req, res, next) => {
+  if (req.session.user?.role === 'super_admin' && req.session._impersonate_tenant_id) {
+    req.session.user.tenant_id = req.session._impersonate_tenant_id;
+  }
+  next();
+});
 const requireRole = (...roles) => (req, res, next) => {
   const u = req.session.user;
   if (!u) return res.redirect('/login');
@@ -2594,8 +2602,26 @@ app.post('/reset-password', ah(async (req, res) => {
 // === DASHBOARD ROUTER ===
 app.get('/dashboard', requireAuth, (req, res) => {
   const u = req.session.user;
+  // If super_admin is impersonating a tenant, let them into the tenant dashboard
+  if (u.role === 'super_admin' && req.session._impersonate_tenant_id) {
+    const tenantType = u.tenant_type || 'school';
+    return res.redirect(`/portal/${tenantType}`);
+  }
   if (u.role === 'super_admin') return res.redirect('/dev/master');
   res.redirect(`/portal/${u.tenant_type}`);
+});
+
+// === EXIT TENANT IMPERSONATION ===
+app.get('/dev/exit-tenant', requireAuth, requireSuperAdmin, (req, res) => {
+  if (req.session._original_tenant) {
+    req.session.user.tenant_id = req.session._original_tenant.id;
+    req.session.user.tenant_name = req.session._original_tenant.name;
+    req.session.user.tenant_type = req.session._original_tenant.type;
+    delete req.session._original_tenant;
+  }
+  delete req.session._impersonate_tenant_id;
+  req.session.flash = { type: 'info', msg: 'Returned to developer dashboard' };
+  res.redirect('/dev/master');
 });
 
 // === SCHOOL PORTAL ===
@@ -6713,23 +6739,98 @@ app.get('/p/:subdomain', ah(async (req, res, next) => {
   const specialSubdomains = ['entertainment', 'fundraising', 'home', 'links'];
   if (specialSubdomains.includes(req.params.subdomain)) return next();
 
-  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND verified=true', [req.params.subdomain])).rows[0];
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true AND (banned=false OR banned IS NULL)', [req.params.subdomain])).rows[0];
   if (!tenant) return next(); // Pass to next handler (launch-routes or 404)
+
+  // Load homepage sections designed by the tenant admin
+  let sections = [];
+  try {
+    sections = (await pool.query(
+      'SELECT * FROM homepage_sections WHERE tenant_id=$1 AND is_visible=true ORDER BY COALESCE(sort_order,0), id',
+      [tenant.id]
+    )).rows;
+  } catch(e) { /* table may not exist */ }
+
   const events = (await pool.query('SELECT * FROM events WHERE tenant_id=$1 AND event_date>=CURRENT_DATE ORDER BY event_date LIMIT 5', [tenant.id])).rows;
-  res.send(renderPage(tenant.name, `
-    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)">
-      <h1>${esc(tenant.name)}</h1>
-      <p>${esc(tenant.type)} ${tenant.address ? '| ' + esc(tenant.address) : ''}</p>
-    </div>
-    ${tenant.description ? `<div class="card"><h3>About</h3><p>${esc(tenant.description)}</p></div>` : ''}
-    ${events.length > 0 ? `
-      <div class="card"><h3>Upcoming Events</h3>
+
+  // Render homepage sections if they exist, otherwise fall back to generic content
+  let sectionsHtml = '';
+  if (sections.length > 0) {
+    sectionsHtml = sections.map(s => {
+      let bg = s.background_color || '#fff';
+      let content = '';
+      switch(s.section_type) {
+        case 'hero':
+          content = `<div style="background:linear-gradient(135deg,${s.background_color || '#4f46e5'},${s.accent_color || '#7c3aed'});color:#fff;padding:48px 24px;text-align:center;border-radius:16px">
+            <h1 style="font-size:32px;margin-bottom:12px">${esc(s.title || tenant.name)}</h1>
+            ${s.subtitle ? `<p style="font-size:18px;opacity:0.9">${esc(s.subtitle)}</p>` : ''}
+            ${s.button_text ? `<a href="${esc(s.button_link || '/register')}" style="display:inline-block;margin-top:16px;background:#fff;color:#4f46e5;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700">${esc(s.button_text)}</a>` : ''}
+          </div>`;
+          break;
+        case 'features':
+          try {
+            const items = typeof s.content === 'string' ? JSON.parse(s.content) : (s.content || []);
+            content = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;padding:20px 0">${items.map(i => `
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px;text-align:center">
+                <div style="font-size:28px;margin-bottom:8px">${i.icon || '✦'}</div>
+                <h3 style="color:#1e293b;margin-bottom:6px">${esc(i.title || '')}</h3>
+                <p style="color:#64748b;font-size:14px">${esc(i.description || '')}</p>
+              </div>`).join('')}</div>`;
+          } catch(e) { content = `<p>${esc(s.content || '')}</p>`; }
+          bg = '#f8fafc';
+          break;
+        case 'about':
+          content = `<div style="max-width:700px;margin:0 auto;line-height:1.7">${s.content ? esc(s.content).replace(/\\n/g, '<br>') : ''}</div>`;
+          bg = '#f8fafc';
+          break;
+        case 'stats':
+          try {
+            const stats = typeof s.content === 'string' ? JSON.parse(s.content) : (s.content || []);
+            content = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;padding:16px 0">${stats.map(st => `
+              <div style="text-align:center;padding:20px;background:${st.bg || '#ede9fe'};border-radius:12px">
+                <div style="font-size:28px;font-weight:800;color:${st.color || '#4f46e5'}">${esc(st.value || '0')}</div>
+                <div style="font-size:13px;color:#64748b;margin-top:4px">${esc(st.label || '')}</div>
+              </div>`).join('')}</div>`;
+          } catch(e) { content = ''; }
+          bg = '#fff';
+          break;
+        case 'contact':
+          content = `<div style="text-align:center;padding:16px 0">
+            <h3 style="color:#1e293b;margin-bottom:12px">Contact ${esc(tenant.name)}</h3>
+            <p style="color:#475569">${esc(tenant.email)} ${tenant.phone ? '| ' + esc(tenant.phone) : ''}</p>
+            ${tenant.address ? `<p style="color:#475569;margin-top:4px">${esc(tenant.address)}</p>` : ''}
+          </div>`;
+          bg = '#f1f5f9';
+          break;
+        case 'cta':
+          content = `<div style="background:linear-gradient(135deg,${s.background_color || '#4f46e5'},${s.accent_color || '#7c3aed'});color:#fff;padding:40px 24px;text-align:center;border-radius:16px">
+            <h2 style="margin-bottom:8px">${esc(s.title || 'Get Started')}</h2>
+            ${s.subtitle ? `<p style="opacity:0.9;margin-bottom:16px">${esc(s.subtitle)}</p>` : ''}
+            ${s.button_text ? `<a href="${esc(s.button_link || '/register')}" style="display:inline-block;background:#fff;color:#4f46e5;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700">${esc(s.button_text)}</a>` : ''}
+          </div>`;
+          break;
+        default:
+          content = s.content ? `<div style="line-height:1.7">${esc(s.content).replace(/\\n/g, '<br>')}</div>` : '';
+      }
+      return `<div style="background:${bg};padding:32px 0;margin:${s.section_type === 'hero' || s.section_type === 'cta' ? '0' : '0'}">${content}</div>`;
+    }).join('');
+  }
+
+  // If no custom sections, build default content
+  if (!sectionsHtml) {
+    sectionsHtml = `
+      ${tenant.description ? `<div class="card"><h3>About</h3><p>${esc(tenant.description)}</p></div>` : ''}
+      ${events.length > 0 ? `<div class="card"><h3>Upcoming Events</h3>
         ${events.map(e => `<div style="margin-bottom:10px"><strong>${esc(e.name)}</strong> - ${new Date(e.event_date).toLocaleDateString()} ${e.venue ? '@ ' + esc(e.venue) : ''}</div>`).join('')}
+      </div>` : ''}
+      <div class="card">
+        <p>Contact: ${esc(tenant.email)} ${tenant.phone ? '| ' + esc(tenant.phone) : ''}</p>
       </div>
-    ` : ''}
-    <div class="card">
-      <p>Contact: ${esc(tenant.email)} ${tenant.phone ? '| ' + esc(tenant.phone) : ''}</p>
-    </div>
+    `;
+  }
+
+  res.send(renderPage(tenant.name, `
+    ${sectionsHtml}
   `, null));
 }));
 
@@ -6983,6 +7084,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
             <option value="grant_free_access">Grant Free Access</option>
             <option value="enable_fundraising">Enable Fundraising</option>
             <option value="delete_tenant">DELETE Tenant</option>
+            <option value="switch_to_tenant" style="color:#4f46e5;font-weight:700">⬡ SWITCH TO TENANT</option>
           </select>
         </div>
         <div style="min-width:100px"><label>Tenant ID</label><input name="target_id" placeholder="ID" type="number" required></div>
@@ -6995,12 +7097,14 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     <div class="dev-section">
       <h3>All Tenants (${tCount.rows[0].count})</h3>
       <div style="overflow-x:auto">
-      <table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Verified</th><th>Status</th></tr>
+      ${req.session._impersonate_tenant_id ? '<div style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:10px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between"><span>⬡ You are impersonating <strong>' + esc(req.session.user.tenant_name || 'Unknown') + '</strong></span><a href="/dev/exit-tenant" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Exit Impersonation</a></div>' : ''}
+      <table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Verified</th><th>Status</th><th>Action</th></tr>
       ${tenants.rows.map(t => `<tr>
         <td>${t.id}</td><td>${esc(t.name)}</td><td>${esc(t.type)}</td>
-        <td>UGX ${parseInt(t.wallet_balance).toLocaleString()}</td>
+        <td>UGX ${parseInt(t.wallet_balance || 0).toLocaleString()}</td>
         <td>${t.verified ? '<span style="color:#059669">Yes</span>' : '<span style="color:#dc2626">No</span>'}</td>
         <td>${t.approved ? (t.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>') : '<span style="color:#d97706">Pending</span>'}</td>
+        <td><form method="POST" action="/dev/execute" style="display:inline"><input type="hidden" name="action" value="switch_to_tenant"><input type="hidden" name="target_id" value="${t.id}"><button type="submit" style="background:#4f46e5;color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Switch To</button></form></td>
       </tr>`).join('')}
       </table>
       </div>
@@ -7049,6 +7153,22 @@ app.post('/dev/execute', requireAuth, requireSuperAdmin, ah(async (req, res) => 
   if (action === 'enable_fundraising') await pool.query('UPDATE tenants SET has_fundraising=true WHERE id=$1', [target_id]);
   if (action === 'grant_free_access') await pool.query('UPDATE tenants SET verified=true,approved=true WHERE id=$1', [target_id]);
   if (action === 'delete_tenant') await pool.query('DELETE FROM tenants WHERE id=$1', [target_id]);
+  // === SWITCH TO TENANT (session-based, no DB mutation) ===
+  if (action === 'switch_to_tenant') {
+    const tenant = (await pool.query('SELECT id, name, type, subdomain FROM tenants WHERE id=$1', [target_id])).rows[0];
+    if (tenant) {
+      if (!req.session._original_tenant) {
+        req.session._original_tenant = { id: req.session.user.tenant_id, name: req.session.user.tenant_name, type: req.session.user.tenant_type };
+      }
+      req.session._impersonate_tenant_id = tenant.id;
+      req.session.user.tenant_id = tenant.id;
+      req.session.user.tenant_name = tenant.name;
+      req.session.user.tenant_type = tenant.type;
+      await audit(req.session.user.email, 'switch_tenant', `Switched to tenant #${tenant.id} (${tenant.name})`);
+      req.session.flash = { type: 'success', msg: `Now viewing: ${tenant.name} — <a href="/dev/exit-tenant" style="color:#fff;text-decoration:underline">Exit to Dev Dashboard</a>` };
+      return res.redirect('/dashboard');
+    }
+  }
   await audit(req.session.user.email, 'dev_action', `${action} on tenant #${target_id}`);
   req.session.flash = { type: 'success', msg: 'Action executed' };
   res.redirect('/dev/master');

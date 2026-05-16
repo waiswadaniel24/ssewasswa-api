@@ -414,7 +414,7 @@ var f=document.getElementById('pw-fill');f.style.width=s+'%';f.style.background=
       const baseDomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '');
       const subdomain = (baseDomain.length > 2 ? baseDomain : 'tenant') + '-' + Math.floor(Math.random() * 9999);
       const tenant = await pool.query(
-        'INSERT INTO tenants(name,type,sub_type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,$6,true) RETURNING id',
+        'INSERT INTO tenants(name,type,sub_type,email,phone,subdomain,approved,verified) VALUES($1,$2,$3,$4,$5,$6,true,true) RETURNING id',
         [org_name, type, sub_type || null, email, phone, subdomain]
       );
       const tid = tenant.rows[0].id;
