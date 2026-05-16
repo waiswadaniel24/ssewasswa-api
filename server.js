@@ -4227,41 +4227,41 @@ app.get('/school/attendance/print', requireAuth, requireNotBanned, ah(async (req
 }));
 
 // === NOTIFICATION CENTER ===
-// [DUPE-REMOVED] app.get('/notifications', requireAuth, ah(async (req, res) => {
-// [DUPE-REMOVED]   const u = req.session.user;
-// [DUPE-REMOVED]   const t = u.tenant_id;
-// [DUPE-REMOVED]   const notifications = (await pool.query('SELECT * FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) ORDER BY created_at DESC LIMIT 50', [t, u.email])).rows;
-// [DUPE-REMOVED]   const unread = notifications.filter(n => !n.read).length;
-// [DUPE-REMOVED]   await pool.query('UPDATE notifications SET read=true WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) AND read=false', [t, u.email]);
-// [DUPE-REMOVED]   res.send(renderPage('Notifications', `
-// [DUPE-REMOVED]     <div class="card"><h3>Notifications <span class="tag">${unread} new</span></h3>
-// [DUPE-REMOVED]       ${notifications.length > 0 ? notifications.map(n => `
-// [DUPE-REMOVED]         <div style="padding:12px;border-bottom:1px solid #e2e8f0;${!n.read?'background:#eff6ff;border-radius:8px':''}">
-// [DUPE-REMOVED]           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:5px">
-// [DUPE-REMOVED]             <strong style="color:${n.type==='error'?'#dc2626':n.type==='success'?'#059669':n.type==='warning'?'#d97706':'#4f46e5'}">${esc(n.title)}</strong>
-// [DUPE-REMOVED]             <span class="muted">${new Date(n.created_at).toLocaleString()}</span>
-// [DUPE-REMOVED]           </div>
-// [DUPE-REMOVED]           <p style="margin-top:4px;color:#475569">${esc(n.message)}</p>
-// [DUPE-REMOVED]         </div>
-// [DUPE-REMOVED]       `).join('') : '<p style="text-align:center;padding:40px;color:#94a3b8">No notifications yet</p>'}
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/notifications/count', requireAuth, ah(async (req, res) => {
-// [DUPE-REMOVED]   const u = req.session.user;
-// [DUPE-REMOVED]   const t = u.tenant_id;
-// [DUPE-REMOVED]   const count = (await pool.query('SELECT COUNT(*) FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) AND read=false', [t, u.email])).rows[0].count;
-// [DUPE-REMOVED]   res.json({ count: parseInt(count) });
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/notifications/recent', requireAuth, ah(async (req, res) => {
-// [DUPE-REMOVED]   const u = req.session.user;
-// [DUPE-REMOVED]   const t = u.tenant_id;
-// [DUPE-REMOVED]   const notifications = (await pool.query('SELECT id, title, message, type, read, created_at FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) ORDER BY created_at DESC LIMIT 10', [t, u.email])).rows;
-// [DUPE-REMOVED]   res.json(notifications);
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
+app.get('/notifications', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  const t = u.tenant_id;
+  const notifications = (await pool.query('SELECT * FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) ORDER BY created_at DESC LIMIT 50', [t, u.email])).rows;
+  const unread = notifications.filter(n => !n.read).length;
+  await pool.query('UPDATE notifications SET read=true WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) AND read=false', [t, u.email]);
+  res.send(renderPage('Notifications', `
+    <div class="card"><h3>Notifications <span class="tag">${unread} new</span></h3>
+      ${notifications.length > 0 ? notifications.map(n => `
+        <div style="padding:12px;border-bottom:1px solid #e2e8f0;${!n.read?'background:#eff6ff;border-radius:8px':''}">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:5px">
+            <strong style="color:${n.type==='error'?'#dc2626':n.type==='success'?'#059669':n.type==='warning'?'#d97706':'#4f46e5'}">${esc(n.title)}</strong>
+            <span class="muted">${new Date(n.created_at).toLocaleString()}</span>
+          </div>
+          <p style="margin-top:4px;color:#475569">${esc(n.message)}</p>
+        </div>
+      `).join('') : '<p style="text-align:center;padding:40px;color:#94a3b8">No notifications yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/notifications/count', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  const t = u.tenant_id;
+  const count = (await pool.query('SELECT COUNT(*) FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) AND read=false', [t, u.email])).rows[0].count;
+  res.json({ count: parseInt(count) });
+}));
+
+app.get('/notifications/recent', requireAuth, ah(async (req, res) => {
+  const u = req.session.user;
+  const t = u.tenant_id;
+  const notifications = (await pool.query('SELECT id, title, message, type, read, created_at FROM notifications WHERE tenant_id=$1 AND (user_email IS NULL OR user_email=$2) ORDER BY created_at DESC LIMIT 10', [t, u.email])).rows;
+  res.json(notifications);
+}));
+
 app.post('/notifications/mark-read', requireAuth, ah(async (req, res) => {
   const u = req.session.user;
   await pool.query('UPDATE notifications SET read=true WHERE id=$1 AND tenant_id=$2', [req.body.id, u.tenant_id]);
@@ -5003,90 +5003,90 @@ app.post('/church/tithes/save', requireAuth, requireNotBanned, ah(async (req, re
 }));
 
 // === CHURCH: SERMONS ===
-// [DUPE-REMOVED] app.get('/church/sermons', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const t = req.session.user.tenant_id;
-// [DUPE-REMOVED]   const sermons = (await pool.query('SELECT * FROM sermons WHERE tenant_id=$1 ORDER BY sermon_date DESC', [t])).rows;
-// [DUPE-REMOVED]   res.send(renderPage('Sermon Archive', `
-// [DUPE-REMOVED]     <div class="card"><h3>Sermon Archive</h3>
-// [DUPE-REMOVED]       <a href="/church/sermons/new" class="btn btn-sm" style="margin-bottom:15px">+ New Sermon</a>
-// [DUPE-REMOVED]       <table><tr><th>Title</th><th>Preacher</th><th>Date</th><th>Scripture</th><th>Actions</th></tr>
-// [DUPE-REMOVED]       ${sermons.map(s => `<tr><td>${esc(s.title)}</td><td>${esc(s.preacher)}</td><td>${s.sermon_date ? new Date(s.sermon_date).toLocaleDateString() : ''}</td><td>${esc(s.scripture)}</td>
-// [DUPE-REMOVED]         <td><a href="/church/sermons/${s.id}" class="btn btn-sm">View</a> <a href="/church/sermons/${s.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
-// [DUPE-REMOVED]       </tr>`).join('') || '<tr><td colspan="5">No sermons yet</td></tr>'}
-// [DUPE-REMOVED]       </table>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/church/sermons/new', requireAuth, requireNotBanned, (req, res) => {
-// [DUPE-REMOVED]   res.send(renderPage('New Sermon', `
-// [DUPE-REMOVED]     <div class="card" style="max-width:700px;margin:40px auto"><h3>Record Sermon</h3>
-// [DUPE-REMOVED]       <form method="POST" action="/church/sermons/save">
-// [DUPE-REMOVED]         <input name="title" placeholder="Sermon Title" required>
-// [DUPE-REMOVED]         <input name="preacher" placeholder="Preacher Name" required>
-// [DUPE-REMOVED]         <input name="sermon_date" type="date" value="${new Date().toISOString().split('T')[0]}" required>
-// [DUPE-REMOVED]         <input name="scripture" placeholder="Scripture Reference (e.g. John 3:16)">
-// [DUPE-REMOVED]         <textarea name="notes" rows="8" placeholder="Sermon notes, key points..."></textarea>
-// [DUPE-REMOVED]         <button class="btn btn-gold">Save Sermon</button>
-// [DUPE-REMOVED]       </form>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] });
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.post('/church/sermons/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const { title, preacher, sermon_date, scripture, notes } = req.body;
-// [DUPE-REMOVED]   await pool.query('INSERT INTO sermons(tenant_id,title,preacher,sermon_date,scripture,notes) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, title, preacher, sermon_date, scripture, notes]);
-// [DUPE-REMOVED]   res.redirect('/church/sermons');
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/church/sermons/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const s = (await pool.query('SELECT * FROM sermons WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
-// [DUPE-REMOVED]   if (!s) return res.status(404).send('Not found');
-// [DUPE-REMOVED]   res.send(renderPage(s.title, `
-// [DUPE-REMOVED]     <div class="card"><h3>${esc(s.title)}</h3>
-// [DUPE-REMOVED]       <p class="muted">${esc(s.preacher)} | ${s.sermon_date ? new Date(s.sermon_date).toLocaleDateString() : ''} | ${esc(s.scripture)}</p>
-// [DUPE-REMOVED]       <div style="margin-top:20px;white-space:pre-wrap">${esc(s.notes)}</div>
-// [DUPE-REMOVED]       <a href="/church/sermons" class="btn btn-sm" style="margin-top:15px">Back to Archive</a>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/church/sermons/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   await pool.query('DELETE FROM sermons WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-// [DUPE-REMOVED]   res.redirect('/church/sermons');
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
+app.get('/church/sermons', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sermons = (await pool.query('SELECT * FROM sermons WHERE tenant_id=$1 ORDER BY sermon_date DESC', [t])).rows;
+  res.send(renderPage('Sermon Archive', `
+    <div class="card"><h3>Sermon Archive</h3>
+      <a href="/church/sermons/new" class="btn btn-sm" style="margin-bottom:15px">+ New Sermon</a>
+      <table><tr><th>Title</th><th>Preacher</th><th>Date</th><th>Scripture</th><th>Actions</th></tr>
+      ${sermons.map(s => `<tr><td>${esc(s.title)}</td><td>${esc(s.preacher)}</td><td>${s.sermon_date ? new Date(s.sermon_date).toLocaleDateString() : ''}</td><td>${esc(s.scripture)}</td>
+        <td><a href="/church/sermons/${s.id}" class="btn btn-sm">View</a> <a href="/church/sermons/${s.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
+      </tr>`).join('') || '<tr><td colspan="5">No sermons yet</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/sermons/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Sermon', `
+    <div class="card" style="max-width:700px;margin:40px auto"><h3>Record Sermon</h3>
+      <form method="POST" action="/church/sermons/save">
+        <input name="title" placeholder="Sermon Title" required>
+        <input name="preacher" placeholder="Preacher Name" required>
+        <input name="sermon_date" type="date" value="${new Date().toISOString().split('T')[0]}" required>
+        <input name="scripture" placeholder="Scripture Reference (e.g. John 3:16)">
+        <textarea name="notes" rows="8" placeholder="Sermon notes, key points..."></textarea>
+        <button class="btn btn-gold">Save Sermon</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/church/sermons/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { title, preacher, sermon_date, scripture, notes } = req.body;
+  await pool.query('INSERT INTO sermons(tenant_id,title,preacher,sermon_date,scripture,notes) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, title, preacher, sermon_date, scripture, notes]);
+  res.redirect('/church/sermons');
+}));
+
+app.get('/church/sermons/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const s = (await pool.query('SELECT * FROM sermons WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!s) return res.status(404).send('Not found');
+  res.send(renderPage(s.title, `
+    <div class="card"><h3>${esc(s.title)}</h3>
+      <p class="muted">${esc(s.preacher)} | ${s.sermon_date ? new Date(s.sermon_date).toLocaleDateString() : ''} | ${esc(s.scripture)}</p>
+      <div style="margin-top:20px;white-space:pre-wrap">${esc(s.notes)}</div>
+      <a href="/church/sermons" class="btn btn-sm" style="margin-top:15px">Back to Archive</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/sermons/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM sermons WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/church/sermons');
+}));
+
 // === CHURCH: PRAYER REQUESTS ===
-// [DUPE-REMOVED] app.get('/church/prayers', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const t = req.session.user.tenant_id;
-// [DUPE-REMOVED]   const prayers = (await pool.query('SELECT * FROM prayer_requests WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
-// [DUPE-REMOVED]   res.send(renderPage('Prayer Requests', `
-// [DUPE-REMOVED]     <div class="card"><h3>Prayer Requests</h3>
-// [DUPE-REMOVED]       <a href="/church/prayers/new" class="btn btn-sm" style="margin-bottom:15px">+ New Request</a>
-// [DUPE-REMOVED]       ${prayers.map(p => `
-// [DUPE-REMOVED]         <div class="card">
-// [DUPE-REMOVED]           <h4>${esc(p.name || 'Anonymous')} ${p.is_private ? '<span class="tag" style="background:#fee2e2;color:#991b1b">Private</span>' : ''}</h4>
-// [DUPE-REMOVED]           <p style="white-space:pre-wrap">${esc(p.request)}</p>
-// [DUPE-REMOVED]           <p class="muted">${new Date(p.created_at).toLocaleString()}</p>
-// [DUPE-REMOVED]           <a href="/church/prayers/${p.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Delete</a>
-// [DUPE-REMOVED]         </div>
-// [DUPE-REMOVED]       `).join('') || '<p>No prayer requests yet</p>'}
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/church/prayers/new', requireAuth, requireNotBanned, (req, res) => {
-// [DUPE-REMOVED]   res.send(renderPage('New Prayer Request', `
-// [DUPE-REMOVED]     <div class="card" style="max-width:600px;margin:40px auto"><h3>Submit Prayer Request</h3>
-// [DUPE-REMOVED]       <form method="POST" action="/church/prayers/save">
-// [DUPE-REMOVED]         <input name="name" placeholder="Your Name (or leave blank for anonymous)">
-// [DUPE-REMOVED]         <textarea name="request" rows="5" placeholder="Prayer request..." required></textarea>
-// [DUPE-REMOVED]         <label style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" name="is_private" value="true" style="width:auto"> Keep this private (only admins see it)</label>
-// [DUPE-REMOVED]         <button class="btn">Submit Request</button>
-// [DUPE-REMOVED]       </form>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] });
+app.get('/church/prayers', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const prayers = (await pool.query('SELECT * FROM prayer_requests WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Prayer Requests', `
+    <div class="card"><h3>Prayer Requests</h3>
+      <a href="/church/prayers/new" class="btn btn-sm" style="margin-bottom:15px">+ New Request</a>
+      ${prayers.map(p => `
+        <div class="card">
+          <h4>${esc(p.name || 'Anonymous')} ${p.is_private ? '<span class="tag" style="background:#fee2e2;color:#991b1b">Private</span>' : ''}</h4>
+          <p style="white-space:pre-wrap">${esc(p.request)}</p>
+          <p class="muted">${new Date(p.created_at).toLocaleString()}</p>
+          <a href="/church/prayers/${p.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Delete</a>
+        </div>
+      `).join('') || '<p>No prayer requests yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/church/prayers/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Prayer Request', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Submit Prayer Request</h3>
+      <form method="POST" action="/church/prayers/save">
+        <input name="name" placeholder="Your Name (or leave blank for anonymous)">
+        <textarea name="request" rows="5" placeholder="Prayer request..." required></textarea>
+        <label style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" name="is_private" value="true" style="width:auto"> Keep this private (only admins see it)</label>
+        <button class="btn">Submit Request</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
 
 app.post('/church/prayers/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, request, is_private } = req.body;
@@ -6698,16 +6698,16 @@ app.post('/settings/branding/save', requireAuth, ah(async (req, res) => {
 }));
 
 // === SEARCH ===
-// [DUPE-REMOVED] app.get('/search', requireAuth, (req, res) => {
-// [DUPE-REMOVED]   res.send(renderPage('Search', `
-// [DUPE-REMOVED]     <div class="card" style="max-width:600px;margin:40px auto"><h3>Search Your Data</h3>
-// [DUPE-REMOVED]       <form method="GET" action="/search/results">
-// [DUPE-REMOVED]         <input name="q" placeholder="Search anything..." value="${esc(req.query.q || '')}" required autofocus>
-// [DUPE-REMOVED]         <button class="btn">Search</button>
-// [DUPE-REMOVED]       </form>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] });
+app.get('/search', requireAuth, (req, res) => {
+  res.send(renderPage('Search', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h3>Search Your Data</h3>
+      <form method="GET" action="/search/results">
+        <input name="q" placeholder="Search anything..." value="${esc(req.query.q || '')}" required autofocus>
+        <button class="btn">Search</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
 
 app.get('/search/results', requireAuth, ah(async (req, res) => {
   const q = req.query.q || '';
@@ -8385,42 +8385,42 @@ app.post('/upgrade/fundraising/activate', requireAuth, ah(async (req, res) => {
 }));
 
 // === FUNDRAISING PAGE ===
-// [DUPE-REMOVED] app.get('/fundraising', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const t = req.session.user.tenant_id;
-// [DUPE-REMOVED]   const tenant = (await pool.query('SELECT has_fundraising FROM tenants WHERE id=$1', [t])).rows[0];
-// [DUPE-REMOVED]   if (!tenant.has_fundraising) return res.redirect('/upgrade/fundraising');
-// [DUPE-REMOVED]   const donations = (await pool.query("SELECT * FROM org_finance WHERE tenant_id=$1 AND type='income' AND description ILIKE '%donation%' ORDER BY created_at DESC", [t])).rows;
-// [DUPE-REMOVED]   const total = donations.reduce((a, d) => a + parseInt(d.amount), 0);
-// [DUPE-REMOVED]   res.send(renderPage('Fundraising', `
-// [DUPE-REMOVED]     <div class="hero" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
-// [DUPE-REMOVED]       <h1>Fundraising</h1><p>Donations and campaigns</p>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]     <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${total.toLocaleString()}</div><div>Total Donations</div></div></div>
-// [DUPE-REMOVED]     <div class="card"><h3>Record Donation</h3>
-// [DUPE-REMOVED]       <form method="POST" action="/fundraising/save">
-// [DUPE-REMOVED]         <input name="amount" type="number" placeholder="Donation Amount UGX" required>
-// [DUPE-REMOVED]         <input name="description" placeholder="Donation - Donor Name" required>
-// [DUPE-REMOVED]         <button class="btn btn-gold">Record Donation</button>
-// [DUPE-REMOVED]       </form>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]     <div class="card"><h3>Recent Donations</h3>
-// [DUPE-REMOVED]       <table><tr><th>Amount</th><th>Donor</th><th>Date</th></tr>
-// [DUPE-REMOVED]       ${donations.map(d => `<tr><td>UGX ${parseInt(d.amount).toLocaleString()}</td><td>${esc(d.description)}</td><td>${new Date(d.created_at).toLocaleDateString()}</td></tr>`).join('') || '<tr><td colspan="3">No donations yet</td></tr>'}
-// [DUPE-REMOVED]       </table>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const { amount, description } = req.body;
-// [DUPE-REMOVED]   await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, amount, 'income', `Donation - ${description}`]);
+app.get('/fundraising', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT has_fundraising FROM tenants WHERE id=$1', [t])).rows[0];
+  if (!tenant.has_fundraising) return res.redirect('/upgrade/fundraising');
+  const donations = (await pool.query("SELECT * FROM org_finance WHERE tenant_id=$1 AND type='income' AND description ILIKE '%donation%' ORDER BY created_at DESC", [t])).rows;
+  const total = donations.reduce((a, d) => a + parseInt(d.amount), 0);
+  res.send(renderPage('Fundraising', `
+    <div class="hero" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+      <h1>Fundraising</h1><p>Donations and campaigns</p>
+    </div>
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${total.toLocaleString()}</div><div>Total Donations</div></div></div>
+    <div class="card"><h3>Record Donation</h3>
+      <form method="POST" action="/fundraising/save">
+        <input name="amount" type="number" placeholder="Donation Amount UGX" required>
+        <input name="description" placeholder="Donation - Donor Name" required>
+        <button class="btn btn-gold">Record Donation</button>
+      </form>
+    </div>
+    <div class="card"><h3>Recent Donations</h3>
+      <table><tr><th>Amount</th><th>Donor</th><th>Date</th></tr>
+      ${donations.map(d => `<tr><td>UGX ${parseInt(d.amount).toLocaleString()}</td><td>${esc(d.description)}</td><td>${new Date(d.created_at).toLocaleDateString()}</td></tr>`).join('') || '<tr><td colspan="3">No donations yet</td></tr>'}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { amount, description } = req.body;
+  await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, amount, 'income', `Donation - ${description}`]);
   // 5% platform fee
-// [DUPE-REMOVED]   const fee = Math.round(parseInt(amount) * 0.05);
-// [DUPE-REMOVED]   await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
-// [DUPE-REMOVED]   await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, `Fundraising fee - ${req.session.user.tenant_name}`]);
-// [DUPE-REMOVED]   res.redirect('/fundraising');
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
+  const fee = Math.round(parseInt(amount) * 0.05);
+  await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
+  await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, `Fundraising fee - ${req.session.user.tenant_name}`]);
+  res.redirect('/fundraising');
+}));
+
 
 // === BILLING & SUBSCRIPTIONS ===
 app.get('/billing', requireAuth, ah(async (req, res) => {
@@ -9104,118 +9104,118 @@ app.get('/income/:id/delete', requireAuth, requireNotBanned, ah(async (req, res)
 }));
 
 // === FUNDRAISING CAMPAIGNS ===
-// [DUPE-REMOVED] app.get('/campaigns', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const t = req.session.user.tenant_id;
-// [DUPE-REMOVED]   const campaigns = (await pool.query('SELECT * FROM campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
-// [DUPE-REMOVED]   res.send(renderPage('Fundraising Campaigns', `
-// [DUPE-REMOVED]     <div class="card">
-// [DUPE-REMOVED]       <h2>Fundraising Campaigns</h2>
-// [DUPE-REMOVED]       <a href="/campaigns/new" class="btn btn-sm" style="margin-bottom:15px">New Campaign</a>
-// [DUPE-REMOVED]       <div class="grid">${campaigns.map(c=>{const pct=c.target>0?Math.min(100,Math.round(c.raised/c.target*100)):0;return`<div class="card"><h3>${esc(c.title)}</h3><p class="muted">${esc(c.description||'')}</p><div class="progress-bar" style="margin:10px 0"><div class="progress-fill" style="width:${pct}%;background:linear-gradient(135deg,#059669,#10b981)"></div></div><p><strong>UGX ${Number(c.raised).toLocaleString()}</strong> / UGX ${Number(c.target).toLocaleString()} (${pct}%)</p><span class="tag">${esc(c.status)}</span> <span class="muted">${c.end_date?'Ends: '+new Date(c.end_date).toLocaleDateString():''}</span><br><a href="/campaigns/${c.id}" class="btn btn-sm" style="margin-top:10px">View</a> <a href="/campaigns/${c.id}/pledge" class="btn btn-sm btn-green" style="margin-top:10px">Add Pledge</a></div>`}).join('')}</div>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/campaigns/new', requireAuth, requireNotBanned, (req, res) => {
-// [DUPE-REMOVED]   res.send(renderPage('New Campaign', `
-// [DUPE-REMOVED]     <div class="card" style="max-width:600px;margin:40px auto">
-// [DUPE-REMOVED]       <h2>Create Campaign</h2>
-// [DUPE-REMOVED]       <form method="POST" action="/campaigns/save">
-// [DUPE-REMOVED]         <input name="title" placeholder="Campaign Title" required>
-// [DUPE-REMOVED]         <textarea name="description" placeholder="Description" rows="4"></textarea>
-// [DUPE-REMOVED]         <input name="target" type="number" placeholder="Fundraising Target (UGX)" required>
-// [DUPE-REMOVED]         <input name="start_date" type="date" required>
-// [DUPE-REMOVED]         <input name="end_date" type="date" required>
-// [DUPE-REMOVED]         <button class="btn btn-gold" style="width:100%">Create Campaign</button>
-// [DUPE-REMOVED]       </form>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] });
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.post('/campaigns/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const t = req.session.user.tenant_id;
-// [DUPE-REMOVED]   const { title, description, target, start_date, end_date } = req.body;
-// [DUPE-REMOVED]   await pool.query('INSERT INTO campaigns(tenant_id,title,description,target,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6)', [t, title, description, target, start_date, end_date]);
-// [DUPE-REMOVED]   res.redirect('/campaigns');
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/campaigns/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const c = (await pool.query('SELECT * FROM campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
-// [DUPE-REMOVED]   const pledges = (await pool.query('SELECT * FROM campaign_pledges WHERE campaign_id=$1 ORDER BY pledged_at DESC', [c.id])).rows;
-// [DUPE-REMOVED]   const pct = c.target>0?Math.min(100,Math.round(c.raised/c.target*100)):0;
-// [DUPE-REMOVED]   res.send(renderPage(c.title, `
-// [DUPE-REMOVED]     <div class="card">
-// [DUPE-REMOVED]       <h2>${esc(c.title)}</h2><p>${esc(c.description||'')}</p>
-// [DUPE-REMOVED]       <div class="progress-bar" style="margin:15px 0;height:30px"><div class="progress-fill" style="width:${pct}%;background:linear-gradient(135deg,#059669,#10b981)"><span style="color:white;padding:5px 10px;font-weight:bold">${pct}%</span></div></div>
-// [DUPE-REMOVED]       <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${Number(c.raised).toLocaleString()}</div><div>Raised</div></div><div class="stat-card"><div class="stat-num">UGX ${Number(c.target).toLocaleString()}</div><div>Target</div></div></div>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]     <div class="card">
-// [DUPE-REMOVED]       <h2>Pledges</h2>
-// [DUPE-REMOVED]       ${pledges.length?`<table><tr><th>Donor</th><th>Pledged</th><th>Paid</th><th>Date</th></tr>${pledges.map(p=>`<tr><td>${esc(p.donor_name)}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>UGX ${Number(p.paid).toLocaleString()}</td><td>${new Date(p.pledged_at).toLocaleDateString()}</td></tr>`).join('')}</table>`:'<p class="muted">No pledges yet</p>'}
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]     <a href="/campaigns" class="btn">Back to Campaigns</a>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/campaigns/:id/pledge', requireAuth, requireNotBanned, (req, res) => {
-// [DUPE-REMOVED]   res.send(renderPage('Add Pledge', `
-// [DUPE-REMOVED]     <div class="card" style="max-width:500px;margin:40px auto">
-// [DUPE-REMOVED]       <h2>Add Pledge</h2>
-// [DUPE-REMOVED]       <form method="POST" action="/campaigns/${req.params.id}/pledge">
-// [DUPE-REMOVED]         <input name="donor_name" placeholder="Donor Name" required>
-// [DUPE-REMOVED]         <input name="amount" type="number" placeholder="Pledge Amount (UGX)" required>
-// [DUPE-REMOVED]         <input name="paid" type="number" placeholder="Amount Already Paid (UGX)" value="0">
-// [DUPE-REMOVED]         <button class="btn btn-gold" style="width:100%">Add Pledge</button>
-// [DUPE-REMOVED]       </form>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] });
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.post('/campaigns/:id/pledge', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const { donor_name, amount, paid } = req.body;
-// [DUPE-REMOVED]   await pool.query('INSERT INTO campaign_pledges(campaign_id,donor_name,amount,paid) VALUES($1,$2,$3,$4)', [req.params.id, donor_name, amount, paid||0]);
-// [DUPE-REMOVED]   await pool.query('UPDATE campaigns SET raised=raised+$1 WHERE id=$2', [paid||0, req.params.id]);
-// [DUPE-REMOVED]   res.redirect('/campaigns/' + req.params.id);
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
+app.get('/campaigns', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const campaigns = (await pool.query('SELECT * FROM campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  res.send(renderPage('Fundraising Campaigns', `
+    <div class="card">
+      <h2>Fundraising Campaigns</h2>
+      <a href="/campaigns/new" class="btn btn-sm" style="margin-bottom:15px">New Campaign</a>
+      <div class="grid">${campaigns.map(c=>{const pct=c.target>0?Math.min(100,Math.round(c.raised/c.target*100)):0;return`<div class="card"><h3>${esc(c.title)}</h3><p class="muted">${esc(c.description||'')}</p><div class="progress-bar" style="margin:10px 0"><div class="progress-fill" style="width:${pct}%;background:linear-gradient(135deg,#059669,#10b981)"></div></div><p><strong>UGX ${Number(c.raised).toLocaleString()}</strong> / UGX ${Number(c.target).toLocaleString()} (${pct}%)</p><span class="tag">${esc(c.status)}</span> <span class="muted">${c.end_date?'Ends: '+new Date(c.end_date).toLocaleDateString():''}</span><br><a href="/campaigns/${c.id}" class="btn btn-sm" style="margin-top:10px">View</a> <a href="/campaigns/${c.id}/pledge" class="btn btn-sm btn-green" style="margin-top:10px">Add Pledge</a></div>`}).join('')}</div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/campaigns/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Campaign', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Create Campaign</h2>
+      <form method="POST" action="/campaigns/save">
+        <input name="title" placeholder="Campaign Title" required>
+        <textarea name="description" placeholder="Description" rows="4"></textarea>
+        <input name="target" type="number" placeholder="Fundraising Target (UGX)" required>
+        <input name="start_date" type="date" required>
+        <input name="end_date" type="date" required>
+        <button class="btn btn-gold" style="width:100%">Create Campaign</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/campaigns/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, description, target, start_date, end_date } = req.body;
+  await pool.query('INSERT INTO campaigns(tenant_id,title,description,target,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6)', [t, title, description, target, start_date, end_date]);
+  res.redirect('/campaigns');
+}));
+
+app.get('/campaigns/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const c = (await pool.query('SELECT * FROM campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  const pledges = (await pool.query('SELECT * FROM campaign_pledges WHERE campaign_id=$1 ORDER BY pledged_at DESC', [c.id])).rows;
+  const pct = c.target>0?Math.min(100,Math.round(c.raised/c.target*100)):0;
+  res.send(renderPage(c.title, `
+    <div class="card">
+      <h2>${esc(c.title)}</h2><p>${esc(c.description||'')}</p>
+      <div class="progress-bar" style="margin:15px 0;height:30px"><div class="progress-fill" style="width:${pct}%;background:linear-gradient(135deg,#059669,#10b981)"><span style="color:white;padding:5px 10px;font-weight:bold">${pct}%</span></div></div>
+      <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${Number(c.raised).toLocaleString()}</div><div>Raised</div></div><div class="stat-card"><div class="stat-num">UGX ${Number(c.target).toLocaleString()}</div><div>Target</div></div></div>
+    </div>
+    <div class="card">
+      <h2>Pledges</h2>
+      ${pledges.length?`<table><tr><th>Donor</th><th>Pledged</th><th>Paid</th><th>Date</th></tr>${pledges.map(p=>`<tr><td>${esc(p.donor_name)}</td><td>UGX ${Number(p.amount).toLocaleString()}</td><td>UGX ${Number(p.paid).toLocaleString()}</td><td>${new Date(p.pledged_at).toLocaleDateString()}</td></tr>`).join('')}</table>`:'<p class="muted">No pledges yet</p>'}
+    </div>
+    <a href="/campaigns" class="btn">Back to Campaigns</a>
+  `, req.session.user));
+}));
+
+app.get('/campaigns/:id/pledge', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Pledge', `
+    <div class="card" style="max-width:500px;margin:40px auto">
+      <h2>Add Pledge</h2>
+      <form method="POST" action="/campaigns/${req.params.id}/pledge">
+        <input name="donor_name" placeholder="Donor Name" required>
+        <input name="amount" type="number" placeholder="Pledge Amount (UGX)" required>
+        <input name="paid" type="number" placeholder="Amount Already Paid (UGX)" value="0">
+        <button class="btn btn-gold" style="width:100%">Add Pledge</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
+
+app.post('/campaigns/:id/pledge', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { donor_name, amount, paid } = req.body;
+  await pool.query('INSERT INTO campaign_pledges(campaign_id,donor_name,amount,paid) VALUES($1,$2,$3,$4)', [req.params.id, donor_name, amount, paid||0]);
+  await pool.query('UPDATE campaigns SET raised=raised+$1 WHERE id=$2', [paid||0, req.params.id]);
+  res.redirect('/campaigns/' + req.params.id);
+}));
+
 // === MEMBER ROLES & PERMISSIONS ===
-// [DUPE-REMOVED] app.get('/roles', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [DUPE-REMOVED]   const t = req.session.user.tenant_id;
-// [DUPE-REMOVED]   const roles = (await pool.query('SELECT * FROM role_permissions WHERE tenant_id=$1 ORDER BY role_name', [t])).rows;
-// [DUPE-REMOVED]   const defaultRoles = ['admin','manager','staff','viewer','member'];
-// [DUPE-REMOVED]   res.send(renderPage('Member Roles & Permissions', `
-// [DUPE-REMOVED]     <div class="card">
-// [DUPE-REMOVED]       <h2>Member Roles & Permissions</h2>
-// [DUPE-REMOVED]       <a href="/roles/new" class="btn btn-sm" style="margin-bottom:15px">Create Role</a>
-// [DUPE-REMOVED]       ${roles.length?`<table><tr><th>Role</th><th>Permissions</th><th>Actions</th></tr>${roles.map(r=>{const perms=typeof r.permissions==='string'?JSON.parse(r.permissions):r.permissions||{};return`<tr><td><strong>${esc(r.role_name)}</strong></td><td>${Object.entries(perms).filter(([,v])=>v).map(([k])=>`<span class="tag">${esc(k)}</span>`).join(' ')}</td><td><a href="/roles/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`}).join('')}</table>`:'<p class="muted">No custom roles defined</p>'}
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]     <div class="card">
-// [DUPE-REMOVED]       <h2>Default Roles</h2>
-// [DUPE-REMOVED]       <div class="grid">${defaultRoles.map(r=>`<div class="card"><h3>${esc(r)}</h3><a href="/roles/quick-create/${r}" class="btn btn-sm">Configure Permissions</a></div>`).join('')}</div>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.get('/roles/new', requireAuth, requireNotBanned, (req, res) => {
-// [DUPE-REMOVED]   res.send(renderPage('Create Role', `
-// [DUPE-REMOVED]     <div class="card" style="max-width:600px;margin:40px auto">
-// [DUPE-REMOVED]       <h2>Create Custom Role</h2>
-// [DUPE-REMOVED]       <form method="POST" action="/roles/save">
-// [DUPE-REMOVED]         <input name="role_name" placeholder="Role Name" required>
-// [DUPE-REMOVED]         <h3 style="margin:15px 0">Permissions</h3>
-// [DUPE-REMOVED]         <label style="display:block;margin:8px 0"><input type="checkbox" name="can_create" value="true"> Create Records</label>
-// [DUPE-REMOVED]         <label style="display:block;margin:8px 0"><input type="checkbox" name="can_read" value="true" checked> Read Records</label>
-// [DUPE-REMOVED]         <label style="display:block;margin:8px 0"><input type="checkbox" name="can_update" value="true"> Update Records</label>
-// [DUPE-REMOVED]         <label style="display:block;margin:8px 0"><input type="checkbox" name="can_delete" value="true"> Delete Records</label>
-// [DUPE-REMOVED]         <label style="display:block;margin:8px 0"><input type="checkbox" name="can_manage_users" value="true"> Manage Users</label>
-// [DUPE-REMOVED]         <label style="display:block;margin:8px 0"><input type="checkbox" name="can_manage_finance" value="true"> Manage Finances</label>
-// [DUPE-REMOVED]         <label style="display:block;margin:8px 0"><input type="checkbox" name="can_view_reports" value="true" checked> View Reports</label>
-// [DUPE-REMOVED]         <label style="display:block;margin:8px 0"><input type="checkbox" name="can_send_sms" value="true"> Send SMS</label>
-// [DUPE-REMOVED]         <button class="btn" style="width:100%">Create Role</button>
-// [DUPE-REMOVED]       </form>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] });
+app.get('/roles', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const roles = (await pool.query('SELECT * FROM role_permissions WHERE tenant_id=$1 ORDER BY role_name', [t])).rows;
+  const defaultRoles = ['admin','manager','staff','viewer','member'];
+  res.send(renderPage('Member Roles & Permissions', `
+    <div class="card">
+      <h2>Member Roles & Permissions</h2>
+      <a href="/roles/new" class="btn btn-sm" style="margin-bottom:15px">Create Role</a>
+      ${roles.length?`<table><tr><th>Role</th><th>Permissions</th><th>Actions</th></tr>${roles.map(r=>{const perms=typeof r.permissions==='string'?JSON.parse(r.permissions):r.permissions||{};return`<tr><td><strong>${esc(r.role_name)}</strong></td><td>${Object.entries(perms).filter(([,v])=>v).map(([k])=>`<span class="tag">${esc(k)}</span>`).join(' ')}</td><td><a href="/roles/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`}).join('')}</table>`:'<p class="muted">No custom roles defined</p>'}
+    </div>
+    <div class="card">
+      <h2>Default Roles</h2>
+      <div class="grid">${defaultRoles.map(r=>`<div class="card"><h3>${esc(r)}</h3><a href="/roles/quick-create/${r}" class="btn btn-sm">Configure Permissions</a></div>`).join('')}</div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/roles/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Role', `
+    <div class="card" style="max-width:600px;margin:40px auto">
+      <h2>Create Custom Role</h2>
+      <form method="POST" action="/roles/save">
+        <input name="role_name" placeholder="Role Name" required>
+        <h3 style="margin:15px 0">Permissions</h3>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_create" value="true"> Create Records</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_read" value="true" checked> Read Records</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_update" value="true"> Update Records</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_delete" value="true"> Delete Records</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_manage_users" value="true"> Manage Users</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_manage_finance" value="true"> Manage Finances</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_view_reports" value="true" checked> View Reports</label>
+        <label style="display:block;margin:8px 0"><input type="checkbox" name="can_send_sms" value="true"> Send SMS</label>
+        <button class="btn" style="width:100%">Create Role</button>
+      </form>
+    </div>
+  `, req.session.user));
+});
 
 app.post('/roles/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
@@ -10242,31 +10242,31 @@ app.get('/suppliers/:id/delete', requireAuth, requireNotBanned, ah(async (req, r
   res.redirect('/suppliers');
 }));
 
-// [REMOVED] Duplicate route — enhanced version loaded later: app.get('/branches', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [REMOVED] Duplicate route — enhanced version loaded later:   const t = req.session.user.tenant_id;
-// [REMOVED] Duplicate route — enhanced version loaded later:   const branches = (await pool.query('SELECT * FROM branches WHERE tenant_id=$1 ORDER BY name', [t])).rows;
-// [REMOVED] Duplicate route — enhanced version loaded later:   res.send(renderPage('Branches', `
-// [REMOVED] Duplicate route — enhanced version loaded later:     <div class="card"><h2>Branches</h2><a href="/branches/new" class="btn btn-sm" style="margin-bottom:15px">Add Branch</a>
-// [REMOVED] Duplicate route — enhanced version loaded later:     ${branches.length?`<table><tr><th>Name</th><th>Location</th><th>Manager</th><th>Actions</th></tr>${branches.map(b=>`<tr><td>${esc(b.name)}</td><td>${esc(b.location||'-')}</td><td>${esc(b.manager||'-')}</td><td><a href="/branches/${b.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No branches</p>'}</div>
-// [REMOVED] Duplicate route — enhanced version loaded later:   `, req.session.user));
-// [REMOVED] Duplicate route — enhanced version loaded later: }));
-// [REMOVED] Duplicate route — enhanced version loaded later: 
-// [REMOVED] Duplicate route — enhanced version loaded later: app.get('/branches/new', requireAuth, requireNotBanned, (req, res) => {
-// [REMOVED] Duplicate route — enhanced version loaded later:   res.send(renderPage('Add Branch', '<div class="card" style="max-width:500px;margin:40px auto"><h2>Add Branch</h2><form method="POST" action="/branches/save"><input name="name" placeholder="Branch Name" required><input name="location" placeholder="Location"><input name="manager" placeholder="Manager Name"><button class="btn" style="width:100%">Add Branch</button></form></div>', req.session.user));
-// [REMOVED] Duplicate route — enhanced version loaded later: });
-// [REMOVED] Duplicate route — enhanced version loaded later: 
-// [REMOVED] Duplicate route — enhanced version loaded later: app.post('/branches/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [REMOVED] Duplicate route — enhanced version loaded later:   const t = req.session.user.tenant_id;
-// [REMOVED] Duplicate route — enhanced version loaded later:   await pool.query('INSERT INTO branches(tenant_id,name,location,manager) VALUES($1,$2,$3,$4)', [t, req.body.name, req.body.location, req.body.manager]);
-// [REMOVED] Duplicate route — enhanced version loaded later:   res.redirect('/branches');
-// [REMOVED] Duplicate route — enhanced version loaded later: }));
-// [REMOVED] Duplicate route — enhanced version loaded later: 
-// [REMOVED] Duplicate route — enhanced version loaded later: app.get('/branches/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
-// [REMOVED] Duplicate route — enhanced version loaded later:   await pool.query('DELETE FROM branches WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-// [REMOVED] Duplicate route — enhanced version loaded later:   res.redirect('/branches');
-// [REMOVED] Duplicate route — enhanced version loaded later: }));
-// [REMOVED] Duplicate route — enhanced version loaded later: 
-// [REMOVED] Duplicate route — enhanced version loaded later: // ============================================================
+app.get('/branches', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const branches = (await pool.query('SELECT * FROM branches WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Branches', `
+    <div class="card"><h2>Branches</h2><a href="/branches/new" class="btn btn-sm" style="margin-bottom:15px">Add Branch</a>
+    ${branches.length?`<table><tr><th>Name</th><th>Location</th><th>Manager</th><th>Actions</th></tr>${branches.map(b=>`<tr><td>${esc(b.name)}</td><td>${esc(b.location||'-')}</td><td>${esc(b.manager||'-')}</td><td><a href="/branches/${b.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No branches</p>'}</div>
+  `, req.session.user));
+}));
+
+app.get('/branches/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Branch', '<div class="card" style="max-width:500px;margin:40px auto"><h2>Add Branch</h2><form method="POST" action="/branches/save"><input name="name" placeholder="Branch Name" required><input name="location" placeholder="Location"><input name="manager" placeholder="Manager Name"><button class="btn" style="width:100%">Add Branch</button></form></div>', req.session.user));
+});
+
+app.post('/branches/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO branches(tenant_id,name,location,manager) VALUES($1,$2,$3,$4)', [t, req.body.name, req.body.location, req.body.manager]);
+  res.redirect('/branches');
+}));
+
+app.get('/branches/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM branches WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/branches');
+}));
+
+// ============================================================
 // v4.0: LOYALTY POINTS + SMS MARKETING
 // ============================================================
 app.get('/loyalty', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -10832,13 +10832,13 @@ app.get('/compliance/export', requireAuth, requireNotBanned, ah(async (req, res)
 // ============================================================
 // v5.0: PWA MANIFEST
 // ============================================================
-// [DUPE-REMOVED] app.get('/manifest.json', (req, res) => {
-// [DUPE-REMOVED]   res.json({
-// [DUPE-REMOVED]     name: 'Comfort Platform', short_name: 'Comfort', start_url: '/', display: 'standalone',
-// [DUPE-REMOVED]     background_color: '#4f46e5', theme_color: '#4f46e5',
-// [DUPE-REMOVED]     icons: [{ src: '/favicon.ico', sizes: '48x48', type: 'image/x-icon' }]
-// [DUPE-REMOVED]   });
-// [DUPE-REMOVED] });
+app.get('/manifest.json', (req, res) => {
+  res.json({
+    name: 'Comfort Platform', short_name: 'Comfort', start_url: '/', display: 'standalone',
+    background_color: '#4f46e5', theme_color: '#4f46e5',
+    icons: [{ src: '/favicon.ico', sizes: '48x48', type: 'image/x-icon' }]
+  });
+});
 
 // ============================================================
 // ENHANCED STATUS PAGE (v9.0) with incident management
@@ -11416,10 +11416,10 @@ app.get('/personal/debt-calculator', requireAuth, requireNotBanned, (req, res) =
 });
 
 // === v5.0: PWA SERVICE WORKER ===
-// [DUPE-REMOVED] app.get('/sw.js', (req, res) => {
-// [DUPE-REMOVED]   res.setHeader('Content-Type', 'application/javascript');
-// [DUPE-REMOVED]   res.send(`const CACHE='ssewasswa-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/','/login','/manifest.json'])))});self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});`);
-// [DUPE-REMOVED] });
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send(`const CACHE='ssewasswa-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/','/login','/manifest.json'])))});self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});`);
+});
 
 // === v6.0: UNEB RESULTS IMPORT ===
 app.get('/school/uneb', requireAuth, requireNotBanned, (req, res) => {
@@ -11855,28 +11855,28 @@ const cacheMiddleware = (ttlMs = 30000) => (req, res, next) => {
 };
 
 // === v9.0: MULTI-COUNTRY ENHANCEMENT (currency helper already exists above) ===
-// [DUPE-REMOVED] app.get('/settings/country', requireAuth, ah(async (req, res) => {
-// [DUPE-REMOVED]   const t = req.session.user.tenant_id;
-// [DUPE-REMOVED]   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
-// [DUPE-REMOVED]   res.send(renderPage('Country & Currency', `
-// [DUPE-REMOVED]     <div class="card" style="max-width:500px;margin:40px auto"><h2>Country & Currency Settings</h2>
-// [DUPE-REMOVED]       <form method="POST" action="/settings/country/save">
-// [DUPE-REMOVED]         <select name="country"><option value="UG" ${tenant?.country==='UG'?'selected':''}>Uganda (UGX)</option><option value="KE" ${tenant?.country==='KE'?'selected':''}>Kenya (KES)</option><option value="TZ" ${tenant?.country==='TZ'?'selected':''}>Tanzania (TZS)</option><option value="RW" ${tenant?.country==='RW'?'selected':''}>Rwanda (RWF)</option><option value="CD" ${tenant?.country==='CD'?'selected':''}>DRC (CDF)</option><option value="US" ${tenant?.country==='US'?'selected':''}>United States (USD)</option></select>
-// [DUPE-REMOVED]         <select name="currency"><option value="UGX" ${tenant?.currency==='UGX'?'selected':''}>UGX - Ugandan Shilling</option><option value="KES" ${tenant?.currency==='KES'?'selected':''}>KES - Kenyan Shilling</option><option value="TZS" ${tenant?.currency==='TZS'?'selected':''}>TZS - Tanzanian Shilling</option><option value="RWF" ${tenant?.currency==='RWF'?'selected':''}>RWF - Rwandan Franc</option><option value="USD" ${tenant?.currency==='USD'?'selected':''}>USD - US Dollar</option></select>
-// [DUPE-REMOVED]         <input name="tax_id" placeholder="Tax ID / TIN" value="${esc(tenant?.tax_id||'')}">
-// [DUPE-REMOVED]         <button class="btn" style="width:100%">Save</button>
-// [DUPE-REMOVED]       </form>
-// [DUPE-REMOVED]     </div>
-// [DUPE-REMOVED]   `, req.session.user));
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
-// [DUPE-REMOVED] app.post('/settings/country/save', requireAuth, ah(async (req, res) => {
-// [DUPE-REMOVED]   const t = req.session.user.tenant_id;
-// [DUPE-REMOVED]   const { country, currency, tax_id } = req.body;
-// [DUPE-REMOVED]   await pool.query('UPDATE tenants SET country=$1,currency=$2,tax_id=$3 WHERE id=$4', [country, currency, tax_id, t]);
-// [DUPE-REMOVED]   res.redirect('/settings/country');
-// [DUPE-REMOVED] }));
-// [DUPE-REMOVED] 
+app.get('/settings/country', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  res.send(renderPage('Country & Currency', `
+    <div class="card" style="max-width:500px;margin:40px auto"><h2>Country & Currency Settings</h2>
+      <form method="POST" action="/settings/country/save">
+        <select name="country"><option value="UG" ${tenant?.country==='UG'?'selected':''}>Uganda (UGX)</option><option value="KE" ${tenant?.country==='KE'?'selected':''}>Kenya (KES)</option><option value="TZ" ${tenant?.country==='TZ'?'selected':''}>Tanzania (TZS)</option><option value="RW" ${tenant?.country==='RW'?'selected':''}>Rwanda (RWF)</option><option value="CD" ${tenant?.country==='CD'?'selected':''}>DRC (CDF)</option><option value="US" ${tenant?.country==='US'?'selected':''}>United States (USD)</option></select>
+        <select name="currency"><option value="UGX" ${tenant?.currency==='UGX'?'selected':''}>UGX - Ugandan Shilling</option><option value="KES" ${tenant?.currency==='KES'?'selected':''}>KES - Kenyan Shilling</option><option value="TZS" ${tenant?.currency==='TZS'?'selected':''}>TZS - Tanzanian Shilling</option><option value="RWF" ${tenant?.currency==='RWF'?'selected':''}>RWF - Rwandan Franc</option><option value="USD" ${tenant?.currency==='USD'?'selected':''}>USD - US Dollar</option></select>
+        <input name="tax_id" placeholder="Tax ID / TIN" value="${esc(tenant?.tax_id||'')}">
+        <button class="btn" style="width:100%">Save</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/country/save', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { country, currency, tax_id } = req.body;
+  await pool.query('UPDATE tenants SET country=$1,currency=$2,tax_id=$3 WHERE id=$4', [country, currency, tax_id, t]);
+  res.redirect('/settings/country');
+}));
+
 // === v9.0: GOVERNMENT DASHBOARDS ===
 app.get('/dev/government', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const [schoolStats, orgStats, churchStats, bizStats] = await Promise.all([
@@ -24627,10 +24627,12 @@ app.get('/event-tickets/:id/delete', requireAuth, requireNotBanned, ah(async (re
 // FEATURE 0: UNIVERSAL DEV ACCESS (Portal Switcher)
 // ============================================================
 const DEV_PORTAL_TYPES = [
-  { type: 'school', label: 'School Portal', icon: '🏫', color: '#059669' },
-  { type: 'church', label: 'Church Portal', icon: '⛪', color: '#7c3aed' },
-  { type: 'clinic', label: 'Clinic Portal', icon: '🏥', color: '#0891b2' },
-  { type: 'business', label: 'Business Portal', icon: '🏢', color: '#475569' },
+  { type: 'school', label: 'School Portal', icon: '🏫', color: '#3b82f6' },
+  { type: 'church', label: 'Church Portal', icon: '⛪', color: '#8b5cf6' },
+  { type: 'business', label: 'Business Portal', icon: '🏢', color: '#f59e0b' },
+  { type: 'organization', label: 'Organization Portal', icon: '🤝', color: '#10b981' },
+  { type: 'individual', label: 'Individual Portal', icon: '👤', color: '#ec4899' },
+  { type: 'clinic', label: 'Clinic Portal', icon: '🏥', color: '#ef4444' },
   { type: 'hotel', label: 'Hotel & Lodge', icon: '🏨', color: '#dc2626' },
   { type: 'restaurant', label: 'Restaurant', icon: '🍽️', color: '#ea580c' },
   { type: 'retail', label: 'Retail Shop', icon: '🛍️', color: '#e11d48' },
@@ -24641,8 +24643,6 @@ const DEV_PORTAL_TYPES = [
   { type: 'supermarket', label: 'Supermarket', icon: '🛒', color: '#0d9488' },
   { type: 'transport', label: 'Transport', icon: '🚗', color: '#4f46e5' },
   { type: 'electronics', label: 'Electronics Shop', icon: '📱', color: '#6366f1' },
-  { type: 'individual', label: 'Individual Portal', icon: '👤', color: '#8b5cf6' },
-  { type: 'organization', label: 'Organization Portal', icon: '🤝', color: '#10b981' },
   { type: 'public', label: 'Public Portal', icon: '🌐', color: '#0ea5e9' }
 ];
 
@@ -24672,13 +24672,13 @@ app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     const demo = existingMap[p.type];
     const isActive = current.tenant_type === p.type && (original || current.tenant_name && current.tenant_name.startsWith('Dev'));
     const csrfVal = req.csrfToken || req.session?.csrfToken || '';
-    return `<form method="POST" action="/dev/switch-tenant" style="border:2px solid ${isActive ? '#22c55e' : '#e2e8f0'};border-radius:12px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : '#fff'};margin:0;display:block;transition:all 0.2s" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(0,0,0,0.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+    return `<form method="POST" action="/dev/switch-tenant" style="border:2px solid ${isActive ? '#22c55e' : '#e2e8f0'};border-radius:12px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : '#fff'};margin:0;display:block;transition:all 0.2s" onclick="if(!${isActive})this.submit()" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(0,0,0,0.1)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
       <input type="hidden" name="_csrf" value="${esc(csrfVal)}">
       <input type="hidden" name="type" value="${esc(p.type)}">
       <div style="font-size:48px;margin-bottom:8px;pointer-events:none">${p.icon}</div>
       <h3 style="margin:0 0 4px;pointer-events:none">${esc(p.label)}</h3>
       <p style="font-size:13px;color:#64748b;margin:0 0 12px;pointer-events:none">${demo ? 'Tenant #' + demo.id + ' exists' : 'Not yet created'}</p>
-      ${isActive ? '<span style="color:#22c55e;font-weight:bold;font-size:13px;pointer-events:none">&#9679; ACTIVE</span>' : '<button type="submit" class="btn" style="background:' + p.color + ';color:#fff;font-size:13px;pointer-events:none">Switch to ' + esc(p.type) + '</button>'}
+      ${isActive ? '<span style="color:#22c55e;font-weight:bold;font-size:13px;pointer-events:none">&#9679; ACTIVE</span>' : '<button type="submit" class="btn" style="background:' + p.color + ';color:#fff;font-size:13px">Switch to ' + esc(p.type) + '</button>'}
     </form>`;
   }).join('');
   res.send(renderPage('Dev Portal Switcher', `
@@ -24770,13 +24770,13 @@ app.get('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) => 
   const csrfVal = req.csrfToken || req.session?.csrfToken || '';
   const cards = USER_PORTAL_TYPES.map(p => {
     const isActive = currentType === p.type;
-    return `<form method="POST" action="/switch-portal" style="border:2px solid ${isActive ? '#22c55e' : (dark ? '#334155' : '#e2e8f0')};border-radius:14px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : (dark ? '#1e293b' : '#fff')};margin:0;display:block;transition:all 0.2s" onmouseover="if(!${isActive}){this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(0,0,0,0.12)'}" onmouseout="this.style.transform='';this.style.boxShadow=''">
+    return `<form method="POST" action="/switch-portal" style="border:2px solid ${isActive ? '#22c55e' : (dark ? '#334155' : '#e2e8f0')};border-radius:14px;padding:20px;text-align:center;cursor:pointer;background:${isActive ? '#f0fdf4' : (dark ? '#1e293b' : '#fff')};margin:0;display:block;transition:all 0.2s" onclick="if(!${isActive})this.submit()" onmouseover="if(!${isActive}){this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(0,0,0,0.12)'}" onmouseout="this.style.transform='';this.style.boxShadow=''">
       <input type="hidden" name="_csrf" value="${esc(csrfVal)}">
       <input type="hidden" name="type" value="${esc(p.type)}">
       <div style="font-size:44px;margin-bottom:8px;pointer-events:none">${p.icon}</div>
       <h3 style="margin:0 0 4px;pointer-events:none;color:${isActive ? '#16a34a' : (dark ? '#e2e8f0' : '#1e293b')}">${esc(p.label)}</h3>
       <p style="font-size:12px;color:#64748b;margin:0 0 12px;pointer-events:none">${esc(p.desc)}</p>
-      ${isActive ? '<span style="color:#22c55e;font-weight:700;font-size:14px;pointer-events:none">&#10003; CURRENT PORTAL</span>' : '<button type="submit" class="btn" style="background:' + p.color + ';color:#fff;font-size:13px;pointer-events:none">Switch to ' + esc(p.label) + '</button>'}
+      ${isActive ? '<span style="color:#22c55e;font-weight:700;font-size:14px;pointer-events:none">&#10003; CURRENT PORTAL</span>' : '<button type="submit" class="btn" style="background:' + p.color + ';color:#fff;font-size:13px">Switch to ' + esc(p.label) + '</button>'}
     </form>`;
   }).join('');
   res.send(renderPage('Switch Portal', `
@@ -24799,7 +24799,6 @@ app.post('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) =>
   }
   const user = req.session.user;
   const tid = user.tenant_id;
-  const oldType = user.tenant_type || 'unknown';
   // Update the tenant type in the database
   await pool.query('UPDATE tenants SET type = $1 WHERE id = $2', [newType, tid]);
   // Update user role to match new portal type (unless super_admin)
@@ -24811,308 +24810,8 @@ app.post('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) =>
   if (user.role !== 'super_admin') {
     req.session.user.role = newType;
   }
-  await audit(user.email, 'portal_switch', 'Switched portal type from ' + oldType + ' to ' + newType);
+  await audit(user.email, 'portal_switch', 'Switched portal type from ' + (user.tenant_type || 'unknown') + ' to ' + newType);
   res.redirect('/portal/' + newType);
-}));
-
-// === HOTEL PORTAL ===
-app.get('/portal/hotel', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [rooms, reservations, guests, revenue] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM rooms WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COUNT(*) FROM reservations WHERE tenant_id=$1 AND status IN ('confirmed','checked_in')", [t]),
-    pool.query('SELECT COUNT(DISTINCT guest_id) FROM reservations WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COALESCE(SUM(amount),0) FROM reservations WHERE tenant_id=$1 AND status IN ('checked_out','completed')", [t])
-  ]);
-  res.send(renderPage('Hotel Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#f87171)">
-      <h1>Hotel &amp; Lodge Portal</h1><p>Manage rooms, reservations, guests, and housekeeping</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${rooms.rows[0].count}</div><div>Total Rooms</div></div>
-      <div class="stat-card"><div class="stat-num">${reservations.rows[0].count}</div><div>Active Reservations</div></div>
-      <div class="stat-card"><div class="stat-num">${guests.rows[0].count}</div><div>Total Guests</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(revenue.rows[0].coalesce).toLocaleString()}</div><div>Revenue</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Room Management</h3><p>Add, edit rooms and set rates, availability, and amenities.</p><a href="/hotel/rooms" class="btn btn-sm">Manage Rooms</a></div>
-      <div class="card"><h3>Reservations</h3><p>View and manage bookings, check-in and check-out guests.</p><a href="/hotel/reservations" class="btn btn-sm btn-blue">Reservations</a></div>
-      <div class="card"><h3>Guest Directory</h3><p>Guest profiles, visit history, preferences, and loyalty tracking.</p><a href="/hotel/guests" class="btn btn-sm">Guests</a></div>
-      <div class="card"><h3>Housekeeping</h3><p>Room status tracking, cleaning schedules, and staff assignments.</p><a href="/hotel/housekeeping" class="btn btn-sm btn-gold">Housekeeping</a></div>
-      <div class="card"><h3>Billing &amp; Invoices</h3><p>Room charges, restaurant bills, minibar, and guest invoicing.</p><a href="/hotel/billing" class="btn btn-sm btn-green">Billing</a></div>
-      <div class="card"><h3>Reports</h3><p>Occupancy rates, revenue analytics, and booking trends.</p><a href="/reports" class="btn btn-sm">View Reports</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === RESTAURANT PORTAL ===
-app.get('/portal/restaurant', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [orders, menuItems, tables, todaySales] = await Promise.all([
-    pool.query("SELECT COUNT(*) FROM orders WHERE tenant_id=$1 AND status IN ('pending','preparing','serving')", [t]),
-    pool.query('SELECT COUNT(*) FROM menu_items WHERE tenant_id=$1 AND available=true', [t]),
-    pool.query('SELECT COUNT(*) FROM tables WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COALESCE(SUM(total),0) FROM orders WHERE tenant_id=$1 AND status='completed' AND DATE(created_at)=CURRENT_DATE", [t])
-  ]);
-  res.send(renderPage('Restaurant Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#ea580c,#fb923c)">
-      <h1>Restaurant Portal</h1><p>Menu management, orders, kitchen display, tables, and delivery</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${orders.rows[0].count}</div><div>Active Orders</div></div>
-      <div class="stat-card"><div class="stat-num">${menuItems.rows[0].count}</div><div>Menu Items</div></div>
-      <div class="stat-card"><div class="stat-num">${tables.rows[0].count}</div><div>Tables</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(todaySales.rows[0].coalesce).toLocaleString()}</div><div>Today's Sales</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Menu Management</h3><p>Manage menu categories, items, prices, and availability.</p><a href="/restaurant/menu" class="btn btn-sm">Menu</a></div>
-      <div class="card"><h3>New Order</h3><p>Create a new order for dine-in, takeaway, or delivery.</p><a href="/restaurant/orders/new" class="btn btn-sm btn-blue">New Order</a></div>
-      <div class="card"><h3>Kitchen Display</h3><p>Real-time order queue for kitchen staff.</p><a href="/restaurant/kitchen" class="btn btn-sm btn-gold">Kitchen</a></div>
-      <div class="card"><h3>Tables</h3><p>Table layout, reservation status, and capacity management.</p><a href="/restaurant/tables" class="btn btn-sm">Tables</a></div>
-      <div class="card"><h3>Sales Reports</h3><p>Daily, weekly, and monthly sales analytics.</p><a href="/reports" class="btn btn-sm btn-green">Reports</a></div>
-      <div class="card"><h3>Inventory</h3><p>Track ingredients, stock levels, and supplier orders.</p><a href="/inventory" class="btn btn-sm">Inventory</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === RETAIL SHOP PORTAL ===
-app.get('/portal/retail', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [products, salesToday, lowStock, customers] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM products WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COALESCE(SUM(total),0) FROM sales WHERE tenant_id=$1 AND DATE(created_at)=CURRENT_DATE", [t]),
-    pool.query('SELECT COUNT(*) FROM products WHERE tenant_id=$1 AND stock <= reorder_level', [t]),
-    pool.query('SELECT COUNT(*) FROM customers WHERE tenant_id=$1', [t])
-  ]);
-  res.send(renderPage('Retail Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#e11d48,#fb7185)">
-      <h1>Retail Shop Portal</h1><p>POS terminal, inventory, sales, customers, and supplier management</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${products.rows[0].count}</div><div>Products</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(salesToday.rows[0].coalesce).toLocaleString()}</div><div>Today's Sales</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:${parseInt(lowStock.rows[0].count) > 0 ? '#ef4444' : ''}">${lowStock.rows[0].count}</div><div>Low Stock Alerts</div></div>
-      <div class="stat-card"><div class="stat-num">${customers.rows[0].count}</div><div>Customers</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Point of Sale</h3><p>Process sales with barcode scanning and quick checkout.</p><a href="/pos" class="btn btn-sm btn-blue">Open POS</a></div>
-      <div class="card"><h3>Products</h3><p>Manage product catalog, pricing, categories, and stock levels.</p><a href="/inventory" class="btn btn-sm">Products</a></div>
-      <div class="card"><h3>Sales History</h3><p>View all transactions, receipts, and returns.</p><a href="/sales" class="btn btn-sm">Sales</a></div>
-      <div class="card"><h3>Customers</h3><p>Customer profiles, purchase history, and loyalty points.</p><a href="/crm" class="btn btn-sm">Customers</a></div>
-      <div class="card"><h3>Purchases &amp; Suppliers</h3><p>Manage purchase orders, suppliers, and stock receiving.</p><a href="/purchases" class="btn btn-sm btn-gold">Purchases</a></div>
-      <div class="card"><h3>Reports</h3><p>Sales trends, profit margins, and stock reports.</p><a href="/reports" class="btn btn-sm btn-green">Reports</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === SALON & SPA PORTAL ===
-app.get('/portal/salon', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [appointments, services, staff, todayRev] = await Promise.all([
-    pool.query("SELECT COUNT(*) FROM appointments WHERE tenant_id=$1 AND status IN ('scheduled','in_progress')", [t]),
-    pool.query('SELECT COUNT(*) FROM services WHERE tenant_id=$1 AND active=true', [t]),
-    pool.query('SELECT COUNT(*) FROM staff WHERE tenant_id=$1 AND active=true', [t]),
-    pool.query("SELECT COALESCE(SUM(amount),0) FROM appointments WHERE tenant_id=$1 AND status='completed' AND DATE(created_at)=CURRENT_DATE", [t])
-  ]);
-  res.send(renderPage('Salon &amp; Spa Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#db2777,#f472b6)">
-      <h1>Salon &amp; Spa Portal</h1><p>Appointments, services, staff scheduling, and commission tracking</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${appointments.rows[0].count}</div><div>Active Appointments</div></div>
-      <div class="stat-card"><div class="stat-num">${services.rows[0].count}</div><div>Services</div></div>
-      <div class="stat-card"><div class="stat-num">${staff.rows[0].count}</div><div>Staff Members</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(todayRev.rows[0].coalesce).toLocaleString()}</div><div>Today's Revenue</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>New Appointment</h3><p>Book a new appointment for a client.</p><a href="/salon/appointments/new" class="btn btn-sm btn-blue">Book Now</a></div>
-      <div class="card"><h3>Appointments</h3><p>View and manage all appointments, today's schedule.</p><a href="/salon/appointments" class="btn btn-sm">All Appointments</a></div>
-      <div class="card"><h3>Services</h3><p>Manage service catalog, pricing, and duration.</p><a href="/salon/services" class="btn btn-sm">Services</a></div>
-      <div class="card"><h3>Staff</h3><p>Staff scheduling, commissions, and performance.</p><a href="/salon/staff" class="btn btn-sm btn-gold">Staff</a></div>
-      <div class="card"><h3>Clients</h3><p>Client profiles, visit history, and preferences.</p><a href="/crm" class="btn btn-sm">Clients</a></div>
-      <div class="card"><h3>Reports</h3><p>Revenue trends, popular services, and staff commissions.</p><a href="/reports" class="btn btn-sm btn-green">Reports</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === PHARMACY PORTAL ===
-app.get('/portal/pharmacy', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [drugs, dispensedToday, expiringSoon, lowStock] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM pharmacy_drugs WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COUNT(*) FROM pharmacy_dispensing WHERE tenant_id=$1 AND DATE(created_at)=CURRENT_DATE", [t]),
-    pool.query('SELECT COUNT(*) FROM pharmacy_drugs WHERE tenant_id=$1 AND expiry_date <= CURRENT_DATE + INTERVAL \'30 days\'', [t]),
-    pool.query('SELECT COUNT(*) FROM pharmacy_drugs WHERE tenant_id=$1 AND stock <= min_stock', [t])
-  ]);
-  res.send(renderPage('Pharmacy Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#2563eb,#60a5fa)">
-      <h1>Pharmacy Portal</h1><p>Drug inventory, dispensing, expiry tracking, and prescription management</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${drugs.rows[0].count}</div><div>Drugs in Stock</div></div>
-      <div class="stat-card"><div class="stat-num">${dispensedToday.rows[0].count}</div><div>Dispensed Today</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:${parseInt(expiringSoon.rows[0].count) > 0 ? '#ef4444' : ''}">${expiringSoon.rows[0].count}</div><div>Expiring Soon</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:${parseInt(lowStock.rows[0].count) > 0 ? '#ef4444' : ''}">${lowStock.rows[0].count}</div><div>Low Stock</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Dispense Drug</h3><p>Search drugs and fill a new prescription.</p><a href="/pharmacy/dispense" class="btn btn-sm btn-blue">Dispense</a></div>
-      <div class="card"><h3>Drug Inventory</h3><p>View and manage all drugs, stock levels, and pricing.</p><a href="/pharmacy/inventory" class="btn btn-sm">Inventory</a></div>
-      <div class="card"><h3>Prescriptions</h3><p>View prescriptions from connected clinics.</p><a href="/pharmacy/prescriptions" class="btn btn-sm">Prescriptions</a></div>
-      <div class="card"><h3>Expiry Alerts</h3><p>${parseInt(expiringSoon.rows[0].count) > 0 ? '<span style="color:#ef4444;font-weight:bold">' + expiringSoon.rows[0].count + ' drugs expiring within 30 days!</span>' : 'No expiry alerts.'}</p><a href="/pharmacy/expiry" class="btn btn-sm btn-red">View Expiry</a></div>
-      <div class="card"><h3>Suppliers</h3><p>Manage drug suppliers and purchase orders.</p><a href="/pharmacy/suppliers" class="btn btn-sm btn-gold">Suppliers</a></div>
-      <div class="card"><h3>Reports</h3><p>Dispensing history, revenue, and stock reports.</p><a href="/reports" class="btn btn-sm btn-green">Reports</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === GYM & FITNESS PORTAL ===
-app.get('/portal/gym', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [members, activeToday, classes, trainers] = await Promise.all([
-    pool.query("SELECT COUNT(*) FROM gym_members WHERE tenant_id=$1 AND status='active'", [t]),
-    pool.query("SELECT COUNT(*) FROM gym_checkins WHERE tenant_id=$1 AND DATE(checkin_time)=CURRENT_DATE", [t]),
-    pool.query('SELECT COUNT(*) FROM gym_classes WHERE tenant_id=$1 AND active=true', [t]),
-    pool.query('SELECT COUNT(*) FROM staff WHERE tenant_id=$1 AND active=true', [t])
-  ]);
-  res.send(renderPage('Gym &amp; Fitness Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#16a34a,#4ade80)">
-      <h1>Gym &amp; Fitness Portal</h1><p>Memberships, check-ins, class schedules, trainers, and payments</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${members.rows[0].count}</div><div>Active Members</div></div>
-      <div class="stat-card"><div class="stat-num">${activeToday.rows[0].count}</div><div>Checked In Today</div></div>
-      <div class="stat-card"><div class="stat-num">${classes.rows[0].count}</div><div>Classes</div></div>
-      <div class="stat-card"><div class="stat-num">${trainers.rows[0].count}</div><div>Trainers</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Check-In</h3><p>Quick member check-in with QR code or search.</p><a href="/gym/checkin" class="btn btn-sm btn-blue">Check In</a></div>
-      <div class="card"><h3>Members</h3><p>View and manage all gym members and memberships.</p><a href="/gym/members" class="btn btn-sm">Members</a></div>
-      <div class="card"><h3>Class Schedule</h3><p>Manage classes, schedules, and bookings.</p><a href="/gym/classes" class="btn btn-sm btn-gold">Classes</a></div>
-      <div class="card"><h3>New Membership</h3><p>Register a new member and assign a plan.</p><a href="/gym/members/new" class="btn btn-sm btn-green">New Member</a></div>
-      <div class="card"><h3>Payments</h3><p>Membership fee collection and renewal tracking.</p><a href="/gym/payments" class="btn btn-sm">Payments</a></div>
-      <div class="card"><h3>Reports</h3><p>Attendance trends, revenue, and membership analytics.</p><a href="/reports" class="btn btn-sm">Reports</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === HARDWARE STORE PORTAL ===
-app.get('/portal/hardware', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [products, quotations, suppliers, todaySales] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM products WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COUNT(*) FROM quotations WHERE tenant_id=$1 AND status='pending'", [t]),
-    pool.query('SELECT COUNT(*) FROM suppliers WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COALESCE(SUM(total),0) FROM sales WHERE tenant_id=$1 AND DATE(created_at)=CURRENT_DATE", [t])
-  ]);
-  res.send(renderPage('Hardware Store Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#ca8a04,#facc15)">
-      <h1>Hardware Store Portal</h1><p>Products, quotations, stock management, suppliers, and pricing</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${products.rows[0].count}</div><div>Products</div></div>
-      <div class="stat-card"><div class="stat-num">${quotations.rows[0].count}</div><div>Pending Quotations</div></div>
-      <div class="stat-card"><div class="stat-num">${suppliers.rows[0].count}</div><div>Suppliers</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(todaySales.rows[0].coalesce).toLocaleString()}</div><div>Today's Sales</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Products</h3><p>Manage hardware product catalog, pricing, and stock.</p><a href="/inventory" class="btn btn-sm">Products</a></div>
-      <div class="card"><h3>New Quotation</h3><p>Create a price quotation for a customer.</p><a href="/quotations/new" class="btn btn-sm btn-blue">New Quotation</a></div>
-      <div class="card"><h3>Point of Sale</h3><p>Process walk-in sales at the counter.</p><a href="/pos" class="btn btn-sm btn-green">Open POS</a></div>
-      <div class="card"><h3>Suppliers</h3><p>Manage suppliers and purchase orders.</p><a href="/purchases" class="btn btn-sm btn-gold">Suppliers</a></div>
-      <div class="card"><h3>Sales History</h3><p>View all sales transactions and receipts.</p><a href="/sales" class="btn btn-sm">Sales</a></div>
-      <div class="card"><h3>Reports</h3><p>Sales, stock, and profit analysis.</p><a href="/reports" class="btn btn-sm">Reports</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === SUPERMARKET PORTAL ===
-app.get('/portal/supermarket', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [products, todaySales, categories, dailyOrders] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM products WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COALESCE(SUM(total),0) FROM sales WHERE tenant_id=$1 AND DATE(created_at)=CURRENT_DATE", [t]),
-    pool.query('SELECT COUNT(*) FROM categories WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COUNT(*) FROM sales WHERE tenant_id=$1 AND DATE(created_at)=CURRENT_DATE", [t])
-  ]);
-  res.send(renderPage('Supermarket Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#0d9488,#2dd4bf)">
-      <h1>Supermarket Portal</h1><p>POS, barcode scanning, perishable tracking, bulk pricing, and daily sales</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${products.rows[0].count}</div><div>Products</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(todaySales.rows[0].coalesce).toLocaleString()}</div><div>Today's Sales</div></div>
-      <div class="stat-card"><div class="stat-num">${dailyOrders.rows[0].count}</div><div>Today's Orders</div></div>
-      <div class="stat-card"><div class="stat-num">${categories.rows[0].count}</div><div>Categories</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>POS Terminal</h3><p>Fast checkout with barcode scanning and cash/card payments.</p><a href="/pos" class="btn btn-sm btn-blue">Open POS</a></div>
-      <div class="card"><h3>Products</h3><p>Manage product catalog, pricing, bulk deals, and stock.</p><a href="/inventory" class="btn btn-sm">Products</a></div>
-      <div class="card"><h3>Perishables</h3><p>Track expiry dates for perishable goods and reduce waste.</p><a href="/inventory/expiring" class="btn btn-sm btn-red">Expiry Tracking</a></div>
-      <div class="card"><h3>Categories</h3><p>Manage product categories and shelf organization.</p><a href="/inventory/categories" class="btn btn-sm">Categories</a></div>
-      <div class="card"><h3>Suppliers</h3><p>Supplier management and purchase orders.</p><a href="/purchases" class="btn btn-sm btn-gold">Suppliers</a></div>
-      <div class="card"><h3>Reports</h3><p>Daily sales, profit margins, and stock movement reports.</p><a href="/reports" class="btn btn-sm btn-green">Reports</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === TRANSPORT PORTAL ===
-app.get('/portal/transport', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [vehicles, routes, todayBookings, drivers] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM vehicles WHERE tenant_id=$1', [t]),
-    pool.query('SELECT COUNT(*) FROM transport_routes WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COUNT(*) FROM transport_bookings WHERE tenant_id=$1 AND DATE(created_at)=CURRENT_DATE", [t]),
-    pool.query('SELECT COUNT(*) FROM staff WHERE tenant_id=$1 AND active=true', [t])
-  ]);
-  res.send(renderPage('Transport Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#818cf8)">
-      <h1>Transport Portal</h1><p>Fleet management, routes, bookings, drivers, and vehicle maintenance</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${vehicles.rows[0].count}</div><div>Vehicles</div></div>
-      <div class="stat-card"><div class="stat-num">${routes.rows[0].count}</div><div>Routes</div></div>
-      <div class="stat-card"><div class="stat-num">${todayBookings.rows[0].count}</div><div>Today's Bookings</div></div>
-      <div class="stat-card"><div class="stat-num">${drivers.rows[0].count}</div><div>Drivers</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Vehicles</h3><p>Manage your vehicle fleet, registration, and status.</p><a href="/transport/vehicles" class="btn btn-sm">Fleet</a></div>
-      <div class="card"><h3>Routes</h3><p>Define routes, schedules, and pricing.</p><a href="/transport/routes" class="btn btn-sm btn-blue">Routes</a></div>
-      <div class="card"><h3>New Booking</h3><p>Create a new passenger or cargo booking.</p><a href="/transport/bookings/new" class="btn btn-sm btn-green">Book Now</a></div>
-      <div class="card"><h3>Drivers</h3><p>Driver profiles, assignments, and license tracking.</p><a href="/transport/drivers" class="btn btn-sm btn-gold">Drivers</a></div>
-      <div class="card"><h3>Maintenance</h3><p>Vehicle service schedules, repairs, and costs.</p><a href="/transport/maintenance" class="btn btn-sm">Maintenance</a></div>
-      <div class="card"><h3>Reports</h3><p>Revenue, fleet utilization, and trip analytics.</p><a href="/reports" class="btn btn-sm">Reports</a></div>
-    </div>
-  `, req.session.user));
-}));
-
-// === ELECTRONICS SHOP PORTAL ===
-app.get('/portal/electronics', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [products, repairs, warranties, todaySales] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM products WHERE tenant_id=$1', [t]),
-    pool.query("SELECT COUNT(*) FROM repair_jobs WHERE tenant_id=$1 AND status IN ('pending','in_progress')", [t]),
-    pool.query("SELECT COUNT(*) FROM warranties WHERE tenant_id=$1 AND expiry_date >= CURRENT_DATE", [t]),
-    pool.query("SELECT COALESCE(SUM(total),0) FROM sales WHERE tenant_id=$1 AND DATE(created_at)=CURRENT_DATE", [t])
-  ]);
-  res.send(renderPage('Electronics Shop Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#a78bfa)">
-      <h1>Electronics Shop Portal</h1><p>Products, repairs, warranties, IMEI tracking, and sales</p>
-    </div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num">${products.rows[0].count}</div><div>Products</div></div>
-      <div class="stat-card"><div class="stat-num">${repairs.rows[0].count}</div><div>Active Repairs</div></div>
-      <div class="stat-card"><div class="stat-num">${warranties.rows[0].count}</div><div>Active Warranties</div></div>
-      <div class="stat-card"><div class="stat-num">UGX ${parseInt(todaySales.rows[0].coalesce).toLocaleString()}</div><div>Today's Sales</div></div>
-    </div>
-    <div class="grid">
-      <div class="card"><h3>Products</h3><p>Manage electronics catalog, pricing, and stock.</p><a href="/inventory" class="btn btn-sm">Products</a></div>
-      <div class="card"><h3>New Repair</h3><p>Log a new repair job with customer details.</p><a href="/electronics/repairs/new" class="btn btn-sm btn-blue">New Repair</a></div>
-      <div class="card"><h3>Repairs</h3><p>Track all repair jobs, parts used, and completion.</p><a href="/electronics/repairs" class="btn btn-sm">All Repairs</a></div>
-      <div class="card"><h3>Warranties</h3><p>Manage product warranties and claims.</p><a href="/electronics/warranties" class="btn btn-sm btn-gold">Warranties</a></div>
-      <div class="card"><h3>Point of Sale</h3><p>Process sales with product lookup and receipt.</p><a href="/pos" class="btn btn-sm btn-green">Open POS</a></div>
-      <div class="card"><h3>Reports</h3><p>Sales, repair turnaround, and warranty analytics.</p><a href="/reports" class="btn btn-sm">Reports</a></div>
-    </div>
-  `, req.session.user));
 }));
 
 // === PUBLIC PORTAL ===
@@ -25168,6 +24867,46 @@ app.get('/portal/public', requireAuth, ah(async (req, res) => {
       <a href="/settings/public-pages" class="btn btn-gold" style="margin-left:8px">Manage Pages</a>
     </div>`;
   res.send(renderPage('Public Portal', html, req.session.user));
+}));
+
+// === GENERIC PORTAL (catch-all for types without dedicated dashboards) ===
+app.get('/portal/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const ptype = req.params.type;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  const label = ptype.charAt(0).toUpperCase() + ptype.slice(1);
+  const iconMap = { hotel:'🏨', restaurant:'🍽️', retail:'🛍️', salon:'💇', pharmacy:'💊', gym:'🏋️', hardware:'🔧', supermarket:'🛒', transport:'🚗', electronics:'📱' };
+  const icon = iconMap[ptype] || '📋';
+  res.send(renderPage(label + ' Portal', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px;border-radius:16px;margin-bottom:24px;color:white;text-align:center">
+      <div style="font-size:64px;margin-bottom:8px">${icon}</div>
+      <h1>${esc(label)} Portal</h1>
+      <p style="opacity:0.9;margin-top:4px">${esc(tenant?.name || 'My Business')}</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${label}</div><div>Portal Type</div></div>
+      <div class="stat-card"><div class="stat-num">#${t}</div><div>Tenant ID</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">Active</div><div>Status</div></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Dashboard</h3><a href="/dashboard" class="btn btn-sm">Main Dashboard</a></div>
+      <div class="card"><h3>Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>
+      <div class="card"><h3>Staff</h3><a href="/roles" class="btn btn-sm">Roles & Permissions</a></div>
+      <div class="card"><h3>Finance</h3><a href="/billing" class="btn btn-sm">Subscriptions</a></div>
+      <div class="card"><h3>Fundraising</h3><a href="/fundraising" class="btn btn-sm btn-green">Campaigns</a></div>
+      <div class="card"><h3>Reports</h3><a href="/reports" class="btn btn-sm">View Reports</a></div>
+      <div class="card"><h3>Settings</h3><a href="/settings/profile" class="btn btn-sm">Edit Profile</a></div>
+      <div class="card"><h3>Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a></div>
+    </div>
+    <div class="card" style="margin-top:24px;text-align:center;padding:40px">
+      <h3 style="margin-bottom:8px">More features coming soon!</h3>
+      <p class="muted">This portal type is in development. Use the links above to access available modules, or switch portals from the navigation.</p>
+      <div style="margin-top:16px">
+        <a href="/dev/portals" class="btn btn-gold" style="margin:4px">Switch Portal</a>
+        <a href="/switch-portal" class="btn" style="margin:4px">Change Type</a>
+      </div>
+    </div>
+  `, req.session.user));
 }));
 
 // ============================================================
