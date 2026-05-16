@@ -314,7 +314,11 @@ const VALID_TABLES = new Set([
   'student_id_cards', 'qr_payments', 'qr_payment_scans',
   'installment_plans', 'installment_payments',
   'whatsapp_receipt_log', 'whatsapp_templates',
-  'ussd_sessions', 'ussd_menu_config'
+  'ussd_sessions', 'ussd_menu_config',
+  'email_campaigns_list', 'email_subscribers', 'email_tracking',
+  'reorder_rules', 'reorder_alerts',
+  'appraisals', 'appraisal_criteria', 'appraisal_scores',
+  'health_visits', 'health_screenings'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -28098,6 +28102,31 @@ try { const m = require('./whatsapp-receipts'); m(app, db, pool, renderPage, esc
 // NEW MODULE: USSD PORTAL (Feature Phone Access)
 // ============================================================
 try { const m = require('./ussd-portal'); m(app, db, pool, renderPage, esc); console.log('[USSD] USSD portal loaded'); } catch(e) { console.warn('[USSD] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: EMAIL CAMPAIGN BUILDER
+// ============================================================
+try { const m = require('./email-campaigns'); m(app, db, pool, renderPage, esc); console.log('[EmailCampaigns] Email campaign builder loaded'); } catch(e) { console.warn('[EmailCampaigns] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: PARENT-TEACHER CONFERENCE BOOKING
+// ============================================================
+try { const m = require('./ptc-booking'); m(app, db, pool, renderPage, esc); console.log('[PTCBooking] Parent-teacher conference booking loaded'); } catch(e) { console.warn('[PTCBooking] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: INVENTORY AUTO-REORDER & ALERTS
+// ============================================================
+try { const m = require('./inventory-reorder'); m(app, db, pool, renderPage, esc); console.log('[InventoryReorder] Inventory auto-reorder loaded'); } catch(e) { console.warn('[InventoryReorder] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: STAFF PERFORMANCE APPRAISALS
+// ============================================================
+try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc); console.log('[StaffAppraisals] Staff appraisals loaded'); } catch(e) { console.warn('[StaffAppraisals] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: STUDENT HEALTH RECORDS
+// ============================================================
+try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
