@@ -88,3 +88,31 @@ Stage Summary:
 - Non-health tenants (schools, hotels, churches, businesses) now have universal /sickbay
 - Health institutions can specialize as Hospital, Clinic, Pharmacy, Drugshop, etc.
 - All backward compatible (old /portal/clinic redirects to /portal/health)
+---
+Task ID: 1
+Agent: Main Agent
+Task: Consolidate small businesses under Business Portal, remove clinic sickbays, specialize Health Portal
+
+Work Log:
+- Audited full portal structure: 29,486 lines, 1,467 routes across 17 portal types
+- Removed clinic_sickbays/clinic_sickbay_visits routes (~300 lines, 15 routes) — sickbays are for small enterprises only
+- Updated /clinic dashboard: removed sickbay references, renamed to Health Portal
+- Added business_type column to tenants table via migration
+- Created /business/settings page with 10 business sub-types (general, hotel, restaurant, retail, salon, gym, hardware, supermarket, transport, electronics)
+- Specialized Business Portal dashboard with conditional feature sections per business type
+- Added Sick Bay card to Business Portal dashboard
+- Restructured DEV_PORTAL_TYPES: 17→7 types (removed 10 standalone small business types)
+- Restructured USER_PORTAL_TYPES: 15→6 types (consolidated small businesses under Business)
+- Added redirect logic to /portal/:type for 9 small business types → /portal/business
+- Added pharmacy redirect → /portal/health
+- Updated registration form: removed standalone small business type options
+- Added institution type display card to Health Portal dashboard
+- Verified syntax with node -c server.js
+
+Stage Summary:
+- Commit 022ecdb pushed to main
+- Portal architecture now: School, Church, Organization, Health, Business, Individual, Dev, Public
+- Small businesses (hotel, restaurant, retail, salon, gym, hardware, supermarket, transport, electronics) consolidated under Business Portal as selectable sub-types
+- Pharmacy redirected to Health Portal
+- Sickbay positioned as universal feature for non-health tenants
+- Health Portal has 18 facility types selectable via /health/settings
