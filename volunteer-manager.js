@@ -22,7 +22,7 @@ module.exports = function volunteerManager(app, db, pool, renderPage, esc) {
 
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-  if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/([&<>"'])/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&amp;quot;', "'": '&#39;' }[m]));
+  if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/([&<>"'])/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
   const fmtMoney = (n) => 'UGX ' + Number(n || 0).toLocaleString();
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '\u2014';

@@ -12,7 +12,8 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
     if (!req.session || !req.session.user) return res.redirect('/login');
     next();
   };
-  const ah = (action) => `/canteen${action}`;
+  const navUrl = (action) => `/canteen${action}`;
+  const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
   const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
   const MEALS = ['breakfast','lunch','snack','dinner'];
   const STATUSES = ['pending','preparing','ready','fulfilled'];
@@ -91,9 +92,9 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ── Shared nav ─────────────────────────────────────────────────────────────
   function nav(active) {
     const links = [
-      ['Dashboard', ah('')], ['Menu Planner', ah('/menu')],
-      ['Place Order', ah('/order')], ['Order Queue', ah('/orders')],
-      ['Inventory', ah('/inventory')], ['Reports', ah('/report')],
+      ['Dashboard', navUrl('')], ['Menu Planner', navUrl('/menu')],
+      ['Place Order', navUrl('/order')], ['Order Queue', navUrl('/orders')],
+      ['Inventory', navUrl('/inventory')], ['Reports', navUrl('/report')],
     ];
     return '<nav class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:24px;">' +
       links.map(([label, href]) =>
@@ -167,7 +168,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
         html += `<tr><td>${esc(i.ingredient_name)}</td>
           <td><span class="badge badge-warning">${parseFloat(i.quantity).toFixed(1)}</span></td>
           <td>${esc(i.unit)}</td><td>${parseFloat(i.reorder_level).toFixed(1)}</td>
-          <td><a href="${ah('/inventory')}" class="btn btn-sm btn-gold">Restock</a></td></tr>`;
+          <td><a href="${navUrl('/inventory')}" class="btn btn-sm btn-gold">Restock</a></td></tr>`;
       });
       html += '</table>';
     } else { html += '<p class="muted">All ingredients are sufficiently stocked.</p>'; }
@@ -192,7 +193,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
     } else { html += '<p class="muted">No orders placed today.</p>'; }
     html += '</div>';
 
-    renderPage('Canteen Dashboard', html, req.session.user, req);
+    res.send(renderPage('Canteen Dashboard', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -239,7 +240,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
             html += `<div style="margin-bottom:6px;padding:4px 0;border-bottom:1px solid #eee;">
               <strong>${esc(item.item_name)}</strong>${availBadge}<br>
               <small class="muted">${fmtMoney(item.price)}${item.calories ? ' · ' + item.calories + ' kcal' : ''}</small><br>
-              <form method="POST" action="${ah('/menu/' + item.id + '/delete')}" style="display:inline;margin-top:2px;"
+              <form method="POST" action="${navUrl('/menu/' + item.id + '/delete')}" style="display:inline;margin-top:2px;"
                 onsubmit="return confirm('Remove ${esc(item.item_name)} from the menu?')">
                 <button class="btn btn-sm btn-red">Remove</button></form></div>`;
           });
@@ -254,7 +255,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
 
     // Add menu item form
     html += `<div id="add-item" class="card" style="margin-top:24px;"><h3>Add Menu Item</h3>
-      <form method="POST" action="${ah('/menu/add')}">
+      <form method="POST" action="${navUrl('/menu/add')}">
       <table>
         <tr><td><label>Item Name *</label></td>
           <td><input name="item_name" required style="width:300px;padding:8px;" placeholder="e.g. Grilled Chicken Bowl"></td></tr>
@@ -278,7 +279,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
       <button type="submit" class="btn btn-green">Add to Menu</button>
     </form></div>`;
 
-    renderPage('Weekly Menu Planner', html, req.session.user, req);
+    res.send(renderPage('Weekly Menu Planner', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -297,7 +298,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
       [tid, item_name.trim(), description || null, day_of_week || null,
         meal_type || 'lunch', parseFloat(price) || 0,
         calories ? parseInt(calories) : null, tagsArr]);
-    res.redirect(ah('/menu'));
+    res.redirect(navUrl('/menu'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -333,7 +334,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
           entry.day_of_week || 'monday', entry.meal_type || 'lunch',
           parseFloat(entry.price) || 0, entry.calories ? parseInt(entry.calories) : null, tagsArr]);
     }
-    res.redirect(ah('/menu'));
+    res.redirect(navUrl('/menu'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -361,7 +362,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
     html += `<h2>Place an Order</h2>`;
     html += `<p class="muted">Today is <strong>${fmtStr(today)}</strong>. Select items from the available menu below.</p>`;
 
-    html += `<form method="POST" action="${ah('/order/place')}">
+    html += `<form method="POST" action="${navUrl('/order/place')}">
       <table>
         <tr><td><label>Your Name *</label></td>
           <td><input name="customer_name" required value="${esc(req.session.user.name || '')}" style="width:300px;padding:8px;"></td></tr>
@@ -399,7 +400,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
     html += `<button type="submit" class="btn btn-green" ${!availableItems.rows.length ? 'disabled' : ''}>Place Order</button>
     </form>`;
 
-    renderPage('Place Order', html, req.session.user, req);
+    res.send(renderPage('Place Order', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -440,7 +441,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
       [tid, orderNum, customer_name.trim(), orderItems, totalAmount,
         payment_method || 'cash', notes || null]);
 
-    res.redirect(ah('/orders'));
+    res.redirect(navUrl('/orders'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -473,9 +474,9 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
 
     // Filter tabs
     html += '<div style="margin-bottom:16px;">';
-    html += `<a href="${ah('/orders')}" class="btn btn-sm ${!statusFilter ? 'btn-green' : ''}">All (${orders.rows.length})</a> `;
+    html += `<a href="${navUrl('/orders')}" class="btn btn-sm ${!statusFilter ? 'btn-green' : ''}">All (${orders.rows.length})</a> `;
     STATUSES.forEach(s => {
-      html += `<a href="${ah('/orders?status=' + s)}" class="btn btn-sm ${statusFilter === s ? 'btn-green' : ''}">${fmtStr(s)} (${countMap[s] || 0})</a> `;
+      html += `<a href="${navUrl('/orders?status=' + s)}" class="btn btn-sm ${statusFilter === s ? 'btn-green' : ''}">${fmtStr(s)} (${countMap[s] || 0})</a> `;
     });
     html += '</div>';
 
@@ -500,7 +501,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
           : o.status === 'preparing' ? 'ready'
           : o.status === 'ready' ? 'fulfilled' : null;
         const actionBtn = nextStatus
-          ? `<form method="POST" action="${ah('/orders/' + o.id + '/status')}" style="display:inline">
+          ? `<form method="POST" action="${navUrl('/orders/' + o.id + '/status')}" style="display:inline">
               <input type="hidden" name="status" value="${nextStatus}">
               <button class="btn btn-sm btn-green">${fmtStr(nextStatus)}</button></form>`
           : '<span class="muted">Done</span>';
@@ -519,7 +520,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
       html += '<div class="card"><p class="muted">No orders found.</p></div>';
     }
 
-    renderPage('Order Queue', html, req.session.user, req);
+    res.send(renderPage('Order Queue', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -558,7 +559,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
       `UPDATE canteen_orders SET ${updateFields} WHERE id=$2 AND tenant_id=$3`,
       [status, id, tid]);
 
-    res.redirect(ah('/orders'));
+    res.redirect(navUrl('/orders'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -602,7 +603,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
           <td>${fmtDate(i.last_restocked)}</td>
           <td>${statusBadge}</td>
           <td>
-            <form method="POST" action="${ah('/inventory/' + i.id + '/update')}" style="display:inline">
+            <form method="POST" action="${navUrl('/inventory/' + i.id + '/update')}" style="display:inline">
               <input name="quantity" type="number" step="0.1" min="0" value="${qty}" style="width:80px;padding:4px;">
               <button class="btn btn-sm btn-gold">Update</button></form>
           </td></tr>`;
@@ -614,7 +615,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
 
     // Add ingredient form
     html += `<div id="add-ingredient" class="card" style="margin-top:24px;"><h3>Add / Restock Ingredient</h3>
-      <form method="POST" action="${ah('/inventory/add')}">
+      <form method="POST" action="${navUrl('/inventory/add')}">
       <table>
         <tr><td><label>Ingredient Name *</label></td>
           <td><input name="ingredient_name" required style="width:300px;padding:8px;" placeholder="e.g. Chicken Breast"></td></tr>
@@ -634,7 +635,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
       <button type="submit" class="btn btn-green">Add Ingredient</button>
     </form></div>`;
 
-    renderPage('Ingredient Inventory', html, req.session.user, req);
+    res.send(renderPage('Ingredient Inventory', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -667,7 +668,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
           unit || 'kg', parseFloat(reorder_level) || 5,
           supplier || null]);
     }
-    res.redirect(ah('/inventory'));
+    res.redirect(navUrl('/inventory'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -688,7 +689,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
        WHERE id=$2 AND tenant_id=$3`,
       [newQty, id, tid]);
 
-    res.redirect(ah('/inventory'));
+    res.redirect(navUrl('/inventory'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -788,7 +789,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
       html += '</div>'; } else { html += '<p class="muted">No peak hour data.</p>'; }
     html += '</div>';
 
-    renderPage('Canteen Sales Reports', html, req.session.user, req);
+    res.send(renderPage('Canteen Sales Reports', html, req.session.user, req));
   });
 
   // ── Boot ───────────────────────────────────────────────────────────────────

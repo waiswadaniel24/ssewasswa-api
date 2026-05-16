@@ -12,7 +12,8 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     if (!req.session || !req.session.user) return res.redirect('/login');
     next();
   };
-  const ah = (action) => `/hostel${action}`;
+  const navUrl = (action) => `/hostel${action}`;
+  const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
   // ── Migrations ─────────────────────────────────────────────────────────────
   async function migrate() {
@@ -104,11 +105,11 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ── Shared nav ─────────────────────────────────────────────────────────────
   function nav(active) {
     const links = [
-      ['Dashboard', ah('')],
-      ['Buildings', ah('/buildings')],
-      ['Maintenance', ah('/maintenance')],
-      ['Reports', ah('/report')],
-      ['Bed Spaces', ah('/bed-spaces')],
+      ['Dashboard', navUrl('')],
+      ['Buildings', navUrl('/buildings')],
+      ['Maintenance', navUrl('/maintenance')],
+      ['Reports', navUrl('/report')],
+      ['Bed Spaces', navUrl('/bed-spaces')],
     ];
     return '<nav class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:24px;">' +
       links.map(([label, href]) =>
@@ -182,7 +183,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
           : `<span class="badge">${esc(m.priority || 'normal')}</span>`;
         html += `<tr><td>${esc(m.issue_type || 'N/A')}</td><td>${esc(loc || '—')}</td>` +
           `<td>${pBadge}</td>` +
-          `<td><form method="POST" action="${ah('/maintenance/' + m.id + '/resolve')}" style="display:inline">` +
+          `<td><form method="POST" action="${navUrl('/maintenance/' + m.id + '/resolve')}" style="display:inline">` +
           `<button class="btn btn-sm btn-green">Resolve</button></form></td></tr>`;
       });
       html += '</table>';
@@ -191,7 +192,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     }
     html += '</div></div>';
 
-    renderPage('Hostel Dashboard', html, req.session.user, req);
+    res.send(renderPage('Hostel Dashboard', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -211,7 +212,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     let html = nav('Buildings');
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
       '<h2>Hostel Buildings</h2>' +
-      `<a href="${ah('/buildings/new')}" class="btn btn-green">+ Add Building</a></div>`;
+      `<a href="${navUrl('/buildings/new')}" class="btn btn-green">+ Add Building</a></div>`;
 
     if (result.rows.length) {
       html += '<table><tr><th>Name</th><th>Type</th><th>Rooms</th><th>Occupants</th>' +
@@ -221,15 +222,15 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
           ? '<span class="badge badge-success">Active</span>'
           : '<span class="badge badge-warning">Inactive</span>';
         html += `<tr>
-          <td><a href="${ah('/buildings/' + b.id)}">${esc(b.name)}</a></td>
+          <td><a href="${navUrl('/buildings/' + b.id)}">${esc(b.name)}</a></td>
           <td>${esc(b.type)}</td>
           <td>${b.room_count}</td>
           <td>${b.occupant_count}</td>
           <td>${esc(b.warden_name || '—')}</td>
           <td>${statusBadge}</td>
           <td>
-            <a href="${ah('/buildings/' + b.id)}" class="btn btn-sm btn-blue">View</a>
-            <form method="POST" action="${ah('/buildings/' + b.id + '/delete')}" style="display:inline" ` +
+            <a href="${navUrl('/buildings/' + b.id)}" class="btn btn-sm btn-blue">View</a>
+            <form method="POST" action="${navUrl('/buildings/' + b.id + '/delete')}" style="display:inline" ` +
             `onsubmit="return confirm('Delete this building and all its rooms?')">` +
             `<input type="hidden" name="_method" value="DELETE">` +
             `<button class="btn btn-sm btn-red">Delete</button></form>
@@ -239,7 +240,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     } else {
       html += '<div class="card"><p class="muted">No buildings added yet.</p></div>';
     }
-    renderPage('Hostel Buildings', html, req.session.user, req);
+    res.send(renderPage('Hostel Buildings', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -248,7 +249,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   app.get('/hostel/buildings/new', requireAuth, async (req, res) => {
     let html = nav('Buildings');
     html += '<div class="card"><h2>Add New Building</h2>';
-    html += `<form method="POST" action="${ah('/buildings/create')}">`;
+    html += `<form method="POST" action="${navUrl('/buildings/create')}">`;
     html += `
       <label>Name *</label><br><input name="name" required style="width:100%;max-width:400px;padding:8px;"><br><br>
       <label>Type</label><br>
@@ -268,10 +269,10 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       <textarea name="description" rows="3" style="width:100%;max-width:500px;padding:8px;"></textarea><br><br>
       <label><input type="checkbox" name="is_active" checked> Active</label><br><br>
       <button type="submit" class="btn btn-green">Save Building</button>
-      <a href="${ah('/buildings')}" class="btn btn-sm">Cancel</a>
+      <a href="${navUrl('/buildings')}" class="btn btn-sm">Cancel</a>
     `;
     html += '</form></div>';
-    renderPage('Add Building', html, req.session.user, req);
+    res.send(renderPage('Add Building', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -290,7 +291,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
         warden_name || null, warden_phone || null, description || null,
         is_active !== undefined && is_active !== 'false']
     );
-    res.redirect(ah('/buildings'));
+    res.redirect(navUrl('/buildings'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -313,7 +314,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     let html = nav('Buildings');
     html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <h2>${esc(b.name)} <span class="muted">(${esc(b.type)})</span></h2>
-      <a href="${ah('/buildings')}" class="btn btn-sm btn-blue">&larr; All Buildings</a>
+      <a href="${navUrl('/buildings')}" class="btn btn-sm btn-blue">&larr; All Buildings</a>
     </div>`;
 
     // Building info card
@@ -336,7 +337,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
             ? '<span class="badge badge-warning">Maint.</span>'
             : '<span class="badge badge-success">Available</span>';
         html += `<div class="card" style="text-align:center;">
-          <a href="${ah('/rooms/' + r.id)}" style="font-weight:bold;font-size:1.2em;">${esc(r.room_number)}</a>
+          <a href="${navUrl('/rooms/' + r.id)}" style="font-weight:bold;font-size:1.2em;">${esc(r.room_number)}</a>
           <br>Floor ${r.floor} &middot; ${esc(r.room_type)}
           <br>${r.occupants}/${r.capacity} occupants ${sBadge}
           <br><small class="muted">${(r.amenities || []).join(', ') || 'No amenities'}</small>
@@ -346,7 +347,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     } else {
       html += '<p class="muted">No rooms in this building yet.</p>';
     }
-    renderPage('Building: ' + b.name, html, req.session.user, req);
+    res.send(renderPage('Building: ' + b.name, html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -373,7 +374,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     }
 
     let html = nav('Dashboard');
-    html += `<a href="${ah('/buildings/' + r.building_id)}" class="btn btn-sm btn-blue" style="margin-bottom:12px;">&larr; ${esc(r.building_name)}</a>`;
+    html += `<a href="${navUrl('/buildings/' + r.building_id)}" class="btn btn-sm btn-blue" style="margin-bottom:12px;">&larr; ${esc(r.building_name)}</a>`;
     html += '<div class="card">';
     html += `<h2>Room ${esc(r.room_number)}</h2>`;
     html += `<p><strong>Building:</strong> ${esc(r.building_name)} (${esc(r.building_type)})</p>`;
@@ -396,7 +397,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
           <strong>Bed ${b.bed}</strong><br>
           ${esc(o.student_name)}<br>
           <small class="muted">${esc(o.class || '')} ${esc(o.student_id || '')}</small><br>
-          <form method="POST" action="${ah('/deallocate/' + o.id)}" style="display:inline;margin-top:6px;"
+          <form method="POST" action="${navUrl('/deallocate/' + o.id)}" style="display:inline;margin-top:6px;"
             onsubmit="return confirm('Remove ${esc(o.student_name)}?')">
             <button class="btn btn-sm btn-red">Remove</button>
           </form>
@@ -413,7 +414,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     const availableBeds = bedNums.filter(b => !b.occupied).map(b => b.bed);
     if (availableBeds.length) {
       html += '<h3 style="margin:20px 0 8px;">Allocate Student</h3>';
-      html += `<div class="card"><form method="POST" action="${ah('/allocate')}">
+      html += `<div class="card"><form method="POST" action="${navUrl('/allocate')}">
         <input type="hidden" name="room_id" value="${r.id}">
         <table>
           <tr><td><label>Student Name *</label></td><td><input name="student_name" required style="width:250px;padding:8px;"></td></tr>
@@ -431,7 +432,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       </form></div>`;
     }
 
-    renderPage('Room ' + r.room_number, html, req.session.user, req);
+    res.send(renderPage('Room ' + r.room_number, html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -474,7 +475,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
         status = CASE WHEN current_occupants + 1 >= capacity THEN 'full' ELSE 'available' END
        WHERE id=$1`, [room_id]);
 
-    res.redirect(ah('/rooms/' + room_id));
+    res.redirect(navUrl('/rooms/' + room_id));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -494,7 +495,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       `UPDATE hostel_rooms SET current_occupants = GREATEST(current_occupants - 1, 0),
         status = 'available' WHERE id=$1`, [alloc.rows[0].room_id]);
 
-    res.redirect(ah('/rooms/' + alloc.rows[0].room_id));
+    res.redirect(navUrl('/rooms/' + alloc.rows[0].room_id));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -533,7 +534,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     const filters = [['', 'All'], ['pending', 'Pending'], ['in_progress', 'In Progress'], ['resolved', 'Resolved']];
     html += '<div style="margin-bottom:16px;">';
     filters.forEach(([val, label]) => {
-      html += `<a href="${ah('/maintenance?status=' + val)}" class="btn btn-sm ${statusFilter === val ? 'btn-green' : ''}">${label}</a> `;
+      html += `<a href="${navUrl('/maintenance?status=' + val)}" class="btn btn-sm ${statusFilter === val ? 'btn-green' : ''}">${label}</a> `;
     });
     html += '</div>';
 
@@ -553,7 +554,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
             ? '<span class="badge badge-warning">In Progress</span>'
             : '<span class="badge">Pending</span>';
         const resolveBtn = m.status !== 'resolved'
-          ? `<form method="POST" action="${ah('/maintenance/' + m.id + '/resolve')}" style="display:inline">
+          ? `<form method="POST" action="${navUrl('/maintenance/' + m.id + '/resolve')}" style="display:inline">
              <button class="btn btn-sm btn-green">Resolve</button></form>`
           : '<span class="muted">Done</span>';
         html += `<tr>
@@ -574,7 +575,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
 
     // Report issue form
     html += `<div id="report-form" class="card" style="margin-top:24px;"><h3>Report Maintenance Issue</h3>`;
-    html += `<form method="POST" action="${ah('/maintenance/new')}">
+    html += `<form method="POST" action="${navUrl('/maintenance/new')}">
       <table>
         <tr><td><label>Building</label></td><td>
           <select name="building_id" style="padding:8px;" id="maint-building">
@@ -610,7 +611,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       <button type="submit" class="btn btn-green">Submit Report</button>
     </form></div>`;
 
-    renderPage('Hostel Maintenance', html, req.session.user, req);
+    res.send(renderPage('Hostel Maintenance', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -627,7 +628,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [tid, building_id || null, room_id || null, issue_type || 'other',
         description.trim(), reported_by || null, priority || 'normal']);
-    res.redirect(ah('/maintenance'));
+    res.redirect(navUrl('/maintenance'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -640,7 +641,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       `UPDATE hostel_maintenance SET status='resolved', resolved_at=NOW() WHERE id=$1 AND tenant_id=$2`,
       [id, tid]);
     if (result.rowCount === 0) return res.status(404).send('Maintenance request not found.');
-    res.redirect(ah('/maintenance'));
+    res.redirect(navUrl('/maintenance'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -701,7 +702,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       bStats.rows.forEach(b => {
         const avail = Math.max(b.total_beds - b.occupants, 0);
         const pct = b.total_beds > 0 ? ((b.occupants / b.total_beds) * 100).toFixed(1) : 0;
-        html += `<tr><td><a href="${ah('/buildings/' + b.id)}">${esc(b.name)}</a></td>
+        html += `<tr><td><a href="${navUrl('/buildings/' + b.id)}">${esc(b.name)}</a></td>
           <td>${esc(b.type)}</td><td>${b.total_rooms}</td><td>${b.total_beds}</td>
           <td>${b.occupants}</td><td>${avail}</td><td>${pct}%</td></tr>`;
       });
@@ -748,7 +749,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     html += `<tr><td>Resolved</td><td>${maintMap['resolved'] || 0}</td></tr>`;
     html += '</table></div>';
 
-    renderPage('Hostel Reports', html, req.session.user, req);
+    res.send(renderPage('Hostel Reports', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -783,7 +784,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
     // Type filters
     html += '<div style="margin-bottom:16px;">';
     [['', 'All'], ['boys', 'Boys'], ['girls', 'Girls'], ['mixed', 'Mixed']].forEach(([val, label]) => {
-      html += `<a href="${ah('/bed-spaces?type=' + val)}" class="btn btn-sm ${typeFilter === val ? 'btn-green' : ''}">${label}</a> `;
+      html += `<a href="${navUrl('/bed-spaces?type=' + val)}" class="btn btn-sm ${typeFilter === val ? 'btn-green' : ''}">${label}</a> `;
     });
     html += `<span class="muted" style="margin-left:12px;">${totalAvail} bed(s) available</span></div>`;
 
@@ -792,15 +793,15 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
         '<th>Room Type</th><th>Occupancy</th><th>Available Beds</th><th>Amenities</th><th>Action</th></tr>';
       spaces.rows.forEach(r => {
         html += `<tr>
-          <td><a href="${ah('/buildings/' + r.building_id)}">${esc(r.building_name)}</a></td>
+          <td><a href="${navUrl('/buildings/' + r.building_id)}">${esc(r.building_name)}</a></td>
           <td>${esc(r.building_type)}</td>
-          <td><a href="${ah('/rooms/' + r.id)}">${esc(r.room_number)}</a></td>
+          <td><a href="${navUrl('/rooms/' + r.id)}">${esc(r.room_number)}</a></td>
           <td>${r.floor}</td>
           <td>${esc(r.room_type)}</td>
           <td>${r.current_occupants}/${r.capacity}</td>
           <td><strong>${r.available_beds}</strong></td>
           <td>${(r.amenities || []).join(', ') || '<span class="muted">—</span>'}</td>
-          <td><a href="${ah('/rooms/' + r.id)}" class="btn btn-sm btn-blue">Allocate</a></td>
+          <td><a href="${navUrl('/rooms/' + r.id)}" class="btn btn-sm btn-blue">Allocate</a></td>
         </tr>`;
       });
       html += '</table>';
@@ -808,7 +809,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       html += '<div class="card"><p class="muted">No available bed spaces found.</p></div>';
     }
 
-    renderPage('Available Bed Spaces', html, req.session.user, req);
+    res.send(renderPage('Available Bed Spaces', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -825,20 +826,20 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
       WHERE r.building_id=$1 AND a.tenant_id=$2 AND a.status='active'`, [id, tid]);
     if (allocCheck.rows[0].c > 0) {
       return res.send(`<div class="alert">Cannot delete building with ${allocCheck.rows[0].c} active occupant(s). Deallocate all students first.</div>
-        <a href="${ah('/buildings')}" class="btn btn-sm btn-blue">Back to Buildings</a>`);
+        <a href="${navUrl('/buildings')}" class="btn btn-sm btn-blue">Back to Buildings</a>`);
     }
 
     const result = await pool.query(
       'DELETE FROM hostel_buildings WHERE id=$1 AND tenant_id=$2', [id, tid]);
     if (result.rowCount === 0) return res.status(404).send('Building not found.');
 
-    res.redirect(ah('/buildings'));
+    res.redirect(navUrl('/buildings'));
   });
 
   // Also support POST with _method=DELETE for form-based deletion
   app.post('/hostel/buildings/:id/delete', requireAuth, async (req, res) => {
     req.method = 'DELETE';
-    req.url = ah('/buildings/' + req.params.id);
+    req.url = navUrl('/buildings/' + req.params.id);
     app._router.handle(req, res);
   });
 

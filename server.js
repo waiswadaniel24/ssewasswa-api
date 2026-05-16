@@ -6927,6 +6927,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/dev/features" style="background:#64748b;color:white">Features</a>
       <a href="/dev/subscription-access" style="background:#6366f1;color:white">Subscription Access</a>
       <a href="/dev/portals" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white">Portal Switcher</a>
+      <a href="/fundraising" style="background:linear-gradient(135deg,#059669,#10b981);color:white">Fundraising</a>
       <a href="/exams" style="background:#3b82f6;color:white">Exams</a>
       <a href="/whatsapp" style="background:#22c55e;color:white">WhatsApp</a>
       <a href="/scheduled-reports" style="background:#f59e0b;color:white">Reports</a>
@@ -7041,6 +7042,10 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/dev/cleanup" class="quick-action">
         <div class="icon" style="background:#fee2e2;color:#dc2626">&#9888;</div>
         <div class="text"><h4>Database Cleanup</h4><p>Erase test data, prepare for real users</p></div>
+      </a>
+      <a href="/fundraising" class="quick-action">
+        <div class="icon" style="background:#dcfce7;color:#059669">&#127873;</div>
+        <div class="text"><h4>Fundraising Portal</h4><p>Create campaigns, collect donations, track progress</p></div>
       </a>
     </div>
 
@@ -10581,16 +10586,19 @@ app.post('/report-builder/save', requireAuth, requireNotBanned, ah(async (req, r
 }));
 
 app.get('/report-builder/:id/run', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const tmpl = (await pool.query('SELECT * FROM report_templates WHERE id=$1', [req.params.id])).rows[0];
+  const tmpl = (await pool.query('SELECT * FROM report_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  if (!tmpl) return res.status(404).send(renderPage('Not Found', '<div class="card"><h2>Report template not found</h2><a href="/report-builder" class="btn btn-sm">Back</a></div>', req.session.user));
   const config = typeof tmpl.config === 'string' ? JSON.parse(tmpl.config) : tmpl.config;
   let data = [];
   const t = req.session.user.tenant_id;
-  if (config.data_source === 'students') data = (await pool.query('SELECT * FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
-  else if (config.data_source === 'fees') data = (await pool.query('SELECT f.*,s.name as student_name FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 ORDER BY f.created_at DESC', [t])).rows;
-  else if (config.data_source === 'expenses') data = (await pool.query('SELECT * FROM expenses WHERE tenant_id=$1 ORDER BY COALESCE(expense_date, created_at) DESC', [t])).rows;
-  else if (config.data_source === 'donations') data = (await pool.query('SELECT * FROM donations WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
-  else if (config.data_source === 'sales') data = (await pool.query('SELECT * FROM sales WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
-  else data = (await pool.query(`SELECT * FROM ${config.data_source} WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200`, [t])).rows;
+  const ALLOWED_SOURCES = ['students','fees','expenses','donations','sales','inventory','customers','church_members','members','staff','attendance','marks'];
+  const src = ALLOWED_SOURCES.includes(config.data_source) ? config.data_source : 'students';
+  if (src === 'students') data = (await pool.query('SELECT * FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  else if (src === 'fees') data = (await pool.query('SELECT f.*,s.name as student_name FROM fees f LEFT JOIN students s ON f.student_id=s.id WHERE f.tenant_id=$1 ORDER BY f.created_at DESC', [t])).rows;
+  else if (src === 'expenses') data = (await pool.query('SELECT * FROM expenses WHERE tenant_id=$1 ORDER BY COALESCE(expense_date, created_at) DESC', [t])).rows;
+  else if (src === 'donations') data = (await pool.query('SELECT * FROM donations WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  else if (src === 'sales') data = (await pool.query('SELECT * FROM sales WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  else data = (await pool.query('SELECT * FROM ' + src + ' WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200', [t])).rows;
   const cols = config.columns?.length ? config.columns : Object.keys(data[0] || {});
   res.send(renderPage(tmpl.name, `<div class="card"><h2>${esc(tmpl.name)}</h2><a href="/report-builder" class="btn btn-sm">Back</a>${data.length?`<table style="margin-top:15px"><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}</tr>${data.map(r=>`<tr>${cols.map(c=>`<td>${esc(r[c]||'-')}</td>`).join('')}</tr>`).join('')}</table>`:'<p class="muted">No data</p>'}</div>`, req.session.user));
 }));
@@ -11968,7 +11976,7 @@ setTimeout(runAutoBackup, 60000);
 app.get('/relationships/:type/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { type, id } = req.params;
-  const rels = (await pool.query('SELECT * FROM relationships WHERE tenant_id=$1 AND (person_type=$2 AND person_id=$3) OR (related_type=$2 AND related_id=$3)', [t, type, id])).rows;
+  const rels = (await pool.query('SELECT * FROM relationships WHERE tenant_id=$1 AND ((person_type=$2 AND person_id=$3) OR (related_type=$2 AND related_id=$3))', [t, type, id])).rows;
   res.send(renderPage('Relationships', `
     <div class="card"><h2>Relationships</h2><a href="/relationships/${type}/${id}/add" class="btn btn-sm" style="margin-bottom:10px">+ Add Relationship</a>
       ${rels.length ? `<table><tr><th>Person</th><th>Relation</th><th>Related To</th><th>Actions</th></tr>${rels.map(r => `<tr><td>${esc(r.person_type)} #${r.person_id}</td><td>${esc(r.relation)}</td><td>${esc(r.related_type)} #${r.related_id}</td><td><a href="/relationships/${r.id}/delete" class="btn btn-sm btn-red">Remove</a></td></tr>`).join('')}</table>` : '<p class="muted">No relationships recorded</p>'}
@@ -15286,8 +15294,10 @@ app.get('/org/resolutions/:id/vote', requireAuth, requireNotBanned, ah(async (re
 }));
 
 app.get('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const col = req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain';
-  await pool.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1`, [req.params.id]);
+  const VALID_COLS = ['vote_for','vote_against','vote_abstain'];
+  const col = VALID_COLS.includes(req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain') ? (req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain') : null;
+  if (!col) return res.status(400).send('Invalid vote direction');
+  await pool.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.session.user.tenant_id]);
   res.redirect(`/org/resolutions/${req.params.id}/vote`);
 }));
 
@@ -15746,11 +15756,12 @@ app.get('/search', requireAuth, requireNotBanned, requireFeature('global_search'
 // =============================================
 // CROSS-CUTTING: DARK MODE TOGGLE
 // =============================================
-app.get('/dark-mode/toggle', requireAuth, (req, res) => {
-  const current = req.session.user?.darkMode || false;
-  req.session.user.darkMode = !current;
+app.get('/dark-mode/toggle', requireAuth, ah(async (req, res) => {
+  const current = req.session.user.dark_mode || false;
+  await pool.query('UPDATE users SET dark_mode=$1 WHERE id=$2', [!current, req.session.user.id]);
+  req.session.user.dark_mode = !current;
   res.redirect('back');
-});
+}));
 
 // =============================================
 // CROSS-CUTTING: SURVEYS & FEEDBACK
@@ -24646,7 +24657,7 @@ app.get('/dev/portals', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     const exists = (await pool.query(`SELECT id FROM tenants WHERE email=$1 AND name=$2`, [devEmail, tenantName])).rows[0];
     if (!exists) {
       const devSubdomain = 'dev-' + tenantType + '-' + Math.floor(Math.random() * 9999);
-      const created = (await pool.query(`INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1,$2,$3,true,true,$4) RETURNING id`, [tenantName, tenantType, devEmail, devSubdomain])).rows[0];
+      const created = (await pool.query(`INSERT INTO tenants (name, type, email, verified, approved, subdomain, has_fundraising) VALUES ($1,$2,$3,true,true,$4,true) RETURNING id`, [tenantName, tenantType, devEmail, devSubdomain])).rows[0];
       await pool.query(`INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1,'enterprise','active') ON CONFLICT DO NOTHING`, [created.id]);
       audit(devEmail, 'dev_auto_create', 'Auto-created tenant: ' + tenantName + ' (#' + created.id + ')');
     }
@@ -24702,11 +24713,14 @@ app.post('/dev/switch-tenant', requireAuth, requireSuperAdmin, ah(async (req, re
   if (!tenant) {
     const portalSubdomain = 'portal-' + tenantType + '-' + Math.floor(Math.random() * 9999);
     tenant = (await pool.query(
-      `INSERT INTO tenants (name, type, email, verified, approved, subdomain) VALUES ($1, $2, $3, true, true, $4) RETURNING id, name, type`,
+      `INSERT INTO tenants (name, type, email, verified, approved, subdomain, has_fundraising) VALUES ($1, $2, $3, true, true, $4, true) RETURNING id, name, type`,
       [tenantName, tenantType, user.email, portalSubdomain]
     )).rows[0];
     await pool.query(`INSERT INTO subscriptions (tenant_id, plan, status) VALUES ($1, 'enterprise', 'active')`, [tenant.id]);
     audit(user.email, 'dev_create_tenant', 'Created demo tenant: ' + tenantName + ' (#' + tenant.id + ')');
+  } else {
+    // Ensure fundraising is enabled for any existing dev tenant
+    await pool.query(`UPDATE tenants SET has_fundraising = true WHERE id = $1 AND has_fundraising = false`, [tenant.id]);
   }
   await pool.query(`UPDATE users SET tenant_id = $1 WHERE email = $2`, [tenant.id, user.email]);
   req.session.user.tenant_id = tenant.id;

@@ -12,7 +12,8 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
     if (!req.session || !req.session.user) return res.redirect('/login');
     next();
   };
-  const ah = (action) => `/transport${action}`;
+  const navUrl = (action) => `/transport${action}`;
+  const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
   function fmtDate(d) { return d ? new Date(d).toISOString().split('T')[0] : '—'; }
 
   // ── Migrations ─────────────────────────────────────────────────────────────
@@ -100,8 +101,8 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ── Shared nav ─────────────────────────────────────────────────────────────
   function nav(active) {
     const links = [
-      ['Dashboard', ah('')], ['Vehicles', ah('/vehicles')],
-      ['Routes', ah('/routes')], ['Incidents', ah('/incidents')], ['Reports', ah('/report')],
+      ['Dashboard', navUrl('')], ['Vehicles', navUrl('/vehicles')],
+      ['Routes', navUrl('/routes')], ['Incidents', navUrl('/incidents')], ['Reports', navUrl('/report')],
     ];
     return '<nav class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:24px;">' +
       links.map(([l, h]) =>
@@ -172,7 +173,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       openInc.rows.forEach(i => {
         html += `<tr><td>${esc(i.incident_type||'N/A')}</td><td>${esc(i.plate_number||'—')}</td>` +
           `<td>${fmtDate(i.date)}</td>` +
-          `<td><a href="${ah('/incidents')}" class="btn btn-sm btn-blue">View</a></td></tr>`;
+          `<td><a href="${navUrl('/incidents')}" class="btn btn-sm btn-blue">View</a></td></tr>`;
       });
       html += '</table>';
     } else { html += '<p class="muted">No open incidents. All clear!</p>'; }
@@ -185,14 +186,14 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       routeUtil.rows.forEach(r => {
         const pct = r.cap > 0 ? ((r.pax_count/r.cap)*100).toFixed(0) : '—';
         const warn = r.cap>0 && (r.pax_count/r.cap)>0.9 ? ' <span class="badge badge-warning">Near Full</span>' : '';
-        html += `<tr><td><a href="${ah('/routes/'+r.id)}">${esc(r.name)}</a></td>` +
+        html += `<tr><td><a href="${navUrl('/routes/'+r.id)}">${esc(r.name)}</a></td>` +
           `<td>${esc(r.plate_number||'Unassigned')}</td><td>${r.pax_count}</td><td>${r.cap}</td>` +
           `<td>${pct}%${warn}</td></tr>`;
       });
       html += '</table>';
     } else { html += '<p class="muted">No routes configured yet.</p>'; }
     html += '</div>';
-    renderPage('Transport Dashboard', html, req.session.user, req);
+    res.send(renderPage('Transport Dashboard', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -214,11 +215,11 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
 
     let html = nav('Vehicles');
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
-      '<h2>Vehicle Fleet</h2>' + `<a href="${ah('/vehicles/new')}" class="btn btn-green">+ Add Vehicle</a></div>`;
+      '<h2>Vehicle Fleet</h2>' + `<a href="${navUrl('/vehicles/new')}" class="btn btn-green">+ Add Vehicle</a></div>`;
     const filters = [['','All'],['active','Active'],['maintenance','Maintenance'],['inactive','Inactive']];
     html += '<div style="margin-bottom:16px;">';
     filters.forEach(([v,l]) => {
-      html += `<a href="${ah('/vehicles?status='+v)}" class="btn btn-sm ${sf===v?'btn-green':''}">${l}</a> `;
+      html += `<a href="${navUrl('/vehicles?status='+v)}" class="btn btn-sm ${sf===v?'btn-green':''}">${l}</a> `;
     });
     html += '</div>';
 
@@ -240,7 +241,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       });
       html += '</table>';
     } else { html += '<div class="card"><p class="muted">No vehicles found.</p></div>'; }
-    renderPage('Vehicle Fleet', html, req.session.user, req);
+    res.send(renderPage('Vehicle Fleet', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -249,7 +250,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   app.get('/transport/vehicles/new', requireAuth, (req, res) => {
     let html = nav('Vehicles');
     html += '<div class="card"><h2>Add New Vehicle</h2>';
-    html += `<form method="POST" action="${ah('/vehicles/create')}">
+    html += `<form method="POST" action="${navUrl('/vehicles/create')}">
       <table>
         <tr><td><label>Plate Number *</label></td><td><input name="plate_number" required style="width:200px;padding:8px;" placeholder="ABC-1234"></td></tr>
         <tr><td><label>Vehicle Type</label></td><td><select name="vehicle_type" style="padding:8px;">
@@ -266,9 +267,9 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
         </select></td></tr>
       </table><br>
       <button type="submit" class="btn btn-green">Save Vehicle</button>
-      <a href="${ah('/vehicles')}" class="btn btn-sm">Cancel</a>
+      <a href="${navUrl('/vehicles')}" class="btn btn-sm">Cancel</a>
     </form></div>`;
-    renderPage('Add Vehicle', html, req.session.user, req);
+    res.send(renderPage('Add Vehicle', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -291,7 +292,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [tid, plate_number.trim(), vehicle_type||'bus', parseInt(capacity)||50,
         driver_name||null, driver_phone||null, insurance_expiry||null, next_service||null, status||'active']);
-    res.redirect(ah('/vehicles'));
+    res.redirect(navUrl('/vehicles'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -308,7 +309,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
 
     let html = nav('Routes');
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
-      '<h2>Transport Routes</h2>' + `<a href="${ah('/routes/new')}" class="btn btn-green">+ Add Route</a></div>`;
+      '<h2>Transport Routes</h2>' + `<a href="${navUrl('/routes/new')}" class="btn btn-green">+ Add Route</a></div>`;
 
     if (result.rows.length) {
       html += '<table><tr><th>Route</th><th>Vehicle</th><th>Driver</th>' +
@@ -318,17 +319,17 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
         const fp = r.vehicle_capacity > 0 ? ((r.pax_count/r.vehicle_capacity)*100).toFixed(0) : '—';
         const sc = (r.stops||[]).length;
         html += `<tr>
-          <td><strong><a href="${ah('/routes/'+r.id)}">${esc(r.name)}</a></strong><br><small class="muted">${sc} stop${sc!==1?'s':''}</small></td>
+          <td><strong><a href="${navUrl('/routes/'+r.id)}">${esc(r.name)}</a></strong><br><small class="muted">${sc} stop${sc!==1?'s':''}</small></td>
           <td>${esc(r.vehicle_plate||'Unassigned')}</td><td>${esc(r.driver_name||'—')}</td>
           <td>${r.pax_count}/${r.vehicle_capacity} (${fp}%)</td>
           <td>$${parseFloat(r.fare||0).toFixed(2)}</td>
           <td>${r.distance_km ? r.distance_km+' km' : '—'}</td>
-          <td>${sb}</td><td><a href="${ah('/routes/'+r.id)}" class="btn btn-sm btn-blue">View</a></td>
+          <td>${sb}</td><td><a href="${navUrl('/routes/'+r.id)}" class="btn btn-sm btn-blue">View</a></td>
         </tr>`;
       });
       html += '</table>';
     } else { html += '<div class="card"><p class="muted">No routes configured yet.</p></div>'; }
-    renderPage('Transport Routes', html, req.session.user, req);
+    res.send(renderPage('Transport Routes', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -341,7 +342,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
 
     let html = nav('Routes');
     html += '<div class="card"><h2>Add New Route</h2>';
-    html += `<form method="POST" action="${ah('/routes/create')}">
+    html += `<form method="POST" action="${navUrl('/routes/create')}">
       <table>
         <tr><td><label>Route Name *</label></td><td><input name="name" required style="width:300px;padding:8px;" placeholder="e.g. North Campus Loop"></td></tr>
         <tr><td><label>Description</label></td><td><textarea name="description" rows="2" style="width:100%;max-width:400px;padding:8px;"></textarea></td></tr>
@@ -357,9 +358,9 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
         <tr><td><label><input type="checkbox" name="is_active" checked> Active</label></td><td></td></tr>
       </table><br>
       <button type="submit" class="btn btn-green">Save Route</button>
-      <a href="${ah('/routes')}" class="btn btn-sm">Cancel</a>
+      <a href="${navUrl('/routes')}" class="btn btn-sm">Cancel</a>
     </form></div>`;
-    renderPage('Add Route', html, req.session.user, req);
+    res.send(renderPage('Add Route', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -378,7 +379,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       [tid, name.trim(), description||null, stopsArr,
         estimated_time||null, parseFloat(distance_km)||null,
         parseFloat(fare)||0, vehicle_id||null, is_active!==undefined && is_active!=='false']);
-    res.redirect(ah('/routes'));
+    res.redirect(navUrl('/routes'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -403,7 +404,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
     const stopsHtml = stops.length ? '<ol>'+stops.map(s=>`<li>${esc(s)}</li>`).join('')+'</ol>' : '<span class="muted">No stops defined</span>';
 
     let html = nav('Routes');
-    html += `<a href="${ah('/routes')}" class="btn btn-sm btn-blue" style="margin-bottom:12px;">&larr; All Routes</a>`;
+    html += `<a href="${navUrl('/routes')}" class="btn btn-sm btn-blue" style="margin-bottom:12px;">&larr; All Routes</a>`;
     html += '<div class="card">';
     html += `<h2>${esc(r.name)}</h2>`;
     html += `<p><strong>Description:</strong> ${esc(r.description||'—')}</p>`;
@@ -420,7 +421,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
 
     // Assign vehicle
     html += '<div class="card"><h3>Assign Vehicle</h3>';
-    html += `<form method="POST" action="${ah('/routes/'+id+'/assign-vehicle')}" style="display:inline;">
+    html += `<form method="POST" action="${navUrl('/routes/'+id+'/assign-vehicle')}" style="display:inline;">
       <select name="vehicle_id" style="padding:8px;">
         <option value="">-- Unassign --</option>
         ${avVehs.rows.map(v=>`<option value="${v.id}" ${String(v.id)===String(r.vehicle_id)?'selected':''}>${esc(v.plate_number)} (${esc(v.vehicle_type)}) — ${esc(v.driver_name||'No driver')}, cap ${v.capacity}</option>`).join('')}
@@ -434,7 +435,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       pax.rows.forEach(p => {
         html += `<tr><td>${esc(p.passenger_name)}</td><td>${esc(p.passenger_id||'—')}</td>` +
           `<td>${esc(p.stop_name||'—')}</td><td>${esc(p.parent_phone||'—')}</td>` +
-          `<td><form method="POST" action="${ah('/passengers/'+p.id+'/remove')}" style="display:inline" ` +
+          `<td><form method="POST" action="${navUrl('/passengers/'+p.id+'/remove')}" style="display:inline" ` +
           `onsubmit="return confirm('Remove ${esc(p.passenger_name)}?')">` +
           `<button class="btn btn-sm btn-red">Remove</button></form></td></tr>`;
       });
@@ -444,7 +445,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
 
     // Add passenger
     html += '<div class="card" style="margin-top:20px;"><h3>Add Passenger</h3>';
-    html += `<form method="POST" action="${ah('/passengers/add')}">
+    html += `<form method="POST" action="${navUrl('/passengers/add')}">
       <input type="hidden" name="route_id" value="${r.id}">
       <table>
         <tr><td><label>Passenger Name *</label></td><td><input name="passenger_name" required style="width:250px;padding:8px;"></td></tr>
@@ -457,7 +458,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       </table><br>
       <button type="submit" class="btn btn-green">Add Passenger</button>
     </form></div>`;
-    renderPage('Route: ' + r.name, html, req.session.user, req);
+    res.send(renderPage('Route: ' + r.name, html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -475,7 +476,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       if (!vc.rows.length) return res.status(404).send('Vehicle not found.');
     }
     await pool.query('UPDATE transport_routes SET vehicle_id=$1 WHERE id=$2 AND tenant_id=$3', [vid, id, tid]);
-    res.redirect(ah('/routes/' + id));
+    res.redirect(navUrl('/routes/' + id));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -494,7 +495,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       `INSERT INTO transport_passengers (tenant_id,route_id,passenger_name,passenger_id,stop_name,parent_phone)
        VALUES ($1,$2,$3,$4,$5,$6)`,
       [tid, route_id, passenger_name.trim(), passenger_id||null, finalStop, parent_phone||null]);
-    res.redirect(ah('/routes/' + route_id));
+    res.redirect(navUrl('/routes/' + route_id));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -507,7 +508,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       "SELECT route_id FROM transport_passengers WHERE id=$1 AND tenant_id=$2 AND status='active'", [id, tid]);
     if (!p.rows.length) return res.status(404).send('Passenger not found.');
     await pool.query("UPDATE transport_passengers SET status='removed' WHERE id=$1 AND tenant_id=$2", [id, tid]);
-    res.redirect(ah('/routes/' + p.rows[0].route_id));
+    res.redirect(navUrl('/routes/' + p.rows[0].route_id));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -532,7 +533,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       '<h2>Incident Log</h2><div><a href="#report-form" class="btn btn-gold">+ Report Incident</a></div></div>';
 
     [['','All'],['open','Open'],['resolved','Resolved']].forEach(([v,l]) => {
-      html += `<a href="${ah('/incidents?filter='+v)}" class="btn btn-sm ${flt===v?'btn-green':''}">${l}</a> `;
+      html += `<a href="${navUrl('/incidents?filter='+v)}" class="btn btn-sm ${flt===v?'btn-green':''}">${l}</a> `;
     });
     html += '<br><br>';
 
@@ -561,7 +562,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
 
     // Report form
     html += `<div id="report-form" class="card" style="margin-top:24px;"><h3>Report New Incident</h3>
-      <form method="POST" action="${ah('/incidents/new')}">
+      <form method="POST" action="${navUrl('/incidents/new')}">
         <table>
           <tr><td><label>Vehicle</label></td><td><select name="vehicle_id" style="padding:8px;">
             <option value="">-- Select --</option>
@@ -578,7 +579,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
         </table><br>
         <button type="submit" class="btn btn-green">Submit Report</button>
       </form></div>`;
-    renderPage('Incident Log', html, req.session.user, req);
+    res.send(renderPage('Incident Log', html, req.session.user, req));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -594,7 +595,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       `INSERT INTO transport_incidents (tenant_id,vehicle_id,incident_type,description,date,reported_by)
        VALUES ($1,$2,$3,$4,$5,$6)`,
       [tid, vehicle_id||null, incident_type||'other', description.trim(), date||null, reported_by||null]);
-    res.redirect(ah('/incidents'));
+    res.redirect(navUrl('/incidents'));
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -681,7 +682,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
       paxRoute.rows.forEach(r => {
         const pct = r.vcap>0 ? ((r.pax_cnt/r.vcap)*100).toFixed(0) : '—';
         const sb = r.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-warning">Inactive</span>';
-        html += `<tr><td><a href="${ah('/routes/'+r.id)}">${esc(r.name)}</a></td><td>${esc(r.vp)}</td>` +
+        html += `<tr><td><a href="${navUrl('/routes/'+r.id)}">${esc(r.name)}</a></td><td>${esc(r.vp)}</td>` +
           `<td>${r.vcap}</td><td>${r.pax_cnt}</td><td>${pct}%</td><td>${r.with_stop}</td><td>${sb}</td></tr>`;
       });
       html += '</table>';
@@ -737,7 +738,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
     } else { html += '<p class="muted">No incidents.</p>'; }
     html += '</div></div>';
 
-    renderPage('Transport Reports', html, req.session.user, req);
+    res.send(renderPage('Transport Reports', html, req.session.user, req));
   });
 
   // ── Boot ──────────────────────────────────────────────────────────────────
