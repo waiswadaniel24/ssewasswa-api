@@ -28130,6 +28130,31 @@ try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc)
 try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
 
 // ============================================================
+// NEW MODULE: SCHOLARSHIP & BURSARY MANAGER
+// ============================================================
+try { const m = require('./scholarship-manager'); m(app, db, pool, renderPage, esc); console.log('[Scholarships] Scholarship & bursary manager loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: LEAVE MANAGEMENT (Staff & Student)
+// ============================================================
+try { const m = require('./leave-manager'); m(app, db, pool, renderPage, esc); console.log('[LeaveManager] Leave management loaded'); } catch(e) { console.warn('[LeaveManager] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: DISCIPLINE & BEHAVIOR TRACKER
+// ============================================================
+try { const m = require('./discipline-tracker'); m(app, db, pool, renderPage, esc); console.log('[Discipline] Discipline & behavior tracker loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: DEPARTMENT & BUDGET MANAGER
+// ============================================================
+try { const m = require('./budget-manager'); m(app, db, pool, renderPage, esc); console.log('[Budget] Department & budget manager loaded'); } catch(e) { console.warn('[Budget] Error:', e.message); }
+
+// ============================================================
+// NEW MODULE: VOLUNTEER MANAGER
+// ============================================================
+try { const m = require('./volunteer-manager'); m(app, db, pool, renderPage, esc); console.log('[Volunteers] Volunteer manager loaded'); } catch(e) { console.warn('[Volunteers] Error:', e.message); }
+
+// ============================================================
 // MODULE: TITHES & OFFERINGS (Church Giving Management)
 // ============================================================
 try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
@@ -28178,6 +28203,18 @@ try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log
 // MODULE: ADMISSIONS (Application, Review, Enrollment)
 // ============================================================
 ['admission_applications','admission_settings'].forEach(t => VALID_TABLES.add(t));
+
+// === TABLE ALLOWLIST: Scholarship & Bursary Manager ===
+['scholarships','scholarship_applications','scholarship_disbursements'].forEach(t => VALID_TABLES.add(t));
+// === TABLE ALLOWLIST: Leave Management ===
+['leave_types','leave_balances','leave_requests'].forEach(t => VALID_TABLES.add(t));
+// === TABLE ALLOWLIST: Discipline & Behavior Tracker ===
+['behavior_categories','discipline_incidents','discipline_actions'].forEach(t => VALID_TABLES.add(t));
+// === TABLE ALLOWLIST: Department & Budget Manager ===
+['budget_departments','budget_expenses','budget_purchase_requests'].forEach(t => VALID_TABLES.add(t));
+// === TABLE ALLOWLIST: Volunteer Manager ===
+['volunteers','volunteer_events','volunteer_assignments'].forEach(t => VALID_TABLES.add(t));
+
 try { const m = require('./admissions'); m(app, db, pool, renderPage, esc); console.log('[Admissions] Admissions module loaded'); } catch(e) { console.warn('[Admissions] Error:', e.message); }
 
 // ============================================================
