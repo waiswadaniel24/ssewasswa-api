@@ -524,6 +524,51 @@ const requirePlanLimit = (table) => async (req, res, next) => {
   next();
 };
 
+// ============================================================
+// FEATURE GATING: Subscription-aware dashboard card rendering
+// ============================================================
+const PLAN_HIERARCHY = ['free', 'basic', 'pro', 'enterprise'];
+const PLAN_NAMES = { free: 'Free', basic: 'Basic', pro: 'Professional', enterprise: 'Enterprise' };
+const _planCache = new Map();
+const PLAN_CACHE_TTL = 5 * 60 * 1000;
+
+async function getTenantPlanInfo(tenantId) {
+  const now = Date.now();
+  const cached = _planCache.get(tenantId);
+  if (cached && now - cached.ts < PLAN_CACHE_TTL) return cached;
+  const sub = (await pool.query(
+    "SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1",
+    [tenantId]
+  )).rows[0];
+  const plan = sub?.plan || 'free';
+  const planIdx = PLAN_HIERARCHY.indexOf(plan);
+  const flags = (await pool.query('SELECT feature_key, min_plan, is_active FROM feature_flags WHERE is_active = true')).rows;
+  const accessible = new Set();
+  for (const f of flags) {
+    const minIdx = PLAN_HIERARCHY.indexOf(f.min_plan || 'free');
+    if (planIdx >= minIdx) accessible.add(f.feature_key);
+  }
+  const info = { plan, planIdx, accessible, ts: now };
+  _planCache.set(tenantId, info);
+  return info;
+}
+
+async function hasFeature(tenantId, featureKey) {
+  const info = await getTenantPlanInfo(tenantId);
+  return info.accessible.has(featureKey);
+}
+
+// Render a dashboard card — locked or unlocked based on subscription
+// featureKey: feature_flags.feature_key. null = always free/accessible.
+// minPlanLabel: e.g. "Basic Plan" — shown on locked cards.
+function featureCard({ title, desc, link, icon, btnClass, featureKey, planInfo, minPlanLabel }) {
+  if (!featureKey || planInfo.accessible.has(featureKey)) {
+    return `<div class="card"><h3>${icon ? icon + ' ' : ''}${title}</h3>${desc ? '<p>' + desc + '</p>' : ''}<a href="${link}" class="btn ${btnClass || 'btn-sm'}">${title}</a></div>`;
+  }
+  const lbl = minPlanLabel || PLAN_NAMES[featureKey] || featureKey;
+  return `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${lbl}</div><h3>${icon ? icon + ' ' : ''}${title}</h3>${desc ? '<p>' + desc + '</p>' : '<p>Upgrade your plan to unlock this feature.</p>'}<a href="/billing" class="btn btn-sm btn-gold">Upgrade Plan</a></div>`;
+}
+
 // Permission check (v2.0)
 const checkPermission = (perm) => async (req, res, next) => {
   const u = req.session.user;
@@ -2628,6 +2673,7 @@ app.get('/dev/exit-tenant', requireAuth, requireSuperAdmin, (req, res) => {
 // === SCHOOL PORTAL ===
 app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
+  const pi = await getTenantPlanInfo(t);
   const cacheKey = `dashboard:stats:school:${t}`;
   const cached = await cacheGet(cacheKey);
   let students, fees, exams, attendance;
@@ -2682,8 +2728,14 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
     + '<text x="100" y="100" text-anchor="middle" font-size="24" font-weight="700" fill="#1e293b">' + attPct + '%</text>'
     + '<text x="100" y="118" text-anchor="middle" font-size="11" fill="#64748b">Present</text>'
     + '</svg>';
+  const hasTransport = pi.accessible.has('transport');
+  const hasExams = pi.accessible.has('online_exams');
+  const hasWhatsApp = pi.accessible.has('whatsapp_integration');
+  const hasReports = pi.accessible.has('scheduled_reports');
+  const hasBranches = pi.accessible.has('multi_branch');
+  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/, 'href="/billing"')}</div>`;
   res.send(renderPage('School Dashboard', `
-    <div class="hero"><h1>School Portal</h1><p>Manage students, fees, exams, attendance, reports</p></div>
+    <div class="hero"><h1>School Portal</h1><p>Manage students, fees, exams, attendance, reports</p><div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div></div>
     <div class="stats">
       <div class="stat-card"><div class="stat-num">${students.rows[0].count}</div><div>Students</div></div>
       <div class="stat-card"><div class="stat-num">UGX ${parseInt(fees.rows[0].coalesce).toLocaleString()}</div><div>Fees Due</div></div>
@@ -2712,7 +2764,7 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">📚 Books & Papers</h3><a href="/library" class="btn btn-sm">Browse Library</a></div>
       <div class="card"><h3>Bills</h3><a href="/bill-reminders" class="btn btn-sm btn-red">Bill Reminders</a></div>
       <div class="card"><h3>API & Webhooks</h3><a href="/api-keys" class="btn btn-sm">Manage Keys</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>
+      ${hasTransport ? `<div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>` : lockCard(`<div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Transport</h3><a href="/school/transport" class="btn btn-sm">Bus Routes</a></div>`, 'Basic Plan')}
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Discipline</h3><a href="/school/discipline" class="btn btn-sm">Incidents</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Homework</h3><a href="/school/homework" class="btn btn-sm">Assignments</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Calendar</h3><a href="/school/calendar" class="btn btn-sm">Events & Terms</a></div>
@@ -2731,10 +2783,10 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Fee Reminders</h3><a href="/school/fee-reminders" class="btn btn-sm btn-red">Send Reminders</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Online Payments</h3><a href="/billing" class="btn btn-sm">Pay/Subscribe</a></div>
-      <div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: Online Exams</h3><a href="/exams" class="btn btn-sm">Quizzes & Tests</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>
-      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>
-      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>
+      ${hasExams ? `<div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: Online Exams</h3><a href="/exams" class="btn btn-sm">Quizzes & Tests</a></div>` : lockCard(`<div class="card" style="background:#eff6ff;border:2px solid #2563eb"><h3 style="color:#2563eb">NEW: Online Exams</h3><a href="/exams" class="btn btn-sm">Quizzes & Tests</a></div>`, 'Basic Plan')}
+      ${hasWhatsApp ? `<div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>` : lockCard(`<div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>`, 'Basic Plan')}
+      ${hasReports ? `<div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>` : lockCard(`<div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>`, 'Basic Plan')}
+      ${hasBranches ? `<div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>` : lockCard(`<div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>`, 'Basic Plan')}
       <div class="card" style="background:#eff6ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">NEW: Deep Links</h3><a href="/links" class="btn btn-sm">URL Shortener</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Webhooks</h3><a href="/webhooks" class="btn btn-sm">Webhook Mgmt</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Plugins</h3><a href="/marketplace" class="btn btn-sm">Marketplace</a></div>
@@ -4850,6 +4902,7 @@ app.get('/org/reports/export', requireAuth, requireNotBanned, ah(async (req, res
 // ============================================================
 app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
+  const pi = await getTenantPlanInfo(t);
   const [members, tithes, sermons, prayers, schedules] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [t]),
     pool.query("SELECT COALESCE(SUM(amount),0) FROM org_finance WHERE tenant_id=$1 AND type='income' AND description ILIKE '%tithe%'", [t]),
@@ -4860,6 +4913,7 @@ app.get('/portal/church', requireAuth, requireNotBanned, ah(async (req, res) => 
   res.send(renderPage('Church Dashboard', `
     <div class="hero" style="background:linear-gradient(135deg,#7c2d12,#ea580c)">
       <h1>Church Portal</h1><p>Congregation, Tithes, Sermons, Prayer Requests</p>
+      <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
       <div class="stat-card"><div class="stat-num">${members.rows[0].count}</div><div>Members</div></div>
@@ -5263,6 +5317,7 @@ app.get('/church/donations/:id/delete', requireAuth, requireNotBanned, ah(async 
 // ============================================================
 app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
+  const pi = await getTenantPlanInfo(t);
   const [sales, inventory, invoices, expenses, customers] = await Promise.all([
     pool.query("SELECT COALESCE(SUM(total),0) FROM sales WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month', NOW())", [t]),
     pool.query('SELECT COUNT(*) FROM inventory WHERE tenant_id=$1 AND quantity<5', [t]),
@@ -5271,9 +5326,13 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
     pool.query('SELECT COUNT(*) FROM customers WHERE tenant_id=$1', [t])
   ]);
   const profit = parseInt(sales.rows[0].coalesce) - parseInt(expenses.rows[0].coalesce);
+  const hasInventory = pi.accessible.has('inventory_management');
+  const hasReports = pi.accessible.has('scheduled_reports');
+  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/, 'href="/billing"')}</div>`;
   res.send(renderPage('Business Dashboard', `
     <div class="hero" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">
       <h1>Business Portal</h1><p>POS, Inventory, Invoices, Customers, Profit/Loss</p>
+      <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
       <div class="stat-card"><div class="stat-num">UGX ${parseInt(sales.rows[0].coalesce).toLocaleString()}</div><div>Month Sales</div></div>
@@ -5284,11 +5343,11 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
     </div>
     <div class="grid">
       <div class="card"><h3>Point of Sale</h3><a href="/business/pos" class="btn btn-sm">New Sale</a><a href="/business/sales" class="btn btn-sm" style="margin-top:8px">Sales History</a></div>
-      <div class="card"><h3>Inventory</h3><a href="/business/inventory" class="btn btn-sm">Stock Management</a><a href="/business/inventory/add" class="btn btn-sm" style="margin-top:8px">Add Product</a></div>
+      ${hasInventory ? `<div class="card"><h3>Inventory</h3><a href="/business/inventory" class="btn btn-sm">Stock Management</a><a href="/business/inventory/add" class="btn btn-sm" style="margin-top:8px">Add Product</a></div>` : lockCard(`<div class="card"><h3>Inventory</h3><a href="/business/inventory" class="btn btn-sm">Stock Management</a><a href="/business/inventory/add" class="btn btn-sm" style="margin-top:8px">Add Product</a></div>`, 'Basic Plan')}
       <div class="card"><h3>Invoices</h3><a href="/business/invoices" class="btn btn-sm">Manage Invoices</a></div>
       <div class="card"><h3>Expenses</h3><a href="/business/expenses" class="btn btn-sm">Record Expense</a><a href="/business/profit-loss" class="btn btn-sm" style="margin-top:8px">Profit/Loss</a></div>
       <div class="card"><h3>Customers</h3><a href="/business/customers" class="btn btn-sm">Customer Directory</a></div>
-      <div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>
+      ${hasReports ? `<div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>` : lockCard(`<div class="card"><h3>Reports</h3><a href="/business/monthly-report" class="btn btn-gold btn-sm">Monthly Report</a></div>`, 'Basic Plan')}
       <div class="card"><h3>Debts</h3><a href="/business/debts" class="btn btn-sm btn-red">Customer Debts</a></div>
       <div class="card"><h3>Purchase Orders</h3><a href="/business/purchase-orders" class="btn btn-sm">Manage POs</a></div>
       <div class="card"><h3>Tax (VAT/URA)</h3><a href="/business/tax" class="btn btn-sm">Tax Reports</a></div>
@@ -5837,6 +5896,7 @@ app.get('/business/monthly-report', requireAuth, requireNotBanned, requireTenant
 // === HEALTH PORTAL (Upgraded for Health Centers & Hospitals) ===
 app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
+  const pi = await getTenantPlanInfo(t);
   const today = new Date().toISOString().split('T')[0];
   const [staffRow, queueRow, consultRow, rxRow, labRow, invRow, apptRow, patientRow, revenueRow, bedsRow, emergencyRow, completedRow] = await Promise.all([
     pool.query('SELECT role, COUNT(*)::int as cnt FROM clinic_staff WHERE tenant_id=$1 AND is_active=true GROUP BY role', [t]).catch(() => ({rows:[]})),
@@ -5870,11 +5930,17 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
 
   const recentQueue = (await pool.query("SELECT * FROM patient_queue WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 8", [t])).rows || [];
 
+  const hasEnhancedClinic = pi.accessible.has('enhanced_clinic');
+  const hasPatientLab = pi.accessible.has('patient_lab');
+  const hasPatientEHR = pi.accessible.has('patient_ehr');
+  const hasReports = pi.accessible.has('scheduled_reports');
+  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/, 'href="/billing"')}</div>`;
   res.send(renderPage('Health Portal', `
     <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
       <h1>Health Portal</h1>
       <p>Full patient management, departments, pharmacy, lab, billing & bed management</p>
       <a href="/health/settings" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);font-size:13px">Change Institution Type</a>
+      <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
 
     ${emergencies > 0 ? `<div style="background:#fef2f2;border:2px solid #dc2626;border-radius:12px;padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
@@ -5917,17 +5983,17 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
 
     <div class="grid">
       <div class="card" style="border-left:4px solid #f59e0b"><h3>&#128269; Patient Queue / Triage</h3><p class="muted">${waiting} waiting, ${seeing} being seen, ${done} done</p><a href="/clinic/queue" class="btn btn-sm">View Queue</a><a href="/clinic/queue/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Patient</a></div>
-      <div class="card" style="border-left:4px solid #3b82f6"><h3>&#129657; Patient Registry</h3><p class="muted">${patientTotal} registered patients</p><a href="/clinic-enhanced/patients" class="btn btn-sm">Patient List</a><a href="/clinic-enhanced/patients/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Register</a></div>
+      ${hasEnhancedClinic ? `<div class="card" style="border-left:4px solid #3b82f6"><h3>&#129657; Patient Registry</h3><p class="muted">${patientTotal} registered patients</p><a href="/clinic-enhanced/patients" class="btn btn-sm">Patient List</a><a href="/clinic-enhanced/patients/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Register</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #3b82f6"><h3>&#129657; Patient Registry</h3><p class="muted">${patientTotal} registered patients</p><a href="/clinic-enhanced/patients" class="btn btn-sm">Patient List</a><a href="/clinic-enhanced/patients/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Register</a></div>`, 'Pro Plan')}
       <div class="card" style="border-left:4px solid #10b981"><h3>&#128137; Consultations</h3><p class="muted">${consultToday} consultations today</p><a href="/clinic/consultation/new" class="btn btn-sm">New Consultation</a><a href="/clinic/consultations" class="btn btn-sm" style="margin-top:6px">History</a></div>
       <div class="card" style="border-left:4px solid #8b5cf6"><h3>&#128138; Prescriptions</h3><p class="muted">${rxToday} prescriptions today</p><a href="/clinic/prescription/new" class="btn btn-sm">New Prescription</a><a href="/clinic/prescriptions" class="btn btn-sm" style="margin-top:6px">View All</a></div>
-      <div class="card" style="border-left:4px solid #ec4899"><h3>&#128300; Laboratory</h3><p class="muted">${pendingLabs} pending, ${inProgressLabs} in progress</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a><a href="/clinic/lab/new" class="btn btn-sm btn-green" style="margin-top:6px">+ New Request</a></div>
+      ${hasPatientLab ? `<div class="card" style="border-left:4px solid #ec4899"><h3>&#128300; Laboratory</h3><p class="muted">${pendingLabs} pending, ${inProgressLabs} in progress</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a><a href="/clinic/lab/new" class="btn btn-sm btn-green" style="margin-top:6px">+ New Request</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #ec4899"><h3>&#128300; Laboratory</h3><p class="muted">${pendingLabs} pending, ${inProgressLabs} in progress</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a><a href="/clinic/lab/new" class="btn btn-sm btn-green" style="margin-top:6px">+ New Request</a></div>`, 'Pro Plan')}
       <div class="card" style="border-left:4px solid #f97316"><h3>&#128197; Appointments</h3><p class="muted">${apptToday} appointments today</p><a href="/clinic/appointments" class="btn btn-sm">All Appointments</a><a href="/clinic/appointments/today" class="btn btn-sm" style="margin-top:6px">Today</a><a href="/clinic/appointments/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Book</a></div>
       <div class="card" style="border-left:4px solid #06b6d4"><h3>&#128138; Pharmacy</h3><p class="muted">${invRow.rows[0].cnt} items low stock</p><a href="/clinic/pharmacy/inventory" class="btn btn-sm">Inventory</a><a href="/clinic/pharmacy/inventory/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Drug</a></div>
       <div class="card" style="border-left:4px solid #dc2626"><h3>&#127973; Bed Management</h3><p class="muted">${bedsOccupied}/${bedsTotal} beds occupied</p><a href="/clinic/beds" class="btn btn-sm">View Beds</a><a href="/clinic/beds/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Bed</a></div>
-      <div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>
+      ${hasPatientEHR ? `<div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>`, 'Pro Plan')}
       <div class="card" style="border-left:4px solid #eab308"><h3>&#128179; Insurance & Billing</h3><p class="muted">Claims, invoices, payments</p><a href="/clinic/insurance" class="btn btn-sm">Insurance</a><a href="/clinic/claims" class="btn btn-sm" style="margin-top:6px">Claims</a></div>
       <div class="card" style="border-left:4px solid #6366f1"><h3>&#129302; Clinical Decision Support</h3><p class="muted">Drug interactions, dosage calc</p><a href="/clinic/cds" class="btn btn-sm">CDS Dashboard</a></div>
-      <div class="card" style="border-left:4px solid #475569"><h3>&#128202; Reports & Analytics</h3><p class="muted">Revenue, diagnoses, trends</p><a href="/clinic/reports" class="btn btn-sm">View Reports</a></div>
+      ${hasReports ? `<div class="card" style="border-left:4px solid #475569"><h3>&#128202; Reports & Analytics</h3><p class="muted">Revenue, diagnoses, trends</p><a href="/clinic/reports" class="btn btn-sm">View Reports</a></div>` : lockCard(`<div class="card" style="border-left:4px solid #475569"><h3>&#128202; Reports & Analytics</h3><p class="muted">Revenue, diagnoses, trends</p><a href="/clinic/reports" class="btn btn-sm">View Reports</a></div>`, 'Basic Plan')}
     </div>
 
     ${recentQueue.length ? `<div class="card" style="margin-top:20px"><h3>Current Queue</h3>
@@ -6614,6 +6680,7 @@ app.get('/clinic/sickbay-visits/:id/discharge', requireAuth, requireNotBanned, a
 // === INDIVIDUAL PORTAL (enhanced) ===
 app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
+  const pi = await getTenantPlanInfo(t);
   const [goals, notes, budgetItems] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM goals WHERE tenant_id=$1', [t]),
     pool.query('SELECT COUNT(*) FROM personal_notes WHERE tenant_id=$1', [t]),
@@ -6622,6 +6689,7 @@ app.get('/portal/individual', requireAuth, requireNotBanned, ah(async (req, res)
   res.send(renderPage('Personal Dashboard', `
     <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
       <h1>Personal Portal</h1><p>Your budgets, goals, notes, personal tracking</p>
+      <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
       <div class="stat-card"><div class="stat-num">${goals.rows[0].count}</div><div>Goals</div></div>
@@ -25476,16 +25544,21 @@ app.get('/portal/public', requireAuth, ah(async (req, res) => {
 // === GENERIC PORTAL (catch-all for types without dedicated dashboards) ===
 app.get('/portal/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
+  const pi = await getTenantPlanInfo(t);
   const ptype = req.params.type;
   const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
   const label = ptype.charAt(0).toUpperCase() + ptype.slice(1);
   const iconMap = { hotel:'🏨', restaurant:'🍽️', retail:'🛍️', salon:'💇', pharmacy:'💊', gym:'🏋️', hardware:'🔧', supermarket:'🛒', transport:'🚗', electronics:'📱' };
   const icon = iconMap[ptype] || '📋';
+  const hasInventory = pi.accessible.has('inventory_management');
+  const hasReports = pi.accessible.has('scheduled_reports');
+  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/, 'href="/billing"')}</div>`;
   res.send(renderPage(label + ' Portal', `
     <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px;border-radius:16px;margin-bottom:24px;color:white;text-align:center">
       <div style="font-size:64px;margin-bottom:8px">${icon}</div>
       <h1>${esc(label)} Portal</h1>
       <p style="opacity:0.9;margin-top:4px">${esc(tenant?.name || 'My Business')}</p>
+      <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div>
     </div>
     <div class="stats">
       <div class="stat-card"><div class="stat-num">${label}</div><div>Portal Type</div></div>
@@ -25494,11 +25567,11 @@ app.get('/portal/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
     </div>
     <div class="grid">
       <div class="card"><h3>Dashboard</h3><a href="/dashboard" class="btn btn-sm">Main Dashboard</a></div>
-      <div class="card"><h3>Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>
+      ${hasInventory ? `<div class="card"><h3>Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>` : lockCard(`<div class="card"><h3>Inventory</h3><a href="/inventory" class="btn btn-sm">Stock Management</a></div>`, 'Basic Plan')}
       <div class="card"><h3>Staff</h3><a href="/roles" class="btn btn-sm">Roles & Permissions</a></div>
       <div class="card"><h3>Finance</h3><a href="/billing" class="btn btn-sm">Subscriptions</a></div>
       <div class="card"><h3>Fundraising</h3><a href="/fundraising" class="btn btn-sm btn-green">Campaigns</a></div>
-      <div class="card"><h3>Reports</h3><a href="/reports" class="btn btn-sm">View Reports</a></div>
+      ${hasReports ? `<div class="card"><h3>Reports</h3><a href="/reports" class="btn btn-sm">View Reports</a></div>` : lockCard(`<div class="card"><h3>Reports</h3><a href="/reports" class="btn btn-sm">View Reports</a></div>`, 'Basic Plan')}
       <div class="card"><h3>Settings</h3><a href="/settings/profile" class="btn btn-sm">Edit Profile</a></div>
       <div class="card"><h3>Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a></div>
     </div>
