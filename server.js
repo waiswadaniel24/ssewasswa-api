@@ -2067,7 +2067,7 @@ setInterval(loadPlatformSettings, 60000);
 
 // === RENDER PAGE (with dark mode support) ===
 const renderPage = (title, content, user, csrfTokenOrReq) => {
-  const dark = user?.dark_mode;
+  const dark = user?.dark_mode || false;
   const siteName = platformSettings?.site_name || 'Comfort';
   const siteDesc = platformSettings?.site_tagline || 'The Operating System for African Institutions';
   // Extract CSRF token from either a string or a request object
@@ -12127,7 +12127,7 @@ const paginationHtml = (currentPage, totalCount, perPage, baseUrl) => {
 
 // 3.14: SEO META TAGS (enhance renderPage)
 const renderPageV3 = (title, content, user, meta = {}) => {
-  const dark = user?.dark_mode;
+  const dark = user?.dark_mode || false;
   const description = meta.description || `${title} - Comfort All-in-One Management Platform`;
   const keywords = meta.keywords || 'school management, church management, business management, Uganda, Comfort, clinic management, SaaS Africa';
   const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
@@ -24702,8 +24702,9 @@ app.post('/dev/switch-tenant', requireAuth, requireSuperAdmin, ah(async (req, re
   req.session.user.tenant_id = tenant.id;
   req.session.user.tenant_name = tenant.name;
   req.session.user.tenant_type = type;
+  req.session._impersonate_tenant_id = tenant.id;
   audit(user.email, 'dev_switch_tenant', 'Switched to ' + tenantName + ' (#' + tenant.id + ')');
-  req.session.save(() => { res.redirect('/portal/' + type); });
+  res.redirect('/portal/' + type);
 }));
 
 app.get('/dev/restore-session', requireAuth, requireSuperAdmin, ah(async (req, res) => {
@@ -24716,7 +24717,7 @@ app.get('/dev/restore-session', requireAuth, requireSuperAdmin, ah(async (req, r
   req.session.user.tenant_type = orig.type;
   delete req.session._original_tenant;
   audit(user.email, 'dev_restore_session', 'Restored to ' + orig.name + ' (#' + orig.id + ')');
-  req.session.save(() => { res.redirect('/dashboard'); });
+  res.redirect('/dashboard');
 }));
 
 // === USER PORTAL SWITCHER (available to ALL users, not just super_admin) ===
@@ -24741,6 +24742,7 @@ const USER_PORTAL_TYPES = [
 app.get('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) => {
   const user = req.session.user;
   const currentType = user.tenant_type || 'school';
+  const dark = user?.dark_mode || false;
   const csrfVal = req.csrfToken || req.session?.csrfToken || '';
   const cards = USER_PORTAL_TYPES.map(p => {
     const isActive = currentType === p.type;
@@ -24785,7 +24787,7 @@ app.post('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) =>
     req.session.user.role = newType;
   }
   await audit(user.email, 'portal_switch', 'Switched portal type from ' + (user.tenant_type || 'unknown') + ' to ' + newType);
-  req.session.save(() => { res.redirect('/portal/' + newType); });
+  res.redirect('/portal/' + newType);
 }));
 
 // === PUBLIC PORTAL ===
