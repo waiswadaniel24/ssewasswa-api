@@ -1,19 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
-        http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
-  <!-- Main Platform (live on Render) -->
+  <!-- GitHub Pages: Project Documentation & Landing -->
+  <url>
+    <loc>https://ssewasswa.github.io/ssewasswa-api/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://ssewasswa.github.io/ssewasswa-api/README.md</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- Platform Feature Pages (served by Comfort Zone on Render) -->
   <url>
     <loc>https://ssewasswa.onrender.com/</loc>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
-  </url>
-  <url>
-    <loc>https://ssewasswa.onrender.com/login</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/register</loc>
@@ -40,35 +44,21 @@
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
-
-  <!-- Public Content Pages -->
+  <url>
+    <loc>https://ssewasswa.onrender.com/login</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
   <url>
     <loc>https://ssewasswa.onrender.com/blog</loc>
     <changefreq>daily</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://ssewasswa.onrender.com/p/entertainment</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://ssewasswa.onrender.com/p/fundraising</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://ssewasswa.onrender.com/directory</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
-  </url>
-  <url>
     <loc>https://ssewasswa.onrender.com/help</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
-
-  <!-- Legal -->
   <url>
     <loc>https://ssewasswa.onrender.com/privacy</loc>
     <changefreq>yearly</changefreq>
@@ -80,56 +70,56 @@
     <priority>0.3</priority>
   </url>
 
-  <!-- Feature Pages (SEO marketing pages) -->
+  <!-- SEO Feature Pages -->
   <url>
     <loc>https://ssewasswa.onrender.com/features/school-management</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/clinic-management</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/church-management</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/business-management</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/fees-payment</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/attendance-tracking</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/exam-report-cards</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/payroll-hr</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/pos-inventory</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/tithe-offering</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/transport-hostel</loc>
@@ -144,29 +134,37 @@
   <url>
     <loc>https://ssewasswa.onrender.com/features/lms-online-learning</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/momo-payments</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://ssewasswa.onrender.com/features/offline-mode</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
-
-  <!-- GitHub Pages (code repository / documentation) -->
   <url>
-    <loc>https://ssewasswa.github.io/ssewasswa-api/</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.5</priority>
+    <loc>https://ssewasswa.onrender.com/features/multi-branch</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://ssewasswa.github.io/ssewasswa-api/README.md</loc>
-    <changefreq>weekly</changefreq>
-    <priority>0.4</priority>
+    <loc>https://ssewasswa.onrender.com/features/admissions</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://ssewasswa.onrender.com/features/scholarships</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://ssewasswa.onrender.com/features/discipline</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
 
 </urlset>
