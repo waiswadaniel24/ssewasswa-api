@@ -1470,6 +1470,8 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS lab_results (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, lab_request_id INTEGER REFERENCES lab_requests(id) ON DELETE CASCADE, lab_technician_id INTEGER REFERENCES clinic_staff(id), result_value TEXT, result_numeric NUMERIC, unit TEXT, reference_range TEXT, interpretation TEXT, is_abnormal BOOLEAN DEFAULT false, verified_by INTEGER REFERENCES clinic_staff(id), verified_at TIMESTAMPTZ, notes TEXT, reported_at TIMESTAMPTZ DEFAULT NOW())`,
   // Pharmacy Inventory (Clinic pharmacy stock)
   `CREATE TABLE IF NOT EXISTS pharmacy_inventory (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, medicine_name TEXT NOT NULL, generic_name TEXT, category TEXT, quantity INTEGER DEFAULT 0, unit_price INTEGER DEFAULT 0, batch_number TEXT, manufacturer TEXT, expiry_date DATE, reorder_level INTEGER DEFAULT 10, location TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Bed Management for hospitals/health centers
+  `CREATE TABLE IF NOT EXISTS clinic_beds (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, bed_number TEXT NOT NULL, ward TEXT NOT NULL DEFAULT 'General Ward', bed_type TEXT DEFAULT 'Standard', daily_rate INTEGER DEFAULT 0, patient_name TEXT, reason TEXT, status TEXT DEFAULT 'available', assigned_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // ============ STUDENT SPECIALIZATION TABLES ============
   // School Levels & Sections
   `CREATE TABLE IF NOT EXISTS school_levels (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, level_name TEXT NOT NULL, level_code TEXT NOT NULL, level_order INTEGER DEFAULT 0, description TEXT, min_age INTEGER, max_age INTEGER, has_streams BOOLEAN DEFAULT true, has_boarding BOOLEAN DEFAULT true, assessment_type TEXT DEFAULT 'exam_based', curriculum TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -2687,10 +2689,9 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Discipline</h3><a href="/school/discipline" class="btn btn-sm">Incidents</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Homework</h3><a href="/school/homework" class="btn btn-sm">Assignments</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">NEW: Calendar</h3><a href="/school/calendar" class="btn btn-sm">Events & Terms</a></div>
-      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">NEW: Health</h3><a href="/school/health" class="btn btn-sm">Medical Records</a></div>
+      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">NEW: Health</h3><a href="/school/health" class="btn btn-sm">Medical Records</a><a href="/school/sickbay" class="btn btn-sm" style="margin-top:6px">Sick Bay</a></div>
       <div class="card" style="background:#eff6ff;border:2px solid #3b82f6"><h3 style="color:#3b82f6">NEW: Alumni</h3><a href="/school/alumni" class="btn btn-sm">Graduates</a></div>
       <div class="card" style="background:#f7fee7;border:2px solid #65a30d"><h3 style="color:#65a30d">NEW: Library</h3><a href="/school/library" class="btn btn-sm">Books & Borrow</a></div>
-      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Clinic</h3><a href="/clinic" class="btn btn-sm">Doctor→Pharm→Lab</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Levels</h3><a href="/school/levels" class="btn btn-sm">K-University</a></div>
       <div class="card" style="background:#ecfeff;border:2px solid #06b6d4"><h3 style="color:#06b6d4">Hostels</h3><a href="/school/hostels" class="btn btn-sm">Dormitories</a></div>
       <div class="card" style="background:#fff7ed;border:2px solid #f59e0b"><h3 style="color:#f59e0b">Meals</h3><a href="/school/meals" class="btn btn-sm">Meal Plans</a></div>
@@ -2707,7 +2708,6 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
       <div class="card" style="background:#f0fdf4;border:2px solid #16a34a"><h3 style="color:#16a34a">NEW: WhatsApp</h3><a href="/whatsapp" class="btn btn-sm">Messaging</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Reports</h3><a href="/scheduled-reports" class="btn btn-sm">Auto Reports</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Branches</h3><a href="/branches" class="btn btn-sm">Multi-Branch</a></div>
-      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">NEW: Clinic v2</h3><a href="/clinic-enhanced" class="btn btn-sm">Enhanced Clinic</a></div>
       <div class="card" style="background:#eff6ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">NEW: Deep Links</h3><a href="/links" class="btn btn-sm">URL Shortener</a></div>
       <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">NEW: Webhooks</h3><a href="/webhooks" class="btn btn-sm">Webhook Mgmt</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">NEW: Plugins</h3><a href="/marketplace" class="btn btn-sm">Marketplace</a></div>
@@ -5807,42 +5807,228 @@ app.get('/business/monthly-report', requireAuth, requireNotBanned, requireTenant
   res.send(buffer);
 }));
 
-// === CLINIC PORTAL ===
+// === CLINIC PORTAL (Upgraded for Health Centers & Hospitals) ===
 app.get('/portal/clinic', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const [staffCount, queueCount, consultCount, rxCount, labCount, invCount] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM clinic_staff WHERE tenant_id=$1', [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
-    pool.query("SELECT COUNT(*) FROM patient_queue WHERE tenant_id=$1 AND status='waiting'", [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
-    pool.query('SELECT COUNT(*) FROM consultations WHERE tenant_id=$1 AND created_at>DATE_TRUNC(\'day\',NOW())', [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
-    pool.query('SELECT COUNT(*) FROM prescriptions WHERE tenant_id=$1 AND created_at>DATE_TRUNC(\'day\',NOW())', [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
-    pool.query("SELECT COUNT(*) FROM lab_requests WHERE tenant_id=$1 AND status='pending'", [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0),
-    pool.query('SELECT COUNT(*) FROM pharmacy_inventory WHERE tenant_id=$1 AND quantity<=reorder_level', [t]).then(r => parseInt(r.rows[0].count)).catch(() => 0)
+  const today = new Date().toISOString().split('T')[0];
+  const [staffRow, queueRow, consultRow, rxRow, labRow, invRow, apptRow, patientRow, revenueRow, bedsRow, emergencyRow, completedRow] = await Promise.all([
+    pool.query('SELECT role, COUNT(*)::int as cnt FROM clinic_staff WHERE tenant_id=$1 AND is_active=true GROUP BY role', [t]).catch(() => ({rows:[]})),
+    pool.query("SELECT status, COUNT(*)::int as cnt FROM patient_queue WHERE tenant_id=$1 GROUP BY status", [t]).catch(() => ({rows:[]})),
+    pool.query("SELECT COUNT(*)::int as cnt FROM consultations WHERE tenant_id=$1 AND created_at>DATE_TRUNC('day',NOW())", [t]).catch(() => ({rows:[{cnt:0}]})),
+    pool.query("SELECT COUNT(*)::int as cnt FROM prescriptions WHERE tenant_id=$1 AND created_at>DATE_TRUNC('day',NOW())", [t]).catch(() => ({rows:[{cnt:0}]})),
+    pool.query("SELECT status, COUNT(*)::int as cnt FROM lab_requests WHERE tenant_id=$1 GROUP BY status", [t]).catch(() => ({rows:[]})),
+    pool.query('SELECT COUNT(*)::int as cnt FROM pharmacy_inventory WHERE tenant_id=$1 AND quantity<=reorder_level', [t]).catch(() => ({rows:[{cnt:0}]})),
+    pool.query("SELECT COUNT(*)::int as cnt FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=$1", [today]).catch(() => ({rows:[{cnt:0}]})),
+    pool.query('SELECT COUNT(*)::int as cnt FROM clinic_patients WHERE tenant_id=$1').catch(() => ({rows:[{cnt:0}]})),
+    pool.query("SELECT COALESCE(SUM(total_amount),0)::int as total FROM patient_invoices WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month',NOW())", [t]).catch(() => ({rows:[{total:0}]})),
+    pool.query("SELECT COUNT(*)::int as total, COALESCE(SUM(CASE WHEN status='occupied' THEN 1 ELSE 0 END),0)::int as occupied FROM clinic_beds WHERE tenant_id=$1", [t]).catch(() => ({rows:[{total:0,occupied:0}]})),
+    pool.query("SELECT COUNT(*)::int as cnt FROM patient_queue WHERE tenant_id=$1 AND priority='emergency' AND status='waiting'", [t]).catch(() => ({rows:[{cnt:0}]})),
+    pool.query("SELECT COUNT(*)::int as cnt FROM consultations WHERE tenant_id=$1 AND created_at>DATE_TRUNC('day',NOW()) AND status='completed'", [t]).catch(() => ({rows:[{cnt:0}]}))
   ]);
-  const recentQueue = (await pool.query("SELECT * FROM patient_queue WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5", [t])).rows || [];
-  res.send(renderPage('Clinic Dashboard', `
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
-      <h1>Clinic / Hospital Portal</h1><p>Patient management, consultations, pharmacy & lab</p>
+  // Staff breakdown
+  const staffMap = {}; staffRow.rows.forEach(r => { staffMap[r.role] = r.cnt; });
+  const staffTotal = Object.values(staffMap).reduce((a,b) => a+b, 0);
+  // Queue breakdown
+  const queueMap = {}; queueRow.rows.forEach(r => { queueMap[r.status] = r.cnt; });
+  const waiting = queueMap.waiting||0, seeing = queueMap.seeing||0, done = queueMap.done||0;
+  // Lab breakdown
+  const labMap = {}; labRow.rows.forEach(r => { labMap[r.status] = r.cnt; });
+  const pendingLabs = labMap.requested||labMap.pending||0, inProgressLabs = labMap.in_progress||0;
+  const consultToday = consultRow.rows[0].cnt, rxToday = rxRow.rows[0].cnt, completedToday = completedRow.rows[0].cnt;
+  const apptToday = apptRow.rows[0].cnt, patientTotal = patientRow.rows[0].cnt;
+  const monthRevenue = revenueRow.rows[0].total;
+  const bedsTotal = bedsRow.rows[0].total, bedsOccupied = bedsRow.rows[0].occupied;
+  const emergencies = emergencyRow.rows[0].cnt;
+  const fmtUGX = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'K' : (n||0).toString();
+
+  const recentQueue = (await pool.query("SELECT * FROM patient_queue WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 8", [t])).rows || [];
+
+  res.send(renderPage('Health Center Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
+      <h1>Health Center / Hospital Portal</h1>
+      <p>Full patient management, departments, pharmacy, lab, billing & bed management</p>
     </div>
+
+    ${emergencies > 0 ? `<div style="background:#fef2f2;border:2px solid #dc2626;border-radius:12px;padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+      <span style="font-size:28px">&#127383;</span>
+      <div><strong style="color:#dc2626;font-size:16px">${emergencies} Emergency Patient${emergencies>1?'s':''} Waiting</strong><p class="muted" style="margin:0;font-size:13px">Needs immediate attention</p></div>
+      <a href="/clinic/queue" class="btn btn-red" style="margin-left:auto">View Queue</a>
+    </div>` : ''}
+
     <div class="stats">
-      <div class="stat-card"><div class="stat-num">${staffCount}</div><div>Staff</div></div>
-      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num">${queueCount}</div><div>Waiting</div></div>
-      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num">${consultCount}</div><div>Today Consults</div></div>
-      <div class="stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-num">${rxCount}</div><div>Today Rx</div></div>
-      <div class="stat-card" style="border-left:4px solid #ec4899"><div class="stat-num">${labCount}</div><div>Pending Labs</div></div>
-      <div class="stat-card" style="border-left:4px solid #dc2626"><div class="stat-num">${invCount}</div><div>Low Stock</div></div>
+      <div class="stat-card"><div class="stat-num">${patientTotal}</div><div>Total Patients</div></div>
+      <div class="stat-card" style="border-left:4px solid #f59e0b"><div class="stat-num" style="color:#f59e0b">${waiting}</div><div>Waiting Now</div></div>
+      <div class="stat-card" style="border-left:4px solid #3b82f6"><div class="stat-num">${consultToday}</div><div>Today Consults</div></div>
+      <div class="stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-num">${completedToday}</div><div>Completed</div></div>
+      <div class="stat-card" style="border-left:4px solid #10b981"><div class="stat-num">${rxToday}</div><div>Today Rx</div></div>
+      <div class="stat-card" style="border-left:4px solid #ec4899"><div class="stat-num">${pendingLabs}</div><div>Pending Labs</div></div>
+      <div class="stat-card" style="border-left:4px solid #f97316"><div class="stat-num">${apptToday}</div><div>Appts Today</div></div>
+      <div class="stat-card" style="border-left:4px solid #dc2626"><div class="stat-num">${invRow.rows[0].cnt}</div><div>Low Stock</div></div>
     </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px">
+      <div class="card" style="background:linear-gradient(135deg,#0f766e,#14b8a6);color:white;border:none">
+        <div style="font-size:14px;opacity:0.9">This Month Revenue</div>
+        <div style="font-size:32px;font-weight:800;margin:4px 0">UGX ${fmtUGX(monthRevenue)}</div>
+        <a href="/clinic/reports" style="color:white;text-decoration:underline;font-size:13px">View Reports</a>
+      </div>
+      <div class="card" style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none">
+        <div style="font-size:14px;opacity:0.9">Bed Occupancy</div>
+        <div style="font-size:32px;font-weight:800;margin:4px 0">${bedsOccupied} / ${bedsTotal}</div>
+        <a href="/clinic/beds" style="color:white;text-decoration:underline;font-size:13px">Manage Beds</a>
+      </div>
+      <div class="card" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:white;border:none">
+        <div style="font-size:14px;opacity:0.9">Medical Staff</div>
+        <div style="font-size:28px;font-weight:800;margin:4px 0">${staffTotal}</div>
+        <div style="font-size:12px;opacity:0.85">
+          ${staffMap.doctor||0} Doctors &bull; ${staffMap.nurse||0} Nurses &bull; ${staffMap.pharmacist||0} Pharmacists &bull; ${staffMap.lab_technician||0} Lab Techs
+        </div>
+        <a href="/clinic/staff" style="color:white;text-decoration:underline;font-size:13px">Manage Staff</a>
+      </div>
+    </div>
+
     <div class="grid">
-      <div class="card"><h3>Staff Management</h3><p class="muted">Doctors, nurses, pharmacists</p><a href="/clinic/staff" class="btn btn-sm">Manage Staff</a></div>
-      <div class="card" style="border-left:4px solid #f59e0b"><h3>Patient Queue</h3><p class="muted">${queueCount} patients waiting</p><a href="/clinic/queue" class="btn btn-sm">View Queue</a></div>
-      <div class="card"><h3>Consultations</h3><p class="muted">Diagnose & treat patients</p><a href="/clinic/consultation/new" class="btn btn-sm">New Consultation</a></div>
-      <div class="card"><h3>Prescriptions</h3><p class="muted">${rxCount} prescriptions today</p><a href="/clinic/prescriptions" class="btn btn-sm">View Prescriptions</a></div>
-      <div class="card"><h3>Lab Requests</h3><p class="muted">${labCount} pending tests</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a></div>
-      <div class="card"><h3>Pharmacy Inventory</h3><p class="muted">${invCount} items low stock</p><a href="/clinic-enhanced" class="btn btn-sm">Pharmacy</a></div>
-      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">Prescribe</h3><p class="muted">Write new prescription</p><a href="/clinic/prescription/new" class="btn btn-sm btn-red">New Prescription</a></div>
-      <div class="card"><h3>Calendar</h3><p class="muted">Schedule & appointments</p><a href="/calendar" class="btn btn-sm">Calendar</a></div>
-      <div class="card"><h3>Reports</h3><p class="muted">Clinic analytics</p><a href="/reports" class="btn btn-sm">View Reports</a></div>
+      <div class="card" style="border-left:4px solid #f59e0b"><h3>&#128269; Patient Queue / Triage</h3><p class="muted">${waiting} waiting, ${seeing} being seen, ${done} done</p><a href="/clinic/queue" class="btn btn-sm">View Queue</a><a href="/clinic/queue/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Patient</a></div>
+      <div class="card" style="border-left:4px solid #3b82f6"><h3>&#129657; Patient Registry</h3><p class="muted">${patientTotal} registered patients</p><a href="/clinic-enhanced/patients" class="btn btn-sm">Patient List</a><a href="/clinic-enhanced/patients/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Register</a></div>
+      <div class="card" style="border-left:4px solid #10b981"><h3>&#128137; Consultations</h3><p class="muted">${consultToday} consultations today</p><a href="/clinic/consultation/new" class="btn btn-sm">New Consultation</a><a href="/clinic/consultations" class="btn btn-sm" style="margin-top:6px">History</a></div>
+      <div class="card" style="border-left:4px solid #8b5cf6"><h3>&#128138; Prescriptions</h3><p class="muted">${rxToday} prescriptions today</p><a href="/clinic/prescription/new" class="btn btn-sm">New Prescription</a><a href="/clinic/prescriptions" class="btn btn-sm" style="margin-top:6px">View All</a></div>
+      <div class="card" style="border-left:4px solid #ec4899"><h3>&#128300; Laboratory</h3><p class="muted">${pendingLabs} pending, ${inProgressLabs} in progress</p><a href="/clinic/lab" class="btn btn-sm">Lab Center</a><a href="/clinic/lab/new" class="btn btn-sm btn-green" style="margin-top:6px">+ New Request</a></div>
+      <div class="card" style="border-left:4px solid #f97316"><h3>&#128197; Appointments</h3><p class="muted">${apptToday} appointments today</p><a href="/clinic/appointments" class="btn btn-sm">All Appointments</a><a href="/clinic/appointments/today" class="btn btn-sm" style="margin-top:6px">Today</a><a href="/clinic/appointments/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Book</a></div>
+      <div class="card" style="border-left:4px solid #06b6d4"><h3>&#128138; Pharmacy</h3><p class="muted">${invRow.rows[0].cnt} items low stock</p><a href="/clinic/pharmacy/inventory" class="btn btn-sm">Inventory</a><a href="/clinic/pharmacy/inventory/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Drug</a></div>
+      <div class="card" style="border-left:4px solid #dc2626"><h3>&#127973; Bed Management</h3><p class="muted">${bedsOccupied}/${bedsTotal} beds occupied</p><a href="/clinic/beds" class="btn btn-sm">View Beds</a><a href="/clinic/beds/new" class="btn btn-sm btn-green" style="margin-top:6px">+ Add Bed</a></div>
+      <div class="card" style="border-left:4px solid #65a30d"><h3>&#128203; Electronic Health Records</h3><p class="muted">Patient history, vitals, allergies</p><a href="/clinic/ehr-search" class="btn btn-sm">Search EHR</a></div>
+      <div class="card" style="border-left:4px solid #eab308"><h3>&#128179; Insurance & Billing</h3><p class="muted">Claims, invoices, payments</p><a href="/clinic/insurance" class="btn btn-sm">Insurance</a><a href="/clinic/claims" class="btn btn-sm" style="margin-top:6px">Claims</a></div>
+      <div class="card" style="border-left:4px solid #6366f1"><h3>&#129302; Clinical Decision Support</h3><p class="muted">Drug interactions, dosage calc</p><a href="/clinic/cds" class="btn btn-sm">CDS Dashboard</a></div>
+      <div class="card" style="border-left:4px solid #475569"><h3>&#128202; Reports & Analytics</h3><p class="muted">Revenue, diagnoses, trends</p><a href="/clinic/reports" class="btn btn-sm">View Reports</a></div>
     </div>
-    ${recentQueue.length ? `<div class="card"><h3>Recent Queue Entries</h3><table><tr><th>Patient</th><th>Complaint</th><th>Status</th><th>Time</th></tr>${recentQueue.map(q => `<tr><td>${esc(q.patient_name||'N/A')}</td><td>${esc(q.complaint||'N/A')}</td><td><span class="badge ${q.status==='waiting'?'badge-warning':q.status==='seeing'?'badge-info':q.status==='done'?'badge-success':'badge-error'}">${esc(q.status||'unknown')}</span></td><td>${q.created_at ? new Date(q.created_at).toLocaleString() : ''}</td></tr>`).join('')}</table></div>` : ''}
+
+    ${recentQueue.length ? `<div class="card" style="margin-top:20px"><h3>Current Queue</h3>
+      <div style="overflow-x:auto"><table><tr><th>#</th><th>Patient</th><th>Priority</th><th>Complaint</th><th>Status</th><th>Time</th></tr>
+      ${recentQueue.map(q => `<tr style="${q.priority==='emergency'?'background:#fef2f2;font-weight:bold':''}">
+        <td>${q.queue_number||q.id}</td>
+        <td>${esc(q.patient_name||'N/A')}</td>
+        <td><span class="badge ${q.priority==='emergency'?'badge-error':q.priority==='urgent'?'badge-warning':'badge-info'}">${esc(q.priority||'normal')}</span></td>
+        <td>${esc(q.complaint||'N/A')}</td>
+        <td><span class="badge ${q.status==='waiting'?'badge-warning':q.status==='seeing'?'badge-info':q.status==='done'?'badge-success':'badge-error'}">${esc(q.status||'')}</span></td>
+        <td style="white-space:nowrap">${q.created_at ? new Date(q.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''}</td>
+      </tr>`).join('')}
+      </table></div>
+    </div>` : ''}
+  `, req.session.user));
+}));
+
+// === CLINIC: BED MANAGEMENT (for hospitals/health centers) ===
+app.get('/clinic/beds', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const beds = (await pool.query('SELECT * FROM clinic_beds WHERE tenant_id=$1 ORDER BY ward, bed_number', [t])).rows;
+  const wardGroups = {};
+  beds.forEach(b => { if (!wardGroups[b.ward]) wardGroups[b.ward] = []; wardGroups[b.ward].push(b); });
+  const statsHtml = Object.entries(wardGroups).map(([ward, bds]) => {
+    const occupied = bds.filter(b => b.status==='occupied').length;
+    const total = bds.length;
+    const pct = total ? Math.round(occupied/total*100) : 0;
+    const color = pct > 80 ? '#dc2626' : pct > 50 ? '#f59e0b' : '#22c55e';
+    return `<div style="background:${pct>80?'#fef2f2':pct>50?'#fffbeb':'#f0fdf4'};border:1px solid ${color};border-radius:10px;padding:14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:14px;color:${color}">${esc(ward)}</strong>
+        <span style="font-size:24px;font-weight:800;color:${color}">${occupied}/${total}</span>
+      </div>
+      <div style="background:#e2e8f0;border-radius:4px;height:6px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${color};border-radius:4px"></div></div>
+    </div>`;
+  }).join('');
+  res.send(renderPage('Bed Management', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:white"><h1>Bed Management</h1><p>Ward overview and bed occupancy</p></div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/clinic/beds/new" class="btn btn-green">+ Add Bed</a>
+      <a href="/clinic/beds/assign" class="btn">+ Assign Patient</a>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-bottom:20px">${statsHtml}</div>
+    ${beds.length ? `<div class="card"><h3>All Beds</h3>
+      <table><tr><th>Bed #</th><th>Ward</th><th>Type</th><th>Patient</th><th>Status</th><th>Actions</th></tr>
+      ${beds.map(b => `<tr>
+        <td><strong>${esc(b.bed_number)}</strong></td><td>${esc(b.ward||'')}</td><td>${esc(b.bed_type||'Standard')}</td>
+        <td>${esc(b.patient_name||'—')}</td>
+        <td><span class="badge ${b.status==='occupied'?'badge-error':b.status==='reserved'?'badge-warning':'badge-success'}">${esc(b.status||'available')}</span></td>
+        <td>${b.status==='occupied'?`<a href="/clinic/beds/${b.id}/discharge" class="btn btn-sm">Discharge</a>`:`<a href="/clinic/beds/${b.id}/assign" class="btn btn-sm btn-green">Assign</a>`}</td>
+      </tr>`).join('')}
+      </table></div>` : '<div class="card"><p class="muted">No beds added yet. Click "+ Add Bed" to get started.</p></div>'}
+  `, req.session.user));
+}));
+
+app.get('/clinic/beds/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  res.send(renderPage('Add Bed', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Add New Bed</h2>
+    <form method="POST" action="/clinic/beds/save">
+      <label>Bed Number</label><input name="bed_number" required placeholder="e.g. A-101">
+      <label>Ward / Department</label><select name="ward" required>
+        <option value="General Ward">General Ward</option><option value="Private Ward">Private Ward</option><option value="Maternity">Maternity</option>
+        <option value="Pediatrics">Pediatrics</option><option value="ICU">ICU</option><option value="Emergency">Emergency</option>
+        <option value="Surgery">Surgery / Theater</option><option value="Labor Room">Labor Room</option><option value="Observation">Observation</option>
+      </select>
+      <label>Bed Type</label><select name="bed_type"><option value="Standard">Standard</option><option value="VIP">VIP</option><option value="ICU Bed">ICU Bed</option><option value="Maternity Bed">Maternity Bed</option><option value="Pediatric Bed">Pediatric Bed</option><option value="Crib">Crib</option></select>
+      <label>Daily Rate (UGX)</label><input name="daily_rate" type="number" placeholder="50000">
+      <button class="btn btn-green">Add Bed</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/beds/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('INSERT INTO clinic_beds(tenant_id,bed_number,ward,bed_type,daily_rate,status) VALUES($1,$2,$3,$4,$5,$6)', [t, req.body.bed_number, req.body.ward, req.body.bed_type||'Standard', req.body.daily_rate||0, 'available']);
+  res.redirect('/clinic/beds');
+}));
+
+app.get('/clinic/beds/:id/assign', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const bed = (await pool.query('SELECT * FROM clinic_beds WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!bed) return res.status(404).send('Bed not found');
+  res.send(renderPage('Assign Patient to Bed', `<div class="card" style="max-width:500px;margin:40px auto"><h2>Assign Patient — Bed ${esc(bed.bed_number)} (${esc(bed.ward)})</h2>
+    <form method="POST" action="/clinic/beds/${req.params.id}/assign/save">
+      <label>Patient Name</label><input name="patient_name" required placeholder="John Doe">
+      <label>Diagnosis / Reason</label><input name="reason" placeholder="Malaria, Post-op, etc.">
+      <button class="btn btn-green">Assign Bed</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/beds/:id/assign/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE clinic_beds SET patient_name=$1,reason=$2,status=$3,assigned_at=NOW() WHERE id=$4', [req.body.patient_name, req.body.reason, 'occupied', req.params.id]);
+  res.redirect('/clinic/beds');
+}));
+
+app.get('/clinic/beds/:id/discharge', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('UPDATE clinic_beds SET patient_name=NULL,reason=NULL,status=$1,assigned_at=NULL WHERE id=$2', ['available', req.params.id]);
+  res.redirect('/clinic/beds');
+}));
+
+// === CLINIC: DEPARTMENTS (for hospitals) ===
+app.get('/clinic/departments', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const depts = [
+    { name:'Outpatient', icon:'128137', color:'#3b82f6', desc:'Walk-in consultations & triage' },
+    { name:'Inpatient', icon:'127973', color:'#8b5cf6', desc:'Admitted patients & bed management' },
+    { name:'Emergency', icon:'127383', color:'#dc2626', desc:'24/7 emergency & trauma care' },
+    { name:'Maternity', icon:'128118', color:'#ec4899', desc:'Antenatal, delivery & postnatal' },
+    { name:'Pediatrics', icon:'128121', color:'#f97316', desc:'Children health & immunization' },
+    { name:'Surgery', icon:'129656', color:'#475569', desc:'Operating theater & procedures' },
+    { name:'Laboratory', icon:'128300', color:'#06b6d4', desc:'Diagnostic tests & results' },
+    { name:'Pharmacy', icon:'128138', color:'#22c55e', desc:'Drug dispensing & inventory' },
+    { name:'Radiology', icon:'128247', color:'#6366f1', desc:'X-ray, ultrasound, CT scan' },
+    { name:'Dental', icon:'129463', color:'#eab308', desc:'Dental treatments & hygiene' },
+    { name:'Eye Clinic', icon:'128065', color:'#14b8a6', desc:'Vision tests & eye care' },
+    { name:'Mental Health', icon:'129504', color:'#a855f7', desc:'Counseling & psychiatry' },
+    { name:'VCT/ART', icon:'128154', color:'#ef4444', desc:'HIV testing, counseling & ARVs' },
+    { name:'Physiotherapy', icon:'127939', color:'#0ea5e9', desc:'Rehabilitation & physical therapy' }
+  ];
+  res.send(renderPage('Departments', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#6366f1);color:white"><h1>Hospital Departments</h1><p>Quick access to all departments</p></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px">
+      ${depts.map(d => `<div class="card" style="border-left:4px solid ${d.color};padding:18px">
+        <div style="font-size:28px;margin-bottom:6px">&#${d.icon};</div>
+        <h3 style="font-size:15px;margin-bottom:4px">${d.name}</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:10px">${d.desc}</p>
+        <a href="/clinic/queue" class="btn btn-sm" style="background:${d.color};color:white">Open</a>
+      </div>`).join('')}
+    </div>
   `, req.session.user));
 }));
 
@@ -13969,6 +14155,62 @@ app.post('/school/health/visit/save', requireAuth, requireNotBanned, ah(async (r
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.visit_date||'CURRENT_DATE', req.body.complaint, req.body.diagnosis, req.body.treatment, req.body.seen_by]);
   res.redirect('/school/health');
+}));
+
+// === SCHOOL: SICK BAY (Simple visit tracker — NOT a full clinic) ===
+app.get('/school/sickbay', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const todayVisits = (await pool.query("SELECT hv.*,s.name as student_name,s.class FROM health_visits hv JOIN students s ON s.id=hv.student_id WHERE hv.tenant_id=$1 AND hv.visit_date=CURRENT_DATE ORDER BY hv.visit_date DESC", [t])).rows;
+  const pastVisits = (await pool.query("SELECT hv.*,s.name as student_name,s.class FROM health_visits hv JOIN students s ON s.id=hv.student_id WHERE hv.tenant_id=$1 AND hv.visit_date < CURRENT_DATE ORDER BY hv.visit_date DESC LIMIT 15", [t])).rows;
+  const todayCount = todayVisits.length;
+  res.send(renderPage('Sick Bay', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#f43f5e)"><h1>Sick Bay</h1><p>Quick student first aid and minor illness tracker</p></div>
+    <div class="stats">
+      <div class="stat-card" style="border-left:4px solid #ec4899"><div class="stat-num" style="color:#ec4899">${todayCount}</div><div>Visits Today</div></div>
+      <div class="stat-card"><div class="stat-num">${pastVisits.length > 0 ? pastVisits[0].visit_date : '—'}</div><div>Last Visit Before Today</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <a href="/school/sickbay/new" class="btn" style="background:#ec4899;color:white">+ Send to Sick Bay</a>
+        <a href="/school/health" class="btn btn-sm">View All Health Records</a>
+      </div>
+      ${todayCount > 0 ? `<h3 style="margin-bottom:10px">Today's Visits (${todayCount})</h3>
+        <table><tr><th>Student</th><th>Class</th><th>Complaint</th><th>Treatment</th><th>Seen By</th><th>Time</th></tr>
+        ${todayVisits.map(v => `<tr><td><strong>${esc(v.student_name)}</strong></td><td>${esc(v.class||'')}</td><td>${esc(v.complaint||'')}</td><td>${esc(v.treatment||'—')}</td><td>${esc(v.seen_by||'—')}</td><td>${v.visit_date ? new Date(v.visit_date).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''}</td></tr>`).join('')}
+        </table>` : '<p class="muted">No sick bay visits today.</p>'}
+      ${pastVisits.length > 0 ? `<h3 style="margin-top:20px;margin-bottom:10px">Previous Visits</h3>
+        <table><tr><th>Student</th><th>Date</th><th>Complaint</th><th>Treatment</th></tr>
+        ${pastVisits.map(v => `<tr style="opacity:0.8"><td>${esc(v.student_name)}</td><td>${v.visit_date}</td><td>${esc(v.complaint||'')}</td><td>${esc(v.treatment||'—')}</td></tr>`).join('')}
+        </table>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/school/sickbay/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Send to Sick Bay', `<div class="card" style="max-width:600px;margin:40px auto">
+    <h2 style="text-align:center;margin-bottom:20px">Sick Bay Visit</h2>
+    <form method="POST" action="/school/sickbay/save">
+      <label>Student</label><select name="student_id" required>${students.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.class||'')})</option>`).join('')}</select>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Visit Type</label><select name="visit_type"><option value="first_aid">First Aid</option><option value="illness">Minor Illness</option><option value="injury">Injury</option><option value="headache">Headache</option><option value="stomach">Stomach Pain</option><option value="fever">Fever</option><option value="other">Other</option></select></div>
+        <div><label>Seen By</label><input name="seen_by" placeholder="Nurse / Teacher name"></div>
+      </div>
+      <label>Complaint / Symptoms</label><textarea name="complaint" rows="2" required placeholder="What is the student complaining of?"></textarea>
+      <label>Treatment Given</label><textarea name="treatment" rows="2" placeholder="Panadol, bandage, rest, ice pack, etc."></textarea>
+      <label>Action Needed?</label><select name="action"><option value="none">None - returned to class</option><option value="rest">Rest in sick bay</option><option value="parent">Call parent/guardian</option><option value="hospital">Refer to hospital</option></select>
+      <button class="btn btn-green">Save Visit</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/school/sickbay/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const complaint = req.body.complaint + (req.body.action !== 'none' ? ` [Action: ${req.body.action}]` : '');
+  await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,CURRENT_DATE,$3,$4,$5,$6)', [t, req.body.student_id, complaint, req.body.visit_type, req.body.treatment, req.body.seen_by]);
+  await audit(req.session.user.email, 'sick_bay_visit', `Sick bay visit for student #${req.body.student_id}: ${req.body.visit_type}`);
+  res.redirect('/school/sickbay');
 }));
 
 // =============================================
@@ -28344,7 +28586,7 @@ const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth: requireAuth, wsB
 ['approval_requests','approval_actions','approval_notifications','approval_steps','approval_workflow_templates','approval_workflows'].forEach(t => VALID_TABLES.add(t));
 try { const m = require('./approvals'); m(app, db, pool, renderPage, esc); console.log('[Approvals] Approvals workflow module loaded'); } catch(e) { console.warn('[Approvals] Error:', e.message); }
 
-['clinic_patients','clinic_appointments','clinic_consultations','clinic_prescriptions','clinic_prescription_items','clinic_staff','clinic_visit_history','immunization_records','lab_requests','lab_results','patient_allergies','patient_chronic_conditions','patient_medications','patient_queue','patient_vitals','pharmacy_dispensing','pharmacy_inventory'].forEach(t => VALID_TABLES.add(t));
+['clinic_patients','clinic_appointments','clinic_consultations','clinic_prescriptions','clinic_prescription_items','clinic_staff','clinic_visit_history','immunization_records','lab_requests','lab_results','patient_allergies','patient_chronic_conditions','patient_medications','patient_queue','patient_vitals','pharmacy_dispensing','pharmacy_inventory','clinic_beds'].forEach(t => VALID_TABLES.add(t));
 try { const m = require('./clinic-management'); m(app, db, pool, renderPage, esc); console.log('[Clinic] Clinic management module loaded'); } catch(e) { console.warn('[Clinic] Error:', e.message); }
 
 ['custom_forms','custom_fields','custom_field_values','form_field_options','form_submissions'].forEach(t => VALID_TABLES.add(t));
