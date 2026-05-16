@@ -27916,6 +27916,8 @@ try {
 // ============================================================
 // NEW MODULE: NOTIFICATION CENTER (Inbox, Preferences, Announcements)
 // ============================================================
+// db alias for modules that expect (app, db, pool, ...) signature
+const db = pool;
 try {
   const notificationCenter = require('./notification-center');
   notificationCenter(app, db, pool, renderPage, esc);
