@@ -91,12 +91,14 @@ module.exports = function gallery(app, db, pool, renderPage, esc) {
       )`);
       // ALTER TABLE columns
       const albumCols = [
+        ['tenant_id', 'INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE'],
         ['name', 'VARCHAR(255)'], ['description', 'TEXT'], ['cover_url', 'TEXT'],
         ['is_public', 'BOOLEAN DEFAULT true'], ['photo_count', 'INTEGER DEFAULT 0'],
         ['created_by', 'INTEGER'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (const [col, def] of albumCols) { try { await c.query(`ALTER TABLE gallery_albums ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       const photoCols = [
+        ['tenant_id', 'INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE'],
         ['album_id', 'INTEGER'], ['title', 'VARCHAR(255)'], ['description', 'TEXT'],
         ['url', 'TEXT'], ['thumbnail_url', 'TEXT'], ['file_name', 'VARCHAR(255)'],
         ['file_size', 'INTEGER'], ['width', 'INTEGER'], ['height', 'INTEGER'],
@@ -104,6 +106,7 @@ module.exports = function gallery(app, db, pool, renderPage, esc) {
       ];
       for (const [col, def] of photoCols) { try { await c.query(`ALTER TABLE gallery_photos ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }
       const tagCols = [
+        ['tenant_id', 'INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE'],
         ['photo_id', 'INTEGER'], ['tag', 'VARCHAR(100)'], ['created_at', 'TIMESTAMPTZ DEFAULT NOW()']
       ];
       for (const [col, def] of tagCols) { try { await c.query(`ALTER TABLE gallery_tags ADD COLUMN IF NOT EXISTS ${col} ${def}`); } catch (e) {} }

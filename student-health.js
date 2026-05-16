@@ -168,6 +168,42 @@ module.exports = function studentHealth(app, db, pool, renderPage, esc) {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
+      // -- ALTER health_visits: add missing columns ----------------------
+      const hvCols = [
+        ['tenant_id', 'INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE'],
+        ['student_id', 'INTEGER NOT NULL'],
+        ['visit_date', 'DATE NOT NULL'],
+        ['visit_type', 'VARCHAR(50) DEFAULT \'general\''],
+        ['symptoms', 'TEXT'],
+        ['diagnosis', 'TEXT'],
+        ['treatment', 'TEXT'],
+        ['doctor_name', 'VARCHAR(255)'],
+        ['follow_up_date', 'DATE'],
+        ['status', 'VARCHAR(20) DEFAULT \'completed\''],
+        ['notes', 'TEXT'],
+        ['created_by', 'INTEGER'],
+        ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'],
+      ];
+      for (const [col, type] of hvCols) {
+        try { await c.query(`ALTER TABLE health_visits ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (e) { /* ignore */ }
+      }
+
+      // -- ALTER health_screenings: add missing columns --------------------
+      const hsCols = [
+        ['tenant_id', 'INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE'],
+        ['student_id', 'INTEGER NOT NULL'],
+        ['screening_date', 'DATE NOT NULL'],
+        ['screening_type', 'VARCHAR(50) DEFAULT \'general\''],
+        ['results', 'TEXT'],
+        ['status', 'VARCHAR(20) DEFAULT \'completed\''],
+        ['notes', 'TEXT'],
+        ['created_by', 'INTEGER'],
+        ['created_at', 'TIMESTAMPTZ DEFAULT NOW()'],
+      ];
+      for (const [col, type] of hsCols) {
+        try { await c.query(`ALTER TABLE health_screenings ADD COLUMN IF NOT EXISTS ${col} ${type}`); } catch (e) { /* ignore */ }
+      }
+
       // -- INDEXES --------------------------------------------------------
       await c.query(`CREATE INDEX IF NOT EXISTS idx_sh_tenant ON student_health(tenant_id)`);
       await c.query(`CREATE INDEX IF NOT EXISTS idx_sh_student ON student_health(student_id)`);

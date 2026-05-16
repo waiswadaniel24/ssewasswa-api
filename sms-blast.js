@@ -81,13 +81,18 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
       ]) await pool.query(sql).catch(() => {});
 
       // Seed 5 templates (ON CONFLICT DO NOTHING)
-      await pool.query(`INSERT INTO sms_templates (tenant_id,name,content,category,variables) VALUES
-        (0,'General Notice','Dear {{name}}, {{message}}. Regards, {{organization}}.','general',ARRAY['name','message','organization']),
-        (0,'Fee Reminder','Dear {{name}}, fee of {{amount}} for {{term}} due {{due_date}}. Pay promptly.','billing',ARRAY['name','amount','term','due_date']),
-        (0,'Event Invitation','Invited to {{event}} on {{date}} at {{time}}. Venue: {{venue}}.','events',ARRAY['event','date','time','venue']),
-        (0,'Emergency Alert','URGENT: {{alert_message}}. Follow instructions from {{authority}}.','emergency',ARRAY['alert_message','authority']),
-        (0,'Attendance Summary','{{name}}, attendance for {{date}}: Present {{present}}/{{total}} periods.','attendance',ARRAY['name','date','present','total'])
-        ON CONFLICT DO NOTHING;`);
+      // Wrapped in try/catch because tenant_id=0 may not exist in tenants table
+      try {
+        await pool.query(`INSERT INTO sms_templates (tenant_id,name,content,category,variables) VALUES
+          (0,'General Notice','Dear {{name}}, {{message}}. Regards, {{organization}}.','general',ARRAY['name','message','organization']),
+          (0,'Fee Reminder','Dear {{name}}, fee of {{amount}} for {{term}} due {{due_date}}. Pay promptly.','billing',ARRAY['name','amount','term','due_date']),
+          (0,'Event Invitation','Invited to {{event}} on {{date}} at {{time}}. Venue: {{venue}}.','events',ARRAY['event','date','time','venue']),
+          (0,'Emergency Alert','URGENT: {{alert_message}}. Follow instructions from {{authority}}.','emergency',ARRAY['alert_message','authority']),
+          (0,'Attendance Summary','{{name}}, attendance for {{date}}: Present {{present}}/{{total}} periods.','attendance',ARRAY['name','date','present','total'])
+          ON CONFLICT DO NOTHING;`);
+      } catch (seedErr) {
+        console.warn('[SMS] Seed skipped (tenant_id=0 may not exist):', seedErr.message);
+      }
       console.log('[SMS] Migrations & seeds applied');
     } catch (e) { console.error('[SMS] Migration error:', e.message); }
   })();

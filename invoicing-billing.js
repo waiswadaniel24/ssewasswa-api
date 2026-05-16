@@ -203,6 +203,7 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
       `ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
       `ALTER TABLE IF EXISTS invoices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
       // invoice_items
+      `ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS invoice_id INTEGER REFERENCES invoices(id) ON DELETE CASCADE`,
       `ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS item_name VARCHAR(255)`,
       `ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS description TEXT`,
       `ALTER TABLE IF EXISTS invoice_items ADD COLUMN IF NOT EXISTS quantity DECIMAL(10,2) DEFAULT 1`,

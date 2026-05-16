@@ -189,6 +189,8 @@ module.exports = function templateLibrary(app, db, pool, renderPage, esc) {
       await c.query(`CREATE INDEX IF NOT EXISTS idx_tpl_category ON templates(category)`);
       await c.query(`CREATE INDEX IF NOT EXISTS idx_tpl_type ON templates(type)`);
       await c.query(`CREATE INDEX IF NOT EXISTS idx_tpl_active ON templates(is_active)`);
+      // Unique constraint for ON CONFLICT in seed (tenant_id, name)
+      try { await c.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tpl_tenant_name ON templates(tenant_id, name)`); } catch (e) {}
       console.log('[TemplateLibrary] Migrations applied');
     } catch (e) {
       console.error('[TemplateLibrary] Migration error:', e.message);

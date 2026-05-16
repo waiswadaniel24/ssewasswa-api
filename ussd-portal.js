@@ -85,12 +85,17 @@ module.exports = function ussdPortal(app, db, pool, renderPage, esc) {
       ]) await c.query(sql).catch(() => {});
 
       // Seed default menu config for tenant_id=0 (global defaults)
-      await c.query(`INSERT INTO ussd_menu_config (tenant_id,menu_key,label,display_order) VALUES
-        (0,'check_fees','Check Fees',1),
-        (0,'check_attendance','Check Attendance',2),
-        (0,'check_results','Check Results',3),
-        (0,'contact_school','Contact School',4)
-        ON CONFLICT DO NOTHING;`);
+      // Wrapped in try/catch because tenant_id=0 may not exist in tenants table
+      try {
+        await c.query(`INSERT INTO ussd_menu_config (tenant_id,menu_key,label,display_order) VALUES
+          (0,'check_fees','Check Fees',1),
+          (0,'check_attendance','Check Attendance',2),
+          (0,'check_results','Check Results',3),
+          (0,'contact_school','Contact School',4)
+          ON CONFLICT DO NOTHING;`);
+      } catch (seedErr) {
+        console.warn('[USSD] Seed skipped (tenant_id=0 may not exist):', seedErr.message);
+      }
 
       console.log('[USSD] Migrations applied');
     } catch (e) { console.error('[USSD] Migration error:', e.message); }

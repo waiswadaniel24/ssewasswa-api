@@ -499,13 +499,18 @@ Contact: {{school_phone}}`
       }
 
       // Seed default templates for tenant_id 0 (system defaults)
-      for (const [type, content] of Object.entries(DEFAULT_TEMPLATES)) {
-        const vars = [...content.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]).filter((v, i, a) => a.indexOf(v) === i);
-        await c.query(`
-          INSERT INTO whatsapp_templates (tenant_id, receipt_type, template_name, template_content, variables, is_default)
-          VALUES (0, $1, $2, $3, $4, true)
-          ON CONFLICT DO NOTHING;
-        `, [type, typeLabel(type) + ' - Default', content, vars]);
+      // Wrapped in try/catch because tenant_id=0 may not exist in tenants table
+      try {
+        for (const [type, content] of Object.entries(DEFAULT_TEMPLATES)) {
+          const vars = [...content.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]).filter((v, i, a) => a.indexOf(v) === i);
+          await c.query(`
+            INSERT INTO whatsapp_templates (tenant_id, receipt_type, template_name, template_content, variables, is_default)
+            VALUES (0, $1, $2, $3, $4, true)
+            ON CONFLICT DO NOTHING;
+          `, [type, typeLabel(type) + ' - Default', content, vars]);
+        }
+      } catch (seedErr) {
+        console.warn('[WhatsAppReceipts] Seed skipped (tenant_id=0 may not exist):', seedErr.message);
       }
 
       console.log('[WhatsAppReceipts] Migrations applied successfully');
