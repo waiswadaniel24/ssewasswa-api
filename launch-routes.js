@@ -111,6 +111,21 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     // Add public_url column to campaigns if missing
     `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS public_url TEXT`,
     `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS image_url TEXT`,
+    // === MONETIZATION: Ad click tracking for revenue ===
+    `CREATE TABLE IF NOT EXISTS ad_clicks (
+      id SERIAL PRIMARY KEY,
+      ad_type TEXT NOT NULL DEFAULT 'banner',
+      placement TEXT NOT NULL DEFAULT 'sidebar',
+      link_url TEXT NOT NULL,
+      revenue_usd NUMERIC(10,4) DEFAULT 0,
+      page_url TEXT,
+      referrer TEXT,
+      user_agent TEXT,
+      ip_address TEXT,
+      clicked_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_ad_clicks_date ON ad_clicks(clicked_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_ad_clicks_type ON ad_clicks(ad_type)`,
   ];
 
   // Run launch migrations
@@ -1317,6 +1332,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     const content = `
       <div style="padding:20px 0">
         ${advertBanner}
+        ${adBanner('entertainment-top', 'leaderboard')}
         <div style="text-align:center;margin-bottom:36px">
           <h1 style="font-size:36px;font-weight:900;color:#1e293b">&#127911; Entertainment Hub</h1>
           <p style="color:#64748b;font-size:18px;margin-top:8px">Music, Comedy, Sports &amp; News from Uganda</p>
@@ -1325,10 +1341,13 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         <!-- YouTube Embeds -->
         <div style="margin-bottom:40px">
           <h2 style="font-size:22px;font-weight:700;margin-bottom:16px;color:#1e293b">&#127916; Watch Now</h2>
+          ${adBanner('watch-section', 'banner')}
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px">
             ${embedHTML}
           </div>
         </div>
+
+        ${affiliateProductCards('entertainment-mid')}
 
         <!-- Music & Entertainment -->
         ${entertainment.length > 0 ? `
@@ -1344,11 +1363,14 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         ${sports.length > 0 ? `
         <div style="margin-bottom:40px">
           <h2 style="font-size:22px;font-weight:700;margin-bottom:16px;color:#059669">&#9917; Sports</h2>
+          ${adBanner('sports-section', 'banner')}
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
             ${renderCards(sports, '#059669,#10b981')}
           </div>
         </div>
         ` : ''}
+
+        ${adBanner('between-content', 'rectangle')}
 
         <!-- News Headlines -->
         ${news.length > 0 ? `
@@ -1360,6 +1382,8 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
         ` : ''}
 
+        ${affiliateProductCards('entertainment-bottom')}
+
         <!-- CTA -->
         <div style="background:linear-gradient(135deg,#059669,#0891b2);border-radius:20px;padding:40px;text-align:center;margin-top:40px">
           <h2 style="color:white;font-size:28px;font-weight:800;margin-bottom:12px">Love what you see?</h2>
@@ -1369,7 +1393,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
     `;
 
-    res.send(renderPage('Entertainment Hub - Comfort', content, req.session.user || null, '/p/entertainment'));
+    res.send(renderPage('Entertainment Hub - Comfort', content, req.session.user || null, '/p/entertainment') + monetizationScript);
   }));
 
   // =========================================================================
@@ -1448,6 +1472,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
     const content = '<div style="padding:20px 0">' +
       advertBanner +
+      adBanner('news-top', 'leaderboard') +
       // Hero header
       '<div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0891b2 100%);padding:50px 20px 40px;text-align:center;border-radius:0 0 24px 24px;margin-bottom:32px;position:relative;overflow:hidden">' +
         '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(circle at 20% 50%,rgba(8,145,178,0.15),transparent 60%)"></div>' +
@@ -1484,6 +1509,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             '<div style="color:white;font-weight:700;margin-bottom:8px;font-size:15px">' + String.fromCodePoint(128172) + ' Share with Friends</div>' +
             '<a href="https://api.whatsapp.com/send?text=' + encodeURIComponent('Check out Comfort News - Latest Uganda & Africa news, sports, tech and more! ' + BASE_URL + '/news') + '" target="_blank" rel="noopener" style="display:inline-block;padding:10px 24px;background:white;color:#25D366;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Share on WhatsApp</a>' +
           '</div>' +
+          adBanner('news-sidebar', 'rectangle') +
           // Join CTA
           '<div style="background:linear-gradient(135deg,#059669,#0891b2);border-radius:16px;padding:20px;text-align:center;color:white">' +
             '<h3 style="font-size:16px;font-weight:700;margin-bottom:6px">' + String.fromCodePoint(127775) + ' Join Comfort Platform</h3>' +
@@ -1524,7 +1550,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       '</script>' +
     '</div>';
 
-    res.send(renderPage('News Hub - Uganda & Africa News, Sports, Tech | Comfort', content, req.session.user || null, '/news'));
+    res.send(renderPage('News Hub - Uganda & Africa News, Sports, Tech | Comfort', content, req.session.user || null, '/news') + monetizationScript);
   }));
 
   // =========================================================================
@@ -2470,6 +2496,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <a href="/dev/post-public" class="btn btn-sm" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">Post Content</a>
             <a href="/dev/adverts" class="btn btn-sm" style="background:linear-gradient(135deg,#d97706,#f59e0b)">Manage Adverts</a>
+            <a href="/dev/earnings" class="btn btn-sm" style="background:linear-gradient(135deg,#059669,#10b981)">Ad Revenue</a>
             <a href="/dev/scrape-now" class="btn btn-sm" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">Scrape Now</a>
             <form method="POST" action="/dev/cleanup-users" style="display:inline">
               <button type="submit" class="btn btn-sm btn-red" onclick="return confirm('Delete ALL users except dev master?')">Cleanup Users</button>
@@ -2830,7 +2857,131 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   }, 60 * 60 * 1000);
 
   // =========================================================================
-  // SECTION 14: PWA ENHANCEMENTS
+  // SECTION 14: MONETIZATION — Ad Revenue, Affiliate Links, YouTube Embeds
+  // =========================================================================
+
+  // --- Ad click tracking API ---
+  app.post('/api/public/ad-click', ah(async (req, res) => {
+    const { ad_type, placement, link_url, page_url } = req.body;
+    if (!link_url) return res.json({ ok: false });
+    // Estimate CPC revenue (varies by ad type and placement)
+    const cpcRates = { banner: 0.02, sidebar: 0.015, incontent: 0.03, affiliate: 0.15, video: 0.05, popup: 0.01 };
+    const revenue = cpcRates[ad_type] || 0.02;
+    await pool.query(
+      'INSERT INTO ad_clicks (ad_type, placement, link_url, revenue_usd, page_url, referrer, user_agent, ip_address) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      [ad_type || 'banner', placement || 'sidebar', link_url, revenue, page_url || '', req.headers.referer || '', req.headers['user-agent'] || '', req.ip || '']
+    );
+    res.json({ ok: true });
+  }));
+
+  // --- Ad revenue stats API ---
+  app.get('/api/public/ad-stats', ah(async (req, res) => {
+    const today = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE")).rows[0];
+    const week = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE - INTERVAL '7 days'")).rows[0];
+    const month = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE - INTERVAL '30 days'")).rows[0];
+    const allTime = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks")).rows[0];
+    // Top pages
+    const topPages = (await pool.query("SELECT page_url, COUNT(*) as clicks, SUM(revenue_usd) as revenue FROM ad_clicks GROUP BY page_url ORDER BY clicks DESC LIMIT 10")).rows;
+    res.json({ ok: true, today, week, month, allTime, topPages });
+  }));
+
+  // --- Google AdSense integration helper ---
+  const ADSENSE_CLIENT_ID = process.env.ADSENSE_CLIENT_ID || 'ca-pub-XXXXX'; // Replace with real AdSense ID
+
+  // Ad HTML generator with tracking
+  function adBanner(placement, size) {
+    const id = 'ad-' + placement + '-' + Math.random().toString(36).substring(2, 8);
+    if (size === 'leaderboard') {
+      return '<div id="' + id + '" style="background:#f8fafc;border:1px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;margin:16px 0;min-height:90px;display:flex;align-items:center;justify-content:center"><a href="https://jumia.ug" target="_blank" rel="noopener sponsored" onclick="trackAd(this,\'banner\',\'' + placement + '\')" style="color:#475569;font-size:13px;text-decoration:none"><b>Shop on Jumia Uganda</b> — Electronics, Fashion & More at Best Prices</a></div>';
+    }
+    if (size === 'rectangle') {
+      return '<div id="' + id + '" style="background:#f8fafc;border:1px dashed #e2e8f0;border-radius:10px;padding:16px;text-align:center;margin:16px 0;min-height:250px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px"><a href="https://www.jumia.ug/phones/" target="_blank" rel="noopener sponsored" onclick="trackAd(this,\'affiliate\',\'' + placement + '\')" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:white;padding:12px 20px;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Get Deals on Phones</a><a href="https://www.jumia.ug/fashion/" target="_blank" rel="noopener sponsored" onclick="trackAd(this,\'affiliate\',\'' + placement + '\')" style="background:linear-gradient(135deg,#7c3aed,#a855f7);color:white;padding:12px 20px;border-radius:10px;font-weight:700;text-decoration:none;font-size:14px">Shop Fashion</a></div>';
+    }
+    return '<div id="' + id + '" style="background:#f8fafc;border:1px dashed #e2e8f0;border-radius:10px;padding:12px;text-align:center;margin:12px 0;min-height:60px;display:flex;align-items:center;justify-content:center"><a href="https://jumia.ug" target="_blank" rel="noopener sponsored" onclick="trackAd(this,\'banner\',\'' + placement + '\')" style="color:#64748b;font-size:12px;text-decoration:none">Ad — <b>Shop Jumia Uganda</b></a></div>';
+  }
+
+  // Inline video player with ads
+  function videoEmbed(videoUrl, title, placement) {
+    // Extract YouTube video ID if possible
+    const ytMatch = videoUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+    const embedUrl = ytMatch ? 'https://www.youtube.com/embed/' + ytMatch[1] + '?rel=0&modestbranding=1' : videoUrl;
+    return '<div style="position:relative;width:100%;padding-bottom:56.25%;margin:16px 0;border-radius:14px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)"><iframe src="' + embedUrl + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen loading="lazy" title="' + esc(title || 'Video') + '"></iframe></div>';
+  }
+
+  // Affiliate product cards for Jumia
+  function affiliateProductCards(placement) {
+    const products = [
+      { name: 'Samsung Galaxy A15', price: 'UGX 350,000', url: 'https://www.jumia.ug/samsung-galaxy/', img: 'https://via.placeholder.com/200x200/4f46e5/white?text=Samsung', tag: 'Best Seller' },
+      { name: 'Itel P40 Phone', price: 'UGX 180,000', url: 'https://www.jumia.ug/itel-phones/', img: 'https://via.placeholder.com/200x200/059669/white?text=Itel', tag: 'Budget Pick' },
+      { name: 'Wireless Earbuds', price: 'UGX 45,000', url: 'https://www.jumia.ug/earbuds/', img: 'https://via.placeholder.com/200x200/dc2626/white?text=Earbuds', tag: 'Popular' },
+      { name: 'Solar Power Bank', price: 'UGX 65,000', url: 'https://www.jumia.ug/power-banks/', img: 'https://via.placeholder.com/200x200/d97706/white?text=Power+Bank', tag: 'Essential' },
+    ];
+    return '<div style="margin:24px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><h3 style="font-size:18px;font-weight:700;color:#1e293b">Hot Deals on Jumia</h3><span style="font-size:11px;color:#94a3b8;background:#f1f5f9;padding:4px 10px;border-radius:6px">Sponsored</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">' + products.map(function(p) {
+      return '<a href="' + p.url + '" target="_blank" rel="noopener sponsored" onclick="trackAd(this,\'affiliate\',\'' + placement + '\')" style="background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;text-decoration:none;transition:transform 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.04)" onmouseover="this.style.transform=\'translateY(-3px)\'" onmouseout="this.style.transform=\'translateY(0)\'"><div style="position:relative"><img src="' + p.img + '" alt="' + esc(p.name) + '" style="width:100%;height:140px;object-fit:cover" loading="lazy"><span style="position:absolute;top:8px;left:8px;background:#059669;color:white;font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px">' + p.tag + '</span></div><div style="padding:12px"><div style="font-size:14px;font-weight:600;color:#1e293b">' + esc(p.name) + '</div><div style="font-size:16px;font-weight:800;color:#059669;margin-top:4px">' + p.price + '</div></div></a>';
+    }).join('') + '</div></div>';
+  }
+
+  // Monetization script (injected into all public pages)
+  const monetizationScript = '<script>function trackAd(el,type,placement){var url=el.href||el.closest("a")?.href||"";if(!url)return;navigator.sendBeacon("/api/public/ad-click",JSON.stringify({ad_type:type,placement:placement,link_url:url,page_url:location.pathname}))}</script>';
+
+  // --- EARNINGS DASHBOARD ---
+  app.get('/dev/earnings', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+    const today = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE")).rows[0];
+    const week = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE - INTERVAL '7 days'")).rows[0];
+    const month = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE - INTERVAL '30 days'")).rows[0];
+    const allTime = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks")).rows[0];
+    const topPages = (await pool.query("SELECT page_url, COUNT(*) as clicks, SUM(revenue_usd) as revenue FROM ad_clicks GROUP BY page_url ORDER BY clicks DESC LIMIT 15")).rows;
+    const recentClicks = (await pool.query("SELECT ad_type, placement, link_url, revenue_usd, page_url, clicked_at FROM ad_clicks ORDER BY clicked_at DESC LIMIT 30")).rows;
+    const dailyRevenue = (await pool.query("SELECT DATE(clicked_at) as date, COUNT(*) as clicks, SUM(revenue_usd) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE - INTERVAL '14 days' GROUP BY DATE(clicked_at) ORDER BY date")).rows;
+
+    const fmt = (n) => parseFloat(n || 0).toFixed(2);
+
+    res.send(renderPage('Ad Revenue Dashboard', '<div class="card"><h2>Monetization — Ad Revenue</h2>' +
+      '<p class="muted">Track earnings from ads, affiliate links, and video views across your public pages.</p></div>' +
+
+      // Revenue cards
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:20px 0">' +
+        '<div class="card" style="border-left:4px solid #059669"><div style="font-size:28px;font-weight:900;color:#059669">$' + fmt(today.revenue) + '</div><div style="color:#64748b;font-size:13px">Today</div><div style="color:#94a3b8;font-size:12px">' + today.clicks + ' clicks</div></div>' +
+        '<div class="card" style="border-left:4px solid #4f46e5"><div style="font-size:28px;font-weight:900;color:#4f46e5">$' + fmt(week.revenue) + '</div><div style="color:#64748b;font-size:13px">This Week</div><div style="color:#94a3b8;font-size:12px">' + week.clicks + ' clicks</div></div>' +
+        '<div class="card" style="border-left:4px solid #d97706"><div style="font-size:28px;font-weight:900;color:#d97706">$' + fmt(month.revenue) + '</div><div style="color:#64748b;font-size:13px">This Month</div><div style="color:#94a3b8;font-size:12px">' + month.clicks + ' clicks</div></div>' +
+        '<div class="card" style="border-left:4px solid #dc2626"><div style="font-size:28px;font-weight:900;color:#dc2626">$' + fmt(allTime.revenue) + '</div><div style="color:#64748b;font-size:13px">All Time</div><div style="color:#94a3b8;font-size:12px">' + allTime.clicks + ' clicks</div></div>' +
+      '</div>' +
+
+      // 14-day chart
+      '<div class="card" style="margin:20px 0"><h3>Revenue — Last 14 Days</h3><div style="display:flex;align-items:flex-end;gap:6px;height:180px;margin-top:16px;padding:0 8px">' +
+        dailyRevenue.map(function(d) {
+          var maxRev = Math.max.apply(null, dailyRevenue.map(function(x){return parseFloat(x.revenue)}));
+          var h = maxRev > 0 ? Math.max(4, (parseFloat(d.revenue) / maxRev) * 150) : 4;
+          return '<div style="flex:1;text-align:center"><div style="background:linear-gradient(180deg,#059669,#0d9488);height:' + h + 'px;border-radius:6px 6px 0 0;transition:height 0.3s" title="$' + fmt(d.revenue) + '"></div><div style="font-size:10px;color:#94a3b8;margin-top:4px">' + d.date.substring(5) + '</div></div>';
+        }).join('') +
+      '</div></div>' +
+
+      // Top pages
+      '<div class="card" style="margin:20px 0"><h3>Top Earning Pages</h3><table style="margin-top:12px"><tr><th>Page</th><th>Clicks</th><th>Revenue</th></tr>' +
+        topPages.map(function(p) { return '<tr><td><code>' + esc(p.page_url || '/') + '</code></td><td>' + p.clicks + '</td><td style="color:#059669;font-weight:700">$' + fmt(p.revenue) + '</td></tr>'; }).join('') +
+      '</table></div>' +
+
+      // Recent clicks
+      '<div class="card" style="margin:20px 0"><h3>Recent Ad Clicks</h3><table style="margin-top:12px"><tr><th>Type</th><th>Placement</th><th>Revenue</th><th>Page</th><th>Time</th></tr>' +
+        recentClicks.map(function(c) { return '<tr><td><span class="tag">' + esc(c.ad_type) + '</span></td><td>' + esc(c.placement) + '</td><td style="color:#059669;font-weight:600">$' + fmt(c.revenue_usd) + '</td><td><code>' + esc(c.page_url || '/') + '</code></td><td class="muted">' + new Date(c.clicked_at).toLocaleDateString() + '</td></tr>'; }).join('') +
+      '</table></div>' +
+
+      // Setup instructions
+      '<div class="card" style="margin:20px 0;border:2px solid #4f46e5"><h3 style="color:#4f46e5">How to Maximize Earnings</h3>' +
+        '<ul style="font-size:14px;color:#475569;line-height:2.2;margin-top:8px">' +
+          '<li><b>1. Get Google AdSense:</b> Sign up at <a href="https://www.google.com/adsense" target="_blank">google.com/adsense</a> — paste your client ID in the ADSENSE_CLIENT_ID env variable</li>' +
+          '<li><b>2. Jumia Affiliate:</b> Join <a href="https://affiliate.jumia.com" target="_blank">Jumia Affiliate Program</a> — replace product links with your affiliate URLs</li>' +
+          '<li><b>3. YouTube Revenue:</b> Embedded YouTube videos show ads — you earn from views when your YouTube channel is monetized</li>' +
+          '<li><b>4. More Traffic = More Money:</b> Share your <a href="/news">News Hub</a> and <a href="/p/entertainment">Entertainment Hub</a> links on WhatsApp, Facebook, Twitter</li>' +
+          '<li><b>5. Content is King:</b> Post regularly via <a href="/dev/post-public">Post Public Content</a> to keep visitors coming back</li>' +
+        '</ul></div>' +
+
+      '<div style="text-align:center;margin:20px 0"><a href="/dev/master" class="btn btn-outline">Back to Dev Dashboard</a></div>'
+    , req.session.user));
+  }));
+
+  // =========================================================================
+  // SECTION 15: PWA ENHANCEMENTS
   // =========================================================================
 
   // Serve manifest.json with enhanced configuration
