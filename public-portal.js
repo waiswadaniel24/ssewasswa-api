@@ -545,12 +545,18 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
 <footer>© ${new Date().getFullYear()} Comfort Platform — <a href="/register" style="color:#4f46e5">Start Free</a></footer></body></html>`);
   });
 
-  // Tenant public profile
-  app.get('/portal/:subdomain', ah(async (req, res) => {
-    // Skip reserved system routes to prevent conflicts
+  // Tenant public profile (public-only, must not intercept authenticated portal routes)
+  app.get('/portal/:subdomain', ah(async (req, res, next) => {
     const subdomain = req.params.subdomain;
+    // If user is authenticated, let the authenticated portal routes handle it
+    if (req.session && req.session.user) return next();
+    // Skip reserved system routes — redirect to the actual page
     const reserved = ['login','register','dashboard','settings','billing','admin','api','static','public','news','blog','about','contact','privacy','terms','help','faq','features','pricing','test','assets','css','js','images','icon','favicon','manifest','sw','p','entertainment','fundraising','dev'];
     if (reserved.includes(subdomain)) return res.redirect('/' + subdomain);
+    // Skip known portal type names (handled by authenticated routes in server.js)
+    const portalTypes = ['school','clinic','health','church','organization','business','individual','hotel','restaurant','retail','salon','pharmacy','gym','hardware','supermarket','transport','electronics'];
+    if (portalTypes.includes(subdomain)) return next();
+    // Look up tenant by subdomain for the public profile page
     const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.subdomain])).rows[0];
     if (!tenant) return res.status(404).send('<div style="text-align:center;padding:60px"><h1>Institution Not Found</h1><p style="color:#64748b">This institution does not exist or is not approved.</p><a href="/">Go to Comfort Home</a></div>');
     const typeLabels = {school:'School',clinic:'Clinic',church:'Church',hotel:'Hotel/Lodge',restaurant:'Restaurant',retail:'Retail Shop',salon:'Salon/Spa',pharmacy:'Pharmacy',gym:'Gym/Fitness',hardware:'Hardware Store',supermarket:'Supermarket',transport:'Transport',electronics:'Electronics Shop',business:'Business',individual:'Individual',organization:'Organization'};
