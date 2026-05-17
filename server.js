@@ -1079,7 +1079,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS income_records (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, source TEXT NOT NULL, amount INTEGER NOT NULL, category TEXT, description TEXT, received_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Fundraising campaigns
   `CREATE TABLE IF NOT EXISTS campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, target INTEGER DEFAULT 0, raised INTEGER DEFAULT 0, start_date DATE, end_date DATE, status TEXT DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS campaign_pledges (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE, donor_name TEXT, amount INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, pledged_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS campaign_pledges (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, donor_name TEXT, amount INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, pledged_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Member roles/permissions
   `CREATE TABLE IF NOT EXISTS role_permissions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, role_name TEXT NOT NULL, permissions JSONB, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, role_name))`,
   // v11.0 - Theme builder
@@ -1108,7 +1108,7 @@ const migrations = [
   // ============ v3.0 MIGRATIONS ============
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS public_url TEXT`,
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS image_url TEXT`,
-  `CREATE TABLE IF NOT EXISTS campaign_updates (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS campaign_updates (id SERIAL PRIMARY KEY, campaign_id INTEGER, title TEXT NOT NULL, content TEXT, update_type TEXT DEFAULT 'general', is_public BOOLEAN DEFAULT true, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS volunteer_hours (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, member_id INTEGER REFERENCES members(id), hours NUMERIC DEFAULT 0, activity TEXT, date DATE DEFAULT CURRENT_DATE, approved BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS event_tickets (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event_id INTEGER REFERENCES events(id) ON DELETE CASCADE, ticket_type TEXT DEFAULT 'general', price INTEGER DEFAULT 0, quantity_sold INTEGER DEFAULT 0, quantity_total INTEGER DEFAULT 100)`,
   `CREATE TABLE IF NOT EXISTS ticket_sales (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, event_id INTEGER REFERENCES events(id), ticket_type TEXT, buyer_name TEXT, buyer_phone TEXT, buyer_email TEXT, amount INTEGER, payment_method TEXT, payment_ref TEXT, status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -1157,7 +1157,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS ad_impressions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, ad_type TEXT, impressions INTEGER DEFAULT 0, revenue INTEGER DEFAULT 0, date DATE DEFAULT CURRENT_DATE)`,
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT false`,
   `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS peer_to_peer BOOLEAN DEFAULT false`,
-  `CREATE TABLE IF NOT EXISTS peer_fundraisers (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE, name TEXT NOT NULL, email TEXT, phone TEXT, goal INTEGER DEFAULT 0, raised INTEGER DEFAULT 0, message TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS peer_fundraisers (id SERIAL PRIMARY KEY, campaign_id INTEGER, name TEXT NOT NULL, email TEXT, phone TEXT, goal INTEGER DEFAULT 0, raised INTEGER DEFAULT 0, message TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
 
   // ============ v9.0 MIGRATIONS ============
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`,
@@ -8932,45 +8932,9 @@ app.use(async (req, res, next) => {
 });
 
 // === FUNDRAISING PAGE ===
-app.get('/fundraising', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const tenant = (await pool.query('SELECT has_fundraising FROM tenants WHERE id=$1', [t])).rows[0];
-  if (!tenant.has_fundraising && req.session.user.role !== 'super_admin') return res.redirect('/upgrade/fundraising');
-  // Auto-enable for super_admin
-  if (req.session.user.role === 'super_admin' && !tenant.has_fundraising) {
-    await pool.query('UPDATE tenants SET has_fundraising=true WHERE id=$1', [t]).catch(() => {});
-  }
-  const donations = (await pool.query("SELECT * FROM org_finance WHERE tenant_id=$1 AND type='income' AND description ILIKE '%donation%' ORDER BY created_at DESC", [t])).rows;
-  const total = donations.reduce((a, d) => a + parseInt(d.amount), 0);
-  res.send(renderPage('Fundraising', `
-    <div class="hero" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
-      <h1>Fundraising</h1><p>Donations and campaigns</p>
-    </div>
-    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${total.toLocaleString()}</div><div>Total Donations</div></div></div>
-    <div class="card"><h3>Record Donation</h3>
-      <form method="POST" action="/fundraising/save">
-        <input name="amount" type="number" placeholder="Donation Amount UGX" required>
-        <input name="description" placeholder="Donation - Donor Name" required>
-        <button class="btn btn-gold">Record Donation</button>
-      </form>
-    </div>
-    <div class="card"><h3>Recent Donations</h3>
-      <table><tr><th>Amount</th><th>Donor</th><th>Date</th></tr>
-      ${donations.map(d => `<tr><td>UGX ${parseInt(d.amount).toLocaleString()}</td><td>${esc(d.description)}</td><td>${new Date(d.created_at).toLocaleDateString()}</td></tr>`).join('') || '<tr><td colspan="3">No donations yet</td></tr>'}
-      </table>
-    </div>
-  `, req.session.user));
-}));
-
-app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const { amount, description } = req.body;
-  await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, amount, 'income', `Donation - ${description}`]);
-  // 5% platform fee
-  const fee = Math.round(parseInt(amount) * 0.05);
-  await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
-  await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, `Fundraising fee - ${req.session.user.tenant_name}`]);
-  res.redirect('/fundraising');
-}));
+// NOTE: The old basic fundraising handler that used org_finance has been removed.
+// The full fundraising hub with campaigns, investors, and analytics is handled by
+// the route registered later (around line 19865) which uses requireFundraisingSubscription.
 
 
 // === BILLING & SUBSCRIPTIONS ===
@@ -16814,6 +16778,16 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
     `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT false`,
     `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS views_count INTEGER DEFAULT 0`,
     `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS investor_count INTEGER DEFAULT 0`,
+    `ALTER TABLE campaign_donations ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+    `ALTER TABLE campaign_pledges ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+    `ALTER TABLE peer_fundraisers ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_donations_campaign ON campaign_donations(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_donations_tenant ON campaign_donations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_tenant ON campaign_pledges(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_investor_offers_campaign ON investor_offers(campaign_id)`,
+    // Backfill tenant_id for campaign_donations from fundraising_campaigns
+    `UPDATE campaign_donations cd SET tenant_id = (SELECT tenant_id FROM fundraising_campaigns WHERE id = cd.campaign_id) WHERE cd.tenant_id IS NULL`,
+    `UPDATE campaign_pledges cp SET tenant_id = (SELECT tenant_id FROM campaigns WHERE id = cp.campaign_id) WHERE cp.tenant_id IS NULL`,
     `ALTER TABLE public_pages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
     `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS image_url TEXT`,
     `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
@@ -19992,8 +19966,8 @@ app.post('/fundraising/save', requireAuth, requireNotBanned, requireFundraisingS
     tiers.push({ name: req.body.tier_name, amount: parseInt(req.body.tier_amount) || 0, benefits: req.body.tier_benefits || '' });
   }
   const tagsArr = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [];
-  await pool.query('INSERT INTO fundraising_campaigns(tenant_id,title,description,target,deadline,category,organizer,contact_phone,location,image_url,min_investment,urgency_level,is_public,featured,tags,investment_tiers) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)',
-    [t, title, description, target||0, deadline||null, category||'general', organizer||'', contact_phone||'', location||'', image_url||'', min_investment||0, urgency_level||'normal', is_public==='true', featured==='true', tagsArr, JSON.stringify(tiers)]);
+  await pool.query('INSERT INTO fundraising_campaigns(tenant_id,title,description,target,deadline,category,organizer,contact_phone,location,image_url,video_url,min_investment,urgency_level,is_public,featured,tags,investment_tiers) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)',
+    [t, title, description, target||0, deadline||null, category||'general', organizer||'', contact_phone||'', location||'', image_url||'', video_url||'', min_investment||0, urgency_level||'normal', is_public==='true', featured==='true', tagsArr, JSON.stringify(tiers)]);
   // Notify matching investors
   try {
     const matchingInvestors = (await pool.query("SELECT user_email FROM fundraising_investors WHERE ($1 = '{}' OR preferred_categories && $1) AND notification_prefs->>'in_app' = 'true'", [tagsArr.length > 0 ? tagsArr : [category || 'general']])).rows;
@@ -20159,7 +20133,7 @@ app.get('/fundraising/offers/:id/accept', requireAuth, requireNotBanned, ah(asyn
   const net = parseInt(offer.amount_offered) - fee;
   await pool.query('INSERT INTO investment_transactions(offer_id,investor_email,campaign_id,amount,transaction_type,status,platform_fee,net_amount) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [offer.id, offer.investor_email, offer.campaign_id, offer.amount_offered, 'investment', 'completed', fee, net]);
   // Also record as donation
-  await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [offer.campaign_id, offer.investor_email, offer.amount_offered, 'investment', 'Investment offer accepted']);
+  await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [offer.campaign_id, offer.full_name || offer.investor_email, offer.amount_offered, 'investment', 'Investment offer accepted']);
   // Update platform wallet
   await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
   await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Investment fee - Campaign #'+offer.campaign_id]);
@@ -27620,7 +27594,7 @@ app.get('/calendar/attendees', requireAuth, requireNotBanned, requireFeature('ev
 // ============================================================
 app.get('/campaigns', requireAuth, requireNotBanned, requireFeature('campaign_manager'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
-  const campaigns = (await pool.query('SELECT * FROM campaigns WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [tid])).rows;
+  const campaigns = (await pool.query('SELECT * FROM sms_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [tid])).rows;
   const totalSent = campaigns.reduce((s, c) => s + Number(c.sent_count || 0), 0);
   const totalFailed = campaigns.reduce((s, c) => s + Number(c.failed_count || 0), 0);
   res.send(renderPage('Campaign Manager', `
@@ -27662,7 +27636,7 @@ app.get('/campaigns/new', requireAuth, requireNotBanned, requireFeature('campaig
 app.post('/campaigns/save', requireAuth, requireNotBanned, requireFeature('campaign_manager'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { name, campaign_type, target_group, custom_recipients, subject, message, scheduled_at } = req.body;
-  const campaign = (await pool.query('INSERT INTO campaigns(tenant_id,name,campaign_type,subject,message,target_group,status,scheduled_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [tid, name, campaign_type||'sms', subject||'', message, target_group||'all_students', scheduled_at ? 'scheduled' : 'draft', scheduled_at||null, req.session.user.email])).rows[0];
+  const campaign = (await pool.query('INSERT INTO sms_campaigns(tenant_id,name,campaign_type,subject,message,target_group,status,scheduled_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [tid, name, campaign_type||'sms', subject||'', message, target_group||'all_students', scheduled_at ? 'scheduled' : 'draft', scheduled_at||null, req.session.user.email])).rows[0];
   let recipients = [];
   const queryMap = {
     all_students: 'SELECT name, phone, email FROM students WHERE tenant_id=$1 AND (phone IS NOT NULL OR email IS NOT NULL)',
@@ -27681,7 +27655,7 @@ app.post('/campaigns/save', requireAuth, requireNotBanned, requireFeature('campa
   for (const r of recipients) {
     await pool.query('INSERT INTO campaign_recipients(tenant_id,campaign_id,recipient_name,recipient_phone,recipient_email) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [tid, campaign.id, r.name, r.phone||null, r.email||null]);
   }
-  await pool.query('UPDATE campaigns SET recipient_count=$1 WHERE id=$2', [recipients.length, campaign.id]);
+  await pool.query('UPDATE sms_campaigns SET recipient_count=$1 WHERE id=$2', [recipients.length, campaign.id]);
   await audit(req.session.user.email, 'campaign_created', 'Campaign: ' + name + ' with ' + recipients.length + ' recipients');
   req.flash('success', 'Campaign created with ' + recipients.length + ' recipients');
   res.redirect('/campaigns');
@@ -27689,7 +27663,7 @@ app.post('/campaigns/save', requireAuth, requireNotBanned, requireFeature('campa
 
 app.get('/campaigns/:id', requireAuth, requireNotBanned, requireFeature('campaign_manager'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
-  const c = (await pool.query('SELECT * FROM campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  const c = (await pool.query('SELECT * FROM sms_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
   if (!c) return res.status(404).send('Not found');
   const recipients = (await pool.query('SELECT * FROM campaign_recipients WHERE campaign_id=$1 ORDER BY status, created_at', [c.id])).rows;
   res.send(renderPage(c.name, `
@@ -27709,9 +27683,9 @@ app.get('/campaigns/:id', requireAuth, requireNotBanned, requireFeature('campaig
 
 app.get('/campaigns/:id/send', requireAuth, requireNotBanned, requireFeature('campaign_manager'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
-  const c = (await pool.query('SELECT * FROM campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+  const c = (await pool.query('SELECT * FROM sms_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
   if (!c) return res.status(404).send('Not found');
-  await pool.query('UPDATE campaigns SET status=$1,sent_at=NOW() WHERE id=$2', ['sent', c.id]);
+  await pool.query('UPDATE sms_campaigns SET status=$1,sent_at=NOW() WHERE id=$2', ['sent', c.id]);
   const recipients = (await pool.query('SELECT * FROM campaign_recipients WHERE campaign_id=$1', [c.id])).rows;
   let sent = 0, failed = 0;
   for (const r of recipients) {
@@ -27731,14 +27705,14 @@ app.get('/campaigns/:id/send', requireAuth, requireNotBanned, requireFeature('ca
       failed++;
     }
   }
-  await pool.query('UPDATE campaigns SET sent_count=$1,failed_count=$2 WHERE id=$3', [sent, failed, c.id]);
+  await pool.query('UPDATE sms_campaigns SET sent_count=$1,failed_count=$2 WHERE id=$3', [sent, failed, c.id]);
   await audit(req.session.user.email, 'campaign_sent', 'Sent campaign "' + c.name + '": ' + sent + ' sent, ' + failed + ' failed');
   req.flash('success', 'Campaign sent: ' + sent + ' delivered, ' + failed + ' failed');
   res.redirect('/campaigns');
 }));
 
 app.get('/campaigns/:id/delete', requireAuth, requireNotBanned, requireFeature('campaign_manager'), ah(async (req, res) => {
-  await pool.query('DELETE FROM campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  await pool.query('DELETE FROM sms_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   res.redirect('/campaigns');
 }));
 
@@ -29256,15 +29230,35 @@ eventCalMigrations.forEach(m => migrations.push(m));
 
 // === v12 CAMPAIGN + QR + FINANCE DASHBOARD TABLES ===
 const campaignMigrations = [
-  `CREATE TABLE IF NOT EXISTS campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, campaign_type TEXT DEFAULT 'sms', subject TEXT, message TEXT NOT NULL, target_group TEXT, status TEXT DEFAULT 'draft', recipient_count INTEGER DEFAULT 0, sent_count INTEGER DEFAULT 0, failed_count INTEGER DEFAULT 0, scheduled_at TIMESTAMPTZ, sent_at TIMESTAMPTZ, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS campaign_recipients (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE, recipient_name TEXT, recipient_phone TEXT, recipient_email TEXT, status TEXT DEFAULT 'pending', sent_at TIMESTAMPTZ, error TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // Rename old 'campaigns' table (used by SMS) to 'sms_campaigns' to avoid collision with fundraising
+  `DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'campaigns') AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'sms_campaigns') THEN
+      ALTER TABLE campaigns RENAME TO sms_campaigns;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END $$`,
+  // Add missing columns to sms_campaigns from the old campaigns table
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS name TEXT`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS campaign_type TEXT DEFAULT 'sms'`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS subject TEXT`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS message TEXT`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS target_group TEXT`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS recipient_count INTEGER DEFAULT 0`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS sent_count INTEGER DEFAULT 0`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS failed_count INTEGER DEFAULT 0`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ`,
+  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS created_by TEXT`,
+  `CREATE TABLE IF NOT EXISTS sms_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, campaign_type TEXT DEFAULT 'sms', subject TEXT, message TEXT NOT NULL, target_group TEXT, status TEXT DEFAULT 'draft', recipient_count INTEGER DEFAULT 0, sent_count INTEGER DEFAULT 0, failed_count INTEGER DEFAULT 0, scheduled_at TIMESTAMPTZ, sent_at TIMESTAMPTZ, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_campaign_id_fkey`,
+  `CREATE TABLE IF NOT EXISTS campaign_recipients (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER REFERENCES sms_campaigns(id) ON DELETE CASCADE, recipient_name TEXT, recipient_phone TEXT, recipient_email TEXT, status TEXT DEFAULT 'pending', sent_at TIMESTAMPTZ, error TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS qr_checkins (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, person_name TEXT NOT NULL, person_id INTEGER, person_type TEXT, qr_code TEXT UNIQUE, checked_in_at TIMESTAMPTZ DEFAULT NOW(), checked_out_at TIMESTAMPTZ, location TEXT, device_info TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS chart_of_accounts (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, account_code TEXT UNIQUE, account_name TEXT NOT NULL, account_type TEXT DEFAULT 'asset', description TEXT, parent_id INTEGER REFERENCES chart_of_accounts(id) ON DELETE SET NULL, balance NUMERIC DEFAULT 0, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS journal_entries (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, entry_date DATE DEFAULT CURRENT_DATE, description TEXT, account_id INTEGER REFERENCES chart_of_accounts(id) ON DELETE SET NULL, debit NUMERIC DEFAULT 0, credit NUMERIC DEFAULT 0, reference TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS staff_appraisals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, staff_id INTEGER, staff_name TEXT NOT NULL, appraisal_period TEXT NOT NULL, criteria JSONB, overall_score NUMERIC DEFAULT 0, rating TEXT DEFAULT 'satisfactory', strengths TEXT, improvements TEXT, goals TEXT, appraiser TEXT, status TEXT DEFAULT 'draft', created_at TIMESTAMPTZ DEFAULT NOW(), submitted_at TIMESTAMPTZ)`,
 ];
 campaignMigrations.forEach(m => migrations.push(m));
-['campaigns','campaign_recipients','qr_checkins','chart_of_accounts','journal_entries','staff_appraisals'].forEach(t => VALID_TABLES.add(t));
+['sms_campaigns','campaign_recipients','qr_checkins','chart_of_accounts','journal_entries','staff_appraisals'].forEach(t => VALID_TABLES.add(t));
 
 app.get('/links', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
