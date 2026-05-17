@@ -347,27 +347,33 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
       await c.query(`CREATE INDEX IF NOT EXISTS idx_as_criteria ON appraisal_scores(criteria_id)`);
 
       // Seed default criteria if none exist (for a quick start)
-      // Wrapped in try/catch because tenant_id=0 may not exist in tenants table
+      // Use a real tenant_id from the tenants table instead of hardcoded 0 to avoid FK violations
       try {
-        const seedCheck = await c.query(`SELECT COUNT(*)::int as cnt FROM appraisal_criteria WHERE tenant_id = 0`);
-        if (seedCheck.rows[0].cnt === 0) {
-          const defaults = [
-            ['Job Knowledge', 'performance', 20],
-            ['Quality of Work', 'performance', 20],
-            ['Teamwork & Collaboration', 'behavior', 15],
-            ['Communication Skills', 'communication', 15],
-            ['Initiative & Problem Solving', 'skills', 10],
-            ['Leadership & Mentoring', 'leadership', 10],
-            ['Punctuality & Attendance', 'behavior', 5],
-            ['Adaptability & Learning', 'skills', 5]
-          ];
-          for (let i = 0; i < defaults.length; i++) {
-            await c.query(`INSERT INTO appraisal_criteria (tenant_id, name, category, weight, display_order) VALUES (0, $1, $2, $3, $4)`,
-              [defaults[i][0], defaults[i][1], defaults[i][2], i]);
+        const tenantRow = await c.query(`SELECT id FROM tenants LIMIT 1`);
+        const seedTid = tenantRow.rows[0]?.id;
+        if (seedTid) {
+          const seedCheck = await c.query(`SELECT COUNT(*)::int as cnt FROM appraisal_criteria WHERE tenant_id = $1`, [seedTid]);
+          if (seedCheck.rows[0].cnt === 0) {
+            const defaults = [
+              ['Job Knowledge', 'performance', 20],
+              ['Quality of Work', 'performance', 20],
+              ['Teamwork & Collaboration', 'behavior', 15],
+              ['Communication Skills', 'communication', 15],
+              ['Initiative & Problem Solving', 'skills', 10],
+              ['Leadership & Mentoring', 'leadership', 10],
+              ['Punctuality & Attendance', 'behavior', 5],
+              ['Adaptability & Learning', 'skills', 5]
+            ];
+            for (let i = 0; i < defaults.length; i++) {
+              await c.query(`INSERT INTO appraisal_criteria (tenant_id, name, category, weight, display_order) VALUES ($5, $1, $2, $3, $4)`,
+                [defaults[i][0], defaults[i][1], defaults[i][2], i, seedTid]);
+            }
           }
+        } else {
+          console.warn('[StaffAppraisals] Seed skipped (no tenants exist yet)');
         }
       } catch (seedErr) {
-        console.warn('[StaffAppraisals] Seed skipped (tenant_id=0 may not exist):', seedErr.message);
+        console.warn('[StaffAppraisals] Seed skipped:', seedErr.message);
       }
 
       console.log('[StaffAppraisals] Migrations applied successfully');

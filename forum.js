@@ -103,8 +103,15 @@ module.exports = function forum(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[Forum] Cannot connect to DB for migrations'); return; }
+    // Retry DB connection up to 3 times with delay
+    let c = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      c = await pool.connect().catch(() => null);
+      if (c) break;
+      console.warn('[Forum] DB connection attempt ' + attempt + ' failed, retrying...');
+      await new Promise(r => setTimeout(r, 2000 * attempt));
+    }
+    if (!c) { console.error('[Forum] Cannot connect to DB for migrations after 3 attempts'); return; }
     try {
       await c.query(`CREATE TABLE IF NOT EXISTS forum_categories (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

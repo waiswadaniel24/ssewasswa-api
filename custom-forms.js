@@ -141,6 +141,7 @@ module.exports = function customForms(app, db, pool, renderPage, esc) {
         file_url TEXT, file_size INTEGER, uploaded_at TIMESTAMPTZ DEFAULT NOW()
       )`);
       await c.query(`CREATE INDEX IF NOT EXISTS idx_cf_tenant ON custom_forms(tenant_id)`);
+      try { await c.query(`ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS form_id INTEGER`); } catch(e) {}
       await c.query(`CREATE INDEX IF NOT EXISTS idx_cfields_form ON custom_fields(form_id)`);
       await c.query(`CREATE INDEX IF NOT EXISTS idx_cfv_submission ON custom_field_values(submission_id)`);
       await c.query(`CREATE INDEX IF NOT EXISTS idx_fs_form ON form_submissions(form_id)`);

@@ -113,6 +113,8 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         recommendation VARCHAR(20) DEFAULT 'pending',
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
+      try { await c.query(`ALTER TABLE scholarship_applications ADD COLUMN IF NOT EXISTS program_id INTEGER`); } catch(e) {}
+      try { await c.query(`ALTER TABLE scholarship_awards ADD COLUMN IF NOT EXISTS program_id INTEGER`); } catch(e) {}
       const idxs = [
         'idx_sch_prog_t ON scholarship_programs(tenant_id)', 'idx_sch_prog_type ON scholarship_programs(tenant_id, type)',
         'idx_sch_prog_active ON scholarship_programs(tenant_id, is_active)',
