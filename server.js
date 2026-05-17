@@ -2798,7 +2798,7 @@ app.get('/portal/school', requireAuth, requireNotBanned, ah(async (req, res) => 
   const hasWhatsApp = pi.accessible.has('whatsapp_integration');
   const hasReports = pi.accessible.has('scheduled_reports');
   const hasBranches = pi.accessible.has('multi_branch');
-  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/, 'href="/billing"')}</div>`;
+  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/g, 'href="/billing"')}</div>`;
   res.send(renderPage('School Dashboard', `
     <div class="hero"><h1>School Portal</h1><p>Manage students, fees, exams, attendance, reports</p><div style="display:inline-block;background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:8px;margin-top:8px;font-size:0.85rem">Current Plan: <strong>${PLAN_NAMES[pi.plan]}</strong></div></div>
     <div class="stats">
@@ -5399,7 +5399,7 @@ app.get('/portal/business', requireAuth, requireNotBanned, ah(async (req, res) =
   const bizType = tenant?.business_type || 'general';
   const hasInventory = pi.accessible.has('inventory_management');
   const hasReports = pi.accessible.has('scheduled_reports');
-  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/, 'href="/billing"')}</div>`;
+  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/g, 'href="/billing"')}</div>`;
   res.send(renderPage('Business Dashboard', `
     <div class="hero" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">
       <h1>Business Portal</h1><p>POS, Inventory, Invoices, Customers, Profit/Loss</p>
@@ -6075,7 +6075,7 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
   const hasPatientLab = pi.accessible.has('patient_lab');
   const hasPatientEHR = pi.accessible.has('patient_ehr');
   const hasReports = pi.accessible.has('scheduled_reports');
-  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/, 'href="/billing"')}</div>`;
+  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/g, 'href="/billing"')}</div>`;
   res.send(renderPage('Health Portal', `
     <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
       <h1>Health Portal</h1>
@@ -6191,7 +6191,7 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
   res.send(renderPage('Health Institution Settings', `
     <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6);color:white"><h1>Health Institution Type</h1><p>Set what type of health facility ${esc(tenant.name||'')} is</p></div>
     <div class="card" style="margin-bottom:20px;background:#f0fdf4;border:2px solid #22c55e">
-      <h3 style="color:#22c55e">Current Type: ${types.find(t=>t.value===currentType)?.label || currentType}</h3>
+      <h3 style="color:#22c55e">Current Type: ${types.find(tp=>tp.value===currentType)?.label || currentType}</h3>
       <p class="muted">Features on the Health Portal will adapt based on the institution type you select below.</p>
     </div>
     <form method="POST" action="/health/settings/save">
@@ -6218,6 +6218,10 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
 app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { health_institution_type } = req.body;
+  const validTypes = ['general_hospital','health_center_iii','health_center_iv','clinic','dental','eye_clinic','mental_health','physiotherapy','lab','imaging','maternity','pharmacy','veterinary','special'];
+  if (health_institution_type && !validTypes.includes(health_institution_type)) {
+    return res.status(400).send('Invalid institution type');
+  }
   await pool.query('UPDATE tenants SET health_institution_type=$1 WHERE id=$2', [health_institution_type || 'general_hospital', t]);
   await audit(req.session.user.email, 'update_health_type', health_institution_type);
   res.redirect('/portal/health');
@@ -6370,7 +6374,7 @@ app.post('/sickbay/visits/:id/update', requireAuth, requireNotBanned, ah(async (
   res.redirect('/sickbay');
 }));
 
-app.get('/sickbay/visits/:id/discharge', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/sickbay/visits/:id/discharge', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const v = (await pool.query('SELECT * FROM sickbay_visits WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
   if (!v || v.status === 'discharged') return res.redirect('/sickbay');
@@ -6454,7 +6458,7 @@ app.post('/sickbay/units/:id/update', requireAuth, requireNotBanned, ah(async (r
   res.redirect('/sickbay/units');
 }));
 
-app.get('/sickbay/units/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/sickbay/units/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE sickbay_units SET is_active=NOT is_active WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
   res.redirect('/sickbay/units');
@@ -6539,7 +6543,7 @@ app.post('/clinic/beds/:id/assign/save', requireAuth, requireNotBanned, ah(async
   res.redirect('/clinic/beds');
 }));
 
-app.get('/clinic/beds/:id/discharge', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic/beds/:id/discharge', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE clinic_beds SET patient_name=NULL,reason=NULL,status=$1,assigned_at=NULL WHERE id=$2 AND tenant_id=$3', ['available', req.params.id, t]);
   res.redirect('/clinic/beds');
@@ -17008,7 +17012,7 @@ app.post('/clinic/staff/save', requireAuth, requireNotBanned, requireFeature('cl
   res.redirect('/clinic/staff?role='+(role||'doctor'));
 }));
 
-app.get('/clinic/staff/:id/toggle', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.post('/clinic/staff/:id/toggle', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE clinic_staff SET is_active=NOT is_active WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
   res.redirect('/clinic/staff');
@@ -17165,9 +17169,69 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
   const t = req.session.user.tenant_id;
   const { consultation_id, doctor_id, patient_name, diagnosis, notes } = req.body;
   const patient_id = req.body.patient_id || null;
+  // Collect all medicine names for interaction check
+  const medNames = [];
+  let i = 1;
+  while (req.body[`medicine_${i}`]) {
+    const med = req.body[`medicine_${i}`];
+    if (med.trim()) medNames.push(med.trim().toLowerCase());
+    i++;
+  }
+  // Drug-drug interaction check
+  if (medNames.length >= 2) {
+    const interactions = [];
+    for (let a = 0; a < medNames.length; a++) {
+      for (let b = a + 1; b < medNames.length; b++) {
+        const check = (await pool.query("SELECT * FROM drug_interactions WHERE (LOWER(drug_a)=$1 AND LOWER(drug_b)=$2) OR (LOWER(drug_a)=$2 AND LOWER(drug_b)=$1)", [medNames[a], medNames[b]])).rows;
+        if (check.length > 0) {
+          interactions.push(...check);
+        }
+      }
+    }
+    if (interactions.length > 0) {
+      // Show interaction warnings but allow prescriber to proceed
+      const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, 'WARNING: ' + interactions.map(x=>x.drug_a+' + '+x.drug_b+': '+x.description).join('; '), 'pending']);
+      const rxId = rx.rows[0].id;
+      i = 1;
+      while (req.body[`medicine_${i}`]) {
+        const med = req.body[`medicine_${i}`];
+        if (med.trim()) {
+          await pool.query('INSERT INTO prescription_items(tenant_id,prescription_id,medicine_name,dosage,frequency,duration,quantity,instructions) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, rxId, med, req.body[`dosage_${i}`]||null, req.body[`frequency_${i}`]||null, req.body[`duration_${i}`]||null, req.body[`quantity_${i}`]||1, req.body[`instructions_${i}`]||null]);
+        }
+        i++;
+      }
+      await audit(req.session.user.email, 'Prescription with interaction warning', `Rx #${rxId} for ${patient_name}: ${interactions.length} interaction(s)`);
+      res.redirect('/clinic/prescriptions');
+      return;
+    }
+  }
+  // Check patient allergies against prescribed drugs
+  if (patient_id) {
+    const allergies = (await pool.query("SELECT allergen FROM patient_allergies WHERE tenant_id=$1 AND patient_id=$2 AND is_active=true", [t, patient_id])).rows.map(a => a.allergen.toLowerCase());
+    const matchedAllergies = medNames.filter(m => allergies.some(a => m.includes(a) || a.includes(m)));
+    if (matchedAllergies.length > 0) {
+      // Still allow but flag
+      const allergyNote = 'ALLERGY ALERT: Patient may be allergic to: ' + matchedAllergies.join(', ');
+      const existingNotes = notes || '';
+      const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, allergyNote + (existingNotes ? ' | ' + existingNotes : '')]);
+      const rxId = rx.rows[0].id;
+      i = 1;
+      while (req.body[`medicine_${i}`]) {
+        const med = req.body[`medicine_${i}`];
+        if (med.trim()) {
+          await pool.query('INSERT INTO prescription_items(tenant_id,prescription_id,medicine_name,dosage,frequency,duration,quantity,instructions) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, rxId, med, req.body[`dosage_${i}`]||null, req.body[`frequency_${i}`]||null, req.body[`duration_${i}`]||null, req.body[`quantity_${i}`]||1, req.body[`instructions_${i}`]||null]);
+        }
+        i++;
+      }
+      await audit(req.session.user.email, 'Prescription allergy warning', `Rx #${rxId}: ${matchedAllergies.join(', ')}`);
+      res.redirect('/clinic/prescriptions');
+      return;
+    }
+  }
+  // No interactions or allergies - normal prescription flow
   const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, notes||null]);
   const rxId = rx.rows[0].id;
-  let i = 1;
+  i = 1;
   while (req.body[`medicine_${i}`]) {
     const med = req.body[`medicine_${i}`];
     if (med.trim()) {
@@ -17240,10 +17304,23 @@ app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanne
   const { pharmacist_id, notes } = req.body;
   const items = (await pool.query("SELECT * FROM prescription_items WHERE prescription_id IN (SELECT id FROM prescriptions WHERE tenant_id=$1) AND prescription_id=$2 AND status='pending'", [t, req.params.id])).rows;
   for (const item of items) {
-    const qty = req.body[`qty_${item.id}`] || item.quantity;
+    const qty = parseInt(req.body[`qty_${item.id}`]) || item.quantity;
     const batch = req.body[`batch_${item.id}`] || null;
     const expiry = req.body[`expiry_${item.id}`] || null;
+    // Check stock availability before dispensing
+    const stock = (await pool.query("SELECT quantity, expiry_date FROM pharmacy_inventory WHERE medicine_name=$1 AND tenant_id=$2", [item.medicine_name, t])).rows[0];
+    if (stock && stock.quantity < qty) {
+      return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Insufficient Stock</h2><p>Not enough <strong>${esc(item.medicine_name)}</strong> in stock. Available: ${stock.quantity}, Requested: ${qty}</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
+    }
+    // Check expiry if pharmacy_inventory has the drug
+    if (stock && stock.expiry_date && new Date(stock.expiry_date) < new Date()) {
+      return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Drug Expired</h2><p><strong>${esc(item.medicine_name)}</strong> expired on ${new Date(stock.expiry_date).toLocaleDateString()}</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
+    }
     await pool.query('UPDATE prescription_items SET status=$1,dispensed_by=$2,dispensed_at=NOW() WHERE id=$3', ['dispensed', pharmacist_id, item.id]);
+    // Decrement pharmacy inventory stock
+    if (stock) {
+      await pool.query('UPDATE pharmacy_inventory SET quantity = quantity - $1 WHERE medicine_name=$2 AND tenant_id=$3', [qty, item.medicine_name, t]);
+    }
     await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, (await pool.query('SELECT patient_name FROM prescriptions WHERE id=$1',[req.params.id])).rows[0]?.patient_name||'', item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
   }
   await pool.query("UPDATE prescriptions SET status='dispensed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
@@ -17302,7 +17379,7 @@ app.post('/clinic/lab/save', requireAuth, requireNotBanned, requireFeature('clin
   res.redirect('/clinic/lab');
 }));
 
-app.get('/clinic/lab/:id/start', requireAuth, requireNotBanned, requireFeature('clinic_lab'), ah(async (req, res) => {
+app.post('/clinic/lab/:id/start', requireAuth, requireNotBanned, requireFeature('clinic_lab'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query("UPDATE lab_requests SET status='in_progress' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
   res.redirect('/clinic/lab');
@@ -17542,6 +17619,16 @@ app.post('/clinic/appointments/save', requireAuth, requireNotBanned, requireFeat
   if (!patient_name || !appointment_date || !appointment_time) {
     return res.redirect('/clinic/appointments/new');
   }
+  // Check for appointment conflicts (same doctor, date, time)
+  if (doctor_name) {
+    const conflict = (await pool.query("SELECT id FROM clinic_appointments WHERE tenant_id=$1 AND doctor_name=$2 AND appointment_date=$3 AND appointment_time=$4 AND status='scheduled'", [t, doctor_name, appointment_date, appointment_time])).rows[0];
+    if (conflict) {
+      const appts = (await pool.query('SELECT * FROM clinic_appointments WHERE id=$1', [conflict.id])).rows;
+      // Show conflict warning but still allow booking (double-booking may be intentional for urgent cases)
+      // For strict conflict prevention, uncomment the next line:
+      // return res.send(renderPage('Appointment Conflict', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#f59e0b">Time Slot Taken</h2><p>Dr. ${esc(doctor_name)} already has an appointment at ${esc(appointment_time)} on ${esc(appointment_date)}.</p><a href="/clinic/appointments/new" class="btn">Choose Different Time</a></div>`, req.session.user));
+    }
+  }
   await pool.query(
     'INSERT INTO clinic_appointments(tenant_id,patient_name,patient_type,patient_id,phone,appointment_date,appointment_time,doctor_name,reason,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
     [t, patient_name, patient_type || 'patient', patient_id || null, phone || null, appointment_date, appointment_time, doctor_name || null, reason || null, notes || null, req.session.user.email]
@@ -17549,15 +17636,15 @@ app.post('/clinic/appointments/save', requireAuth, requireNotBanned, requireFeat
   res.redirect('/clinic/appointments');
 }));
 
-// GET /clinic/appointments/:id/cancel — Cancel appointment
-app.get('/clinic/appointments/:id/cancel', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+// POST /clinic/appointments/:id/cancel — Cancel appointment
+app.post('/clinic/appointments/:id/cancel', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query("UPDATE clinic_appointments SET status='cancelled' WHERE tenant_id=$1 AND id=$2 AND status='scheduled'", [t, req.params.id]);
   res.redirect('/clinic/appointments');
 }));
 
-// GET /clinic/appointments/:id/complete — Mark completed and convert to queue entry
-app.get('/clinic/appointments/:id/complete', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+// POST /clinic/appointments/:id/complete — Mark completed and convert to queue entry
+app.post('/clinic/appointments/:id/complete', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const appt = (await pool.query('SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND id=$2 AND status=\'scheduled\'', [t, req.params.id])).rows[0];
   if (!appt) return res.redirect('/clinic/appointments');
@@ -17576,8 +17663,17 @@ app.get('/clinic/appointments/:id/complete', requireAuth, requireNotBanned, requ
 // PUBLIC APPOINTMENT BOOKING (no auth required)
 // =============================================
 
+// Rate limiter for public booking to prevent spam
+const publicBookingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // max 5 bookings per IP per 15 minutes
+  message: 'Too many booking attempts. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 // GET /clinic/book/:tenant_subdomain — Public appointment booking
-app.get('/clinic/book/:tenant_subdomain', ah(async (req, res) => {
+app.get('/clinic/book/:tenant_subdomain', publicBookingLimiter, ah(async (req, res) => {
   const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
   if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic does not exist.</p></div>', null));
   const doctors = (await pool.query("SELECT name FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [tenant.id])).rows;
@@ -17619,7 +17715,7 @@ app.get('/clinic/book/:tenant_subdomain', ah(async (req, res) => {
 }));
 
 // POST /clinic/book/:tenant_subdomain/save — Save public appointment
-app.post('/clinic/book/:tenant_subdomain/save', ah(async (req, res) => {
+app.post('/clinic/book/:tenant_subdomain/save', publicBookingLimiter, ah(async (req, res) => {
   const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
   if (!tenant) return res.status(404).send('Clinic not found');
   const { patient_name, phone, appointment_date, appointment_time, doctor_name, reason } = req.body;
@@ -22787,6 +22883,25 @@ app.post('/clinic/patient/:type/:id/vitals/save', requireAuth, requireNotBanned,
   const t = req.session.user.tenant_id;
   const { type, id } = req.params;
   const d = req.body;
+  // Vitals range validation for patient safety
+  if (d.temperature && (parseFloat(d.temperature) < 30 || parseFloat(d.temperature) > 45)) {
+    return res.send(renderPage('Invalid Vitals', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Invalid Temperature</h2><p>Temperature must be between 30 and 45 degrees Celsius.</p><a href="javascript:history.back()" class="btn">Go Back</a></div>', req.session.user));
+  }
+  if (d.blood_pressure_systolic && (parseInt(d.blood_pressure_systolic) < 60 || parseInt(d.blood_pressure_systolic) > 300)) {
+    return res.send(renderPage('Invalid Vitals', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Invalid BP Systolic</h2><p>Systolic blood pressure must be between 60 and 300 mmHg.</p><a href="javascript:history.back()" class="btn">Go Back</a></div>', req.session.user));
+  }
+  if (d.blood_pressure_diastolic && (parseInt(d.blood_pressure_diastolic) < 30 || parseInt(d.blood_pressure_diastolic) > 200)) {
+    return res.send(renderPage('Invalid Vitals', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Invalid BP Diastolic</h2><p>Diastolic blood pressure must be between 30 and 200 mmHg.</p><a href="javascript:history.back()" class="btn">Go Back</a></div>', req.session.user));
+  }
+  if (d.heart_rate && (parseInt(d.heart_rate) < 20 || parseInt(d.heart_rate) > 300)) {
+    return res.send(renderPage('Invalid Vitals', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Invalid Heart Rate</h2><p>Heart rate must be between 20 and 300 bpm.</p><a href="javascript:history.back()" class="btn">Go Back</a></div>', req.session.user));
+  }
+  if (d.oxygen_saturation && (parseInt(d.oxygen_saturation) < 0 || parseInt(d.oxygen_saturation) > 100)) {
+    return res.send(renderPage('Invalid Vitals', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Invalid SpO2</h2><p>Oxygen saturation must be between 0 and 100%.</p><a href="javascript:history.back()" class="btn">Go Back</a></div>', req.session.user));
+  }
+  if (d.pain_level && (parseInt(d.pain_level) < 0 || parseInt(d.pain_level) > 10)) {
+    return res.send(renderPage('Invalid Vitals', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Invalid Pain Level</h2><p>Pain level must be between 0 and 10.</p><a href="javascript:history.back()" class="btn">Go Back</a></div>', req.session.user));
+  }
   let patientName = 'Patient';
   if (type === 'student') { const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0]; patientName = s?.name || patientName; }
   const bmi = d.weight && d.height ? (d.weight / ((d.height/100) ** 2)).toFixed(1) : null;
@@ -23034,7 +23149,7 @@ app.get('/clinic/patient/:type/:id/invoice/:invId', requireAuth, requireNotBanne
   const { type, id, invId } = req.params;
   const [invoice, items] = await Promise.all([
     pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [invId, t]),
-    pool.query('SELECT * FROM invoice_items WHERE invoice_id=$1', [invId])
+    pool.query('SELECT * FROM invoice_items WHERE invoice_id=$1 AND tenant_id=$2', [invId, t])
   ]);
   if (!invoice.rows[0]) return res.redirect('/clinic');
   const inv = invoice.rows[0];
@@ -26316,7 +26431,7 @@ app.get('/portal/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
   const icon = iconMap[ptype] || '📋';
   const hasInventory = pi.accessible.has('inventory_management');
   const hasReports = pi.accessible.has('scheduled_reports');
-  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/, 'href="/billing"')}</div>`;
+  const lockCard = (html, planName) => `<div class="card" style="opacity:0.55;position:relative;overflow:hidden;border:1px dashed #f59e0b"><div style="position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700">&#128274; ${planName}</div>${html.replace(/href="[^"]*"/g, 'href="/billing"')}</div>`;
   res.send(renderPage(label + ' Portal', `
     <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:32px;border-radius:16px;margin-bottom:24px;color:white;text-align:center">
       <div style="font-size:64px;margin-bottom:8px">${icon}</div>
@@ -30331,7 +30446,7 @@ try {
 // ============================================================
 // === 1. CLINIC QUEUE, PRESCRIPTIONS, SICK BAY ===
 // ============================================================
-app.get('/clinic/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const [waiting, inConsult, completed, todayStats] = await Promise.all([
     pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='waiting' ORDER BY token_number, priority DESC, created_at", [t]),
@@ -30373,7 +30488,7 @@ app.get('/clinic/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { patient_name, complaint, priority } = req.body;
   const nextToken = (await pool.query("SELECT COALESCE(MAX(token_number),0)+1 as next FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0].next;
@@ -30382,18 +30497,20 @@ app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, ah(async (req, 
   res.redirect('/clinic/queue');
 }));
 
-app.post('/clinic/queue/:id/call', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query("UPDATE clinic_queue SET status='in-consultation',started_at=NOW(),doctor_id=$1 WHERE id=$2", [req.session.user.name||'', req.params.id]);
+app.post('/clinic/queue/:id/call', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("UPDATE clinic_queue SET status='in-consultation',started_at=NOW(),doctor_id=$1 WHERE id=$2 AND tenant_id=$3", [req.session.user.name||'', req.params.id, t]);
   res.redirect('/clinic/queue');
 }));
 
-app.post('/clinic/queue/:id/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query("UPDATE clinic_queue SET status='completed',completed_at=NOW() WHERE id=$1", [req.params.id]);
+app.post('/clinic/queue/:id/complete', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("UPDATE clinic_queue SET status='completed',completed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
   res.redirect('/clinic/queue');
 }));
 
 // Prescriptions
-app.get('/clinic/prescriptions', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic/prescriptions', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const rx = (await pool.query("SELECT * FROM clinic_prescriptions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
   res.send(renderPage('Prescriptions', `
@@ -30405,7 +30522,7 @@ app.get('/clinic/prescriptions', requireAuth, requireNotBanned, ah(async (req, r
   `, req.session.user));
 }));
 
-app.get('/clinic/prescriptions/new', requireAuth, requireNotBanned, (req, res) => {
+app.get('/clinic/prescriptions/new', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), (req, res) => {
   res.send(renderPage('New Prescription', `
     <div class="card" style="max-width:700px;margin:40px auto"><h2>New Prescription</h2>
       <form method="POST" action="/clinic/prescriptions/save" id="rxForm">
@@ -30428,7 +30545,7 @@ app.get('/clinic/prescriptions/new', requireAuth, requireNotBanned, (req, res) =
   `, req.session.user));
 });
 
-app.post('/clinic/prescriptions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic/prescriptions/save', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { patient_name, diagnosis, prescribed_by, notes } = req.body;
   const meds = Array.isArray(req.body.med_name) ? req.body.med_name.map((n,i)=>({name:n,dose:req.body.med_dose?.[i]||'',freq:req.body.med_freq?.[i]||'',dur:req.body.med_dur?.[i]||''})).filter(m=>m.name) : req.body.med_name ? [{name:req.body.med_name,dose:req.body.med_dose||'',freq:req.body.med_freq||'',dur:req.body.med_dur||''}] : [];
@@ -30467,14 +30584,15 @@ app.get('/clinic/sick-bay', requireAuth, requireNotBanned, ah(async (req, res) =
   `, req.session.user));
 }));
 
-app.post('/clinic/sick-bay/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic/sick-bay/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   await pool.query("INSERT INTO sick_bay (tenant_id,student_name,complaint,temperature,nurse_name) VALUES ($1,$2,$3,$4,$5)", [req.session.user.tenant_id, req.body.student_name, req.body.complaint||'', req.body.temperature||'', req.body.nurse_name||'']);
   res.redirect('/clinic/sick-bay');
 }));
 
-app.post('/clinic/sick-bay/:id/release', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic/sick-bay/:id/release', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
   const { treatment } = req.body;
-  await pool.query("UPDATE sick_bay SET status='released',checked_out=NOW(),treatment=$1 WHERE id=$2", [treatment||'Released', req.params.id]);
+  await pool.query("UPDATE sick_bay SET status='released',checked_out=NOW(),treatment=$1 WHERE id=$2 AND tenant_id=$3", [treatment||'Released', req.params.id, t]);
   res.redirect('/clinic/sick-bay');
 }));
 

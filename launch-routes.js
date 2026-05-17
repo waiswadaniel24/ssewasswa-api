@@ -178,7 +178,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "UGX", "description": "Up to 50 records, 1 user" },
         { "@type": "Offer", "name": "Basic", "price": "100000", "priceCurrency": "UGX", "description": "Up to 500 records, 5 users" },
         { "@type": "Offer", "name": "Pro", "price": "200000", "priceCurrency": "UGX", "description": "Up to 50000 records, unlimited users" },
-        { "@type": "Offer", "name": "Enterprise", "price": "0", "priceCurrency": "UGX", "description": "Custom pricing, unlimited everything" }
+        { "@type": "Offer", "name": "Enterprise", "price": "500000", "priceCurrency": "UGX", "description": "Custom pricing, unlimited everything" }
       ],
       "aggregateRating": { "@type": "AggregateRating", "ratingValue": "4.8", "ratingCount": "127" }
     }
@@ -323,6 +323,17 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       { title: 'Uganda Cranes Match Updates', url: 'https://www.newvision.co.ug', source: 'New Vision', category: 'sports', image_url: '', summary: 'Follow the Uganda Cranes national football team latest results.' },
       { title: 'Uganda Athletics Stars Shine', url: 'https://www.monitor.co.ug', source: 'Daily Monitor', category: 'sports', image_url: '', summary: 'Ugandan athletes continue to make their mark on the world stage.' },
       { title: 'Basketball League Playoffs', url: 'https://www.newvision.co.ug', source: 'New Vision', category: 'sports', image_url: '', summary: 'National Basketball League playoffs heat up in Kampala.' },
+    ],
+    health: [
+      { title: 'Uganda Ministry of Health Launches New Vaccination Drive', url: 'https://www.newvision.co.ug', source: 'New Vision', category: 'health', image_url: '', summary: 'The Ministry of Health has rolled out a nationwide vaccination campaign targeting children under five.' },
+      { title: 'WHO Updates Guidelines on Malaria Prevention', url: 'https://www.who.int', source: 'WHO', category: 'health', image_url: '', summary: 'New recommendations include expanded use of insecticide-treated nets and seasonal chemoprevention.' },
+      { title: 'Malaria Cases Drop in Uganda Rural Areas', url: 'https://www.monitor.co.ug', source: 'Daily Monitor', category: 'health', image_url: '', summary: 'Recent data shows a significant decline in malaria incidence following community-based interventions.' },
+      { title: 'Maternal Health Improvements Across East Africa', url: 'https://www.bbc.com/news/health', source: 'BBC Health', category: 'health', image_url: '', summary: 'East African nations report improved maternal mortality rates due to better healthcare access.' },
+      { title: 'Mental Health Awareness Growing in Ugandan Communities', url: 'https://www.newvision.co.ug', source: 'New Vision', category: 'health', image_url: '', summary: 'Community leaders and health workers push for better mental health support and reduced stigma.' },
+    ],
+    technology: [
+      { title: 'Uganda Digital Health Innovations', url: 'https://www.monitor.co.ug', source: 'Daily Monitor', category: 'technology', image_url: '', summary: 'New digital tools are transforming healthcare delivery in Uganda.' },
+      { title: 'AI in African Healthcare', url: 'https://www.bbc.com/news/technology', source: 'BBC Tech', category: 'technology', image_url: '', summary: 'Artificial intelligence solutions being deployed across African hospitals.' },
     ],
   };
 

@@ -318,6 +318,10 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   // ============================================================
   app.get('/register', (req, res) => {
     const selectedType = req.query.type || '';
+    // Validate type parameter to prevent arbitrary injection
+    if (selectedType && !PORTAL_TYPES.find(p => p.type === selectedType)) {
+      return res.redirect('/register');
+    }
     // Step 1: Type selection
     if (!selectedType) {
       const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -515,8 +519,14 @@ input:focus,textarea:focus{outline:none;border-color:#4f46e5}textarea{min-height
 
   app.post('/contact', ah(async (req, res) => {
     const { name, email, phone, subject, message } = req.body;
-    await pool.query('INSERT INTO contact_messages(name,email,phone,subject,message) VALUES($1,$2,$3,$4,$5)', [name, email, phone, subject, message]);
-    sendEmail('hello@comfort.ug', 'Contact: ' + subject, '<p><strong>' + esc(name) + '</strong> (' + esc(email) + ')</p><p>' + esc(message) + '</p>');
+    // Validate inputs
+    if (!name || !email || !message || name.length > 255 || email.length > 255 || (subject && subject.length > 255) || message.length > 5000) {
+      return res.status(400).send('Invalid input. Please check your entries.');
+    }
+    // Sanitize subject to prevent email header injection
+    const safeSubject = (subject || 'Contact Form Inquiry').replace(/[\r\n]/g, '').substring(0, 255);
+    await pool.query('INSERT INTO contact_messages(name,email,phone,subject,message) VALUES($1,$2,$3,$4,$5)', [name, email, phone, safeSubject, message]);
+    sendEmail('hello@comfort.ug', 'Contact: ' + safeSubject, '<p><strong>' + esc(name) + '</strong> (' + esc(email) + ')</p><p>' + esc(message) + '</p>');
     res.send('<div style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">✅</div><h1>Message Sent!</h1><p style="color:#64748b">We\'ll get back to you within 24 hours.</p><a href="/" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Back to Home</a></div>');
   }));
 
@@ -582,7 +592,7 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
     // Look up tenant by subdomain for the public profile page
     const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.subdomain])).rows[0];
     if (!tenant) return res.status(404).send('<div style="text-align:center;padding:60px"><h1>Institution Not Found</h1><p style="color:#64748b">This institution does not exist or is not approved.</p><a href="/">Go to Comfort Home</a></div>');
-    const typeLabels = {school:'School',clinic:'Clinic',church:'Church',hotel:'Hotel/Lodge',restaurant:'Restaurant',retail:'Retail Shop',salon:'Salon/Spa',pharmacy:'Pharmacy',gym:'Gym/Fitness',hardware:'Hardware Store',supermarket:'Supermarket',transport:'Transport',electronics:'Electronics Shop',business:'Business',individual:'Individual',organization:'Organization'};
+    const typeLabels = {school:'School',clinic:'Clinic',health:'Health Center',church:'Church',hotel:'Hotel/Lodge',restaurant:'Restaurant',retail:'Retail Shop',salon:'Salon/Spa',pharmacy:'Pharmacy',gym:'Gym/Fitness',hardware:'Hardware Store',supermarket:'Supermarket',transport:'Transport',electronics:'Electronics Shop',business:'Business',individual:'Individual',organization:'Organization'};
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(tenant.name)} — Comfort</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:#f8fafc;color:#1e293b}
 .hero{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:60px 20px;text-align:center}
