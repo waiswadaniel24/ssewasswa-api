@@ -14747,7 +14747,7 @@ app.get('/school/discipline/new', requireAuth, requireNotBanned, ah(async (req, 
 
 app.post('/school/discipline/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('INSERT INTO discipline_incidents(tenant_id,student_id,incident_date,type,description,action_taken,reported_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.incident_date||'CURRENT_DATE', req.body.type, req.body.description, req.body.action_taken, req.body.reported_by]);
+  await pool.query('INSERT INTO discipline_incidents(tenant_id,student_id,incident_date,type,description,action_taken,reported_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.incident_date||new Date().toISOString().split('T')[0], req.body.type, req.body.description, req.body.action_taken, req.body.reported_by]);
   await audit(req.session.user.email, 'Discipline incident reported', `Student #${req.body.student_id}: ${req.body.type}`);
   res.redirect('/school/discipline');
 }));
