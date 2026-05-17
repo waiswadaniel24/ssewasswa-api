@@ -370,6 +370,7 @@ label{font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px}
 <h2>Create Your Account</h2>
 <div class="type-badge"><span>${pt?.emoji || ''} ${pt?.label || selectedType}</span></div>
 <form method="POST" action="/register">
+<input type="hidden" name="_csrf" value="${req.csrfToken}">
 <input type="hidden" name="type" value="${esc(selectedType)}">
 <label>Organization Name *</label>
 <input name="org_name" placeholder="e.g. Sunrise Primary School" required>
@@ -397,13 +398,28 @@ var f=document.getElementById('pw-fill');f.style.width=s+'%';f.style.background=
     res.send(html);
   });
 
-  // POST /register
+  // [H-1] POST /register removed — duplicate of server.js line 2545 which registers first.
+  // Kept here (commented out) for reference. Includes M-3 sub_type validation fix.
+  /*
   app.post('/register', ah(async (req, res) => {
     const { org_name, type, sub_type, email, phone, password, confirm_password } = req.body;
     // SECURITY: Validate type against known portal types to prevent privilege escalation
     const VALID_TYPES = ['school','church','organization','health','business','individual','hotel','restaurant','salon','pharmacy','gym','supermarket','retail','clinic'];
     if (!type || !VALID_TYPES.includes(type)) {
       return res.status(400).send('<div style="text-align:center;padding:60px"><h2>Error</h2><p>Invalid institution type.</p><a href="/register">Go Back</a></div>');
+    }
+    // M-3: Validate sub_type against known allowed values per type
+    const VALID_SUB_TYPES = {
+      school: ['primary','secondary','university','nursery'],
+      church: ['catholic','protestant','orthodox','mosque','other'],
+      health: ['hospital','clinic','pharmacy','laboratory'],
+      business: ['retail','wholesale','service','manufacturing'],
+      organization: ['ngo','cbo','company','government'],
+      individual: [],
+      hotel: [], restaurant: [], salon: [], pharmacy: [], gym: [], supermarket: [], retail: [], clinic: []
+    };
+    if (sub_type && VALID_SUB_TYPES[type] && !VALID_SUB_TYPES[type].includes(sub_type)) {
+      sub_type = null;
     }
     if (!org_name || !email || !phone || !password) {
       return res.send('<div style="text-align:center;padding:60px"><h2>Error</h2><p>All fields are required.</p><a href="/register?type='+esc(type||'')+'">Go Back</a></div>');
@@ -442,6 +458,7 @@ h1{font-size:28px;color:#059669;margin-bottom:8px} p{color:#475569;margin-bottom
       res.send('<div style="text-align:center;padding:60px"><h2>Error</h2><p>' + esc(e.message) + '</p><a href="/register?type='+esc(type||'')+'">Go Back</a></div>');
     }
   }));
+  */
 
   // ============================================================
   // PUBLIC PAGES
@@ -484,6 +501,7 @@ input:focus,textarea:focus{outline:none;border-color:#4f46e5}textarea{min-height
 </style></head><body><nav><div class="logo">◆ Comfort</div><div><a href="/">Home</a><a href="/register">Register</a><a href="/login">Login</a></div></nav>
 <div class="container"><div class="card"><h1>Get in Touch</h1>
 <form method="POST" action="/contact">
+<input type="hidden" name="_csrf" value="${req.csrfToken}">
 <label>Name *</label><input name="name" required>
 <label>Email *</label><input name="email" type="email" required>
 <label>Phone</label><input name="phone">

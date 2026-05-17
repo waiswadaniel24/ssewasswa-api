@@ -2380,7 +2380,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   }));
 
   // Manual plan activation route
-  app.get('/billing/activate/:plan', requireAuth, ah(async (req, res) => {
+  app.post('/billing/activate/:plan', requireAuth, ah(async (req, res) => {
     const user = req.session.user;
     const plan = req.params.plan;
     // SECURITY: Only super_admin can manually activate plans
@@ -2525,7 +2525,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             <a href="/dev/post-public" class="btn btn-sm" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">Post Content</a>
             <a href="/dev/adverts" class="btn btn-sm" style="background:linear-gradient(135deg,#d97706,#f59e0b)">Manage Adverts</a>
             <a href="/dev/earnings" class="btn btn-sm" style="background:linear-gradient(135deg,#059669,#10b981)">Ad Revenue</a>
-            <a href="/dev/scrape-now" class="btn btn-sm" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">Scrape Now</a>
+            <form method="POST" action="/dev/scrape-now" style="display:inline"><button type="submit" class="btn btn-sm" style="background:linear-gradient(135deg,#0891b2,#06b6d4)">Scrape Now</button></form>
             <form method="POST" action="/dev/cleanup-users" style="display:inline">
               <button type="submit" class="btn btn-sm btn-red" onclick="return confirm('Delete ALL users except dev master?')">Cleanup Users</button>
             </form>
@@ -2639,7 +2639,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   }));
 
   // Scrape trigger
-  app.get('/dev/scrape-now', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  app.post('/dev/scrape-now', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     runFullScrape();
     res.send(renderPage('Scraping Started', `
       <div class="card" style="text-align:center">
@@ -2678,7 +2678,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         <td style="padding:8px;border-bottom:1px solid #e2e8f0">${t.verified ? '&#10003;' : '&#10007;'}</td>
         <td style="padding:8px;border-bottom:1px solid #e2e8f0">${t.approved ? '&#10003;' : '&#10007;'}</td>
         <td style="padding:8px;border-bottom:1px solid #e2e8f0">
-          <a href="/dev/activate-tenant/${t.id}" class="btn btn-sm btn-green">Activate</a>
+          <form method="POST" action="/dev/activate-tenant/${t.id}" style="display:inline"><button type="submit" class="btn btn-sm btn-green">Activate</button></form>
         </td>
       </tr>
     `).join('');
@@ -2696,7 +2696,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     `, req.session.user));
   }));
 
-  app.get('/dev/activate-tenant/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  app.post('/dev/activate-tenant/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     const tid = parseInt(req.params.id);
     try {
       await pool.query('UPDATE tenants SET verified=true, approved=true WHERE id=$1', [tid]);
@@ -2804,7 +2804,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         <td style="padding:8px;border-bottom:1px solid #e2e8f0"><span style="color:${a.is_active ? '#059669' : '#ef4444'};font-weight:600;font-size:13px">${a.is_active ? 'Active' : 'Inactive'}</span></td>
         <td style="padding:8px;border-bottom:1px solid #e2e8f0;font-size:12px">${a.end_date ? new Date(a.end_date).toLocaleDateString() : 'No end'}</td>
         <td style="padding:8px;border-bottom:1px solid #e2e8f0">
-          <a href="/dev/toggle-advert/${a.id}" class="btn btn-sm" style="font-size:11px;padding:4px 10px">${a.is_active ? 'Deactivate' : 'Activate'}</a>
+          <form method="POST" action="/dev/toggle-advert/${a.id}" style="display:inline"><button type="submit" class="btn btn-sm" style="font-size:11px;padding:4px 10px">${a.is_active ? 'Deactivate' : 'Activate'}</button></form>
           <form method="POST" action="/dev/delete-advert/${a.id}" style="display:inline"><button type="submit" class="btn btn-sm btn-red" style="font-size:11px;padding:4px 10px">Delete</button></form>
         </td>
       </tr>
@@ -2859,7 +2859,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     }
   }));
 
-  app.get('/dev/toggle-advert/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  app.post('/dev/toggle-advert/:id', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     try {
       await pool.query('UPDATE daily_adverts SET is_active = NOT is_active WHERE id=$1', [parseInt(req.params.id)]);
       res.redirect('/dev/adverts');
