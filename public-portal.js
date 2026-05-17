@@ -593,21 +593,439 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
     const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.subdomain])).rows[0];
     if (!tenant) return res.status(404).send('<div style="text-align:center;padding:60px"><h1>Institution Not Found</h1><p style="color:#64748b">This institution does not exist or is not approved.</p><a href="/">Go to Comfort Home</a></div>');
     const typeLabels = {school:'School',clinic:'Clinic',health:'Health Center',church:'Church',hotel:'Hotel/Lodge',restaurant:'Restaurant',retail:'Retail Shop',salon:'Salon/Spa',pharmacy:'Pharmacy',gym:'Gym/Fitness',hardware:'Hardware Store',supermarket:'Supermarket',transport:'Transport',electronics:'Electronics Shop',business:'Business',individual:'Individual',organization:'Organization'};
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(tenant.name)} — Comfort</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:#f8fafc;color:#1e293b}
-.hero{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:60px 20px;text-align:center}
-.hero h1{font-size:36px;font-weight:900;margin-bottom:8px}.hero .badge{display:inline-block;padding:6px 16px;background:rgba(255,255,255,0.2);border-radius:20px;font-size:14px;margin-bottom:16px}
-.container{max-width:600px;margin:40px auto;padding:0 20px}
-.card{background:white;border-radius:16px;padding:28px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0;margin-bottom:20px}
-.btn{display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px}
-.info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:14px}
-.info-row .label{color:#64748b}.info-row .value{font-weight:600}
+    const healthTypeLabels = {general_hospital:'General Hospital',health_center_iii:'Health Center III',health_center_iv:'Health Center IV',clinic:'Medical Clinic',dental:'Dental Clinic',eye_clinic:'Eye Clinic',mental_health:'Mental Health Facility',physiotherapy:'Physiotherapy Center',lab:'Medical Laboratory',imaging:'Imaging & Radiology Center',maternity:'Maternity Center',pharmacy:'Pharmacy',veterinary:'Veterinary Clinic',special:'Specialized Hospital'};
+    const healthTypeServices = {
+      general_hospital:['Emergency Care','General Surgery','Internal Medicine','Pediatrics','Obstetrics & Gynecology','Laboratory Services','Pharmacy','Radiology','ICU','Outpatient Care'],
+      health_center_iii:['Maternity Care','Outpatient Consultation','Immunization','Laboratory Testing','Pharmacy','Antenatal Care','HIV Testing & Counseling','Family Planning'],
+      health_center_iv:['Emergency Surgery','Medical Wards','Laboratory','Maternity','Dental Services','X-Ray','Mental Health','HIV/AIDS Care'],
+      clinic:['General Consultation','Pharmacy','Laboratory','Vaccination','Family Planning','Antenatal Care','Minor Surgery'],
+      dental:['Dental Consultation','Teeth Cleaning','Fillings','Root Canal','Tooth Extraction','Dental X-Ray','Orthodontics','Dentures'],
+      eye_clinic:['Eye Examination','Visual Acuity Test','Glaucoma Screening','Cataract Surgery','Contact Lens Fitting','Spectacle Prescription','Retinal Examination'],
+      mental_health:['Psychiatric Evaluation','Counseling','Cognitive Behavioral Therapy','Substance Abuse Treatment','Group Therapy','Crisis Intervention'],
+      physiotherapy:['Physical Therapy','Rehabilitation','Sports Injury Treatment','Massage Therapy','Electrotherapy','Exercise Programs','Post-Surgical Rehab'],
+      lab:['Blood Tests','Urinalysis','HIV Testing','Malaria Testing','TB Screening','Pregnancy Test','Liver Function','Kidney Function','Blood Sugar'],
+      imaging:['X-Ray','Ultrasound','CT Scan','MRI','Mammography','Fluoroscopy','Bone Density Scan'],
+      maternity:['Antenatal Care','Delivery','Postnatal Care','Family Planning','Immunization','Ultrasound Scanning','C-Section'],
+      pharmacy:['Prescription Dispensing','Over-the-Counter Medicine','Drug Counseling','Vaccination','Health Screening','Chronic Disease Management'],
+      veterinary:['Pet Consultation','Vaccination','Surgery','Diagnostics','Boarding','Grooming','Nutrition Counseling'],
+      special:['Specialist Consultation','Advanced Surgery','Oncology','Cardiology','Neurology','Nephrology','Orthopedics']
+    };
+    const instType = tenant.health_institution_type || tenant.type;
+    const instLabel = tenant.type === 'clinic' || tenant.type === 'health' ? (healthTypeLabels[instType] || typeLabels[tenant.type] || tenant.type) : (typeLabels[tenant.type] || tenant.type);
+    const services = healthTypeServices[instType] || (tenant.type === 'clinic' ? healthTypeServices.clinic : null);
+
+    // Query supporting data in parallel
+    let doctors = [], nurses = [], patientCount = 0, reviews = [];
+    try {
+      const [docRes, nurseRes] = await Promise.allSettled([
+        pool.query("SELECT name, specialization, department, license_no FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [tenant.id]),
+        pool.query("SELECT name, specialization, department FROM clinic_staff WHERE tenant_id=$1 AND role='nurse' AND is_active=true ORDER BY name LIMIT 6", [tenant.id])
+      ]);
+      doctors = docRes.status === 'fulfilled' ? docRes.value.rows : [];
+      nurses = nurseRes.status === 'fulfilled' ? nurseRes.value.rows : [];
+    } catch (e) { /* gracefully degrade */ }
+
+    try {
+      const cntRes = await pool.query("SELECT COUNT(*)::int AS total FROM consultations WHERE tenant_id=$1", [tenant.id]);
+      patientCount = cntRes?.rows?.[0]?.total || 0;
+    } catch (e) {
+      try {
+        const cntRes2 = await pool.query("SELECT COUNT(*)::int AS total FROM health_visits WHERE tenant_id=$1", [tenant.id]);
+        patientCount = cntRes2?.rows?.[0]?.total || 0;
+      } catch (e2) { /* no data */ }
+    }
+
+    try {
+      const revRes = await pool.query("SELECT id, patient_name, rating, comment, created_at FROM feedback_entries WHERE tenant_id=$1 AND rating IS NOT NULL ORDER BY created_at DESC LIMIT 5", [tenant.id]);
+      reviews = revRes?.rows || [];
+    } catch (e) { /* table may not exist */ }
+
+    // Working hours fallback
+    let workingHours = null;
+    try {
+      if (tenant.working_hours) workingHours = typeof tenant.working_hours === 'string' ? JSON.parse(tenant.working_hours) : tenant.working_hours;
+    } catch (e) { /* ignore */ }
+
+    const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const now = new Date();
+    const currentDay = days[now.getDay() === 0 ? 6 : now.getDay() - 1];
+    const currentTime = now.getHours() * 100 + now.getMinutes();
+
+    function renderStars(rating) {
+      const full = Math.round(rating || 0);
+      let s = '';
+      for (let i = 1; i <= 5; i++) s += i <= full ? '&#9733;' : '&#9734;';
+      return s;
+    }
+    function isOpenToday(day) {
+      if (!workingHours || !workingHours[day]) return { open: false, hours: 'Closed' };
+      const h = workingHours[day];
+      if (h.closed) return { open: false, hours: 'Closed' };
+      const open = parseInt(String(h.open || '0900').replace(':', ''));
+      const close = parseInt(String(h.close || '1700').replace(':', ''));
+      return { open: true, hours: `${String(h.open || '09:00').padStart(5,'0')} - ${String(h.close || '17:00').padStart(5,'0')}`, isCurrentlyOpen: day === currentDay && currentTime >= open && currentTime < close };
+    }
+
+    const todayStatus = isOpenToday(currentDay);
+    const whatsappPhone = tenant.phone ? tenant.phone.replace(/[^0-9]/g, '') : null;
+    const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+    const canonicalUrl = `${baseUrl}/portal/${esc(req.params.subdomain)}`;
+
+    res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(tenant.name)} — ${esc(instLabel)} | Professional Healthcare</title>
+<meta name="description" content="${esc(tenant.description || tenant.name + ' is a verified ' + instLabel + '. Book an appointment online, view doctors, services, and working hours.')}">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="${esc(canonicalUrl)}">
+<meta property="og:title" content="${esc(tenant.name)} — ${esc(instLabel)}">
+<meta property="og:description" content="Book an appointment at ${esc(tenant.name)}. Verified ${esc(instLabel)} offering ${services ? services.slice(0,3).join(', ') : 'quality healthcare services'}.">
+<meta property="og:type" content="business.business">
+<meta property="og:url" content="${esc(canonicalUrl)}">
+${tenant.logo_url ? '<meta property="og:image" content="'+esc(tenant.logo_url)+'">' : ''}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${esc(tenant.name)}">
+<meta name="twitter:description" content="Verified ${esc(instLabel)} — Book Online">
+<link rel="icon" href="/favicon.png">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0fdfa;color:#1e293b;line-height:1.6}
+a{color:#0d9488;text-decoration:none}a:hover{text-decoration:underline}
+img{max-width:100%}
+.topbar{background:white;border-bottom:1px solid #e2e8f0;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(0,0,0,0.04)}
+.topbar-logo{font-size:20px;font-weight:800;color:#0d9488;display:flex;align-items:center;gap:8px}
+.topbar-nav{display:flex;gap:16px;align-items:center}
+.topbar-nav a{font-size:13px;font-weight:600;color:#475569;padding:6px 14px;border-radius:8px;transition:0.2s}
+.topbar-nav a:hover{background:#f0fdfa;color:#0d9488;text-decoration:none}
+.hero{background:linear-gradient(135deg,#0d9488 0%,#0891b2 50%,#0e7490 100%);color:white;padding:56px 24px 48px;text-align:center;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-40%;right:-20%;width:500px;height:500px;border-radius:50%;background:rgba(255,255,255,0.04)}
+.hero::after{content:'';position:absolute;bottom:-30%;left:-10%;width:400px;height:400px;border-radius:50%;background:rgba(255,255,255,0.03)}
+.hero-inner{position:relative;z-index:1;max-width:800px;margin:0 auto}
+.hero-logo{width:80px;height:80px;border-radius:20px;background:white;box-shadow:0 8px 24px rgba(0,0,0,0.2);margin:0 auto 20px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.hero-logo img{width:100%;height:100%;object-fit:cover}
+.hero-logo .logo-fallback{font-size:36px;color:#0d9488}
+.hero-badges{display:flex;gap:10px;justify-content:center;margin-bottom:16px;flex-wrap:wrap}
+.hero-badge{display:inline-flex;align-items:center;gap:5px;padding:5px 14px;background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);border-radius:20px;font-size:12px;font-weight:600;border:1px solid rgba(255,255,255,0.2)}
+.hero-badge .check{color:#86efac}
+.hero h1{font-size:clamp(26px,5vw,40px);font-weight:900;margin-bottom:6px;letter-spacing:-0.5px}
+.hero .tagline{font-size:clamp(14px,2vw,17px);opacity:0.9;margin-bottom:20px}
+.hero-stats{display:flex;gap:24px;justify-content:center;flex-wrap:wrap;margin-top:24px}
+.hero-stat{text-align:center}
+.hero-stat .num{font-size:28px;font-weight:800}
+.hero-stat .lbl{font-size:12px;opacity:0.8}
+.container{max-width:1100px;margin:0 auto;padding:0 20px}
+.section{padding:48px 0}
+.section-title{text-align:center;font-size:clamp(22px,3.5vw,30px);font-weight:800;margin-bottom:8px;color:#134e4a}
+.section-sub{text-align:center;color:#64748b;margin-bottom:36px;font-size:15px}
+.grid{display:grid;gap:20px}
+.grid-2{grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+.grid-3{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.grid-4{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.card{background:white;border-radius:16px;padding:28px;box-shadow:0 1px 6px rgba(0,0,0,0.05);border:1px solid #e2e8f0;transition:0.3s}
+.card:hover{box-shadow:0 8px 24px rgba(0,0,0,0.08)}
+.card-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.card-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.card-icon.teal{background:#ccfbf1;color:#0d9488}
+.card-icon.blue{background:#dbeafe;color:#2563eb}
+.card-icon.green{background:#dcfce7;color:#16a34a}
+.card-icon.amber{background:#fef3c7;color:#d97706}
+.card-icon.red{background:#fee2e2;color:#dc2626}
+.card-icon.purple{background:#f3e8ff;color:#7c3aed}
+.card h3{font-size:17px;font-weight:700;color:#1e293b}
+.card p.desc{font-size:13px;color:#64748b;margin-bottom:12px}
+.cta-section{text-align:center;padding:48px 24px;background:linear-gradient(135deg,#0d9488,#0891b2);border-radius:20px;margin:0 auto;max-width:700px;color:white}
+.cta-section h2{font-size:clamp(20px,3vw,28px);font-weight:800;margin-bottom:8px}
+.cta-section p{opacity:0.9;margin-bottom:24px;font-size:15px}
+.btn{display:inline-block;padding:12px 28px;border-radius:12px;font-weight:700;font-size:15px;border:none;cursor:pointer;transition:0.3s;text-decoration:none;text-align:center}
+.btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,0.15);text-decoration:none}
+.btn-white{background:white;color:#0d9488}
+.btn-outline-white{background:transparent;border:2px solid rgba(255,255,255,0.5);color:white}
+.btn-outline-white:hover{background:rgba(255,255,255,0.1);border-color:white}
+.btn-teal{background:linear-gradient(135deg,#0d9488,#0891b2);color:white}
+.btn-green{background:linear-gradient(135deg,#059669,#0d9488);color:white}
+.btn-sm{padding:8px 18px;font-size:13px;border-radius:8px}
+.doctor-card{display:flex;gap:16px;align-items:flex-start;padding:20px}
+.doctor-avatar{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#0d9488,#0891b2);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;font-weight:700;flex-shrink:0}
+.doctor-info h4{font-size:15px;font-weight:700;margin-bottom:2px}
+.doctor-info .spec{font-size:13px;color:#0d9488;font-weight:600}
+.doctor-info .dept{font-size:12px;color:#94a3b8}
+.doctor-info .lic{font-size:11px;color:#94a3b8}
+.service-tag{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:#f0fdfa;border:1px solid #ccfbf1;border-radius:12px;font-size:13px;font-weight:600;color:#134e4a;transition:0.2s}
+.service-tag:hover{background:#ccfbf1;border-color:#99f6e4}
+.service-tag .icon{font-size:16px}
+.hours-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:14px;align-items:center}
+.hours-row:last-child{border-bottom:none}
+.hours-row .day{font-weight:600;color:#334155}
+.hours-row .time{color:#64748b}
+.hours-row .closed-label{color:#ef4444;font-weight:500}
+.hours-row .open-now{color:#16a34a;font-weight:600}
+.status-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:700;margin-bottom:20px}
+.status-badge.open{background:#dcfce7;color:#16a34a}
+.status-badge.closed{background:#fee2e2;color:#dc2626}
+.status-badge .dot{width:8px;height:8px;border-radius:50%;animation:pulse 2s infinite}
+.status-badge.open .dot{background:#16a34a}
+.status-badge.closed .dot{background:#dc2626}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.review-card{padding:16px;border-bottom:1px solid #f1f5f9}
+.review-card:last-child{border-bottom:none}
+.review-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.review-name{font-weight:700;font-size:14px}
+.review-date{font-size:12px;color:#94a3b8}
+.review-stars{color:#f59e0b;font-size:16px;margin-bottom:6px}
+.review-text{font-size:13px;color:#475569}
+.contact-row{display:flex;align-items:center;gap:12px;padding:10px 0;font-size:14px}
+.contact-row .contact-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.contact-row a{color:#0d9488;font-weight:600}
+.contact-row .contact-label{color:#64748b;font-size:12px}
+.contact-row .contact-value{font-weight:600;color:#1e293b}
+.emergency-box{background:linear-gradient(135deg,#fee2e2,#fecaca);border:1px solid #fca5a5;border-radius:16px;padding:24px;text-align:center}
+.emergency-box h3{color:#991b1b;font-size:18px;margin-bottom:6px}
+.emergency-box p{color:#7f1d1d;font-size:14px;margin-bottom:12px}
+.emergency-box .phone{font-size:22px;font-weight:800;color:#dc2626;display:block;margin-bottom:8px}
+.map-placeholder{background:#e2e8f0;border-radius:16px;height:200px;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:14px;border:2px dashed #cbd5e1}
+.footer{background:#0f172a;color:#94a3b8;padding:40px 24px 24px;margin-top:48px}
+.footer-inner{max-width:1100px;margin:0 auto;display:flex;justify-content:space-between;flex-wrap:wrap;gap:24px}
+.footer-brand{max-width:300px}
+.footer-brand h3{color:white;font-size:18px;margin-bottom:8px}
+.footer-brand p{font-size:13px}
+.footer-links h4{color:white;font-size:14px;margin-bottom:12px}
+.footer-links a{display:block;font-size:13px;color:#94a3b8;padding:3px 0}
+.footer-links a:hover{color:white;text-decoration:none}
+.footer-bottom{text-align:center;padding-top:20px;margin-top:20px;border-top:1px solid #1e293b;font-size:12px;max-width:1100px;margin-left:auto;margin-right:auto;color:#64748b}
+.verified-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#dcfce7;color:#16a34a;border-radius:6px;font-size:11px;font-weight:700}
+.empty-state{text-align:center;padding:32px;color:#94a3b8;font-size:14px}
+@media(max-width:640px){
+.hero{padding:40px 16px 36px}
+.hero-stats{gap:16px}
+.hero-stat .num{font-size:22px}
+.section{padding:32px 0}
+.card{padding:20px}
+.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}
+.footer-inner{flex-direction:column}
+.topbar-nav a.hide-mobile{display:none}
+}
 </style></head><body>
-<div class="hero"><div class="badge">${esc(typeLabels[tenant.type] || tenant.type)}</div><h1>${esc(tenant.name)}</h1>${tenant.sub_type ? '<p style="opacity:0.9">'+esc(tenant.sub_type)+'</p>' : ''}</div>
+<nav class="topbar">
+  <div class="topbar-logo">${tenant.logo_url ? '<img src="'+esc(tenant.logo_url)+'" alt="'+esc(tenant.name)+'" style="height:28px;border-radius:6px">' : '&#9670; Comfort'}</div>
+  <div class="topbar-nav">
+    <a href="#services">Services</a>
+    <a href="#doctors">Doctors</a>
+    <a href="#contact">Contact</a>
+    <a href="/clinic/book/${esc(req.params.subdomain)}" class="btn btn-teal btn-sm">Book Now</a>
+    <a href="/login" class="hide-mobile">Login</a>
+  </div>
+</nav>
+<div class="hero">
+  <div class="hero-inner">
+    <div class="hero-logo">${tenant.logo_url ? '<img src="'+esc(tenant.logo_url)+'" alt="'+esc(tenant.name)+'">' : '<span class="logo-fallback">&#127973;</span>'}</div>
+    <div class="hero-badges">
+      <span class="hero-badge"><span class="check">&#10003;</span> Verified</span>
+      <span class="hero-badge">${esc(instLabel)}</span>
+      ${tenant.approved ? '<span class="hero-badge"><span class="check">&#10003;</span> Approved</span>' : ''}
+    </div>
+    <h1>${esc(tenant.name)}</h1>
+    <p class="tagline">${esc(tenant.description || (instLabel + ' providing quality healthcare services'))}</p>
+    <div class="hero-stats">
+      <div class="hero-stat"><div class="num">${doctors.length}</div><div class="lbl">Doctors</div></div>
+      <div class="hero-stat"><div class="num">${nurses.length}</div><div class="lbl">Nurses</div></div>
+      <div class="hero-stat"><div class="num">${patientCount > 0 ? (patientCount >= 1000 ? (patientCount/1000).toFixed(1)+'K' : patientCount) : '500+'}</div><div class="lbl">Patients Served</div></div>
+      ${reviews.length > 0 ? '<div class="hero-stat"><div class="num">'+reviews[0].rating?.toFixed(1)+'</div><div class="lbl">Avg Rating</div></div>' : '<div class="hero-stat"><div class="num">5.0</div><div class="lbl">Rating</div></div>'}
+    </div>
+  </div>
+</div>
 <div class="container">
-<div class="card"><div class="info-row"><span class="label">Type</span><span class="value">${esc(typeLabels[tenant.type] || tenant.type)}</span></div>${tenant.sub_type ? '<div class="info-row"><span class="label">Category</span><span class="value">'+esc(tenant.sub_type)+'</span></div>' : ''}<div class="info-row"><span class="label">Email</span><span class="value">${esc(tenant.email)}</span></div>${tenant.phone ? '<div class="info-row"><span class="label">Phone</span><span class="value">'+esc(tenant.phone)+'</span></div>' : ''}</div>
-<div style="text-align:center"><a href="/login" class="btn">Login to Dashboard</a></div>
-</div></body></html>`);
+${services && services.length > 0 ? `
+<section class="section" id="services">
+  <h2 class="section-title">Our Services</h2>
+  <p class="section-sub">Comprehensive healthcare services tailored to your needs</p>
+  <div class="grid grid-4">
+    ${services.map((s, i) => '<div class="service-tag"><span class="icon">'+['&#128137;','&#128300;','&#129657;','&#127973;','&#128138;','&#128666;','&#128200;','&#128167;','&#128170;','&#129657;'][i % 10]+'</span>'+esc(s)+'</div>').join('')}
+  </div>
+</section>` : ''}
+
+<section class="section" id="doctors">
+  <h2 class="section-title">Our Medical Team</h2>
+  <p class="section-sub">Experienced professionals dedicated to your health</p>
+  <div class="grid grid-2">
+    ${doctors.length > 0 ? doctors.map(d => `
+    <div class="card">
+      <div class="doctor-card">
+        <div class="doctor-avatar">${esc(d.name ? d.name.charAt(0).toUpperCase() : 'D')}</div>
+        <div class="doctor-info">
+          <h4>${esc(d.name)}</h4>
+          <div class="spec">${esc(d.specialization || 'General Practitioner')}</div>
+          ${d.department ? '<div class="dept">'+esc(d.department)+'</div>' : ''}
+          ${d.license_no ? '<div class="lic">Lic: '+esc(d.license_no)+'</div>' : ''}
+        </div>
+      </div>
+    </div>`).join('') : '<div class="card"><div class="empty-state">&#128100; Our medical team profiles are being updated.<br>Please contact us for more information.</div></div>'}
+    ${doctors.length > 0 && nurses.length > 0 ? `
+    <div class="card">
+      <div class="doctor-card">
+        <div class="doctor-avatar" style="background:linear-gradient(135deg,#2563eb,#7c3aed)">&#128099;</div>
+        <div class="doctor-info">
+          <h4>Nursing Team</h4>
+          <div class="spec">${nurses.length} Active Nurse${nurses.length !== 1 ? 's' : ''}</div>
+          <div class="dept">Dedicated patient care professionals</div>
+        </div>
+      </div>
+    </div>` : ''}
+  </div>
+</section>
+
+<section class="section" id="hours">
+  <h2 class="section-title">Working Hours</h2>
+  <p class="section-sub">Plan your visit with our convenient hours</p>
+  <div class="grid grid-2">
+    <div class="card">
+      <div style="text-align:center">
+        <div class="status-badge ${todayStatus.open && todayStatus.isCurrentlyOpen ? 'open' : 'closed'}">
+          <span class="dot"></span>
+          ${todayStatus.open && todayStatus.isCurrentlyOpen ? 'Open Now' : 'Currently Closed'}
+        </div>
+        ${todayStatus.open ? '<p style="font-size:18px;font-weight:700;color:#1e293b;margin-bottom:4px">'+esc(todayStatus.hours)+'</p><p style="font-size:13px;color:#64748b">Today ('+esc(currentDay)+')</p>' : '<p style="font-size:14px;color:#64748b;margin-bottom:4px">Closed today</p><p style="font-size:13px;color:#64748b">See full schedule below</p>'}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon amber">&#128339;</div>
+        <h3>Full Schedule</h3>
+      </div>
+      ${workingHours ? days.map(day => {
+        const s = isOpenToday(day);
+        return '<div class="hours-row"><span class="day">'+day+(day === currentDay ? ' (Today)' : '')+'</span>' +
+          (s.open ? '<span class="time'+(s.isCurrentlyOpen ? ' open-now' : '')+'">'+esc(s.hours)+'</span>' : '<span class="closed-label">Closed</span>') + '</div>';
+      }).join('') : `
+      <div class="hours-row"><span class="day">Monday</span><span class="time">08:00 - 17:00</span></div>
+      <div class="hours-row"><span class="day">Tuesday</span><span class="time">08:00 - 17:00</span></div>
+      <div class="hours-row"><span class="day">Wednesday</span><span class="time">08:00 - 17:00</span></div>
+      <div class="hours-row"><span class="day">Thursday</span><span class="time">08:00 - 17:00</span></div>
+      <div class="hours-row"><span class="day">Friday</span><span class="time">08:00 - 17:00</span></div>
+      <div class="hours-row"><span class="day">Saturday</span><span class="time">09:00 - 13:00</span></div>
+      <div class="hours-row"><span class="day">Sunday</span><span class="closed-label">Closed</span></div>`}
+    </div>
+  </div>
+</section>
+
+${reviews.length > 0 ? `
+<section class="section" id="reviews">
+  <h2 class="section-title">Patient Reviews</h2>
+  <p class="section-sub">What our patients say about us</p>
+  <div class="grid grid-2">
+    <div class="card">
+      ${reviews.map(r => `
+      <div class="review-card">
+        <div class="review-header"><span class="review-name">${esc(r.patient_name || 'Anonymous')}</span><span class="review-date">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</span></div>
+        <div class="review-stars">${renderStars(r.rating)}</div>
+        ${r.comment ? '<div class="review-text">'+esc(r.comment)+'</div>' : ''}
+      </div>`).join('')}
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+      <div style="font-size:52px;font-weight:900;color:#0d9488">${reviews.reduce((a,r) => a + (r.rating || 0), 0) / reviews.length}</div>
+      <div style="color:#f59e0b;font-size:24px;margin-bottom:8px">${renderStars(reviews.reduce((a,r) => a + (r.rating || 0), 0) / reviews.length)}</div>
+      <div style="color:#64748b;font-size:14px">Based on ${reviews.length} review${reviews.length !== 1 ? 's' : ''}</div>
+    </div>
+  </div>
+</section>` : `
+<section class="section" id="reviews">
+  <h2 class="section-title">Patient Reviews</h2>
+  <p class="section-sub">Your health is our priority</p>
+  <div class="card" style="text-align:center;padding:48px">
+    <div style="font-size:48px;margin-bottom:12px">&#11088;</div>
+    <div style="font-size:20px;font-weight:700;margin-bottom:6px">Excellent Care</div>
+    <div style="color:#f59e0b;font-size:20px;margin-bottom:8px">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+    <div style="color:#64748b;font-size:14px">We're building our review collection.<br>Book an appointment and share your experience!</div>
+  </div>
+</section>`}
+
+<section class="section" id="location">
+  <h2 class="section-title">Find Us</h2>
+  <p class="section-sub">Visit us at our location</p>
+  <div class="card" style="padding:0;overflow:hidden">
+    ${tenant.address ? '<div style="padding:20px 28px;font-size:14px;color:#334155;font-weight:600">&#128205; '+esc(tenant.address)+'</div>' : ''}
+    <div class="map-placeholder" id="map-container">
+      &#128506; Google Maps integration — Enable location services in your clinic settings to display an interactive map.
+    </div>
+  </div>
+</section>
+
+<section class="section" id="contact">
+  <h2 class="section-title">Contact Us</h2>
+  <p class="section-sub">Get in touch — we're here to help</p>
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon teal">&#128222;</div>
+        <h3>Contact Information</h3>
+      </div>
+      ${tenant.phone ? `
+      <div class="contact-row">
+        <div class="contact-icon" style="background:#ccfbf1;color:#0d9488">&#128222;</div>
+        <div><div class="contact-label">Phone</div><a href="tel:${esc(tenant.phone)}">${esc(tenant.phone)}</a></div>
+      </div>` : ''}
+      ${tenant.email ? `
+      <div class="contact-row">
+        <div class="contact-icon" style="background:#dbeafe;color:#2563eb">&#9993;</div>
+        <div><div class="contact-label">Email</div><a href="mailto:${esc(tenant.email)}">${esc(tenant.email)}</a></div>
+      </div>` : ''}
+      ${whatsappPhone ? `
+      <div class="contact-row">
+        <div class="contact-icon" style="background:#dcfce7;color:#16a34a">&#128172;</div>
+        <div><div class="contact-label">WhatsApp</div><a href="https://wa.me/${esc(whatsappPhone)}" target="_blank" rel="noopener">Chat with us</a></div>
+      </div>` : ''}
+      ${tenant.address ? `
+      <div class="contact-row">
+        <div class="contact-icon" style="background:#fef3c7;color:#d97706">&#128205;</div>
+        <div><div class="contact-label">Address</div><span class="contact-value">${esc(tenant.address)}</span></div>
+      </div>` : ''}
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon red">&#128680;</div>
+        <h3>Emergency</h3>
+      </div>
+      <div class="emergency-box">
+        <h3>Need Emergency Care?</h3>
+        <p>For medical emergencies, call us immediately or visit our facility directly.</p>
+        ${tenant.phone ? '<span class="phone">&#128222; '+esc(tenant.phone)+'</span><a href="tel:'+esc(tenant.phone)+'" class="btn btn-sm" style="background:#dc2626;color:white;display:block">Call Now</a>' : '<a href="#contact" class="btn btn-sm" style="background:#dc2626;color:white">View Contact Info</a>'}
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="booking">
+  <div class="cta-section">
+    <h2>&#128197; Book an Appointment</h2>
+    <p>Schedule your visit online — fast, easy, and secure. No waiting in line.</p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <a href="/clinic/book/${esc(req.params.subdomain)}" class="btn btn-white">Book Appointment Now</a>
+      ${whatsappPhone ? '<a href="https://wa.me/'+esc(whatsappPhone)+'?text=Hello%2C%20I%20would%20like%20to%20book%20an%20appointment" target="_blank" rel="noopener" class="btn btn-outline-white">WhatsApp Us</a>' : ''}
+    </div>
+  </div>
+</section>
+</div>
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <h3>${esc(tenant.name)}</h3>
+      <p>${esc(tenant.description || (instLabel + ' — Providing quality healthcare services. Book an appointment online.'))}</p>
+    </div>
+    <div class="footer-links">
+      <h4>Quick Links</h4>
+      <a href="#services">Services</a>
+      <a href="#doctors">Our Doctors</a>
+      <a href="#hours">Working Hours</a>
+      <a href="#contact">Contact</a>
+    </div>
+    <div class="footer-links">
+      <h4>Legal</h4>
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="/">Comfort Platform</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    &copy; ${new Date().getFullYear()} ${esc(tenant.name)}. Powered by <a href="/" style="color:#0d9488;font-weight:600">Comfort Platform</a>. All rights reserved.
+  </div>
+</footer></body></html>`);
   }));
 
   console.log('[PublicPortal] Landing page, registration, and public pages loaded');

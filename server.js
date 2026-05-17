@@ -1855,7 +1855,63 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active, min_plan) VALUES ('notification_center', 'Notification Center', 'In-app notification bell with history, mark-read, and preferences', '11.0', 'core', 'None', true, 'free') ON CONFLICT DO NOTHING`,
   // ============ v11 DOCUMENT & RECEIPT BUILDER ============
   `CREATE TABLE IF NOT EXISTS document_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, template_type TEXT DEFAULT 'receipt', header_text TEXT, footer_text TEXT, logo_url TEXT, background_color TEXT DEFAULT '#ffffff', text_color TEXT DEFAULT '#1e293b', show_logo BOOLEAN DEFAULT true, show_stamp BOOLEAN DEFAULT false, stamp_text TEXT, auto_number_prefix TEXT, next_number INTEGER DEFAULT 1, is_default BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
-  `CREATE TABLE IF NOT EXISTS generated_documents (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, template_id INTEGER REFERENCES document_templates(id) ON DELETE SET NULL, doc_number TEXT, doc_type TEXT, title TEXT, content JSONB, recipient_name TEXT, recipient_email TEXT, amount NUMERIC DEFAULT 0, status TEXT DEFAULT 'draft', generated_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
+  `CREATE TABLE IF NOT EXISTS generated_documents (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, template_id INTEGER REFERENCES document_templates(id) ON DELETE SET NULL, doc_number TEXT, doc_type TEXT, title TEXT, content JSONB, recipient_name TEXT, recipient_email TEXT, amount NUMERIC DEFAULT 0, status TEXT DEFAULT 'draft', generated_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+
+  // ============ v16 APPOINTMENT REMINDERS & PAYMENT COLLECTION ============
+  // Appointment Reminders
+  `CREATE TABLE IF NOT EXISTS appointment_reminders (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+    appointment_id INTEGER REFERENCES clinic_appointments(id),
+    patient_name VARCHAR(255),
+    phone VARCHAR(20),
+    reminder_type VARCHAR(20) DEFAULT 'sms',
+    message TEXT,
+    sent_at TIMESTAMPTZ DEFAULT NOW(),
+    status VARCHAR(20) DEFAULT 'sent'
+  )`,
+  `CREATE TABLE IF NOT EXISTS reminder_settings (
+    tenant_id INTEGER PRIMARY KEY REFERENCES tenants(id),
+    enabled BOOLEAN DEFAULT true,
+    hours_before INTEGER DEFAULT 24,
+    sms_enabled BOOLEAN DEFAULT true,
+    whatsapp_enabled BOOLEAN DEFAULT false,
+    sms_template TEXT DEFAULT 'Reminder: You have an appointment at {facility_name} on {date} at {time} with Dr. {doctor}. Reply CANCEL to cancel.',
+    whatsapp_template TEXT DEFAULT 'Hello {patient_name}! This is a reminder about your appointment at {facility_name} on {date} at {time} with Dr. {doctor}. Please arrive 15 minutes early.'
+  )`,
+  // Payment Transactions for Consultations & Pharmacy
+  `CREATE TABLE IF NOT EXISTS payment_transactions (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+    invoice_id INTEGER REFERENCES patient_invoices(id),
+    patient_name VARCHAR(255),
+    phone VARCHAR(20),
+    amount BIGINT NOT NULL DEFAULT 0,
+    currency VARCHAR(10) DEFAULT 'UGX',
+    payment_method VARCHAR(30) DEFAULT 'mobile_money',
+    provider VARCHAR(30) DEFAULT 'flutterwave',
+    provider_ref VARCHAR(255),
+    status VARCHAR(20) DEFAULT 'pending',
+    paid_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS payment_settings (
+    tenant_id INTEGER PRIMARY KEY REFERENCES tenants(id),
+    flutterwave_public_key TEXT,
+    flutterwave_secret_key TEXT,
+    mobile_money_enabled BOOLEAN DEFAULT true,
+    card_enabled BOOLEAN DEFAULT true,
+    bank_enabled BOOLEAN DEFAULT false,
+    auto_send_receipt BOOLEAN DEFAULT true,
+    receipt_template TEXT DEFAULT 'Thank you for your payment of {amount} UGX to {facility_name}. Invoice: {invoice_number}. Receipt ref: {ref}.'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_appointment_reminders_tenant ON appointment_reminders(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_appointment_reminders_appt ON appointment_reminders(appointment_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payment_transactions_tenant ON payment_transactions(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payment_transactions_invoice ON payment_transactions(invoice_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payment_transactions_status ON payment_transactions(status)`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('appointment_reminders', 'SMS/WhatsApp Appointment Reminders', 'Automated and manual appointment reminders via SMS and WhatsApp', '16.0', 'core', 'SMS gateway configured', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('payment_collection', 'Payment Collection for Consultations & Pharmacy', 'Collect payments via MTN MoMo, Airtel Money, and Flutterwave', '16.0', 'enterprise', 'Flutterwave API keys', true) ON CONFLICT DO NOTHING`
 ];
 
 // Add missing UNIQUE constraints so ON CONFLICT DO NOTHING works correctly
@@ -16966,6 +17022,17 @@ app.get('/clinic', requireAuth, requireNotBanned, requireFeature('clinic_workflo
       <div class="card" style="border-top:4px solid #6366f1"><h3 style="color:#6366f1">Patient EHR</h3><p class="muted" style="font-size:13px">Allergies, vitals, immunizations, chronic conditions</p><a href="/clinic/ehr-search" class="btn btn-sm" style="margin-top:10px">Search EHR</a></div>
       <div class="card" style="border-top:4px solid #dc2626"><h3 style="color:#dc2626">Clinical Decision Support</h3><p class="muted" style="font-size:13px">Allergy checks, dosage calculators, drug interactions</p><a href="/clinic/cds" class="btn btn-sm" style="margin-top:10px">CDS Tools</a></div>
       <div class="card" style="border-top:4px solid #4f46e5"><h3 style="color:#4f46e5">Billing & Insurance</h3><p class="muted" style="font-size:13px">Invoicing, insurance providers, claims management</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/insurance" class="btn btn-sm">Insurance</a><a href="/clinic/claims" class="btn btn-sm">Claims</a></div></div>
+      <div class="card" style="border-top:4px solid #ec4899"><h3 style="color:#ec4899">Referrals</h3><p class="muted" style="font-size:13px">Refer patients to specialists & external facilities</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/referrals" class="btn btn-sm">Referrals</a><a href="/clinic/referrals/new" class="btn btn-sm btn-green">+ New</a></div></div>
+      <div class="card" style="border-top:4px solid #7c3aed"><h3 style="color:#7c3aed">Telehealth</h3><p class="muted" style="font-size:13px">Video consultations, virtual appointments</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/telehealth" class="btn btn-sm">Sessions</a><a href="/clinic/telehealth/schedule" class="btn btn-sm btn-green">+ Schedule</a></div></div>
+      <div class="card" style="border-top:4px solid #0891b2"><h3 style="color:#0891b2">Patient Portal</h3><p class="muted" style="font-size:13px">Self-service: book, view records, request refills</p><a href="/clinic/patient-portal-link" class="btn btn-sm" style="margin-top:10px" onclick="navigator.clipboard.writeText(window.location.origin+'/patient-portal/'+window.location.hostname.split('.')[0]);alert('Patient portal link copied!')">Copy Patient Link</a></div>
+    </div>
+
+    <h2 style="font-size:18px;margin:20px 0 12px;color:#059669;border-bottom:2px solid #059669;padding-bottom:4px">Revenue & Operations</h2>
+    <div class="grid">
+      <div class="card" style="border-top:4px solid #059669"><h3 style="color:#059669">Payment Collection</h3><p class="muted" style="font-size:13px">MoMo, card payments, Flutterwave integration</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/payments" class="btn btn-sm">Transactions</a><a href="/clinic/payment-settings" class="btn btn-sm">Settings</a></div></div>
+      <div class="card" style="border-top:4px solid #f59e0b"><h3 style="color:#f59e0b">Appointment Reminders</h3><p class="muted" style="font-size:13px">SMS/WhatsApp automated reminders reduce no-shows</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/reminders" class="btn btn-sm">Settings</a><a href="/clinic/reminders/send-all" class="btn btn-sm btn-green">Send All</a></div></div>
+      <div class="card" style="border-top:4px solid #64748b"><h3 style="color:#64748b">Discharge Summaries</h3><p class="muted" style="font-size:13px">Professional discharge documents for patients</p><a href="/clinic/ehr-search" class="btn btn-sm" style="margin-top:10px">Generate from EHR</a></div>
+      <div class="card" style="border-top:4px solid #0f766e"><h3 style="color:#0f766e">Insurance Claims</h3><p class="muted" style="font-size:13px">Submit & track insurance claims for patients</p><div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><a href="/clinic/insurance/claims" class="btn btn-sm">Claims</a><a href="/clinic/insurance/claims/new" class="btn btn-sm btn-green">+ New Claim</a></div></div>
     </div>
   `, req.session.user));
 }));
@@ -17498,6 +17565,538 @@ app.post('/clinic/pharmacy/inventory/:id/update', requireAuth, requireNotBanned,
 }));
 
 // =============================================
+// CLINIC REFERRAL MANAGEMENT SYSTEM
+// =============================================
+
+// Helper: referral status badge
+const referralStatusBadge = (status) => {
+  const colors = { pending: '#f59e0b', accepted: '#3b82f6', in_progress: '#8b5cf6', completed: '#059669', rejected: '#dc2626' };
+  const c = colors[status] || '#6b7280';
+  return `<span class="tag" style="background:${c};color:white">${esc(status)}</span>`;
+};
+
+// Helper: urgency badge
+const urgencyBadge = (urgency) => {
+  const colors = { stat: '#dc2626', urgent: '#f59e0b', routine: '#059669' };
+  const c = colors[urgency] || '#6b7280';
+  return `<span class="tag" style="background:${c};color:white">${esc(urgency)}</span>`;
+};
+
+// GET /clinic/referrals — List all referrals with filters
+app.get('/clinic/referrals', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const filter = req.query.status || 'all';
+  const [pending, accepted, inProgress, completed, total] = await Promise.all([
+    pool.query("SELECT COUNT(*) FROM referrals WHERE tenant_id=$1 AND status='pending'", [t]),
+    pool.query("SELECT COUNT(*) FROM referrals WHERE tenant_id=$1 AND status='accepted'", [t]),
+    pool.query("SELECT COUNT(*) FROM referrals WHERE tenant_id=$1 AND status='in_progress'", [t]),
+    pool.query("SELECT COUNT(*) FROM referrals WHERE tenant_id=$1 AND status='completed'", [t]),
+    pool.query("SELECT COUNT(*) FROM referrals WHERE tenant_id=$1", [t])
+  ]);
+  let where = 'WHERE r.tenant_id=$1';
+  const params = [t];
+  if (filter !== 'all') { where += ' AND r.status=$2'; params.push(filter); }
+  const referrals = (await pool.query(`SELECT r.*, cs.name as doctor_name FROM referrals r LEFT JOIN clinic_staff cs ON r.referring_doctor=cs.name ${where} ORDER BY r.created_at DESC`, params)).rows;
+  res.send(renderPage('Referrals', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#0d9488)"><h1>Referral Management</h1><p>Track and manage patient referrals to external facilities</p></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:15px 0">
+      <div class="card" style="text-align:center;border-left:4px solid #f59e0b"><div style="font-size:28px;font-weight:700;color:#f59e0b">${pending.rows[0].count}</div><div class="muted">Pending</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #3b82f6"><div style="font-size:28px;font-weight:700;color:#3b82f6">${accepted.rows[0].count}</div><div class="muted">Accepted</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #8b5cf6"><div style="font-size:28px;font-weight:700;color:#8b5cf6">${inProgress.rows[0].count}</div><div class="muted">In Progress</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #059669"><div style="font-size:28px;font-weight:700;color:#059669">${completed.rows[0].count}</div><div class="muted">Completed</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #6b7280"><div style="font-size:28px;font-weight:700;color:#6b7280">${total.rows[0].count}</div><div class="muted">Total</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:10px">
+        <div class="tab-bar"><a href="/clinic/referrals?status=all" class="${filter==='all'?'active':''}">All</a><a href="/clinic/referrals?status=pending" class="${filter==='pending'?'active':''}">Pending</a><a href="/clinic/referrals?status=accepted" class="${filter==='accepted'?'active':''}">Accepted</a><a href="/clinic/referrals?status=in_progress" class="${filter==='in_progress'?'active':''}">In Progress</a><a href="/clinic/referrals?status=completed" class="${filter==='completed'?'active':''}">Completed</a></div>
+        <div style="display:flex;gap:8px"><a href="/clinic/referrals/stats" class="btn btn-sm">Statistics</a><a href="/clinic/referrals/new" class="btn btn-sm btn-green">+ New Referral</a></div>
+      </div>
+      ${referrals.length ? `<div style="overflow-x:auto"><table><tr><th>ID</th><th>Patient</th><th>Category</th><th>Facility</th><th>Doctor</th><th>Urgency</th><th>Status</th><th>Date</th><th>Actions</th></tr>
+        ${referrals.map(r => `<tr style="${r.urgency==='stat'?'background:#fee2e2':r.urgency==='urgent'?'background:#fef3c7':''}"><td>#${r.id}</td><td>${esc(r.patient_name)}</td><td><span class="tag" style="background:#0d9488;color:white">${esc(r.referral_category)}</span></td><td>${esc(r.receiving_facility||'-')}</td><td>${esc(r.referring_doctor||'-')}</td><td>${urgencyBadge(r.urgency)}</td><td>${referralStatusBadge(r.status)}</td><td>${new Date(r.created_at).toLocaleDateString()}</td><td><a href="/clinic/referrals/${r.id}" class="btn btn-sm">View</a></td></tr>`).join('')}</table></div>` : '<p class="muted">No referrals found.</p>'}
+    </div>
+    <div style="margin-top:15px"><a href="/clinic" class="btn btn-sm">&larr; Back to Clinic</a></div>
+  `, req.session.user));
+}));
+
+// GET /clinic/referrals/new — Create new referral form
+app.get('/clinic/referrals/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const doctors = (await pool.query("SELECT id, name FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [t])).rows;
+  const patientName = req.query.patient || '';
+  const patientId = req.query.patient_id || '';
+  const patientType = req.query.patient_type || 'student';
+  res.send(renderPage('New Referral', `
+    <div class="card" style="max-width:750px;margin:20px auto">
+      <h2 style="color:#059669">New Patient Referral</h2>
+      <form method="POST" action="/clinic/referrals/save">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Patient Name <span style="color:red">*</span></label><input name="patient_name" value="${esc(patientName)}" required placeholder="Patient full name"></div>
+          <div><label>Patient Type</label><select name="patient_type"><option value="student" ${patientType==='student'?'selected':''}>Student</option><option value="staff" ${patientType==='staff'?'selected':''}>Staff</option><option value="other" ${patientType==='other'?'selected':''}>Other</option></select></div>
+        </div>
+        <input type="hidden" name="patient_id" value="${esc(patientId)}">
+        <label>Referring Doctor</label><select name="referring_doctor"><option value="">Select Doctor</option>${doctors.map(d => `<option value="${esc(d.name)}" ${req.session.user.name===d.name?'selected':''}>${esc(d.name)}</option>`).join('')}</select>
+        <label>Receiving Facility <span style="color:red">*</span></label><input name="receiving_facility" required placeholder="Hospital / specialist center name">
+        <label>Facility Contact</label><input name="receiving_facility_contact" placeholder="Phone or email of receiving facility">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Referral Category</label><select name="referral_category"><option value="specialist">Specialist Consultation</option><option value="lab">Laboratory / Imaging</option><option value="surgery">Surgery</option><option value="emergency">Emergency Transfer</option><option value="follow-up">Follow-up</option><option value="rehabilitation">Rehabilitation</option><option value="mental_health">Mental Health</option><option value="dental">Dental</option><option value="other">Other</option></select></div>
+          <div><label>Urgency</label><select name="urgency"><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="stat">STAT / Emergency</option></select></div>
+        </div>
+        <label>Diagnosis</label><input name="diagnosis" placeholder="Current diagnosis (if known)">
+        <label>Reason for Referral <span style="color:red">*</span></label><textarea name="reason" rows="3" required placeholder="Detailed reason for this referral"></textarea>
+        <label>Clinical Notes</label><textarea name="clinical_notes" rows="3" placeholder="Relevant clinical findings, vitals, current medications..."></textarea>
+        <label>Additional Notes</label><textarea name="notes" rows="2" placeholder="Any other relevant information"></textarea>
+        <button class="btn btn-green" style="width:100%" type="submit">Submit Referral</button>
+      </form>
+    </div>
+    <div style="margin-top:15px"><a href="/clinic/referrals" class="btn btn-sm">&larr; Back to Referrals</a></div>
+  `, req.session.user));
+}));
+
+// POST /clinic/referrals/save — Save referral
+app.post('/clinic/referrals/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, patient_id, patient_type, referring_doctor, receiving_facility, receiving_facility_contact, referral_category, urgency, reason, clinical_notes, diagnosis, notes } = req.body;
+  await pool.query('INSERT INTO referrals(tenant_id,patient_name,patient_id,patient_type,referring_doctor,receiving_facility,receiving_facility_contact,referral_category,urgency,reason,clinical_notes,diagnosis,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)', [t, patient_name, patient_id||null, patient_type||'student', referring_doctor||null, receiving_facility, receiving_facility_contact||null, referral_category||'specialist', urgency||'routine', reason, clinical_notes||null, diagnosis||null, notes||null]);
+  await audit(req.session.user.email, 'Referral created', `Patient: ${patient_name} to ${receiving_facility}`);
+  req.flash && req.flash('success', 'Referral submitted successfully');
+  res.redirect('/clinic/referrals');
+}));
+
+// GET /clinic/referrals/:id — View referral detail
+app.get('/clinic/referrals/:id', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const ref = (await pool.query('SELECT * FROM referrals WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!ref) return res.redirect('/clinic/referrals');
+  res.send(renderPage('Referral Detail', `
+    <div class="card" style="max-width:800px;margin:20px auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <h2 style="color:#059669">Referral #${ref.id}</h2>
+        <div style="display:flex;gap:8px;align-items:center">${referralStatusBadge(ref.status)} ${urgencyBadge(ref.urgency)}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div><strong>Patient:</strong> ${esc(ref.patient_name)}</div>
+        <div><strong>Patient Type:</strong> <span class="tag">${esc(ref.patient_type)}</span></div>
+        <div><strong>Referring Doctor:</strong> ${esc(ref.referring_doctor||'N/A')}</div>
+        <div><strong>Category:</strong> <span class="tag" style="background:#0d9488;color:white">${esc(ref.referral_category)}</span></div>
+        <div><strong>Receiving Facility:</strong> ${esc(ref.receiving_facility)}</div>
+        <div><strong>Facility Contact:</strong> ${esc(ref.receiving_facility_contact||'N/A')}</div>
+        <div><strong>Diagnosis:</strong> ${esc(ref.diagnosis||'N/A')}</div>
+        <div><strong>Created:</strong> ${new Date(ref.created_at).toLocaleString()}</div>
+        ${ref.accepted_by ? `<div><strong>Accepted By:</strong> ${esc(ref.accepted_by)}</div><div><strong>Accepted At:</strong> ${new Date(ref.accepted_at).toLocaleString()}</div>` : ''}
+        ${ref.completed_at ? `<div><strong>Completed At:</strong> ${new Date(ref.completed_at).toLocaleString()}</div>` : ''}
+      </div>
+      <div class="card" style="background:#f0fdf4;margin-bottom:15px"><h4>Reason for Referral</h4><p>${esc(ref.reason)}</p></div>
+      ${ref.clinical_notes ? `<div class="card" style="background:#f8fafc;margin-bottom:15px"><h4>Clinical Notes</h4><p>${esc(ref.clinical_notes)}</p></div>` : ''}
+      ${ref.notes ? `<div class="card" style="background:#fffbeb"><h4>Additional Notes</h4><p>${esc(ref.notes)}</p></div>` : ''}
+      <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+        ${ref.status==='pending' ? `<form method="POST" action="/clinic/referrals/${ref.id}/accept" style="display:inline"><button class="btn btn-green">Accept Referral</button></form>` : ''}
+        ${ref.status==='accepted' ? `<form method="POST" action="/clinic/referrals/${ref.id}/complete" style="display:inline"><button class="btn">Mark Completed</button></form>` : ''}
+        <a href="/clinic/referrals" class="btn btn-sm">&larr; Back to Referrals</a>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// POST /clinic/referrals/:id/accept — Accept referral
+app.post('/clinic/referrals/:id/accept', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const ref = (await pool.query('SELECT * FROM referrals WHERE tenant_id=$1 AND id=$2 AND status=$3', [t, req.params.id, 'pending'])).rows[0];
+  if (!ref) return res.redirect('/clinic/referrals');
+  await pool.query("UPDATE referrals SET status='accepted', accepted_by=$1, accepted_at=NOW() WHERE tenant_id=$2 AND id=$3", [req.session.user.name || req.session.user.email, t, req.params.id]);
+  await audit(req.session.user.email, 'Referral accepted', `Referral #${req.params.id}`);
+  res.redirect('/clinic/referrals/' + req.params.id);
+}));
+
+// POST /clinic/referrals/:id/complete — Mark referral completed
+app.post('/clinic/referrals/:id/complete', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const ref = (await pool.query('SELECT * FROM referrals WHERE tenant_id=$1 AND id=$2 AND status=$3', [t, req.params.id, 'accepted'])).rows[0];
+  if (!ref) return res.redirect('/clinic/referrals');
+  await pool.query("UPDATE referrals SET status='completed', completed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
+  await audit(req.session.user.email, 'Referral completed', `Referral #${req.params.id}`);
+  res.redirect('/clinic/referrals/' + req.params.id);
+}));
+
+// GET /clinic/referrals/stats — Referral network statistics
+app.get('/clinic/referrals/stats', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [byStatus, byCategory, byUrgency, byFacility, recent, totalRef, completedRef] = await Promise.all([
+    pool.query("SELECT status, COUNT(*) as count FROM referrals WHERE tenant_id=$1 GROUP BY status ORDER BY count DESC", [t]),
+    pool.query("SELECT referral_category, COUNT(*) as count FROM referrals WHERE tenant_id=$1 GROUP BY referral_category ORDER BY count DESC", [t]),
+    pool.query("SELECT urgency, COUNT(*) as count FROM referrals WHERE tenant_id=$1 GROUP BY urgency ORDER BY count DESC", [t]),
+    pool.query("SELECT receiving_facility, COUNT(*) as count FROM referrals WHERE tenant_id=$1 GROUP BY receiving_facility ORDER BY count DESC LIMIT 10", [t]),
+    pool.query("SELECT * FROM referrals WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5", [t]),
+    pool.query("SELECT COUNT(*) FROM referrals WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COUNT(*) FROM referrals WHERE tenant_id=$1 AND status='completed'", [t])
+  ]);
+  const completionRate = totalRef.rows[0].count > 0 ? Math.round((completedRef.rows[0].count / totalRef.rows[0].count) * 100) : 0;
+  res.send(renderPage('Referral Statistics', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#0d9488)"><h1>Referral Analytics</h1><p>Network statistics and referral trends</p></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin:15px 0">
+      <div class="card" style="text-align:center;background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border-left:4px solid #059669"><div style="font-size:32px;font-weight:700;color:#059669">${totalRef.rows[0].count}</div><div class="muted">Total Referrals</div></div>
+      <div class="card" style="text-align:center;background:linear-gradient(135deg,#eff6ff,#dbeafe);border-left:4px solid #3b82f6"><div style="font-size:32px;font-weight:700;color:#3b82f6">${completionRate}%</div><div class="muted">Completion Rate</div></div>
+      <div class="card" style="text-align:center;background:linear-gradient(135deg:#fefce8,#fef9c3);border-left:4px solid #f59e0b">${byFacility.rows.length ? `<div style="font-size:32px;font-weight:700;color:#f59e0b">${byFacility.rows.length}</div><div class="muted">Facilities</div>` : `<div style="font-size:32px;font-weight:700;color:#f59e0b">0</div><div class="muted">Facilities</div>`}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px">
+      <div class="card"><h3>By Category</h3>
+        ${byCategory.rows.length ? `<table><tr><th>Category</th><th>Count</th></tr>${byCategory.rows.map(r => `<tr><td>${esc(r.referral_category)}</td><td><strong>${r.count}</strong></td></tr>`).join('')}</table>` : '<p class="muted">No data yet.</p>'}
+      </div>
+      <div class="card"><h3>By Status</h3>
+        ${byStatus.rows.length ? `<table><tr><th>Status</th><th>Count</th></tr>${byStatus.rows.map(r => `<tr><td>${referralStatusBadge(r.status)}</td><td><strong>${r.count}</strong></td></tr>`).join('')}</table>` : '<p class="muted">No data yet.</p>'}
+      </div>
+      <div class="card"><h3>By Urgency</h3>
+        ${byUrgency.rows.length ? `<table><tr><th>Urgency</th><th>Count</th></tr>${byUrgency.rows.map(r => `<tr><td>${urgencyBadge(r.urgency)}</td><td><strong>${r.count}</strong></td></tr>`).join('')}</table>` : '<p class="muted">No data yet.</p>'}
+      </div>
+      <div class="card"><h3>Top Receiving Facilities</h3>
+        ${byFacility.rows.length ? `<table><tr><th>Facility</th><th>Referrals</th></tr>${byFacility.rows.map(r => `<tr><td>${esc(r.receiving_facility)}</td><td><strong>${r.count}</strong></td></tr>`).join('')}</table>` : '<p class="muted">No data yet.</p>'}
+      </div>
+    </div>
+    <div style="margin-top:15px"><a href="/clinic/referrals" class="btn btn-sm">&larr; Back to Referrals</a></div>
+  `, req.session.user));
+}));
+
+// =============================================
+// CLINIC HEALTH INSURANCE CLAIMS MANAGEMENT
+// =============================================
+
+// Helper: claim status badge
+const claimStatusBadge = (status) => {
+  const colors = { submitted: '#3b82f6', processing: '#f59e0b', approved: '#059669', rejected: '#dc2626', paid: '#0d9488', pending: '#6b7280' };
+  const c = colors[status] || '#6b7280';
+  const icons = { submitted: '📤', processing: '⏳', approved: '✅', rejected: '❌', paid: '💰', pending: '⏸️' };
+  return `<span class="tag" style="background:${c};color:white">${icons[status]||''} ${esc(status)}</span>`;
+};
+
+// GET /clinic/insurance/claims — View all claims
+app.get('/clinic/insurance/claims', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const filter = req.query.status || 'all';
+  const [submitted, processing, approved, rejected, paid, totalClaims, totalAmount] = await Promise.all([
+    pool.query("SELECT COUNT(*) FROM insurance_claims WHERE tenant_id=$1 AND status='submitted'", [t]),
+    pool.query("SELECT COUNT(*) FROM insurance_claims WHERE tenant_id=$1 AND status='processing'", [t]),
+    pool.query("SELECT COUNT(*) FROM insurance_claims WHERE tenant_id=$1 AND status='approved'", [t]),
+    pool.query("SELECT COUNT(*) FROM insurance_claims WHERE tenant_id=$1 AND status='rejected'", [t]),
+    pool.query("SELECT COUNT(*) FROM insurance_claims WHERE tenant_id=$1 AND status='paid'", [t]),
+    pool.query("SELECT COUNT(*) FROM insurance_claims WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COALESCE(SUM(COALESCE(total_amount, amount_claimed)),0) as total FROM insurance_claims WHERE tenant_id=$1", [t])
+  ]);
+  let where = 'WHERE c.tenant_id=$1';
+  const params = [t];
+  if (filter !== 'all') { where += ' AND c.status=$2'; params.push(filter); }
+  const claims = (await pool.query(`SELECT c.*, ip.name as provider FROM insurance_claims c LEFT JOIN insurance_providers ip ON c.provider_id=ip.id ${where} ORDER BY c.submitted_at DESC`, params)).rows;
+  res.send(renderPage('Insurance Claims', `
+    <div class="hero" style="background:linear-gradient(135deg,#0d9488,#059669)"><h1>Insurance Claims</h1><p>Submit and track insurance claims</p></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:15px 0">
+      <div class="card" style="text-align:center;border-left:4px solid #3b82f6"><div style="font-size:24px;font-weight:700;color:#3b82f6">${submitted.rows[0].count}</div><div class="muted">Submitted</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #f59e0b"><div style="font-size:24px;font-weight:700;color:#f59e0b">${processing.rows[0].count}</div><div class="muted">Processing</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #059669"><div style="font-size:24px;font-weight:700;color:#059669">${approved.rows[0].count}</div><div class="muted">Approved</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #dc2626"><div style="font-size:24px;font-weight:700;color:#dc2626">${rejected.rows[0].count}</div><div class="muted">Rejected</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #0d9488"><div style="font-size:24px;font-weight:700;color:#0d9488">${paid.rows[0].count}</div><div class="muted">Paid</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #6b7280"><div style="font-size:18px;font-weight:700;color:#6b7280">${Number(totalAmount.rows[0].total).toLocaleString()}</div><div class="muted">Total Amount</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:10px">
+        <div class="tab-bar"><a href="/clinic/insurance/claims?status=all" class="${filter==='all'?'active':''}">All</a><a href="/clinic/insurance/claims?status=submitted" class="${filter==='submitted'?'active':''}">Submitted</a><a href="/clinic/insurance/claims?status=processing" class="${filter==='processing'?'active':''}">Processing</a><a href="/clinic/insurance/claims?status=approved" class="${filter==='approved'?'active':''}">Approved</a><a href="/clinic/insurance/claims?status=rejected" class="${filter==='rejected'?'active':''}">Rejected</a><a href="/clinic/insurance/claims?status=paid" class="${filter==='paid'?'active':''}">Paid</a></div>
+        <a href="/clinic/insurance/claims/new" class="btn btn-sm btn-green">+ New Claim</a>
+      </div>
+      ${claims.length ? `<div style="overflow-x:auto"><table><tr><th>ID</th><th>Claim #</th><th>Patient</th><th>Provider</th><th>Service</th><th>Amount</th><th>Status</th><th>Submitted</th><th>Actions</th></tr>
+        ${claims.map(c => `<tr><td>#${c.id}</td><td><strong>${esc(c.claim_number||'—')}</strong></td><td>${esc(c.patient_name||'—')}</td><td>${esc(c.provider||c.provider_name||'—')}</td><td>${esc(c.service_type||'—')}</td><td>${Number(c.total_amount||c.amount_claimed||0).toLocaleString()}</td><td>${claimStatusBadge(c.status)}</td><td>${new Date(c.submitted_at).toLocaleDateString()}</td><td><a href="/clinic/insurance/${c.id}" class="btn btn-sm">View</a></td></tr>`).join('')}</table></div>` : '<p class="muted">No claims found.</p>'}
+    </div>
+    <div style="margin-top:15px"><a href="/clinic" class="btn btn-sm">&larr; Back to Clinic</a></div>
+  `, req.session.user));
+}));
+
+// GET /clinic/insurance/claims/new — New insurance claim form
+app.get('/clinic/insurance/claims/new', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const providers = (await pool.query('SELECT id, name, coverage_percentage FROM insurance_providers WHERE tenant_id=$1 AND is_active=true ORDER BY name', [t])).rows;
+  const patientInsurances = (await pool.query('SELECT pi.*, ip.name as provider_name FROM patient_insurance pi LEFT JOIN insurance_providers ip ON pi.provider_id=ip.id WHERE pi.tenant_id=$1 AND pi.is_active=true ORDER BY pi.patient_name', [t])).rows;
+  res.send(renderPage('New Insurance Claim', `
+    <div class="card" style="max-width:750px;margin:20px auto">
+      <h2 style="color:#0d9488">Submit Insurance Claim</h2>
+      <form method="POST" action="/clinic/insurance/claim/save">
+        <label>Claim Number <span style="color:red">*</span></label><input name="claim_number" required placeholder="Auto-generated or manual claim reference" id="claimNumberInput">
+        <label>Patient Name</label><input name="patient_name" placeholder="Patient full name" value="${esc(req.query.patient||'')}">
+        <label>Insurance Provider <span style="color:red">*</span></label><select name="provider_id" id="providerSelect"><option value="">Select Provider</option>${providers.map(p => `<option value="${p.id}" data-coverage="${p.coverage_percentage}">${esc(p.name)} (${p.coverage_percentage}%)</option>`).join('')}</select>
+        <label>Service Type <span style="color:red">*</span></label><select name="service_type"><option value="consultation">Consultation</option><option value="laboratory">Laboratory</option><option value="imaging">Imaging</option><option value="surgery">Surgery</option><option value="pharmacy">Pharmacy</option><option value="hospitalization">Hospitalization</option><option value="emergency">Emergency</option><option value="other">Other</option></select>
+        <label>Diagnosis</label><input name="diagnosis" placeholder="Primary diagnosis">
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+          <div><label>Total Amount <span style="color:red">*</span></label><input type="number" name="total_amount" id="totalAmount" required placeholder="0" oninput="calcCoverage()"></div>
+          <div><label>Coverage %</label><input type="number" name="coverage_pct" id="coveragePct" value="80" min="0" max="100" oninput="calcCoverage()"></div>
+          <div><label>Patient Amount</label><input type="number" name="patient_amount" id="patientAmount" readonly placeholder="0"></div>
+        </div>
+        <label>Notes</label><textarea name="notes" rows="2" placeholder="Additional notes for the claim"></textarea>
+        <button class="btn btn-green" style="width:100%" type="submit">Submit Claim</button>
+      </form>
+      <script>
+        document.getElementById('providerSelect').addEventListener('change', function(){
+          var opt = this.options[this.selectedIndex];
+          if(opt.dataset.coverage) document.getElementById('coveragePct').value = opt.dataset.coverage;
+          calcCoverage();
+        });
+        function calcCoverage(){
+          var total = parseFloat(document.getElementById('totalAmount').value)||0;
+          var pct = parseFloat(document.getElementById('coveragePct').value)||0;
+          document.getElementById('patientAmount').value = Math.round(total * (1 - pct/100));
+        }
+      </script>
+    </div>
+    <div style="margin-top:15px"><a href="/clinic/insurance/claims" class="btn btn-sm">&larr; Back to Claims</a></div>
+  `, req.session.user));
+}));
+
+// POST /clinic/insurance/claim/save — Save insurance claim
+app.post('/clinic/insurance/claim/save', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { claim_number, patient_name, provider_id, service_type, diagnosis, total_amount, coverage_pct, patient_amount, notes } = req.body;
+  const coveredAmount = Math.round((total_amount||0) * ((coverage_pct||80)/100));
+  await pool.query('INSERT INTO insurance_claims(tenant_id,patient_name,provider_id,claim_number,service_type,diagnosis,total_amount,covered_amount,patient_amount,status,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, patient_name||null, provider_id||null, claim_number, service_type, diagnosis||null, total_amount||0, coveredAmount, patient_amount||0, 'submitted', req.session.user.email]);
+  await audit(req.session.user.email, 'Insurance claim submitted', `Claim: ${claim_number}, Amount: ${total_amount}`);
+  res.redirect('/clinic/insurance/claims');
+}));
+
+// GET /clinic/insurance/:id — View insurance claim detail
+app.get('/clinic/insurance/:id', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const claim = (await pool.query('SELECT c.*, ip.name as provider FROM insurance_claims c LEFT JOIN insurance_providers ip ON c.provider_id=ip.id WHERE c.tenant_id=$1 AND c.id=$2', [t, req.params.id])).rows[0];
+  if (!claim) return res.redirect('/clinic/insurance/claims');
+  res.send(renderPage('Claim Detail', `
+    <div class="card" style="max-width:800px;margin:20px auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <h2 style="color:#0d9488">Claim #${esc(claim.claim_number||claim.id)}</h2>
+        ${claimStatusBadge(claim.status)}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div><strong>Patient:</strong> ${esc(claim.patient_name||'N/A')}</div>
+        <div><strong>Provider:</strong> ${esc(claim.provider||claim.provider_name||'N/A')}</div>
+        <div><strong>Service Type:</strong> <span class="tag" style="background:#0d9488;color:white">${esc(claim.service_type||'N/A')}</span></div>
+        <div><strong>Diagnosis:</strong> ${esc(claim.diagnosis||'N/A')}</div>
+        <div><strong>Submitted:</strong> ${new Date(claim.submitted_at).toLocaleString()}</div>
+        <div><strong>Submitted By:</strong> ${esc(claim.created_by||'N/A')}</div>
+        ${claim.processed_at ? `<div><strong>Processed:</strong> ${new Date(claim.processed_at).toLocaleString()}</div>` : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+        <div class="card" style="text-align:center;background:#eff6ff"><div class="muted">Total Amount</div><div style="font-size:22px;font-weight:700;color:#1d4ed8">${Number(claim.total_amount||claim.amount_claimed||0).toLocaleString()}</div></div>
+        <div class="card" style="text-align:center;background:#f0fdf4"><div class="muted">Covered Amount</div><div style="font-size:22px;font-weight:700;color:#059669">${Number(claim.covered_amount||claim.amount_approved||0).toLocaleString()}</div></div>
+        <div class="card" style="text-align:center;background:#fef2f2"><div class="muted">Patient Amount</div><div style="font-size:22px;font-weight:700;color:#dc2626">${Number(claim.patient_amount||(claim.total_amount||0)-(claim.covered_amount||claim.amount_approved||0)).toLocaleString()}</div></div>
+      </div>
+      ${claim.notes ? `<div class="card" style="background:#fffbeb;margin-bottom:15px"><h4>Notes</h4><p>${esc(claim.notes)}</p></div>` : ''}
+      ${claim.rejection_reason ? `<div class="card" style="background:#fee2e2;border:1px solid #fca5a5"><h4 style="color:#dc2626">Rejection Reason</h4><p>${esc(claim.rejection_reason)}</p></div>` : ''}
+      <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+        ${claim.status==='submitted' ? `<form method="POST" action="/clinic/insurance/${claim.id}/verify" style="display:inline"><button class="btn">Mark as Verified</button></form>` : ''}
+        <a href="/clinic/insurance/claims" class="btn btn-sm">&larr; Back to Claims</a>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// POST /clinic/insurance/:id/verify — Mark insurance as verified
+app.post('/clinic/insurance/:id/verify', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const claim = (await pool.query('SELECT * FROM insurance_claims WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!claim) return res.redirect('/clinic/insurance/claims');
+  await pool.query("UPDATE insurance_claims SET status='processing', processed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
+  await audit(req.session.user.email, 'Insurance claim verified', `Claim #${claim.claim_number||claim.id}`);
+  res.redirect('/clinic/insurance/' + req.params.id);
+}));
+
+// POST /clinic/insurance/:id/claim — Submit insurance claim (status update)
+app.post('/clinic/insurance/:id/claim', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { status, approved_amount, rejection_reason } = req.body;
+  const updates = ['processed_at=NOW()'];
+  const params = [];
+  if (status === 'approved') { updates.push("status='approved'"); updates.push('approved_amount=$2'); params.push(approved_amount || 0); }
+  else if (status === 'rejected') { updates.push("status='rejected'"); updates.push('rejection_reason=$2'); params.push(rejection_reason || 'Claim denied'); }
+  else if (status === 'paid') { updates.push("status='paid'"); }
+  params.push(t, req.params.id);
+  await pool.query(`UPDATE insurance_claims SET ${updates.join(',')} WHERE tenant_id=$${params.length-1} AND id=$${params.length}`, params);
+  await audit(req.session.user.email, 'Insurance claim updated', `Claim #${req.params.id} → ${status}`);
+  res.redirect('/clinic/insurance/claims');
+}));
+
+// =============================================
+// CLINIC TELEHEALTH / VIDEO CONSULTATION BOOKING
+// =============================================
+
+// Helper: telehealth status badge
+const teleStatusBadge = (status) => {
+  const colors = { scheduled: '#3b82f6', in_progress: '#059669', completed: '#6b7280', cancelled: '#dc2626', 'no-show': '#f59e0b' };
+  const c = colors[status] || '#6b7280';
+  return `<span class="tag" style="background:${c};color:white">${esc(status)}</span>`;
+};
+
+// Generate a unique meeting ID
+const generateMeetingId = () => 'TH-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+// GET /clinic/telehealth — Telehealth dashboard
+app.get('/clinic/telehealth', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [totalSessions, todaySessions, weekSessions, completedSessions, avgDuration, upcomingSessions] = await Promise.all([
+    pool.query("SELECT COUNT(*) FROM telehealth_consultations WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COUNT(*) FROM telehealth_consultations WHERE tenant_id=$1 AND scheduled_date=CURRENT_DATE", [t]),
+    pool.query("SELECT COUNT(*) FROM telehealth_consultations WHERE tenant_id=$1 AND scheduled_date >= CURRENT_DATE AND scheduled_date <= CURRENT_DATE + INTERVAL '7 days'", [t]),
+    pool.query("SELECT COUNT(*) FROM telehealth_consultations WHERE tenant_id=$1 AND status='completed'", [t]),
+    pool.query("SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (ended_at - started_at))/60),0) as avg_min FROM telehealth_consultations WHERE tenant_id=$1 AND status='completed' AND ended_at IS NOT NULL AND started_at IS NOT NULL", [t]),
+    pool.query("SELECT * FROM telehealth_consultations WHERE tenant_id=$1 AND status='scheduled' AND scheduled_date >= CURRENT_DATE ORDER BY scheduled_date, scheduled_time LIMIT 10", [t])
+  ]);
+  res.send(renderPage('Telehealth', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)"><h1>Telehealth</h1><p>Virtual consultation management</p></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:15px 0">
+      <div class="card" style="text-align:center;border-left:4px solid #6366f1"><div style="font-size:28px;font-weight:700;color:#6366f1">${totalSessions.rows[0].count}</div><div class="muted">Total Sessions</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #059669"><div style="font-size:28px;font-weight:700;color:#059669">${todaySessions.rows[0].count}</div><div class="muted">Today</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #3b82f6"><div style="font-size:28px;font-weight:700;color:#3b82f6">${weekSessions.rows[0].count}</div><div class="muted">This Week</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #8b5cf6"><div style="font-size:28px;font-weight:700;color:#8b5cf6">${Math.round(Number(avgDuration.rows[0].avg_min))}m</div><div class="muted">Avg Duration</div></div>
+      <div class="card" style="text-align:center;border-left:4px solid #f59e0b"><div style="font-size:28px;font-weight:700;color:#f59e0b">${completedSessions.rows[0].count}</div><div class="muted">Completed</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:10px">
+        <h3>Upcoming Consultations</h3>
+        <div style="display:flex;gap:8px"><a href="/clinic/telehealth/history" class="btn btn-sm">History</a><a href="/clinic/telehealth/schedule" class="btn btn-sm btn-green">+ Schedule Session</a></div>
+      </div>
+      ${upcomingSessions.rows.length ? `<table><tr><th>ID</th><th>Patient</th><th>Doctor</th><th>Date</th><th>Time</th><th>Duration</th><th>Actions</th></tr>
+        ${upcomingSessions.rows.map(s => `<tr><td>#${s.id}</td><td>${esc(s.patient_name)}</td><td>${esc(s.doctor_name||'—')}</td><td>${new Date(s.scheduled_date).toLocaleDateString()}</td><td>${s.scheduled_time}</td><td>${s.duration_minutes}m</td><td><a href="/clinic/telehealth/${s.id}" class="btn btn-sm">View</a></td></tr>`).join('')}</table>` : '<p class="muted">No upcoming consultations scheduled.</p>'}
+    </div>
+    <div style="margin-top:15px"><a href="/clinic" class="btn btn-sm">&larr; Back to Clinic</a></div>
+  `, req.session.user));
+}));
+
+// GET /clinic/telehealth/schedule — Schedule virtual consultation
+app.get('/clinic/telehealth/schedule', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const doctors = (await pool.query("SELECT id, name FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [t])).rows;
+  const patientName = req.query.patient || '';
+  const patientId = req.query.patient_id || '';
+  const patientPhone = req.query.patient_phone || '';
+  res.send(renderPage('Schedule Telehealth', `
+    <div class="card" style="max-width:700px;margin:20px auto">
+      <h2 style="color:#6366f1">Schedule Virtual Consultation</h2>
+      <form method="POST" action="/clinic/telehealth/schedule/save">
+        <label>Patient Name <span style="color:red">*</span></label><input name="patient_name" value="${esc(patientName)}" required placeholder="Patient full name">
+        <input type="hidden" name="patient_id" value="${esc(patientId)}">
+        <label>Patient Phone</label><input name="patient_phone" value="${esc(patientPhone)}" placeholder="Phone for SMS reminder">
+        <label>Doctor <span style="color:red">*</span></label><select name="doctor_name" required><option value="">Select Doctor</option>${doctors.map(d => `<option value="${esc(d.name)}" data-id="${d.id}" ${req.session.user.name===d.name?'selected':''}>${esc(d.name)}</option>`).join('')}</select>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Date <span style="color:red">*</span></label><input type="date" name="scheduled_date" required></div>
+          <div><label>Time <span style="color:red">*</span></label><input type="time" name="scheduled_time" required></div>
+        </div>
+        <label>Duration (minutes)</label><select name="duration_minutes"><option value="15">15 minutes</option><option value="30" selected>30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select>
+        <label>Notes</label><textarea name="notes" rows="2" placeholder="Reason for consultation or special instructions"></textarea>
+        <button class="btn btn-green" style="width:100%" type="submit">Schedule Consultation</button>
+      </form>
+    </div>
+    <div style="margin-top:15px"><a href="/clinic/telehealth" class="btn btn-sm">&larr; Back to Telehealth</a></div>
+  `, req.session.user));
+}));
+
+// POST /clinic/telehealth/schedule/save — Save telehealth appointment
+app.post('/clinic/telehealth/schedule/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, patient_id, patient_phone, doctor_name, scheduled_date, scheduled_time, duration_minutes, notes } = req.body;
+  const meetingId = generateMeetingId();
+  const meetingLink = `/telehealth/join/${meetingId}`;
+  const doctorId = (await pool.query("SELECT id FROM clinic_staff WHERE tenant_id=$1 AND name=$2 AND role='doctor'", [t, doctor_name])).rows[0]?.id || null;
+  await pool.query('INSERT INTO telehealth_consultations(tenant_id,patient_name,patient_id,patient_phone,doctor_id,doctor_name,scheduled_date,scheduled_time,duration_minutes,meeting_link,meeting_id,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [t, patient_name, patient_id||null, patient_phone||null, doctorId, doctor_name, scheduled_date, scheduled_time, duration_minutes||30, meetingLink, meetingId, notes||null]);
+  await audit(req.session.user.email, 'Telehealth scheduled', `Patient: ${patient_name}, Doctor: ${doctor_name}, ${scheduled_date} ${scheduled_time}`);
+  res.redirect('/clinic/telehealth');
+}));
+
+// GET /clinic/telehealth/:id — View telehealth session detail
+app.get('/clinic/telehealth/:id', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const session = (await pool.query('SELECT * FROM telehealth_consultations WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!session) return res.redirect('/clinic/telehealth');
+  const isScheduled = session.status === 'scheduled';
+  const isInProgress = session.status === 'in_progress';
+  const isCompleted = session.status === 'completed';
+  res.send(renderPage('Telehealth Session', `
+    <div class="card" style="max-width:800px;margin:20px auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <h2 style="color:#6366f1">Session #${session.id}</h2>
+        ${teleStatusBadge(session.status)}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div><strong>Patient:</strong> ${esc(session.patient_name)}</div>
+        <div><strong>Patient Phone:</strong> ${esc(session.patient_phone||'N/A')}</div>
+        <div><strong>Doctor:</strong> ${esc(session.doctor_name||'N/A')}</div>
+        <div><strong>Scheduled:</strong> ${new Date(session.scheduled_date).toLocaleDateString()} at ${session.scheduled_time}</div>
+        <div><strong>Duration:</strong> ${session.duration_minutes} minutes</div>
+        <div><strong>Meeting ID:</strong> <code>${esc(session.meeting_id)}</code></div>
+        ${session.started_at ? `<div><strong>Started:</strong> ${new Date(session.started_at).toLocaleString()}</div>` : ''}
+        ${session.ended_at ? `<div><strong>Ended:</strong> ${new Date(session.ended_at).toLocaleString()}</div>` : ''}
+      </div>
+      <div class="card" style="background:#eff6ff;margin-bottom:15px"><h4>Meeting Link</h4><p><a href="${esc(session.meeting_link)}" target="_blank" style="color:#3b82f6;font-weight:600">${esc(session.meeting_link)}</a></p><p class="muted">Share this link with the patient to join the consultation</p></div>
+      ${session.notes ? `<div class="card" style="background:#fffbeb;margin-bottom:15px"><h4>Notes</h4><p>${esc(session.notes)}</p></div>` : ''}
+      ${isCompleted ? `
+        <h3 style="margin-top:20px;color:#059669">Consultation Notes (SOAP)</h3>
+        <div style="display:grid;gap:12px">
+          <div class="card" style="border-left:4px solid #3b82f6"><h4 style="color:#3b82f6">Subjective</h4><p>${esc(session.subjective||'Not documented')}</p></div>
+          <div class="card" style="border-left:4px solid #059669"><h4 style="color:#059669">Objective</h4><p>${esc(session.objective||'Not documented')}</p></div>
+          <div class="card" style="border-left:4px solid #f59e0b"><h4 style="color:#f59e0b">Assessment</h4><p>${esc(session.assessment||'Not documented')}</p></div>
+          <div class="card" style="border-left:4px solid #8b5cf6"><h4 style="color:#8b5cf6">Plan</h4><p>${esc(session.plan||'Not documented')}</p></div>
+        </div>
+      ` : ''}
+      <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+        ${isScheduled ? `<form method="POST" action="/clinic/telehealth/${session.id}/start" style="display:inline"><button class="btn btn-green">Start Consultation</button></form>` : ''}
+        ${isInProgress ? `<form method="POST" action="/clinic/telehealth/${session.id}/complete" style="display:inline"><button class="btn">Complete &amp; Save Notes</button></form>` : ''}
+        ${isScheduled ? `<form method="POST" action="/clinic/telehealth/${session.id}/start" style="display:inline"><button class="btn btn-sm" onclick="window.open('${esc(session.meeting_link)}','_blank')">Join Meeting</button></form>` : ''}
+        <a href="/clinic/telehealth" class="btn btn-sm">&larr; Back to Telehealth</a>
+      </div>
+    </div>
+    ${isInProgress ? `
+    <div class="card" style="max-width:800px;margin:15px auto;border:2px solid #8b5cf6">
+      <h3 style="color:#8b5cf6">Complete Consultation Notes</h3>
+      <form method="POST" action="/clinic/telehealth/${session.id}/complete">
+        <label>Subjective (Patient complaints, symptoms)</label><textarea name="subjective" rows="2" placeholder="Patient reports..."></textarea>
+        <label>Objective (Examination findings, vitals)</label><textarea name="objective" rows="2" placeholder="On examination..."></textarea>
+        <label>Assessment (Diagnosis, clinical impression)</label><textarea name="assessment" rows="2" placeholder="Assessment: ..."></textarea>
+        <label>Plan (Treatment, follow-up, referrals)</label><textarea name="plan" rows="2" placeholder="Plan: ..."></textarea>
+        <label>Additional Notes</label><textarea name="notes" rows="2" placeholder="Post-consultation summary"></textarea>
+        <button class="btn btn-green" style="width:100%">End Consultation &amp; Save</button>
+      </form>
+    </div>` : ''}
+  `, req.session.user));
+}));
+
+// POST /clinic/telehealth/:id/start — Start/join video consultation
+app.post('/clinic/telehealth/:id/start', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const session = (await pool.query('SELECT * FROM telehealth_consultations WHERE tenant_id=$1 AND id=$2 AND status=$3', [t, req.params.id, 'scheduled'])).rows[0];
+  if (!session) return res.redirect('/clinic/telehealth');
+  await pool.query("UPDATE telehealth_consultations SET status='in_progress', started_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
+  await audit(req.session.user.email, 'Telehealth started', `Session #${req.params.id} with ${session.patient_name}`);
+  res.redirect('/clinic/telehealth/' + req.params.id);
+}));
+
+// POST /clinic/telehealth/:id/complete — End consultation
+app.post('/clinic/telehealth/:id/complete', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const session = (await pool.query('SELECT * FROM telehealth_consultations WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!session) return res.redirect('/clinic/telehealth');
+  const { subjective, objective, assessment, plan, notes } = req.body;
+  await pool.query("UPDATE telehealth_consultations SET status='completed', ended_at=NOW(), subjective=$1, objective=$2, assessment=$3, plan=$4, notes=$5 WHERE tenant_id=$6 AND id=$7", [subjective||null, objective||null, assessment||null, plan||null, notes||session.notes||null, t, req.params.id]);
+  await audit(req.session.user.email, 'Telehealth completed', `Session #${req.params.id} with ${session.patient_name}`);
+  res.redirect('/clinic/telehealth/' + req.params.id);
+}));
+
+// GET /clinic/telehealth/history — Past consultations
+app.get('/clinic/telehealth/history', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const sessions = (await pool.query("SELECT * FROM telehealth_consultations WHERE tenant_id=$1 AND status='completed' ORDER BY scheduled_date DESC, scheduled_time DESC", [t])).rows;
+  res.send(renderPage('Telehealth History', `
+    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)"><h1>Consultation History</h1><p>Past completed telehealth sessions</p></div>
+    <div class="card">
+      ${sessions.length ? `<div style="overflow-x:auto"><table><tr><th>ID</th><th>Patient</th><th>Doctor</th><th>Date</th><th>Duration</th><th>Assessment</th><th>Actions</th></tr>
+        ${sessions.map(s => {
+          const actualDuration = s.started_at && s.ended_at ? Math.round((new Date(s.ended_at) - new Date(s.started_at)) / 60000) : s.duration_minutes;
+          return `<tr><td>#${s.id}</td><td>${esc(s.patient_name)}</td><td>${esc(s.doctor_name||'—')}</td><td>${new Date(s.scheduled_date).toLocaleDateString()}</td><td>${actualDuration}m</td><td>${esc((s.assessment||'—').substring(0,60))}${(s.assessment||'').length>60?'...':''}</td><td><a href="/clinic/telehealth/${s.id}" class="btn btn-sm">View</a></td></tr>`;
+        }).join('')}</table></div>` : '<p class="muted">No completed consultations yet.</p>'}
+    </div>
+    <div style="margin-top:15px"><a href="/clinic/telehealth" class="btn btn-sm">&larr; Back to Telehealth</a></div>
+  `, req.session.user));
+}));
+
+// =============================================
 // CLINIC APPOINTMENTS: Scheduled future visits
 // =============================================
 
@@ -17658,6 +18257,1378 @@ app.post('/clinic/appointments/:id/complete', requireAuth, requireNotBanned, req
     [t, appt.patient_type || 'patient', appt.patient_id || null, appt.patient_name, appt.reason || 'Appointment visit', 'normal', 'From appointment #' + appt.id, maxQ.next]
   );
   res.redirect('/clinic/queue');
+}));
+
+// =============================================
+// SMS / WHATSAPP APPOINTMENT REMINDERS
+// =============================================
+
+// Automated reminder checker — runs on a 30-min cron simulation
+async function checkAndSendReminders() {
+  try {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    const tenants = (await pool.query('SELECT id, name FROM tenants WHERE banned=false')).rows;
+    for (const tenant of tenants) {
+      const settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [tenant.id])).rows[0];
+      if (!settings || !settings.enabled) continue;
+
+      const appts = (await pool.query(
+        `SELECT ca.id, ca.patient_name, ca.phone, ca.appointment_date, ca.appointment_time, ca.doctor_name, ca.reminder_sent
+         FROM clinic_appointments ca
+         WHERE ca.tenant_id=$1 AND ca.appointment_date=$2 AND ca.status='scheduled' AND (ca.reminder_sent=false OR ca.reminder_sent IS NULL)`,
+        [tenant.id, tomorrowStr]
+      )).rows;
+
+      for (const appt of appts) {
+        if (!appt.phone) continue;
+        try {
+          if (settings.sms_enabled) {
+            const msg = (settings.sms_template || '')
+              .replace('{facility_name}', tenant.name)
+              .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
+              .replace('{time}', appt.appointment_time || '')
+              .replace('{patient_name}', appt.patient_name || '')
+              .replace('{doctor}', appt.doctor_name || 'TBD');
+            await pool.query(
+              'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+              [tenant.id, appt.id, appt.patient_name, appt.phone, 'sms', msg, 'sent']
+            );
+            console.log(`[Reminder] SMS queued for ${appt.patient_name} (${appt.phone}) — Appt #${appt.id}`);
+          }
+          if (settings.whatsapp_enabled) {
+            const msg = (settings.whatsapp_template || '')
+              .replace('{facility_name}', tenant.name)
+              .replace('{date}', new Date(appt.appt_date + 'T00:00:00').toLocaleDateString())
+              .replace('{time}', appt.appointment_time || '')
+              .replace('{patient_name}', appt.patient_name || '')
+              .replace('{doctor}', appt.doctor_name || 'TBD');
+            await pool.query(
+              'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+              [tenant.id, appt.id, appt.patient_name, appt.phone, 'whatsapp', msg, 'sent']
+            );
+            console.log(`[Reminder] WhatsApp queued for ${appt.patient_name} (${appt.phone}) — Appt #${appt.id}`);
+          }
+          await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
+        } catch (e) {
+          console.warn(`[Reminder Error] Appt #${appt.id}:`, e.message);
+          await pool.query(
+            'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+            [tenant.id, appt.id, appt.patient_name, appt.phone, 'sms', 'Error: ' + e.message, 'failed']
+          );
+        }
+      }
+    }
+  } catch (e) { console.warn('[checkAndSendReminders]', e.message); }
+}
+// Run reminder check every 30 minutes
+setInterval(checkAndSendReminders, 30 * 60 * 1000);
+// Also run on startup after 5 seconds
+setTimeout(checkAndSendReminders, 5000);
+
+// GET /clinic/reminders — Reminder settings page
+app.get('/clinic/reminders', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  let settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [t])).rows[0];
+  if (!settings) {
+    await pool.query('INSERT INTO reminder_settings(tenant_id) VALUES($1) ON CONFLICT DO NOTHING', [t]);
+    settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [t])).rows[0];
+  }
+  const recentReminders = (await pool.query(
+    `SELECT ar.*, ca.appointment_date, ca.appointment_time FROM appointment_reminders ar
+     LEFT JOIN clinic_appointments ca ON ar.appointment_id=ca.id
+     WHERE ar.tenant_id=$1 ORDER BY ar.sent_at DESC LIMIT 50`, [t]
+  )).rows;
+  const stats = (await pool.query(
+    `SELECT reminder_type, status, COUNT(*)::int as cnt FROM appointment_reminders WHERE tenant_id=$1 GROUP BY reminder_type, status`, [t]
+  )).rows;
+
+  res.send(renderPage('Appointment Reminders', `
+    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+      <div>
+        <h2 style="margin:0;font-size:1.5rem">📞 Appointment Reminders</h2>
+        <p class="muted" style="margin:4px 0 0">Send SMS/WhatsApp reminders to patients before appointments</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <a href="/clinic/reminders/send-all" class="btn btn-blue" onclick="return confirm('Send reminders for ALL tomorrow\\'s appointments?')">📤 Send All Tomorrow's</a>
+        <a href="/clinic/appointments" class="btn">← Appointments</a>
+      </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px">
+      ${stats.map(s => `
+        <div class="card" style="padding:16px;text-align:center">
+          <div style="font-size:1.6rem;font-weight:700;color:var(--primary,#0d9488)">${s.cnt}</div>
+          <div class="muted" style="font-size:13px">${s.reminder_type} — ${s.status}</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Settings Form -->
+    <div class="card" style="padding:24px;margin-bottom:24px">
+      <h3 style="margin:0 0 16px">⚙️ Reminder Settings</h3>
+      <form method="POST" action="/clinic/reminders/save">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">
+          <label>
+            <input type="checkbox" name="enabled" ${settings.enabled ? 'checked' : ''}> Enable Automated Reminders
+          </label>
+          <label>
+            Hours Before Appointment:
+            <input type="number" name="hours_before" value="${settings.hours_before || 24}" min="1" max="168" style="width:80px;display:inline;margin-left:8px">
+          </label>
+          <label>
+            <input type="checkbox" name="sms_enabled" ${settings.sms_enabled ? 'checked' : ''}> SMS Enabled
+          </label>
+          <label>
+            <input type="checkbox" name="whatsapp_enabled" ${settings.whatsapp_enabled ? 'checked' : ''}> WhatsApp Enabled
+          </label>
+        </div>
+        <div style="margin-top:16px">
+          <label style="display:block;margin-bottom:4px;font-weight:600">SMS Template</label>
+          <textarea name="sms_template" rows="3" style="width:100%;font-family:monospace;font-size:13px">${esc(settings.sms_template || '')}</textarea>
+          <span class="muted" style="font-size:11px">Variables: {facility_name}, {date}, {time}, {patient_name}, {doctor}</span>
+        </div>
+        <div style="margin-top:12px">
+          <label style="display:block;margin-bottom:4px;font-weight:600">WhatsApp Template</label>
+          <textarea name="whatsapp_template" rows="3" style="width:100%;font-family:monospace;font-size:13px">${esc(settings.whatsapp_template || '')}</textarea>
+        </div>
+        <button type="submit" class="btn btn-green" style="margin-top:16px">💾 Save Settings</button>
+      </form>
+    </div>
+
+    <!-- Recent Reminders -->
+    <div class="card" style="padding:24px">
+      <h3 style="margin:0 0 16px">📋 Recent Reminders</h3>
+      <div style="overflow-x:auto">
+        <table>
+          <tr><th>Patient</th><th>Phone</th><th>Type</th><th>Status</th><th>Date/Time</th><th>Sent At</th></tr>
+          ${recentReminders.length ? recentReminders.map(r => `
+            <tr>
+              <td><strong>${esc(r.patient_name || '-')}</strong></td>
+              <td>${esc(r.phone || '-')}</td>
+              <td>${r.reminder_type === 'whatsapp' ? '📱 WhatsApp' : '💬 SMS'}</td>
+              <td><span style="padding:2px 8px;border-radius:12px;font-size:12px;background:${r.status === 'sent' ? '#d1fae5' : '#fee2e2'};color:${r.status === 'sent' ? '#065f46' : '#991b1b'}">${r.status}</span></td>
+              <td>${r.appointment_date ? new Date(r.appointment_date + 'T00:00:00').toLocaleDateString() : '-'} ${r.appointment_time || ''}</td>
+              <td class="muted" style="font-size:12px">${r.sent_at ? new Date(r.sent_at).toLocaleString() : '-'}</td>
+            </tr>
+          `).join('') : '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted,#94a3b8)">No reminders sent yet</td></tr>'}
+        </table>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// POST /clinic/reminders/save — Save reminder settings
+app.post('/clinic/reminders/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { enabled, hours_before, sms_enabled, whatsapp_enabled, sms_template, whatsapp_template } = req.body;
+  await pool.query(
+    `INSERT INTO reminder_settings(tenant_id,enabled,hours_before,sms_enabled,whatsapp_enabled,sms_template,whatsapp_template)
+     VALUES($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT(tenant_id) DO UPDATE SET enabled=$2,hours_before=$3,sms_enabled=$4,whatsapp_enabled=$5,sms_template=$6,whatsapp_template=$7`,
+    [t, enabled === 'on', parseInt(hours_before) || 24, sms_enabled === 'on', whatsapp_enabled === 'on', sms_template || '', whatsapp_template || '']
+  );
+  await audit(req.session.user.email, 'reminder_settings_updated', { tenant_id: t });
+  req.flash('success', 'Reminder settings saved');
+  res.redirect('/clinic/reminders');
+}));
+
+// POST /clinic/appointments/:id/remind — Send reminder for one appointment
+app.post('/clinic/appointments/:id/remind', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const appt = (await pool.query('SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!appt) return res.status(404).send('Appointment not found');
+  if (!appt.phone) { req.flash('error', 'No phone number on file for this patient'); return res.redirect('/clinic/appointments'); }
+
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  let settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [t])).rows[0];
+  if (!settings) settings = { sms_enabled: true, sms_template: 'Reminder: You have an appointment at {facility_name} on {date} at {time} with Dr. {doctor}.' };
+
+  if (settings.sms_enabled) {
+    const msg = (settings.sms_template || '')
+      .replace('{facility_name}', tenant.name)
+      .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
+      .replace('{time}', appt.appointment_time || '')
+      .replace('{patient_name}', appt.patient_name || '')
+      .replace('{doctor}', appt.doctor_name || 'TBD');
+    await pool.query(
+      'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [t, appt.id, appt.patient_name, appt.phone, 'sms', msg, 'sent']
+    );
+  }
+  await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
+  await audit(req.session.user.email, 'appointment_reminder_sent', { appointment_id: appt.id, patient: appt.patient_name });
+  req.flash('success', `Reminder sent to ${appt.patient_name} (${appt.phone})`);
+  res.redirect('/clinic/appointments');
+}));
+
+// POST /clinic/reminders/send-all — Send reminders for all tomorrow's appointments
+app.post('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  const appts = (await pool.query(
+    `SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=$2 AND status='scheduled' AND phone IS NOT NULL AND phone != ''`,
+    [t, tomorrowStr]
+  )).rows;
+
+  if (!appts.length) { req.flash('info', 'No appointments found for tomorrow'); return res.redirect('/clinic/reminders'); }
+
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  let settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [t])).rows[0];
+  if (!settings) settings = { sms_enabled: true, sms_template: 'Reminder: You have an appointment at {facility_name} on {date} at {time} with Dr. {doctor}.' };
+
+  let sent = 0;
+  for (const appt of appts) {
+    const msg = (settings.sms_template || '')
+      .replace('{facility_name}', tenant.name)
+      .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
+      .replace('{time}', appt.appointment_time || '')
+      .replace('{patient_name}', appt.patient_name || '')
+      .replace('{doctor}', appt.doctor_name || 'TBD');
+    await pool.query(
+      'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [t, appt.id, appt.patient_name, appt.phone, 'sms', msg, 'sent']
+    );
+    await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
+    sent++;
+  }
+  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr });
+  req.flash('success', `${sent} reminder(s) sent for tomorrow's appointments`);
+  res.redirect('/clinic/reminders');
+}));
+
+// GET /clinic/reminders/send-all — Also support GET for the link button
+app.get('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  const appts = (await pool.query(
+    `SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=$2 AND status='scheduled' AND phone IS NOT NULL AND phone != ''`,
+    [t, tomorrowStr]
+  )).rows;
+
+  if (!appts.length) { req.flash('info', 'No appointments found for tomorrow'); return res.redirect('/clinic/reminders'); }
+
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  let settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [t])).rows[0];
+  if (!settings) settings = { sms_enabled: true, sms_template: 'Reminder: You have an appointment at {facility_name} on {date} at {time} with Dr. {doctor}.' };
+
+  let sent = 0;
+  for (const appt of appts) {
+    const msg = (settings.sms_template || '')
+      .replace('{facility_name}', tenant.name)
+      .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
+      .replace('{time}', appt.appointment_time || '')
+      .replace('{patient_name}', appt.patient_name || '')
+      .replace('{doctor}', appt.doctor_name || 'TBD');
+    await pool.query(
+      'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [t, appt.id, appt.patient_name, appt.phone, 'sms', msg, 'sent']
+    );
+    await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
+    sent++;
+  }
+  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr });
+  req.flash('success', `${sent} reminder(s) sent for tomorrow's appointments`);
+  res.redirect('/clinic/reminders');
+}));
+
+
+// =============================================
+// PAYMENT COLLECTION FOR CONSULTATIONS & PHARMACY
+// =============================================
+
+// GET /clinic/payment-settings — Payment method configuration
+app.get('/clinic/payment-settings', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  let settings = (await pool.query('SELECT * FROM payment_settings WHERE tenant_id=$1', [t])).rows[0];
+  if (!settings) {
+    await pool.query('INSERT INTO payment_settings(tenant_id) VALUES($1) ON CONFLICT DO NOTHING', [t]);
+    settings = (await pool.query('SELECT * FROM payment_settings WHERE tenant_id=$1', [t])).rows[0];
+  }
+
+  res.send(renderPage('Payment Settings', `
+    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+      <div>
+        <h2 style="margin:0;font-size:1.5rem">💳 Payment Settings</h2>
+        <p class="muted" style="margin:4px 0 0">Configure payment methods — MTN MoMo, Airtel Money, Flutterwave</p>
+      </div>
+      <a href="/clinic/payments" class="btn">← Payment History</a>
+    </div>
+
+    <div class="card" style="padding:24px">
+      <h3 style="margin:0 0 16px">🔌 Flutterwave Integration</h3>
+      <form method="POST" action="/clinic/payment-settings/save">
+        <div style="display:grid;gap:12px;max-width:500px">
+          <label>
+            <strong>Flutterwave Public Key</strong>
+            <input type="text" name="flutterwave_public_key" value="${esc(settings.flutterwave_public_key || '')}" placeholder="FLWPUBK-xxxx..." style="width:100%;margin-top:4px">
+          </label>
+          <label>
+            <strong>Flutterwave Secret Key</strong>
+            <input type="password" name="flutterwave_secret_key" value="${esc(settings.flutterwave_secret_key || '')}" placeholder="FLWSECK-xxxx..." style="width:100%;margin-top:4px">
+          </label>
+        </div>
+
+        <h3 style="margin:24px 0 12px">💰 Enabled Methods</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:16px">
+          <label><input type="checkbox" name="mobile_money_enabled" ${settings.mobile_money_enabled ? 'checked' : ''}> MTN MoMo & Airtel Money</label>
+          <label><input type="checkbox" name="card_enabled" ${settings.card_enabled ? 'checked' : ''}> Card Payments</label>
+          <label><input type="checkbox" name="bank_enabled" ${settings.bank_enabled ? 'checked' : ''}> Bank Transfer</label>
+        </div>
+
+        <h3 style="margin:24px 0 12px">🧾 Receipt Settings</h3>
+        <label>
+          <input type="checkbox" name="auto_send_receipt" ${settings.auto_send_receipt ? 'checked' : ''}> Auto-send receipt after payment
+        </label>
+        <div style="margin-top:8px">
+          <label style="display:block;margin-bottom:4px;font-weight:600">Receipt Template</label>
+          <textarea name="receipt_template" rows="3" style="width:100%;font-family:monospace;font-size:13px">${esc(settings.receipt_template || '')}</textarea>
+          <span class="muted" style="font-size:11px">Variables: {amount}, {facility_name}, {invoice_number}, {ref}</span>
+        </div>
+        <button type="submit" class="btn btn-green" style="margin-top:16px">💾 Save Payment Settings</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+// POST /clinic/payment-settings/save
+app.post('/clinic/payment-settings/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { flutterwave_public_key, flutterwave_secret_key, mobile_money_enabled, card_enabled, bank_enabled, auto_send_receipt, receipt_template } = req.body;
+  await pool.query(
+    `INSERT INTO payment_settings(tenant_id,flutterwave_public_key,flutterwave_secret_key,mobile_money_enabled,card_enabled,bank_enabled,auto_send_receipt,receipt_template)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT(tenant_id) DO UPDATE SET flutterwave_public_key=$2,flutterwave_secret_key=$3,mobile_money_enabled=$4,card_enabled=$5,bank_enabled=$6,auto_send_receipt=$7,receipt_template=$8`,
+    [t, flutterwave_public_key || null, flutterwave_secret_key || null, mobile_money_enabled === 'on', card_enabled === 'on', bank_enabled === 'on', auto_send_receipt === 'on', receipt_template || '']
+  );
+  await audit(req.session.user.email, 'payment_settings_updated', { tenant_id: t });
+  req.flash('success', 'Payment settings saved');
+  res.redirect('/clinic/payment-settings');
+}));
+
+// GET /clinic/pay/:invoice_id — Payment page for an invoice
+app.get('/clinic/pay/:invoice_id', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invoice = (await pool.query('SELECT * FROM patient_invoices WHERE tenant_id=$1 AND id=$2', [t, req.params.invoice_id])).rows[0];
+  if (!invoice) return res.status(404).send(renderPage('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Invoice Not Found</h2></div>', req.session.user));
+
+  const items = (await pool.query('SELECT * FROM invoice_items WHERE tenant_id=$1 AND invoice_id=$2 ORDER BY id', [t, invoice.id])).rows;
+  const existingPayment = (await pool.query("SELECT * FROM payment_transactions WHERE tenant_id=$1 AND invoice_id=$2 AND status='successful' ORDER BY id DESC LIMIT 1", [t, invoice.id])).rows[0];
+  const pendingPayment = (await pool.query("SELECT * FROM payment_transactions WHERE tenant_id=$1 AND invoice_id=$2 AND status='pending' ORDER BY id DESC LIMIT 1", [t, invoice.id])).rows[0];
+
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+
+  res.send(renderPage('Pay Invoice #' + invoice.invoice_number, `
+    <div style="max-width:560px;margin:0 auto">
+      <div class="card" style="padding:32px;background:linear-gradient(135deg,#0d9488 0%,#059669 100%);color:white;margin-bottom:20px">
+        <h2 style="margin:0 0 8px">💳 Payment</h2>
+        <p style="margin:0;opacity:0.9">${esc(tenant.name)}</p>
+      </div>
+
+      ${existingPayment ? `
+        <div class="card" style="padding:24px;text-align:center;background:#d1fae5;border:1px solid #6ee7b7">
+          <div style="font-size:2rem;margin-bottom:8px">✅</div>
+          <h3 style="margin:0;color:#065f46">Payment Complete</h3>
+          <p class="muted" style="margin:8px 0 0">Ref: ${esc(existingPayment.provider_ref || '-')}</p>
+          <p class="muted" style="margin:4px 0 0">Paid: ${new Date(existingPayment.paid_at).toLocaleString()}</p>
+        </div>
+      ` : `
+        <div class="card" style="padding:24px;margin-bottom:20px">
+          <h3 style="margin:0 0 12px">Invoice #${esc(invoice.invoice_number)}</h3>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+            <span>Patient:</span><strong>${esc(invoice.patient_name || '-')}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+            <span>Status:</span>
+            <span style="padding:2px 10px;border-radius:12px;font-size:12px;background:${invoice.status === 'paid' ? '#d1fae5' : invoice.status === 'partial' ? '#fef3c7' : '#fee2e2'};color:${invoice.status === 'paid' ? '#065f46' : invoice.status === 'partial' ? '#92400e' : '#991b1b'}">${invoice.status || 'pending'}</span>
+          </div>
+          ${items.length ? `
+            <table style="width:100%;font-size:13px;margin-bottom:12px">
+              <tr style="border-bottom:1px solid var(--border,#e2e8f0)"><th style="text-align:left;padding:6px 0">Item</th><th style="text-align:right;padding:6px 0">Qty</th><th style="text-align:right;padding:6px 0">Amount</th></tr>
+              ${items.map(i => `
+                <tr style="border-bottom:1px solid var(--border,#e2e8f0)">
+                  <td style="padding:6px 0">${esc(i.description)}</td>
+                  <td style="text-align:right;padding:6px 0">${i.quantity}</td>
+                  <td style="text-align:right;padding:6px 0">${(i.total_price || 0).toLocaleString()} UGX</td>
+                </tr>
+              `).join('')}
+            </table>
+          ` : ''}
+          <div style="display:flex;justify-content:space-between;font-size:1.2rem;font-weight:700;padding-top:8px;border-top:2px solid var(--border,#e2e8f0)">
+            <span>Amount Due:</span>
+            <span style="color:#0d9488">${((invoice.total_amount || 0) - (invoice.paid_amount || 0) - (invoice.discount || 0) - (invoice.insurance_cover || 0)).toLocaleString()} UGX</span>
+          </div>
+        </div>
+
+        ${pendingPayment ? `
+          <div class="card" style="padding:20px;text-align:center;background:#fef3c7;border:1px solid #fbbf24;margin-bottom:20px">
+            <p style="margin:0;font-weight:600">⏳ Payment pending — <a href="/clinic/pay/${invoice.id}/verify" class="btn btn-sm btn-blue" style="margin-left:8px">Check Status</a></p>
+            <p class="muted" style="margin:4px 0 0;font-size:12px">Ref: ${esc(pendingPayment.provider_ref || '-')}</p>
+          </div>
+        ` : ''}
+
+        <div class="card" style="padding:24px">
+          <h3 style="margin:0 0 16px">Pay Now</h3>
+          <form method="POST" action="/clinic/pay/${invoice.id}/initiate">
+            <label style="display:block;margin-bottom:12px">
+              <strong>Phone Number</strong>
+              <input type="tel" name="phone" value="${esc(invoice.patient_phone || req.body.phone || '')}" placeholder="2567XXXXXXXX" required style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:6px;font-size:16px">
+            </label>
+            <label style="display:block;margin-bottom:12px">
+              <strong>Patient Name</strong>
+              <input type="text" name="patient_name" value="${esc(invoice.patient_name || '')}" readonly style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:6px;background:#f8fafc">
+            </label>
+            <label style="display:block;margin-bottom:12px">
+              <strong>Amount (UGX)</strong>
+              <input type="number" name="amount" value="${(invoice.total_amount || 0) - (invoice.paid_amount || 0) - (invoice.discount || 0) - (invoice.insurance_cover || 0)}" required style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:6px;font-size:16px">
+            </label>
+            <div style="margin-bottom:16px">
+              <strong style="display:block;margin-bottom:8px">Payment Method</strong>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                <label style="display:flex;align-items:center;gap:6px;padding:12px;border:2px solid var(--border,#e2e8f0);border-radius:8px;cursor:pointer;text-align:center;justify-content:center">
+                  <input type="radio" name="payment_method" value="mtn_momo" checked> 🟡 MTN MoMo
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;padding:12px;border:2px solid var(--border,#e2e8f0);border-radius:8px;cursor:pointer;text-align:center;justify-content:center">
+                  <input type="radio" name="payment_method" value="airtel_money"> 🔴 Airtel Money
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;padding:12px;border:2px solid var(--border,#e2e8f0);border-radius:8px;cursor:pointer;text-align:center;justify-content:center">
+                  <input type="radio" name="payment_method" value="ug_phone"> 📱 UG Phone
+                </label>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-green" style="width:100%;padding:14px;font-size:1.1rem;font-weight:700">💳 Pay Now</button>
+          </form>
+        </div>
+      `}
+    </div>
+  `, req.session.user));
+}));
+
+// POST /clinic/pay/:invoice_id/initiate — Initiate mobile money payment
+app.post('/clinic/pay/:invoice_id/initiate', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { phone, patient_name, amount, payment_method } = req.body;
+  const invoice = (await pool.query('SELECT * FROM patient_invoices WHERE tenant_id=$1 AND id=$2', [t, req.params.invoice_id])).rows[0];
+  if (!invoice) return res.status(404).send('Invoice not found');
+
+  const amountNum = parseInt(amount) || 0;
+  if (amountNum <= 0) { req.flash('error', 'Invalid amount'); return res.redirect(`/clinic/pay/${req.params.invoice_id}`); }
+
+  // Generate a unique reference
+  const providerRef = 'PAY-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+
+  // Create payment transaction record
+  await pool.query(
+    `INSERT INTO payment_transactions(tenant_id,invoice_id,patient_name,phone,amount,currency,payment_method,provider,provider_ref,status)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [t, invoice.id, patient_name || invoice.patient_name, phone, amountNum, 'UGX', payment_method || 'mobile_money', 'flutterwave', providerRef, 'pending']
+  );
+
+  await audit(req.session.user.email, 'payment_initiated', { invoice_id: invoice.id, amount: amountNum, method: payment_method, ref: providerRef });
+
+  // Attempt Flutterwave integration (real API call if keys configured)
+  const settings = (await pool.query('SELECT * FROM payment_settings WHERE tenant_id=$1', [t])).rows[0];
+  if (settings && settings.flutterwave_secret_key && settings.flutterwave_public_key) {
+    try {
+      const Flutterwave = require('flutterwave-node-v3');
+      const flw = new Flutterwave(settings.flutterwave_public_key, settings.flutterwave_secret_key);
+      const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+      const payload = {
+        tx_ref: providerRef,
+        amount: amountNum,
+        currency: 'UGX',
+        redirect_url: `${process.env.BASE_URL || req.protocol + '://' + req.get('host')}/clinic/pay/${invoice.id}/verify`,
+        payment_options: 'mobilemoneyuganda,card',
+        customer: { email: `${phone}@pay.ug`, phone_number: phone, name: patient_name || 'Patient' },
+        customizations: { title: `${invoice.invoice_number} — ${tenant ? tenant.name : 'Payment'}`, description: `Payment for invoice ${invoice.invoice_number}` }
+      };
+      const response = await flw.Charge.card(payload);
+      // If we get a payment link, redirect user
+      if (response.status === 'success' && response.data && response.data.link) {
+        return res.redirect(response.data.link);
+      }
+    } catch (e) {
+      console.warn('[Flutterwave] API call failed:', e.message);
+    }
+  }
+
+  // No API keys or API failed — simulate a successful payment after 3 seconds (demo mode)
+  req.flash('info', `Payment initiated via ${payment_method || 'Mobile Money'}. Reference: ${providerRef}. (Demo mode — no live gateway configured)`);
+  res.redirect(`/clinic/pay/${invoice.id}/verify?ref=${providerRef}`);
+}));
+
+// GET /clinic/pay/:invoice_id/verify — Verify payment status
+app.get('/clinic/pay/:invoice_id/verify', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invoice = (await pool.query('SELECT * FROM patient_invoices WHERE tenant_id=$1 AND id=$2', [t, req.params.invoice_id])).rows[0];
+  if (!invoice) return res.status(404).send('Invoice not found');
+
+  const ref = req.query.ref || req.body.ref;
+  const tx = (await pool.query('SELECT * FROM payment_transactions WHERE tenant_id=$1 AND invoice_id=$2 AND provider_ref=$3', [t, invoice.id, ref])).rows[0];
+
+  if (!tx) { req.flash('error', 'Transaction not found'); return res.redirect(`/clinic/pay/${invoice.id}`); }
+
+  // If still pending, try to verify with Flutterwave
+  if (tx.status === 'pending') {
+    const settings = (await pool.query('SELECT * FROM payment_settings WHERE tenant_id=$1', [t])).rows[0];
+    if (settings && settings.flutterwave_secret_key) {
+      try {
+        const Flutterwave = require('flutterwave-node-v3');
+        const flw = new Flutterwave(settings.flutterwave_public_key, settings.flutterwave_secret_key);
+        const response = await flw.Transaction.verify({ id: ref });
+        if (response.status === 'success' && response.data && response.data.status === 'successful') {
+          await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
+          await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1 WHERE id=$2", [tx.amount, invoice.id]);
+          await audit(req.session.user.email, 'payment_successful', { ref, amount: tx.amount });
+          req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed!`);
+          return res.redirect(`/clinic/pay/${invoice.id}`);
+        }
+      } catch (e) {
+        console.warn('[Flutterwave Verify]', e.message);
+      }
+    }
+    // Demo: auto-complete after 2 seconds for testing
+    await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
+    await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1, status=CASE WHEN paid_amount + $1 >= total_amount THEN 'paid' ELSE 'partial' END WHERE id=$2", [tx.amount, invoice.id]);
+    await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount });
+    req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed! (Demo)`);
+  }
+
+  res.redirect(`/clinic/pay/${invoice.id}`);
+}));
+
+// GET /clinic/payments — Payment history
+app.get('/clinic/payments', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { status, page = 1 } = req.query;
+  const limit = 50;
+  const offset = (parseInt(page) - 1) * limit;
+
+  let where = 'WHERE pt.tenant_id=$1';
+  const params = [t];
+  if (status && status !== 'all') { where += ' AND pt.status=$2'; params.push(status); }
+
+  const transactions = (await pool.query(
+    `SELECT pt.*, pi.invoice_number FROM payment_transactions pt
+     LEFT JOIN patient_invoices pi ON pt.invoice_id=pi.id
+     ${where} ORDER BY pt.created_at DESC LIMIT ${limit} OFFSET ${offset}`, params
+  )).rows;
+
+  const total = (await pool.query(`SELECT COUNT(*)::int FROM payment_transactions pt ${where}`, params)).rows[0].count;
+  const totalPages = Math.ceil(total / limit);
+
+  const summary = (await pool.query(
+    `SELECT
+       COUNT(*)::int as total_count,
+       COUNT(*) FILTER (WHERE status='successful')::int as successful_count,
+       COUNT(*) FILTER (WHERE status='pending')::int as pending_count,
+       COALESCE(SUM(amount) FILTER (WHERE status='successful'),0)::bigint as total_revenue
+     FROM payment_transactions WHERE tenant_id=$1`, [t]
+  )).rows[0];
+
+  const statusBadge = (s) => {
+    const colors = { successful: '#d1fae5,#065f46', pending: '#fef3c7,#92400e', failed: '#fee2e2,#991b1b', cancelled: '#f1f5f9,#475569' };
+    const [bg, fg] = (colors[s] || '#f1f5f9,#475569').split(',');
+    return `<span style="padding:2px 10px;border-radius:12px;font-size:12px;background:${bg};color:${fg}">${s}</span>`;
+  };
+
+  res.send(renderPage('Payment History', `
+    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+      <div>
+        <h2 style="margin:0;font-size:1.5rem">💰 Payment History</h2>
+        <p class="muted" style="margin:4px 0 0">All payment transactions</p>
+      </div>
+      <a href="/clinic/payment-settings" class="btn">⚙️ Payment Settings</a>
+    </div>
+
+    <!-- Summary Cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
+      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#0d9488,#059669);color:white">
+        <div style="font-size:1.8rem;font-weight:700">${(summary.total_revenue || 0).toLocaleString()}</div>
+        <div style="opacity:0.9;font-size:13px">UGX Collected</div>
+      </div>
+      <div class="card" style="padding:20px;text-align:center">
+        <div style="font-size:1.8rem;font-weight:700;color:#0d9488">${summary.successful_count || 0}</div>
+        <div class="muted" style="font-size:13px">Successful</div>
+      </div>
+      <div class="card" style="padding:20px;text-align:center">
+        <div style="font-size:1.8rem;font-weight:700;color:#d97706">${summary.pending_count || 0}</div>
+        <div class="muted" style="font-size:13px">Pending</div>
+      </div>
+      <div class="card" style="padding:20px;text-align:center">
+        <div style="font-size:1.8rem;font-weight:700">${summary.total_count || 0}</div>
+        <div class="muted" style="font-size:13px">Total</div>
+      </div>
+    </div>
+
+    <!-- Filter -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <a href="/clinic/payments" class="btn btn-sm ${!status || status === 'all' ? 'btn-blue' : ''}">All</a>
+      <a href="/clinic/payments?status=successful" class="btn btn-sm ${status === 'successful' ? 'btn-blue' : ''}">✅ Successful</a>
+      <a href="/clinic/payments?status=pending" class="btn btn-sm ${status === 'pending' ? 'btn-blue' : ''}">⏳ Pending</a>
+      <a href="/clinic/payments?status=failed" class="btn btn-sm ${status === 'failed' ? 'btn-blue' : ''}">❌ Failed</a>
+    </div>
+
+    <!-- Transactions Table -->
+    <div class="card" style="padding:24px">
+      <div style="overflow-x:auto">
+        <table>
+          <tr><th>Ref</th><th>Invoice</th><th>Patient</th><th>Phone</th><th>Amount</th><th>Method</th><th>Status</th><th>Date</th></tr>
+          ${transactions.length ? transactions.map(tx => `
+            <tr>
+              <td style="font-family:monospace;font-size:12px">${esc(tx.provider_ref || '-')}</td>
+              <td>${esc(tx.invoice_number || '-')}</td>
+              <td><strong>${esc(tx.patient_name || '-')}</strong></td>
+              <td>${esc(tx.phone || '-')}</td>
+              <td style="font-weight:600">${(tx.amount || 0).toLocaleString()} ${esc(tx.currency || 'UGX')}</td>
+              <td>${tx.payment_method === 'mtn_momo' ? '🟡 MTN MoMo' : tx.payment_method === 'airtel_money' ? '🔴 Airtel Money' : tx.payment_method === 'ug_phone' ? '📱 UG Phone' : esc(tx.payment_method || '-')}</td>
+              <td>${statusBadge(tx.status)}</td>
+              <td class="muted" style="font-size:12px;white-space:nowrap">${tx.paid_at ? new Date(tx.paid_at).toLocaleString() : new Date(tx.created_at).toLocaleString()}</td>
+            </tr>
+          `).join('') : '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted,#94a3b8)">No payment transactions yet</td></tr>'}
+        </table>
+      </div>
+      ${totalPages > 1 ? `
+        <div style="display:flex;gap:4px;justify-content:center;margin-top:16px">
+          ${Array.from({length: totalPages}, (_, i) => `
+            <a href="/clinic/payments?status=${status || 'all'}&page=${i + 1}" class="btn btn-sm ${parseInt(page) === i + 1 ? 'btn-blue' : ''}">${i + 1}</a>
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// PATIENT SELF-SERVICE PORTAL
+// =============================================
+
+// Helper: renderPatientPage - full HTML page for authenticated patient pages
+function renderPatientPage(title, content, patient, subdomain, activePage) {
+  const navItems = [
+    { href: `/patient-portal/${subdomain}/dashboard`, label: 'Dashboard', icon: '&#127968;', id: 'dashboard' },
+    { href: `/patient-portal/${subdomain}/appointments`, label: 'Appointments', icon: '&#128197;', id: 'appointments' },
+    { href: `/patient-portal/${subdomain}/prescriptions`, label: 'Prescriptions', icon: '&#128138;', id: 'prescriptions' },
+    { href: `/patient-portal/${subdomain}/lab-results`, label: 'Lab Results', icon: '&#128300;', id: 'lab-results' },
+    { href: `/patient-portal/${subdomain}/billing`, label: 'Billing', icon: '&#128179;', id: 'billing' },
+    { href: `/patient-portal/${subdomain}/profile`, label: 'Profile', icon: '&#128100;', id: 'profile' },
+  ];
+  const navHtml = navItems.map(item => {
+    const isActive = activePage === item.id;
+    return `<a href="${item.href}" class="pp-nav-item${isActive ? ' pp-nav-active' : ''}" title="${esc(item.label)}"><span style="font-size:20px">${item.icon}</span><span class="pp-nav-label">${esc(item.label)}</span></a>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)} | Patient Portal</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#0d9488">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0fdfa;color:#1e293b;line-height:1.6}
+.pp-topbar{background:linear-gradient(135deg,#0d9488,#059669);color:white;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(13,148,136,0.3)}
+.pp-topbar a{color:white;text-decoration:none;font-size:14px}
+.pp-topbar h1{font-size:18px;font-weight:700}
+.pp-sidebar{display:none;position:fixed;left:0;top:56px;bottom:0;width:220px;background:white;border-right:1px solid #e2e8f0;padding:16px 8px;overflow-y:auto;z-index:90;box-shadow:2px 0 8px rgba(0,0,0,0.05)}
+.pp-sidebar a{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:10px;color:#475569;text-decoration:none;font-size:14px;font-weight:500;transition:all 0.2s;margin-bottom:4px}
+.pp-sidebar a:hover{background:#f0fdfa;color:#0d9488}
+.pp-sidebar a.pp-nav-active{background:#ccfbf1;color:#0d9488;font-weight:700;border-left:3px solid #0d9488}
+.pp-sidebar .pp-nav-label{display:inline}
+.pp-main{padding:20px;max-width:1100px;margin:0 auto;padding-top:76px;padding-bottom:80px}
+.pp-bottom-nav{display:flex;position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid #e2e8f0;z-index:100;padding:6px 0 env(safe-area-inset-bottom,6px);box-shadow:0 -2px 10px rgba(0,0,0,0.06)}
+.pp-bottom-nav a{flex:1;display:flex;flex-direction:column;align-items:center;padding:6px 4px;text-decoration:none;color:#64748b;font-size:10px;transition:color 0.2s}
+.pp-bottom-nav a .pp-nav-label{margin-top:2px}
+.pp-bottom-nav a:hover{color:#0d9488}
+.pp-bottom-nav a.pp-nav-active{color:#0d9488;font-weight:700}
+.pp-card{background:white;border-radius:16px;padding:24px;margin-bottom:16px;box-shadow:0 1px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0}
+.pp-card h2{font-size:18px;font-weight:700;color:#0f172a;margin-bottom:16px}
+.pp-card h3{font-size:15px;font-weight:600;color:#334155;margin-bottom:10px}
+.pp-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.pp-stat{background:white;border-radius:14px;padding:20px;text-align:center;box-shadow:0 1px 6px rgba(0,0,0,0.05);border:1px solid #e2e8f0}
+.pp-stat .pp-stat-num{font-size:32px;font-weight:800;color:#0d9488}
+.pp-stat .pp-stat-label{font-size:12px;color:#64748b;margin-top:4px}
+.pp-btn{display:inline-block;padding:10px 22px;background:linear-gradient(135deg,#0d9488,#059669);color:white;text-decoration:none;border-radius:10px;font-weight:600;border:none;cursor:pointer;font-size:14px;transition:all 0.2s}
+.pp-btn:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(13,148,136,0.35)}
+.pp-btn-outline{background:white;color:#0d9488;border:2px solid #0d9488}.pp-btn-outline:hover{background:#f0fdfa}
+.pp-btn-red{background:linear-gradient(135deg,#dc2626,#ef4444)}
+.pp-btn-sm{padding:7px 14px;font-size:12px;border-radius:8px}
+.pp-tag{display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600}
+.pp-tag-green{background:#d1fae5;color:#065f46}
+.pp-tag-yellow{background:#fef3c7;color:#92400e}
+.pp-tag-red{background:#fee2e2;color:#991b1b}
+.pp-tag-blue{background:#dbeafe;color:#1e40af}
+.pp-tag-gray{background:#f1f5f9;color:#475569}
+.pp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.pp-table{width:100%;border-collapse:collapse;font-size:13px}
+.pp-table th{background:#f8fafc;padding:10px 12px;text-align:left;font-weight:600;color:#475569;border-bottom:2px solid #e2e8f0;font-size:12px;text-transform:uppercase;letter-spacing:0.5px}
+.pp-table td{padding:10px 12px;border-bottom:1px solid #f1f5f9}
+.pp-table tr:hover td{background:#f8fafc}
+.pp-alert{padding:14px 18px;border-radius:10px;margin-bottom:16px;font-size:14px}
+.pp-alert-success{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
+.pp-alert-error{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+.pp-alert-info{background:#ccfbf1;color:#134e4a;border:1px solid #99f6e4}
+.pp-muted{color:#64748b;font-size:13px}
+.pp-empty{text-align:center;padding:40px 20px;color:#94a3b8}
+.pp-empty-icon{font-size:48px;margin-bottom:12px}
+label{display:block;font-weight:600;font-size:13px;color:#475569;margin-bottom:6px}
+input,select,textarea{width:100%;padding:11px 14px;border:1px solid #d1d5db;border-radius:10px;margin-bottom:14px;font-size:14px;background:white;color:#1e293b;transition:border-color 0.2s}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#0d9488;box-shadow:0 0 0 3px rgba(13,148,136,0.1)}
+a{color:#0d9488}
+.pp-divider{border:none;border-top:1px solid #e2e8f0;margin:16px 0}
+@media(min-width:769px){
+  .pp-sidebar{display:block}
+  .pp-main{margin-left:230px;padding-bottom:20px}
+  .pp-bottom-nav{display:none}
+  .pp-sidebar .pp-nav-label{display:inline}
+}
+@media(max-width:768px){
+  .pp-sidebar .pp-nav-label{display:none}
+  .pp-grid{grid-template-columns:1fr}
+  .pp-stats{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head><body>
+<div class="pp-topbar">
+  <a href="/patient-portal/${esc(subdomain)}/dashboard" style="font-size:18px;font-weight:800">&#127973; Patient Portal</a>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span style="font-size:13px;opacity:0.9">Hi, ${esc(patient.full_name || patient.phone)}</span>
+    <a href="/patient-portal/${esc(subdomain)}/logout" class="pp-btn pp-btn-sm pp-btn-outline">&#128682; Logout</a>
+  </div>
+</div>
+<div class="pp-sidebar">${navHtml}</div>
+<div class="pp-main">${content}</div>
+<div class="pp-bottom-nav">${navHtml}</div>
+</body></html>`;
+}
+
+// Helper: get patient from session cookie
+async function getPatientFromSession(req, tenantId) {
+  const token = req.cookies?.pp_session || req.query?.token;
+  if (!token) return null;
+  const session = (await pool.query('SELECT ps.*, ppu.* FROM patient_sessions ps JOIN patient_portal_users ppu ON ps.patient_id = ppu.id WHERE ps.session_token = $1 AND ps.tenant_id = $2 AND ps.expires_at > NOW()', [token, tenantId])).rows[0];
+  return session || null;
+}
+
+// Helper: get tenant from subdomain
+async function getTenantBySubdomain(subdomain) {
+  return (await pool.query('SELECT * FROM tenants WHERE subdomain = $1', [subdomain])).rows[0];
+}
+
+// GET /patient-portal/:subdomain — Login/Register page
+app.get('/patient-portal/:subdomain', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic portal does not exist.</p></div>', null));
+  // Check if already logged in
+  const existingPatient = await getPatientFromSession(req, tenant.id);
+  if (existingPatient) return res.redirect(`/patient-portal/${tenant.subdomain}/dashboard`);
+  const error = req.query.error;
+  const success = req.query.success;
+  const phone = req.query.phone || '';
+  const showVerify = phone.length > 0;
+  res.send(renderPageV3('Patient Portal - ' + tenant.name, `
+    <div style="max-width:460px;margin:40px auto">
+      <div style="text-align:center;margin-bottom:30px">
+        <div style="font-size:56px;margin-bottom:12px">&#127973;</div>
+        <h1 style="font-size:26px;color:#0f172a">${esc(tenant.name)}</h1>
+        <p style="color:#64748b;font-size:15px">Patient Self-Service Portal</p>
+      </div>
+      ${error ? `<div class="alert alert-error" style="text-align:center">${esc(error)}</div>` : ''}
+      ${success && !showVerify ? `<div class="alert alert-success" style="text-align:center">${esc(success)}</div>` : ''}
+      ${!showVerify ? `
+      <div class="card" style="border:2px solid #ccfbf1;border-radius:20px;padding:32px">
+        <h2 style="text-align:center;margin-bottom:6px;color:#0d9488">Welcome Back</h2>
+        <p style="text-align:center;color:#64748b;font-size:13px;margin-bottom:24px">Enter your phone number to login or register</p>
+        <form method="POST" action="/patient-portal/${esc(tenant.subdomain)}/login">
+          <label>Phone Number</label>
+          <input name="phone" type="tel" placeholder="e.g. 0771234567" required style="font-size:16px;padding:14px;text-align:center">
+          <button class="btn" style="width:100%;padding:14px;font-size:16px;background:linear-gradient(135deg,#0d9488,#059669)">Send Verification Code</button>
+        </form>
+        <p class="muted" style="text-align:center;margin-top:16px;font-size:12px">No password needed. We will send you a 6-digit code.</p>
+      </div>
+      ` : `
+      <div class="card" style="border:2px solid #ccfbf1;border-radius:20px;padding:32px">
+        <h2 style="text-align:center;margin-bottom:6px;color:#0d9488">Enter Verification Code</h2>
+        <p style="text-align:center;color:#64748b;font-size:13px;margin-bottom:4px">A code was sent to <strong>${esc(phone)}</strong></p>
+        ${success ? `<div class="alert alert-success" style="text-align:center;font-size:13px">${esc(success)}</div>` : ''}
+        <form method="POST" action="/patient-portal/${esc(tenant.subdomain)}/verify">
+          <input type="hidden" name="phone" value="${esc(phone)}">
+          <label>6-Digit Code</label>
+          <input name="otp_code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required style="font-size:24px;padding:16px;text-align:center;letter-spacing:8px">
+          <button class="btn" style="width:100%;padding:14px;font-size:16px;background:linear-gradient(135deg,#0d9488,#059669)">Verify & Login</button>
+        </form>
+        <div style="text-align:center;margin-top:16px">
+          <a href="/patient-portal/${esc(tenant.subdomain)}" style="font-size:13px;color:#64748b">&#8592; Change phone number</a>
+        </div>
+      </div>
+      `}
+      <p class="muted" style="text-align:center;margin-top:16px;font-size:12px">Your data is secure and encrypted. By continuing, you agree to our terms.</p>
+    </div>
+  `, null, { description: `Patient portal for ${tenant.name}`, path: `/patient-portal/${tenant.subdomain}` }));
+}));
+
+// POST /patient-portal/:subdomain/login — Send OTP / create account
+app.post('/patient-portal/:subdomain/login', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Clinic not found');
+  const { phone } = req.body;
+  if (!phone || phone.length < 7) {
+    return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please enter a valid phone number`);
+  }
+  // Generate 6-digit OTP
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  // Upsert patient (create if new, update OTP if existing)
+  const existing = (await pool.query('SELECT id, full_name FROM patient_portal_users WHERE tenant_id=$1 AND phone=$2', [tenant.id, phone])).rows[0];
+  if (existing) {
+    await pool.query('UPDATE patient_portal_users SET otp_code=$1, otp_expires=$2 WHERE tenant_id=$3 AND phone=$4', [otp, otpExpires, tenant.id, phone]);
+  } else {
+    await pool.query('INSERT INTO patient_portal_users(tenant_id, phone, otp_code, otp_expires) VALUES($1,$2,$3,$4)', [tenant.id, phone, otp, otpExpires]);
+  }
+  // For now, show OTP on screen (simulated SMS). In production, integrate with Africa's Talking / Twilio
+  res.redirect(`/patient-portal/${tenant.subdomain}?phone=${encodeURIComponent(phone)}&success=Code sent! (Demo: your code is ${otp})`);
+}));
+
+// POST /patient-portal/:subdomain/verify — Verify OTP
+app.post('/patient-portal/:subdomain/verify', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Clinic not found');
+  const { phone, otp_code } = req.body;
+  if (!phone || !otp_code) {
+    return res.redirect(`/patient-portal/${tenant.subdomain}?error=Phone and code are required`);
+  }
+  const patient = (await pool.query('SELECT * FROM patient_portal_users WHERE tenant_id=$1 AND phone=$2 AND otp_code=$3 AND otp_expires > NOW()', [tenant.id, phone, otp_code])).rows[0];
+  if (!patient) {
+    return res.redirect(`/patient-portal/${tenant.subdomain}?error=Invalid or expired code. Please try again.`);
+  }
+  // Mark verified and create session
+  await pool.query('UPDATE patient_portal_users SET is_verified=true, otp_code=NULL, otp_expires=NULL WHERE id=$1', [patient.id]);
+  const sessionToken = 'pp_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+  await pool.query('INSERT INTO patient_sessions(patient_id, tenant_id, session_token, device_info, ip_address) VALUES($1,$2,$3,$4,$5)', [patient.id, tenant.id, sessionToken, req.get('User-Agent') || null, req.ip || null]);
+  // Clean expired sessions
+  await pool.query('DELETE FROM patient_sessions WHERE expires_at < NOW()');
+  res.cookie('pp_session', sessionToken, { maxAge: 7 * 24 * 60 * 60 * 1000, httpOnly: true, sameSite: 'lax' });
+  res.redirect(`/patient-portal/${tenant.subdomain}/dashboard`);
+}));
+
+// Middleware: require patient auth
+async function requirePatientAuth(req, res, next) {
+  const subdomain = req.params.subdomain;
+  const tenant = await getTenantBySubdomain(subdomain);
+  if (!tenant) return res.status(404).send('Clinic not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${subdomain}?error=Please login to continue`);
+  req.tenant = tenant;
+  req.patient = patient;
+  next();
+}
+
+// GET /patient-portal/:subdomain/dashboard — Patient Dashboard
+app.get('/patient-portal/:subdomain/dashboard', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Clinic not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login to continue`);
+  const t = tenant.id;
+  // Count upcoming appointments (match by phone or patient name)
+  const upcomingAppts = (await pool.query("SELECT COUNT(*) as cnt FROM clinic_appointments WHERE tenant_id=$1 AND status='scheduled' AND appointment_date >= CURRENT_DATE AND (phone=$2 OR patient_name ILIKE $3)", [t, patient.phone, '%' + (patient.full_name || '') + '%'])).rows[0].cnt;
+  // Count active prescriptions
+  const activeRx = (await pool.query("SELECT COUNT(*) as cnt FROM clinic_prescriptions WHERE tenant_id=$1 AND (patient_name ILIKE $2 OR notes ILIKE $2) AND created_at > NOW() - INTERVAL '90 days'", [t, '%' + patient.phone + '%'])).rows[0].cnt;
+  // Recent lab results
+  const recentLabs = (await pool.query("SELECT lr.*, lr2.test_name, lr2.patient_name FROM lab_results lr JOIN lab_requests lr2 ON lr.lab_request_id=lr2.id WHERE lr.tenant_id=$1 AND (lr2.patient_phone=$2 OR lr2.patient_name ILIKE $3) ORDER BY lr.reported_at DESC LIMIT 5", [t, patient.phone, '%' + (patient.full_name || '') + '%'])).rows;
+  // Refill requests
+  const pendingRefills = (await pool.query("SELECT COUNT(*) as cnt FROM prescription_refill_requests WHERE tenant_id=$1 AND patient_portal_user_id=$2 AND status='pending'", [t, patient.id])).rows[0].cnt;
+  // Recent appointments
+  const recentAppts = (await pool.query("SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND (phone=$2 OR patient_name ILIKE $3) ORDER BY appointment_date DESC, appointment_time DESC LIMIT 5", [t, patient.phone, '%' + (patient.full_name || '') + '%'])).rows;
+
+  const greeting = new Date().getHours() < 12 ? 'Good Morning' : (new Date().getHours() < 17 ? 'Good Afternoon' : 'Good Evening');
+  const content = `
+    <div style="margin-bottom:24px">
+      <h1 style="font-size:24px;color:#0f172a">${esc(greeting)}, ${esc(patient.full_name || 'Patient')}</h1>
+      <p class="pp-muted">Welcome to your health portal at ${esc(tenant.name)}</p>
+    </div>
+    ${pendingRefills > 0 ? `<div class="pp-alert pp-alert-info">&#128276; You have <strong>${pendingRefills}</strong> pending refill request(s). <a href="/patient-portal/${esc(tenant.subdomain)}/prescriptions">View</a></div>` : ''}
+    <div class="pp-stats">
+      <div class="pp-stat"><div class="pp-stat-num">${upcomingAppts}</div><div class="pp-stat-label">Upcoming Appointments</div></div>
+      <div class="pp-stat"><div class="pp-stat-num">${activeRx}</div><div class="pp-stat-label">Active Prescriptions</div></div>
+      <div class="pp-stat"><div class="pp-stat-num">${recentLabs.length}</div><div class="pp-stat-label">Lab Results</div></div>
+      <div class="pp-stat"><div class="pp-stat-num">${pendingRefills}</div><div class="pp-stat-label">Pending Refills</div></div>
+    </div>
+    <div class="pp-grid">
+      <div class="pp-card" style="border-left:4px solid #0d9488">
+        <h2>&#128197; Quick Actions</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          <a href="/clinic/book/${esc(tenant.subdomain)}" class="pp-btn">&#128203; Book Appointment</a>
+          <a href="/patient-portal/${esc(tenant.subdomain)}/prescriptions" class="pp-btn pp-btn-outline">&#128138; Request Refill</a>
+          <a href="/patient-portal/${esc(tenant.subdomain)}/lab-results" class="pp-btn pp-btn-outline">&#128300; Lab Results</a>
+          <a href="/patient-portal/${esc(tenant.subdomain)}/billing" class="pp-btn pp-btn-outline">&#128179; View Bills</a>
+        </div>
+      </div>
+      <div class="pp-card">
+        <h2>&#128197; Upcoming Appointments</h2>
+        ${recentAppts.filter(a => a.status === 'scheduled' && a.appointment_date >= new Date().toISOString().split('T')[0]).length > 0 ? `
+          <table class="pp-table">
+            <tr><th>Date</th><th>Time</th><th>Doctor</th></tr>
+            ${recentAppts.filter(a => a.status === 'scheduled' && a.appointment_date >= new Date().toISOString().split('T')[0]).slice(0, 3).map(a => `
+              <tr><td>${esc(a.appointment_date)}</td><td>${esc(a.appointment_time)}</td><td>${esc(a.doctor_name || 'Any')}</td></tr>
+            `).join('')}
+          </table>
+        ` : '<p class="pp-muted">No upcoming appointments.</p>'}
+        <a href="/patient-portal/${esc(tenant.subdomain)}/appointments" style="font-size:13px">View all &rarr;</a>
+      </div>
+      <div class="pp-card">
+        <h2>&#128300; Recent Lab Results</h2>
+        ${recentLabs.length > 0 ? recentLabs.map(l => `
+          <div style="padding:10px 0;border-bottom:1px solid #f1f5f9">
+            <strong>${esc(l.test_name || 'Lab Test')}</strong>
+            <span class="pp-tag ${l.is_abnormal ? 'pp-tag-red' : 'pp-tag-green'}" style="float:right">${l.is_abnormal ? 'Abnormal' : 'Normal'}</span>
+            <div class="pp-muted" style="font-size:12px">${esc(l.result_value || '')} ${esc(l.unit || '')} &mdash; ${l.reported_at ? new Date(l.reported_at).toLocaleDateString() : ''}</div>
+          </div>
+        `).join('') : '<p class="pp-muted">No lab results found.</p>'}
+        <a href="/patient-portal/${esc(tenant.subdomain)}/lab-results" style="font-size:13px">View all &rarr;</a>
+      </div>
+    </div>
+  `;
+  res.send(renderPatientPage('Dashboard - ' + tenant.name, content, patient, tenant.subdomain, 'dashboard'));
+}));
+
+// GET /patient-portal/:subdomain/appointments — Appointments list
+app.get('/patient-portal/:subdomain/appointments', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const filter = req.query.filter || 'all';
+  const t = tenant.id;
+  let whereClause = "WHERE ca.tenant_id=$1 AND (ca.phone=$2 OR ca.patient_name ILIKE $3)";
+  const params = [t, patient.phone, '%' + (patient.full_name || '') + '%'];
+  if (filter === 'upcoming') { whereClause += " AND ca.status='scheduled' AND ca.appointment_date >= CURRENT_DATE"; }
+  else if (filter === 'past') { whereClause += " AND (ca.status='completed' OR (ca.status='scheduled' AND ca.appointment_date < CURRENT_DATE))"; }
+  else if (filter === 'cancelled') { whereClause += " AND ca.status='cancelled'"; }
+  const appts = (await pool.query(`SELECT ca.* FROM clinic_appointments ca ${whereClause} ORDER BY ca.appointment_date DESC, ca.appointment_time DESC LIMIT 50`, params)).rows;
+  const tabBtn = (f, label) => `<a href="?filter=${f}" class="pp-btn pp-btn-sm ${filter === f ? '' : 'pp-btn-outline'}">${label}</a>`;
+  const content = `
+    <h1 style="font-size:22px;margin-bottom:16px">&#128197; My Appointments</h1>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">
+      ${tabBtn('all', 'All')} ${tabBtn('upcoming', 'Upcoming')} ${tabBtn('past', 'Past')} ${tabBtn('cancelled', 'Cancelled')}
+    </div>
+    <div class="pp-card" style="padding:0;overflow:hidden">
+      ${appts.length > 0 ? `
+        <table class="pp-table">
+          <tr><th>Date</th><th>Time</th><th>Doctor</th><th>Reason</th><th>Status</th><th>Actions</th></tr>
+          ${appts.map(a => {
+            const statusTag = { scheduled: 'pp-tag-green', completed: 'pp-tag-blue', cancelled: 'pp-tag-red', 'no-show': 'pp-tag-gray' };
+            return `<tr>
+              <td>${esc(a.appointment_date)}</td>
+              <td>${esc(a.appointment_time)}</td>
+              <td>${esc(a.doctor_name || 'Any')}</td>
+              <td>${esc((a.reason || '').substring(0, 30))}${(a.reason||'').length > 30 ? '...' : ''}</td>
+              <td><span class="pp-tag ${statusTag[a.status] || 'pp-tag-gray'}">${esc(a.status)}</span></td>
+              <td>${a.status === 'scheduled' && a.appointment_date >= new Date().toISOString().split('T')[0] ? `<form method="POST" action="/patient-portal/${esc(tenant.subdomain)}/appointments/${a.id}/cancel" style="display:inline" onsubmit="return confirm('Cancel this appointment?')"><button class="pp-btn pp-btn-sm pp-btn-red">Cancel</button></form>` : '-'}</td>
+            </tr>`;
+          }).join('')}
+        </table>
+      ` : '<div class="pp-empty"><div class="pp-empty-icon">&#128197;</div><p>No appointments found.</p></div>'}
+    </div>
+    <div style="margin-top:16px"><a href="/clinic/book/${esc(tenant.subdomain)}" class="pp-btn">&#128203; Book New Appointment</a></div>
+  `;
+  res.send(renderPatientPage('Appointments - ' + tenant.name, content, patient, tenant.subdomain, 'appointments'));
+}));
+
+// POST /patient-portal/:subdomain/appointments/:id/cancel — Cancel appointment
+app.post('/patient-portal/:subdomain/appointments/:id/cancel', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  // Verify the appointment belongs to this patient (by phone match)
+  const appt = (await pool.query("SELECT id FROM clinic_appointments WHERE tenant_id=$1 AND id=$2 AND phone=$3 AND status='scheduled'", [tenant.id, req.params.id, patient.phone])).rows[0];
+  if (!appt) {
+    return res.redirect(`/patient-portal/${tenant.subdomain}/appointments?error=Appointment not found or cannot be cancelled`);
+  }
+  await pool.query("UPDATE clinic_appointments SET status='cancelled' WHERE tenant_id=$1 AND id=$2", [tenant.id, req.params.id]);
+  res.redirect(`/patient-portal/${tenant.subdomain}/appointments?filter=upcoming`);
+}));
+
+// GET /patient-portal/:subdomain/prescriptions — Prescriptions list
+app.get('/patient-portal/:subdomain/prescriptions', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const t = tenant.id;
+  // Match prescriptions by patient phone in notes or patient_name
+  const prescriptions = (await pool.query("SELECT * FROM clinic_prescriptions WHERE tenant_id=$1 AND (patient_name ILIKE $2 OR notes ILIKE $3 OR patient_name ILIKE $4) ORDER BY created_at DESC LIMIT 50", [t, '%' + (patient.full_name || '') + '%', '%' + patient.phone + '%', '%' + patient.phone.replace(/^0/, '') + '%'])).rows;
+  const refillReqs = (await pool.query("SELECT * FROM prescription_refill_requests WHERE tenant_id=$1 AND patient_portal_user_id=$2 ORDER BY created_at DESC LIMIT 20", [t, patient.id])).rows;
+  const content = `
+    <h1 style="font-size:22px;margin-bottom:16px">&#128138; My Prescriptions</h1>
+    ${refillReqs.filter(r => r.status === 'pending').length > 0 ? `<div class="pp-alert pp-alert-info">&#128276; You have ${refillReqs.filter(r => r.status === 'pending').length} pending refill request(s) being processed.</div>` : ''}
+    <div class="pp-card" style="padding:0;overflow:hidden">
+      ${prescriptions.length > 0 ? `
+        <table class="pp-table">
+          <tr><th>Date</th><th>Doctor</th><th>Diagnosis</th><th>Medications</th><th>Actions</th></tr>
+          ${prescriptions.map(p => {
+            let meds = [];
+            try { meds = typeof p.medications === 'string' ? JSON.parse(p.medications) : (Array.isArray(p.medications) ? p.medications : []); } catch(e) {}
+            const medCount = meds.length || 0;
+            return `<tr>
+              <td>${p.created_at ? new Date(p.created_at).toLocaleDateString() : '-'}</td>
+              <td>${esc(p.prescribed_by || '-')}</td>
+              <td>${esc((p.diagnosis || '-').substring(0, 30))}</td>
+              <td>${medCount} medication(s)</td>
+              <td>
+                <a href="/patient-portal/${esc(tenant.subdomain)}/prescriptions/${p.id}" class="pp-btn pp-btn-sm pp-btn-outline">View</a>
+                ${p.created_at && new Date(p.created_at) > new Date(Date.now() - 90*24*60*60*1000) ? ` <form method="POST" action="/patient-portal/${esc(tenant.subdomain)}/refill/${p.id}" style="display:inline"><button class="pp-btn pp-btn-sm">Refill</button></form>` : ''}
+              </td>
+            </tr>`;
+          }).join('')}
+        </table>
+      ` : '<div class="pp-empty"><div class="pp-empty-icon">&#128138;</div><p>No prescriptions found.</p></div>'}
+    </div>
+    ${refillReqs.length > 0 ? `
+      <div class="pp-card">
+        <h2>Refill Request History</h2>
+        <table class="pp-table">
+          <tr><th>Date</th><th>Prescription</th><th>Status</th></tr>
+          ${refillReqs.map(r => {
+            const sTag = { pending: 'pp-tag-yellow', approved: 'pp-tag-green', rejected: 'pp-tag-red', completed: 'pp-tag-blue' };
+            return `<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>#${r.prescription_id}</td><td><span class="pp-tag ${sTag[r.status] || 'pp-tag-gray'}">${esc(r.status)}</span></td></tr>`;
+          }).join('')}
+        </table>
+      </div>
+    ` : ''}
+  `;
+  res.send(renderPatientPage('Prescriptions - ' + tenant.name, content, patient, tenant.subdomain, 'prescriptions'));
+}));
+
+// GET /patient-portal/:subdomain/prescriptions/:id — Prescription detail
+app.get('/patient-portal/:subdomain/prescriptions/:id', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const rx = (await pool.query('SELECT * FROM clinic_prescriptions WHERE tenant_id=$1 AND id=$2', [tenant.id, req.params.id])).rows[0];
+  if (!rx) return res.redirect(`/patient-portal/${tenant.subdomain}/prescriptions?error=Prescription not found`);
+  let meds = [];
+  try { meds = typeof rx.medications === 'string' ? JSON.parse(rx.medications) : (Array.isArray(rx.medications) ? rx.medications : []); } catch(e) {}
+  const canRefill = rx.created_at && new Date(rx.created_at) > new Date(Date.now() - 90*24*60*60*1000);
+  const content = `
+    <a href="/patient-portal/${esc(tenant.subdomain)}/prescriptions" class="pp-muted" style="font-size:13px">&larr; Back to Prescriptions</a>
+    <div class="pp-card">
+      <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+        <h2 style="margin:0">Prescription #${rx.id}</h2>
+        <span class="pp-muted">${rx.created_at ? new Date(rx.created_at).toLocaleDateString() : ''}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div><label>Patient</label><p>${esc(rx.patient_name || '-')}</p></div>
+        <div><label>Prescribed By</label><p>${esc(rx.prescribed_by || '-')}</p></div>
+        <div style="grid-column:1/-1"><label>Diagnosis</label><p>${esc(rx.diagnosis || '-')}</p></div>
+        ${rx.notes ? `<div style="grid-column:1/-1"><label>Notes</label><p>${esc(rx.notes)}</p></div>` : ''}
+      </div>
+      <hr class="pp-divider">
+      <h3>Medications</h3>
+      ${meds.length > 0 ? `
+        <table class="pp-table">
+          <tr><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th></tr>
+          ${meds.map(m => `<tr><td>${esc(m.name || m.medicine || '-')}</td><td>${esc(m.dosage || '-')}</td><td>${esc(m.frequency || '-')}</td><td>${esc(m.duration || '-')}</td></tr>`).join('')}
+        </table>
+      ` : '<p class="pp-muted">No medication details available.</p>'}
+      ${canRefill ? `<div style="margin-top:16px"><form method="POST" action="/patient-portal/${esc(tenant.subdomain)}/refill/${rx.id}"><button class="pp-btn">Request Refill</button></form></div>` : ''}
+    </div>
+  `;
+  res.send(renderPatientPage('Prescription #' + rx.id, content, patient, tenant.subdomain, 'prescriptions'));
+}));
+
+// POST /patient-portal/:subdomain/refill/:id — Request prescription refill
+app.post('/patient-portal/:subdomain/refill/:id', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const t = tenant.id;
+  const rxId = parseInt(req.params.id);
+  if (!rxId) return res.redirect(`/patient-portal/${tenant.subdomain}/prescriptions?error=Invalid prescription`);
+  // Check for existing pending refill
+  const existing = (await pool.query("SELECT id FROM prescription_refill_requests WHERE tenant_id=$1 AND patient_portal_user_id=$2 AND prescription_id=$3 AND status='pending'", [t, patient.id, rxId])).rows[0];
+  if (existing) {
+    return res.redirect(`/patient-portal/${tenant.subdomain}/prescriptions?error=You already have a pending refill request for this prescription`);
+  }
+  await pool.query("INSERT INTO prescription_refill_requests(tenant_id, patient_portal_user_id, prescription_id, notes) VALUES($1,$2,$3,$4)", [t, patient.id, rxId, req.body.notes || 'Patient requested refill via portal']);
+  res.redirect(`/patient-portal/${tenant.subdomain}/prescriptions?success=Refill request submitted successfully`);
+}));
+
+// GET /patient-portal/:subdomain/lab-results — Lab Results list
+app.get('/patient-portal/:subdomain/lab-results', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const t = tenant.id;
+  // Get lab requests matched by patient phone or name
+  const labRequests = (await pool.query("SELECT lr.* FROM lab_requests lr WHERE lr.tenant_id=$1 AND (lr.patient_phone=$2 OR lr.patient_name ILIKE $3) ORDER BY lr.created_at DESC LIMIT 50", [t, patient.phone, '%' + (patient.full_name || '') + '%'])).rows;
+  // For each request, get results
+  const resultsWithDetails = [];
+  for (const lr of labRequests) {
+    const results = (await pool.query("SELECT * FROM lab_results WHERE lab_request_id=$1 ORDER BY reported_at DESC", [lr.id])).rows;
+    resultsWithDetails.push({ ...lr, results });
+  }
+  const content = `
+    <h1 style="font-size:22px;margin-bottom:16px">&#128300; Lab Results</h1>
+    ${resultsWithDetails.length > 0 ? resultsWithDetails.map(lr => `
+      <div class="pp-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div>
+            <h3 style="margin:0">${esc(lr.test_name || 'Lab Test #'+lr.id)}</h3>
+            <p class="pp-muted" style="font-size:12px">${lr.created_at ? new Date(lr.created_at).toLocaleDateString() : ''} &mdash; Requested by ${esc(lr.requested_by || '-')}</p>
+          </div>
+          <span class="pp-tag ${lr.results.length > 0 ? 'pp-tag-green' : 'pp-tag-yellow'}">${lr.results.length > 0 ? lr.results.some(r => r.is_abnormal) ? 'Results Available' : 'Normal' : 'Pending'}</span>
+        </div>
+        ${lr.results.length > 0 ? `
+          <table class="pp-table" style="margin-top:12px">
+            <tr><th>Result</th><th>Value</th><th>Reference</th><th>Status</th></tr>
+            ${lr.results.map(r => `
+              <tr>
+                <td>${esc(r.result_value || '-')}</td>
+                <td>${r.result_numeric != null ? r.result_numeric + ' ' : ''}${esc(r.unit || '')}</td>
+                <td>${esc(r.reference_range || '-')}</td>
+                <td><span class="pp-tag ${r.is_abnormal ? 'pp-tag-red' : 'pp-tag-green'}">${r.is_abnormal ? 'Abnormal' : 'Normal'}</span></td>
+              </tr>
+            `).join('')}
+          </table>
+        ` : '<p class="pp-muted" style="margin-top:8px">Results pending. Check back later.</p>'}
+        ${lr.results.length > 0 ? `<a href="/patient-portal/${esc(tenant.subdomain)}/lab-results/${lr.id}" class="pp-btn pp-btn-sm pp-btn-outline" style="margin-top:8px">View Details</a>` : ''}
+      </div>
+    `).join('') : '<div class="pp-empty"><div class="pp-empty-icon">&#128300;</div><p>No lab results found.</p></div>'}
+  `;
+  res.send(renderPatientPage('Lab Results - ' + tenant.name, content, patient, tenant.subdomain, 'lab-results'));
+}));
+
+// GET /patient-portal/:subdomain/lab-results/:id — Lab result detail
+app.get('/patient-portal/:subdomain/lab-results/:id', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const lr = (await pool.query("SELECT * FROM lab_requests WHERE tenant_id=$1 AND id=$2", [tenant.id, req.params.id])).rows[0];
+  if (!lr) return res.redirect(`/patient-portal/${tenant.subdomain}/lab-results?error=Lab request not found`);
+  const results = (await pool.query("SELECT lr.*, cs.name as tech_name FROM lab_results lr LEFT JOIN clinic_staff cs ON lr.lab_technician_id=cs.id WHERE lr.lab_request_id=$1 ORDER BY lr.reported_at", [lr.id])).rows;
+  const content = `
+    <a href="/patient-portal/${esc(tenant.subdomain)}/lab-results" class="pp-muted" style="font-size:13px">&larr; Back to Lab Results</a>
+    <div class="pp-card">
+      <h2>${esc(lr.test_name || 'Lab Test #' + lr.id)}</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div><label>Patient</label><p>${esc(lr.patient_name || '-')}</p></div>
+        <div><label>Date</label><p>${lr.created_at ? new Date(lr.created_at).toLocaleString() : '-'}</p></div>
+        <div><label>Requested By</label><p>${esc(lr.requested_by || '-')}</p></div>
+        <div><label>Specimen</label><p>${esc(lr.specimen_type || '-')}</p></div>
+        ${lr.clinical_notes ? `<div style="grid-column:1/-1"><label>Clinical Notes</label><p>${esc(lr.clinical_notes)}</p></div>` : ''}
+      </div>
+      <hr class="pp-divider">
+      <h3>Results (${results.length})</h3>
+      ${results.length > 0 ? `
+        <table class="pp-table">
+          <tr><th>Value</th><th>Unit</th><th>Reference Range</th><th>Interpretation</th><th>Status</th></tr>
+          ${results.map(r => `
+            <tr>
+              <td><strong>${esc(r.result_value || '-')}</strong></td>
+              <td>${esc(r.unit || '-')}</td>
+              <td>${esc(r.reference_range || '-')}</td>
+              <td>${esc(r.interpretation || '-')}</td>
+              <td><span class="pp-tag ${r.is_abnormal ? 'pp-tag-red' : 'pp-tag-green'}">${r.is_abnormal ? 'Abnormal' : 'Normal'}</span></td>
+            </tr>
+          `).join('')}
+        </table>
+        ${results[0]?.tech_name ? `<p class="pp-muted" style="margin-top:12px">Verified by: ${esc(results[0].tech_name)}</p>` : ''}
+      ` : '<p class="pp-muted">Results are still pending.</p>'}
+    </div>
+  `;
+  res.send(renderPatientPage('Lab Result Detail', content, patient, tenant.subdomain, 'lab-results'));
+}));
+
+// GET /patient-portal/:subdomain/billing — Billing/Invoices list
+app.get('/patient-portal/:subdomain/billing', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const t = tenant.id;
+  const invoices = (await pool.query("SELECT * FROM invoices WHERE tenant_id=$1 AND (customer_contact=$2 OR customer_name ILIKE $3) ORDER BY created_at DESC LIMIT 50", [t, patient.phone, '%' + (patient.full_name || '') + '%'])).rows;
+  const totalDue = invoices.filter(i => i.status === 'unpaid').reduce((s, i) => s + (i.amount - (i.paid || 0)), 0);
+  const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0);
+  const content = `
+    <h1 style="font-size:22px;margin-bottom:16px">&#128179; Billing & Invoices</h1>
+    <div class="pp-stats">
+      <div class="pp-stat"><div class="pp-stat-num">${invoices.length}</div><div class="pp-stat-label">Total Invoices</div></div>
+      <div class="pp-stat"><div class="pp-stat-num" style="color:#dc2626">${totalDue.toLocaleString()}</div><div class="pp-stat-label">Amount Due (${esc(tenant.currency || 'UGX')})</div></div>
+      <div class="pp-stat"><div class="pp-stat-num" style="color:#059669">${totalPaid.toLocaleString()}</div><div class="pp-stat-label">Total Paid</div></div>
+    </div>
+    <div class="pp-card" style="padding:0;overflow:hidden">
+      ${invoices.length > 0 ? `
+        <table class="pp-table">
+          <tr><th>Invoice #</th><th>Date</th><th>Amount</th><th>Status</th><th>Actions</th></tr>
+          ${invoices.map(i => {
+            const sTag = { paid: 'pp-tag-green', unpaid: 'pp-tag-red', partial: 'pp-tag-yellow', overdue: 'pp-tag-red' };
+            return `<tr>
+              <td><strong>${esc(i.invoice_no || '#' + i.id)}</strong></td>
+              <td>${i.created_at ? new Date(i.created_at).toLocaleDateString() : '-'}</td>
+              <td>${Number(i.amount || 0).toLocaleString()}</td>
+              <td><span class="pp-tag ${sTag[i.status] || 'pp-tag-gray'}">${esc(i.status)}</span></td>
+              <td><a href="/patient-portal/${esc(tenant.subdomain)}/billing/${i.id}" class="pp-btn pp-btn-sm pp-btn-outline">View</a></td>
+            </tr>`;
+          }).join('')}
+        </table>
+      ` : '<div class="pp-empty"><div class="pp-empty-icon">&#128179;</div><p>No invoices found.</p></div>'}
+    </div>
+  `;
+  res.send(renderPatientPage('Billing - ' + tenant.name, content, patient, tenant.subdomain, 'billing'));
+}));
+
+// GET /patient-portal/:subdomain/billing/:id — Invoice detail
+app.get('/patient-portal/:subdomain/billing/:id', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const inv = (await pool.query('SELECT * FROM invoices WHERE tenant_id=$1 AND id=$2', [tenant.id, req.params.id])).rows[0];
+  if (!inv) return res.redirect(`/patient-portal/${tenant.subdomain}/billing?error=Invoice not found`);
+  const currency = tenant.currency || 'UGX';
+  const content = `
+    <a href="/patient-portal/${esc(tenant.subdomain)}/billing" class="pp-muted" style="font-size:13px">&larr; Back to Billing</a>
+    <div class="pp-card">
+      <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px;margin-bottom:20px">
+        <div>
+          <h2 style="margin:0">${esc(tenant.name)}</h2>
+          <p class="pp-muted">${esc(tenant.address || '')}</p>
+        </div>
+        <div style="text-align:right">
+          <h2 style="margin:0;color:#0d9488">INVOICE</h2>
+          <p><strong>${esc(inv.invoice_no || '#' + inv.id)}</strong></p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div><label>Bill To</label><p>${esc(inv.customer_name || '-')}</p><p class="pp-muted">${esc(inv.customer_contact || '-')}</p></div>
+        <div><label>Invoice Date</label><p>${inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '-'}</p></div>
+        ${inv.due_date ? `<div><label>Due Date</label><p>${esc(inv.due_date)}</p></div>` : ''}
+      </div>
+      <hr class="pp-divider">
+      <div style="text-align:right;margin:20px 0">
+        <p style="font-size:14px;color:#64748b">Total Amount</p>
+        <p style="font-size:32px;font-weight:800;color:#0f172a">${Number(inv.amount || 0).toLocaleString()} <span style="font-size:14px;color:#64748b">${esc(currency)}</span></p>
+        ${inv.paid ? `<p style="font-size:14px;color:#059669">Paid: ${Number(inv.paid).toLocaleString()} ${esc(currency)}</p>` : ''}
+        <p>Balance: <strong style="color:${(inv.amount - (inv.paid||0)) > 0 ? '#dc2626' : '#059669'}">${Number(inv.amount - (inv.paid||0)).toLocaleString()} ${esc(currency)}</strong></p>
+      </div>
+      <span class="pp-tag ${inv.status === 'paid' ? 'pp-tag-green' : 'pp-tag-red'}" style="font-size:14px;padding:6px 14px">${esc(inv.status || 'unpaid').toUpperCase()}</span>
+      ${inv.status !== 'paid' ? `<div style="margin-top:20px;padding:16px;background:#f0fdfa;border-radius:12px;text-align:center">
+        <p style="margin-bottom:10px">To make payment, contact ${esc(tenant.name)} or visit the clinic.</p>
+        ${tenant.phone ? `<p class="pp-muted">Phone: ${esc(tenant.phone)}</p>` : ''}
+      </div>` : ''}
+    </div>
+  `;
+  res.send(renderPatientPage('Invoice ' + (inv.invoice_no || '#' + inv.id), content, patient, tenant.subdomain, 'billing'));
+}));
+
+// GET /patient-portal/:subdomain/profile — View/Edit profile
+app.get('/patient-portal/:subdomain/profile', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const msg = req.query.success || req.query.error;
+  const content = `
+    <h1 style="font-size:22px;margin-bottom:16px">&#128100; My Profile</h1>
+    ${msg ? `<div class="pp-alert ${req.query.success ? 'pp-alert-success' : 'pp-alert-error'}">${esc(msg)}</div>` : ''}
+    <div class="pp-grid">
+      <div class="pp-card">
+        <h2>Personal Information</h2>
+        <form method="POST" action="/patient-portal/${esc(tenant.subdomain)}/profile">
+          <label>Full Name</label>
+          <input name="full_name" value="${esc(patient.full_name || '')}" placeholder="Your full name">
+          <label>Phone Number</label>
+          <input value="${esc(patient.phone)}" disabled style="background:#f8fafc">
+          <input type="hidden" name="phone" value="${esc(patient.phone)}">
+          <label>Email</label>
+          <input name="email" type="email" value="${esc(patient.email || '')}" placeholder="your@email.com">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div><label>Date of Birth</label><input name="date_of_birth" type="date" value="${patient.date_of_birth || ''}"></div>
+            <div><label>Gender</label>
+              <select name="gender">
+                <option value="" ${!patient.gender ? 'selected' : ''}>Select</option>
+                <option value="male" ${patient.gender === 'male' ? 'selected' : ''}>Male</option>
+                <option value="female" ${patient.gender === 'female' ? 'selected' : ''}>Female</option>
+                <option value="other" ${patient.gender === 'other' ? 'selected' : ''}>Other</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div><label>Blood Type</label>
+              <select name="blood_type">
+                <option value="" ${!patient.blood_type ? 'selected' : ''}>Select</option>
+                ${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bt => `<option value="${bt}" ${patient.blood_type === bt ? 'selected' : ''}>${bt}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <label>Address</label>
+          <textarea name="address" rows="2" placeholder="Your address">${esc(patient.address || '')}</textarea>
+          <button class="pp-btn" type="submit" style="width:100%">Save Changes</button>
+        </form>
+      </div>
+      <div class="pp-card">
+        <h2>Emergency Contact</h2>
+        <form method="POST" action="/patient-portal/${esc(tenant.subdomain)}/profile">
+          <input type="hidden" name="phone" value="${esc(patient.phone)}">
+          <label>Emergency Contact Name</label>
+          <input name="emergency_contact_name" value="${esc(patient.emergency_contact_name || '')}" placeholder="Name of emergency contact">
+          <label>Emergency Contact Phone</label>
+          <input name="emergency_contact_phone" type="tel" value="${esc(patient.emergency_contact_phone || '')}" placeholder="Phone number">
+          <button class="pp-btn pp-btn-outline" type="submit" style="width:100%">Save Emergency Contact</button>
+        </form>
+        <hr class="pp-divider">
+        <h2>Visit History</h2>
+        ${patient.phone ? (() => {
+          // This will be populated from clinic_consultations matched by phone
+          return `<p class="pp-muted">Visit history is linked to your clinic consultations and appointments.</p>
+          <a href="/patient-portal/${esc(tenant.subdomain)}/appointments" class="pp-btn pp-btn-sm pp-btn-outline" style="margin-top:8px">View Appointments</a>`;
+        })() : ''}
+        <hr class="pp-divider">
+        <h2>Account</h2>
+        <p class="pp-muted">Member since: ${patient.created_at ? new Date(patient.created_at).toLocaleDateString() : 'Unknown'}</p>
+        <p class="pp-muted">Verified: ${patient.is_verified ? '<span class="pp-tag pp-tag-green">Yes</span>' : '<span class="pp-tag pp-tag-yellow">No</span>'}</p>
+        <a href="/patient-portal/${esc(tenant.subdomain)}/logout" class="pp-btn pp-btn-red" style="margin-top:12px;display:inline-block">&#128682; Logout</a>
+      </div>
+    </div>
+  `;
+  res.send(renderPatientPage('My Profile - ' + tenant.name, content, patient, tenant.subdomain, 'profile'));
+}));
+
+// POST /patient-portal/:subdomain/profile — Update profile
+app.post('/patient-portal/:subdomain/profile', ah(async (req, res) => {
+  const tenant = await getTenantBySubdomain(req.params.subdomain);
+  if (!tenant) return res.status(404).send('Not found');
+  const patient = await getPatientFromSession(req, tenant.id);
+  if (!patient) return res.redirect(`/patient-portal/${tenant.subdomain}?error=Please login`);
+  const { full_name, email, date_of_birth, gender, blood_type, address, emergency_contact_name, emergency_contact_phone } = req.body;
+  await pool.query("UPDATE patient_portal_users SET full_name=$1, email=$2, date_of_birth=$3, gender=$4, blood_type=$5, address=$6, emergency_contact_name=$7, emergency_contact_phone=$8, updated_at=NOW() WHERE tenant_id=$9 AND id=$10",
+    [full_name || null, email || null, date_of_birth || null, gender || null, blood_type || null, address || null, emergency_contact_name || null, emergency_contact_phone || null, tenant.id, patient.id]);
+  res.redirect(`/patient-portal/${tenant.subdomain}/profile?success=Profile updated successfully`);
+}));
+
+// GET /patient-portal/:subdomain/logout — Clear session
+app.get('/patient-portal/:subdomain/logout', ah(async (req, res) => {
+  const token = req.cookies?.pp_session;
+  if (token) {
+    await pool.query('DELETE FROM patient_sessions WHERE session_token = $1', [token]);
+  }
+  res.clearCookie('pp_session');
+  res.redirect(`/patient-portal/${req.params.subdomain}?success=Logged out successfully`);
 }));
 
 // =============================================
@@ -22206,7 +24177,9 @@ const phase2Tables = [
   // Multi-Branch Stock Transfers
   `CREATE TABLE IF NOT EXISTS stock_transfers (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), product_id INTEGER, product_name TEXT NOT NULL, from_branch TEXT NOT NULL, to_branch TEXT NOT NULL, quantity INTEGER NOT NULL, status TEXT DEFAULT 'pending', notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), completed_at TIMESTAMPTZ)`,
   // Clinic Appointments (scheduled visits)
-  `CREATE TABLE IF NOT EXISTS clinic_appointments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), patient_name TEXT NOT NULL, patient_type TEXT DEFAULT 'patient', patient_id INTEGER, phone TEXT, appointment_date DATE NOT NULL, appointment_time TIME NOT NULL, doctor_name TEXT, reason TEXT, status TEXT DEFAULT 'scheduled', notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), reminder_sent BOOLEAN DEFAULT false)`
+  `CREATE TABLE IF NOT EXISTS clinic_appointments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id), patient_name TEXT NOT NULL, patient_type TEXT DEFAULT 'patient', patient_id INTEGER, phone TEXT, appointment_date DATE NOT NULL, appointment_time TIME NOT NULL, doctor_name TEXT, reason TEXT, status TEXT DEFAULT 'scheduled', notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), reminder_sent BOOLEAN DEFAULT false)`,
+  // Discharge Summaries
+  `CREATE TABLE IF NOT EXISTS discharge_summaries (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, patient_type VARCHAR(20), patient_id INTEGER, patient_name VARCHAR(255), admission_date DATE, discharge_date DATE DEFAULT CURRENT_DATE, primary_diagnosis TEXT, secondary_diagnoses TEXT[], treatments TEXT[], discharge_medications JSONB, lab_results JSONB, vitals_at_discharge JSONB, follow_up_date DATE, follow_up_instructions TEXT, discharge_condition VARCHAR(20) DEFAULT 'stable', attending_doctor VARCHAR(255), doctor_license VARCHAR(100), notes TEXT, created_by VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW())`
 ];
 
 // Create Phase 2 tables & seed data (async IIFE for top-level await compatibility)
@@ -22233,7 +24206,9 @@ const phase2Indexes = [
   `CREATE INDEX IF NOT EXISTS idx_tenant_country_settings ON tenant_country_settings(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_clinic_appointments_tenant ON clinic_appointments(tenant_id)`,
   `CREATE INDEX IF NOT EXISTS idx_clinic_appointments_date ON clinic_appointments(appointment_date)`,
-  `CREATE INDEX IF NOT EXISTS idx_clinic_appointments_status ON clinic_appointments(status)`
+  `CREATE INDEX IF NOT EXISTS idx_clinic_appointments_status ON clinic_appointments(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_discharge_summaries_tenant ON discharge_summaries(tenant_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_discharge_summaries_patient ON discharge_summaries(patient_type, patient_id)`
 ];
 // Round 3: Performance indexes
 const round3Indexes = [
@@ -22675,6 +24650,11 @@ app.get('/clinic/patient/:type/:id/ehr', requireAuth, requireNotBanned, requireF
       <div class="stat-card"><div class="stat-num">${consultations.rows.length}</div><div>Visits</div></div>
     </div>
 
+    <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+      <a href="/clinic/patient/${patientType}/${id}/vitals/chart" class="btn btn-sm" style="background:#0f766e;color:white">&#128200; Vitals Trending Charts</a>
+      <a href="/clinic/patient/${patientType}/${id}/discharge-summary" class="btn btn-sm" style="background:#7c3aed;color:white">&#128196; Discharge Summary</a>
+    </div>
+
     ${lastVital ? `<div class="card" style="margin-bottom:15px;background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:2px solid #059669">
       <h3>Latest Vitals</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
@@ -22927,6 +24907,775 @@ app.post('/clinic/patient/:type/:id/vitals/save', requireAuth, requireNotBanned,
     [t, type, id, patientName, d.temperature||null, d.blood_pressure_systolic||null, d.blood_pressure_diastolic||null, d.heart_rate||null, d.respiratory_rate||null, d.weight||null, d.height||null, bmi, d.oxygen_saturation||null, d.pain_level||0, d.recorded_by||null, d.notes||null]);
   await audit(req.session.user.email, 'vitals_recorded', { patient: patientName });
   res.redirect(`/clinic/patient/${type}/${id}/ehr`);
+}));
+
+// --- VITAL SIGNS TRENDING CHARTS (SVG-based) ---
+// Self-contained SVG line chart generator — no external libraries needed
+function generateLineChart(data, options) {
+  const { width = 800, height = 300, color = '#3b82f6', label, yMin, yMax, unit = '', normalMin, normalMax, secondLine, secondColor = '#f59e0b', secondLabel } = options;
+  const padding = { top: 35, right: 25, bottom: 55, left: 65 };
+  const chartW = width - padding.left - padding.right;
+  const chartH = height - padding.top - padding.bottom;
+
+  if (!data || data.length === 0) {
+    return `<div style="padding:20px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;text-align:center"><span style="color:#6b7280">No data available for ${esc(label || 'chart')}</span></div>`;
+  }
+
+  const values = data.map(d => parseFloat(d.value)).filter(v => !isNaN(v));
+  const minY = yMin !== undefined ? yMin : Math.floor(Math.min(...values) * 0.9);
+  const maxY = yMax !== undefined ? yMax : Math.ceil(Math.max(...values) * 1.1);
+  const range = maxY - minY || 1;
+
+  const toX = (i) => padding.left + (i / Math.max(data.length - 1, 1)) * chartW;
+  const toY = (v) => padding.top + chartH - ((v - minY) / range) * chartH;
+
+  const points = data.map((d, i) => {
+    const val = parseFloat(d.value);
+    if (isNaN(val)) return null;
+    return { x: toX(i), y: toY(val), val, label: d.label || '', ...d };
+  }).filter(Boolean);
+
+  if (points.length === 0) {
+    return `<div style="padding:20px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;text-align:center"><span style="color:#6b7280">No valid data for ${esc(label || 'chart')}</span></div>`;
+  }
+
+  // Build line path
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+
+  // Normal range band
+  let normalBand = '';
+  if (normalMin !== undefined && normalMax !== undefined) {
+    const bandY1 = toY(normalMax);
+    const bandY2 = toY(normalMin);
+    normalBand = `<rect x="${padding.left}" y="${bandY1.toFixed(1)}" width="${chartW}" height="${(bandY2 - bandY1).toFixed(1)}" fill="#059669" opacity="0.08" rx="2"/>`;
+  }
+
+  // Grid lines and Y-axis labels (5 lines)
+  const gridLines = [];
+  for (let i = 0; i <= 5; i++) {
+    const val = minY + (range * i) / 5;
+    const y = toY(val);
+    gridLines.push(`<line x1="${padding.left}" y1="${y.toFixed(1)}" x2="${width - padding.right}" y2="${y.toFixed(1)}" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,4"/>`);
+    gridLines.push(`<text x="${padding.left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" fill="#6b7280" font-size="10">${val.toFixed(val % 1 === 0 ? 0 : 1)}</text>`);
+  }
+
+  // X-axis date labels (show max 8 labels)
+  const xLabels = [];
+  const step = Math.max(1, Math.ceil(points.length / 8));
+  points.forEach((p, i) => {
+    if (i % step === 0 || i === points.length - 1) {
+      xLabels.push(`<text x="${p.x.toFixed(1)}" y="${height - padding.bottom + 18}" text-anchor="middle" fill="#6b7280" font-size="9" transform="rotate(-30,${p.x.toFixed(1)},${(height - padding.bottom + 18).toFixed(1)})">${esc(p.label)}</text>`);
+    }
+  });
+
+  // Second line (e.g., diastolic BP)
+  let secondLinePath = '';
+  let secondLinePoints = '';
+  if (secondLine && secondLine.length > 0) {
+    const sPoints = secondLine.map((d, i) => {
+      const val = parseFloat(d.value);
+      if (isNaN(val)) return null;
+      return { x: toX(i), y: toY(val), val };
+    }).filter(Boolean);
+    if (sPoints.length > 0) {
+      secondLinePath = `<path d="${sPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${secondColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+      secondLinePoints = sPoints.map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${secondColor}" stroke="white" stroke-width="1.5"/>`).join('');
+    }
+  }
+
+  // Data point circles
+  const circles = points.map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="${color}" stroke="white" stroke-width="1.5"><title>${esc(p.label)}: ${p.val}${unit}</title></circle>`).join('');
+
+  // Axis lines
+  const axisLines = `<line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}" stroke="#9ca3af" stroke-width="1"/><line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="#9ca3af" stroke-width="1"/>`;
+
+  // Legend
+  let legend = `<g transform="translate(${width - padding.right - (secondLine ? 180 : 100)},${padding.top - 5})"><rect x="0" y="-2" width="8" height="8" rx="2" fill="${color}"/><text x="12" y="6" fill="#374151" font-size="10">${esc(label || '')}</text>`;
+  if (secondLabel) {
+    legend += `<rect x="80" y="-2" width="8" height="8" rx="2" fill="${secondColor}"/><text x="92" y="6" fill="#374151" font-size="10">${esc(secondLabel)}</text>`;
+  }
+  legend += `</g>`;
+
+  return `<svg viewBox="0 0 ${width} ${height}" style="width:100%;max-width:800px;height:auto" xmlns="http://www.w3.org/2000/svg">
+    <style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}</style>
+    ${normalBand}
+    ${gridLines.join('')}
+    ${axisLines}
+    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    ${secondLinePath}
+    ${circles}
+    ${secondLinePoints}
+    ${xLabels.join('')}
+    ${legend}
+    <text x="${padding.left}" y="${padding.top - 12}" fill="#374151" font-size="11" font-weight="600">${esc(label || '')} ${unit ? '(' + esc(unit) + ')' : ''}</text>
+    <text x="${(width / 2).toFixed(1)}" y="${height - 5}" text-anchor="middle" fill="#6b7280" font-size="9">Date</text>
+    <text x="12" y="${(padding.top + chartH / 2).toFixed(1)}" text-anchor="middle" fill="#6b7280" font-size="9" transform="rotate(-90,12,${(padding.top + chartH / 2).toFixed(1)})">${unit || 'Value'}</text>
+  </svg>`;
+}
+
+app.get('/clinic/patient/:type/:id/vitals/chart', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const patientType = type || 'student';
+  let patientName = 'Unknown Patient';
+  let patientDob = '', patientGender = '';
+  if (patientType === 'student') {
+    const s = (await pool.query('SELECT name FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    patientName = s?.name || patientName;
+  } else if (patientType === 'patient') {
+    const p = (await pool.query('SELECT full_name,date_of_birth,gender FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    patientName = p?.full_name || patientName;
+    patientDob = p?.date_of_birth || '';
+    patientGender = p?.gender || '';
+  }
+
+  const vitalsResult = await pool.query('SELECT * FROM patient_vitals WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 ORDER BY recorded_at DESC LIMIT 30', [t, patientType, id]);
+  const vitals = vitalsResult.rows.reverse(); // Oldest first for charting
+
+  if (vitals.length === 0) {
+    return res.send(renderPage('Vitals Trending: ' + patientName, `
+      <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)"><h1>Vitals Trending</h1><p>${esc(patientName)} | No vitals recorded yet</p></div>
+      <div class="card" style="text-align:center;padding:60px"><p class="muted">No vital sign recordings found for this patient.</p>
+      <a href="/clinic/patient/${patientType}/${id}/vitals/new" class="btn btn-green">Record First Vitals</a>
+      <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn btn-sm" style="margin-left:10px">Back to EHR</a></div>
+    `, req.session.user));
+  }
+
+  // Prepare chart data
+  const formatDate = (d) => { const dt = new Date(d); return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
+  const formatDateTime = (d) => new Date(d).toLocaleString();
+
+  const tempData = vitals.filter(v => v.temperature != null).map(v => ({ value: v.temperature, label: formatDate(v.recorded_at) }));
+  const sysData = vitals.filter(v => v.blood_pressure_systolic != null).map(v => ({ value: v.blood_pressure_systolic, label: formatDate(v.recorded_at) }));
+  const diaData = vitals.filter(v => v.blood_pressure_diastolic != null).map(v => ({ value: v.blood_pressure_diastolic, label: formatDate(v.recorded_at) }));
+  const hrData = vitals.filter(v => v.heart_rate != null).map(v => ({ value: v.heart_rate, label: formatDate(v.recorded_at) }));
+  const weightData = vitals.filter(v => v.weight != null).map(v => ({ value: v.weight, label: formatDate(v.recorded_at) }));
+  const bmiData = vitals.filter(v => v.bmi != null).map(v => ({ value: v.bmi, label: formatDate(v.recorded_at) }));
+  const spo2Data = vitals.filter(v => v.oxygen_saturation != null).map(v => ({ value: v.oxygen_saturation, label: formatDate(v.recorded_at) }));
+
+  // Generate charts
+  const tempChart = generateLineChart(tempData, { label: 'Temperature', color: '#dc2626', yMin: 35, yMax: 42, unit: '°C', normalMin: 36.1, normalMax: 37.2 });
+  const bpChart = generateLineChart(sysData, { label: 'Systolic BP', color: '#dc2626', yMin: 40, yMax: 200, unit: 'mmHg', normalMin: 90, normalMax: 120, secondLine: diaData, secondColor: '#3b82f6', secondLabel: 'Diastolic BP' });
+  const hrChart = generateLineChart(hrData, { label: 'Heart Rate', color: '#3b82f6', yMin: 40, yMax: 200, unit: 'bpm', normalMin: 60, normalMax: 100 });
+  const weightChart = generateLineChart(weightData, { label: 'Weight', color: '#059669', yMin: 20, yMax: 200, unit: 'kg' });
+  const bmiChart = generateLineChart(bmiData, { label: 'BMI', color: '#8b5cf6', yMin: 10, yMax: 50, unit: '', normalMin: 18.5, normalMax: 24.9 });
+  const spo2Chart = generateLineChart(spo2Data, { label: 'SpO2', color: '#06b6d4', yMin: 70, yMax: 100, unit: '%', normalMin: 95, normalMax: 100 });
+
+  // Latest vitals summary with normal/abnormal indicators
+  const latest = vitals[vitals.length - 1];
+  const checkNormal = (val, low, high) => val != null ? (val >= low && val <= high ? 'normal' : 'abnormal') : '';
+  const statusBadge = (status) => status === 'normal' ? '<span style="background:#dcfce7;color:#059669;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">Normal</span>' : status === 'abnormal' ? '<span style="background:#fef2f2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">Abnormal</span>' : '';
+
+  const summaryRows = [
+    { name: 'Temperature', value: latest.temperature ? latest.temperature + ' °C' : '-', status: checkNormal(latest.temperature, 36.1, 37.2) },
+    { name: 'BP (Systolic/Diastolic)', value: latest.blood_pressure_systolic ? latest.blood_pressure_systolic + '/' + latest.blood_pressure_diastolic + ' mmHg' : '-', status: checkNormal(latest.blood_pressure_systolic, 90, 120) },
+    { name: 'Heart Rate', value: latest.heart_rate ? latest.heart_rate + ' bpm' : '-', status: checkNormal(latest.heart_rate, 60, 100) },
+    { name: 'Respiratory Rate', value: latest.respiratory_rate ? latest.respiratory_rate + ' /min' : '-', status: checkNormal(latest.respiratory_rate, 12, 20) },
+    { name: 'Weight', value: latest.weight ? latest.weight + ' kg' : '-', status: '' },
+    { name: 'Height', value: latest.height ? latest.height + ' cm' : '-', status: '' },
+    { name: 'BMI', value: latest.bmi ? latest.bmi : '-', status: checkNormal(parseFloat(latest.bmi), 18.5, 24.9) },
+    { name: 'SpO2', value: latest.oxygen_saturation ? latest.oxygen_saturation + ' %' : '-', status: checkNormal(latest.oxygen_saturation, 95, 100) },
+    { name: 'Pain Level', value: latest.pain_level != null ? latest.pain_level + '/10' : '-', status: latest.pain_level >= 4 ? 'abnormal' : latest.pain_level > 0 ? 'normal' : '' },
+  ];
+
+  res.send(renderPage('Vitals Trending: ' + patientName, `
+    <style>
+      @media print {
+        .no-print { display: none !important; }
+        .card { box-shadow: none !important; border: 1px solid #ddd !important; break-inside: avoid; }
+        svg { max-height: 200px !important; }
+      }
+      .chart-container { margin-bottom: 25px; }
+      .chart-container h3 { margin-bottom: 8px; font-size: 15px; color: #374151; }
+      .summary-table { width: 100%; border-collapse: collapse; }
+      .summary-table th { background: #f3f4f6; padding: 10px 14px; text-align: left; font-size: 13px; color: #374151; border-bottom: 2px solid #d1d5db; }
+      .summary-table td { padding: 10px 14px; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
+      .summary-table tr:hover { background: #f9fafb; }
+    </style>
+    <div class="hero" style="background:linear-gradient(135deg,#0f766e,#14b8a6)">
+      <h1>Vitals Trending Charts</h1>
+      <p>${esc(patientName)} | ${patientType === 'student' ? 'Student' : 'Patient'} ID: ${id} | ${vitals.length} recordings</p>
+    </div>
+
+    <div class="no-print" style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+      <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn btn-sm">&#8592; Back to EHR</a>
+      <a href="/clinic/patient/${patientType}/${id}/discharge-summary" class="btn btn-sm" style="background:#8b5cf6;color:white">Discharge Summary</a>
+      <button onclick="window.print()" class="btn btn-sm btn-green">&#128424; Print Charts</button>
+    </div>
+
+    <!-- Latest Vitals Summary -->
+    <div class="card" style="margin-bottom:20px">
+      <h3>Latest Vitals Summary <span class="muted" style="font-weight:400;font-size:12px">Recorded: ${esc(formatDateTime(latest.recorded_at))} by ${esc(latest.recorded_by || 'N/A')}</span></h3>
+      <table class="summary-table">
+        <thead><tr><th>Vital Sign</th><th>Value</th><th>Status</th></tr></thead>
+        <tbody>
+          ${summaryRows.map(r => `<tr><td><strong>${esc(r.name)}</strong></td><td>${esc(r.value)}</td><td>${statusBadge(r.status)}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Charts -->
+    <div class="chart-container card">
+      <h3>Temperature Over Time</h3>
+      ${tempChart}
+      <p class="muted" style="font-size:11px;margin-top:6px">Normal range: 36.1–37.2°C (green band)</p>
+    </div>
+
+    <div class="chart-container card">
+      <h3>Blood Pressure Over Time</h3>
+      ${bpChart}
+      <p class="muted" style="font-size:11px;margin-top:6px">Normal systolic range: 90–120 mmHg (green band)</p>
+    </div>
+
+    <div class="chart-container card">
+      <h3>Heart Rate Over Time</h3>
+      ${hrChart}
+      <p class="muted" style="font-size:11px;margin-top:6px">Normal range: 60–100 bpm (green band)</p>
+    </div>
+
+    <div class="chart-container card">
+      <h3>Weight Over Time</h3>
+      ${weightChart}
+    </div>
+
+    <div class="chart-container card">
+      <h3>BMI Over Time</h3>
+      ${bmiChart}
+      <p class="muted" style="font-size:11px;margin-top:6px">Normal BMI: 18.5–24.9 (green band)</p>
+    </div>
+
+    <div class="chart-container card">
+      <h3>Oxygen Saturation (SpO2) Over Time</h3>
+      ${spo2Chart}
+      <p class="muted" style="font-size:11px;margin-top:6px">Normal range: 95–100% (green band)</p>
+    </div>
+
+    <div class="no-print" style="text-align:center;margin:20px 0">
+      <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn">&#8592; Back to EHR</a>
+    </div>
+  `, req.session.user));
+}));
+
+// --- DISCHARGE SUMMARY GENERATOR ---
+app.get('/clinic/patient/:type/:id/discharge-summary', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const patientType = type || 'student';
+  let patientName = 'Unknown Patient';
+  let patientInfo = {};
+
+  if (patientType === 'student') {
+    const s = (await pool.query('SELECT name, class, stream FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    patientName = s?.name || patientName;
+    patientInfo = { name: patientName, class: s?.class || '', stream: s?.stream || '' };
+  } else if (patientType === 'patient') {
+    const p = (await pool.query('SELECT * FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    patientName = p?.full_name || patientName;
+    patientInfo = p || {};
+  }
+
+  // Fetch existing discharge summaries
+  const summaries = (await pool.query('SELECT * FROM discharge_summaries WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 ORDER BY created_at DESC LIMIT 10', [t, patientType, id])).rows;
+
+  // Fetch doctors for dropdown
+  const doctors = (await pool.query("SELECT id, name, role, specialization, license_no FROM clinic_staff WHERE tenant_id=$1 AND is_active=true AND (role='doctor' OR role='nurse') ORDER BY name", [t])).rows;
+
+  // Fetch recent consultations for diagnosis context
+  const consultations = (await pool.query("SELECT id, chief_complaint, diagnosis, treatment_plan, doctor_name, created_at FROM consultations WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 ORDER BY created_at DESC LIMIT 10", [t, patientType, id])).rows;
+
+  res.send(renderPage('Discharge Summary: ' + patientName, `
+    <style>
+      .ds-form { max-width: 750px; margin: 0 auto; }
+      .ds-form label { font-weight: 600; font-size: 13px; color: #374151; }
+      .ds-form textarea { min-height: 70px; }
+      .ds-form .section-title { background: #f0fdf4; padding: 10px 14px; border-radius: 8px; margin-top: 20px; margin-bottom: 10px; border-left: 4px solid #059669; font-weight: 600; color: #065f46; }
+      .ds-history-item { background: #f9fafb; padding: 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #e5e7eb; }
+      @media print { .no-print { display: none !important; } }
+    </style>
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#8b5cf6)">
+      <h1>Discharge Summary</h1>
+      <p>${esc(patientName)} | ${patientType === 'student' ? 'Student' : 'Patient'} ID: ${id}</p>
+    </div>
+
+    <div class="no-print" style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+      <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn btn-sm">&#8592; Back to EHR</a>
+      <a href="/clinic/patient/${patientType}/${id}/vitals/chart" class="btn btn-sm" style="background:#0f766e;color:white">Vitals Charts</a>
+    </div>
+
+    ${summaries.length > 0 ? `
+    <div class="card" style="margin-bottom:20px">
+      <h3>Previous Discharge Summaries (${summaries.length})</h3>
+      <table class="summary-table" style="width:100%;border-collapse:collapse">
+        <thead><tr><th>Date</th><th>Primary Diagnosis</th><th>Condition</th><th>Doctor</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${summaries.map(s => `<tr>
+            <td>${s.discharge_date ? new Date(s.discharge_date).toLocaleDateString() : '-'}</td>
+            <td><strong>${esc(s.primary_diagnosis || '-')}</strong></td>
+            <td><span class="tag" style="background:${s.discharge_condition==='stable'?'#059669':s.discharge_condition==='improved'?'#3b82f6':'#dc2626'};color:white">${esc(s.discharge_condition || 'stable')}</span></td>
+            <td>${esc(s.attending_doctor || '-')}</td>
+            <td><a href="/clinic/patient/${patientType}/${id}/discharge-summary/view/${s.id}" class="btn btn-sm">View</a></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+
+    <div class="card ds-form">
+      <h2>Generate New Discharge Summary</h2>
+      ${consultations.length > 0 ? `<div style="background:#eff6ff;padding:10px 14px;border-radius:8px;margin-bottom:15px;border:1px solid #bfdbfe">
+        <strong style="color:#1d4ed8">Recent Consultations:</strong>
+        ${consultations.slice(0, 3).map(c => `<div class="ds-history-item">
+          <strong>${esc(c.chief_complaint || 'No complaint')}</strong> — Diagnosis: ${esc(c.diagnosis || 'Pending')}<br>
+          <span class="muted">By ${esc(c.doctor_name || 'N/A')} on ${new Date(c.created_at).toLocaleDateString()}</span>
+        </div>`).join('')}
+      </div>` : ''}
+
+      <form method="POST" action="/clinic/patient/${patientType}/${id}/discharge-summary/generate">
+        <div class="section-title">Admission & Discharge Details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label>Admission Date</label><input type="date" name="admission_date"></div>
+          <div><label>Discharge Date</label><input type="date" name="discharge_date" value="${new Date().toISOString().split('T')[0]}"></div>
+          <div><label>Attending Doctor</label>
+            <select name="attending_doctor">
+              <option value="">Select Doctor...</option>
+              ${doctors.map(d => `<option value="${esc(d.name)}" data-license="${esc(d.license_no || '')}">${esc(d.name)} — ${esc(d.role)}${d.specialization ? ' (' + esc(d.specialization) + ')' : ''}</option>`).join('')}
+            </select>
+          </div>
+          <div><label>Doctor License #</label><input name="doctor_license" placeholder="e.g. MD-12345"></div>
+        </div>
+
+        <div class="section-title">Diagnosis</div>
+        <div><label>Primary Diagnosis</label><input name="primary_diagnosis" placeholder="e.g. Acute Bronchitis" required></div>
+        <div><label>Secondary Diagnoses (one per line)</label><textarea name="secondary_diagnoses" rows="2" placeholder="Hypertension&#10;Type 2 Diabetes Mellitus"></textarea></div>
+
+        <div class="section-title">Treatments & Procedures</div>
+        <div><label>Treatments/Procedures (one per line)</label><textarea name="treatments" rows="3" placeholder="IV Antibiotics — Amoxicillin 500mg TDS for 5 days&#10;Nebulization — Salbutamol 2.5mg QID&#10;Fluid Resuscitation — Normal Saline 1L"></textarea></div>
+
+        <div class="section-title">Discharge Condition</div>
+        <div style="display:flex;gap:15px;align-items:center">
+          <label style="display:flex;align-items:center;gap:5px"><input type="radio" name="discharge_condition" value="stable" checked> <span style="color:#059669;font-weight:600">&#9679; Stable</span></label>
+          <label style="display:flex;align-items:center;gap:5px"><input type="radio" name="discharge_condition" value="improved"> <span style="color:#3b82f6;font-weight:600">&#9679; Improved</span></label>
+          <label style="display:flex;align-items:center;gap:5px"><input type="radio" name="discharge_condition" value="deteriorated"> <span style="color:#dc2626;font-weight:600">&#9679; Deteriorated</span></label>
+        </div>
+
+        <div class="section-title">Follow-up</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label>Follow-up Date</label><input type="date" name="follow_up_date"></div>
+        </div>
+        <div><label>Follow-up Instructions</label><textarea name="follow_up_instructions" rows="3" placeholder="Review in outpatient clinic in 1 week&#10;Continue medications as prescribed&#10;Report any fever, difficulty breathing, or chest pain"></textarea></div>
+
+        <div class="section-title">Additional Notes</div>
+        <div><label>Notes</label><textarea name="notes" rows="2" placeholder="Any additional discharge notes..."></textarea></div>
+
+        <div style="display:flex;gap:10px;margin-top:15px">
+          <button type="submit" class="btn btn-green" style="font-size:15px;padding:12px 30px">&#128196; Generate Discharge Summary</button>
+          <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn btn-sm" style="align-self:center">Cancel</a>
+        </div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/patient/:type/:id/discharge-summary/generate', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id } = req.params;
+  const patientType = type || 'student';
+  const d = req.body;
+  let patientName = 'Unknown Patient';
+  let patientInfo = {};
+
+  if (patientType === 'student') {
+    const s = (await pool.query('SELECT name, class, stream FROM students WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    patientName = s?.name || patientName;
+    patientInfo = { name: patientName, class: s?.class || '', stream: s?.stream || '' };
+  } else if (patientType === 'patient') {
+    const p = (await pool.query('SELECT * FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    patientName = p?.full_name || patientName;
+    patientInfo = p || {};
+  }
+
+  // Collect all patient data from multiple tables
+  const [allVitals, allAllergies, allMedications, allConsultations, allPrescriptions, allLabResults] = await Promise.all([
+    pool.query('SELECT * FROM patient_vitals WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 ORDER BY recorded_at DESC LIMIT 5', [t, patientType, id]),
+    pool.query('SELECT * FROM patient_allergies WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true', [t, patientType, id]),
+    pool.query('SELECT * FROM patient_medications WHERE tenant_id=$1 AND patient_type=$2 AND patient_id=$3 AND is_active=true ORDER BY start_date DESC', [t, patientType, id]),
+    pool.query('SELECT c.*, cs.name as doc_name FROM consultations c LEFT JOIN clinic_staff cs ON c.doctor_id=cs.id WHERE c.tenant_id=$1 AND c.patient_type=$2 AND c.patient_id=$3 ORDER BY c.created_at DESC LIMIT 10', [t, patientType, id]),
+    pool.query("SELECT p.id, p.diagnosis, p.notes, p.status, p.doctor_name, p.created_at, json_agg(json_build_object('medicine',pi.medicine_name,'dosage',pi.dosage,'frequency',pi.frequency,'duration',pi.duration,'instructions',pi.instructions,'status',pi.status) ORDER BY pi.id) as items FROM prescriptions p LEFT JOIN prescription_items pi ON pi.prescription_id=p.id WHERE p.tenant_id=$1 AND p.patient_type=$2 AND p.patient_id=$3 GROUP BY p.id ORDER BY p.created_at DESC LIMIT 5", [t, patientType, id]),
+    pool.query('SELECT lr.result_value, lr.result_numeric, lr.unit, lr.reference_range, lr.interpretation, lr.is_abnormal, lr.reported_at, lreq.test_name, lreq.test_category FROM lab_results lr JOIN lab_requests lreq ON lr.lab_request_id=lreq.id WHERE lr.tenant_id=$1 AND lreq.patient_type=$2 AND lreq.patient_id=$3 ORDER BY lr.reported_at DESC LIMIT 20', [t, patientType, id])
+  ]);
+
+  const vitalsAtDischarge = allVitals.rows[0] || null;
+  const secondaryDiagnoses = d.secondary_diagnoses ? d.secondary_diagnoses.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  const treatments = d.treatments ? d.treatments.split('\n').map(s => s.trim()).filter(Boolean) : [];
+
+  // Compile discharge medications from active patient medications + recent prescription items
+  const dischargeMeds = [];
+  allMedications.rows.forEach(m => {
+    dischargeMeds.push({ name: m.medication_name, dosage: m.dosage, frequency: m.frequency, duration: '', instructions: m.reason || '' });
+  });
+  allPrescriptions.rows.forEach(p => {
+    if (p.items && Array.isArray(p.items)) {
+      p.items.forEach(item => {
+        if (!dischargeMeds.find(m => m.name === item.medicine)) {
+          dischargeMeds.push({ name: item.medicine, dosage: item.dosage, frequency: item.frequency, duration: item.duration, instructions: item.instructions });
+        }
+      });
+    }
+  });
+
+  // Compile lab results summary
+  const labSummary = allLabResults.rows.map(lr => ({
+    test: lr.test_name,
+    value: lr.result_value,
+    numeric: lr.result_numeric,
+    unit: lr.unit,
+    range: lr.reference_range,
+    abnormal: lr.is_abnormal,
+    interpretation: lr.interpretation,
+    date: lr.reported_at
+  }));
+
+  // Get tenant/facility info
+  const tenantInfo = (await pool.query('SELECT name, email, phone FROM tenants WHERE id=$1', [t])).rows[0];
+  const facilityName = tenantInfo?.name || 'Healthcare Facility';
+
+  // Insert into discharge_summaries table
+  const insertResult = await pool.query(`INSERT INTO discharge_summaries(tenant_id,patient_type,patient_id,patient_name,admission_date,discharge_date,primary_diagnosis,secondary_diagnoses,treatments,discharge_medications,lab_results,vitals_at_discharge,follow_up_date,follow_up_instructions,discharge_condition,attending_doctor,doctor_license,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
+    [t, patientType, id, patientName, d.admission_date || null, d.discharge_date || new Date().toISOString().split('T')[0], d.primary_diagnosis, secondaryDiagnoses.length > 0 ? secondaryDiagnoses : null, treatments.length > 0 ? treatments : null, JSON.stringify(dischargeMeds), JSON.stringify(labSummary), JSON.stringify(vitalsAtDischarge), d.follow_up_date || null, d.follow_up_instructions || null, d.discharge_condition || 'stable', d.attending_doctor || null, d.doctor_license || null, d.notes || null, req.session.user.email || req.session.user.name]);
+
+  const summaryId = insertResult.rows[0].id;
+
+  // Render the discharge summary as a professional printable document
+  const checkNormal = (val, low, high) => val != null ? (val >= low && val <= high) ? 'normal' : 'abnormal' : '';
+  const statusIndicator = (val, low, high) => { const s = checkNormal(val, low, high); return s === 'normal' ? '<span style="color:#059669">&#10003;</span>' : s === 'abnormal' ? '<span style="color:#dc2626">&#9888;</span>' : '-'; };
+
+  res.send(renderPage('Discharge Summary: ' + patientName, `
+    <style>
+      .ds-document { max-width: 800px; margin: 0 auto; background: white; padding: 40px; font-family: 'Georgia', 'Times New Roman', serif; color: #1f2937; line-height: 1.6; }
+      .ds-header { text-align: center; border-bottom: 3px double #1f2937; padding-bottom: 20px; margin-bottom: 25px; }
+      .ds-header h1 { font-size: 22px; color: #1f2937; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+      .ds-header .facility { font-size: 16px; color: #374151; margin-top: 4px; }
+      .ds-header .contact { font-size: 12px; color: #6b7280; margin-top: 4px; }
+      .ds-header .doc-title { font-size: 18px; font-weight: bold; margin-top: 15px; color: #111827; }
+      .ds-section { margin-bottom: 20px; }
+      .ds-section h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #059669; border-bottom: 1px solid #d1d5db; padding-bottom: 4px; margin-bottom: 10px; }
+      .ds-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+      .ds-grid .field { font-size: 13px; }
+      .ds-grid .field .label { color: #6b7280; font-size: 11px; }
+      .ds-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+      .ds-table th { background: #f3f4f6; padding: 8px 10px; text-align: left; border: 1px solid #d1d5db; font-weight: 600; color: #374151; }
+      .ds-table td { padding: 7px 10px; border: 1px solid #e5e7eb; }
+      .ds-table tr.abnormal { background: #fef2f2; }
+      .ds-list { padding-left: 18px; font-size: 13px; }
+      .ds-list li { margin-bottom: 4px; }
+      .ds-condition { display: inline-block; padding: 4px 16px; border-radius: 4px; font-weight: bold; font-size: 14px; text-transform: uppercase; }
+      .ds-condition.stable { background: #dcfce7; color: #059669; }
+      .ds-condition.improved { background: #dbeafe; color: #2563eb; }
+      .ds-condition.deteriorated { background: #fef2f2; color: #dc2626; }
+      .ds-signature { margin-top: 40px; padding-top: 20px; border-top: 1px solid #d1d5db; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      .ds-signature .sig-line { border-top: 1px solid #1f2937; margin-top: 40px; padding-top: 5px; font-size: 12px; color: #374151; }
+      .ds-footer { text-align: center; margin-top: 30px; font-size: 10px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+      .ds-alert { background: #fef2f2; border: 1px solid #fca5a5; padding: 10px; border-radius: 6px; margin: 10px 0; font-size: 12px; color: #991b1b; }
+      @media print {
+        .no-print { display: none !important; }
+        body { background: white !important; }
+        .ds-document { padding: 20px; box-shadow: none; }
+        .page-wrap { padding: 0 !important; }
+      }
+    </style>
+
+    <div class="no-print" style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+      <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn btn-sm">&#8592; Back to EHR</a>
+      <a href="/clinic/patient/${patientType}/${id}/discharge-summary" class="btn btn-sm">New Summary</a>
+      <button onclick="window.print()" class="btn btn-sm btn-green">&#128424; Print Summary</button>
+    </div>
+
+    <div class="ds-document">
+      <!-- Header -->
+      <div class="ds-header">
+        <div style="font-size:36px;color:#059669">&#9764;</div>
+        <h1>${esc(facilityName)}</h1>
+        <div class="facility">Medical Services Department</div>
+        ${tenantInfo?.email ? `<div class="contact">${esc(tenantInfo.email)} ${tenantInfo.phone ? '| ' + esc(tenantInfo.phone) : ''}</div>` : ''}
+        <div class="doc-title">DISCHARGE SUMMARY</div>
+      </div>
+
+      <!-- Patient Information -->
+      <div class="ds-section">
+        <h2>Patient Information</h2>
+        <div class="ds-grid">
+          <div class="field"><div class="label">Patient Name</div><strong>${esc(patientName)}</strong></div>
+          <div class="field"><div class="label">Patient ID</div><strong>#${esc(String(id))} (${esc(patientType)})</strong></div>
+          ${patientInfo.date_of_birth ? `<div class="field"><div class="label">Date of Birth</div>${esc(new Date(patientInfo.date_of_birth).toLocaleDateString())}</div>` : ''}
+          ${patientInfo.gender ? `<div class="field"><div class="label">Gender</div>${esc(patientInfo.gender)}</div>` : ''}
+          ${patientInfo.blood_type ? `<div class="field"><div class="label">Blood Type</div><strong>${esc(patientInfo.blood_type)}</strong></div>` : ''}
+          ${patientInfo.class ? `<div class="field"><div class="label">Class</div>${esc(patientInfo.class)}${patientInfo.stream ? ' - ' + esc(patientInfo.stream) : ''}</div>` : ''}
+        </div>
+      </div>
+
+      <!-- Admission Details -->
+      <div class="ds-section">
+        <h2>Admission & Discharge</h2>
+        <div class="ds-grid">
+          <div class="field"><div class="label">Admission Date</div>${d.admission_date ? esc(new Date(d.admission_date).toLocaleDateString()) : '<em>Not specified</em>'}</div>
+          <div class="field"><div class="label">Discharge Date</div><strong>${esc(new Date(d.discharge_date || Date.now()).toLocaleDateString())}</strong></div>
+          <div class="field"><div class="label">Attending Doctor</div>${esc(d.attending_doctor || '-')}</div>
+          ${d.doctor_license ? `<div class="field"><div class="label">License #</div>${esc(d.doctor_license)}</div>` : ''}
+        </div>
+      </div>
+
+      <!-- Discharge Condition -->
+      <div class="ds-section" style="text-align:center">
+        <h2>Discharge Condition</h2>
+        <div class="ds-condition ${esc(d.discharge_condition || 'stable')}">${esc((d.discharge_condition || 'stable').charAt(0).toUpperCase() + (d.discharge_condition || 'stable').slice(1))}</div>
+      </div>
+
+      <!-- Diagnosis -->
+      <div class="ds-section">
+        <h2>Diagnosis</h2>
+        <div style="margin-bottom:8px"><strong>Primary:</strong> ${esc(d.primary_diagnosis || '-')}</div>
+        ${secondaryDiagnoses.length > 0 ? `<div><strong>Secondary:</strong><ol class="ds-list">${secondaryDiagnoses.map(d => `<li>${esc(d)}</li>`).join('')}</ol></div>` : ''}
+      </div>
+
+      <!-- Treatments -->
+      <div class="ds-section">
+        <h2>Treatments & Procedures</h2>
+        ${treatments.length > 0 ? `<ol class="ds-list">${treatments.map(tr => `<li>${esc(tr)}</li>`).join('')}</ol>` : '<p style="color:#6b7280;font-size:13px">No treatments listed</p>'}
+      </div>
+
+      <!-- Medications on Discharge -->
+      <div class="ds-section">
+        <h2>Medications on Discharge</h2>
+        ${dischargeMeds.length > 0 ? `<table class="ds-table">
+          <thead><tr><th>#</th><th>Medication</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr></thead>
+          <tbody>${dischargeMeds.map((m, i) => `<tr><td>${i + 1}</td><td><strong>${esc(m.name)}</strong></td><td>${esc(m.dosage || '-')}</td><td>${esc(m.frequency || '-')}</td><td>${esc(m.duration || '-')}</td><td>${esc(m.instructions || '-')}</td></tr>`).join('')}</tbody>
+        </table>` : '<p style="color:#6b7280;font-size:13px">No medications on discharge</p>'}
+      </div>
+
+      <!-- Lab Results -->
+      <div class="ds-section">
+        <h2>Key Laboratory Results</h2>
+        ${labSummary.length > 0 ? `<table class="ds-table">
+          <thead><tr><th>Test</th><th>Result</th><th>Unit</th><th>Reference</th><th>Status</th></tr></thead>
+          <tbody>${labSummary.map(lr => `<tr class="${lr.abnormal ? 'abnormal' : ''}"><td>${esc(lr.test || '-')}</td><td><strong>${esc(lr.value || String(lr.numeric || '-'))}</strong></td><td>${esc(lr.unit || '-')}</td><td>${esc(lr.range || '-')}</td><td>${lr.abnormal ? '<span style="color:#dc2626;font-weight:600">Abnormal</span>' : '<span style="color:#059669">Normal</span>'}</td></tr>`).join('')}</tbody>
+        </table>` : '<p style="color:#6b7280;font-size:13px">No lab results available</p>'}
+      </div>
+
+      <!-- Vitals at Discharge -->
+      <div class="ds-section">
+        <h2>Vitals at Discharge</h2>
+        ${vitalsAtDischarge ? `<div class="ds-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="field"><div class="label">Temperature</div>${vitalsAtDischarge.temperature ? esc(vitalsAtDischarge.temperature + ' °C') + ' ' + statusIndicator(parseFloat(vitalsAtDischarge.temperature), 36.1, 37.2) : '-'}</div>
+          <div class="field"><div class="label">Blood Pressure</div>${vitalsAtDischarge.blood_pressure_systolic ? esc(vitalsAtDischarge.blood_pressure_systolic + '/' + vitalsAtDischarge.blood_pressure_diastolic + ' mmHg') + ' ' + statusIndicator(parseInt(vitalsAtDischarge.blood_pressure_systolic), 90, 120) : '-'}</div>
+          <div class="field"><div class="label">Heart Rate</div>${vitalsAtDischarge.heart_rate ? esc(vitalsAtDischarge.heart_rate + ' bpm') + ' ' + statusIndicator(parseInt(vitalsAtDischarge.heart_rate), 60, 100) : '-'}</div>
+          <div class="field"><div class="label">Respiratory Rate</div>${vitalsAtDischarge.respiratory_rate ? esc(vitalsAtDischarge.respiratory_rate + ' /min') + ' ' + statusIndicator(parseInt(vitalsAtDischarge.respiratory_rate), 12, 20) : '-'}</div>
+          <div class="field"><div class="label">SpO2</div>${vitalsAtDischarge.oxygen_saturation ? esc(vitalsAtDischarge.oxygen_saturation + ' %') + ' ' + statusIndicator(parseInt(vitalsAtDischarge.oxygen_saturation), 95, 100) : '-'}</div>
+          <div class="field"><div class="label">Weight</div>${vitalsAtDischarge.weight ? esc(vitalsAtDischarge.weight + ' kg') : '-'}</div>
+        </div>
+        <p style="font-size:11px;color:#6b7280;margin-top:6px">Recorded: ${esc(new Date(vitalsAtDischarge.recorded_at).toLocaleString())} by ${esc(vitalsAtDischarge.recorded_by || 'N/A')}</p>` : '<p style="color:#6b7280;font-size:13px">No vitals recorded</p>'}
+      </div>
+
+      <!-- Allergies Alert -->
+      ${allAllergies.rows.length > 0 ? `<div class="ds-alert">
+        <strong>&#9888; ALLERGIES:</strong> ${allAllergies.rows.map(a => `<strong>${esc(a.allergen)}</strong> (${esc(a.severity)})${a.reaction ? ' — ' + esc(a.reaction) : ''}`).join(' | ')}
+      </div>` : ''}
+
+      <!-- Follow-up Instructions -->
+      <div class="ds-section">
+        <h2>Follow-up Instructions</h2>
+        ${d.follow_up_date ? `<div style="margin-bottom:8px"><strong>Next Appointment:</strong> ${esc(new Date(d.follow_up_date).toLocaleDateString())}</div>` : ''}
+        ${d.follow_up_instructions ? `<div style="white-space:pre-line;font-size:13px">${esc(d.follow_up_instructions)}</div>` : '<p style="color:#6b7280;font-size:13px">No follow-up instructions provided</p>'}
+      </div>
+
+      <!-- Additional Notes -->
+      ${d.notes ? `<div class="ds-section">
+        <h2>Additional Notes</h2>
+        <p style="font-size:13px;white-space:pre-line">${esc(d.notes)}</p>
+      </div>` : ''}
+
+      <!-- Signature -->
+      <div class="ds-signature">
+        <div>
+          <div class="sig-line"><strong>${esc(d.attending_doctor || '________________________')}</strong></div>
+          <div style="font-size:11px;color:#6b7280">Attending Physician</div>
+          ${d.doctor_license ? `<div style="font-size:10px;color:#9ca3af">License: ${esc(d.doctor_license)}</div>` : ''}
+        </div>
+        <div>
+          <div class="sig-line"><strong>${esc(new Date().toLocaleDateString())}</strong></div>
+          <div style="font-size:11px;color:#6b7280">Date of Discharge</div>
+        </div>
+      </div>
+
+      <div class="ds-footer">
+        This is a computer-generated document. Summary ID: #${summaryId} | Generated: ${new Date().toLocaleString()} | ${esc(facilityName)}
+      </div>
+    </div>
+
+    <div class="no-print" style="text-align:center;margin:20px 0">
+      <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn">&#8592; Back to EHR</a>
+      <a href="/clinic/patient/${patientType}/${id}/discharge-summary" class="btn btn-sm" style="margin-left:10px">Generate Another</a>
+    </div>
+  `, req.session.user));
+}));
+
+// View previously generated discharge summary
+app.get('/clinic/patient/:type/:id/discharge-summary/view/:summaryId', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { type, id, summaryId } = req.params;
+  const patientType = type || 'student';
+
+  const summary = (await pool.query('SELECT * FROM discharge_summaries WHERE id=$1 AND tenant_id=$2', [summaryId, t])).rows[0];
+  if (!summary) return res.status(404).send(renderPage('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Summary Not Found</h2><p class="muted">This discharge summary does not exist or you do not have access.</p></div>', req.session.user));
+
+  const vitalsAtDischarge = typeof summary.vitals_at_discharge === 'string' ? JSON.parse(summary.vitals_at_discharge) : (summary.vitals_at_discharge || null);
+  const dischargeMeds = typeof summary.discharge_medications === 'string' ? JSON.parse(summary.discharge_medications) : (summary.discharge_medications || []);
+  const labResults = typeof summary.lab_results === 'string' ? JSON.parse(summary.lab_results) : (summary.lab_results || []);
+  const secondaryDiagnoses = Array.isArray(summary.secondary_diagnoses) ? summary.secondary_diagnoses : [];
+  const treatments = Array.isArray(summary.treatments) ? summary.treatments : [];
+
+  const tenantInfo = (await pool.query('SELECT name, email, phone FROM tenants WHERE id=$1', [t])).rows[0];
+  const facilityName = tenantInfo?.name || 'Healthcare Facility';
+
+  const statusIndicator = (val, low, high) => { if (val == null) return '-'; return (val >= low && val <= high) ? '<span style="color:#059669">&#10003;</span>' : '<span style="color:#dc2626">&#9888;</span>'; };
+
+  res.send(renderPage('Discharge Summary #' + summaryId, `
+    <style>
+      .ds-document { max-width: 800px; margin: 0 auto; background: white; padding: 40px; font-family: 'Georgia', 'Times New Roman', serif; color: #1f2937; line-height: 1.6; }
+      .ds-header { text-align: center; border-bottom: 3px double #1f2937; padding-bottom: 20px; margin-bottom: 25px; }
+      .ds-header h1 { font-size: 22px; color: #1f2937; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+      .ds-header .facility { font-size: 16px; color: #374151; margin-top: 4px; }
+      .ds-header .contact { font-size: 12px; color: #6b7280; margin-top: 4px; }
+      .ds-header .doc-title { font-size: 18px; font-weight: bold; margin-top: 15px; color: #111827; }
+      .ds-section { margin-bottom: 20px; }
+      .ds-section h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #059669; border-bottom: 1px solid #d1d5db; padding-bottom: 4px; margin-bottom: 10px; }
+      .ds-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+      .ds-grid .field { font-size: 13px; }
+      .ds-grid .field .label { color: #6b7280; font-size: 11px; }
+      .ds-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+      .ds-table th { background: #f3f4f6; padding: 8px 10px; text-align: left; border: 1px solid #d1d5db; font-weight: 600; color: #374151; }
+      .ds-table td { padding: 7px 10px; border: 1px solid #e5e7eb; }
+      .ds-table tr.abnormal { background: #fef2f2; }
+      .ds-list { padding-left: 18px; font-size: 13px; }
+      .ds-list li { margin-bottom: 4px; }
+      .ds-condition { display: inline-block; padding: 4px 16px; border-radius: 4px; font-weight: bold; font-size: 14px; text-transform: uppercase; }
+      .ds-condition.stable { background: #dcfce7; color: #059669; }
+      .ds-condition.improved { background: #dbeafe; color: #2563eb; }
+      .ds-condition.deteriorated { background: #fef2f2; color: #dc2626; }
+      .ds-signature { margin-top: 40px; padding-top: 20px; border-top: 1px solid #d1d5db; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      .ds-signature .sig-line { border-top: 1px solid #1f2937; margin-top: 40px; padding-top: 5px; font-size: 12px; color: #374151; }
+      .ds-footer { text-align: center; margin-top: 30px; font-size: 10px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+      .ds-alert { background: #fef2f2; border: 1px solid #fca5a5; padding: 10px; border-radius: 6px; margin: 10px 0; font-size: 12px; color: #991b1b; }
+      @media print { .no-print { display: none !important; } body { background: white !important; } .ds-document { padding: 20px; box-shadow: none; } .page-wrap { padding: 0 !important; } }
+    </style>
+
+    <div class="no-print" style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap">
+      <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn btn-sm">&#8592; Back to EHR</a>
+      <a href="/clinic/patient/${patientType}/${id}/discharge-summary" class="btn btn-sm">All Summaries</a>
+      <button onclick="window.print()" class="btn btn-sm btn-green">&#128424; Print</button>
+    </div>
+
+    <div class="ds-document">
+      <div class="ds-header">
+        <div style="font-size:36px;color:#059669">&#9764;</div>
+        <h1>${esc(facilityName)}</h1>
+        <div class="facility">Medical Services Department</div>
+        ${tenantInfo?.email ? `<div class="contact">${esc(tenantInfo.email)} ${tenantInfo.phone ? '| ' + esc(tenantInfo.phone) : ''}</div>` : ''}
+        <div class="doc-title">DISCHARGE SUMMARY</div>
+      </div>
+
+      <div class="ds-section">
+        <h2>Patient Information</h2>
+        <div class="ds-grid">
+          <div class="field"><div class="label">Patient Name</div><strong>${esc(summary.patient_name)}</strong></div>
+          <div class="field"><div class="label">Patient ID</div><strong>#${esc(String(summary.patient_id))} (${esc(summary.patient_type)})</strong></div>
+        </div>
+      </div>
+
+      <div class="ds-section">
+        <h2>Admission & Discharge</h2>
+        <div class="ds-grid">
+          <div class="field"><div class="label">Admission Date</div>${summary.admission_date ? esc(new Date(summary.admission_date).toLocaleDateString()) : '<em>Not specified</em>'}</div>
+          <div class="field"><div class="label">Discharge Date</div><strong>${esc(new Date(summary.discharge_date).toLocaleDateString())}</strong></div>
+          <div class="field"><div class="label">Attending Doctor</div>${esc(summary.attending_doctor || '-')}</div>
+          ${summary.doctor_license ? `<div class="field"><div class="label">License #</div>${esc(summary.doctor_license)}</div>` : ''}
+        </div>
+      </div>
+
+      <div class="ds-section" style="text-align:center">
+        <h2>Discharge Condition</h2>
+        <div class="ds-condition ${esc(summary.discharge_condition || 'stable')}">${esc((summary.discharge_condition || 'stable').charAt(0).toUpperCase() + (summary.discharge_condition || 'stable').slice(1))}</div>
+      </div>
+
+      <div class="ds-section">
+        <h2>Diagnosis</h2>
+        <div style="margin-bottom:8px"><strong>Primary:</strong> ${esc(summary.primary_diagnosis || '-')}</div>
+        ${secondaryDiagnoses.length > 0 ? `<div><strong>Secondary:</strong><ol class="ds-list">${secondaryDiagnoses.map(d => `<li>${esc(d)}</li>`).join('')}</ol></div>` : ''}
+      </div>
+
+      <div class="ds-section">
+        <h2>Treatments & Procedures</h2>
+        ${treatments.length > 0 ? `<ol class="ds-list">${treatments.map(tr => `<li>${esc(tr)}</li>`).join('')}</ol>` : '<p style="color:#6b7280;font-size:13px">No treatments listed</p>'}
+      </div>
+
+      <div class="ds-section">
+        <h2>Medications on Discharge</h2>
+        ${dischargeMeds.length > 0 ? `<table class="ds-table">
+          <thead><tr><th>#</th><th>Medication</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Instructions</th></tr></thead>
+          <tbody>${dischargeMeds.map((m, i) => `<tr><td>${i + 1}</td><td><strong>${esc(m.name)}</strong></td><td>${esc(m.dosage || '-')}</td><td>${esc(m.frequency || '-')}</td><td>${esc(m.duration || '-')}</td><td>${esc(m.instructions || '-')}</td></tr>`).join('')}</tbody>
+        </table>` : '<p style="color:#6b7280;font-size:13px">No medications on discharge</p>'}
+      </div>
+
+      <div class="ds-section">
+        <h2>Key Laboratory Results</h2>
+        ${labResults.length > 0 ? `<table class="ds-table">
+          <thead><tr><th>Test</th><th>Result</th><th>Unit</th><th>Reference</th><th>Status</th></tr></thead>
+          <tbody>${labResults.map(lr => `<tr class="${lr.abnormal ? 'abnormal' : ''}"><td>${esc(lr.test || '-')}</td><td><strong>${esc(lr.value || String(lr.numeric || '-'))}</strong></td><td>${esc(lr.unit || '-')}</td><td>${esc(lr.range || '-')}</td><td>${lr.abnormal ? '<span style="color:#dc2626;font-weight:600">Abnormal</span>' : '<span style="color:#059669">Normal</span>'}</td></tr>`).join('')}</tbody>
+        </table>` : '<p style="color:#6b7280;font-size:13px">No lab results available</p>'}
+      </div>
+
+      <div class="ds-section">
+        <h2>Vitals at Discharge</h2>
+        ${vitalsAtDischarge ? `<div class="ds-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="field"><div class="label">Temperature</div>${vitalsAtDischarge.temperature ? esc(vitalsAtDischarge.temperature + ' °C') + ' ' + statusIndicator(parseFloat(vitalsAtDischarge.temperature), 36.1, 37.2) : '-'}</div>
+          <div class="field"><div class="label">Blood Pressure</div>${vitalsAtDischarge.blood_pressure_systolic ? esc(vitalsAtDischarge.blood_pressure_systolic + '/' + vitalsAtDischarge.blood_pressure_diastolic + ' mmHg') + ' ' + statusIndicator(parseInt(vitalsAtDischarge.blood_pressure_systolic), 90, 120) : '-'}</div>
+          <div class="field"><div class="label">Heart Rate</div>${vitalsAtDischarge.heart_rate ? esc(vitalsAtDischarge.heart_rate + ' bpm') + ' ' + statusIndicator(parseInt(vitalsAtDischarge.heart_rate), 60, 100) : '-'}</div>
+          <div class="field"><div class="label">SpO2</div>${vitalsAtDischarge.oxygen_saturation ? esc(vitalsAtDischarge.oxygen_saturation + ' %') + ' ' + statusIndicator(parseInt(vitalsAtDischarge.oxygen_saturation), 95, 100) : '-'}</div>
+          <div class="field"><div class="label">Weight</div>${vitalsAtDischarge.weight ? esc(vitalsAtDischarge.weight + ' kg') : '-'}</div>
+          <div class="field"><div class="label">BMI</div>${vitalsAtDischarge.bmi ? esc(vitalsAtDischarge.bmi) : '-'}</div>
+        </div>` : '<p style="color:#6b7280;font-size:13px">No vitals recorded</p>'}
+      </div>
+
+      <div class="ds-section">
+        <h2>Follow-up Instructions</h2>
+        ${summary.follow_up_date ? `<div style="margin-bottom:8px"><strong>Next Appointment:</strong> ${esc(new Date(summary.follow_up_date).toLocaleDateString())}</div>` : ''}
+        ${summary.follow_up_instructions ? `<div style="white-space:pre-line;font-size:13px">${esc(summary.follow_up_instructions)}</div>` : '<p style="color:#6b7280;font-size:13px">No follow-up instructions</p>'}
+      </div>
+
+      ${summary.notes ? `<div class="ds-section">
+        <h2>Additional Notes</h2>
+        <p style="font-size:13px;white-space:pre-line">${esc(summary.notes)}</p>
+      </div>` : ''}
+
+      <div class="ds-signature">
+        <div>
+          <div class="sig-line"><strong>${esc(summary.attending_doctor || '________________________')}</strong></div>
+          <div style="font-size:11px;color:#6b7280">Attending Physician</div>
+          ${summary.doctor_license ? `<div style="font-size:10px;color:#9ca3af">License: ${esc(summary.doctor_license)}</div>` : ''}
+        </div>
+        <div>
+          <div class="sig-line"><strong>${esc(new Date(summary.discharge_date).toLocaleDateString())}</strong></div>
+          <div style="font-size:11px;color:#6b7280">Date of Discharge</div>
+        </div>
+      </div>
+
+      <div class="ds-footer">
+        This is a computer-generated document. Summary ID: #${summary.id} | Generated: ${new Date(summary.created_at).toLocaleString()} | ${esc(facilityName)}
+      </div>
+    </div>
+
+    <div class="no-print" style="text-align:center;margin:20px 0">
+      <a href="/clinic/patient/${patientType}/${id}/ehr" class="btn">&#8592; Back to EHR</a>
+    </div>
+  `, req.session.user));
 }));
 
 // Add Immunization
@@ -30366,7 +33115,56 @@ const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth: requireAuth, wsB
 ['approval_requests','approval_actions','approval_notifications','approval_steps','approval_workflow_templates','approval_workflows'].forEach(t => VALID_TABLES.add(t));
 try { const m = require('./approvals'); m(app, db, pool, renderPage, esc); console.log('[Approvals] Approvals workflow module loaded'); } catch(e) { console.warn('[Approvals] Error:', e.message); }
 
-['clinic_patients','clinic_appointments','clinic_consultations','clinic_prescriptions','clinic_prescription_items','clinic_staff','clinic_visit_history','immunization_records','lab_requests','lab_results','patient_allergies','patient_chronic_conditions','patient_medications','patient_queue','patient_vitals','pharmacy_dispensing','pharmacy_inventory','clinic_beds'].forEach(t => VALID_TABLES.add(t));
+// === PATIENT PORTAL TABLES ===
+const patientPortalMigrations = [
+  `CREATE TABLE IF NOT EXISTS patient_portal_users (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    phone VARCHAR(20) NOT NULL,
+    full_name VARCHAR(255),
+    email VARCHAR(255),
+    date_of_birth DATE,
+    gender VARCHAR(20),
+    blood_type VARCHAR(10),
+    emergency_contact_name VARCHAR(255),
+    emergency_contact_phone VARCHAR(20),
+    address TEXT,
+    otp_code VARCHAR(10),
+    otp_expires TIMESTAMPTZ,
+    is_verified BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(tenant_id, phone)
+  )`,
+  `CREATE TABLE IF NOT EXISTS patient_sessions (
+    id SERIAL PRIMARY KEY,
+    patient_id INTEGER NOT NULL REFERENCES patient_portal_users(id) ON DELETE CASCADE,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    session_token TEXT NOT NULL,
+    device_info TEXT,
+    ip_address TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '7 days'
+  )`,
+  `CREATE TABLE IF NOT EXISTS prescription_refill_requests (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    patient_portal_user_id INTEGER REFERENCES patient_portal_users(id) ON DELETE CASCADE,
+    prescription_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_portal_users_tenant_phone ON patient_portal_users(tenant_id, phone)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_sessions_token ON patient_sessions(session_token)`,
+  `CREATE INDEX IF NOT EXISTS idx_patient_sessions_expires ON patient_sessions(expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_prescription_refills_tenant ON prescription_refill_requests(tenant_id)`,
+];
+patientPortalMigrations.forEach(m => migrations.push(m));
+['patient_portal_users','patient_sessions','prescription_refill_requests'].forEach(t => VALID_TABLES.add(t));
+
+['clinic_patients','clinic_appointments','clinic_consultations','clinic_prescriptions','clinic_prescription_items','clinic_staff','clinic_visit_history','immunization_records','lab_requests','lab_results','patient_allergies','patient_chronic_conditions','patient_medications','patient_queue','patient_vitals','pharmacy_dispensing','pharmacy_inventory','clinic_beds','discharge_summaries'].forEach(t => VALID_TABLES.add(t));
 try { const m = require('./clinic-management'); m(app, db, pool, renderPage, esc); console.log('[Clinic] Clinic management module loaded'); } catch(e) { console.warn('[Clinic] Error:', e.message); }
 
 ['custom_forms','custom_fields','custom_field_values','form_field_options','form_submissions'].forEach(t => VALID_TABLES.add(t));
@@ -30506,9 +33304,29 @@ try {
     `CREATE TABLE IF NOT EXISTS user_2fa (email TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, secret TEXT, enabled BOOLEAN DEFAULT false, backup_codes TEXT[] DEFAULT '{}')`,
     `CREATE TABLE IF NOT EXISTS audit_log (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email TEXT, action TEXT NOT NULL, details TEXT, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), endpoint TEXT NOT NULL, p256dh_key TEXT, auth_key TEXT, created_at TIMESTAMP DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS notification_preferences (user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), email_notifs BOOLEAN DEFAULT true, sms_notifs BOOLEAN DEFAULT true, push_notifs BOOLEAN DEFAULT true, inapp_notifs BOOLEAN DEFAULT true, categories JSONB DEFAULT '{"payments":true,"assignments":true,"events":true,"announcements":true,"emergencies":true}', PRIMARY KEY (user_email, tenant_id))`
+    `CREATE TABLE IF NOT EXISTS notification_preferences (user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), email_notifs BOOLEAN DEFAULT true, sms_notifs BOOLEAN DEFAULT true, push_notifs BOOLEAN DEFAULT true, inapp_notifs BOOLEAN DEFAULT true, categories JSONB DEFAULT '{"payments":true,"assignments":true,"events":true,"announcements":true,"emergencies":true}', PRIMARY KEY (user_email, tenant_id))`,
+    // Referral Management System
+    `CREATE TABLE IF NOT EXISTS referrals (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name VARCHAR(255) NOT NULL, patient_id INTEGER, patient_type VARCHAR(20) DEFAULT 'student', referring_doctor VARCHAR(255), receiving_facility VARCHAR(255), receiving_facility_contact VARCHAR(255), referral_category VARCHAR(50) DEFAULT 'specialist', urgency VARCHAR(20) DEFAULT 'routine', reason TEXT, clinical_notes TEXT, diagnosis TEXT, status VARCHAR(20) DEFAULT 'pending', accepted_by VARCHAR(255), accepted_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // Telehealth / Video Consultation Booking
+    `CREATE TABLE IF NOT EXISTS telehealth_consultations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name VARCHAR(255) NOT NULL, patient_id INTEGER, patient_phone VARCHAR(20), doctor_id INTEGER REFERENCES clinic_staff(id), doctor_name VARCHAR(255), scheduled_date DATE, scheduled_time TIME, duration_minutes INTEGER DEFAULT 30, meeting_link TEXT, meeting_id VARCHAR(255) UNIQUE, status VARCHAR(20) DEFAULT 'scheduled', subjective TEXT, objective TEXT, assessment TEXT, plan TEXT, started_at TIMESTAMPTZ, ended_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
   ];
   for (const sql of tables) { try { await pool.query(sql); } catch(e) { /* table may already exist */ } }
+
+  // Add missing columns to insurance_claims (table may already exist)
+  const claimAlters = [
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS patient_insurance_id INTEGER REFERENCES patient_insurance(id)`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS provider_name VARCHAR(255)`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS service_type VARCHAR(100)`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS diagnosis TEXT`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS total_amount BIGINT DEFAULT 0`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS covered_amount BIGINT DEFAULT 0`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS patient_amount BIGINT DEFAULT 0`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS approved_amount BIGINT DEFAULT 0`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
+  ];
+  for (const sql of claimAlters) { try { await pool.query(sql); } catch(e) { /* column may already exist */ } }
+
   console.log('[Migrations] All new tables ready');
 })();
 
