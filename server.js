@@ -30142,6 +30142,12 @@ try { require('./revenue-quickstart'); console.log('[Revenue] Tips, pricing, ads
 // === ULTIMATE MONETIZATION ENGINE: Ads CPM, Exit Popups, Social Proof, Affiliate Cloaker, Donations, Premium Content, Sitemap, Revenue Dashboard, Promo Codes, Landing Pages, Lead Magnets ===
 try { require('./monetization-engine'); console.log('[Monetization] Ad CPM system, exit popups, social proof, affiliate links, donations, premium content lock, sitemap/robots, promo codes, revenue dashboard, landing pages, lead magnets, cookie consent, CTA bar, push notifications, comments, engagement scoring ALL LOADED'); } catch(e) { console.warn('[Monetization] Error:', e.message); }
 
+// === VIRAL GROWTH BOOSTER: Polls, Quizzes, Testimonials, Community Forums, Countdowns, User Stories, Feedback Widget, Invite Codes ===
+try { require('./viral-growth-booster'); console.log('[ViralGrowth] Polls, quizzes, testimonials, community forums, viral countdowns, user stories, feedback widget, invite codes, achievement badges ALL LOADED'); } catch(e) { console.warn('[ViralGrowth] Error:', e.message); }
+
+// === ENGAGEMENT ENGINE: Daily Challenges, Streaks, Achievements, Rewards Store, Leaderboard, User Profiles ===
+try { require('./engagement-engine'); console.log('[Engagement] Daily challenges, streaks, 15 achievements, 8 rewards, leaderboard, gamification ALL LOADED'); } catch(e) { console.warn('[Engagement] Error:', e.message); }
+
 // ============================================================
 // === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
 // ============================================================
