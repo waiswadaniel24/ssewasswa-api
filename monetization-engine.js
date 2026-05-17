@@ -1,11 +1,8 @@
 // ============================================================
-// === ULTIMATE MONETIZATION ENGINE — Earn From Everything ===
+// === MONETIZATION ENGINE — Revenue Tracking & Billing ===
 // ============================================================
-// Auto-ads, exit popups, social proof, affiliate cloaker, donations,
-// premium content lock, sitemap/robots SEO, revenue dashboard,
-// promo codes, landing pages, push notifications, comment system,
-// floating CTA bar, cookie consent, featured listings, tips system,
-// A/B testing, engagement scoring, reward wall, lead magnets
+// trackRevenue, creditDeveloperRevenue, subscription plans,
+// usage metering, invoices, pricing page, webhooks
 
 // ============================================================
 // === DATABASE MIGRATIONS ===
