@@ -7804,6 +7804,7 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
     'church_attendance','purchase_orders','tax_records','bill_reminders','documents',
     'income_records','campaigns','campaign_pledges','role_permissions',
     'campaign_updates','volunteer_hours','event_tickets','ticket_sales','campaign_comments','campaign_payouts','matching_donations','donor_profiles','donation_receipts','campaign_milestones','campaign_deadline_reminders',
+    'campaign_goal_breakdown','live_donation_feed','campaign_progress_timeline','campaign_email_campaigns','exchange_rates','campaign_trust_reviews','donor_recognition','campaign_shares','campaign_followers','campaign_testimonials','campaign_stories','donor_impact','refund_requests',
     'chart_of_accounts','ledger_entries','document_folders','suppliers','branches',
     'inventory_transfers','loyalty_points','sms_campaigns','investments','debt_payoff',
     'momo_payments','automation_rules','integration_configs','calendar_events',
@@ -19989,6 +19990,7 @@ app.get('/fundraising', requireAuth, requireNotBanned, requireFundraisingSubscri
         <a href="/fundraising/new" class="btn btn-green" style="background:white;color:#059669;font-weight:700">+ New Campaign</a>
         <a href="/fundraising/investors" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">View Investors</a>
         <a href="/fundraising/analytics" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Analytics</a>
+        <a href="/fundraising/enhanced-dashboard" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Enhanced Dashboard</a>
         <a href="/my-donations" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">My Donations</a>
         <a href="/admin/payouts" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Payouts</a>
         <a href="/admin/refunds" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Refunds</a>
@@ -20030,6 +20032,9 @@ app.get('/fundraising', requireAuth, requireNotBanned, requireFundraisingSubscri
         '<div style="display:flex;gap:6px;flex-wrap:wrap"><a href="/fundraising/'+c.id+'" class="btn btn-sm">View</a><a href="/fundraising/'+c.id+'/donate" class="btn btn-sm btn-green">Donate</a>'+
         '<a href="/campaigns/'+c.id+'/matching" class="btn btn-sm" style="background:#f59e0b;color:white">Match</a>'+
         '<a href="/campaigns/'+c.id+'/comments" class="btn btn-sm" style="background:#7c3aed;color:white">Comments</a>'+
+        '<a href="/campaigns/'+c.id+'/breakdown" class="btn btn-sm" style="background:#0891b2;color:white">Breakdown</a>'+
+        '<a href="/campaigns/'+c.id+'/peer" class="btn btn-sm" style="background:#ec4899;color:white">P2P</a>'+
+        '<a href="/campaigns/'+c.id+'/emails" class="btn btn-sm" style="background:#64748b;color:white">Email</a>'+
         (c.status==='active'?'<a href="/fundraising/'+c.id+'/close" class="btn btn-sm">Close</a>':'')+
         '<a href="/fundraising/'+c.id+'/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete this campaign?\')">Del</a></div></div>';
     }).join('')||'<p class="muted" style="text-align:center;padding:40px">No campaigns yet. <a href="/fundraising/new" class="btn btn-green">Create Your First Campaign</a></p>'}</div></div>
@@ -20549,6 +20554,10 @@ app.get('/discover/:id', ah(async (req, res) => {
             <a href="/campaigns/${c.id}/milestones" style="font-size:13px;color:#f59e0b;font-weight:600">Milestones</a>
             <a href="/campaigns/${c.id}/impact" style="font-size:13px;color:#059669;font-weight:600">Impact</a>
             <a href="/campaigns/${c.id}/story" style="font-size:13px;color:#4f46e5;font-weight:600">Stories</a>
+            <a href="/campaigns/${c.id}/breakdown" style="font-size:13px;color:#0891b2;font-weight:600">How Funds Used</a>
+            <a href="/campaigns/${c.id}/peer" style="font-size:13px;color:#ec4899;font-weight:600">Peer Fundraising</a>
+            <a href="/campaigns/${c.id}/trust" style="font-size:13px;color:#06b6d4;font-weight:600">Trust Score</a>
+            <a href="/campaigns/${c.id}/timeline" style="font-size:13px;color:#7c3aed;font-weight:600">Timeline</a>
           </div>
         </div>
       </div>
