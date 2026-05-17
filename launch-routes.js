@@ -110,7 +110,10 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ('Uganda Registration Services', 'https://www.ursb.go.ug', 'government', 'Business registration', 11),
       ('NBS TV', 'https://www.nbstv.co.ug', 'news', 'NBS Television Uganda', 12),
       ('NTV Uganda', 'https://www.ntv.co.ug', 'news', 'NTV Uganda news', 13),
-      ('Spark TV', 'https://www.sparktv.co.ug', 'entertainment', 'Spark TV Uganda', 14)
+      ('Spark TV', 'https://www.sparktv.co.ug', 'entertainment', 'Spark TV Uganda', 14),
+      ('Ministry of Health Uganda', 'https://www.health.go.ug', 'health', 'Uganda Ministry of Health', 15),
+      ('WHO Uganda', 'https://www.who.int/countries/uga', 'health', 'World Health Organization Uganda', 16),
+      ('Uganda Medical Association', 'https://www.uma.co.ug', 'health', 'Uganda Medical Association', 17)
     ON CONFLICT DO NOTHING`,
     // Add public_url column to campaigns if missing
     `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS public_url TEXT`,
@@ -335,6 +338,14 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       { title: 'Uganda Digital Health Innovations', url: 'https://www.monitor.co.ug', source: 'Daily Monitor', category: 'technology', image_url: '', summary: 'New digital tools are transforming healthcare delivery in Uganda.' },
       { title: 'AI in African Healthcare', url: 'https://www.bbc.com/news/technology', source: 'BBC Tech', category: 'technology', image_url: '', summary: 'Artificial intelligence solutions being deployed across African hospitals.' },
     ],
+    business: [
+      { title: 'Uganda Economy Shows Strong Growth in Q1', url: 'https://www.newvision.co.ug', category: 'business', source: 'New Vision', snippet: 'Uganda GDP grows by...', date: new Date().toISOString().split('T')[0] },
+      { title: 'East African Trade Bloc Expands', url: 'https://www.monitor.co.ug', category: 'business', source: 'Monitor', snippet: 'New trade agreements...', date: new Date().toISOString().split('T')[0] }
+    ],
+    education: [
+      { title: 'UNEB Releases 2026 Examination Timetable', url: 'https://www.uneb.ac.ug', category: 'education', source: 'UNEB', snippet: 'The examination body...', date: new Date().toISOString().split('T')[0] },
+      { title: 'Government Increases Capitation Grants', url: 'https://www.education.go.ug', category: 'education', source: 'MoES', snippet: 'Primary schools receive...', date: new Date().toISOString().split('T')[0] }
+    ]
   };
 
   // Extract first image from RSS item
@@ -1770,7 +1781,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       `;
 
-      res.send(renderPage(post.title + ' - Comfort Blog', content, req.session.user || null, '/blog/' + id));
+      res.send(renderPage(post.title + ' - Comfort Blog', content, req.session.user || null, '/blog/' + postId));
     } catch (e) {
       console.error('[Blog Post] Error:', e.message);
       res.redirect('/blog');
@@ -1920,7 +1931,16 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   app.get('/p/:subdomain', ah(async (req, res) => {
     const subdomain = req.params.subdomain;
     // Skip known routes
-    if (subdomain === 'entertainment' || subdomain === 'fundraising') return res.redirect(`/p/${subdomain}`);
+    if (subdomain === 'entertainment' || subdomain === 'fundraising') {
+      return res.send(renderPage('Not Found', `
+        <div style="text-align:center;padding:80px 20px">
+          <div style="font-size:64px;margin-bottom:16px">&#128533;</div>
+          <h1 style="font-size:32px;font-weight:800;color:#1e293b;margin-bottom:8px">Page Not Found</h1>
+          <p style="color:#64748b;margin-bottom:24px">This page doesn't exist.</p>
+          <a href="/" style="display:inline-block;padding:14px 32px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none">Go Home</a>
+        </div>
+      `, null));
+    }
 
     try {
       const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain = $1', [subdomain])).rows[0];
@@ -2045,7 +2065,24 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           </div>
         `;
       } else if (tenant.type === 'clinic') {
+        // Dynamic clinic data from database
+        let clinicStats = '';
+        try {
+          const [patientCount, doctorCount, apptCount] = await Promise.all([
+            pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tenant.id]),
+            pool.query("SELECT COUNT(*) FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true", [tenant.id]),
+            pool.query('SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1', [tenant.id])
+          ]);
+          clinicStats = `
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+              <div style="background:#f0fdf4;border-radius:12px;padding:16px;text-align:center"><div style="font-size:24px;font-weight:800;color:#059669">${patientCount.rows[0].count}</div><div style="font-size:12px;color:#64748b">Patients</div></div>
+              <div style="background:#eff6ff;border-radius:12px;padding:16px;text-align:center"><div style="font-size:24px;font-weight:800;color:#2563eb">${doctorCount.rows[0].count}</div><div style="font-size:12px;color:#64748b">Doctors</div></div>
+              <div style="background:#fef3c7;border-radius:12px;padding:16px;text-align:center"><div style="font-size:24px;font-weight:800;color:#d97706">${apptCount.rows[0].count}</div><div style="font-size:12px;color:#64748b">Appointments</div></div>
+            </div>
+          `;
+        } catch (e) { /* tables may not exist yet */ }
         tenantContent = `
+          ${clinicStats}
           <div style="background:white;border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid #e2e8f0">
             <h3 style="font-size:18px;font-weight:700;margin-bottom:8px">Our Services</h3>
             <ul style="list-style:none;padding:0;color:#475569;font-size:14px;line-height:2">
@@ -2057,7 +2094,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             </ul>
           </div>
           <div style="display:flex;gap:12px;flex-wrap:wrap">
-            <a href="/register" style="padding:10px 24px;background:${color};color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Book Appointment</a>
+            <a href="/portal/${tenant.subdomain}" style="padding:10px 24px;background:${color};color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Book Appointment</a>
           </div>
         `;
       }
@@ -2757,6 +2794,13 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             <option value="entertainment">Entertainment</option>
             <option value="announcement">Announcement</option>
             <option value="promotion">Promotion</option>
+            <option value="blog">Blog</option>
+            <option value="health">Health</option>
+            <option value="tips">Tips</option>
+            <option value="technology">Technology</option>
+            <option value="business">Business</option>
+            <option value="education">Education</option>
+            <option value="sports">Sports</option>
           </select>
           <input name="image_url" placeholder="Image URL (optional)">
           <label style="display:flex;align-items:center;gap:8px;margin:8px 0;cursor:pointer">

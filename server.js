@@ -29,6 +29,8 @@ const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 const REQUEST_TIMEOUT_MS = 30 * 1000; // 30 seconds
 const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
+const VALID_PATIENT_TYPES = ['student', 'staff', 'patient', 'other', 'family', 'employee'];
+const VALID_CLINIC_INSTITUTION_TYPES = ['general_hospital','referral_hospital','district_hospital','health_centre_ii','health_centre_iii','health_centre_iv','private_clinic','specialist_clinic','dental_clinic','eye_clinic','mental_health','maternity','pharmacy','laboratory','radiology','rehabilitation','hospice','community_health'];
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -229,6 +231,21 @@ app.use('/dev/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
 app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20 }));
 app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
 app.use('/momo/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
+// v12: Rate limit clinic mutation endpoints to prevent abuse
+app.use('/clinic/queue/save', rateLimit({ windowMs: 60 * 1000, max: 30 }));
+app.use('/clinic/queue/checkin', rateLimit({ windowMs: 60 * 1000, max: 30 }));
+app.use('/clinic/prescription/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/clinic/prescriptions/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/clinic/lab/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/clinic/appointments/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/clinic/consultation/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/clinic/pharmacy/inventory/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/clinic/referrals/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/clinic/insurance/claim/save', rateLimit({ windowMs: 60 * 1000, max: 15 }));
+app.use('/clinic/telehealth/schedule/save', rateLimit({ windowMs: 60 * 1000, max: 15 }));
+app.use('/sickbay/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/clinic/sick-bay/checkin', rateLimit({ windowMs: 60 * 1000, max: 20 }));
+app.use('/patient-portal', rateLimit({ windowMs: 60 * 1000, max: 30 }));
 
 // Request timeout middleware
 app.use((req, res, next) => {
@@ -6274,7 +6291,7 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
 app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { health_institution_type } = req.body;
-  const validTypes = ['general_hospital','health_center_iii','health_center_iv','clinic','dental','eye_clinic','mental_health','physiotherapy','lab','imaging','maternity','pharmacy','veterinary','special'];
+  const validTypes = ['general_hospital','referral_hospital','health_center_4','health_center_3','health_center_2','health_center_1','clinic','drugshop','pharmacy','dental','eye_clinic','mental_health','physiotherapy','lab','imaging','maternity','veterinary','special'];
   if (health_institution_type && !validTypes.includes(health_institution_type)) {
     return res.status(400).send('Invalid institution type');
   }
@@ -17075,7 +17092,17 @@ app.get('/clinic/staff/new', requireAuth, requireNotBanned, requireFeature('clin
 app.post('/clinic/staff/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { name, role, specialization, license_no, email, phone, department } = req.body;
-  await pool.query('INSERT INTO clinic_staff(tenant_id,name,role,specialization,license_no,email,phone,department) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name, role||'doctor', specialization||null, license_no||null, email||null, phone||null, department||null]);
+  if (!name || !name.trim()) return res.redirect('/clinic/staff/new');
+  // v12: Check for duplicate staff (same email or license within tenant)
+  if (email) {
+    const dupEmail = (await pool.query('SELECT id FROM clinic_staff WHERE tenant_id=$1 AND email=$2', [t, email])).rows[0];
+    if (dupEmail) return res.send(renderPage('Duplicate Staff', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Duplicate Email</h2><p>A staff member with this email already exists.</p><a href="/clinic/staff/new" class="btn">Go Back</a></div>', req.session.user));
+  }
+  if (license_no) {
+    const dupLicense = (await pool.query('SELECT id FROM clinic_staff WHERE tenant_id=$1 AND license_no=$2', [t, license_no])).rows[0];
+    if (dupLicense) return res.send(renderPage('Duplicate Staff', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Duplicate License</h2><p>A staff member with this license number already exists.</p><a href="/clinic/staff/new" class="btn">Go Back</a></div>', req.session.user));
+  }
+  await pool.query('INSERT INTO clinic_staff(tenant_id,name,role,specialization,license_no,email,phone,department) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name.trim(), role||'doctor', specialization||null, license_no||null, email||null, phone||null, department||null]);
   await audit(req.session.user.email, 'Add clinic staff', name);
   res.redirect('/clinic/staff?role='+(role||'doctor'));
 }));
@@ -17131,7 +17158,7 @@ app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_
 app.get('/clinic/queue/new', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 200', [t])).rows;
-  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0];
+  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE FOR UPDATE", [t])).rows[0];
   res.send(renderPage('Add to Queue', `
     <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Patient to Queue</h2>
     <form method="POST" action="/clinic/queue/save">
@@ -17154,7 +17181,7 @@ app.post('/clinic/queue/save', requireAuth, requireNotBanned, requireFeature('pa
   res.redirect('/clinic/queue');
 }));
 
-app.get('/clinic/queue/:id/see', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.post('/clinic/queue/:id/see', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const doctors = (await pool.query("SELECT id FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true LIMIT 1", [t])).rows;
   await pool.query("UPDATE patient_queue SET status='seeing', seen_by=$1 WHERE tenant_id=$2 AND id=$3", [doctors[0]?.id||null, t, req.params.id]);
@@ -17197,7 +17224,7 @@ app.post('/clinic/consultation/save', requireAuth, requireNotBanned, requireFeat
   const { queue_id, patient_name, patient_id, patient_type, doctor_id, chief_complaint, history, examination, diagnosis, treatment_plan, follow_up_date, notes, action } = req.body;
   const result = await pool.query('INSERT INTO consultations(tenant_id,patient_type,patient_id,patient_name,doctor_id,queue_id,chief_complaint,history,examination,diagnosis,treatment_plan,follow_up_date,notes,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id', [t, patient_type||'student', patient_id||null, patient_name, doctor_id, queue_id||null, chief_complaint||null, history||null, examination||null, diagnosis, treatment_plan||null, follow_up_date||null, notes||null, 'in_progress']);
   const consultationId = result.rows[0].id;
-  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1', [doctor_id])).rows[0]?.name || '';
+  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1 AND tenant_id=$2', [doctor_id, t])).rows[0]?.name || '';
   if (queue_id) await pool.query("UPDATE patient_queue SET status='consulted' WHERE tenant_id=$1 AND id=$2", [t, queue_id]);
   if (action === 'prescribe') return res.redirect(`/clinic/prescription/new?consultation=${consultationId}&doctor=${doctor_id}&patient=${encodeURIComponent(patient_name)}&diagnosis=${encodeURIComponent(diagnosis||'')}`);
   if (action === 'lab') return res.redirect(`/clinic/lab/new?consultation=${consultationId}&doctor=${doctor_id}&patient=${encodeURIComponent(patient_name)}&diagnosis=${encodeURIComponent(diagnosis||'')}`);
@@ -17250,7 +17277,7 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
     const interactions = [];
     for (let a = 0; a < medNames.length; a++) {
       for (let b = a + 1; b < medNames.length; b++) {
-        const check = (await pool.query("SELECT * FROM drug_interactions WHERE (LOWER(drug_a)=$1 AND LOWER(drug_b)=$2) OR (LOWER(drug_a)=$2 AND LOWER(drug_b)=$1)", [medNames[a], medNames[b]])).rows;
+        const check = (await pool.query("SELECT * FROM drug_interactions WHERE ((LOWER(drug_a)=$1 AND LOWER(drug_b)=$2) OR (LOWER(drug_a)=$2 AND LOWER(drug_b)=$1)) AND (tenant_id=$3 OR tenant_id IS NULL)", [medNames[a], medNames[b], t])).rows;
         if (check.length > 0) {
           interactions.push(...check);
         }
@@ -17370,6 +17397,7 @@ app.get('/clinic/prescriptions/:id/dispense', requireAuth, requireNotBanned, req
 app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { pharmacist_id, notes } = req.body;
+  const rx = (await pool.query('SELECT patient_name FROM prescriptions WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
   const items = (await pool.query("SELECT * FROM prescription_items WHERE prescription_id IN (SELECT id FROM prescriptions WHERE tenant_id=$1) AND prescription_id=$2 AND status='pending'", [t, req.params.id])).rows;
   for (const item of items) {
     const qty = parseInt(req.body[`qty_${item.id}`]) || item.quantity;
@@ -17387,9 +17415,12 @@ app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanne
     await pool.query('UPDATE prescription_items SET status=$1,dispensed_by=$2,dispensed_at=NOW() WHERE id=$3', ['dispensed', pharmacist_id, item.id]);
     // Decrement pharmacy inventory stock
     if (stock) {
-      await pool.query('UPDATE pharmacy_inventory SET quantity = quantity - $1 WHERE medicine_name=$2 AND tenant_id=$3', [qty, item.medicine_name, t]);
+      const result = (await pool.query('UPDATE pharmacy_inventory SET quantity = quantity - $1 WHERE medicine_name=$2 AND tenant_id=$3 AND quantity >= $1 RETURNING quantity', [qty, item.medicine_name, t])).rows[0];
+      if (!result) {
+        return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Stock Update Failed</h2><p>Insufficient <strong>${esc(item.medicine_name)}</strong> (concurrent update). Please try again.</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
+      }
     }
-    await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, (await pool.query('SELECT patient_name FROM prescriptions WHERE id=$1',[req.params.id])).rows[0]?.patient_name||'', item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
+    await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, rx.patient_name, item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
   }
   await pool.query("UPDATE prescriptions SET status='dispensed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
   await audit(req.session.user.email, 'Prescription dispensed', `Rx #${req.params.id}`);
@@ -17442,7 +17473,7 @@ app.get('/clinic/lab/new', requireAuth, requireNotBanned, requireFeature('clinic
 app.post('/clinic/lab/save', requireAuth, requireNotBanned, requireFeature('clinic_lab'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { consultation_id, patient_type, patient_id, patient_name, doctor_id, test_name, test_category, urgency, clinical_notes } = req.body;
-  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1', [doctor_id])).rows[0]?.name || '';
+  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1 AND tenant_id=$2', [doctor_id, t])).rows[0]?.name || '';
   await pool.query('INSERT INTO lab_requests(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,test_name,test_category,urgency,clinical_notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, consultation_id||null, patient_type||'student', patient_id||null, patient_name, doctor_id||null, doctorName, test_name, test_category||null, urgency||'routine', clinical_notes||null]);
   res.redirect('/clinic/lab');
 }));
@@ -18221,12 +18252,9 @@ app.post('/clinic/appointments/save', requireAuth, requireNotBanned, requireFeat
   }
   // Check for appointment conflicts (same doctor, date, time)
   if (doctor_name) {
-    const conflict = (await pool.query("SELECT id FROM clinic_appointments WHERE tenant_id=$1 AND doctor_name=$2 AND appointment_date=$3 AND appointment_time=$4 AND status='scheduled'", [t, doctor_name, appointment_date, appointment_time])).rows[0];
+    const conflict = (await pool.query("SELECT id, patient_name FROM clinic_appointments WHERE tenant_id=$1 AND doctor_name=$2 AND appointment_date=$3 AND appointment_time=$4 AND status='scheduled'", [t, doctor_name, appointment_date, appointment_time])).rows[0];
     if (conflict) {
-      const appts = (await pool.query('SELECT * FROM clinic_appointments WHERE id=$1', [conflict.id])).rows;
-      // Show conflict warning but still allow booking (double-booking may be intentional for urgent cases)
-      // For strict conflict prevention, uncomment the next line:
-      // return res.send(renderPage('Appointment Conflict', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#f59e0b">Time Slot Taken</h2><p>Dr. ${esc(doctor_name)} already has an appointment at ${esc(appointment_time)} on ${esc(appointment_date)}.</p><a href="/clinic/appointments/new" class="btn">Choose Different Time</a></div>`, req.session.user));
+      return res.send(renderPage('Appointment Conflict', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#f59e0b">Time Slot Already Booked</h2><p>Dr. ${esc(doctor_name)} already has an appointment at ${esc(appointment_time)} on ${esc(appointment_date)} for patient <strong>${esc(conflict.patient_name)}</strong>.</p><p style="margin-top:10px">Please choose a different time slot.</p><a href="/clinic/appointments/new" class="btn">Choose Different Time</a></div>`, req.session.user));
     }
   }
   await pool.query(
@@ -18250,8 +18278,8 @@ app.post('/clinic/appointments/:id/complete', requireAuth, requireNotBanned, req
   if (!appt) return res.redirect('/clinic/appointments');
   // Mark appointment completed
   await pool.query("UPDATE clinic_appointments SET status='completed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  // Create queue entry
-  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0];
+  // Create queue entry with atomic queue number
+  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE FOR UPDATE", [t])).rows[0];
   await pool.query(
     'INSERT INTO patient_queue(tenant_id,patient_type,patient_id,patient_name,complaint,priority,triage_notes,queue_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
     [t, appt.patient_type || 'patient', appt.patient_id || null, appt.patient_name, appt.reason || 'Appointment visit', 'normal', 'From appointment #' + appt.id, maxQ.next]
@@ -18301,7 +18329,7 @@ async function checkAndSendReminders() {
           if (settings.whatsapp_enabled) {
             const msg = (settings.whatsapp_template || '')
               .replace('{facility_name}', tenant.name)
-              .replace('{date}', new Date(appt.appt_date + 'T00:00:00').toLocaleDateString())
+              .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
               .replace('{time}', appt.appointment_time || '')
               .replace('{patient_name}', appt.patient_name || '')
               .replace('{doctor}', appt.doctor_name || 'TBD');
@@ -18503,41 +18531,8 @@ app.post('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFea
   res.redirect('/clinic/reminders');
 }));
 
-// GET /clinic/reminders/send-all — Also support GET for the link button
-app.get('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0];
-
-  const appts = (await pool.query(
-    `SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=$2 AND status='scheduled' AND phone IS NOT NULL AND phone != ''`,
-    [t, tomorrowStr]
-  )).rows;
-
-  if (!appts.length) { req.flash('info', 'No appointments found for tomorrow'); return res.redirect('/clinic/reminders'); }
-
-  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
-  let settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [t])).rows[0];
-  if (!settings) settings = { sms_enabled: true, sms_template: 'Reminder: You have an appointment at {facility_name} on {date} at {time} with Dr. {doctor}.' };
-
-  let sent = 0;
-  for (const appt of appts) {
-    const msg = (settings.sms_template || '')
-      .replace('{facility_name}', tenant.name)
-      .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
-      .replace('{time}', appt.appointment_time || '')
-      .replace('{patient_name}', appt.patient_name || '')
-      .replace('{doctor}', appt.doctor_name || 'TBD');
-    await pool.query(
-      'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
-      [t, appt.id, appt.patient_name, appt.phone, 'sms', msg, 'sent']
-    );
-    await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
-    sent++;
-  }
-  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr });
-  req.flash('success', `${sent} reminder(s) sent for tomorrow's appointments`);
+// GET /clinic/reminders/send-all — Redirect to POST
+app.get('/clinic/reminders/send-all', requireAuth, requireNotBanned, ah(async (req, res) => {
   res.redirect('/clinic/reminders');
 }));
 
@@ -18796,11 +18791,15 @@ app.get('/clinic/pay/:invoice_id/verify', requireAuth, requireNotBanned, require
         console.warn('[Flutterwave Verify]', e.message);
       }
     }
-    // Demo: auto-complete after 2 seconds for testing
-    await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
-    await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1, status=CASE WHEN paid_amount + $1 >= total_amount THEN 'paid' ELSE 'partial' END WHERE id=$2", [tx.amount, invoice.id]);
-    await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount });
-    req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed! (Demo)`);
+    // Demo mode: auto-complete ONLY in development/testing
+    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+      await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
+      await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1, status=CASE WHEN paid_amount + $1 >= total_amount THEN 'paid' ELSE 'partial' END WHERE id=$2", [tx.amount, invoice.id]);
+      await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount });
+      if (req.flash) req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed! (Demo)`);
+    } else {
+      if (req.flash) req.flash('error', 'Payment verification failed. Please contact support with reference: ' + ref);
+    }
   }
 
   res.redirect(`/clinic/pay/${invoice.id}`);
@@ -24612,7 +24611,8 @@ app.get('/pay/checkout-v2', requireAuth, ah(async (req, res) => {
 app.get('/clinic/patient/:type/:id/ehr', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { type, id } = req.params;
-  const patientType = type || 'student';
+  const patientType = VALID_PATIENT_TYPES.includes(type) ? type : 'patient';
+  if (!VALID_PATIENT_TYPES.includes(type)) return res.redirect('/clinic');
   
   // Get patient name
   let patientName = 'Unknown Patient';
@@ -26135,19 +26135,19 @@ app.get('/clinic/claims', requireAuth, requireNotBanned, requireFeature('patient
     <div class="card">
       <h2>Insurance Claims</h2>
       ${claims.length ? `<table><tr><th>Claim #</th><th>Patient</th><th>Provider</th><th>Claimed</th><th>Approved</th><th>Status</th><th>Actions</th></tr>
-        ${claims.map(c => `<tr><td>${esc(c.claim_number)}</td><td>${esc(c.patient_name)}</td><td>${esc(c.provider_name||'')}</td><td>UGX ${parseInt(c.amount_claimed).toLocaleString()}</td><td>UGX ${parseInt(c.amount_approved).toLocaleString()}</td><td><span class="tag" style="background:${c.status==='approved'?'#d1fae5;color:#065f46':c.status==='rejected'?'#fee2e2;color:#991b1b':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td>${c.status==='submitted'?`<a href="/clinic/claims/${c.id}/approve" class="btn btn-sm btn-green">Approve</a> <a href="/clinic/claims/${c.id}/reject" class="btn btn-sm btn-red">Reject</a>`:''}</td></tr>`).join('')}</table>` : '<p class="muted">No claims yet</p>'}
+        ${claims.map(c => `<tr><td>${esc(c.claim_number)}</td><td>${esc(c.patient_name)}</td><td>${esc(c.provider_name||'')}</td><td>UGX ${parseInt(c.amount_claimed).toLocaleString()}</td><td>UGX ${parseInt(c.amount_approved).toLocaleString()}</td><td><span class="tag" style="background:${c.status==='approved'?'#d1fae5;color:#065f46':c.status==='rejected'?'#fee2e2;color:#991b1b':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td>${c.status==='submitted'?`<form method="POST" action="/clinic/claims/${c.id}/approve" style="display:inline"><button class="btn btn-sm btn-green">Approve</button></form> <form method="POST" action="/clinic/claims/${c.id}/reject" style="display:inline"><button class="btn btn-sm btn-red">Reject</button></form>`:''}</td></tr>`).join('')}</table>` : '<p class="muted">No claims yet</p>'}
     </div>
   `, req.session.user));
 }));
 
-app.get('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+app.post('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const claim = (await pool.query('SELECT * FROM insurance_claims WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!claim) return res.redirect('/clinic/claims');
   await pool.query('UPDATE insurance_claims SET status=$1, amount_approved=$2, processed_at=NOW() WHERE id=$3', ['approved', claim.amount_claimed, req.params.id]);
   // Apply insurance payment to invoice
   if (claim.invoice_id) {
-    const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1', [claim.invoice_id])).rows[0];
+    const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [claim.invoice_id, t])).rows[0];
     if (inv) {
       const newPaid = Math.min(inv.paid_amount + claim.amount_claimed, inv.total_amount);
       await pool.query('UPDATE patient_invoices SET paid_amount=$1, insurance_cover=$2, status=$3 WHERE id=$4', [newPaid, claim.amount_claimed, newPaid >= inv.total_amount ? 'paid' : 'partial', claim.invoice_id]);
@@ -26157,7 +26157,7 @@ app.get('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeat
   res.redirect('/clinic/claims');
 }));
 
-app.get('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+app.post('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE insurance_claims SET status=$1, processed_at=NOW(), rejection_reason=$2 WHERE id=$3', ['rejected', 'Rejected by admin', req.params.id]);
   await audit(req.session.user.email, 'claim_rejected', { claimId: req.params.id });
@@ -26569,7 +26569,8 @@ app.post('/clinic/prescription/save-cds', requireAuth, requireNotBanned, require
   
   if (medications.length > 0 && patient_id) {
     try {
-      const cdsResp = await fetch(`http://localhost:${process.env.PORT || 3000}/api/cds/full-check`, {
+      const baseUrl = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+      const cdsResp = await fetch(`${baseUrl}/api/cds/full-check`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Cookie': req.headers.cookie || '' },
         body: JSON.stringify({ patient_type, patient_id, medications, age: null, weight: null })
       });
@@ -31916,8 +31917,8 @@ app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, ah(async
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT * FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
-  const appointments = (await pool.query('SELECT * FROM clinic_appointments WHERE patient_id=$1 ORDER BY appointment_date DESC LIMIT 20', [patient.id])).rows;
-  const consultations = (await pool.query('SELECT * FROM clinic_consultations WHERE patient_id=$1 ORDER BY created_at DESC LIMIT 20', [patient.id])).rows;
+  const appointments = (await pool.query('SELECT * FROM clinic_appointments WHERE patient_id=$1 AND tenant_id=$2 ORDER BY appointment_date DESC LIMIT 20', [patient.id, tid])).rows;
+  const consultations = (await pool.query('SELECT * FROM clinic_consultations WHERE patient_id=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 20', [patient.id, tid])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>${esc(patient.full_name)}</h1>
     <p>ID: ${esc(patient.patient_id)} | ${esc(patient.gender||'-')} | Blood: ${esc(patient.blood_type||'Unknown')}</p>
@@ -32093,7 +32094,7 @@ app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, a
     `INSERT INTO clinic_consultations (tenant_id,patient_id,appointment_id,doctor_name,chief_complaint,history,examination,diagnosis,weight,temperature,blood_pressure,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
     [tid, parseInt(patient_id), appointment_id ? parseInt(appointment_id) : null, doctor_name, chief_complaint, history, examination, diagnosis, parseFloat(weight)||null, parseFloat(temperature)||null, blood_pressure, notes]
   );
-  if (appointment_id) { await pool.query("UPDATE clinic_appointments SET status='completed' WHERE id=$1", [parseInt(appointment_id)]); }
+  if (appointment_id) { await pool.query("UPDATE clinic_appointments SET status='completed' WHERE id=$1 AND tenant_id=$2", [parseInt(appointment_id), tid]); }
   audit(req.session.user.email, 'consultation_saved', 'Patient ID: ' + patient_id);
   res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
@@ -33399,7 +33400,7 @@ app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_
 app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { patient_name, complaint, priority } = req.body;
-  const nextToken = (await pool.query("SELECT COALESCE(MAX(token_number),0)+1 as next FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0].next;
+  const nextToken = (await pool.query("SELECT COALESCE(MAX(token_number),0)+1 as next FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE FOR UPDATE", [t])).rows[0].next;
   await pool.query("INSERT INTO clinic_queue (tenant_id,patient_name,complaint,token_number,priority) VALUES ($1,$2,$3,$4,$5)", [t, patient_name, complaint||'', nextToken||1, priority||'normal']);
   await pool.query("INSERT INTO audit_log (tenant_id,user_email,action,details) VALUES ($1,$2,'clinic_checkin',$3)", [t, req.session.user.email, 'Checked in: '+patient_name]);
   res.redirect('/clinic/queue');
@@ -33462,7 +33463,7 @@ app.post('/clinic/prescriptions/save', requireAuth, requireNotBanned, requireFea
 }));
 
 // Sick Bay
-app.get('/clinic/sick-bay', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic/sick-bay', requireAuth, requireNotBanned, requireFeature('sick_bay'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const [active, today] = await Promise.all([
     pool.query("SELECT * FROM sick_bay WHERE tenant_id=$1 AND status='in_bay' ORDER BY checked_in DESC", [t]),
@@ -33492,15 +33493,22 @@ app.get('/clinic/sick-bay', requireAuth, requireNotBanned, ah(async (req, res) =
   `, req.session.user));
 }));
 
-app.post('/clinic/sick-bay/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
-  await pool.query("INSERT INTO sick_bay (tenant_id,student_name,complaint,temperature,nurse_name) VALUES ($1,$2,$3,$4,$5)", [req.session.user.tenant_id, req.body.student_name, req.body.complaint||'', req.body.temperature||'', req.body.nurse_name||'']);
+app.post('/clinic/sick-bay/checkin', requireAuth, requireNotBanned, requireFeature('sick_bay'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { student_name, complaint, temperature, nurse_name } = req.body;
+  if (!student_name || !student_name.trim()) return res.redirect('/clinic/sick-bay');
+  const temp = parseFloat(temperature);
+  if (temperature && (isNaN(temp) || temp < 30 || temp > 45)) return res.redirect('/clinic/sick-bay');
+  await pool.query("INSERT INTO sick_bay (tenant_id,student_name,complaint,temperature,nurse_name) VALUES ($1,$2,$3,$4,$5)", [t, student_name.trim(), complaint||'', temperature||null, nurse_name||'']);
+  await audit(req.session.user.email, 'sickbay_checkin', { student_name, complaint });
   res.redirect('/clinic/sick-bay');
 }));
 
-app.post('/clinic/sick-bay/:id/release', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+app.post('/clinic/sick-bay/:id/release', requireAuth, requireNotBanned, requireFeature('sick_bay'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { treatment } = req.body;
   await pool.query("UPDATE sick_bay SET status='released',checked_out=NOW(),treatment=$1 WHERE id=$2 AND tenant_id=$3", [treatment||'Released', req.params.id, t]);
+  await audit(req.session.user.email, 'sickbay_release', { id: req.params.id });
   res.redirect('/clinic/sick-bay');
 }));
 
@@ -33526,7 +33534,8 @@ app.get('/billing/invoices', requireAuth, requireNotBanned, ah(async (req, res) 
 }));
 
 app.get('/billing/invoices/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const inv = (await pool.query("SELECT * FROM invoices WHERE id=$1", [req.params.id])).rows[0];
+  const t = req.session.user.tenant_id;
+  const inv = (await pool.query("SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2", [req.params.id, t])).rows[0];
   if (!inv) return res.status(404).send('Not found');
   const tenant = (await pool.query("SELECT name,type FROM tenants WHERE id=$1", [inv.tenant_id])).rows[0];
   const items = Array.isArray(inv.items) ? inv.items : [];
@@ -34032,6 +34041,694 @@ try {
   });
   console.log('[WS] WebSocket server initialized');
 } catch (e) { console.warn('[WS] Failed to initialize WebSocket:', e.message); }
+
+// ============================================================
+// === v12.0: MAJOR HEALTH PORTAL ENHANCEMENTS ===
+// ============================================================
+
+// --- FEATURE 1: ICD-10 DIAGNOSIS CODES ---
+const ICD10_COMMON = [
+  { code: 'A00', description: 'Cholera', category: 'Infectious' },
+  { code: 'A09', description: 'Gastroenteritis', category: 'Infectious' },
+  { code: 'B54', description: 'Unspecified malaria', category: 'Infectious' },
+  { code: 'B34.9', description: 'Viral infection, unspecified', category: 'Infectious' },
+  { code: 'E11.9', description: 'Type 2 diabetes mellitus without complications', category: 'Endocrine' },
+  { code: 'E78.5', description: 'Hyperlipidemia, unspecified', category: 'Endocrine' },
+  { code: 'I10', description: 'Essential hypertension', category: 'Circulatory' },
+  { code: 'I21.9', description: 'Acute myocardial infarction, unspecified', category: 'Circulatory' },
+  { code: 'J00', description: 'Acute nasopharyngitis (common cold)', category: 'Respiratory' },
+  { code: 'J06.9', description: 'Acute upper respiratory infection, unspecified', category: 'Respiratory' },
+  { code: 'J10.1', description: 'Influenza due to other identified influenza virus with other respiratory manifestations', category: 'Respiratory' },
+  { code: 'J11.1', description: 'Influenza with other respiratory manifestations, virus not identified', category: 'Respiratory' },
+  { code: 'J18.9', description: 'Pneumonia, unspecified organism', category: 'Respiratory' },
+  { code: 'J45.909', description: 'Unspecified asthma, uncomplicated', category: 'Respiratory' },
+  { code: 'K21.0', description: 'Gastroesophageal reflux disease with esophagitis', category: 'Digestive' },
+  { code: 'K29.7', description: 'Gastritis, unspecified', category: 'Digestive' },
+  { code: 'K52.9', description: 'Noninfective gastroenteritis and colitis, unspecified', category: 'Digestive' },
+  { code: 'L30.9', description: 'Dermatitis, unspecified', category: 'Skin' },
+  { code: 'M54.5', description: 'Low back pain', category: 'Musculoskeletal' },
+  { code: 'M79.3', description: 'Panniculitis, unspecified', category: 'Musculoskeletal' },
+  { code: 'N30.0', description: 'Acute cystitis', category: 'Genitourinary' },
+  { code: 'N39.0', description: 'Urinary tract infection, site not specified', category: 'Genitourinary' },
+  { code: 'O03.9', description: 'Spontaneous abortion, unspecified', category: 'Pregnancy' },
+  { code: 'O80', description: 'Encounter for full-term uncomplicated delivery', category: 'Pregnancy' },
+  { code: 'O10.919', description: 'Pre-existing hypertension, unspecified, first trimester', category: 'Pregnancy' },
+  { code: 'R50.9', description: 'Fever, unspecified', category: 'Symptoms' },
+  { code: 'R51', description: 'Headache', category: 'Symptoms' },
+  { code: 'R52', description: 'Pain, unspecified', category: 'Symptoms' },
+  { code: 'R56.9', description: 'Febrile convulsions, unspecified', category: 'Symptoms' },
+  { code: 'Z23', description: 'Encounter for immunization', category: 'Health' },
+  { code: 'Z34.00', description: 'Supervision of normal first pregnancy', category: 'Pregnancy' }
+];
+
+app.get('/api/health/icd10-search', requireAuth, ah(async (req, res) => {
+  const q = (req.query.q || '').toLowerCase().trim();
+  if (!q || q.length < 1) return res.json({ results: [] });
+  const results = ICD10_COMMON.filter(c => c.code.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)).slice(0, 20);
+  res.json({ results });
+}));
+
+// --- FEATURE 2: PHARMACY STOCK AUDIT TRAIL ---
+(async () => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS pharmacy_stock_movements (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      drug_id INTEGER REFERENCES pharmacy_inventory(id),
+      medicine_name VARCHAR(255) NOT NULL,
+      movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('in','out','adjustment','expiry_writeoff','damaged')),
+      quantity INTEGER NOT NULL,
+      previous_quantity INTEGER,
+      new_quantity INTEGER,
+      reference_type VARCHAR(50),
+      reference_id INTEGER,
+      batch_number VARCHAR(100),
+      expiry_date DATE,
+      notes TEXT,
+      performed_by VARCHAR(255) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_tenant ON pharmacy_stock_movements(tenant_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_drug ON pharmacy_stock_movements(drug_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_date ON pharmacy_stock_movements(created_at)');
+  } catch (e) { console.warn('[v12] pharmacy_stock_movements table:', e.message); }
+})();
+
+app.get('/clinic/pharmacy/stock-movements', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { drug_id, type, from_date, to_date, page = 1 } = req.query;
+  const limit = 50;
+  const offset = (parseInt(page) - 1) * limit;
+  let where = 'WHERE sm.tenant_id = $1';
+  const params = [t];
+  let paramIdx = 2;
+  if (drug_id) { where += ` AND sm.drug_id = $${paramIdx++}`; params.push(drug_id); }
+  if (type && type !== 'all') { where += ` AND sm.movement_type = $${paramIdx++}`; params.push(type); }
+  if (from_date) { where += ` AND sm.created_at::date >= $${paramIdx++}`; params.push(from_date); }
+  if (to_date) { where += ` AND sm.created_at::date <= $${paramIdx++}`; params.push(to_date); }
+  
+  const [movements, total] = await Promise.all([
+    pool.query(`SELECT sm.*, pi.medicine_name as inv_name FROM pharmacy_stock_movements sm LEFT JOIN pharmacy_inventory pi ON sm.drug_id=pi.id ${where} ORDER BY sm.created_at DESC LIMIT ${limit} OFFSET ${offset}`, params),
+    pool.query(`SELECT COUNT(*)::int FROM pharmacy_stock_movements sm ${where}`, params)
+  ]);
+  const totalPages = Math.ceil((total.rows[0]?.count || 0) / limit);
+  
+  res.send(renderPage('Stock Movements', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Stock Movement History</h1><p>Complete audit trail of all pharmacy stock changes</p></div>
+    <div class="card" style="margin-bottom:16px">
+      <form method="GET" style="display:flex;gap:10px;flex-wrap:wrap">
+        <select name="type"><option value="all">All Types</option><option value="in">Stock In</option><option value="out">Stock Out</option><option value="adjustment">Adjustment</option><option value="expiry_writeoff">Expiry Write-off</option><option value="damaged">Damaged</option></select>
+        <input name="from_date" type="date" placeholder="From" value="${from_date||''}">
+        <input name="to_date" type="date" placeholder="To" value="${to_date||''}">
+        <button class="btn btn-green">Filter</button>
+        <a href="/clinic/pharmacy/stock-movements" class="btn">Clear</a>
+      </form>
+    </div>
+    <div class="card"><table><tr><th>Date</th><th>Drug</th><th>Type</th><th>Qty</th><th>Before</th><th>After</th><th>Reference</th><th>By</th></tr>
+      ${movements.rows.map(m => `<tr style="${m.movement_type==='out'||m.movement_type==='expiry_writeoff'||m.movement_type==='damaged'?'background:#fef3c7':''}"><td>${new Date(m.created_at).toLocaleString()}</td><td><strong>${esc(m.medicine_name)}</strong></td><td><span class="tag" style="background:${m.movement_type==='in'?'#d1fae5;color:#065f46':m.movement_type==='out'?'#dbeafe;color:#1e40af':'#f3f4f6'}">${m.movement_type}</span></td><td style="font-weight:700;color:${m.movement_type==='in'?'#059669':'#dc2626'}">${m.movement_type==='in'?'+':'-'}${m.quantity}</td><td>${m.previous_quantity}</td><td>${m.new_quantity}</td><td class="muted">${esc(m.reference_type||'')} #${m.reference_id||''}</td><td class="muted">${esc(m.performed_by)}</td></tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px" class="muted">No stock movements recorded</td></tr>'}
+    </table>
+    ${totalPages > 1 ? `<div style="display:flex;gap:8px;justify-content:center;margin-top:16px">${Array.from({length: totalPages}, (_, i) => `<a href="?page=${i+1}&type=${type||'all'}" class="btn btn-sm ${parseInt(page)===i+1?'btn-green':''}">${i+1}</a>`).join('')}</div>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+// --- FEATURE 3: BLOOD BANK MANAGEMENT ---
+(async () => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS blood_bank_inventory (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      blood_type VARCHAR(10) NOT NULL CHECK (blood_type IN ('A+','A-','B+','B-','AB+','AB-','O+','O-')),
+      component VARCHAR(50) NOT NULL CHECK (component IN ('whole_blood','packed_rbc','platelets','plasma','cryoprecipitate')),
+      units_available INTEGER NOT NULL DEFAULT 0,
+      batch_number VARCHAR(100),
+      collected_date DATE,
+      expiry_date DATE,
+      donor_id VARCHAR(100),
+      storage_location VARCHAR(100),
+      status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available','reserved','used','expired','quarantine')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_bank_tenant ON blood_bank_inventory(tenant_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_bank_type ON blood_bank_inventory(blood_type, component)');
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS blood_transfusions (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      patient_name VARCHAR(255) NOT NULL,
+      patient_id INTEGER,
+      patient_type VARCHAR(20),
+      blood_type VARCHAR(10) NOT NULL,
+      component VARCHAR(50) NOT NULL,
+      units_transfused INTEGER NOT NULL DEFAULT 1,
+      transfusion_date TIMESTAMPTZ DEFAULT NOW(),
+      reason TEXT,
+      crossmatch_result VARCHAR(20) DEFAULT 'compatible',
+      adverse_reactions TEXT,
+      performed_by VARCHAR(255),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_trans_tenant ON blood_transfusions(tenant_id)');
+  } catch (e) { console.warn('[v12] blood bank tables:', e.message); }
+})();
+
+app.get('/clinic/blood-bank', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [inventory, recentTransfusions] = await Promise.all([
+    pool.query("SELECT * FROM blood_bank_inventory WHERE tenant_id=$1 AND status='available' ORDER BY blood_type, component", [t]),
+    pool.query("SELECT * FROM blood_transfusions WHERE tenant_id=$1 ORDER BY transfusion_date DESC LIMIT 20", [t])
+  ]);
+  const bloodTypes = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
+  const components = ['whole_blood','packed_rbc','platelets','plasma','cryoprecipitate'];
+  const componentLabels = { whole_blood:'Whole Blood', packed_rbc:'Packed RBC', platelets:'Platelets', plasma:'Plasma', cryoprecipitate:'Cryoprecipitate' };
+  
+  // Build summary matrix
+  const summary = {};
+  for (const bt of bloodTypes) { summary[bt] = { total: 0 }; }
+  for (const row of inventory.rows) {
+    if (!summary[row.blood_type]) summary[row.blood_type] = { total: 0 };
+    summary[row.blood_type][row.component] = row.units_available;
+    summary[row.blood_type].total += row.units_available;
+  }
+
+  res.send(renderPage('Blood Bank', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>Blood Bank Management</h1><p>Manage blood inventory and transfusion records</p></div>
+    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+      <a href="/clinic/blood-bank/add" class="btn btn-green">+ Add Blood Units</a>
+      <a href="/clinic/blood-bank/transfuse" class="btn" style="background:#dc2626;color:white">+ Record Transfusion</a>
+      <a href="/clinic/blood-bank/stock" class="btn">Full Inventory</a>
+    </div>
+    <div class="card"><h3>Blood Stock Summary</h3>
+      <div style="overflow-x:auto"><table><tr><th>Blood Type</th>${components.map(c=>`<th>${componentLabels[c]}</th>`).join('')}<th style="font-weight:700">Total</th></tr>
+      ${bloodTypes.map(bt => `<tr style="${(summary[bt].total||0) < 3 ? 'background:#fee2e2' : (summary[bt].total||0) < 5 ? 'background:#fef3c7' : ''}"><td style="font-weight:700;font-size:16px;color:#dc2626">${bt}</td>${components.map(c=>`<td>${summary[bt]?.[c] || 0}</td>`).join('')}<td style="font-weight:700">${summary[bt]?.total || 0}</td></tr>`).join('')}
+      </table></div>
+    </div>
+    ${recentTransfusions.rows.length > 0 ? `<div class="card" style="margin-top:16px"><h3>Recent Transfusions</h3><table><tr><th>Date</th><th>Patient</th><th>Type</th><th>Component</th><th>Units</th><th>By</th></tr>${recentTransfusions.rows.map(r=>`<tr><td>${new Date(r.transfusion_date).toLocaleString()}</td><td>${esc(r.patient_name)}</td><td style="color:#dc2626;font-weight:700">${r.blood_type}</td><td>${componentLabels[r.component]||r.component}</td><td>${r.units_transfused}</td><td class="muted">${esc(r.performed_by||'')}</td></tr>`).join('')}</table></div>` : ''}
+  `, req.session.user));
+}));
+
+app.get('/clinic/blood-bank/add', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
+  res.send(renderPage('Add Blood Units', `
+    <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Blood Units to Inventory</h2>
+    <form method="POST" action="/clinic/blood-bank/save">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Blood Type *</label><select name="blood_type" required>${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bt=>`<option value="${bt}">${bt}</option>`).join('')}</select></div>
+        <div><label>Component *</label><select name="component" required><option value="whole_blood">Whole Blood</option><option value="packed_rbc">Packed RBC</option><option value="platelets">Platelets</option><option value="plasma">Plasma</option><option value="cryoprecipitate">Cryoprecipitate</option></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>Units *</label><input name="units_available" type="number" min="1" value="1" required></div>
+        <div><label>Batch Number</label><input name="batch_number" placeholder="e.g. BTN-2026-001"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>Collected Date</label><input name="collected_date" type="date"></div>
+        <div><label>Expiry Date *</label><input name="expiry_date" type="date" required></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>Donor ID</label><input name="donor_id" placeholder="Donor reference"></div>
+        <div><label>Storage Location</label><input name="storage_location" placeholder="e.g. Fridge 1, Shelf A"></div>
+      </div>
+      <div style="margin-top:12px"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+      <button class="btn btn-green" style="width:100%;margin-top:16px">Add to Inventory</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/clinic/blood-bank/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { blood_type, component, units_available, batch_number, collected_date, expiry_date, donor_id, storage_location, notes } = req.body;
+  if (!blood_type || !component || !expiry_date) return res.redirect('/clinic/blood-bank/add');
+  // Check expiry
+  if (new Date(expiry_date) < new Date()) {
+    return res.send(renderPage('Error', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Expired Blood</h2><p>Cannot add blood that has already expired.</p><a href="/clinic/blood-bank/add" class="btn">Go Back</a></div>', req.session.user));
+  }
+  await pool.query('INSERT INTO blood_bank_inventory(tenant_id,blood_type,component,units_available,batch_number,collected_date,expiry_date,donor_id,storage_location,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, blood_type, component, parseInt(units_available)||1, batch_number||null, collected_date||null, expiry_date, donor_id||null, storage_location||null, notes||null]);
+  await audit(req.session.user.email, 'blood_bank_add', { blood_type, component, units: units_available });
+  res.redirect('/clinic/blood-bank');
+}));
+
+app.get('/clinic/blood-bank/transfuse', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const available = (await pool.query("SELECT * FROM blood_bank_inventory WHERE tenant_id=$1 AND status='available' AND units_available > 0 AND expiry_date > CURRENT_DATE ORDER BY blood_type", [t])).rows;
+  res.send(renderPage('Record Transfusion', `
+    <div class="card" style="max-width:600px;margin:0 auto"><h2>Record Blood Transfusion</h2>
+    <form method="POST" action="/clinic/blood-bank/transfuse/save">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Patient Name *</label><input name="patient_name" required></div>
+        <div><label>Patient Blood Type *</label><select name="blood_type" required>${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bt=>`<option value="${bt}">${bt}</option>`).join('')}</select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>Component *</label><select name="component" required><option value="whole_blood">Whole Blood</option><option value="packed_rbc">Packed RBC</option><option value="platelets">Platelets</option><option value="plasma">Plasma</option></select></div>
+        <div><label>Units *</label><input name="units_transfused" type="number" min="1" value="1" required></div>
+      </div>
+      <div style="margin-top:12px"><label>Reason *</label><textarea name="reason" rows="2" required placeholder="Indication for transfusion"></textarea></div>
+      <div style="margin-top:12px"><label>Crossmatch Result</label><select name="crossmatch_result"><option value="compatible">Compatible</option><option value="incompatible">Incompatible</option><option value="not_done">Not Done</option></select></div>
+      <div style="margin-top:12px"><label>Adverse Reactions</label><textarea name="adverse_reactions" rows="2" placeholder="Any transfusion reactions observed"></textarea></div>
+      <button class="btn" style="width:100%;margin-top:16px;background:#dc2626;color:white">Record Transfusion</button>
+    </form></div>
+    ${available.length === 0 ? '<p style="text-align:center;color:#dc2626;margin-top:16px">No blood units currently available in inventory.</p>' : ''}
+  `, req.session.user));
+}));
+
+app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, patient_id, patient_type, blood_type, component, units_transfused, reason, crossmatch_result, adverse_reactions } = req.body;
+  if (!patient_name || !blood_type || !component || !reason) return res.redirect('/clinic/blood-bank/transfuse');
+  const units = parseInt(units_transfused) || 1;
+  // Check and reserve stock
+  const stock = (await pool.query("UPDATE blood_bank_inventory SET units_available = units_available - $1, status = CASE WHEN units_available - $1 <= 0 THEN 'used' ELSE status END, updated_at = NOW() WHERE tenant_id=$2 AND blood_type=$3 AND component=$4 AND status='available' AND units_available >= $1 RETURNING id, units_available", [units, t, blood_type, component])).rows[0];
+  if (!stock) {
+    return res.send(renderPage('Stock Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Insufficient Blood Stock</h2><p>No available ${blood_type} ${component} units. Please check inventory.</p><a href="/clinic/blood-bank" class="btn">Go Back</a></div>`, req.session.user));
+  }
+  await pool.query('INSERT INTO blood_transfusions(tenant_id,patient_name,patient_id,patient_type,blood_type,component,units_transfused,reason,crossmatch_result,adverse_reactions,performed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, patient_name, patient_id||null, patient_type||'patient', blood_type, component, units, reason, crossmatch_result||'compatible', adverse_reactions||null, req.session.user.name||req.session.user.email]);
+  await audit(req.session.user.email, 'blood_transfusion', { patient_name, blood_type, component, units });
+  res.redirect('/clinic/blood-bank');
+}));
+
+// --- FEATURE 4: MATERNAL / ANTENATAL CARE ---
+(async () => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS maternal_anc_visits (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      patient_name VARCHAR(255) NOT NULL,
+      patient_id INTEGER,
+      patient_type VARCHAR(20) DEFAULT 'patient',
+      visit_number INTEGER NOT NULL,
+      visit_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      edd DATE,
+      gestational_age_weeks INTEGER,
+      blood_pressure_systolic INTEGER,
+      blood_pressure_diastolic INTEGER,
+      weight_kg DECIMAL(6,2),
+      fundal_height_cm DECIMAL(5,1),
+      fetal_heart_rate INTEGER,
+      presentation VARCHAR(50),
+      urine_protein VARCHAR(20),
+      urine_glucose VARCHAR(20),
+      hemoglobin DECIMAL(5,1),
+      tt_dose INTEGER DEFAULT 0,
+      ipt_dose INTEGER DEFAULT 0,
+      itn_given BOOLEAN DEFAULT false,
+      supplements TEXT,
+      findings TEXT,
+      plan TEXT,
+      next_visit_date DATE,
+      provider VARCHAR(255),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_maternal_tenant ON maternal_anc_visits(tenant_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_maternal_patient ON maternal_anc_visits(patient_id)');
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS maternal_deliveries (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      patient_name VARCHAR(255) NOT NULL,
+      patient_id INTEGER,
+      delivery_date TIMESTAMPTZ DEFAULT NOW(),
+      delivery_type VARCHAR(30) CHECK (delivery_type IN ('svd','assisted','cesarean','vacuum','forceps')),
+      gestational_age_weeks INTEGER,
+      baby_sex VARCHAR(10),
+      baby_weight_grams INTEGER,
+      apgar_1min SMALLINT,
+      apgar_5min SMALLINT,
+      baby_status VARCHAR(20) DEFAULT 'alive',
+      complications TEXT,
+      provider VARCHAR(255),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_deliveries_tenant ON maternal_deliveries(tenant_id)');
+  } catch (e) { console.warn('[v12] maternal care tables:', e.message); }
+})();
+
+app.get('/clinic/maternal-care', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [activeANC, totalDeliveries, totalANC] = await Promise.all([
+    pool.query("SELECT DISTINCT ON (patient_id) m.* FROM maternal_anc_visits m WHERE m.tenant_id=$1 ORDER BY m.patient_id, m.visit_number DESC", [t]),
+    pool.query("SELECT COUNT(*)::int FROM maternal_deliveries WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COUNT(DISTINCT patient_id)::int FROM maternal_anc_visits WHERE tenant_id=$1", [t])
+  ]);
+  res.send(renderPage('Maternal Care', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#f43f5e)"><h1>Maternal Health Care</h1><p>Antenatal care, delivery tracking &amp; postnatal follow-up</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#ec4899">${totalANC.rows[0].count}</div><div>Active ANC Patients</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${totalDeliveries.rows[0].count}</div><div>Total Deliveries</div></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+      <a href="/clinic/maternal-care/anc/new" class="btn btn-green">+ New ANC Visit</a>
+      <a href="/clinic/maternal-care/delivery/new" class="btn" style="background:#ec4899;color:white">+ Record Delivery</a>
+      <a href="/clinic/maternal-care/register" class="btn">ANC Register</a>
+    </div>
+    <div class="card"><h3>Recent ANC Visits</h3>
+    <table><tr><th>Patient</th><th>Visit #</th><th>Date</th><th>GA (weeks)</th><th>BP</th><th>Weight</th><th>FHR</th><th>Provider</th></tr>
+      ${activeANC.rows.slice(0, 15).map(v => `<tr><td><strong>${esc(v.patient_name)}</strong></td><td>${v.visit_number}</td><td>${new Date(v.visit_date).toLocaleDateString()}</td><td>${v.gestational_age_weeks||'-'}</td><td>${v.blood_pressure_systolic||'-'}/${v.blood_pressure_diastolic||'-'}</td><td>${v.weight_kg||'-'}</td><td>${v.fetal_heart_rate||'-'}</td><td class="muted">${esc(v.provider||'')}</td></tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px" class="muted">No ANC visits recorded</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+app.get('/clinic/maternal-care/anc/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
+  res.send(renderPage('New ANC Visit', `
+    <div class="card" style="max-width:700px;margin:0 auto"><h2>Record ANC Visit</h2>
+    <form method="POST" action="/clinic/maternal-care/anc/save">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div><label>Patient Name *</label><input name="patient_name" required></div>
+        <div><label>Visit Number *</label><input name="visit_number" type="number" min="1" value="1" required></div>
+        <div><label>Visit Date *</label><input name="visit_date" type="date" required></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>EDD</label><input name="edd" type="date"></div>
+        <div><label>Gestational Age (weeks)</label><input name="gestational_age_weeks" type="number" min="0" max="42"></div>
+        <div><label>Weight (kg)</label><input name="weight_kg" type="number" step="0.1"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>BP Systolic</label><input name="blood_pressure_systolic" type="number" min="60" max="250"></div>
+        <div><label>BP Diastolic</label><input name="blood_pressure_diastolic" type="number" min="30" max="150"></div>
+        <div><label>Fetal Heart Rate</label><input name="fetal_heart_rate" type="number" min="60" max="220"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>Fundal Height (cm)</label><input name="fundal_height_cm" type="number" step="0.1"></div>
+        <div><label>Hemoglobin (g/dL)</label><input name="hemoglobin" type="number" step="0.1"></div>
+        <div><label>Presentation</label><select name="presentation"><option value="">-</option><option value="cephalic">Cephalic</option><option value="breech">Breech</option><option value="transverse">Transverse</option><option value="oblique">Oblique</option></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>Urine Protein</label><select name="urine_protein"><option value="">-</option><option value="nil">Nil</option><option value="trace">Trace</option><option value="+1">+1</option><option value="+2">+2</option><option value="+3">+3</option></select></div>
+        <div><label>Urine Glucose</label><select name="urine_glucose"><option value="">-</option><option value="nil">Nil</option><option value="trace">Trace</option><option value="+1">+1</option><option value="+2">+2</option></select></div>
+        <div><label>Next Visit Date</label><input name="next_visit_date" type="date"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+        <label><input type="checkbox" name="itn_given" value="true"> ITN Given</label>
+        <div><label>TT Dose</label><input name="tt_dose" type="number" min="0" max="5" value="0"></div>
+        <div><label>IPT Dose</label><input name="ipt_dose" type="number" min="0" max="5" value="0"></div>
+      </div>
+      <div style="margin-top:12px"><label>Findings</label><textarea name="findings" rows="2"></textarea></div>
+      <div style="margin-top:12px"><label>Plan</label><textarea name="plan" rows="2"></textarea></div>
+      <button class="btn btn-green" style="width:100%;margin-top:16px">Save ANC Visit</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/clinic/maternal-care/anc/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, patient_id, visit_number, visit_date, edd, gestational_age_weeks, weight_kg, blood_pressure_systolic, blood_pressure_diastolic, fetal_heart_rate, fundal_height_cm, hemoglobin, presentation, urine_protein, urine_glucose, next_visit_date, itn_given, tt_dose, ipt_dose, findings, plan } = req.body;
+  if (!patient_name || !visit_number || !visit_date) return res.redirect('/clinic/maternal-care/anc/new');
+  // Alert for high BP (pre-eclampsia screening)
+  const systolic = parseInt(blood_pressure_systolic);
+  const diastolic = parseInt(blood_pressure_diastolic);
+  let bpAlert = '';
+  if (systolic >= 140 || diastolic >= 90) {
+    bpAlert = ' ALERT: Elevated BP detected - screen for pre-eclampsia.';
+  }
+  await pool.query(`INSERT INTO maternal_anc_visits(tenant_id,patient_name,patient_id,patient_type,visit_number,visit_date,edd,gestational_age_weeks,blood_pressure_systolic,blood_pressure_diastolic,weight_kg,fundal_height_cm,fetal_heart_rate,presentation,urine_protein,urine_glucose,hemoglobin,tt_dose,ipt_dose,itn_given,findings,plan,next_visit_date,provider) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+    [t, patient_name, patient_id||null, 'patient', parseInt(visit_number), visit_date, edd||null, gestational_age_weeks||null, systolic||null, diastolic||null, weight_kg||null, fundal_height_cm||null, fetal_heart_rate||null, presentation||null, urine_protein||null, urine_glucose||null, hemoglobin||null, parseInt(tt_dose)||0, parseInt(ipt_dose)||0, itn_given==='true', findings||null, plan||null, next_visit_date||null, req.session.user.name||'']);
+  await audit(req.session.user.email, 'anc_visit', { patient_name, visit_number, bpAlert: bpAlert.trim() });
+  res.redirect('/clinic/maternal-care');
+}));
+
+app.get('/clinic/maternal-care/delivery/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
+  res.send(renderPage('Record Delivery', `
+    <div class="card" style="max-width:700px;margin:0 auto"><h2>Record Delivery</h2>
+    <form method="POST" action="/clinic/maternal-care/delivery/save">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Patient Name *</label><input name="patient_name" required></div>
+        <div><label>Delivery Type *</label><select name="delivery_type" required><option value="svd">SVD (Normal)</option><option value="assisted">Assisted</option><option value="cesarean">C-Section</option><option value="vacuum">Vacuum</option><option value="forceps">Forceps</option></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>GA at Delivery (weeks)</label><input name="gestational_age_weeks" type="number" min="20" max="44"></div>
+        <div><label>Baby Sex</label><select name="baby_sex"><option value="">-</option><option value="male">Male</option><option value="female">Female</option></select></div>
+        <div><label>Baby Weight (g)</label><input name="baby_weight_grams" type="number" min="500" max="6000"></div>
+        <div><label>Baby Status</label><select name="baby_status"><option value="alive">Alive</option><option value="stillbirth">Stillbirth</option><option value="neonatal_death">Neonatal Death</option></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div><label>APGAR 1 min</label><input name="apgar_1min" type="number" min="0" max="10"></div>
+        <div><label>APGAR 5 min</label><input name="apgar_5min" type="number" min="0" max="10"></div>
+      </div>
+      <div style="margin-top:12px"><label>Complications</label><textarea name="complications" rows="2"></textarea></div>
+      <div style="margin-top:12px"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+      <button class="btn" style="width:100%;margin-top:16px;background:#ec4899;color:white">Record Delivery</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/clinic/maternal-care/delivery/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, patient_id, delivery_type, gestational_age_weeks, baby_sex, baby_weight_grams, apgar_1min, apgar_5min, baby_status, complications, notes } = req.body;
+  if (!patient_name || !delivery_type) return res.redirect('/clinic/maternal-care/delivery/new');
+  await pool.query(`INSERT INTO maternal_deliveries(tenant_id,patient_name,patient_id,delivery_date,delivery_type,gestational_age_weeks,baby_sex,baby_weight_grams,apgar_1min,apgar_5min,baby_status,complications,provider,notes) VALUES($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [t, patient_name, patient_id||null, delivery_type, gestational_age_weeks||null, baby_sex||null, baby_weight_grams||null, apgar_1min||null, apgar_5min||null, baby_status||'alive', complications||null, req.session.user.name||'', notes||null]);
+  await audit(req.session.user.email, 'delivery_recorded', { patient_name, delivery_type });
+  res.redirect('/clinic/maternal-care');
+}));
+
+// --- FEATURE 5: CLINIC REPORTS & ANALYTICS ---
+app.get('/clinic/reports', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { period = 'month' } = req.query;
+  const dateFilter = period === 'week' ? "created_at >= CURRENT_DATE - INTERVAL '7 days'" : period === 'month' ? "created_at >= CURRENT_DATE - INTERVAL '30 days'" : period === 'year' ? "created_at >= CURRENT_DATE - INTERVAL '1 year'" : '1=1';
+  
+  const [apptStats, rxStats, labStats, revenueStats, queueStats, topDiagnoses] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='scheduled')::int as scheduled, COUNT(*) FILTER (WHERE status='completed')::int as completed, COUNT(*) FILTER (WHERE status='cancelled')::int as cancelled FROM clinic_appointments WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
+    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='dispensed')::int as dispensed, COUNT(*) FILTER (WHERE status='pending')::int as pending FROM prescriptions WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
+    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='completed')::int as completed, COUNT(*) FILTER (WHERE status='requested')::int as pending FROM lab_requests WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
+    pool.query(`SELECT COALESCE(SUM(amount),0)::bigint as total_revenue, COUNT(*)::int as paid_invoices FROM payment_transactions WHERE tenant_id=$1 AND status='successful' AND ${dateFilter}`, [t]),
+    pool.query(`SELECT COUNT(*)::int as total, COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60),0)::numeric(6,1) as avg_wait_min FROM patient_queue WHERE tenant_id=$1 AND status='completed' AND ${dateFilter}`, [t]),
+    pool.query(`SELECT diagnosis, COUNT(*)::int as count FROM prescriptions WHERE tenant_id=$1 AND diagnosis IS NOT NULL AND ${dateFilter} GROUP BY diagnosis ORDER BY count DESC LIMIT 10`, [t])
+  ]);
+  
+  const a = apptStats.rows[0] || {};
+  const r = rxStats.rows[0] || {};
+  const l = labStats.rows[0] || {};
+  const rev = revenueStats.rows[0] || {};
+  const q = queueStats.rows[0] || {};
+  
+  res.send(renderPage('Clinic Reports', `
+    <div class="hero" style="background:linear-gradient(135deg,#3b82f6,#6366f1)"><h1>Clinic Analytics &amp; Reports</h1></div>
+    <div style="display:flex;gap:8px;margin-bottom:20px"><a href="?period=week" class="btn btn-sm ${period==='week'?'btn-green':''}">Week</a><a href="?period=month" class="btn btn-sm ${period==='month'?'btn-green':''}">Month</a><a href="?period=year" class="btn btn-sm ${period==='year'?'btn-green':''}">Year</a><a href="?period=all" class="btn btn-sm ${period==='all'?'btn-green':''}">All</a></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
+      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#3b82f6,#6366f1);color:white"><div style="font-size:2rem;font-weight:700">${a.total||0}</div><div>Appointments</div></div>
+      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#059669,#10b981);color:white"><div style="font-size:2rem;font-weight:700">${r.total||0}</div><div>Prescriptions</div></div>
+      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#f59e0b,#d97706);color:white"><div style="font-size:2rem;font-weight:700">${l.total||0}</div><div>Lab Tests</div></div>
+      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#0d9488,#14b8a6);color:white"><div style="font-size:2rem;font-weight:700">UGX ${(parseInt(rev.total_revenue)||0).toLocaleString()}</div><div>Revenue</div></div>
+      <div class="card" style="padding:20px;text-align:center"><div style="font-size:2rem;font-weight:700">${q.total||0}</div><div>Patients Served</div></div>
+      <div class="card" style="padding:20px;text-align:center"><div style="font-size:2rem;font-weight:700">${q.avg_wait_min||0}</div><div>Avg Wait (min)</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card"><h3>Top Diagnoses</h3><table><tr><th>Diagnosis</th><th>Count</th></tr>${topDiagnoses.rows.map(d=>`<tr><td>${esc(d.diagnosis)}</td><td style="font-weight:700">${d.count}</td></tr>`).join('')||'<tr><td colspan="2" class="muted">No data</td></tr>'}</table></div>
+      <div class="card"><h3>Appointment Summary</h3>
+        <table><tr><th>Status</th><th>Count</th><th>%</th></tr>
+          <tr><td><span class="tag" style="background:#dbeafe">Scheduled</span></td><td>${a.scheduled||0}</td><td>${a.total?Math.round((a.scheduled||0)/a.total*100):0}%</td></tr>
+          <tr><td><span class="tag" style="background:#d1fae5">Completed</span></td><td>${a.completed||0}</td><td>${a.total?Math.round((a.completed||0)/a.total*100):0}%</td></tr>
+          <tr><td><span class="tag" style="background:#fee2e2">Cancelled</span></td><td>${a.cancelled||0}</td><td>${a.total?Math.round((a.cancelled||0)/a.total*100):0}%</td></tr>
+        </table>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// --- FEATURE 6: STOCK EXPIRY ALERTS ---
+app.get('/clinic/pharmacy/expiry-alerts', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [expired, expiringSoon, lowStock] = await Promise.all([
+    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND expiry_date < CURRENT_DATE AND quantity > 0 ORDER BY expiry_date", [t]),
+    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '90 days' AND quantity > 0 ORDER BY expiry_date", [t]),
+    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND quantity > 0 AND quantity <= reorder_level ORDER BY quantity ASC", [t])
+  ]);
+  res.send(renderPage('Pharmacy Alerts', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Pharmacy Alerts</h1><p>Expiry and stock level monitoring</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${expired.rows.length}</div><div>Expired Drugs</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${expiringSoon.rows.length}</div><div>Expiring Soon (90d)</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${lowStock.rows.length}</div><div>Low Stock</div></div>
+    </div>
+    ${expired.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #dc2626"><h3 style="color:#dc2626">EXPIRED DRUGS (${expired.rows.length})</h3><table><tr><th>Drug</th><th>Batch</th><th>Qty</th><th>Expired</th><th>Action</th></tr>${expired.rows.map(d=>`<tr style="background:#fee2e2"><td>${esc(d.medicine_name)}</td><td>${esc(d.batch_number||'-')}</td><td>${d.quantity}</td><td>${new Date(d.expiry_date).toLocaleDateString()}</td><td><form method="POST" action="/clinic/pharmacy/inventory/${d.id}/writeoff" style="display:inline"><button class="btn btn-sm" style="background:#dc2626;color:white" onclick="return confirm('Write off this expired drug?')">Write Off</button></form></td></tr>`).join('')}</table></div>` : ''}
+    ${expiringSoon.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #f59e0b"><h3 style="color:#d97706">EXPIRING SOON (${expiringSoon.rows.length})</h3><table><tr><th>Drug</th><th>Batch</th><th>Qty</th><th>Expiry Date</th><th>Days Left</th></tr>${expiringSoon.rows.map(d=>{const days=Math.ceil((new Date(d.expiry_date)-new Date())/(1000*60*60*24));return `<tr style="background:#fef3c7"><td>${esc(d.medicine_name)}</td><td>${esc(d.batch_number||'-')}</td><td>${d.quantity}</td><td>${new Date(d.expiry_date).toLocaleDateString()}</td><td style="font-weight:700;color:${days<30?'#dc2626':'#d97706'}">${days}d</td></tr>`;}).join('')}</table></div>` : ''}
+    ${lowStock.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #3b82f6"><h3 style="color:#3b82f6">LOW STOCK (${lowStock.rows.length})</h3><table><tr><th>Drug</th><th>Current Qty</th><th>Reorder Level</th><th>Category</th></tr>${lowStock.rows.map(d=>`<tr style="background:#dbeafe"><td>${esc(d.medicine_name)}</td><td style="font-weight:700;color:#dc2626">${d.quantity}</td><td>${d.reorder_level}</td><td>${esc(d.category||'')}</td></tr>`).join('')}</table></div>` : ''}
+    ${expired.rows.length===0 && expiringSoon.rows.length===0 && lowStock.rows.length===0 ? '<div class="card" style="text-align:center;padding:40px;color:#059669"><h2>All Clear!</h2><p>No pharmacy alerts at this time.</p></div>' : ''}
+  `, req.session.user));
+}));
+
+app.post('/clinic/pharmacy/inventory/:id/writeoff', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const item = (await pool.query("SELECT * FROM pharmacy_inventory WHERE id=$1 AND tenant_id=$2", [req.params.id, t])).rows[0];
+  if (!item) return res.redirect('/clinic/pharmacy/expiry-alerts');
+  const prevQty = item.quantity;
+  await pool.query("UPDATE pharmacy_inventory SET quantity=0 WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+  // Record in stock movements
+  await pool.query("INSERT INTO pharmacy_stock_movements(tenant_id,drug_id,medicine_name,movement_type,quantity,previous_quantity,new_quantity,reference_type,reference_id,batch_number,expiry_date,notes,performed_by) VALUES($1,$2,$3,'expiry_writeoff',$4,$5,0,'expiry',NULL,$6,$7,'Expired stock written off',$8)", [t, item.id, item.medicine_name, prevQty, prevQty, item.batch_number||null, item.expiry_date||null, req.session.user.email]);
+  await audit(req.session.user.email, 'expiry_writeoff', { drug: item.medicine_name, qty: prevQty });
+  res.redirect('/clinic/pharmacy/expiry-alerts');
+}));
+
+// --- FEATURE 7: PRESCRIPTION REFILL WORKFLOW ---
+app.get('/clinic/prescriptions/refill-requests', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const requests = (await pool.query("SELECT * FROM prescription_refills WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
+  res.send(renderPage('Refill Requests', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)"><h1>Prescription Refill Requests</h1><p>Manage patient medication refill requests</p></div>
+    ${requests.length > 0 ? `<div class="card"><table><tr><th>Date</th><th>Patient</th><th>Rx #</th><th>Medicine</th><th>Status</th><th>Actions</th></tr>${requests.map(r=>`<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${esc(r.patient_name||'')}</td><td>#${r.prescription_id}</td><td>${esc(r.medicine_name||'')}</td><td><span class="tag" style="background:${r.status==='pending'?'#f59e0b':r.status==='approved'?'#d1fae5':'#fee2e2'}">${esc(r.status)}</span></td><td>${r.status==='pending'?`<form method="POST" action="/clinic/prescriptions/refill/${r.id}/approve" style="display:inline"><button class="btn btn-sm btn-green">Approve</button></form> <form method="POST" action="/clinic/prescriptions/refill/${r.id}/reject" style="display:inline"><button class="btn btn-sm" style="background:#dc2626;color:white">Reject</button></form>`:''}</td></tr>`).join('')}</table></div>` : '<div class="card" style="text-align:center;padding:40px"><p class="muted">No refill requests at this time.</p></div>'}
+  `, req.session.user));
+}));
+
+// Ensure prescription_refills table exists
+(async () => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS prescription_refills (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      prescription_id INTEGER NOT NULL,
+      item_id INTEGER,
+      patient_name VARCHAR(255),
+      medicine_name VARCHAR(255),
+      requested_by VARCHAR(255),
+      status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      reviewed_at TIMESTAMPTZ
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_rx_refills_tenant ON prescription_refills(tenant_id)');
+  } catch(e) { console.warn('[v12] prescription_refills:', e.message); }
+})();
+
+// Update patient portal refill endpoint to store request
+const origRefillHandler = null; // Will be intercepted below
+
+app.post('/clinic/prescriptions/refill/:id/approve', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("UPDATE prescription_refills SET status='approved', reviewed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
+  await audit(req.session.user.email, 'refill_approved', { refill_id: req.params.id });
+  res.redirect('/clinic/prescriptions/refill-requests');
+}));
+
+app.post('/clinic/prescriptions/refill/:id/reject', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("UPDATE prescription_refills SET status='rejected', reviewed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
+  await audit(req.session.user.email, 'refill_rejected', { refill_id: req.params.id });
+  res.redirect('/clinic/prescriptions/refill-requests');
+}));
+
+// --- FEATURE 8: AUTOMATED VITALS ALERTS ---
+// Flag abnormal vitals with WebSocket notification
+const VITAL_ALERTS = {
+  temp_high: 39.5, temp_low: 35.0,
+  bp_systolic_high: 180, bp_systolic_low: 80,
+  bp_diastolic_high: 120, bp_diastolic_low: 50,
+  hr_high: 150, hr_low: 40,
+  spo2_low: 90, spo2_critical: 85,
+  pain_high: 8
+};
+
+function checkVitalAlerts(tenantId, vitals) {
+  const alerts = [];
+  if (vitals.temperature) {
+    if (vitals.temperature >= VITAL_ALERTS.temp_high) alerts.push({ level: 'critical', message: `Critical temperature: ${vitals.temperature}C`, metric: 'temperature' });
+    else if (vitals.temperature > 38.0) alerts.push({ level: 'warning', message: `Fever: ${vitals.temperature}C`, metric: 'temperature' });
+    else if (vitals.temperature <= VITAL_ALERTS.temp_low) alerts.push({ level: 'critical', message: `Hypothermia: ${vitals.temperature}C`, metric: 'temperature' });
+  }
+  if (vitals.bp_systolic) {
+    if (vitals.bp_systolic >= VITAL_ALERTS.bp_systolic_high || (vitals.bp_diastolic && vitals.bp_diastolic >= VITAL_ALERTS.bp_diastolic_high))
+      alerts.push({ level: 'critical', message: `Hypertensive crisis: ${vitals.bp_systolic}/${vitals.bp_diastolic}`, metric: 'blood_pressure' });
+    else if (vitals.bp_systolic >= 140 || (vitals.bp_diastolic && vitals.bp_diastolic >= 90))
+      alerts.push({ level: 'warning', message: `High BP: ${vitals.bp_systolic}/${vitals.bp_diastolic}`, metric: 'blood_pressure' });
+  }
+  if (vitals.heart_rate) {
+    if (vitals.heart_rate >= VITAL_ALERTS.hr_high) alerts.push({ level: 'critical', message: `Tachycardia: ${vitals.heart_rate} bpm`, metric: 'heart_rate' });
+    else if (vitals.heart_rate <= VITAL_ALERTS.hr_low) alerts.push({ level: 'critical', message: `Bradycardia: ${vitals.heart_rate} bpm`, metric: 'heart_rate' });
+  }
+  if (vitals.spo2) {
+    if (vitals.spo2 <= VITAL_ALERTS.spo2_critical) alerts.push({ level: 'critical', message: `Critical SpO2: ${vitals.spo2}%`, metric: 'spo2' });
+    else if (vitals.spo2 <= VITAL_ALERTS.spo2_low) alerts.push({ level: 'warning', message: `Low SpO2: ${vitals.spo2}%`, metric: 'spo2' });
+  }
+  if (vitals.pain_score && vitals.pain_score >= VITAL_ALERTS.pain_high) alerts.push({ level: 'warning', message: `Severe pain: ${vitals.pain_score}/10`, metric: 'pain' });
+  
+  if (alerts.length > 0) {
+    wsBroadcast(tenantId, { type: 'vital_alert', patient: vitals.patient_name, alerts, timestamp: new Date().toISOString() });
+    alerts.forEach(a => console.log(`[VITAL ALERT] Tenant ${tenantId}: ${a.level} - ${a.message} (${vitals.patient_name})`));
+  }
+  return alerts;
+}
+
+// --- FEATURE 9: PRINTABLE PRESCRIPTIONS ---
+app.get('/clinic/prescriptions/:id/print', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const rx = (await pool.query('SELECT p.*, cs.name as doctor FROM prescriptions p LEFT JOIN clinic_staff cs ON p.doctor_id=cs.id WHERE p.tenant_id=$1 AND p.id=$2', [t, req.params.id])).rows[0];
+  if (!rx) return res.status(404).send('Not found');
+  const items = (await pool.query('SELECT * FROM prescription_items WHERE prescription_id=$1', [rx.id])).rows;
+  const tenant = (await pool.query('SELECT name, business_type, subdomain FROM tenants WHERE id=$1', [t])).rows[0];
+  
+  res.send(`<!DOCTYPE html><html><head><title>Prescription #${rx.id}</title>
+    <style>
+      body{font-family:Arial,sans-serif;margin:40px;color:#333}
+      .header{display:flex;justify-content:space-between;border-bottom:3px double #333;padding-bottom:15px;margin-bottom:20px}
+      .header h1{margin:0;font-size:24px;color:#1a5632}
+      .header p{margin:2px 0;color:#666;font-size:13px}
+      .rx-content{margin:20px 0}
+      .patient-info{background:#f8fafc;padding:15px;border-radius:6px;margin-bottom:20px}
+      .patient-info div{margin:4px 0}
+      table{width:100%;border-collapse:collapse;margin:15px 0}
+      th,td{border:1px solid #ddd;padding:8px;text-align:left;font-size:13px}
+      th{background:#f1f5f9;font-weight:600}
+      .footer{margin-top:60px;display:flex;justify-content:space-between}
+      .signature{width:200px;text-align:center;border-top:1px solid #333;padding-top:5px;font-size:12px}
+      @media print{body{margin:20px}.no-print{display:none}}
+    </style></head><body>
+    <div class="header"><div><h1>${esc(tenant?.name||'Health Facility')}</h1><p>${esc(tenant?.business_type||'Healthcare Facility')}</p><p>${esc(tenant?.subdomain||'')}.comfort.ug</p></div><div style="text-align:right"><h2 style="margin:0;color:#1a5632">PRESCRIPTION</h2><p>#${rx.id}</p><p>${new Date(rx.created_at).toLocaleDateString()}</p></div></div>
+    <div class="patient-info"><div><strong>Patient:</strong> ${esc(rx.patient_name)}</div><div><strong>Doctor:</strong> ${esc(rx.doctor_name||rx.doctor||'-')}</div>${rx.diagnosis?`<div><strong>Diagnosis:</strong> ${esc(rx.diagnosis)}</div>`:''}</div>
+    <table><thead><tr><th>#</th><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Qty</th><th>Instructions</th></tr></thead><tbody>${items.map((item,i)=>`<tr><td>${i+1}</td><td><strong>${esc(item.medicine_name)}</strong></td><td>${esc(item.dosage||'-')}</td><td>${esc(item.frequency||'-')}</td><td>${esc(item.duration||'-')}</td><td>${item.quantity}</td><td>${esc(item.instructions||'-')}</td></tr>`).join('')}</tbody></table>
+    ${rx.notes?`<p><strong>Notes:</strong> ${esc(rx.notes)}</p>`:''}
+    <div class="footer"><div class="signature">Prescribing Doctor<br><br>${esc(rx.doctor_name||'')}</div><div class="signature">Dispensing Pharmacist<br><br><br></div></div>
+    <div class="no-print" style="margin-top:20px;text-align:center"><button onclick="window.print()" style="padding:10px 30px;background:#059669;color:white;border:none;border-radius:6px;font-size:16px;cursor:pointer">Print Prescription</button></div>
+    </body></html>`);
+}));
+
+// --- FEATURE 10: PATIENT CONSENT MANAGEMENT ---
+(async () => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS patient_consent (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      patient_id INTEGER,
+      patient_type VARCHAR(20),
+      patient_name VARCHAR(255) NOT NULL,
+      consent_type VARCHAR(100) NOT NULL,
+      consent_status VARCHAR(20) DEFAULT 'signed' CHECK (consent_status IN ('signed','declined','revoked','expired')),
+      details TEXT,
+      signed_by VARCHAR(255),
+      signed_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_consent_tenant ON patient_consent(tenant_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_consent_patient ON patient_consent(patient_id)');
+  } catch(e) { console.warn('[v12] patient_consent:', e.message); }
+})();
+
+app.get('/clinic/consent/:type/:id/new', requireAuth, requireNotBanned, requireFeature('patient_ehr'), (req, res) => {
+  const consentTypes = ['treatment', 'surgery', 'blood_transfusion', 'data_privacy', 'photography', 'research', 'telemedicine', 'discharge'];
+  const consentLabels = { treatment: 'Consent to Treatment', surgery: 'Consent to Surgery', blood_transfusion: 'Consent to Blood Transfusion', data_privacy: 'Data Privacy Consent (HIPAA)', photography: 'Photography/Recording Consent', research: 'Research Participation Consent', telemedicine: 'Telemedicine Consent', discharge: 'Discharge Against Medical Advice' };
+  res.send(renderPage('Record Patient Consent', `
+    <div class="card" style="max-width:600px;margin:0 auto"><h2>Record Patient Consent</h2>
+    <form method="POST" action="/clinic/consent/${req.params.type}/${req.params.id}/save">
+      <input type="hidden" name="patient_type" value="${req.params.type}">
+      <input type="hidden" name="patient_id" value="${req.params.id}">
+      <div><label>Consent Type *</label><select name="consent_type" required>${consentTypes.map(ct=>`<option value="${ct}">${consentLabels[ct]||ct}</option>`).join('')}</select></div>
+      <div style="margin-top:12px"><label>Status *</label><select name="consent_status"><option value="signed">Signed</option><option value="declined">Declined</option></select></div>
+      <div style="margin-top:12px"><label>Details / Notes</label><textarea name="details" rows="3"></textarea></div>
+      <button class="btn btn-green" style="width:100%;margin-top:16px">Record Consent</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/clinic/consent/:type/:id/save', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { consent_type, consent_status, details } = req.body;
+  await pool.query('INSERT INTO patient_consent(tenant_id,patient_id,patient_type,patient_name,consent_type,consent_status,details,signed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, req.params.id, req.params.type, req.body.patient_name||'Patient', consent_type, consent_status||'signed', details||null, req.session.user.email]);
+  await audit(req.session.user.email, 'consent_recorded', { patient_id: req.params.id, consent_type });
+  res.redirect(`/clinic/patient/${req.params.type}/${req.params.id}/ehr`);
+}));
+
+console.log('[v12] All v12 health features loaded successfully');
 
 server.listen(PORT, () => {
   console.log(`Comfort Platform LIVE on ${PORT}`);

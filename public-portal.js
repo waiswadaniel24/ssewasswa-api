@@ -4,6 +4,12 @@
 // ============================================================
 module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger) {
 
+  // === RATE LIMITING ===
+  const rateLimit = require('express-rate-limit');
+  const contactLimiter = rateLimit({ windowMs: 15*60*1000, max: 5, message: 'Too many messages. Please try again later.', standardHeaders: true, legacyHeaders: false });
+  const registerLimiter = rateLimit({ windowMs: 60*60*1000, max: 3, message: 'Too many registration attempts. Please try again later.', standardHeaders: true, legacyHeaders: false });
+  const portalLimiter = rateLimit({ windowMs: 60*1000, max: 30, message: 'Too many requests. Please slow down.', standardHeaders: true, legacyHeaders: false });
+
   // === MIGRATIONS ===
   const migrations = [
     `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sub_type VARCHAR(100)`,
@@ -517,16 +523,30 @@ input:focus,textarea:focus{outline:none;border-color:#4f46e5}textarea{min-height
 </div></body></html>`);
   });
 
-  app.post('/contact', ah(async (req, res) => {
+  app.post('/contact', contactLimiter, ah(async (req, res) => {
     const { name, email, phone, subject, message } = req.body;
     // Validate inputs
     if (!name || !email || !message || name.length > 255 || email.length > 255 || (subject && subject.length > 255) || message.length > 5000) {
       return res.status(400).send('Invalid input. Please check your entries.');
     }
+    // Email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).send('Invalid email format.');
+    }
+    // Phone validation (optional, but if provided must be reasonable)
+    if (phone && phone.length > 20) {
+      return res.status(400).send('Invalid phone number.');
+    }
     // Sanitize subject to prevent email header injection
     const safeSubject = (subject || 'Contact Form Inquiry').replace(/[\r\n]/g, '').substring(0, 255);
-    await pool.query('INSERT INTO contact_messages(name,email,phone,subject,message) VALUES($1,$2,$3,$4,$5)', [name, email, phone, safeSubject, message]);
-    sendEmail('hello@comfort.ug', 'Contact: ' + safeSubject, '<p><strong>' + esc(name) + '</strong> (' + esc(email) + ')</p><p>' + esc(message) + '</p>');
+    try {
+      await pool.query('INSERT INTO contact_messages(name,email,phone,subject,message) VALUES($1,$2,$3,$4,$5)', [name, email, phone, safeSubject, message]);
+    } catch (e) {
+      if (logger) logger.error('Contact form DB insert failed', e);
+      return res.status(500).send('Something went wrong. Please try again.');
+    }
+    try { sendEmail('hello@comfort.ug', 'Contact: ' + safeSubject, '<p><strong>' + esc(name) + '</strong> (' + esc(email) + ')</p><p>' + esc(message) + '</p>'); } catch (e) { if (logger) logger.warn('Contact email send failed', e); }
     res.send('<div style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">✅</div><h1>Message Sent!</h1><p style="color:#64748b">We\'ll get back to you within 24 hours.</p><a href="/" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Back to Home</a></div>');
   }));
 
@@ -579,8 +599,10 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
   });
 
   // Tenant public profile (public-only, must not intercept authenticated portal routes)
-  app.get('/portal/:subdomain', ah(async (req, res, next) => {
+  app.get('/portal/:subdomain', portalLimiter, ah(async (req, res, next) => {
     const subdomain = req.params.subdomain;
+    // Security: validate subdomain format to prevent injection attacks
+    if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(subdomain)) return res.status(400).send('Invalid subdomain');
     // If user is authenticated, let the authenticated portal routes handle it
     if (req.session && req.session.user) return next();
     // Skip reserved system routes — redirect to the actual page
@@ -590,7 +612,7 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
     const portalTypes = ['school','clinic','health','church','organization','business','individual','hotel','restaurant','retail','salon','pharmacy','gym','hardware','supermarket','transport','electronics'];
     if (portalTypes.includes(subdomain)) return next();
     // Look up tenant by subdomain for the public profile page
-    const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.subdomain])).rows[0];
+    const tenant = (await pool.query('SELECT id, name, type, subdomain, logo_url, description, address, phone, email, approved, business_type FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.subdomain])).rows[0];
     if (!tenant) return res.status(404).send('<div style="text-align:center;padding:60px"><h1>Institution Not Found</h1><p style="color:#64748b">This institution does not exist or is not approved.</p><a href="/">Go to Comfort Home</a></div>');
     const typeLabels = {school:'School',clinic:'Clinic',health:'Health Center',church:'Church',hotel:'Hotel/Lodge',restaurant:'Restaurant',retail:'Retail Shop',salon:'Salon/Spa',pharmacy:'Pharmacy',gym:'Gym/Fitness',hardware:'Hardware Store',supermarket:'Supermarket',transport:'Transport',electronics:'Electronics Shop',business:'Business',individual:'Individual',organization:'Organization'};
     const healthTypeLabels = {general_hospital:'General Hospital',health_center_iii:'Health Center III',health_center_iv:'Health Center IV',clinic:'Medical Clinic',dental:'Dental Clinic',eye_clinic:'Eye Clinic',mental_health:'Mental Health Facility',physiotherapy:'Physiotherapy Center',lab:'Medical Laboratory',imaging:'Imaging & Radiology Center',maternity:'Maternity Center',pharmacy:'Pharmacy',veterinary:'Veterinary Clinic',special:'Specialized Hospital'};
@@ -826,8 +848,8 @@ img{max-width:100%}
     <div class="hero-stats">
       <div class="hero-stat"><div class="num">${doctors.length}</div><div class="lbl">Doctors</div></div>
       <div class="hero-stat"><div class="num">${nurses.length}</div><div class="lbl">Nurses</div></div>
-      <div class="hero-stat"><div class="num">${patientCount > 0 ? (patientCount >= 1000 ? (patientCount/1000).toFixed(1)+'K' : patientCount) : '500+'}</div><div class="lbl">Patients Served</div></div>
-      ${reviews.length > 0 ? '<div class="hero-stat"><div class="num">'+reviews[0].rating?.toFixed(1)+'</div><div class="lbl">Avg Rating</div></div>' : '<div class="hero-stat"><div class="num">5.0</div><div class="lbl">Rating</div></div>'}
+      <div class="hero-stat"><div class="num">${patientCount > 0 ? (patientCount >= 1000 ? (patientCount/1000).toFixed(1)+'K' : patientCount) : '<span style="font-size:14px">New</span>'}</div><div class="lbl">Patients Served</div></div>
+      ${reviews.length > 0 ? '<div class="hero-stat"><div class="num">'+reviews[0].rating?.toFixed(1)+'</div><div class="lbl">Avg Rating</div></div>' : '<div class="hero-stat"><div class="num">No reviews yet</div><div class="lbl">Rating</div></div>'}
     </div>
   </div>
 </div>
@@ -913,7 +935,7 @@ ${reviews.length > 0 ? `
     <div class="card">
       ${reviews.map(r => `
       <div class="review-card">
-        <div class="review-header"><span class="review-name">${esc(r.patient_name || 'Anonymous')}</span><span class="review-date">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</span></div>
+        <div class="review-header"><span class="review-name">${esc(r.patient_name || '').split(' ').map(n => n.charAt(0).toUpperCase()).join('.') || 'Anonymous'}</span><span class="review-date">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</span></div>
         <div class="review-stars">${renderStars(r.rating)}</div>
         ${r.comment ? '<div class="review-text">'+esc(r.comment)+'</div>' : ''}
       </div>`).join('')}
