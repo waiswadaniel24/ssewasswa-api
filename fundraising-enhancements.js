@@ -778,6 +778,136 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       registration_status TEXT DEFAULT 'registered' CHECK (registration_status IN ('registered','confirmed','cancelled','attended','no_show')),
       ticket_code TEXT,
       registered_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // =============================================
+    // V4 TABLES - Additional Success Features
+    // =============================================
+
+    // Donation gift cards
+    `CREATE TABLE IF NOT EXISTS donation_gift_cards (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      card_code TEXT UNIQUE NOT NULL,
+      amount INTEGER NOT NULL,
+      purchaser_name TEXT,
+      purchaser_email TEXT NOT NULL,
+      recipient_name TEXT NOT NULL,
+      recipient_email TEXT NOT NULL,
+      message TEXT,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active','redeemed','expired','cancelled')),
+      redeemed_by TEXT,
+      redeemed_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign challenges/competitions
+    `CREATE TABLE IF NOT EXISTS campaign_challenges (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT,
+      challenge_type TEXT DEFAULT 'most_raised' CHECK (challenge_type IN ('most_raised','most_donors','fastest_goal','highest_percentage','most_shared','community_impact')),
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      prize_description TEXT,
+      max_participants INTEGER DEFAULT 20,
+      participant_count INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'upcoming' CHECK (status IN ('upcoming','active','completed','cancelled')),
+      is_public BOOLEAN DEFAULT true,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Challenge participants
+    `CREATE TABLE IF NOT EXISTS challenge_participants (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      challenge_id INTEGER REFERENCES campaign_challenges(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      joined_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(challenge_id, campaign_id)
+    )`,
+
+    // Campaign ambassadors
+    `CREATE TABLE IF NOT EXISTS campaign_ambassadors (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      ambassador_name TEXT NOT NULL,
+      ambassador_email TEXT NOT NULL,
+      ambassador_photo TEXT,
+      motivation TEXT,
+      promotion_plan TEXT,
+      social_reach INTEGER DEFAULT 0,
+      referrals_count INTEGER DEFAULT 0,
+      total_donated INTEGER DEFAULT 0,
+      tier TEXT DEFAULT 'bronze' CHECK (tier IN ('bronze','silver','gold','platinum')),
+      status TEXT DEFAULT 'active' CHECK (status IN ('pending','active','suspended','retired')),
+      joined_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(campaign_id, ambassador_email)
+    )`,
+
+    // Campaign merchandise
+    `CREATE TABLE IF NOT EXISTS campaign_merchandise (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      item_name TEXT NOT NULL,
+      description TEXT,
+      price INTEGER NOT NULL,
+      image_url TEXT,
+      quantity_available INTEGER,
+      quantity_sold INTEGER DEFAULT 0,
+      is_donation BOOLEAN DEFAULT true,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Community board posts
+    `CREATE TABLE IF NOT EXISTS campaign_community_posts (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      author_name TEXT NOT NULL,
+      author_email TEXT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      post_type TEXT DEFAULT 'discussion' CHECK (post_type IN ('discussion','question','idea','celebration','update')),
+      likes INTEGER DEFAULT 0,
+      replies_count INTEGER DEFAULT 0,
+      is_pinned BOOLEAN DEFAULT false,
+      status TEXT DEFAULT 'visible' CHECK (status IN ('visible','hidden','flagged')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Donor segments for targeted communications
+    `CREATE TABLE IF NOT EXISTS donor_segments (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      segment_name TEXT NOT NULL,
+      segment_type TEXT DEFAULT 'custom' CHECK (segment_type IN ('top_donors','new_donors','recurring','lapsed','custom','high_value','at_risk')),
+      criteria JSONB DEFAULT '{}',
+      donor_count INTEGER DEFAULT 0,
+      last_calculated TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign translations for multi-language
+    `CREATE TABLE IF NOT EXISTS campaign_translations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      language TEXT NOT NULL DEFAULT 'en',
+      title TEXT,
+      description TEXT,
+      story TEXT,
+      impact_summary TEXT,
+      translated_by TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(campaign_id, language)
     )`
   ];
 
@@ -924,6 +1054,26 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     `CREATE INDEX IF NOT EXISTS idx_campaign_event_registrations_tenant ON campaign_event_registrations(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_event_registrations_event ON campaign_event_registrations(event_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_update_notifications_tenant ON campaign_update_notifications(tenant_id)`,
+    // V4 Indexes
+    `CREATE INDEX IF NOT EXISTS idx_donation_gift_cards_tenant ON donation_gift_cards(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donation_gift_cards_code ON donation_gift_cards(card_code)`,
+    `CREATE INDEX IF NOT EXISTS idx_donation_gift_cards_email ON donation_gift_cards(purchaser_email)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_challenges_tenant ON campaign_challenges(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_challenges_status ON campaign_challenges(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_challenge_participants_tenant ON challenge_participants(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_challenge_participants_challenge ON challenge_participants(challenge_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_ambassadors_tenant ON campaign_ambassadors(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_ambassadors_campaign ON campaign_ambassadors(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_merchandise_tenant ON campaign_merchandise(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_merchandise_campaign ON campaign_merchandise(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_community_posts_tenant ON campaign_community_posts(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_community_posts_campaign ON campaign_community_posts(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_segments_tenant ON donor_segments(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_translations_tenant ON campaign_translations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_translations_campaign ON campaign_translations(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_translations_language ON campaign_translations(language)`,
+    // V4: Add gift_card_balance to donor_profiles
+    `ALTER TABLE donor_profiles ADD COLUMN IF NOT EXISTS gift_card_balance INTEGER DEFAULT 0`,
   ];
 
   // Run migrations
@@ -3515,6 +3665,598 @@ Sitemap: ${BASE_URL}/sitemap.xml
   const originalProcessDonation = processDonationEffects;
   // We'll update streaks directly in the donate-save flow
 
-  console.log('[Fundraising Enhancements] All routes registered successfully');
-  console.log('[Fundraising V3] Verification Badges, Rewards/Tiers, Wishlists, Volunteers, Endorsements, Donor Streaks, Collaboration, Tipping, Retention Analytics, Success Score, Events, FAQ + All V2 Features');
+  console.log('[Fundraising V4] Donation Gift Cards, Challenges, Ambassadors, Impact Reports, Smart Suggestions, Merchandise, Community Board, Donor Segmentation, Health Monitor, Multi-Language + All V3 Features');
+
+  // =============================================
+  // V4 FEATURE 1: DONATION GIFT CARDS
+  // =============================================
+
+  app.get('/gift-cards', ah(async (req, res) => {
+    const giftCards = req.session.user ? (await pool.query('SELECT * FROM donation_gift_cards WHERE purchaser_email=$1 ORDER BY created_at DESC LIMIT 20', [req.session.user.email])).rows : [];
+    res.send(renderPage('Donation Gift Cards', `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="background:linear-gradient(135deg,#f59e0b,#f97316);padding:40px;border-radius:20px;color:white;text-align:center;margin-bottom:24px">
+          <div style="font-size:48px;margin-bottom:12px">&#127873;</div>
+          <h1 style="font-size:32px;font-weight:900;margin:0 0 8px 0">Donation Gift Cards</h1>
+          <p style="font-size:18px;opacity:0.9">Give the gift of giving! Let someone special choose a cause they care about.</p>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin-bottom:24px">
+          <div style="background:white;border-radius:16px;padding:24px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:2px solid #f59e0b;cursor:pointer" onclick="document.getElementById('amount25').checked=true">
+            <div style="font-size:36px;font-weight:900;color:#f59e0b">UGX 25,000</div>
+            <p style="color:#64748b">Starter Gift</p>
+          </div>
+          <div style="background:white;border-radius:16px;padding:24px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:2px solid #059669;cursor:pointer" onclick="document.getElementById('amount50').checked=true">
+            <div style="font-size:36px;font-weight:900;color:#059669">UGX 50,000</div>
+            <p style="color:#64748b">Popular Gift</p>
+          </div>
+          <div style="background:white;border-radius:16px;padding:24px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:2px solid #4f46e5;cursor:pointer" onclick="document.getElementById('amount100').checked=true">
+            <div style="font-size:36px;font-weight:900;color:#4f46e5">UGX 100,000</div>
+            <p style="color:#64748b">Premium Gift</p>
+          </div>
+          <div style="background:white;border-radius:16px;padding:24px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:2px solid #7c3aed;cursor:pointer">
+            <div style="font-size:36px;font-weight:900;color:#7c3aed">Custom</div>
+            <p style="color:#64748b">Any Amount</p>
+          </div>
+        </div>
+        ${req.session.user ? '<div class="card"><h3>Purchase a Gift Card</h3><form method="POST" action="/gift-cards/purchase"><label>Amount (UGX)</label><input name="amount" type="number" placeholder="50000" required><label>Recipient Name</label><input name="recipient_name" placeholder="Jane Doe" required><label>Recipient Email</label><input name="recipient_email" type="email" placeholder="jane@example.com" required><label>Personal Message</label><textarea name="message" rows="3" placeholder="Happy Birthday! Choose a cause close to your heart."></textarea><label>Your Name</label><input name="purchaser_name" value="'+esc(req.session.user?.name||'')+'"><button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Purchase Gift Card</button></form></div>' : '<div style="text-align:center;padding:20px"><a href="/register" class="btn btn-green" style="padding:14px 32px;font-size:16px">Sign Up to Purchase Gift Cards</a></div>'}
+        ${giftCards.length > 0 ? '<div class="card" style="margin-top:20px"><h3>Your Gift Cards</h3><table><tr><th>Code</th><th>Amount</th><th>Recipient</th><th>Status</th></tr>'+giftCards.map(gc => '<tr><td style="font-family:monospace;font-weight:700">'+esc(gc.card_code)+'</td><td>UGX '+parseInt(gc.amount).toLocaleString()+'</td><td>'+esc(gc.recipient_name)+'</td><td><span class="tag" style="background:'+(gc.status==='active'?'#d1fae5;color:#065f46':gc.status==='redeemed'?'#e0e7ff;color:#3730a3':'#f1f5f9;color:#64748b')+'">'+esc(gc.status)+'</span></td></tr>').join('')+'</table></div>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/gift-cards/purchase', requireAuth, ah(async (req, res) => {
+    const { amount, recipient_name, recipient_email, message, purchaser_name } = req.body;
+    const cardCode = 'GFT-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2,6).toUpperCase();
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO donation_gift_cards(tenant_id,card_code,amount,purchaser_name,purchaser_email,recipient_name,recipient_email,message) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+      [t, cardCode, amount, purchaser_name||req.session.user.name, req.session.user.email, recipient_name, recipient_email, message||'']);
+    // Send email to recipient
+    try {
+      const purchaserN = purchaser_name || req.session.user.name || 'Someone';
+      await sendEmail(recipient_email, 'You Received a Donation Gift Card!', `
+        <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+          <div style="background:linear-gradient(135deg,#f59e0b,#f97316);padding:30px;border-radius:12px 12px 0 0;text-align:center;color:white"><h1>You Got a Gift Card!</h1></div>
+          <div style="padding:30px;background:white;border:1px solid #e2e8f0">
+            <p>${esc(purchaserN)} sent you a donation gift card worth <strong style="color:#f59e0b;font-size:24px">UGX ${parseInt(amount).toLocaleString()}</strong>!</p>
+            ${message ? '<p style="font-style:italic;color:#64748b">"${esc(message)}"</p>' : ''}
+            <p>Use this code to donate to any campaign: <strong style="font-family:monospace;font-size:20px;background:#fef3c7;padding:4px 12px;border-radius:6px">${esc(cardCode)}</strong></p>
+            <a href="${BASE_URL}/discover" style="display:inline-block;padding:12px 24px;background:#059669;color:white;border-radius:8px;text-decoration:none;font-weight:700;margin-top:16px">Browse Campaigns</a>
+          </div>
+        </div>
+      `);
+    } catch(e) { console.warn('[Gift Card Email Error]', e.message); }
+    res.send(renderPage('Gift Card Purchased!', `
+      <div style="max-width:500px;margin:0 auto;padding:20px;text-align:center">
+        <div style="background:linear-gradient(135deg,#f59e0b,#f97316);padding:40px;border-radius:16px;color:white;margin-bottom:24px">
+          <div style="font-size:48px;margin-bottom:12px">&#127873;</div>
+          <h1>Gift Card Sent!</h1>
+          <p>Your gift card of UGX ${parseInt(amount).toLocaleString()} has been sent to ${esc(recipient_name)}</p>
+          <div style="background:rgba(255,255,255,0.2);padding:16px;border-radius:12px;margin-top:16px">
+            <div style="font-size:13px;opacity:0.8">Gift Card Code</div>
+            <div style="font-size:24px;font-weight:800;letter-spacing:2px">${esc(cardCode)}</div>
+          </div>
+        </div>
+        <a href="/gift-cards" class="btn btn-green">Buy Another Gift Card</a>
+      </div>
+    `, req.session.user));
+  }));
+
+  // Redeem gift card
+  app.get('/gift-cards/redeem', requireAuth, ah(async (req, res) => {
+    res.send(renderPage('Redeem Gift Card', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/gift-cards/redeem-save" class="card">
+          <h2>Redeem Your Gift Card</h2>
+          <p style="color:#64748b">Enter your gift card code to add funds to your donor balance</p>
+          <label>Gift Card Code</label><input name="card_code" placeholder="GFT-XXXXXX" style="font-family:monospace;font-size:18px;text-align:center" required>
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Redeem</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/gift-cards/redeem-save', requireAuth, ah(async (req, res) => {
+    const { card_code } = req.body;
+    const gc = (await pool.query("SELECT * FROM donation_gift_cards WHERE card_code=$1 AND status='active'", [card_code])).rows[0];
+    if (!gc) return res.send(renderPage('Invalid Gift Card', '<div style="text-align:center;padding:40px"><h2 style="color:#ef4444">Invalid or Already Used</h2><p>This gift card code is not valid or has already been redeemed.</p><a href="/gift-cards/redeem" class="btn">Try Again</a></div>', req.session.user));
+    await pool.query("UPDATE donation_gift_cards SET status='redeemed', redeemed_by=$1, redeemed_at=NOW() WHERE id=$2", [req.session.user.email, gc.id]);
+    // Add to user's donor balance or create a credit
+    await pool.query(`INSERT INTO donor_profiles(tenant_id,user_email,full_name,gift_card_balance) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id, user_email) DO UPDATE SET gift_card_balance=COALESCE(gift_card_balance,0)+$4`,
+      [gc.tenant_id, req.session.user.email, req.session.user.name||'', gc.amount]);
+    res.send(renderPage('Gift Card Redeemed!', `
+      <div style="text-align:center;padding:40px">
+        <div style="font-size:48px;margin-bottom:16px">&#9989;</div>
+        <h1 style="color:#059669">Gift Card Redeemed!</h1>
+        <p style="font-size:20px">UGX ${parseInt(gc.amount).toLocaleString()} has been added to your donor balance</p>
+        <a href="/discover" class="btn btn-green" style="margin-top:16px">Browse Campaigns to Donate</a>
+      </div>
+    `, req.session.user));
+  }));
+
+  // =============================================
+  // V4 FEATURE 2: CAMPAIGN CHALLENGES/COMPETITIONS
+  // =============================================
+
+  app.get('/challenges', ah(async (req, res) => {
+    const challenges = (await pool.query("SELECT cc.*, t.name as org_name FROM campaign_challenges cc JOIN tenants t ON cc.tenant_id=t.id WHERE cc.is_public=true ORDER BY cc.created_at DESC LIMIT 20")).rows;
+    res.send(renderPage('Fundraising Challenges', `
+      <div style="max-width:1000px;margin:0 auto;padding:20px">
+        <div style="background:linear-gradient(135deg,#7c3aed,#ec4899);padding:40px;border-radius:20px;color:white;text-align:center;margin-bottom:24px">
+          <div style="font-size:48px;margin-bottom:12px">&#127942;</div>
+          <h1 style="font-size:32px;font-weight:900;margin:0 0 8px 0">Fundraising Challenges</h1>
+          <p style="font-size:18px;opacity:0.9">Compete with other organizations. Rise up the leaderboard!</p>
+        </div>
+        ${challenges.length > 0 ? '<div style="display:grid;gap:20px">' + challenges.map(ch => {
+          const daysLeft = ch.end_date ? Math.max(0, Math.ceil((new Date(ch.end_date) - new Date()) / (1000*60*60*24))) : 999;
+          return '<div style="background:white;border-radius:16px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.08)"><div style="display:flex;justify-content:space-between;align-items:start"><div><h3 style="font-size:22px;font-weight:800">'+esc(ch.title)+'</h3><p style="color:#64748b;margin:4px 0">'+esc(ch.description||'')+'</p></div><div style="text-align:right"><span class="tag" style="background:'+({active:'#d1fae5;color:#065f46',completed:'#e0e7ff;color:#3730a3',upcoming:'#fef3c7;color:#92400e'}[ch.status]||'#f1f5f9')+'">'+esc(ch.status)+'</span>'+(daysLeft<999?'<div style="font-size:20px;font-weight:800;color:'+(daysLeft<=3?'#ef4444':daysLeft<=7?'#f59e0b':'#4f46e5')+';margin-top:8px">'+daysLeft+' days left</div>':'')+'</div></div><div style="display:flex;gap:8px;margin-top:12px"><span class="tag" style="background:#e0e7ff;color:#3730a3">'+esc(ch.challenge_type)+'</span>'+(ch.prize_description?'<span class="tag" style="background:#fef3c7;color:#92400e">Prize: '+esc(ch.prize_description)+'</span>':'')+'</div><a href="/challenges/'+ch.id+'" style="display:block;margin-top:12px;text-align:center;padding:10px;background:#7c3aed;color:white;border-radius:10px;text-decoration:none;font-weight:700">View Challenge & Join</a></div>';
+        }).join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#127942;</div><h3>No Active Challenges</h3><p style="color:#64748b">Check back soon for exciting fundraising competitions!</p></div>'}
+        ${req.session.user ? '<a href="/challenges/create" style="display:block;margin-top:20px;text-align:center;padding:16px;background:#7c3aed;color:white;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px">Create a Challenge</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/challenges/create', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    res.send(renderPage('Create Challenge', `
+      <div style="max-width:600px;margin:0 auto;padding:20px">
+        <form method="POST" action="/challenges/save" class="card">
+          <h2>Create a Fundraising Challenge</h2>
+          <label>Challenge Title</label><input name="title" placeholder="e.g., Schools Education Challenge 2025" required>
+          <label>Description</label><textarea name="description" rows="3" placeholder="What is this challenge about?"></textarea>
+          <label>Challenge Type</label>
+          <select name="challenge_type"><option value="most_raised">Most Money Raised</option><option value="most_donors">Most Donors</option><option value="fastest_goal">Fastest to Reach Goal</option><option value="highest_percentage">Highest Percentage Funded</option><option value="most_shared">Most Shared on Social Media</option><option value="community_impact">Community Impact</option></select>
+          <label>Start Date</label><input name="start_date" type="date" required>
+          <label>End Date</label><input name="end_date" type="date" required>
+          <label>Prize Description</label><input name="prize_description" placeholder="e.g., Featured spot, UGX 500k bonus, Trophy">
+          <label>Max Participants</label><input name="max_participants" type="number" placeholder="10" value="20">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Create Challenge</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/challenges/save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const { title, description, challenge_type, start_date, end_date, prize_description, max_participants } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_challenges(tenant_id,title,description,challenge_type,start_date,end_date,prize_description,max_participants,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [t, title, description||'', challenge_type||'most_raised', start_date, end_date, prize_description||null, max_participants||20, req.session.user.email]);
+    res.redirect('/challenges');
+  }));
+
+  app.get('/challenges/:id', ah(async (req, res) => {
+    const ch = (await pool.query('SELECT cc.*, t.name as org_name FROM campaign_challenges cc JOIN tenants t ON cc.tenant_id=t.id WHERE cc.id=$1', [req.params.id])).rows[0];
+    if (!ch) return res.status(404).send('Challenge not found');
+    const participants = (await pool.query('SELECT cp.*, fc.title as campaign_title, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=cp.campaign_id AND refunded=false) as raised FROM challenge_participants cp JOIN fundraising_campaigns fc ON cp.campaign_id=fc.id WHERE cp.challenge_id=$1 ORDER BY raised DESC', [req.params.id])).rows;
+    res.send(renderPage(ch.title, `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <h1 style="font-size:28px;font-weight:800;margin-bottom:8px">${esc(ch.title)}</h1>
+        <p style="color:#64748b;margin-bottom:20px">${esc(ch.description||'')}</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px">
+          <div style="background:white;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-weight:800;color:#7c3aed">${esc(ch.challenge_type.replace(/_/g,' '))}</div><div style="font-size:13px;color:#64748b">Challenge Type</div></div>
+          <div style="background:white;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-weight:800;color:#059669">${participants.length}</div><div style="font-size:13px;color:#64748b">Participants</div></div>
+          <div style="background:white;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-weight:800;color:#f59e0b">${ch.prize_description ? esc(ch.prize_description) : 'Bragging Rights'}</div><div style="font-size:13px;color:#64748b">Prize</div></div>
+        </div>
+        <div class="card"><h3>Leaderboard</h3><table><tr><th>Rank</th><th>Campaign</th><th>Raised</th></tr>
+        ${participants.map((p, i) => '<tr'+(i<3?' style="background:'+['#fef3c7','#f1f5f9','#fef2f2'][i]+'"':'')+'><td style="font-weight:800;font-size:18px">'+(i<3?['&#129351;','&#129352;','&#129353;'][i]:(i+1))+'</td><td>'+esc(p.campaign_title)+'</td><td style="font-weight:700;color:#059669">UGX '+parseInt(p.raised||0).toLocaleString()+'</td></tr>').join('')||'<tr><td colspan="3">No participants yet</td></tr>'}
+        </table></div>
+        ${req.session.user && ch.status === 'active' ? '<a href="/challenges/'+ch.id+'/join" style="display:block;margin-top:20px;text-align:center;padding:16px;background:#7c3aed;color:white;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px">Join This Challenge</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/challenges/:id/join', requireAuth, ah(async (req, res) => {
+    const campaigns = (await pool.query("SELECT id, title FROM fundraising_campaigns WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id])).rows;
+    res.send(renderPage('Join Challenge', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/challenges/${req.params.id}/join-save" class="card">
+          <h2>Join Challenge</h2>
+          <label>Select Your Campaign</label>
+          <select name="campaign_id" required><option value="">Choose campaign...</option>${campaigns.map(c => '<option value="'+c.id+'">'+esc(c.title)+'</option>').join('')}</select>
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Join Challenge</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/challenges/:id/join-save', requireAuth, ah(async (req, res) => {
+    const { campaign_id } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO challenge_participants(tenant_id,challenge_id,campaign_id) VALUES($1,$2,$3) ON CONFLICT (challenge_id, campaign_id) DO NOTHING',
+      [t, req.params.id, campaign_id]);
+    await pool.query('UPDATE campaign_challenges SET participant_count=(SELECT COUNT(*) FROM challenge_participants WHERE challenge_id=$1) WHERE id=$1', [req.params.id]);
+    res.redirect('/challenges/'+req.params.id);
+  }));
+
+  // =============================================
+  // V4 FEATURE 3: CAMPAIGN AMBASSADORS
+  // =============================================
+
+  app.get('/campaigns/:id/ambassadors', ah(async (req, res) => {
+    const ambassadors = (await pool.query('SELECT * FROM campaign_ambassadors WHERE campaign_id=$1 AND status=$2 ORDER BY tier DESC, created_at DESC', [req.params.id, 'active'])).rows;
+    const isAmbassador = req.session.user ? (await pool.query('SELECT id FROM campaign_ambassadors WHERE campaign_id=$1 AND ambassador_email=$2', [req.params.id, req.session.user.email])).rows[0] : null;
+    res.send(renderPage('Campaign Ambassadors', `
+      <div style="max-width:800px;margin:0 auto;padding:20px">
+        <div style="text-align:center;margin-bottom:24px">
+          <h1 style="font-size:28px;font-weight:800">Campaign Ambassadors</h1>
+          <p style="color:#64748b">Passionate supporters who spread the word</p>
+        </div>
+        ${ambassadors.length > 0 ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px">' + ambassadors.map(a => '<div style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);text-align:center;border-top:4px solid '+(a.tier==='gold'?'#f59e0b':a.tier==='silver'?'#94a3b8':'#cd7f32')+'"><div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,'+(a.tier==='gold'?'#f59e0b,#fbbf24':a.tier==='silver'?'#94a3b8,#cbd5e1':'#cd7f32,#f59e0b')+');margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:24px;font-weight:700">'+esc((a.ambassador_name||'A')[0])+'</div><div style="font-weight:700">'+esc(a.ambassador_name)+'</div><span class="tag" style="background:'+(a.tier==='gold'?'#fef3c7;color:#92400e':a.tier==='silver'?'#f1f5f9;color:#475569':'#fef3c7;color:#92400e')+'">'+esc(a.tier||'bronze')+' ambassador</span><div style="margin-top:8px;font-size:13px;color:#64748b">'+parseInt(a.referrals_count||0)+' referrals | UGX '+parseInt(a.total_donated||0).toLocaleString()+' raised</div></div>').join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#127775;</div><h3>No Ambassadors Yet</h3><p style="color:#64748b">Be the first ambassador for this campaign!</p></div>'}
+        ${req.session.user && !isAmbassador ? '<a href="/campaigns/'+req.params.id+'/ambassadors/apply" style="display:block;margin-top:20px;text-align:center;padding:16px;background:#f59e0b;color:white;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px">Become an Ambassador</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/ambassadors/apply', requireAuth, ah(async (req, res) => {
+    res.send(renderPage('Become an Ambassador', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/ambassadors/save" class="card">
+          <h2>Become a Campaign Ambassador</h2>
+          <p style="color:#64748b">As an ambassador, you commit to sharing and promoting this campaign</p>
+          <label>Your Name</label><input name="ambassador_name" value="${esc(req.session.user?.name||'')}" required>
+          <label>Why do you want to be an ambassador?</label><textarea name="motivation" rows="3" placeholder="Tell us why you're passionate about this cause"></textarea>
+          <label>How will you promote this campaign?</label><textarea name="promotion_plan" rows="3" placeholder="Social media, community events, workplace, etc."></textarea>
+          <label>Social media following (approx)</label><input name="social_reach" type="number" placeholder="1000" value="0">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Apply as Ambassador</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/ambassadors/save', requireAuth, ah(async (req, res) => {
+    const { ambassador_name, motivation, promotion_plan, social_reach } = req.body;
+    const t = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0]?.tenant_id;
+    await pool.query('INSERT INTO campaign_ambassadors(tenant_id,campaign_id,ambassador_name,ambassador_email,motivation,promotion_plan,social_reach) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [t, req.params.id, ambassador_name, req.session.user.email, motivation||'', promotion_plan||'', social_reach||0]);
+    res.redirect('/campaigns/'+req.params.id+'/ambassadors');
+  }));
+
+  // =============================================
+  // V4 FEATURE 4: IMPACT REPORTS
+  // =============================================
+
+  app.get('/campaigns/:id/impact-report', ah(async (req, res) => {
+    const c = (await pool.query('SELECT fc.*, t.name as org_name, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as donor_count FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
+    if (!c) return res.status(404).send('Campaign not found');
+    const [impacts, milestones, breakdown, updates, testimonials] = await Promise.all([
+      pool.query('SELECT * FROM donor_impact WHERE campaign_id=$1 AND verified=true ORDER BY created_at DESC', [req.params.id]),
+      pool.query('SELECT * FROM campaign_milestones WHERE campaign_id=$1 AND is_completed=true ORDER BY reached_at DESC', [req.params.id]),
+      pool.query('SELECT * FROM campaign_goal_breakdown WHERE campaign_id=$1 ORDER BY sort_order', [req.params.id]),
+      pool.query('SELECT * FROM campaign_updates WHERE campaign_id=$1 AND is_public=true ORDER BY created_at DESC LIMIT 5', [req.params.id]),
+      pool.query("SELECT * FROM campaign_testimonials WHERE campaign_id=$1 AND is_approved=true ORDER BY created_at DESC LIMIT 3", [req.params.id])
+    ]);
+    const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
+
+    res.send(renderPage('Impact Report - '+c.title, `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="background:linear-gradient(135deg,#059669,#10b981);padding:40px;border-radius:20px;color:white;text-align:center;margin-bottom:24px">
+          <h1 style="font-size:32px;font-weight:900;margin:0 0 8px 0">Impact Report</h1>
+          <h2 style="font-size:22px;opacity:0.9;margin:0">${esc(c.title)}</h2>
+          <p style="opacity:0.8;margin-top:8px">by ${esc(c.org_name)}</p>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#059669">UGX ${parseInt(c.raised||0).toLocaleString()}</div><div style="color:#64748b;font-size:14px">Total Raised</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#4f46e5">${parseInt(c.donor_count||0)}</div><div style="color:#64748b;font-size:14px">Donors</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#f59e0b">${pct}%</div><div style="color:#64748b;font-size:14px">Funded</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#7c3aed">${c.estimated_beneficiaries||'N/A'}</div><div style="color:#64748b;font-size:14px">Beneficiaries</div></div>
+        </div>
+        ${breakdown.rows.length > 0 ? '<div class="card" style="margin-bottom:20px"><h3>How Funds Are Being Used</h3><div style="display:grid;gap:12px">'+breakdown.rows.map(b => {
+          const bPct = c.target > 0 ? Math.round(parseInt(b.amount)/parseInt(c.target)*100) : 0;
+          return '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#f8fafc;border-radius:10px"><div style="flex:1"><div style="font-weight:700">'+esc(b.item_name)+'</div>'+(b.description?'<div style="font-size:13px;color:#64748b">'+esc(b.description)+'</div>':'')+'</div><div style="text-align:right"><div style="font-weight:800;color:#059669">UGX '+parseInt(b.amount).toLocaleString()+'</div><div style="font-size:12px;color:#64748b">'+bPct+'% of total</div></div></div>';
+        }).join('')+'</div></div>' : ''}
+        ${impacts.rows.length > 0 ? '<div class="card" style="margin-bottom:20px"><h3>Verified Impact</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">'+impacts.rows.map(i => '<div style="background:#f0fdf4;border-radius:12px;padding:16px;text-align:center"><div style="font-size:24px;font-weight:900;color:#059669">'+esc(i.impact_value||'0')+'</div><div style="font-size:13px;color:#64748b">'+esc(i.impact_unit||'people')+'</div><div style="font-size:12px;color:#94a3b8;margin-top:4px">'+esc(i.impact_description||'')+'</div></div>').join('')+'</div></div>' : ''}
+        ${milestones.rows.length > 0 ? '<div class="card" style="margin-bottom:20px"><h3>Milestones Achieved</h3>'+milestones.rows.map(m => '<div style="padding:12px;border-left:4px solid #059669;margin-bottom:8px;background:#f8fafc;border-radius:0 10px 10px 0"><strong>'+esc(m.title)+'</strong> <span style="font-size:12px;color:#64748b">'+(m.reached_at?new Date(m.reached_at).toLocaleDateString():'')+'</span>'+(m.description?'<p style="margin:4px 0;font-size:14px;color:#475569">'+esc(m.description)+'</p>':'')+'</div>').join('')+'</div>' : ''}
+        ${testimonials.rows.length > 0 ? '<div class="card" style="margin-bottom:20px"><h3>Beneficiary Voices</h3>'+testimonials.rows.map(t => '<div style="background:#faf5ff;border-radius:12px;padding:16px;margin-bottom:10px;border-left:4px solid #7c3aed"><p style="font-style:italic;color:#475569">"'+esc(t.content)+'"</p><strong style="font-size:14px">'+esc(t.author_name)+'</strong></div>').join('')+'</div>' : ''}
+        <div style="background:#f8fafc;border-radius:12px;padding:20px;text-align:center">
+          <p style="color:#64748b;font-size:14px">This impact report was generated on ${new Date().toLocaleDateString()} based on data from the campaign organizer.</p>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+            <a href="/discover/${c.id}" class="btn btn-sm">View Campaign</a>
+            <a href="/campaigns/${c.id}/impact" class="btn btn-sm" style="background:#059669;color:white">Add Impact Data</a>
+          </div>
+        </div>
+      </div>
+    `, req.session.user));
+  }));
+
+  // =============================================
+  // V4 FEATURE 5: SMART DONATION SUGGESTIONS
+  // =============================================
+
+  app.get('/api/campaigns/:id/suggested-amounts', ah(async (req, res) => {
+    const c = (await pool.query('SELECT target, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as raised, (SELECT AVG(amount) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as avg_donation, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as donor_count FROM fundraising_campaigns fc WHERE fc.id=$1', [req.params.id])).rows[0];
+    if (!c) return res.status(404).json({ error: 'Not found' });
+    const target = parseInt(c.target||0);
+    const remaining = target - parseInt(c.raised||0);
+    const avg = parseInt(c.avg_donation||0);
+    const donorCount = parseInt(c.donor_count||0);
+    // Smart suggestions based on campaign data
+    const suggestions = [];
+    if (remaining > 0) {
+      suggestions.push({ amount: Math.max(5000, Math.round(remaining * 0.01)), label: '1% of remaining', impact: 'Helps cover basic supplies' });
+      suggestions.push({ amount: Math.max(10000, Math.round(remaining * 0.05)), label: '5% of remaining', impact: 'Funds a key component' });
+      suggestions.push({ amount: Math.max(50000, Math.round(remaining * 0.1)), label: '10% of remaining', impact: 'Makes a significant difference' });
+    }
+    if (avg > 0) suggestions.push({ amount: avg, label: 'Average donation', impact: 'Join other donors at this level' });
+    suggestions.push({ amount: 10000, label: 'Supporter', impact: 'Every contribution matters' });
+    suggestions.push({ amount: 50000, label: 'Champion', impact: 'Helps purchase essential supplies' });
+    suggestions.push({ amount: 100000, label: 'Hero', impact: 'Can change lives directly' });
+    suggestions.push({ amount: 500000, label: 'Major Donor', impact: 'Transformative impact' });
+    suggestions.push({ amount: 1000000, label: 'Visionary', impact: 'Covers a major project component' });
+    // Remove duplicates and sort
+    const unique = suggestions.filter((s, i, self) => s.amount > 0 && i === self.findIndex(t => t.amount === s.amount)).sort((a,b) => a.amount - b.amount);
+    res.json({ suggestions: unique, remaining, average: avg, donor_count: donorCount });
+  }));
+
+  // =============================================
+  // V4 FEATURE 6: CAMPAIGN MERCHANDISE
+  // =============================================
+
+  app.get('/campaigns/:id/merch', ah(async (req, res) => {
+    const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
+    if (!c) return res.status(404).send('Campaign not found');
+    const items = (await pool.query('SELECT * FROM campaign_merchandise WHERE campaign_id=$1 AND is_active=true ORDER BY price ASC', [req.params.id])).rows;
+    res.send(renderPage('Merchandise - '+c.title, `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="text-align:center;margin-bottom:24px">
+          <h1 style="font-size:28px;font-weight:800">Support & Get Merch!</h1>
+          <p style="color:#64748b">Every purchase supports "${esc(c.title)}"</p>
+        </div>
+        ${items.length > 0 ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:20px">' + items.map(i => '<div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08)">'+(i.image_url?'<div style="height:200px;overflow:hidden"><img src="'+esc(i.image_url)+'" style="width:100%;height:100%;object-fit:cover"></div>':'<div style="height:200px;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:center;color:white;font-size:48px;font-weight:900">'+esc(i.item_name[0])+'</div>')+'<div style="padding:16px"><h3 style="font-weight:700">'+esc(i.item_name)+'</h3>'+(i.description?'<p style="color:#64748b;font-size:13px;margin:4px 0">'+esc(i.description)+'</p>':'')+'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><span style="font-size:20px;font-weight:800;color:#059669">UGX '+parseInt(i.price).toLocaleString()+'</span>'+(i.quantity_available?'<span style="font-size:12px;color:#64748b">'+parseInt(i.quantity_available-i.quantity_sold||0)+' left</span>':'<span style="font-size:12px;color:#059669">Available</span>')+'</div>'+(i.is_donation?'<div style="font-size:11px;color:#059669;font-weight:700;margin-top:4px">100% goes to campaign</div>':'')+'</div></div>').join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#128090;</div><h3>No Merchandise Available</h3><p style="color:#64748b">The organizer has not set up merchandise yet.</p></div>'}
+        ${req.session.user && c.tenant_id === req.session.user.tenant_id ? '<a href="/campaigns/'+c.id+'/merch/new" style="display:block;margin-top:20px;text-align:center;padding:16px;background:#4f46e5;color:white;border-radius:12px;text-decoration:none;font-weight:700">Add Merchandise</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/merch/new', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    res.send(renderPage('Add Merchandise', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/merch/save" class="card">
+          <h2>Add Merchandise</h2>
+          <label>Item Name</label><input name="item_name" placeholder="e.g., Campaign T-Shirt" required>
+          <label>Description</label><textarea name="description" rows="2" placeholder="Describe the item"></textarea>
+          <label>Price (UGX)</label><input name="price" type="number" placeholder="30000" required>
+          <label>Image URL</label><input name="image_url" placeholder="https://...">
+          <label>Quantity Available (blank = unlimited)</label><input name="quantity_available" type="number" placeholder="50">
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="is_donation" checked> 100% of proceeds go to campaign</label>
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Add Merchandise</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/merch/save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const { item_name, description, price, image_url, quantity_available, is_donation } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_merchandise(tenant_id,campaign_id,item_name,description,price,image_url,quantity_available,is_donation) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+      [t, req.params.id, item_name, description||'', price, image_url||null, quantity_available||null, is_donation?true:false]);
+    res.redirect('/campaigns/'+req.params.id+'/merch');
+  }));
+
+  // =============================================
+  // V4 FEATURE 7: COMMUNITY BOARD
+  // =============================================
+
+  app.get('/campaigns/:id/community', ah(async (req, res) => {
+    const posts = (await pool.query('SELECT * FROM campaign_community_posts WHERE campaign_id=$1 AND status=$2 ORDER BY is_pinned DESC, created_at DESC LIMIT 30', [req.params.id, 'visible'])).rows;
+    res.send(renderPage('Community Board', `
+      <div style="max-width:800px;margin:0 auto;padding:20px">
+        <div style="text-align:center;margin-bottom:24px">
+          <h1 style="font-size:28px;font-weight:800">Community Board</h1>
+          <p style="color:#64748b">Discuss, share ideas, and support each other</p>
+        </div>
+        ${req.session.user ? '<a href="/campaigns/'+req.params.id+'/community/new" style="display:block;margin-bottom:20px;padding:14px;background:#4f46e5;color:white;text-align:center;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px">Start a Discussion</a>' : ''}
+        ${posts.length > 0 ? posts.map(p => '<div style="background:white;border-radius:12px;padding:20px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,0.04)'+(p.is_pinned?';border:2px solid #f59e0b':'')+'"><div style="display:flex;justify-content:space-between;align-items:start"><div><div style="font-weight:700;font-size:16px">'+esc(p.author_name)+'</div><div style="font-size:12px;color:#64748b">'+(p.post_type!=='discussion'?'<span class="tag" style="background:#e0e7ff;color:#3730a3;margin-right:4px">'+esc(p.post_type)+'</span>':'')+new Date(p.created_at).toLocaleDateString()+'</div></div>'+(p.is_pinned?'<span class="tag" style="background:#fef3c7;color:#92400e">Pinned</span>':'')+'</div><h3 style="margin:12px 0 8px;font-weight:700">'+esc(p.title)+'</h3><p style="color:#475569;line-height:1.6">'+esc(p.content).replace(/\n/g,'<br>')+'</p><div style="display:flex;gap:12px;margin-top:12px;font-size:13px;color:#64748b"><span>&#128077; '+parseInt(p.likes||0)+'</span><span>&#128172; '+parseInt(p.replies_count||0)+' replies</span></div></div>').join('') : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#128172;</div><h3>No Discussions Yet</h3><p style="color:#64748b">Be the first to start a conversation!</p></div>'}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/community/new', requireAuth, ah(async (req, res) => {
+    res.send(renderPage('Start Discussion', `
+      <div style="max-width:600px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/community/save" class="card">
+          <h2>Start a Discussion</h2>
+          <label>Topic</label><input name="title" placeholder="What would you like to discuss?" required>
+          <label>Post Type</label>
+          <select name="post_type"><option value="discussion">Discussion</option><option value="question">Question</option><option value="idea">Idea</option><option value="celebration">Celebration</option><option value="update">Update</option></select>
+          <label>Content</label><textarea name="content" rows="5" placeholder="Share your thoughts..." required></textarea>
+          <label>Your Name</label><input name="author_name" value="${esc(req.session.user?.name||'')}" required>
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Post</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/community/save', requireAuth, ah(async (req, res) => {
+    const { title, post_type, content, author_name } = req.body;
+    const t = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0]?.tenant_id;
+    await pool.query('INSERT INTO campaign_community_posts(tenant_id,campaign_id,author_name,author_email,title,post_type,content) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [t, req.params.id, author_name, req.session.user.email, title, post_type||'discussion', content]);
+    res.redirect('/campaigns/'+req.params.id+'/community');
+  }));
+
+  // =============================================
+  // V4 FEATURE 8: DONOR SEGMENTATION
+  // =============================================
+
+  app.get('/admin/donor-segments', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const [segments, topDonors, newDonors, recurring, lapsed] = await Promise.all([
+      pool.query('SELECT * FROM donor_segments WHERE tenant_id=$1 ORDER BY created_at DESC', [t]),
+      pool.query('SELECT donor_name, donor_email, SUM(amount) as total FROM campaign_donations WHERE tenant_id=$1 AND refunded=false GROUP BY donor_name, donor_email ORDER BY total DESC LIMIT 10', [t]),
+      pool.query("SELECT donor_name, donor_email, SUM(amount) as total FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donated_at >= NOW() - INTERVAL '30 days' GROUP BY donor_name, donor_email ORDER BY total DESC LIMIT 10", [t]),
+      pool.query("SELECT dp.full_name, dp.user_email, dp.total_donated, dp.donation_count FROM donor_profiles dp WHERE dp.tenant_id=$1 AND dp.is_recurring_donor=true", [t]),
+      pool.query("SELECT dp.full_name, dp.user_email, dp.total_donated, dp.last_donation_at FROM donor_profiles dp WHERE dp.tenant_id=$1 AND dp.last_donation_at < NOW() - INTERVAL '90 days' ORDER BY dp.total_donated DESC LIMIT 20", [t])
+    ]);
+    res.send(renderPage('Donor Segmentation', `
+      <div style="max-width:1000px;margin:0 auto;padding:20px">
+        <h1 style="margin-bottom:24px">Donor Segmentation & Targeting</h1>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#f59e0b">${topDonors.rows.length}</div><div style="color:#64748b">Top Donors</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#059669">${newDonors.rows.length}</div><div style="color:#64748b">New (30 days)</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#4f46e5">${recurring.rows.length}</div><div style="color:#64748b">Recurring</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#ef4444">${lapsed.rows.length}</div><div style="color:#64748b">Lapsed (90+ days)</div></div>
+        </div>
+        <div class="card" style="margin-bottom:20px"><h3>Top Donors (All Time)</h3><table><tr><th>Name</th><th>Total</th></tr>${topDonors.rows.map(d => '<tr><td>'+esc(d.donor_name)+'</td><td style="font-weight:700;color:#059669">UGX '+parseInt(d.total).toLocaleString()+'</td></tr>').join('')||'<tr><td colspan="2">No data</td></tr>'}</table></div>
+        <div class="card" style="margin-bottom:20px"><h3>Recurring Donors</h3><table><tr><th>Name</th><th>Total</th><th>Count</th></tr>${recurring.rows.map(d => '<tr><td>'+esc(d.full_name)+'</td><td style="font-weight:700;color:#059669">UGX '+parseInt(d.total_donated).toLocaleString()+'</td><td>'+parseInt(d.donation_count)+'</td></tr>').join('')||'<tr><td colspan="3">No recurring donors yet. Encourage monthly giving!</td></tr>'}</table></div>
+        <div class="card"><h3>Lapsed Donors (90+ days since last donation)</h3><p style="color:#64748b;font-size:14px;margin-bottom:12px">These donors haven't given in 3+ months. Consider reaching out!</p><table><tr><th>Name</th><th>Last Donation</th><th>Historical Total</th></tr>${lapsed.rows.map(d => '<tr><td>'+esc(d.full_name)+'</td><td>'+(d.last_donation_at?new Date(d.last_donation_at).toLocaleDateString():'N/A')+'</td><td style="font-weight:700;color:#f59e0b">UGX '+parseInt(d.total_donated).toLocaleString()+'</td></tr>').join('')||'<tr><td colspan="3">No lapsed donors - great job!</td></tr>'}</table></div>
+      </div>
+    `, req.session.user));
+  }));
+
+  // =============================================
+  // V4 FEATURE 9: CAMPAIGN HEALTH MONITOR
+  // =============================================
+
+  app.get('/campaigns/:id/health', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const c = (await pool.query('SELECT fc.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as donor_count, (SELECT MAX(donated_at) FROM campaign_donations WHERE campaign_id=fc.id) as last_donation, (SELECT COUNT(*) FROM campaign_updates WHERE campaign_id=fc.id) as update_count, (SELECT COUNT(*) FROM campaign_comments WHERE campaign_id=fc.id) as comment_count, (SELECT COUNT(*) FROM campaign_followers WHERE campaign_id=fc.id) as follower_count FROM fundraising_campaigns fc WHERE fc.id=$1 AND fc.tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!c) return res.status(404).send('Campaign not found');
+
+    // Calculate health metrics
+    const daysSinceCreation = Math.max(1, Math.ceil((new Date() - new Date(c.created_at)) / (1000*60*60*24)));
+    const daysLeft = c.deadline ? Math.max(0, Math.ceil((new Date(c.deadline) - new Date()) / (1000*60*60*24))) : null;
+    const pct = c.target > 0 ? Math.round(parseInt(c.raised||0)/parseInt(c.target)*100) : 0;
+    const dailyRate = parseInt(c.raised||0) / daysSinceCreation;
+    const projectedTotal = dailyRate * (daysLeft ? (daysSinceCreation + daysLeft) : daysSinceCreation * 2);
+    const projectedPct = c.target > 0 ? Math.min(100, Math.round(projectedTotal / parseInt(c.target) * 100)) : 0;
+    const daysSinceLastDonation = c.last_donation ? Math.ceil((new Date() - new Date(c.last_donation)) / (1000*60*60*24)) : 999;
+    const lastUpdateDays = c.updated_at ? Math.ceil((new Date() - new Date(c.updated_at)) / (1000*60*60*24)) : 999;
+
+    // Health scores
+    const fundingHealth = pct >= 75 ? 'excellent' : pct >= 40 ? 'good' : pct >= 15 ? 'fair' : 'critical';
+    const engagementHealth = parseInt(c.donor_count) > 20 ? 'excellent' : parseInt(c.donor_count) > 5 ? 'good' : parseInt(c.donor_count) > 0 ? 'fair' : 'critical';
+    const momentumHealth = daysSinceLastDonation <= 2 ? 'excellent' : daysSinceLastDonation <= 7 ? 'good' : daysSinceLastDonation <= 30 ? 'fair' : 'critical';
+    const updateHealth = lastUpdateDays <= 7 ? 'excellent' : lastUpdateDays <= 14 ? 'good' : lastUpdateDays <= 30 ? 'fair' : 'critical';
+
+    const healthColors = { excellent:'#059669', good:'#0891b2', fair:'#f59e0b', critical:'#ef4444' };
+    const healthLabels = { excellent:'Excellent', good:'Good', fair:'Needs Attention', critical:'Critical' };
+
+    const alerts = [];
+    if (fundingHealth === 'critical') alerts.push({ type: 'danger', msg: 'Funding is critically low. Consider adding matching sponsors or sharing more aggressively.' });
+    if (momentumHealth === 'critical') alerts.push({ type: 'danger', msg: 'No donations in 30+ days. Post an update and re-share on social media.' });
+    if (updateHealth === 'fair' || updateHealth === 'critical') alerts.push({ type: 'warning', msg: 'Campaign hasn\'t been updated recently. Regular updates boost donor confidence.' });
+    if (daysLeft && daysLeft <= 7 && pct < 75) alerts.push({ type: 'warning', msg: 'Deadline approaching with less than 75% funded. Consider extending the deadline.' });
+    if (!c.image_url) alerts.push({ type: 'info', msg: 'Add a cover image to increase donations by 2x.' });
+    if (!c.video_url) alerts.push({ type: 'info', msg: 'Add a video to tell your story more effectively.' });
+    if (pct >= 100 && c.status !== 'completed') alerts.push({ type: 'success', msg: 'Goal reached! Mark the campaign as completed.' });
+
+    res.send(renderPage('Campaign Health - '+c.title, `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <h1 style="margin-bottom:8px">Campaign Health Monitor</h1>
+        <h2 style="color:#64748b;font-size:18px;font-weight:400;margin-bottom:24px">${esc(c.title)}</h2>
+        ${alerts.length > 0 ? '<div style="margin-bottom:24px">'+alerts.map(a => '<div style="padding:14px;border-radius:10px;margin-bottom:8px;background:'+({danger:'#fee2e2;color:#991b1b',warning:'#fef3c7;color:#92400e',info:'#e0e7ff;color:#3730a3',success:'#d1fae5;color:#065f46'}[a.type])+';border-left:4px solid '+({danger:'#ef4444',warning:'#f59e0b',info:'#4f46e5',success:'#059669'}[a.type])+'">'+esc(a.msg)+'</div>').join('')+'</div>' : ''}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+          ${[['Funding',fundingHealth,pct+'% funded'],['Engagement',engagementHealth,parseInt(c.donor_count)+' donors'],['Momentum',momentumHealth,daysSinceLastDonation<=999?daysSinceLastDonation+'d since last donation':'No donations yet'],['Updates',updateHealth,lastUpdateDays<=999?lastUpdateDays+'d since last update':'Never updated']].map(([name,health,val]) => '<div style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-top:4px solid '+healthColors[health]+'"><div style="font-weight:700;margin-bottom:4px">'+name+'</div><div style="font-size:24px;font-weight:900;color:'+healthColors[health]+'">'+healthLabels[health]+'</div><div style="font-size:13px;color:#64748b;margin-top:4px">'+val+'</div></div>').join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#059669">UGX ${Math.round(dailyRate).toLocaleString()}</div><div style="color:#64748b;font-size:14px">Daily Rate</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#4f46e5">${projectedPct}%</div><div style="color:#64748b;font-size:14px">Projected at Deadline</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#f59e0b">${parseInt(c.follower_count||0)}</div><div style="color:#64748b;font-size:14px">Followers</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:28px;font-weight:900;color:#0891b2">${parseInt(c.update_count||0)}</div><div style="color:#64748b;font-size:14px">Updates Posted</div></div>
+        </div>
+        <div class="card"><h3>Quick Actions to Improve Health</h3>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px">
+            <a href="/campaigns/${c.id}/emails/new" style="padding:14px;background:#e0e7ff;border-radius:10px;text-decoration:none;color:#3730a3;font-weight:700;text-align:center">Email Donors</a>
+            <a href="/fundraising/${c.id}/update" style="padding:14px;background:#d1fae5;border-radius:10px;text-decoration:none;color:#065f46;font-weight:700;text-align:center">Post Update</a>
+            <a href="/campaigns/${c.id}/matching/new" style="padding:14px;background:#fef3c7;border-radius:10px;text-decoration:none;color:#92400e;font-weight:700;text-align:center">Add Matching</a>
+            <a href="/campaigns/${c.id}/peer" style="padding:14px;background:#faf5ff;border-radius:10px;text-decoration:none;color:#7c3aed;font-weight:700;text-align:center">Peer Fundraising</a>
+            <a href="/campaigns/${c.id}/success-score" style="padding:14px;background:#f0fdf4;border-radius:10px;text-decoration:none;color:#065f46;font-weight:700;text-align:center">Success Score</a>
+          </div>
+        </div>
+      </div>
+    `, req.session.user));
+  }));
+
+  // =============================================
+  // V4 FEATURE 10: MULTI-LANGUAGE SUPPORT
+  // =============================================
+
+  app.get('/api/campaigns/:id/translate', ah(async (req, res) => {
+    const { lang } = req.query;
+    if (!lang) return res.status(400).json({ error: 'Provide ?lang parameter (e.g., en, fr, sw, lg)' });
+    const c = (await pool.query('SELECT title, description, story, impact_summary FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+    if (!c) return res.status(404).json({ error: 'Campaign not found' });
+    // Check for existing translation
+    const existing = (await pool.query('SELECT * FROM campaign_translations WHERE campaign_id=$1 AND language=$2', [req.params.id, lang])).rows[0];
+    if (existing) return res.json({ language: lang, translated: existing });
+    // Return original with language hint for client-side translation
+    res.json({ language: lang, original: c, note: 'Use client-side translation or add a manual translation via POST /api/campaigns/'+req.params.id+'/translate' });
+  }));
+
+  app.post('/api/campaigns/:id/translate', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const { language, title, description, story, impact_summary } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query(`INSERT INTO campaign_translations(tenant_id,campaign_id,language,title,description,story,impact_summary,translated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (campaign_id, language) DO UPDATE SET title=$4,description=$5,story=$6,impact_summary=$7,translated_by=$8,updated_at=NOW()`,
+      [t, req.params.id, language, title, description||null, story||null, impact_summary||null, req.session.user.email]);
+    res.json({ success: true, message: 'Translation saved for language: '+language });
+  }));
+
+  // API: Get available translations for a campaign
+  app.get('/api/campaigns/:id/languages', ah(async (req, res) => {
+    const translations = (await pool.query('SELECT language, title FROM campaign_translations WHERE campaign_id=$1', [req.params.id])).rows;
+    res.json({ available_languages: translations.map(t => t.language), translations });
+  }));
+
+  // =============================================
+  // V4: UPDATED ENHANCED DASHBOARD WITH V4 LINKS
+  // =============================================
+
+  // Add V4 links to the existing enhanced dashboard (override by re-registering)
+  app.get('/fundraising/v4-dashboard', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const [campaigns, donors, payouts, refunds, challenges, giftCards, healthAlerts] = await Promise.all([
+      pool.query("SELECT id, title, status, target, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fundraising_campaigns.id) as raised, featured, urgency_level, success_score, is_verified, verification_badge FROM fundraising_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC", [t]),
+      pool.query('SELECT COUNT(*) as count, SUM(total_donated) as total FROM donor_profiles WHERE tenant_id=$1', [t]),
+      pool.query("SELECT COUNT(*) as count, SUM(amount) as total FROM payout_requests WHERE tenant_id=$1 AND status='pending'", [t]),
+      pool.query("SELECT COUNT(*) as count FROM refund_requests WHERE tenant_id=$1 AND status='pending'", [t]),
+      pool.query("SELECT COUNT(*) as count FROM campaign_challenges WHERE tenant_id=$1 AND status='active'", [t]),
+      pool.query("SELECT COUNT(*) as count FROM donation_gift_cards WHERE purchaser_email=$1", [req.session.user.email]),
+      pool.query("SELECT COUNT(*) as count FROM fundraising_campaigns WHERE tenant_id=$1 AND status='active'", [t])
+    ]);
+    const activeCampaigns = campaigns.rows.filter(c => c.status === 'active');
+    const totalRaised = campaigns.rows.reduce((a,c) => a + parseInt(c.raised||0), 0);
+
+    res.send(renderPage('Fundraising V4 Dashboard', `
+      <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#ec4899,#f59e0b)">
+        <h1>Fundraising V4 Dashboard</h1>
+        <p>All features for campaign success</p>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+          <a href="/fundraising" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Campaigns</a>
+          <a href="/admin/donors" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Donors</a>
+          <a href="/admin/donor-segments" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Segments</a>
+          <a href="/admin/donor-retention" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Retention</a>
+          <a href="/challenges" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Challenges</a>
+          <a href="/gift-cards" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Gift Cards</a>
+          <a href="/donor-leaderboard" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Leaderboard</a>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num">${campaigns.rows.length}</div><div>Total Campaigns</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#059669">${activeCampaigns.length}</div><div>Active</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#4f46e5">UGX ${totalRaised.toLocaleString()}</div><div>Total Raised</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#ec4899">${parseInt(donors.rows[0]?.count||0)}</div><div>Donors</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#7c3aed">${parseInt(challenges.rows[0]?.count||0)}</div><div>Active Challenges</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${parseInt(giftCards.rows[0]?.count||0)}</div><div>Gift Cards</div></div>
+      </div>
+      <div class="card">
+        <h3>All Campaigns</h3>
+        <table><tr><th>Campaign</th><th>Status</th><th>Raised</th><th>Goal</th><th>Score</th><th>Health</th><th>Actions</th></tr>
+        ${campaigns.rows.map(c => {
+          const pct = c.target > 0 ? Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100) : 0;
+          return '<tr><td><strong>'+esc(c.title)+'</strong>'+(c.is_verified?' <span style="background:#d1fae5;color:#065f46;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700">Verified</span>':'')+(c.featured?' <span style="background:#f59e0b;color:white;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700">Featured</span>':'')+'</td><td><span class="tag" style="background:'+(c.status==='active'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e')+'">'+esc(c.status)+'</span></td><td style="font-weight:700;color:#059669">UGX '+(parseInt(c.raised)||0).toLocaleString()+'</td><td>UGX '+(parseInt(c.target)||0).toLocaleString()+'</td><td style="font-weight:700;color:'+(parseFloat(c.success_score)>=70?'#059669':parseFloat(c.success_score)>=40?'#f59e0b':'#ef4444')+'">'+parseFloat(c.success_score||0).toFixed(0)+'</td><td><a href="/campaigns/'+c.id+'/health" class="btn btn-sm" style="background:#4f46e5;color:white">Health</a></td><td><a href="/fundraising/'+c.id+'" class="btn btn-sm">View</a> <a href="/campaigns/'+c.id+'/rewards/manage" class="btn btn-sm" style="background:#f59e0b;color:white">Rewards</a> <a href="/campaigns/'+c.id+'/success-score" class="btn btn-sm" style="background:#7c3aed;color:white">Score</a></td></tr>';
+        }).join('')||'<tr><td colspan="7">No campaigns yet</td></tr>'}
+        </table>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:20px">
+        <a href="/gift-cards" class="card" style="text-decoration:none;text-align:center;padding:24px;color:inherit;border-top:4px solid #f59e0b"><div style="font-size:32px;margin-bottom:8px">&#127873;</div><h4>Gift Cards</h4><p class="muted" style="font-size:13px">Give the gift of giving</p></a>
+        <a href="/challenges" class="card" style="text-decoration:none;text-align:center;padding:24px;color:inherit;border-top:4px solid #7c3aed"><div style="font-size:32px;margin-bottom:8px">&#127942;</div><h4>Challenges</h4><p class="muted" style="font-size:13px">Compete and fundraise together</p></a>
+        <a href="/admin/donor-segments" class="card" style="text-decoration:none;text-align:center;padding:24px;color:inherit;border-top:4px solid #ec4899"><div style="font-size:32px;margin-bottom:8px">&#128101;</div><h4>Donor Segments</h4><p class="muted" style="font-size:13px">Targeted communications</p></a>
+        <a href="/donor-leaderboard" class="card" style="text-decoration:none;text-align:center;padding:24px;color:inherit;border-top:4px solid #059669"><div style="font-size:32px;margin-bottom:8px">&#127941;</div><h4>Leaderboard</h4><p class="muted" style="font-size:13px">Top donor recognition</p></a>
+        <a href="/admin/donor-retention" class="card" style="text-decoration:none;text-align:center;padding:24px;color:inherit;border-top:4px solid #0891b2"><div style="font-size:32px;margin-bottom:8px">&#128200;</div><h4>Retention</h4><p class="muted" style="font-size:13px">Keep donors coming back</p></a>
+        <a href="/admin/verifications" class="card" style="text-decoration:none;text-align:center;padding:24px;color:inherit;border-top:4px solid #10b981"><div style="font-size:32px;margin-bottom:8px">&#9989;</div><h4>Verifications</h4><p class="muted" style="font-size:13px">Trust badges for campaigns</p></a>
+      </div>
+    `, req.session.user));
+  }));
+
+  console.log('[Fundraising Enhancements] All V4 routes registered successfully');
 };
+
+module.exports.processDonationEffects = processDonationEffects;
