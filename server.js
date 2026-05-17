@@ -30233,6 +30233,15 @@ try { require('./viral-growth-booster'); console.log('[ViralGrowth] Polls, quizz
 // === ENGAGEMENT ENGINE: Daily Challenges, Streaks, Achievements, Rewards Store, Leaderboard, User Profiles ===
 try { require('./engagement-engine'); console.log('[Engagement] Daily challenges, streaks, 15 achievements, 8 rewards, leaderboard, gamification ALL LOADED'); } catch(e) { console.warn('[Engagement] Error:', e.message); }
 
+// === SEO TRAFFIC ENGINE: Auto-blog, keyword tracker, smart 404, search pings, schema markup ===
+try { require('./seo-traffic-engine'); console.log('[SEO] Auto-blog (30+ posts), 20 target keywords, smart 404, search pings, schema/OG auto-tags ALL LOADED'); } catch(e) { console.warn('[SEO] Error:', e.message); }
+
+// === ANALYTICS INTELLIGENCE: Real-time dashboard, funnels, session tracking, device stats ===
+try { require('./analytics-engine'); console.log('[Analytics] Real-time dashboard, conversion funnels, session/page/event tracking, daily aggregation ALL LOADED'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
+
+// === EMAIL AUTOMATION: Welcome series, digest, referral invite, re-engagement, milestones ===
+try { require('./email-automation'); console.log('[EmailAuto] 5 email templates, email queue, broadcast, unsubscribe tracking, engagement triggers ALL LOADED'); } catch(e) { console.warn('[EmailAuto] Error:', e.message); }
+
 // ============================================================
 // === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
 // ============================================================
