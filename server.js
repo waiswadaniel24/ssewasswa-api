@@ -7783,7 +7783,7 @@ app.post('/dev/cleanup/execute', requireAuth, requireSuperAdmin, ah(async (req, 
     'sign_in_out','notifications','fee_receipts','subscriptions','payments',
     'church_attendance','purchase_orders','tax_records','bill_reminders','documents',
     'income_records','campaigns','campaign_pledges','role_permissions',
-    'campaign_updates','volunteer_hours','event_tickets','ticket_sales',
+    'campaign_updates','volunteer_hours','event_tickets','ticket_sales','campaign_comments','campaign_payouts','matching_donations','donor_profiles','donation_receipts','campaign_milestones','campaign_deadline_reminders',
     'chart_of_accounts','ledger_entries','document_folders','suppliers','branches',
     'inventory_transfers','loyalty_points','sms_campaigns','investments','debt_payoff',
     'momo_payments','automation_rules','integration_configs','calendar_events',
@@ -19866,6 +19866,9 @@ app.get('/fundraising', requireAuth, requireNotBanned, requireFundraisingSubscri
         <a href="/fundraising/new" class="btn btn-green" style="background:white;color:#059669;font-weight:700">+ New Campaign</a>
         <a href="/fundraising/investors" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">View Investors</a>
         <a href="/fundraising/analytics" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Analytics</a>
+        <a href="/my-donations" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">My Donations</a>
+        <a href="/admin/payouts" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Payouts</a>
+        <a href="/admin/refunds" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Refunds</a>
       </div>
     </div>
     <div class="stats">
@@ -20076,10 +20079,13 @@ app.get('/fundraising/:id', requireAuth, requireNotBanned, requireFundraisingSub
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px;margin-bottom:12px">
         <h2>${c.featured?'<span style="background:#f59e0b;color:white;padding:2px 8px;border-radius:6px;font-size:12px;margin-right:8px">Featured</span>':''} ${esc(c.title)}</h2>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
           <a href="/fundraising/${c.id}/donate" class="btn btn-green">Donate Now</a>
           <a href="/fundraising/${c.id}/update" class="btn btn-sm">Post Update</a>
           <a href="/fundraising/${c.id}/offers" class="btn btn-sm" style="background:#f59e0b;color:white">Offers (${offers.rows.filter(o=>o.offer_status==='pending').length})</a>
+          <a href="/campaigns/${c.id}/donors" class="btn btn-sm" style="background:#7c3aed;color:white">Donor Wall</a>
+          <a href="/campaigns/${c.id}/qr" class="btn btn-sm" style="background:#0891b2;color:white">QR Code</a>
+          <a href="/campaigns/${c.id}/embed" class="btn btn-sm" style="background:#64748b;color:white">Embed</a>
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -20102,6 +20108,23 @@ app.get('/fundraising/:id', requireAuth, requireNotBanned, requireFundraisingSub
       <h3 style="margin-top:20px">Recent Donations (${donations.rows.length})</h3>
       ${donations.rows.length ? '<table><tr><th>Donor</th><th>Amount</th><th>Method</th><th>Message</th><th>Date</th></tr>'+donations.rows.map(d=>'<tr><td>'+esc(d.donor_name||'Anonymous')+'</td><td style="color:#059669;font-weight:700">UGX '+(parseInt(d.amount)||0).toLocaleString()+'</td><td>'+esc(d.method)+'</td><td class="muted">'+esc(d.message||'-').substring(0,40)+'</td><td>'+(d.donated_at?new Date(d.donated_at).toLocaleDateString():'')+'</td></tr>').join('')+'</table>' : '<p class="muted">No donations yet. Share this campaign to start receiving donations!</p>'}
       ${updates.rows.length > 0 ? '<h3 style="margin-top:20px">Campaign Updates</h3>'+updates.rows.map(u=>'<div style="background:#f8fafc;border-radius:10px;padding:14px;margin:8px 0;border-left:4px solid '+(u.update_type==='milestone'?'#059669':u.update_type==='urgent'?'#ef4444':u.update_type==='financial'?'#4f46e5':'#64748b')+'"><strong>'+esc(u.title)+'</strong><span class="muted" style="margin-left:10px;font-size:12px">'+(u.created_at?new Date(u.created_at).toLocaleDateString():'')+'</span>'+(u.content?'<p style="margin:6px 0;font-size:14px">'+esc(u.content).replace(/\n/g,'<br>')+'</p>':'')+'</div>').join('') : ''}
+      <div style="margin-top:30px;padding-top:20px;border-top:2px solid #e2e8f0">
+        <h3>Share This Campaign</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+          <a href="https://wa.me/?text='+encodeURIComponent('${esc(c.title)} - Support this cause! '+BASE_URL+'/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#25d366;color:white;border-radius:8px;text-decoration:none;font-weight:600">WhatsApp</a>
+          <a href="https://twitter.com/intent/tweet?text='+encodeURIComponent('Support "${esc(c.title)}"')+'&url='+encodeURIComponent(BASE_URL+'/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#1da1f2;color:white;border-radius:8px;text-decoration:none;font-weight:600">Twitter/X</a>
+          <a href="https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent(BASE_URL+'/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#1877f2;color:white;border-radius:8px;text-decoration:none;font-weight:600">Facebook</a>
+          <a href="mailto:?subject='+encodeURIComponent('Support: ${esc(c.title)}')+'&body='+encodeURIComponent('I thought you might want to support this cause: ${esc(c.title)}\\n\\n'+BASE_URL+'/discover/${c.id}')+'" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#64748b;color:white;border-radius:8px;text-decoration:none;font-weight:600">Email</a>
+          <button onclick="navigator.clipboard.writeText('${BASE_URL}/discover/${c.id}');this.textContent='Copied!'" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#475569;color:white;border-radius:8px;font-weight:600;border:none;cursor:pointer">Copy Link</button>
+        </div>
+      </div>
+      <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/fundraising/${c.id}/payout" class="btn btn-sm" style="background:#7c3aed;color:white">Request Payout</a>
+        <a href="/fundraising/${c.id}/matching" class="btn btn-sm" style="background:#f59e0b;color:white">Matching Donations</a>
+        <a href="/campaigns/${c.id}/comments" class="btn btn-sm" style="background:#059669;color:white">Comments</a>
+        <a href="/fundraising/${c.id}/close" class="btn btn-sm">Close Campaign</a>
+        <a href="/fundraising/${c.id}/delete" class="btn btn-sm btn-red" onclick="return confirm('Delete this campaign?')">Delete</a>
+      </div>
     </div>
   `, req.session.user));
 }));
@@ -20180,20 +20203,29 @@ app.get('/fundraising/:id/donate', requireAuth, requireNotBanned, requireFundrai
       <input name="amount" type="number" placeholder="Amount (UGX)" required>
       <select name="method"><option value="cash">Cash</option><option value="mobile_money">Mobile Money (MTN)</option><option value="airtel_money">Airtel Money</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card Payment</option><option value="online">Online</option></select>
       <textarea name="message" rows="2" placeholder="Message of support (optional)"></textarea>
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" name="donate_anonymously"> Donate anonymously (your name won't appear on donor wall)</label>
       <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Complete Donation</button>
     </form></div>`, req.session.user));
 }));
 
 app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
-  const { donor_name, amount, method, message } = req.body;
+  const { donor_name, amount, method, message, donate_anonymously } = req.body;
+  const displayName = donate_anonymously ? 'Anonymous' : (donor_name || 'Anonymous');
   const camp = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
-  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [camp?.tenant_id || req.session.user.tenant_id, req.params.id, donor_name||'Anonymous', amount||0, method||'cash', message||'']);
+  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [camp?.tenant_id || req.session.user.tenant_id, req.params.id, displayName, amount||0, method||'cash', message||'']);
   // 5% platform fee
   const fee = Math.round(parseInt(amount||0) * 0.05);
   if (fee > 0) {
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
     await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Donation fee - Campaign #'+req.params.id]);
   }
+  // Trigger matching donations
+  try { const fp = require('./fundraising-pro'); } catch(e) {}
+  // Trigger milestones check
+  try {
+    const campt = camp?.tenant_id || req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_milestones(tenant_id,campaign_id,milestone_type,percentage,message) SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS (SELECT 1 FROM campaign_milestones WHERE campaign_id=$2 AND percentage=1)', [campt, req.params.id, 'donation', 1, 'First donation received!']);
+  } catch(e) {}
   res.redirect('/fundraising/'+req.params.id);
 }));
 
@@ -20350,6 +20382,21 @@ app.get('/discover/:id', ah(async (req, res) => {
         </div>
         ${updates.rows.length > 0 ? '<h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Campaign Updates</h3>'+updates.rows.map(u=>'<div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px;border-left:4px solid '+(u.update_type==='milestone'?'#059669':u.update_type==='urgent'?'#ef4444':'#64748b')+'"><strong>'+esc(u.title)+'</strong><span class="muted" style="margin-left:8px;font-size:12px">'+(u.created_at?new Date(u.created_at).toLocaleDateString():'')+'</span>'+(u.content?'<p style="margin:6px 0;font-size:14px;color:#475569">'+esc(u.content).replace(/\n/g,'<br>')+'</p>':'')+'</div>').join('') : ''}
         ${donations.rows.length > 0 ? '<h3 style="font-size:18px;font-weight:700;margin:20px 0 12px">Recent Supporters ('+donations.rows.length+')</h3>'+donations.rows.slice(0,10).map(d=>'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9"><span>'+(d.donor_name==='Anonymous'?'Supporter':esc(d.donor_name))+'</span><span style="font-weight:700;color:#059669">UGX '+(parseInt(d.amount)||0).toLocaleString()+'</span></div>').join('') : ''}
+        <div style="margin-top:24px;padding-top:20px;border-top:2px solid #e2e8f0">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:12px">Share This Campaign</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a href="https://wa.me/?text='+encodeURIComponent('${esc(c.title)} - Support this cause! ${BASE_URL}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#25d366;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">WhatsApp</a>
+            <a href="https://twitter.com/intent/tweet?text='+encodeURIComponent('Support "${esc(c.title)}"')+'&url='+encodeURIComponent('${BASE_URL}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#1da1f2;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Twitter/X</a>
+            <a href="https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent('${BASE_URL}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#1877f2;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Facebook</a>
+            <button onclick="navigator.clipboard.writeText('${BASE_URL}/discover/${c.id}');this.textContent='Copied!'" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#475569;color:white;border-radius:8px;font-weight:600;font-size:13px;border:none;cursor:pointer">Copy Link</button>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <a href="/campaigns/${c.id}/donors" style="font-size:13px;color:#7c3aed;font-weight:600">View Donor Wall</a>
+            <a href="/campaigns/${c.id}/comments" style="font-size:13px;color:#059669;font-weight:600">Leave Encouragement</a>
+            <a href="/campaigns/${c.id}/qr" style="font-size:13px;color:#0891b2;font-weight:600">Get QR Code</a>
+            <a href="/campaigns/${c.id}/embed" style="font-size:13px;color:#64748b;font-weight:600">Embed on Website</a>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -20369,6 +20416,7 @@ app.get('/discover/:id/donate', requireAuth, requireFundraisingSubscription, ah(
         <input name="amount" type="number" placeholder="Amount (UGX)" required>
         <select name="method"><option value="mobile_money">MTN Mobile Money</option><option value="airtel_money">Airtel Money</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card Payment</option><option value="cash">Cash</option></select>
         <textarea name="message" rows="2" placeholder="Message of support (optional)"></textarea>
+        <label style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" name="donate_anonymously"> Donate anonymously</label>
         <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Complete Donation</button>
       </form></div>
   `, req.session.user));
@@ -20377,8 +20425,9 @@ app.get('/discover/:id/donate', requireAuth, requireFundraisingSubscription, ah(
 app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
-  const { donor_name, donor_email, amount, method, message } = req.body;
-  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [c.tenant_id, c.id, donor_name||req.session.user.name||'Anonymous', amount||0, method||'mobile_money', message||'']);
+  const { donor_name, donor_email, amount, method, message, donate_anonymously } = req.body;
+  const displayName = donate_anonymously ? 'Anonymous' : (donor_name||req.session.user.name||'Anonymous');
+  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [c.tenant_id, c.id, displayName, amount||0, method||'mobile_money', message||'']);
   const fee = Math.round(parseInt(amount||0) * 0.05);
   if (fee > 0) {
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
@@ -24229,6 +24278,15 @@ try {
   console.log('[Launch] Public routes loaded');
 } catch (e) {
   console.warn('[Launch] Failed to load launch routes:', e.message);
+}
+
+// === FUNDRAISING PRO (social sharing, donor dashboard, payouts, matching, comments, QR, embed, refunds, milestones, receipts) ===
+try {
+  const fundraisingPro = require('./fundraising-pro');
+  fundraisingPro(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+  console.log('[FundraisingPro] Professional fundraising features loaded');
+} catch (e) {
+  console.warn('[FundraisingPro] Failed to load fundraising pro:', e.message);
 }
 
 // ============================================================
