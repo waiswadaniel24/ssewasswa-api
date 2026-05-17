@@ -12,10 +12,7 @@ if (!process.env.NODE_NO_WARNINGS) process.env.NODE_NO_WARNINGS = '1';
 
 // === GLOBAL TLS SAFETY NET ===
 // Render/Heroku managed databases use self-signed certs internally.
-// This ensures all outbound HTTPS requests (fetch, nodemailer, webhooks) work.
-if (process.env.NODE_ENV === 'production') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-}
+// TLS verification is handled per-connection in the Pool config (ssl: { rejectUnauthorized: false }).
 process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
 const express = require('express');
 const session = require('express-session');
@@ -6049,7 +6046,7 @@ app.get('/portal/health', requireAuth, requireNotBanned, ah(async (req, res) => 
     pool.query("SELECT COUNT(*)::int as cnt FROM prescriptions WHERE tenant_id=$1 AND created_at>DATE_TRUNC('day',NOW())", [t]).catch(() => ({rows:[{cnt:0}]})),
     pool.query("SELECT status, COUNT(*)::int as cnt FROM lab_requests WHERE tenant_id=$1 GROUP BY status", [t]).catch(() => ({rows:[]})),
     pool.query('SELECT COUNT(*)::int as cnt FROM pharmacy_inventory WHERE tenant_id=$1 AND quantity<=reorder_level', [t]).catch(() => ({rows:[{cnt:0}]})),
-    pool.query("SELECT COUNT(*)::int as cnt FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=$1", [today]).catch(() => ({rows:[{cnt:0}]})),
+    pool.query("SELECT COUNT(*)::int as cnt FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=$2", [t, today]).catch(() => ({rows:[{cnt:0}]})),
     pool.query('SELECT COUNT(*)::int as cnt FROM clinic_patients WHERE tenant_id=$1').catch(() => ({rows:[{cnt:0}]})),
     pool.query("SELECT COALESCE(SUM(total_amount),0)::int as total FROM patient_invoices WHERE tenant_id=$1 AND created_at>DATE_TRUNC('month',NOW())", [t]).catch(() => ({rows:[{total:0}]})),
     pool.query("SELECT COUNT(*)::int as total, COALESCE(SUM(CASE WHEN status='occupied' THEN 1 ELSE 0 END),0)::int as occupied FROM clinic_beds WHERE tenant_id=$1", [t]).catch(() => ({rows:[{total:0,occupied:0}]})),
@@ -6221,7 +6218,7 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
 app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { health_institution_type } = req.body;
-  await pool.query('UPDATE tenants SET health_institution_type=$1 WHERE id=$2', [hhealth_institution_type || 'general_hospital', t]);
+  await pool.query('UPDATE tenants SET health_institution_type=$1 WHERE id=$2', [health_institution_type || 'general_hospital', t]);
   await audit(req.session.user.email, 'update_health_type', health_institution_type);
   res.redirect('/portal/health');
 }));
@@ -20585,7 +20582,12 @@ app.get('/donations/recurring/:id/resume', requireAuth, requireNotBanned, requir
   res.redirect('/donations/recurring');
 }));
 
-app.post('/api/recurring-donations/process', ah(async (req, res) => {
+app.post('/api/recurring-donations/process', requireAuth, ah(async (req, res) => {
+  // SECURITY: Require admin role to process recurring donations
+  const role = req.session.user?.role || 'staff';
+  if (role !== 'super_admin' && role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
   // Process due recurring donations - called by cron/scheduler
   const due = (await pool.query("SELECT * FROM recurring_donations WHERE next_date <= CURRENT_DATE AND status = 'active'")).rows;
   let processed = 0, errors = 0;
@@ -24247,14 +24249,20 @@ app.post('/leave/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   res.redirect('/leave');
 }));
 
-app.get('/leave/approve/:id', requireAuth, ah(async (req, res) => {
+app.get('/leave/approve/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  // SECURITY: Only admin or HR can approve leave
+  const role = req.session.user.role || 'staff';
+  if (role !== 'admin' && role !== 'hr') { return res.status(403).send('Only admin or HR can approve leave requests.'); }
   await pool.query('UPDATE leave_requests SET status=$1,approver_email=$2 WHERE id=$3 AND tenant_id=$4', ['approved', req.session.user.email, req.params.id, req.session.user.tenant_id]);
   const lr = await pool.query('SELECT user_email,leave_type FROM leave_requests WHERE id=$1', [req.params.id]);
   if (lr.rows[0]) { audit(req.session.user.email, 'leave_approved', '#'+req.params.id); notify(req.session.user.tenant_id, lr.rows[0].user_email, 'Leave Approved', `Your ${lr.rows[0].leave_type} leave has been approved.`, 'success'); }
   res.redirect('/leave');
 }));
 
-app.get('/leave/reject/:id', requireAuth, ah(async (req, res) => {
+app.get('/leave/reject/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  // SECURITY: Only admin or HR can reject leave
+  const role = req.session.user.role || 'staff';
+  if (role !== 'admin' && role !== 'hr') { return res.status(403).send('Only admin or HR can reject leave requests.'); }
   await pool.query('UPDATE leave_requests SET status=$1,approver_email=$2 WHERE id=$3 AND tenant_id=$4', ['rejected', req.session.user.email, req.params.id, req.session.user.tenant_id]);
   const lr = await pool.query('SELECT user_email,leave_type FROM leave_requests WHERE id=$1', [req.params.id]);
   if (lr.rows[0]) { audit(req.session.user.email, 'leave_rejected', '#'+req.params.id); notify(req.session.user.tenant_id, lr.rows[0].user_email, 'Leave Rejected', `Your ${lr.rows[0].leave_type} leave has been rejected.`, 'warning'); }
@@ -24313,14 +24321,20 @@ app.post('/expense-claims/save', requireAuth, requireNotBanned, ah(async (req, r
   res.redirect('/expense-claims');
 }));
 
-app.get('/expense-claims/approve/:id', requireAuth, ah(async (req, res) => {
+app.get('/expense-claims/approve/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  // SECURITY: Only admin, HR, or finance can approve expenses
+  const role = req.session.user.role || 'staff';
+  if (role !== 'admin' && role !== 'hr' && role !== 'finance') { return res.status(403).send('Only admin, HR, or finance can approve expenses.'); }
   await pool.query('UPDATE expense_claims SET status=$1,approver_email=$2 WHERE id=$3 AND tenant_id=$4', ['approved', req.session.user.email, req.params.id, req.session.user.tenant_id]);
   const cl = await pool.query('SELECT user_email,title,amount FROM expense_claims WHERE id=$1', [req.params.id]);
   if (cl.rows[0]) { audit(req.session.user.email, 'expense_approved', '#'+req.params.id); notify(req.session.user.tenant_id, cl.rows[0].user_email, 'Expense Approved', `"${cl.rows[0].title}" approved.`, 'success'); }
   res.redirect('/expense-claims');
 }));
 
-app.get('/expense-claims/reject/:id', requireAuth, ah(async (req, res) => {
+app.get('/expense-claims/reject/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  // SECURITY: Only admin, HR, or finance can reject expenses
+  const role = req.session.user.role || 'staff';
+  if (role !== 'admin' && role !== 'hr' && role !== 'finance') { return res.status(403).send('Only admin, HR, or finance can reject expenses.'); }
   await pool.query('UPDATE expense_claims SET status=$1,approver_email=$2 WHERE id=$3 AND tenant_id=$4', ['rejected', req.session.user.email, req.params.id, req.session.user.tenant_id]);
   const cl = await pool.query('SELECT user_email,title FROM expense_claims WHERE id=$1', [req.params.id]);
   if (cl.rows[0]) { audit(req.session.user.email, 'expense_rejected', '#'+req.params.id); notify(req.session.user.tenant_id, cl.rows[0].user_email, 'Expense Rejected', `"${cl.rows[0].title}" rejected.`, 'warning'); }
@@ -24599,19 +24613,28 @@ app.get('/announcements/new', requireAuth, ah(async (req, res) => {
   </form></div>`, req.session.user));
 }));
 
-app.post('/announcements/save', requireAuth, ah(async (req, res) => {
+app.post('/announcements/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  // SECURITY: Only admin or HR can create announcements
+  const role = req.session.user.role || 'staff';
+  if (role !== 'admin' && role !== 'hr') { return res.status(403).send('Only admin or HR can create announcements.'); }
   await pool.query('INSERT INTO announcements (tenant_id,user_email,title,content,priority,target_audience,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7)', [req.session.user.tenant_id, req.session.user.email, req.body.title, req.body.content, req.body.priority, req.body.target_audience, req.body.expires_at||null]);
   audit(req.session.user.email, 'announcement', req.body.title);
   notify(req.session.user.tenant_id, null, req.body.title, req.body.content.length>200?req.body.content.slice(0,200)+'...':req.body.content, req.body.priority==='urgent'?'warning':'info');
   res.redirect('/announcements');
 }));
 
-app.get('/announcements/pin/:id', requireAuth, ah(async (req, res) => {
+app.get('/announcements/pin/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  // SECURITY: Only admin or HR can pin announcements
+  const role = req.session.user.role || 'staff';
+  if (role !== 'admin' && role !== 'hr') { return res.status(403).send('Only admin or HR can pin announcements.'); }
   await pool.query('UPDATE announcements SET pinned=NOT pinned WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   res.redirect('/announcements');
 }));
 
-app.get('/announcements/delete/:id', requireAuth, ah(async (req, res) => {
+app.get('/announcements/delete/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  // SECURITY: Only admin or HR can delete announcements
+  const role = req.session.user.role || 'staff';
+  if (role !== 'admin' && role !== 'hr') { return res.status(403).send('Only admin or HR can delete announcements.'); }
   await pool.query('DELETE FROM announcements WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   res.redirect('/announcements');
 }));

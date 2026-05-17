@@ -2363,6 +2363,10 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   app.get('/billing/activate/:plan', requireAuth, ah(async (req, res) => {
     const user = req.session.user;
     const plan = req.params.plan;
+    // SECURITY: Only super_admin can manually activate plans
+    if (user.role !== 'super_admin') {
+      return res.status(403).send(renderPage('Access Denied', '<div class="card"><div class="alert alert-error">Only platform administrators can activate plans.</div><a href="/billing" class="btn">Back to Billing</a></div>', user));
+    }
 
     if (!PLAN_PRICES.hasOwnProperty(plan)) {
       return res.send(renderPage('Invalid Plan', '<div class="card"><div class="alert alert-error">Invalid plan selected.</div><a href="/billing" class="btn">Back to Billing</a></div>', user));

@@ -400,6 +400,11 @@ var f=document.getElementById('pw-fill');f.style.width=s+'%';f.style.background=
   // POST /register
   app.post('/register', ah(async (req, res) => {
     const { org_name, type, sub_type, email, phone, password, confirm_password } = req.body;
+    // SECURITY: Validate type against known portal types to prevent privilege escalation
+    const VALID_TYPES = ['school','church','organization','health','business','individual','hotel','restaurant','salon','pharmacy','gym','supermarket','retail','clinic'];
+    if (!type || !VALID_TYPES.includes(type)) {
+      return res.status(400).send('<div style="text-align:center;padding:60px"><h2>Error</h2><p>Invalid institution type.</p><a href="/register">Go Back</a></div>');
+    }
     if (!org_name || !email || !phone || !password) {
       return res.send('<div style="text-align:center;padding:60px"><h2>Error</h2><p>All fields are required.</p><a href="/register?type='+esc(type||'')+'">Go Back</a></div>');
     }
@@ -419,9 +424,9 @@ var f=document.getElementById('pw-fill');f.style.width=s+'%';f.style.background=
       );
       const tid = tenant.rows[0].id;
       try {
-        await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,$4,true)', [tid, email, hash, type === 'individual' ? 'admin' : type]);
+        await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,$4,true)', [tid, email, hash, 'admin']);
       } catch(e) {
-        await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tid, email, hash, type === 'individual' ? 'admin' : type]);
+        await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tid, email, hash, 'admin']);
       }
       try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status) VALUES($1,$2,$3,$4)', [tid, 'free', 0, 'active']); } catch(e) {}
       await audit(email, 'register', 'New ' + type + ' account: ' + org_name + (sub_type ? ' (' + sub_type + ')' : ''));
