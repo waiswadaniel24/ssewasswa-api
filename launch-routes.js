@@ -95,6 +95,8 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     ON CONFLICT (name) DO NOTHING`,
     // Drop legacy plan_key column if it exists from older schema
     `ALTER TABLE subscription_plans DROP COLUMN IF EXISTS plan_key`,
+    // Clean duplicate URLs before creating unique index
+    `DELETE FROM external_links a USING external_links b WHERE a.id > b.id AND a.url = b.url`,
     // Seed external links
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_external_links_url ON external_links(url)`,
     `INSERT INTO external_links (title, url, category, description, sort_order) VALUES

@@ -1862,13 +1862,13 @@ module.exports = function securityOps(app, pool, requireAuth, logger, audit, ren
 
   // Track session activity middleware
   app.use('/settings', requireAuth, ah(async (req, res, next) => {
-    if (req.sessionID && req.user) {
+    if (req.sessionID && req.session.user) {
       try {
         await pool.query(
           `INSERT INTO user_sessions (tenant_id,user_email,session_id,device_info,ip_address,user_agent,last_active)
            VALUES ($1,$2,$3,$4,$5,$6,NOW())
            ON CONFLICT (session_id) DO UPDATE SET last_active=NOW(), is_active=true`,
-          [req.user.tenant_id, req.user.email, req.sessionID,
+          [req.session.user.tenant_id, req.session.user.email, req.sessionID,
             (req.headers['user-agent'] || 'unknown').substring(0, 200),
             req.ip, (req.headers['user-agent'] || 'unknown').substring(0, 200)]
         ).catch(() => {});

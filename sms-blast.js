@@ -93,18 +93,20 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
         'CREATE INDEX IF NOT EXISTS idx_sms_grp_tid ON sms_groups(tenant_id);',
       ]) await pool.query(sql).catch(() => {});
 
-      // Seed 5 templates (ON CONFLICT DO NOTHING)
-      // Wrapped in try/catch because tenant_id=0 may not exist in tenants table
+      // Seed 5 templates per tenant (ON CONFLICT DO NOTHING)
       try {
-        await pool.query(`INSERT INTO sms_templates (tenant_id,name,content,category,variables) VALUES
-          (0,'General Notice','Dear {{name}}, {{message}}. Regards, {{organization}}.','general',ARRAY['name','message','organization']),
-          (0,'Fee Reminder','Dear {{name}}, fee of {{amount}} for {{term}} due {{due_date}}. Pay promptly.','billing',ARRAY['name','amount','term','due_date']),
-          (0,'Event Invitation','Invited to {{event}} on {{date}} at {{time}}. Venue: {{venue}}.','events',ARRAY['event','date','time','venue']),
-          (0,'Emergency Alert','URGENT: {{alert_message}}. Follow instructions from {{authority}}.','emergency',ARRAY['alert_message','authority']),
-          (0,'Attendance Summary','{{name}}, attendance for {{date}}: Present {{present}}/{{total}} periods.','attendance',ARRAY['name','date','present','total'])
-          ON CONFLICT DO NOTHING;`);
+        const tenantRows = (await pool.query(`SELECT id FROM tenants`)).rows;
+        for (const t of tenantRows) {
+          await pool.query(`INSERT INTO sms_templates (tenant_id,name,content,category,variables) VALUES
+            ($1,'General Notice','Dear {{name}}, {{message}}. Regards, {{organization}}.','general',ARRAY['name','message','organization']),
+            ($1,'Fee Reminder','Dear {{name}}, fee of {{amount}} for {{term}} due {{due_date}}. Pay promptly.','billing',ARRAY['name','amount','term','due_date']),
+            ($1,'Event Invitation','Invited to {{event}} on {{date}} at {{time}}. Venue: {{venue}}.','events',ARRAY['event','date','time','venue']),
+            ($1,'Emergency Alert','URGENT: {{alert_message}}. Follow instructions from {{authority}}.','emergency',ARRAY['alert_message','authority']),
+            ($1,'Attendance Summary','{{name}}, attendance for {{date}}: Present {{present}}/{{total}} periods.','attendance',ARRAY['name','date','present','total'])
+            ON CONFLICT DO NOTHING;`, [t.id]);
+        }
       } catch (seedErr) {
-        console.warn('[SMS] Seed skipped (tenant_id=0 may not exist):', seedErr.message);
+        console.warn('[SMS] Seed skipped:', seedErr.message);
       }
       console.log('[SMS] Migrations & seeds applied');
     } catch (e) { console.error('[SMS] Migration error:', e.message); }
@@ -274,7 +276,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   app.get('/sms/compose', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id;
     const[tmpls,grps]=await Promise.all([
-      pool.query(`SELECT * FROM sms_templates WHERE (tenant_id=$1 OR tenant_id=0) AND is_active=true ORDER BY name`,[tid]),
+      pool.query(`SELECT * FROM sms_templates WHERE tenant_id=$1 AND is_active=true ORDER BY name`,[tid]),
       pool.query(`SELECT id,name,member_count FROM sms_groups WHERE tenant_id=$1 ORDER BY name`,[tid])]);
     const tO=tmpls.rows.map(t=>`<option value="${t.id}" data-vars='${JSON.stringify(t.variables||[])}' data-content="${esc(t.content)}">${esc(t.name)}</option>`).join('');
     const gO=grpOpts(grps.rows);
@@ -409,7 +411,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   //  6. GET /sms/templates — Template management
   // ═══════════════════════════════════════════════════════
   app.get('/sms/templates', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
-    const tid=req.session.user.tenant_id,tmpls=(await pool.query(`SELECT * FROM sms_templates WHERE (tenant_id=$1 OR tenant_id=0) ORDER BY tenant_id,name`,[tid])).rows;
+    const tid=req.session.user.tenant_id,tmpls=(await pool.query(`SELECT * FROM sms_templates WHERE tenant_id=$1 ORDER BY name`,[tid])).rows;
     const cc={general:'#6b7280',billing:'#f59e0b',events:'#3b82f6',emergency:'#ef4444',attendance:'#8b5cf6'};
     const cH=tmpls.length===0?'<p class="muted" style="text-align:center;padding:28px">No templates</p>'
       :`<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">`+
@@ -417,8 +419,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
         return`<div class="tmpl-card"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><strong>${esc(t.name)}</strong><span style="background:${clr}15;color:${clr};padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600">${esc(t.category||'')}</span></div>
         <p style="font-size:13px;color:#4b5563;line-height:1.4;margin:0 0 6px;white-space:pre-wrap">${esc(t.content)}</p><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">${vt}</div>
         <div style="display:flex;justify-content:space-between;font-size:12px" class="muted"><span>Used ${F(t.usage_count)}x</span><span class="badge ${t.is_active?'btn-green':'btn-gold'}" style="font-size:11px">${t.is_active?'Active':'Inactive'}</span></div>
-        ${t.tenant_id===0?'<div class="muted" style="font-size:11px;margin-top:5px">System template</div>'
-        :`<div style="margin-top:6px;display:flex;gap:6px"><button onclick="useTmpl(${t.id})" class="btn btn-sm btn-blue">Use</button><button onclick="delTmpl(${t.id})" class="btn btn-sm btn-red">Delete</button></div>`}</div>`}).join('')+'</div>';
+        <div style="margin-top:6px;display:flex;gap:6px"><button onclick="useTmpl(${t.id})" class="btn btn-sm btn-blue">Use</button><button onclick="delTmpl(${t.id})" class="btn btn-sm btn-red">Delete</button></div></div>`}).join('')+'</div>';
     res.send(renderPage('SMS Templates',`${CSS}${nav('templates')}
       <h2>SMS Templates</h2><p class="muted" style="margin-bottom:14px">Manage reusable message templates with variable support</p>${cH}
       <div class="card" style="margin-top:18px"><h3 style="margin:0 0 14px">Add New Template</h3>

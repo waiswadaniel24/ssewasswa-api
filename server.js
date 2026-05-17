@@ -33238,13 +33238,36 @@ try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.lo
 
 //
 
+// === Module-scope uiT translation helper (used by SchoolV18b and other modules) ===
+const uiT = (key, lang) => {
+  const dict = {
+    'nav.dashboard': { lg: 'Olutimbe', sw: 'Dashibodi', fr: 'Tableau de bord' },
+    'nav.notifications': { lg: 'Ebyogerwa', sw: 'Arifa', fr: 'Notifications' },
+    'nav.modules': { lg: 'Amasomo', sw: 'Moduli', fr: 'Modules' },
+    'nav.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
+    'nav.portal': { lg: 'Akabinja', sw: 'Lango', fr: 'Portail' },
+    'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
+    'school_pages': { lg: 'Emitwe', sw: 'Kurasa', fr: 'Pages' },
+    'school_admissions': { lg: 'Okuyingira', sw: 'Uingizwaji', fr: 'Admissions' },
+    'school_bus': { lg: 'Emotoka', sw: 'Basi', fr: 'Bus' },
+    'school_meals': { lg: 'Emere', sw: 'Chakula', fr: 'Repas' },
+    'school_sickbay': { lg: 'Edwaliro', sw: 'Hospitali', fr: 'Infirmerie' },
+    'school_analytics': { lg: 'Ebigambo', sw: 'Uchambuzi', fr: 'Analytique' },
+    'school_api_docs': { lg: 'Ebirala', sw: 'Hati', fr: 'API Docs' },
+    'school_pwa': { lg: 'Apuyaka', sw: 'Programu', fr: 'Application' },
+  };
+  const entry = dict[key];
+  if (!entry) return key;
+  return entry[lang || 'en'] || key;
+};
+
 // === V18 SCHOOL UPGRADE: School Features Part 2 (Public Pages, SEO, Accessibility, Admissions Form, Bus GPS, Meals, Sickbay, API Docs, PWA, Analytics) ===
 [
   'school_public_pages','public_admission_applications','bus_trips','bus_trip_logs','meal_schedules',
   'meal_attendance_v18','sickbay_medicine_inventory','user_accessibility_settings'
 ].forEach(t => VALID_TABLES.add(t));
 try {
-  const _v18bOpts = { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail: global.queueEmail || (() => {}), uiT: (typeof uiT !== 'undefined' ? uiT : (k) => k), awardPoints: global.awardPoints || (() => {}), trackRevenue: global.trackRevenue || (() => {}) };
+  const _v18bOpts = { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail: global.queueEmail || (() => {}), uiT, awardPoints: global.awardPoints || (() => {}), trackRevenue: global.trackRevenue || (() => {}) };
   const m = require('./school-v18-b');
   m(app, pool, _v18bOpts);
   console.log('[SchoolV18b] School upgrade Part 2 loaded (V18) — 10 features, 30+ routes');
