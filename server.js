@@ -123,9 +123,9 @@ const pool = new Pool({
   // Always use rejectUnauthorized:false — Render/Heroku/Neon managed PostgreSQL uses self-signed CA certs.
   // Using NODE_ENV check breaks when Render doesn't set NODE_ENV=production by default.
   ssl: { rejectUnauthorized: false },
-  max: 20,
+  max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000
+  connectionTimeoutMillis: 10000
 });
 
 // === SECURITY ===
@@ -33331,7 +33331,7 @@ setTimeout(() => loadSelfExec('advanced-platform', 'AdvancedPlatform'), 13000);
 // Keep pool, app, db, ah, esc, renderPage, requireAuth, requireNotBanned as globals
 // Self-exec modules' route handlers need them at request time
 // Only clean up non-essential globals
-const _keepGlobals = ['app','pool','db','ah','esc','renderPage','requireAuth','requireNotBanned','requireSuperAdmin','audit','notify','notifyAll','sendEmail','sendSMS','migrations'];
+const _keepGlobals = ['app','pool','db','ah','esc','renderPage','requireAuth','requireNotBanned','requireSuperAdmin','audit','notify','notifyAll','sendEmail','sendSMS','migrations','VALID_TABLES','requestMtnPayment'];
 Object.keys(_scopeBridge).forEach(k => { if (!_keepGlobals.includes(k)) delete global[k]; });
 // KEEP cross-module functions on global — route handlers in other modules
 // need trackRevenue, awardPoints, creditDeveloperRevenue, queueEmail at request time.
@@ -34373,7 +34373,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
   async function retryQuery(sql, params) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        return await retryQuery(sql, params);
+        return await pool.query(sql, params);
       } catch(e) {
         if (attempt === maxRetries) throw e;
         console.warn('[v14-v17] Retry ' + attempt + '/' + maxRetries + ' for query...');

@@ -85,18 +85,12 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
 
       await c.query(`CREATE TABLE IF NOT EXISTS discipline_settings (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
-        point_thresholds JSONB DEFAULT $1,
+        point_thresholds JSONB DEFAULT '[{"points":5,"action":"verbal_warning","label":"5 pts — Verbal Warning"},{"points":10,"action":"parent_meeting","label":"10 pts — Parent Meeting"},{"points":15,"action":"counseling_referral","label":"15 pts — Counseling Referral"},{"points":20,"action":"suspension","label":"20 pts — Suspension"},{"points":30,"action":"expulsion_referral","label":"30 pts — Expulsion Referral"}]'::jsonb,
         auto_notify_parent BOOLEAN DEFAULT true,
         require_acknowledgment BOOLEAN DEFAULT true,
         counseling_referral_threshold INTEGER DEFAULT 15,
         updated_at TIMESTAMPTZ DEFAULT NOW()
-      )`, [JSON.stringify([
-        { points: 5, action: 'verbal_warning', label: '5 pts — Verbal Warning' },
-        { points: 10, action: 'parent_meeting', label: '10 pts — Parent Meeting' },
-        { points: 15, action: 'counseling_referral', label: '15 pts — Counseling Referral' },
-        { points: 20, action: 'suspension', label: '20 pts — Suspension' },
-        { points: 30, action: 'expulsion_referral', label: '30 pts — Expulsion Referral' },
-      ])]);
+      )`);
 
       await c.query(`CREATE TABLE IF NOT EXISTS discipline_committee (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL,
