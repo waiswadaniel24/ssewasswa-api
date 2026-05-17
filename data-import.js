@@ -118,7 +118,7 @@ module.exports = function dataImport(app, db, pool, renderPage, esc) {
     },
     products: {
       label: 'Products / Inventory',
-      table: 'shop_items',
+      table: 'school_shop_items',
       columns: [
         { name: 'name', label: 'Name', required: true },
         { name: 'description', label: 'Description', required: false },

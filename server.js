@@ -26075,7 +26075,7 @@ app.get('/portal/public', requireAuth, ah(async (req, res) => {
   const tenant = (await pool.query('SELECT name, type, email FROM tenants WHERE id=$1', [tid])).rows[0];
   const pages = (await pool.query("SELECT * FROM public_pages WHERE tenant_id=$1 AND is_published=true ORDER BY page_order", [tid])).rows;
   const posts = (await pool.query('SELECT * FROM public_posts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [tid])).rows;
-  const shopItems = (await pool.query('SELECT * FROM shop_items WHERE tenant_id=$1 AND is_active=true ORDER BY name LIMIT 50', [tid])).rows;
+  const shopItems = (await pool.query('SELECT * FROM school_shop_items WHERE tenant_id=$1 AND (is_active=true OR is_active IS NULL) ORDER BY name LIMIT 50', [tid])).rows;
   const html = `
     <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);padding:32px;border-radius:16px;margin-bottom:24px;color:white;text-align:center">
       <h1 style="font-size:28px">${esc(tenant?.name || 'Welcome')}</h1>
