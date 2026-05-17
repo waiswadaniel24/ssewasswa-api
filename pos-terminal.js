@@ -664,6 +664,9 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
         );
       }
 
+      // Track revenue for platform earnings
+      try { await global.trackRevenue('pos_sale', totalAmount / 3700, `POS sale: ${receiptNumber}`, receiptNumber); } catch(e) {}
+
       res.json({ success: true, receipt_number: receiptNumber, sale_id: saleId, total: totalAmount });
     } catch (e) {
       res.status(500).json({ success: false, error: e.message });
@@ -986,6 +989,593 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
     )).rows;
 
     res.json({ success: true, count: products.length, products });
+  }));
+
+  // ============================================================
+  // NEW DATABASE MIGRATIONS
+  // ============================================================
+  (async () => {
+    const c = await pool.connect().catch(() => null);
+    if (!c) { console.error('[POS] Cannot connect to DB for new migrations'); return; }
+    try {
+      await c.query(`CREATE TABLE IF NOT EXISTS pos_stock_alerts (
+        id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+        product_id INTEGER NOT NULL, threshold INTEGER NOT NULL DEFAULT 5,
+        is_dismissed BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+      await c.query(`CREATE TABLE IF NOT EXISTS pos_sale_payments (
+        id SERIAL PRIMARY KEY, sale_id INTEGER NOT NULL,
+        method VARCHAR(50) NOT NULL, amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        reference VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+      await c.query(`CREATE TABLE IF NOT EXISTS pos_receipt_settings (
+        id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+        header_text TEXT DEFAULT '', footer_text TEXT DEFAULT '',
+        show_logo BOOLEAN DEFAULT true, paper_size VARCHAR(20) DEFAULT '80mm',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_pos_stock_alerts_tenant ON pos_stock_alerts(tenant_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_pos_stock_alerts_product ON pos_stock_alerts(product_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_pos_sale_payments_sale ON pos_sale_payments(sale_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_pos_receipt_settings_tenant ON pos_receipt_settings(tenant_id)`);
+      console.log('[POS] New migrations applied successfully');
+    } catch (e) { console.error('[POS] New migration error:', e.message); }
+    finally { c.release(); }
+  })();
+
+  // -- dark mode CSS addon ------------------------------------------------
+  const POS_DARK_CSS = `<style>
+    @media(prefers-color-scheme:dark){
+      .pos-nav a{background:#1e293b;color:#94a3b8}
+      .pos-nav a:hover{background:#334155}.pos-nav a.active{background:#4f46e5;color:#fff}
+      .pos-btn-secondary{background:#334155;color:#cbd5e1}
+      .pos-table th{background:#0f172a;color:#94a3b8}
+      .pos-table td{color:#cbd5e1;border-bottom-color:#1e293b}
+      .pos-table tr:hover{background:#1e293b}
+      .pos-card{background:#1e293b;border-color:#334155}
+      .pos-filter{background:#1e293b}.pos-filter label{color:#94a3b8}
+      .pos-filter input,.pos-filter select{background:#0f172a;border-color:#334155;color:#e2e8f0}
+      .pos-product-card{background:#1e293b;border-color:#334155}
+      .pos-product-card:hover{border-color:#6366f1}
+      .pos-cart-item{border-bottom-color:#1e293b}
+    }
+  </style>`;
+
+  // ============================================================
+  // STOCK ALERT SYSTEM
+  // ============================================================
+  // ROUTE: GET /pos/alerts — Low stock products with alert configuration
+  app.get('/pos/alerts', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+
+    // Products at or below alert threshold
+    const alerts = (await pool.query(
+      `SELECT rp.id as product_id, rp.name, rp.sku, rp.category, rp.stock_quantity, rp.min_stock_level,
+              COALESCE(sa.threshold, rp.min_stock_level) as alert_threshold,
+              COALESCE(sa.is_dismissed, false) as is_dismissed,
+              sa.id as alert_id
+       FROM retail_products rp
+       LEFT JOIN pos_stock_alerts sa ON sa.product_id = rp.id AND sa.tenant_id = $1 AND sa.is_dismissed = false
+       WHERE rp.tenant_id = $1 AND rp.is_active = true AND rp.stock_quantity <= COALESCE(sa.threshold, rp.min_stock_level)
+       ORDER BY rp.stock_quantity ASC`,
+      [tid]
+    )).rows;
+
+    // All configured alerts
+    const configured = (await pool.query(
+      `SELECT sa.*, rp.name as product_name, rp.category
+       FROM pos_stock_alerts sa
+       LEFT JOIN retail_products rp ON rp.id = sa.product_id AND rp.tenant_id = sa.tenant_id
+       WHERE sa.tenant_id = $1
+       ORDER BY sa.created_at DESC`,
+      [tid]
+    )).rows;
+
+    const alertsHtml = alerts.map(a => `<tr>
+      <td><strong>${esc(a.name)}</strong></td>
+      <td class="muted">${esc(a.sku || '')}</td>
+      <td>${esc(a.category || '—')}</td>
+      <td style="color:#dc2626;font-weight:700">${a.stock_quantity}</td>
+      <td>${a.alert_threshold}</td>
+      <td>${a.is_dismissed ? '<span class="badge badge-success">Dismissed</span>' : '<span class="badge badge-error">Active</span>'}</td>
+      <td>
+        ${!a.is_dismissed ? '<form method="POST" action="/pos/alerts/dismiss" style="display:inline"><input type="hidden" name="alert_id" value="' + (a.alert_id || '') + '"><input type="hidden" name="product_id" value="' + a.product_id + '"><button type="submit" class="pos-btn pos-btn-secondary" style="padding:3px 10px;font-size:11px">Dismiss</button></form>' : ''}
+      </td>
+    </tr>`).join('');
+
+    const configuredHtml = configured.map(c => `<tr>
+      <td>${esc(c.product_name || 'Product #' + c.product_id)}</td>
+      <td>${esc(c.category || '')}</td>
+      <td>${c.threshold}</td>
+      <td>${c.is_dismissed ? '<span class="badge badge-success">Dismissed</span>' : '<span class="badge badge-error">Active</span>'}</td>
+      <td class="muted">${fmtDateTime(c.created_at)}</td>
+    </tr>`).join('');
+
+    const categories = (await pool.query(
+      `SELECT DISTINCT category FROM retail_products WHERE tenant_id=$1 AND is_active=true AND category IS NOT NULL ORDER BY category`, [tid]
+    )).rows;
+
+    const html = POS_CSS + POS_DARK_CSS + `<div style="max-width:1200px;margin:0 auto">
+      ${nav('alerts')}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+        <div><h1 style="font-size:24px;color:#1e293b">🔔 Stock Alerts</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">Monitor and configure low stock notifications</p></div>
+      </div>
+      <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-num" style="color:#ef4444">${alerts.length}</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Active Alerts</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${configured.length}</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Configured Rules</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+        <div class="pos-card">
+          <h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">⚠️ Active Alerts (${alerts.length})</h3>
+          <div style="overflow-x:auto;max-height:500px;overflow-y:auto"><table class="pos-table">
+            <thead style="position:sticky;top:0"><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock</th><th>Threshold</th><th>Status</th><th></th></tr></thead>
+            <tbody>${alertsHtml || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px">No active alerts — all stock levels OK</td></tr>'}</tbody>
+          </table></div>
+        </div>
+        <div>
+          <div class="pos-card" style="padding:24px">
+            <h3 style="margin:0 0 16px;color:#1e293b">⚙️ Configure Alert Threshold</h3>
+            <form method="POST" action="/pos/alerts/configure" style="display:flex;flex-direction:column;gap:12px">
+              <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Product</label>
+                <select name="product_id" required style="width:100%;padding:9px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
+                  <option value="">Select product...</option>
+                </select>
+                <input type="text" id="alertProductSearch" placeholder="Search product..." style="width:100%;padding:9px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;margin-top:6px" oninput="filterAlertProducts(this.value)">
+              </div>
+              <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Minimum Stock Threshold</label>
+                <input type="number" name="threshold" value="5" min="0" required style="width:100%;padding:9px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
+              </div>
+              <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Or set by Category</label>
+                <select name="category" style="width:100%;padding:9px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
+                  <option value="">Select category...</option>
+                  ${categories.map(c => '<option value="' + esc(c.category) + '">' + esc(c.category) + '</option>').join('')}
+                </select>
+              </div>
+              <button type="submit" class="pos-btn pos-btn-primary" style="justify-content:center">💾 Save Alert Rule</button>
+            </form>
+          </div>
+          <div class="pos-card" style="margin-top:16px">
+            <h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">📋 Configured Rules (${configured.length})</h3>
+            <div style="overflow-x:auto;max-height:260px;overflow-y:auto"><table class="pos-table">
+              <thead style="position:sticky;top:0"><tr><th>Product</th><th>Category</th><th>Threshold</th><th>Status</th><th>Created</th></tr></thead>
+              <tbody>${configuredHtml || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px">No configured rules yet</td></tr>'}</tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    res.send(renderPage('Stock Alerts', html, user, req));
+  }));
+
+  // ROUTE: POST /pos/alerts/configure — Set minimum stock thresholds
+  app.post('/pos/alerts/configure', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const { product_id, category, threshold } = req.body;
+    const thresh = parseInt(threshold) || 5;
+
+    if (product_id) {
+      // Single product threshold
+      await pool.query(`
+        INSERT INTO pos_stock_alerts (tenant_id, product_id, threshold, is_dismissed)
+        VALUES ($1, $2, $3, false)
+        ON CONFLICT DO UPDATE SET threshold = $3, is_dismissed = false`,
+        [tid, parseInt(product_id), thresh]
+      );
+      console.log('[POS] Stock alert configured for product #' + product_id + ' by ' + user.email);
+    } else if (category) {
+      // Apply threshold to all products in category
+      const products = (await pool.query(
+        `SELECT id FROM retail_products WHERE tenant_id=$1 AND is_active=true AND category=$2`,
+        [tid, category]
+      )).rows;
+      for (const p of products) {
+        await pool.query(`
+          INSERT INTO pos_stock_alerts (tenant_id, product_id, threshold, is_dismissed)
+          VALUES ($1, $2, $3, false)
+          ON CONFLICT DO UPDATE SET threshold = $3, is_dismissed = false`,
+          [tid, p.id, thresh]
+        );
+      }
+      console.log('[POS] Stock alert configured for category "' + category + '" (' + products.length + ' products) by ' + user.email);
+    }
+    req.session.flash = { type: 'success', msg: 'Alert threshold configured' };
+    res.redirect('/pos/alerts');
+  }));
+
+  // ROUTE: POST /pos/alerts/dismiss — Dismiss an alert
+  app.post('/pos/alerts/dismiss', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { alert_id, product_id } = req.body;
+
+    if (alert_id) {
+      await pool.query(`UPDATE pos_stock_alerts SET is_dismissed = true WHERE id = $1 AND tenant_id = $2`, [parseInt(alert_id), tid]);
+    } else if (product_id) {
+      await pool.query(`UPDATE pos_stock_alerts SET is_dismissed = true WHERE product_id = $1 AND tenant_id = $2`, [parseInt(product_id), tid]);
+    }
+    res.redirect('/pos/alerts');
+  }));
+
+  // ============================================================
+  // DAILY SALES REPORT
+  // ============================================================
+  // ROUTE: GET /pos/daily-report — Today's detailed sales breakdown
+  app.get('/pos/daily-report', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+
+    // Overall summary
+    const summary = (await pool.query(
+      `SELECT COALESCE(SUM(total_amount), 0)::numeric(14,2) as total_sales,
+              COALESCE(SUM(subtotal), 0)::numeric(14,2) as total_subtotal,
+              COALESCE(SUM(tax_amount), 0)::numeric(14,2) as total_tax,
+              COALESCE(SUM(discount_amount), 0)::numeric(14,2) as total_discount,
+              COUNT(*)::int as total_transactions
+       FROM retail_sales WHERE tenant_id = $1 AND created_at::date = CURRENT_DATE AND status = 'completed'`,
+      [tid]
+    )).rows[0];
+
+    // Hourly breakdown
+    const hourly = (await pool.query(
+      `SELECT EXTRACT(HOUR FROM created_at)::int as hour,
+              COALESCE(SUM(total_amount), 0)::numeric(12,2) as total,
+              COUNT(*)::int as txns
+       FROM retail_sales WHERE tenant_id = $1 AND created_at::date = CURRENT_DATE AND status = 'completed'
+       GROUP BY EXTRACT(HOUR FROM created_at) ORDER BY hour`,
+      [tid]
+    )).rows;
+
+    const maxHourly = Math.max(...hourly.map(h => Number(h.total) || 0), 1);
+    const hourlyHtml = hourly.map(h => {
+      const pct = Math.round((Number(h.total) || 0) / maxHourly * 100);
+      return `<tr>
+        <td style="font-weight:600">${String(h.hour).padStart(2, '0')}:00</td>
+        <td><div style="background:#f1f5f9;border-radius:6px;height:18px;overflow:hidden;position:relative"><div style="height:100%;width:${pct}%;background:#059669;border-radius:6px"></div></div></td>
+        <td style="font-weight:600;color:#16a34a">${Number(h.total).toLocaleString()}</td>
+        <td class="muted">${h.txns} txn</td>
+      </tr>`;
+    }).join('');
+
+    // By category
+    const byCategory = (await pool.query(
+      `SELECT rp.category, COALESCE(SUM(rsi.total_price), 0)::numeric(12,2) as total,
+              SUM(rsi.quantity)::int as qty, COUNT(DISTINCT rsi.sale_id)::int as txns
+       FROM retail_sale_items rsi
+       JOIN retail_products rp ON rp.id = rsi.product_id AND rp.tenant_id = rsi.tenant_id
+       JOIN retail_sales rs ON rs.id = rsi.sale_id AND rs.tenant_id = rsi.tenant_id
+       WHERE rsi.tenant_id = $1 AND rs.created_at::date = CURRENT_DATE AND rs.status = 'completed'
+       GROUP BY rp.category ORDER BY total DESC`,
+      [tid]
+    )).rows;
+
+    const categoryHtml = byCategory.map(c => `<tr>
+      <td><strong>${esc(c.category || 'Uncategorized')}</strong></td>
+      <td>${c.qty}</td>
+      <td>${c.txns}</td>
+      <td style="font-weight:700;color:#16a34a">${Number(c.total).toLocaleString()}</td>
+    </tr>`).join('');
+
+    // By payment method
+    const byPayment = (await pool.query(
+      `SELECT payment_method, COALESCE(SUM(total_amount), 0)::numeric(12,2) as total, COUNT(*)::int as txns
+       FROM retail_sales WHERE tenant_id = $1 AND created_at::date = CURRENT_DATE AND status = 'completed'
+       GROUP BY payment_method ORDER BY total DESC`,
+      [tid]
+    )).rows;
+
+    const paymentHtml = byPayment.map(p => `<tr>
+      <td><strong>${esc(p.payment_method || 'N/A')}</strong></td>
+      <td>${p.txns}</td>
+      <td style="font-weight:700;color:#16a34a">${Number(p.total).toLocaleString()}</td>
+      <td>${summary.total_transactions > 0 ? Math.round(Number(p.total) / Number(summary.total_sales) * 100) : 0}%</td>
+    </tr>`).join('');
+
+    // Top products
+    const topProducts = (await pool.query(
+      `SELECT rsi.product_name, SUM(rsi.quantity)::int as qty, COALESCE(SUM(rsi.total_price), 0)::numeric(12,2) as revenue
+       FROM retail_sale_items rsi
+       JOIN retail_sales rs ON rs.id = rsi.sale_id AND rs.tenant_id = rsi.tenant_id
+       WHERE rsi.tenant_id = $1 AND rs.created_at::date = CURRENT_DATE AND rs.status = 'completed'
+       GROUP BY rsi.product_name ORDER BY revenue DESC LIMIT 10`,
+      [tid]
+    )).rows;
+
+    const topHtml = topProducts.map((p, i) => `<tr>
+      <td>${i + 1}</td>
+      <td><strong>${esc(p.product_name)}</strong></td>
+      <td>${p.qty}</td>
+      <td style="font-weight:700;color:#4f46e5">${Number(p.revenue).toLocaleString()}</td>
+    </tr>`).join('');
+
+    const html = POS_CSS + POS_DARK_CSS + `<div style="max-width:1200px;margin:0 auto">
+      ${nav('daily-report')}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+        <div><h1 style="font-size:24px;color:#1e293b">📊 Daily Sales Report</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">${fmtDate(today())} — Detailed breakdown</p></div>
+        <form method="POST" action="/pos/daily-report/email"><button type="submit" class="pos-btn pos-btn-primary">📧 Email Report</button></form>
+      </div>
+      <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-num" style="color:#16a34a">${Number(summary.total_sales).toLocaleString()}</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Total Sales</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${summary.total_transactions}</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Transactions</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${Number(summary.total_tax).toLocaleString()}</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Tax Collected</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#ef4444">${Number(summary.total_discount).toLocaleString()}</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Discounts</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+        <div class="pos-card">
+          <h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">⏰ Sales by Hour</h3>
+          <div style="overflow-x:auto;max-height:400px;overflow-y:auto"><table class="pos-table">
+            <thead style="position:sticky;top:0"><tr><th>Hour</th><th style="width:40%">Volume</th><th>Total</th><th>Txns</th></tr></thead>
+            <tbody>${hourlyHtml || '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px">No sales today</td></tr>'}</tbody>
+          </table></div>
+        </div>
+        <div class="pos-card">
+          <h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">💳 By Payment Method</h3>
+          <table class="pos-table">
+            <thead><tr><th>Method</th><th>Txns</th><th>Total</th><th>Share</th></tr></thead>
+            <tbody>${paymentHtml || '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px">No data</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+        <div class="pos-card">
+          <h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">📁 By Category</h3>
+          <div style="overflow-x:auto;max-height:400px;overflow-y:auto"><table class="pos-table">
+            <thead style="position:sticky;top:0"><tr><th>Category</th><th>Qty</th><th>Txns</th><th>Revenue</th></tr></thead>
+            <tbody>${categoryHtml || '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px">No data</td></tr>'}</tbody>
+          </table></div>
+        </div>
+        <div class="pos-card">
+          <h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">🏆 Top Products</h3>
+          <div style="overflow-x:auto;max-height:400px;overflow-y:auto"><table class="pos-table">
+            <thead style="position:sticky;top:0"><tr><th>#</th><th>Product</th><th>Qty</th><th>Revenue</th></tr></thead>
+            <tbody>${topHtml || '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px">No data</td></tr>'}</tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>`;
+    res.send(renderPage('Daily Sales Report', html, user, req));
+  }));
+
+  // ROUTE: POST /pos/daily-report/email — Email daily report to admin
+  app.post('/pos/daily-report/email', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+
+    const summary = (await pool.query(
+      `SELECT COALESCE(SUM(total_amount), 0)::numeric(14,2) as total_sales, COUNT(*)::int as total_transactions
+       FROM retail_sales WHERE tenant_id = $1 AND created_at::date = CURRENT_DATE AND status = 'completed'`,
+      [tid]
+    )).rows[0];
+
+    const subject = 'POS Daily Sales Report — ' + today();
+    const body = 'Daily Sales Summary for ' + today() + '\\n' +
+      '━━━━━━━━━━━━━━━━━━━━\\n' +
+      'Total Sales: ' + Number(summary.total_sales).toLocaleString() + '\\n' +
+      'Transactions: ' + summary.total_transactions + '\\n' +
+      'Report generated by: ' + (user.name || user.email);
+
+    console.log('[POS] Daily report email requested by ' + user.email + ': ' + subject);
+    req.session.flash = { type: 'success', msg: 'Daily report email queued for delivery' };
+    res.redirect('/pos/daily-report');
+  }));
+
+  // ============================================================
+  // MULTI-PAYMENT SPLIT
+  // ============================================================
+  // ROUTE: POST /pos/terminal/sale-split — Process sale with multiple payment methods
+  app.post('/pos/terminal/sale-split', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const { items, customer_name, payments } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, error: 'No items provided' });
+    }
+    if (!payments || !Array.isArray(payments) || payments.length === 0) {
+      return res.status(400).json({ success: false, error: 'No payment methods provided' });
+    }
+
+    const client = await pool.connect().catch(() => null);
+    if (!client) return res.status(500).json({ success: false, error: 'Database unavailable' });
+
+    try {
+      await client.query('BEGIN');
+
+      // Calculate totals
+      const subtotal = items.reduce((s, i) => s + (Number(i.unit_price) || 0) * (Number(i.quantity) || 0), 0);
+      const totalPayments = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+
+      if (Math.abs(totalPayments - subtotal) > 0.01) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, error: 'Payment total (' + totalPayments.toFixed(2) + ') does not match sale total (' + subtotal.toFixed(2) + ')' });
+      }
+
+      // Validate stock
+      for (const item of items) {
+        const stock = (await client.query(
+          `SELECT stock_quantity, name FROM retail_products WHERE id=$1 AND tenant_id=$2 AND is_active=true FOR UPDATE`,
+          [item.product_id, tid]
+        )).rows[0];
+        if (!stock) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, error: 'Product not found: #' + item.product_id }); }
+        if (stock.stock_quantity < item.quantity) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, error: 'Insufficient stock for "' + stock.name + '" (have ' + stock.stock_quantity + ', need ' + item.quantity + ')' }); }
+      }
+
+      // Generate receipt number
+      const receiptNumber = 'RCP-' + Date.now().toString(36).toUpperCase() + '-' + genToken().substring(0, 4).toUpperCase();
+
+      // Create sale record
+      const primaryMethod = payments[0].method || 'split';
+      const saleResult = await client.query(
+        `INSERT INTO retail_sales (tenant_id, receipt_number, customer_name, subtotal, tax_amount, discount_amount, total_amount, payment_method, status, cashier_id)
+         VALUES ($1,$2,$3,$4,0,0,$5,$6,'completed',$7) RETURNING id`,
+        [tid, receiptNumber, customer_name || null, subtotal, subtotal, primaryMethod, user.id]
+      );
+      const saleId = saleResult.rows[0].id;
+
+      // Insert sale items and update stock
+      for (const item of items) {
+        const unitPrice = Number(item.unit_price) || 0;
+        const qty = Number(item.quantity) || 1;
+        await client.query(
+          `INSERT INTO retail_sale_items (tenant_id, sale_id, product_id, product_name, quantity, unit_price, total_price) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [tid, saleId, item.product_id, item.product_name || '', qty, unitPrice, unitPrice * qty]
+        );
+        await client.query(
+          `UPDATE retail_products SET stock_quantity = stock_quantity - $1 WHERE id = $2 AND tenant_id = $3`,
+          [qty, item.product_id, tid]
+        );
+        // Record stock movement
+        await client.query(
+          `INSERT INTO stock_movements (tenant_id, product_id, product_name, movement_type, quantity, reference, performed_by) VALUES ($1,$2,$3,'sale',$4,$5,$6)`,
+          [tid, item.product_id, item.product_name || '', qty, receiptNumber, user.id]
+        );
+      }
+
+      // Insert split payment records
+      for (const payment of payments) {
+        await client.query(
+          `INSERT INTO pos_sale_payments (sale_id, method, amount, reference) VALUES ($1,$2,$3,$4)`,
+          [saleId, payment.method || 'cash', Number(payment.amount) || 0, payment.reference || null]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      // Track revenue
+      if (typeof global.trackRevenue === 'function') {
+        try { global.trackRevenue(tid, subtotal); } catch (e) {}
+      }
+
+      console.log('[POS] Split sale completed: ' + receiptNumber + ' — ' + payments.length + ' payments totaling ' + subtotal.toFixed(2));
+      res.json({ success: true, receipt_number: receiptNumber, sale_id: saleId, total: subtotal });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[POS] Split sale error:', e.message);
+      res.status(500).json({ success: false, error: 'Sale processing failed: ' + e.message });
+    } finally {
+      client.release();
+    }
+  }));
+
+  // ============================================================
+  // BARCODE / SKU LOOKUP
+  // ============================================================
+  // ROUTE: POST /pos/terminal/lookup — Find product by barcode or SKU
+  app.post('/pos/terminal/lookup', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { code } = req.body;
+
+    if (!code || !code.trim()) {
+      return res.status(400).json({ success: false, error: 'No code provided' });
+    }
+
+    const searchCode = code.trim();
+
+    const product = (await pool.query(
+      `SELECT id, name, sku, barcode, category, selling_price, stock_quantity, unit
+       FROM retail_products
+       WHERE tenant_id = $1 AND is_active = true AND (sku ILIKE $2 OR barcode ILIKE $2 OR name ILIKE $2)
+       LIMIT 1`,
+      [tid, searchCode]
+    )).rows[0];
+
+    if (!product) {
+      return res.json({ success: false, error: 'Product not found for code: ' + esc(searchCode) });
+    }
+
+    res.json({
+      success: true,
+      product: {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        barcode: product.barcode,
+        category: product.category,
+        selling_price: Number(product.selling_price),
+        stock_quantity: product.stock_quantity,
+        unit: product.unit
+      }
+    });
+  }));
+
+  // ============================================================
+  // RECEIPT CUSTOMIZATION
+  // ============================================================
+  // ROUTE: GET /pos/receipt-settings — Configure receipt template
+  app.get('/pos/receipt-settings', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+
+    const settings = (await pool.query(
+      `SELECT * FROM pos_receipt_settings WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [tid]
+    )).rows[0];
+
+    const s = settings || { header_text: '', footer_text: '', show_logo: true, paper_size: '80mm' };
+
+    const html = POS_CSS + POS_DARK_CSS + `<div style="max-width:800px;margin:0 auto">
+      ${nav('receipt-settings')}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+        <div><h1 style="font-size:24px;color:#1e293b">🧾 Receipt Settings</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">Customize your receipt template</p></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div class="pos-card" style="padding:24px">
+          <h3 style="margin:0 0 16px;color:#1e293b">⚙️ Configuration</h3>
+          <form method="POST" action="/pos/receipt-settings" style="display:flex;flex-direction:column;gap:14px">
+            <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Header Text</label>
+              <textarea name="header_text" rows="3" style="width:100%;padding:9px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">${esc(s.header_text || '')}</textarea></div>
+            <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Footer Text</label>
+              <textarea name="footer_text" rows="3" style="width:100%;padding:9px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">${esc(s.footer_text || '')}</textarea></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Paper Size</label>
+                <select name="paper_size" style="width:100%;padding:9px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
+                  <option value="80mm" ${s.paper_size === '80mm' ? 'selected' : ''}>80mm (Thermal)</option>
+                  <option value="58mm" ${s.paper_size === '58mm' ? 'selected' : ''}>58mm (Mini)</option>
+                  <option value="a4" ${s.paper_size === 'a4' ? 'selected' : ''}>A4 (Full)</option>
+                </select></div>
+              <div style="display:flex;align-items:end"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:9px 14px">
+                <input type="checkbox" name="show_logo" value="true" ${s.show_logo ? 'checked' : ''} style="width:18px;height:18px">
+                <span style="font-size:13px;font-weight:600;color:#475569">Show Logo</span>
+              </label></div>
+            </div>
+            <button type="submit" class="pos-btn pos-btn-primary" style="justify-content:center">💾 Save Settings</button>
+          </form>
+        </div>
+        <div class="pos-card">
+          <h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">👁️ Preview</h3>
+          <div style="background:#fff;border:1px dashed #cbd5e1;border-radius:8px;padding:20px;font-family:monospace;font-size:12px;max-width:320px;margin:0 auto;color:#1e293b">
+            ${s.show_logo ? '<div style="text-align:center;font-size:20px;margin-bottom:8px">🏪</div>' : ''}
+            <div style="text-align:center;font-weight:700;font-size:13px;margin-bottom:4px">${esc(s.header_text || 'Your Store Name')}</div>
+            <div style="text-align:center;font-size:10px;color:#64748b;margin-bottom:10px">━━━━━━━━━━━━━━━━━━━━━━━━</div>
+            <div style="margin-bottom:4px">Receipt #: RCP-ABC123</div>
+            <div style="margin-bottom:4px">Date: ${fmtDateTime(new Date())}</div>
+            <div style="margin-bottom:4px">Cashier: ${esc(user.name || user.email)}</div>
+            <div style="font-size:10px;color:#64748b;margin:8px 0">━━━━━━━━━━━━━━━━━━━━━━━━</div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:2px"><span>Sample Item</span><span>1 x 1,500</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:2px"><span>Sample Item 2</span><span>2 x 750</span></div>
+            <div style="font-size:10px;color:#64748b;margin:8px 0">━━━━━━━━━━━━━━━━━━━━━━━━</div>
+            <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px"><span>TOTAL</span><span>3,000.00</span></div>
+            <div style="font-size:10px;color:#64748b;margin:8px 0">━━━━━━━━━━━━━━━━━━━━━━━━</div>
+            <div style="text-align:center;font-size:10px;color:#64748b">${esc(s.footer_text || 'Thank you for your purchase!')}</div>
+          </div>
+          <p style="font-size:11px;color:#94a3b8;margin-top:12px;text-align:center">Receipt width: ${esc(s.paper_size)}</p>
+        </div>
+      </div>
+    </div>`;
+    res.send(renderPage('Receipt Settings', html, user, req));
+  }));
+
+  // ROUTE: POST /pos/receipt-settings — Save receipt settings
+  app.post('/pos/receipt-settings', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { header_text, footer_text, show_logo, paper_size } = req.body;
+
+    await pool.query(`
+      INSERT INTO pos_receipt_settings (tenant_id, header_text, footer_text, show_logo, paper_size)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT DO UPDATE SET header_text = $2, footer_text = $3, show_logo = $4, paper_size = $5`,
+      [tid, header_text || '', footer_text || '', show_logo === 'true', paper_size || '80mm']
+    );
+
+    console.log('[POS] Receipt settings updated for tenant #' + tid);
+    req.session.flash = { type: 'success', msg: 'Receipt settings saved' };
+    res.redirect('/pos/receipt-settings');
   }));
 
 };

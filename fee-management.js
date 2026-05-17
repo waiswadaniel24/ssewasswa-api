@@ -538,6 +538,9 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
       );
     } catch (e) { /* payments table may have different schema */ }
 
+    // Track revenue for platform earnings
+    try { await global.trackRevenue('fee_payment', Number(amount) / 3700, `Fee payment: ${student ? student.first_name + ' ' + student.last_name : 'Student'}`, receiptNumber); } catch(e) {}
+
     req.session.flash = { type: 'success', msg: `Payment of ${Number(amount).toLocaleString()} recorded. Receipt: ${receiptNumber}` };
     res.redirect(`/fees/receipts?search=${receiptNumber}`);
   }));
@@ -847,6 +850,413 @@ module.exports = function feeManagement(app, db, pool, renderPage, esc) {
       receipt_count: receiptCount,
       overdue_students: overdueStudents
     });
+  }));
+
+  // ============================================================
+  // NEW DATABASE MIGRATIONS — Payment Plans & Invoices
+  // ============================================================
+  (async () => {
+    const c = await pool.connect().catch(() => null);
+    if (!c) { console.error('[FeeManagement] Cannot connect for new migrations'); return; }
+    try {
+      await c.query(`CREATE TABLE IF NOT EXISTS fee_payment_plans (
+        id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+        student_id INTEGER, total_amount NUMERIC(12,2) DEFAULT 0,
+        installments_count INTEGER DEFAULT 1, frequency VARCHAR(50) DEFAULT 'monthly',
+        status VARCHAR(20) DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+      await c.query(`CREATE TABLE IF NOT EXISTS fee_invoices (
+        id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+        student_id INTEGER, amount NUMERIC(12,2) DEFAULT 0,
+        due_date DATE, status VARCHAR(20) DEFAULT 'pending',
+        invoice_number VARCHAR(100), created_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+      const prNewCols = [
+        { name: 'fee_structure_id', type: 'INTEGER' },
+        { name: 'description', type: 'TEXT' },
+        { name: 'invoice_id', type: 'INTEGER' },
+      ];
+      for (const col of prNewCols) { try { await c.query(`ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`); } catch(e){} }
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_payment_plans_tenant ON fee_payment_plans(tenant_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_payment_plans_student ON fee_payment_plans(student_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_invoices_tenant ON fee_invoices(tenant_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_fee_invoices_student ON fee_invoices(student_id)`);
+      console.log('[FeeManagement] New migrations (plans/invoices) applied');
+    } catch (e) { console.error('[FeeManagement] New migration error:', e.message); }
+    finally { c.release(); }
+  })();
+
+  // ============================================================
+  // DARK MODE CSS
+  // ============================================================
+  const FM_DARK_CSS = `<style>
+    @media(prefers-color-scheme:dark){
+      body{background:#0f172a!important;color:#e2e8f0!important}
+      .fm-card{background:#1e293b!important;border-color:#334155!important;color:#e2e8f0!important}
+      .fm-table th{background:#1e293b!important;color:#94a3b8!important;border-color:#334155!important}
+      .fm-table td{color:#cbd5e1!important;border-color:#1e293b!important}
+      .fm-table tr:hover{background:#334155!important}
+      .fm-nav a{background:#1e293b!important;color:#94a3b8!important}
+      .fm-nav a:hover{background:#334155!important}
+      .fm-nav a.active{background:#4f46e5!important;color:#fff!important}
+      .fm-filter{background:#1e293b!important}
+      .fm-filter input,.fm-filter select{background:#0f172a!important;border-color:#334155!important;color:#e2e8f0!important}
+      .stat-card{background:#1e293b!important;border-color:#334155!important}
+      .stat-num{color:#e2e8f0!important}
+      h1,h2,h3,h4{color:#f1f5f9!important}
+      .card{background:#1e293b!important;border-color:#334155!important}
+      .badge-success{background:#064e3b!important;color:#6ee7b7!important}
+      .badge-error{background:#7f1d1d!important;color:#fca5a5!important}
+      .badge-warning{background:#78350f!important;color:#fcd34d!important}
+    }
+  </style>`;
+
+  // ============================================================
+  // ROUTE: GET /fees/plans — Payment Plans
+  // ============================================================
+  app.get('/fees/plans', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const students = (await pool.query(`SELECT id, first_name, last_name, admission_number FROM students WHERE tenant_id=$1 ORDER BY last_name LIMIT 200`, [tid])).rows;
+    const plans = (await pool.query(
+      `SELECT fp.*, s.first_name, s.last_name, c.name as class_name
+       FROM fee_payment_plans fp LEFT JOIN students s ON s.id = fp.student_id
+       LEFT JOIN classes c ON c.id = s.class_id WHERE fp.tenant_id=$1 ORDER BY fp.created_at DESC LIMIT 100`, [tid]
+    )).rows;
+
+    const rowsHtml = plans.map(p => `<tr>
+      <td><strong>${esc(p.first_name + ' ' + p.last_name)}</strong></td>
+      <td>${esc(p.class_name || '—')}</td>
+      <td style="font-weight:600;color:#4f46e5">${Number(p.total_amount).toLocaleString()}</td>
+      <td>${p.installments_count} x ${Number(p.total_amount / (p.installments_count || 1)).toLocaleString()}</td>
+      <td>${esc(p.frequency || '—')}</td>
+      <td>${statusBadge(p.status)}</td>
+      <td>${fmtDate(p.created_at)}</td>
+    </tr>`).join('');
+    const studentOpts = students.map(s => `<option value="${s.id}">${esc(s.last_name + ', ' + s.first_name)} (${esc(s.admission_number || '')})</option>`).join('');
+
+    const html = (FM_CSS + FM_DARK_CSS) + `<div style="max-width:1200px;margin:0 auto">
+      ${nav('plans')}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+        <div><h1 style="font-size:24px;color:#1e293b">📋 Payment Plans</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">Configure installment-based payment plans for students</p></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:20px">
+        <div class="fm-card" style="padding:24px">
+          <h3 style="margin:0 0 16px;color:#1e293b">Create Payment Plan</h3>
+          <form method="POST" action="/fees/plans/create" style="display:flex;flex-direction:column;gap:14px">
+            <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Student *</label>
+              <select name="student_id" required style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
+                <option value="">Select student</option>${studentOpts}</select></div>
+            <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Total Amount *</label>
+              <input type="number" name="total_amount" required min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
+            <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Number of Installments *</label>
+              <input type="number" name="installments_count" required min="1" max="24" value="3" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
+            <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Frequency *</label>
+              <select name="frequency" required style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
+                <option value="monthly">Monthly</option><option value="biweekly">Bi-Weekly</option><option value="weekly">Weekly</option></select></div>
+            <button type="submit" class="fm-btn fm-btn-primary" style="justify-content:center">💾 Create Plan</button>
+          </form>
+        </div>
+        <div class="fm-card">
+          <h3 style="margin:0 0 14px;color:#1e293b">All Payment Plans (${plans.length})</h3>
+          <div style="overflow-x:auto"><table class="fm-table">
+            <thead><tr><th>Student</th><th>Class</th><th>Total</th><th>Installments</th><th>Frequency</th><th>Status</th><th>Created</th></tr></thead>
+            <tbody>${rowsHtml || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px">No payment plans yet</td></tr>'}</tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>`;
+    res.send(renderPage('Payment Plans', html, user, req));
+  }));
+
+  // ============================================================
+  // ROUTE: POST /fees/plans/create — Create Payment Plan
+  // ============================================================
+  app.post('/fees/plans/create', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const { student_id, total_amount, installments_count, frequency } = req.body;
+    if (!student_id || !total_amount || !installments_count) {
+      req.session.flash = { type: 'error', msg: 'Please provide student, amount, and installment count' };
+      return res.redirect('/fees/plans');
+    }
+    await pool.query(
+      `INSERT INTO fee_payment_plans (tenant_id, student_id, total_amount, installments_count, frequency, status) VALUES ($1,$2,$3,$4,$5,'active')`,
+      [tid, student_id, total_amount, parseInt(installments_count) || 1, frequency || 'monthly']
+    );
+    const count = parseInt(installments_count) || 1;
+    const perInstallment = Math.round((Number(total_amount) / count) * 100) / 100;
+    const startDate = new Date();
+    for (let i = 0; i < count; i++) {
+      const dueDate = new Date(startDate);
+      if (frequency === 'weekly') dueDate.setDate(dueDate.getDate() + (i * 7));
+      else if (frequency === 'biweekly') dueDate.setDate(dueDate.getDate() + (i * 14));
+      else dueDate.setMonth(dueDate.getMonth() + i);
+      const invoiceNumber = 'INV-' + Date.now().toString(36).toUpperCase() + '-' + (i + 1);
+      await pool.query(
+        `INSERT INTO fee_invoices (tenant_id, student_id, amount, due_date, status, invoice_number) VALUES ($1,$2,$3,$4,'pending',$5)`,
+        [tid, student_id, perInstallment, dueDate.toISOString().slice(0, 10), invoiceNumber]
+      );
+    }
+    const student = (await pool.query(`SELECT first_name, last_name FROM students WHERE id=$1 AND tenant_id=$2`, [student_id, tid])).rows[0];
+    req.session.flash = { type: 'success', msg: `Payment plan created with ${count} installment invoices for ${student ? student.first_name : 'student'}` };
+    res.redirect('/fees/plans');
+  }));
+
+  // ============================================================
+  // ROUTE: GET /fees/invoices — Invoice List
+  // ============================================================
+  app.get('/fees/invoices', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const statusFilter = req.query.status || '';
+    let where = ['fi.tenant_id=$1'], params = [tid], pi = 2;
+    if (statusFilter) { where.push(`fi.status=$${pi++}`); params.push(statusFilter); }
+
+    const invoices = (await pool.query(
+      `SELECT fi.*, s.first_name, s.last_name, s.admission_number, c.name as class_name
+       FROM fee_invoices fi LEFT JOIN students s ON s.id = fi.student_id
+       LEFT JOIN classes c ON c.id = s.class_id
+       WHERE ${where.join(' AND ')} ORDER BY fi.created_at DESC LIMIT 200`, params
+    )).rows;
+    const totalPending = (await pool.query(`SELECT COALESCE(SUM(amount),0)::numeric(12,2) as total FROM fee_invoices WHERE tenant_id=$1 AND status='pending'`, [tid])).rows[0].total;
+    const totalOverdue = (await pool.query(`SELECT COALESCE(SUM(amount),0)::numeric(12,2) as total FROM fee_invoices WHERE tenant_id=$1 AND status='overdue'`, [tid])).rows[0].total;
+
+    const rowsHtml = invoices.map(inv => `<tr>
+      <td>${esc(inv.invoice_number || '—')}</td>
+      <td><strong>${esc(inv.first_name + ' ' + inv.last_name)}</strong></td>
+      <td>${esc(inv.class_name || '—')}</td>
+      <td style="font-weight:600">${Number(inv.amount).toLocaleString()}</td>
+      <td>${fmtDate(inv.due_date)}</td>
+      <td>${statusBadge(inv.status)}</td>
+      <td>${fmtDate(inv.created_at)}</td>
+    </tr>`).join('');
+
+    const html = (FM_CSS + FM_DARK_CSS) + `<div style="max-width:1200px;margin:0 auto">
+      ${nav('invoices')}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+        <div><h1 style="font-size:24px;color:#1e293b">📄 Fee Invoices</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">View and manage all fee invoices</p></div>
+        <a href="/fees/bulk-invoice" class="fm-btn fm-btn-primary">📦 Bulk Invoice</a>
+      </div>
+      <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${Number(totalPending).toLocaleString()}</div><div class="muted" style="font-size:11px">Pending Invoices</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#dc2626">${Number(totalOverdue).toLocaleString()}</div><div class="muted" style="font-size:11px">Overdue Invoices</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#4f46e5">${invoices.length}</div><div class="muted" style="font-size:11px">Total Invoices</div></div>
+      </div>
+      <div class="fm-card">
+        <div style="overflow-x:auto"><table class="fm-table">
+          <thead><tr><th>Invoice#</th><th>Student</th><th>Class</th><th>Amount</th><th>Due Date</th><th>Status</th><th>Created</th></tr></thead>
+          <tbody>${rowsHtml || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px">No invoices found</td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+    res.send(renderPage('Fee Invoices', html, user, req));
+  }));
+
+  // ============================================================
+  // ROUTE: GET /fees/bulk-invoice — Bulk Invoice Form
+  // ============================================================
+  app.get('/fees/bulk-invoice', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const classes = (await pool.query(`SELECT id, name FROM classes WHERE tenant_id=$1 ORDER BY name`, [tid])).rows;
+    const structures = (await pool.query(`SELECT id, name, total_amount, term FROM fee_structures WHERE tenant_id=$1 AND is_active=true ORDER BY name`, [tid])).rows;
+    const classOpts = classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    const structOpts = structures.map(s => `<option value="${s.id}">${esc(s.name)} — ${Number(s.total_amount).toLocaleString()}</option>`).join('');
+
+    const html = (FM_CSS + FM_DARK_CSS) + `<div style="max-width:800px;margin:0 auto">
+      ${nav('invoices')}
+      <h1 style="font-size:24px;color:#1e293b;margin-bottom:20px">📦 Bulk Invoice Generation</h1>
+      <div class="fm-card" style="padding:28px">
+        <h3 style="margin:0 0 16px;color:#1e293b">Generate Invoices for Entire Class</h3>
+        <p style="font-size:13px;color:#94a3b8;margin-bottom:20px">Create fee invoices for all students in a class at once</p>
+        <form method="POST" action="/fees/bulk-invoice" style="display:flex;flex-direction:column;gap:14px">
+          <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Class *</label>
+            <select name="class_id" required style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
+              <option value="">Select class</option>${classOpts}</select></div>
+          <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Fee Structure (optional)</label>
+            <select name="fee_structure_id" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">
+              <option value="">— Select —</option>${structOpts}</select></div>
+          <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Amount Per Student *</label>
+            <input type="number" name="amount" required min="0" step="0.01" placeholder="0.00" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
+          <div><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Due Date</label>
+            <input type="date" name="due_date" value="${today()}" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px"></div>
+          <button type="submit" class="fm-btn fm-btn-primary" style="justify-content:center;padding:14px 28px;font-size:15px">📦 Generate Bulk Invoices</button>
+        </form>
+      </div>
+    </div>`;
+    res.send(renderPage('Bulk Invoice', html, user, req));
+  }));
+
+  // ============================================================
+  // ROUTE: POST /fees/bulk-invoice — Bulk Invoicing
+  // ============================================================
+  app.post('/fees/bulk-invoice', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const { class_id, fee_structure_id, amount, due_date } = req.body;
+    if (!class_id || !amount) {
+      req.session.flash = { type: 'error', msg: 'Please provide class and amount' };
+      return res.redirect('/fees/bulk-invoice');
+    }
+    const students = (await pool.query(`SELECT id, first_name, last_name FROM students WHERE tenant_id=$1 AND class_id=$2 ORDER BY last_name`, [tid, class_id])).rows;
+    let created = 0;
+    for (const s of students) {
+      const invoiceNumber = 'INV-' + Date.now().toString(36).toUpperCase() + '-' + genToken().substring(0, 4).toUpperCase();
+      await pool.query(
+        `INSERT INTO fee_invoices (tenant_id, student_id, amount, due_date, status, invoice_number) VALUES ($1,$2,$3,$4,'pending',$5)`,
+        [tid, s.id, amount, due_date || today(), invoiceNumber]
+      );
+      created++;
+    }
+    req.session.flash = { type: 'success', msg: `${created} invoices generated for class` };
+    res.redirect('/fees/invoices');
+  }));
+
+  // ============================================================
+  // ROUTE: GET /fees/arrears — Fee Arrears Report
+  // ============================================================
+  app.get('/fees/arrears', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const overdue = (await pool.query(
+      `SELECT fi.*, s.first_name, s.last_name, s.admission_number, c.name as class_name,
+        EXTRACT(DAY FROM CURRENT_DATE - fi.due_date)::int as days_overdue
+       FROM fee_invoices fi LEFT JOIN students s ON s.id = fi.student_id
+       LEFT JOIN classes c ON c.id = s.class_id
+       WHERE fi.tenant_id=$1 AND fi.status='pending' AND fi.due_date < CURRENT_DATE
+       ORDER BY days_overdue DESC`, [tid]
+    )).rows;
+
+    const bucket30 = overdue.filter(r => r.days_overdue <= 30);
+    const bucket60 = overdue.filter(r => r.days_overdue > 30 && r.days_overdue <= 60);
+    const bucket90 = overdue.filter(r => r.days_overdue > 60 && r.days_overdue <= 90);
+    const bucket90plus = overdue.filter(r => r.days_overdue > 90);
+    const sumB = (a) => a.reduce((s, r) => s + Number(r.amount || 0), 0);
+    const totalArrears = sumB(overdue);
+
+    const rowsHtml = overdue.map(r => {
+      const clr = r.days_overdue > 90 ? '#dc2626' : r.days_overdue > 60 ? '#f59e0b' : r.days_overdue > 30 ? '#3b82f6' : '#64748b';
+      return `<tr>
+        <td><strong>${esc(r.first_name + ' ' + r.last_name)}</strong></td>
+        <td>${esc(r.class_name || '—')}</td>
+        <td>${esc(r.invoice_number || '—')}</td>
+        <td style="font-weight:600;color:#dc2626">${Number(r.amount).toLocaleString()}</td>
+        <td>${fmtDate(r.due_date)}</td>
+        <td><span style="background:${clr};color:#fff;padding:3px 10px;border-radius:8px;font-size:12px;font-weight:600">${r.days_overdue} days</span></td>
+      </tr>`;
+    }).join('');
+
+    const html = (FM_CSS + FM_DARK_CSS) + `<div style="max-width:1200px;margin:0 auto">
+      ${nav('arrears')}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+        <div><h1 style="font-size:24px;color:#1e293b">⚠️ Fee Arrears Report</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">Overdue payments analysis with aging buckets</p></div>
+      </div>
+      <div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-num" style="color:#dc2626">${Number(totalArrears).toLocaleString()}</div><div class="muted" style="font-size:11px">Total Arrears</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#ef4444">${overdue.length}</div><div class="muted" style="font-size:11px">Overdue Invoices</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#64748b">${Number(sumB(bucket30)).toLocaleString()}</div><div class="muted" style="font-size:11px">1–30 Days</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${Number(sumB(bucket60)).toLocaleString()}</div><div class="muted" style="font-size:11px">31–60 Days</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${Number(sumB(bucket90)).toLocaleString()}</div><div class="muted" style="font-size:11px">61–90 Days</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#dc2626">${Number(sumB(bucket90plus)).toLocaleString()}</div><div class="muted" style="font-size:11px">90+ Days</div></div>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px;background:#f1f5f9;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#64748b">${bucket30.length}</div><div style="font-size:11px;color:#94a3b8">1–30 days</div></div>
+        <div style="flex:1;min-width:120px;background:#fef3c7;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#b45309">${bucket60.length}</div><div style="font-size:11px;color:#92400e">31–60 days</div></div>
+        <div style="flex:1;min-width:120px;background:#dbeafe;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#1d4ed8">${bucket90.length}</div><div style="font-size:11px;color:#1e40af">61–90 days</div></div>
+        <div style="flex:1;min-width:120px;background:#fee2e2;border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:#dc2626">${bucket90plus.length}</div><div style="font-size:11px;color:#991b1b">90+ days</div></div>
+      </div>
+      <div class="fm-card">
+        <h3 style="margin:0 0 14px;color:#1e293b">Overdue Invoices (${overdue.length})</h3>
+        <div style="overflow-x:auto;max-height:500px;overflow-y:auto"><table class="fm-table">
+          <thead style="position:sticky;top:0"><tr><th>Student</th><th>Class</th><th>Invoice#</th><th>Amount</th><th>Due Date</th><th>Days Overdue</th></tr></thead>
+          <tbody>${rowsHtml || '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:30px">No overdue invoices — all clear! 🎉</td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+    res.send(renderPage('Fee Arrears Report', html, user, req));
+  }));
+
+  // ============================================================
+  // ROUTE: GET /fees/pay/:token — Public Payment Page
+  // ============================================================
+  app.get('/fees/pay/:token', ah(async (req, res) => {
+    const token = req.params.token;
+    const pr = (await pool.query(
+      `SELECT pr.*, s.first_name, s.last_name, s.admission_number, c.name as class_name, t.name as school_name
+       FROM payment_requests pr LEFT JOIN students s ON s.id = pr.student_id
+       LEFT JOIN classes c ON c.id = s.class_id
+       LEFT JOIN tenants t ON t.id = pr.tenant_id
+       WHERE pr.token=$1 AND pr.expires_at > NOW()`, [token]
+    )).rows[0];
+    if (!pr) {
+      return res.status(404).send(`<div style="max-width:600px;margin:60px auto;text-align:center;font-family:system-ui">
+        <h1 style="color:#dc2626;font-size:28px">❌ Invalid or Expired</h1>
+        <p style="color:#64748b;margin-top:12px">This payment link is invalid or has expired. Please contact the school for a new link.</p></div>`);
+    }
+    const html = (FM_CSS + FM_DARK_CSS) + `<div style="max-width:600px;margin:40px auto">
+      <div class="fm-card" style="border:2px solid #e2e8f0;padding:32px;text-align:center">
+        <div style="width:60px;height:60px;background:#dcfce7;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px">💳</div>
+        <h2 style="margin:0 0 4px;color:#1e293b;font-size:22px">Fee Payment</h2>
+        <p style="font-size:13px;color:#94a3b8;margin-bottom:24px">${esc(pr.school_name || 'School')} · Secure Online Payment</p>
+        <div style="background:#f8fafc;border-radius:10px;padding:16px;margin-bottom:24px;text-align:left">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:#64748b;font-size:13px">Student</span><strong>${esc(pr.first_name + ' ' + pr.last_name)}</strong></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:#64748b;font-size:13px">Class</span><span>${esc(pr.class_name || '—')}</span></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:#64748b;font-size:13px">Adm#</span><span>${esc(pr.admission_number || '—')}</span></div>
+          <div style="border-top:2px solid #e2e8f0;padding-top:8px;display:flex;justify-content:space-between"><span style="font-weight:700;color:#1e293b">Amount Due</span><strong style="color:#dc2626;font-size:20px">${Number(pr.amount).toLocaleString()}</strong></div>
+        </div>
+        <form method="POST" action="/fees/pay/${esc(token)}/process" style="display:flex;flex-direction:column;gap:14px">
+          <div style="text-align:left"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Payment Method *</label>
+            <select name="payment_method" required style="width:100%;padding:12px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px">
+              <option value="mobile_money">Mobile Money</option><option value="card">Credit/Debit Card</option><option value="bank_transfer">Bank Transfer</option></select></div>
+          <div style="text-align:left"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Reference (optional)</label>
+            <input type="text" name="reference" placeholder="Transaction reference" style="width:100%;padding:12px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px"></div>
+          <button type="submit" class="fm-btn fm-btn-success" style="padding:16px 28px;font-size:16px;justify-content:center">🔒 Pay ${Number(pr.amount).toLocaleString()} Now</button>
+          <p style="font-size:11px;color:#94a3b8;margin:0">Payments are processed securely. You will receive a receipt via email.</p>
+        </form>
+      </div>
+    </div>`;
+    res.send(html);
+  }));
+
+  // ============================================================
+  // ROUTE: POST /fees/pay/:token/process — Process Online Payment
+  // ============================================================
+  app.post('/fees/pay/:token/process', ah(async (req, res) => {
+    const token = req.params.token;
+    const { payment_method, reference } = req.body;
+    const pr = (await pool.query(`SELECT * FROM payment_requests WHERE token=$1 AND status='pending' AND expires_at > NOW()`, [token])).rows[0];
+    if (!pr) {
+      return res.status(400).send(`<div style="max-width:600px;margin:60px auto;text-align:center;font-family:system-ui">
+        <h1 style="color:#dc2626;font-size:28px">❌ Payment Failed</h1>
+        <p style="color:#64748b;margin-top:12px">This payment link is invalid, expired, or already processed.</p></div>`);
+    }
+    await pool.query(`UPDATE payment_requests SET status='completed', processed_at=NOW() WHERE id=$1`, [pr.id]);
+    await pool.query(
+      `INSERT INTO payment_transactions (tenant_id, payment_request_id, student_id, amount, method, reference, status, processed_at) VALUES ($1,$2,$3,$4,$5,$6,'completed',NOW())`,
+      [pr.tenant_id, pr.id, pr.student_id, pr.amount, payment_method || 'online', reference || null]
+    );
+    const receiptNumber = 'RCP-' + Date.now().toString(36).toUpperCase() + '-' + genToken().substring(0, 6).toUpperCase();
+    try {
+      await pool.query(
+        `INSERT INTO fee_receipts (tenant_id, student_id, receipt_number, amount_paid, balance, payment_method, reference, term, year, status, notes) VALUES ($1,$2,$3,$4,0,$5,$6,'Online','2025','paid','Online payment via link')`,
+        [pr.tenant_id, pr.student_id, receiptNumber, pr.amount, payment_method || 'online', reference || null]
+      );
+    } catch(e) { console.warn('[FeeManagement] Could not create receipt:', e.message); }
+    try { await global.trackRevenue('fee_online_payment', Number(pr.amount) / 3700, `Online fee payment via link: ${receiptNumber}`, receiptNumber); } catch(e) {}
+    try { await global.creditDeveloperRevenue('fee_online_payment', Number(pr.amount) / 3700, `Online fee payment: ${receiptNumber}`); } catch(e) {}
+    const student = (await pool.query(`SELECT first_name, last_name FROM students WHERE id=$1`, [pr.student_id])).rows[0];
+    res.send((FM_CSS + FM_DARK_CSS) + `<div style="max-width:600px;margin:40px auto">
+      <div class="fm-card" style="border:2px solid #dcfce7;padding:32px;text-align:center">
+        <div style="width:70px;height:70px;background:#dcfce7;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:36px">✅</div>
+        <h2 style="margin:0 0 8px;color:#16a34a;font-size:22px">Payment Successful!</h2>
+        <p style="font-size:13px;color:#94a3b8;margin-bottom:24px">Your payment has been processed successfully.</p>
+        <div style="background:#f8fafc;border-radius:10px;padding:16px;margin-bottom:24px;text-align:left">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:#64748b;font-size:13px">Receipt#</span><strong>${esc(receiptNumber)}</strong></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:#64748b;font-size:13px">Student</span><span>${esc(student ? student.first_name + ' ' + student.last_name : '—')}</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="color:#64748b;font-size:13px">Amount</span><strong style="color:#16a34a">${Number(pr.amount).toLocaleString()}</strong></div>
+        </div>
+        <p style="font-size:12px;color:#94a3b8;margin:0">Please save this receipt for your records. Thank you!</p>
+      </div>
+    </div>`);
   }));
 
 };

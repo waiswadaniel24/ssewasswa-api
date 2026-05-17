@@ -1041,6 +1041,8 @@ module.exports = function qrPayments(app, db, pool, renderPage, esc) {
       if (phone) {
         await pool.query(`UPDATE qr_payments SET payer_phone=$1 WHERE id=$2`, [phone, qr.id]);
       }
+      // Track revenue for platform earnings
+      try { await global.trackRevenue('qr_payment', qr.amount / 3700, `QR payment: ${qr.qr_code}`, qr.qr_code); } catch(e) {}
     }
 
     const html = `
@@ -1125,6 +1127,8 @@ module.exports = function qrPayments(app, db, pool, renderPage, esc) {
       if (phone) {
         await pool.query(`UPDATE qr_payments SET payer_phone=$1 WHERE id=$2`, [phone, qr.id]);
       }
+      // Track revenue for platform earnings
+      try { await global.trackRevenue('qr_payment', qr.amount / 3700, `QR payment: ${qr.qr_code}`, qr.qr_code); } catch(e) {}
     }
 
     const html = `

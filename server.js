@@ -5459,6 +5459,9 @@ app.post('/church/donations/save', requireAuth, requireNotBanned, ah(async (req,
   const { donor_name, amount, type, method, reference } = req.body;
   await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,reference) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, donor_name, amount, type, method, reference]);
   await audit(req.session.user.email, 'add_donation', `Donation UGX ${amount} from ${donor_name}`);
+  // Track revenue for church donation
+  try { await global.trackRevenue('church_donation', parseFloat(amount||0) / 3700, (type||'donation') + ': ' + donor_name, 'church-' + Date.now()); } catch(e) {}
+  try { await global.creditDeveloperRevenue(req.session.user.tenant_id, Math.round(parseFloat(amount||0) * 0.05), 'church_donation', 'Church donation: ' + donor_name); } catch(e) {}
   res.redirect('/church/donations');
 }));
 
@@ -22599,6 +22602,9 @@ app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscriptio
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
     await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Public donation fee - Campaign #'+c.id]);
   }
+  // Track revenue for campaign donation
+  try { await global.trackRevenue('campaign_donation', parseFloat(amount||0) / 3700, 'Campaign donation: ' + c.title + ' by ' + displayName, donationId); } catch(e) {}
+  try { await global.creditDeveloperRevenue(c.tenant_id, fee, 'campaign_donation', 'Platform fee: Campaign #' + c.id); } catch(e) {}
 
   // Trigger post-donation processing (matching, badges, thank you, milestones, followers)
   try {

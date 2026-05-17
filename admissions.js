@@ -704,6 +704,357 @@ module.exports = function admissions(app, db, pool, renderPage, esc) {
   }));
 
   // ============================================================
-  // END MODULE
+  // NEW DATABASE MIGRATIONS — Interviews & Tracking Token
   // ============================================================
+  (async () => {
+    const c = await pool.connect().catch(() => null);
+    if (!c) { console.error('[Admissions] Cannot connect for new migrations'); return; }
+    try {
+      await c.query(`CREATE TABLE IF NOT EXISTS admission_interviews (
+        id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0,
+        application_id INTEGER, interview_date DATE, interview_time VARCHAR(10),
+        interviewer_id INTEGER, status VARCHAR(20) DEFAULT 'scheduled',
+        notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+      try { await c.query(`ALTER TABLE admission_applications ADD COLUMN IF NOT EXISTS tracking_token VARCHAR(100)`); } catch(e){}
+      await c.query(`CREATE INDEX IF NOT EXISTS adm_interviews_tenant ON admission_interviews(tenant_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS adm_interviews_app ON admission_interviews(application_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS adm_applications_token ON admission_applications(tracking_token)`);
+      console.log('[Admissions] New migrations (interviews/token) applied');
+    } catch (e) { console.error('[Admissions] New migration error:', e.message); }
+    finally { c.release(); }
+  })();
+
+  // ============================================================
+  // DARK MODE CSS
+  // ============================================================
+  const ADM_DARK_CSS = '<style>\n\
+@media(prefers-color-scheme:dark){\n\
+  body{background:#0f172a!important;color:#e2e8f0!important}\n\
+  .card{background:#1e293b!important;border-color:#334155!important}\n\
+  .adm-table th{background:#1e293b!important;color:#94a3b8!important;border-color:#334155!important}\n\
+  .adm-table td{color:#cbd5e1!important;border-color:#1e293b!important}\n\
+  .adm-table tr:hover{background:#334155!important}\n\
+  .adm-nav a{background:#1e293b!important;color:#94a3b8!important}\n\
+  .adm-nav a:hover{background:#334155!important}\n\
+  .adm-nav a.active{background:#4f46e5!important;color:#fff!important}\n\
+  .adm-filter input,.adm-filter select{background:#0f172a!important;border-color:#334155!important;color:#e2e8f0!important}\n\
+  .adm-form input,.adm-form select,.adm-form textarea{background:#0f172a!important;border-color:#334155!important;color:#e2e8f0!important}\n\
+  .stat-card{background:#1e293b!important;border-color:#334155!important}\n\
+  .stat-num{color:#e2e8f0!important}\n\
+  h1,h2,h3,h4{color:#f1f5f9!important}\n\
+  .adm-detail-label{color:#94a3b8!important}\n\
+  .adm-detail-value{color:#cbd5e1!important}\n\
+  .adm-applicant-card{background:#1e293b!important;border-color:#334155!important}\n\
+}\n\
+</style>';
+
+  // ============================================================
+  // ROUTE: GET /admissions/apply/public — Public Application Form
+  // ============================================================
+  app.get('/admissions/apply/public', ah(async (req, res) => {
+    const token = req.query.token || '';
+    const settings = (await pool.query(
+      `SELECT * FROM admission_settings WHERE status='open' ORDER BY created_at DESC LIMIT 1`
+    )).rows[0];
+    if (!settings) {
+      return res.status(404).send(`<div style="max-width:600px;margin:60px auto;text-align:center;font-family:system-ui">
+        <h1 style="color:#dc2626;font-size:28px">❌ Applications Closed</h1>
+        <p style="color:#64748b;margin-top:12px">Admissions are currently not open. Please check back later.</p></div>`);
+    }
+    const classes = (await pool.query(`SELECT id, name FROM classes WHERE tenant_id=$1 ORDER BY name`, [settings.tenant_id])).rows;
+    const classOpts = classes.map(cl => '<option value="' + esc(cl.name) + '">' + esc(cl.name) + '</option>').join('');
+
+    const html = (ADM_CSS + ADM_DARK_CSS) + '<div style="max-width:800px;margin:0 auto">' +
+      '<div class="card" style="padding:28px">' +
+        '<div style="text-align:center;margin-bottom:24px">' +
+          '<div style="width:60px;height:60px;background:#eef2ff;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px">🎓</div>' +
+          '<h2 style="color:#1e293b;margin:8px 0 4px">Student Application</h2>' +
+          '<p style="font-size:13px;color:#94a3b8">' + esc(settings.academic_year || '2025') + ' · ' + esc(settings.term || '') + '</p>' +
+        '</div>' +
+        '<form method="POST" action="/admissions/apply/public" class="adm-form-grid adm-form">' +
+          '<div><label>Applicant Name *</label><input type="text" name="applicant_name" required placeholder="Full name"></div>' +
+          '<div><label>Email *</label><input type="email" name="email" required placeholder="email@example.com"></div>' +
+          '<div><label>Phone</label><input type="tel" name="phone" placeholder="Phone number"></div>' +
+          '<div><label>Date of Birth</label><input type="date" name="date_of_birth"></div>' +
+          '<div><label>Gender</label><select name="gender"><option value="">— Select —</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></div>' +
+          '<div><label>Applying Class *</label><select name="applying_class" required><option value="">— Select —</option>' + classOpts + '</select></div>' +
+          '<div><label>Parent/Guardian Name</label><input type="text" name="parent_name" placeholder="Parent full name"></div>' +
+          '<div><label>Parent Phone</label><input type="tel" name="parent_phone" placeholder="Parent phone"></div>' +
+          '<div class="full"><label>Previous School</label><input type="text" name="previous_school" placeholder="Previous school name"></div>' +
+          '<div class="full"><label>Address</label><textarea name="address" rows="2" placeholder="Home address..."></textarea></div>' +
+          '<div class="full"><label>Medical Notes</label><textarea name="medical_notes" rows="2" placeholder="Any medical conditions or allergies..."></textarea></div>' +
+          '<input type="hidden" name="tenant_id" value="' + settings.tenant_id + '">' +
+          (token ? '<input type="hidden" name="share_token" value="' + esc(token) + '">' : '') +
+          '<div class="full" style="display:flex;gap:10px;margin-top:8px">' +
+            '<button type="submit" class="adm-btn adm-btn-primary" style="padding:12px 28px">Submit Application</button>' +
+          '</div>' +
+        '</form>' +
+      '</div>' +
+    '</div>';
+    res.send(html);
+  }));
+
+  // ============================================================
+  // ROUTE: POST /admissions/apply/public — Submit Public Application
+  // ============================================================
+  app.post('/admissions/apply/public', ah(async (req, res) => {
+    const { applicant_name, email, phone, date_of_birth, gender, previous_school,
+            applying_class, parent_name, parent_phone, address, medical_notes, tenant_id, share_token } = req.body;
+    if (!applicant_name || !applicant_name.trim() || !email || !email.trim() || !tenant_id) {
+      return res.status(400).send('Missing required fields');
+    }
+    const trackingToken = genToken().substring(0, 20);
+    await pool.query(
+      `INSERT INTO admission_applications (tenant_id, applicant_name, email, phone, date_of_birth,
+        gender, previous_school, applying_class, parent_name, parent_phone, address, medical_notes, status, tracking_token)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending',$14)`,
+      [parseInt(tenant_id), applicant_name.trim(), email.trim(), phone || null, date_of_birth || null,
+       gender || null, previous_school || null, applying_class || null,
+       parent_name || null, parent_phone || null, address || null, medical_notes || null, trackingToken]
+    );
+    console.log('[Admissions] Public application submitted by ' + applicant_name.trim() + ' token=' + trackingToken);
+    res.send((ADM_CSS + ADM_DARK_CSS) + '<div style="max-width:600px;margin:60px auto;text-align:center">' +
+      '<div class="card" style="padding:32px">' +
+        '<div style="width:70px;height:70px;background:#dcfce7;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:36px">✅</div>' +
+        '<h2 style="margin:12px 0 4px;color:#16a34a;font-size:22px">Application Submitted!</h2>' +
+        '<p style="font-size:13px;color:#94a3b8;margin-bottom:24px">Your application has been received. Save your tracking token to check status.</p>' +
+        '<div style="background:#f8fafc;border-radius:10px;padding:16px;margin-bottom:20px">' +
+          '<div style="font-size:12px;color:#64748b;margin-bottom:4px">Your Tracking Token</div>' +
+          '<div style="font-size:18px;font-weight:700;color:#4f46e5;font-family:monospace;word-break:break-all">' + esc(trackingToken) + '</div>' +
+        '</div>' +
+        '<p style="font-size:12px;color:#94a3b8">Bookmark this page or save your token. You can check your application status anytime at:<br>' +
+          '<strong>/admissions/status/' + esc(trackingToken) + '</strong></p>' +
+      '</div>' +
+    '</div>');
+  }));
+
+  // ============================================================
+  // ROUTE: GET /admissions/status/:token — Status Tracking
+  // ============================================================
+  app.get('/admissions/status/:token', ah(async (req, res) => {
+    const token = req.params.token;
+    const app_data = (await pool.query(
+      `SELECT aa.*, t.name as school_name FROM admission_applications aa LEFT JOIN tenants t ON t.id = aa.tenant_id WHERE aa.tracking_token=$1`, [token]
+    )).rows[0];
+    if (!app_data) {
+      return res.status(404).send('<div style="max-width:600px;margin:60px auto;text-align:center;font-family:system-ui"><h1 style="color:#dc2626;font-size:28px">❌ Not Found</h1><p style="color:#64748b;margin-top:12px">No application found with this tracking token.</p></div>');
+    }
+
+    const detail = (label, value) =>
+      '<div><div style="font-size:12px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px">' + label + '</div><div style="color:#1e293b;font-weight:500">' + esc(value || '—') + '</div></div>';
+
+    const html = (ADM_CSS + ADM_DARK_CSS) + '<div style="max-width:700px;margin:40px auto">' +
+      '<div class="card" style="padding:28px;text-align:center">' +
+        '<h2 style="margin:0 0 4px;color:#1e293b;font-size:22px">📋 Application Status</h2>' +
+        '<p style="font-size:13px;color:#94a3b8;margin-bottom:24px">' + esc(app_data.school_name || 'School') + '</p>' +
+      '</div>' +
+      '<div class="card" style="padding:24px;margin-bottom:20px">' +
+        '<div style="margin-bottom:20px">' + statusBadge(app_data.status) + '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+          detail('Applicant Name', app_data.applicant_name) +
+          detail('Email', app_data.email) +
+          detail('Applying Class', app_data.applying_class) +
+          detail('Phone', app_data.phone) +
+          detail('Date of Birth', app_data.date_of_birth ? fmtDate(app_data.date_of_birth) : '—') +
+          detail('Applied On', fmtDate(app_data.created_at)) +
+          detail('Interview Date', app_data.interview_date ? fmtDateTime(app_data.interview_date) : 'Not scheduled') +
+          detail('Tracking Token', token) +
+        '</div>' +
+      '</div>' +
+      '<p style="font-size:11px;color:#94a3b8;text-align:center;margin-bottom:40px">Check back anytime — this page always shows your latest status.</p>' +
+    '</div>';
+    res.send(html);
+  }));
+
+  // ============================================================
+  // ROUTE: GET /admissions/pay/:appId — Application Fee Payment
+  // ============================================================
+  app.get('/admissions/pay/:appId', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const appId = req.params.appId;
+    const app_data = (await pool.query(
+      `SELECT * FROM admission_applications WHERE id=$1 AND tenant_id=$2`, [appId, tid]
+    )).rows[0];
+    if (!app_data) return res.redirect('/admissions/applications');
+    const settings = (await pool.query(
+      `SELECT * FROM admission_settings WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 1`, [tid]
+    )).rows[0];
+    const fee = settings ? Number(settings.fee) || 0 : 0;
+
+    if (fee <= 0) {
+      return res.send((ADM_CSS + ADM_DARK_CSS) + '<div style="max-width:600px;margin:40px auto;text-align:center">' +
+        '<div class="card" style="padding:32px"><h2 style="color:#1e293b">ℹ️ No Application Fee</h2>' +
+        '<p style="color:#94a3b8;margin-top:8px">There is no application fee configured for this admission period.</p></div></div>');
+    }
+
+    const html = (ADM_CSS + ADM_DARK_CSS) + '<div style="max-width:600px;margin:0 auto">' +
+      '<div class="card" style="padding:28px;text-align:center">' +
+        '<div style="width:60px;height:60px;background:#fef3c7;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px">💳</div>' +
+        '<h2 style="margin:8px 0 4px;color:#1e293b;font-size:22px">Application Fee</h2>' +
+        '<p style="font-size:13px;color:#94a3b8;margin-bottom:24px">Application #' + appId + ' — ' + esc(app_data.applicant_name) + '</p>' +
+        '<div style="background:#f8fafc;border-radius:10px;padding:16px;margin-bottom:24px">' +
+          '<div style="display:flex;justify-content:space-between"><span style="color:#64748b">Application Fee</span><strong style="color:#dc2626;font-size:20px">' + fee.toLocaleString() + '</strong></div>' +
+        '</div>' +
+        '<form method="POST" action="/admissions/pay/' + appId + '" style="display:flex;flex-direction:column;gap:14px">' +
+          '<div style="text-align:left"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Payment Method *</label>' +
+            '<select name="payment_method" required style="width:100%;padding:12px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px">' +
+              '<option value="mobile_money">Mobile Money</option><option value="card">Credit/Debit Card</option><option value="bank_transfer">Bank Transfer</option><option value="cash">Cash (at office)</option></select></div>' +
+          '<div style="text-align:left"><label style="font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px">Reference (optional)</label>' +
+            '<input type="text" name="reference" placeholder="Transaction reference" style="width:100%;padding:12px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px"></div>' +
+          '<button type="submit" class="adm-btn adm-btn-success" style="padding:16px 28px;font-size:16px;justify-content:center">🔒 Pay ' + fee.toLocaleString() + ' Now</button>' +
+        '</form>' +
+      '</div>' +
+    '</div>';
+    res.send(renderPage('Application Fee', html, user, req));
+  }));
+
+  // ============================================================
+  // ROUTE: POST /admissions/pay/:appId — Process Application Fee
+  // ============================================================
+  app.post('/admissions/pay/:appId', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const appId = req.params.appId;
+    const { payment_method, reference } = req.body;
+    const app_data = (await pool.query(
+      `SELECT * FROM admission_applications WHERE id=$1 AND tenant_id=$2`, [parseInt(appId), tid]
+    )).rows[0];
+    if (!app_data) return res.redirect('/admissions/applications');
+    const settings = (await pool.query(
+      `SELECT * FROM admission_settings WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 1`, [tid]
+    )).rows[0];
+    const fee = settings ? Number(settings.fee) || 0 : 0;
+
+    try { await global.trackRevenue('admission_fee', fee / 3700, `Admission fee: ${app_data.applicant_name}`, appId); } catch(e) {}
+    try { await global.creditDeveloperRevenue('admission_fee', fee / 3700, `Admission fee: Application #${appId}`); } catch(e) {}
+
+    req.session.flash = { type: 'success', msg: 'Application fee of ' + fee.toLocaleString() + ' processed for ' + app_data.applicant_name };
+    res.redirect('/admissions/applications/' + appId);
+  }));
+
+  // ============================================================
+  // ROUTE: GET /admissions/interviews — Interview Calendar
+  // ============================================================
+  app.get('/admissions/interviews', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const interviews = (await pool.query(
+      `SELECT ai.*, aa.applicant_name, aa.applying_class, aa.email, aa.phone,
+        u.name as interviewer_name
+       FROM admission_interviews ai
+       LEFT JOIN admission_applications aa ON aa.id = ai.application_id
+       LEFT JOIN users u ON u.id = ai.interviewer_id
+       WHERE ai.tenant_id=$1 ORDER BY ai.interview_date ASC, ai.interview_time ASC LIMIT 200`, [tid]
+    )).rows;
+
+    const pending = interviews.filter(i => i.status === 'scheduled').length;
+    const completed = interviews.filter(i => i.status === 'completed').length;
+    const cancelled = interviews.filter(i => i.status === 'cancelled').length;
+
+    const applications = (await pool.query(
+      `SELECT id, applicant_name, applying_class FROM admission_applications WHERE tenant_id=$1 AND status IN ('pending','reviewing') ORDER BY applicant_name`, [tid]
+    )).rows;
+    const interviewers = (await pool.query(
+      `SELECT id, name FROM users WHERE tenant_id=$1 ORDER BY name`, [tid]
+    )).rows;
+
+    const rowsHtml = interviews.map(i => `<tr>
+      <td><strong>${esc(i.applicant_name || '—')}</strong></td>
+      <td>${esc(i.applying_class || '—')}</td>
+      <td>${fmtDate(i.interview_date)}</td>
+      <td>${esc(i.interview_time || '—')}</td>
+      <td>${esc(i.interviewer_name || 'Not assigned')}</td>
+      <td>${statusBadge(i.status)}</td>
+      <td>${esc(i.notes || '')}</td>
+    </tr>`).join('');
+    const appOpts = applications.map(a => '<option value="' + a.id + '">' + esc(a.applicant_name) + ' — ' + esc(a.applying_class) + '</option>').join('');
+    const interviewerOpts = interviewers.map(u => '<option value="' + u.id + '">' + esc(u.name) + '</option>').join('');
+
+    const html = (ADM_CSS + ADM_DARK_CSS) + '<div style="max-width:1200px;margin:0 auto">' +
+      nav('interviews') +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">' +
+        '<div><h1 style="font-size:24px;color:#1e293b">📅 Interview Calendar</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">Schedule and manage applicant interviews</p></div>' +
+      '</div>' +
+      '<div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px">' +
+        '<div class="stat-card"><div class="stat-num" style="color:#4f46e5">' + interviews.length + '</div><div class="muted" style="font-size:11px">Total</div></div>' +
+        '<div class="stat-card"><div class="stat-num" style="color:#f59e0b">' + pending + '</div><div class="muted" style="font-size:11px">Scheduled</div></div>' +
+        '<div class="stat-card"><div class="stat-num" style="color:#16a34a">' + completed + '</div><div class="muted" style="font-size:11px">Completed</div></div>' +
+        '<div class="stat-card"><div class="stat-num" style="color:#dc2626">' + cancelled + '</div><div class="muted" style="font-size:11px">Cancelled</div></div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 2fr;gap:20px">' +
+        '<div class="card" style="padding:24px">' +
+          '<h3 style="margin:0 0 16px;color:#1e293b">Schedule Interview</h3>' +
+          '<form method="POST" action="/admissions/interviews/schedule" class="adm-form" style="display:flex;flex-direction:column;gap:14px">' +
+            '<div style="margin-bottom:0"><label style="display:block;font-size:13px;font-weight:600;color:#475569;margin-bottom:4px">Application *</label>' +
+              '<select name="application_id" required style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px"><option value="">Select applicant</option>' + appOpts + '</select></div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' +
+              '<div><label style="display:block;font-size:13px;font-weight:600;color:#475569;margin-bottom:4px">Date *</label><input type="date" name="interview_date" required value="' + today() + '" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px"></div>' +
+              '<div><label style="display:block;font-size:13px;font-weight:600;color:#475569;margin-bottom:4px">Time *</label><input type="time" name="interview_time" required style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px"></div>' +
+            '</div>' +
+            '<div style="margin-bottom:0"><label style="display:block;font-size:13px;font-weight:600;color:#475569;margin-bottom:4px">Interviewer</label>' +
+              '<select name="interviewer_id" style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px"><option value="">Unassigned</option>' + interviewerOpts + '</select></div>' +
+            '<div style="margin-bottom:0"><label style="display:block;font-size:13px;font-weight:600;color:#475569;margin-bottom:4px">Notes</label>' +
+              '<textarea name="notes" rows="2" placeholder="Interview notes..." style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px"></textarea></div>' +
+            '<button type="submit" class="adm-btn adm-btn-primary" style="padding:12px 28px;justify-content:center">📅 Schedule Interview</button>' +
+          '</form>' +
+        '</div>' +
+        '<div class="card" style="padding:20px">' +
+          '<h3 style="margin:0 0 14px;color:#1e293b">All Interviews (' + interviews.length + ')</h3>' +
+          '<div style="overflow-x:auto;max-height:500px;overflow-y:auto"><table class="adm-table">' +
+            '<thead style="position:sticky;top:0"><tr><th>Applicant</th><th>Class</th><th>Date</th><th>Time</th><th>Interviewer</th><th>Status</th><th>Notes</th></tr></thead>' +
+            '<tbody>' + (rowsHtml || '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:30px">No interviews scheduled yet</td></tr>') + '</tbody>' +
+          '</table></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    res.send(renderPage('Interviews', html, user, req));
+  }));
+
+  // ============================================================
+  // ROUTE: POST /admissions/interviews/schedule — Schedule Interview
+  // ============================================================
+  app.post('/admissions/interviews/schedule', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const { application_id, interview_date, interview_time, interviewer_id, notes } = req.body;
+    if (!application_id || !interview_date || !interview_time) {
+      req.session.flash = { type: 'error', msg: 'Please provide application, date, and time' };
+      return res.redirect('/admissions/interviews');
+    }
+    await pool.query(
+      `INSERT INTO admission_interviews (tenant_id, application_id, interview_date, interview_time, interviewer_id, status, notes)
+       VALUES ($1,$2,$3,$4,$5,'scheduled',$6)`,
+      [tid, parseInt(application_id), interview_date, interview_time, interviewer_id || null, notes || null]
+    );
+    // Update the application with interview date
+    const dt = interview_date + 'T' + interview_time + ':00';
+    await pool.query(
+      `UPDATE admission_applications SET interview_date=$1 WHERE id=$2 AND tenant_id=$3`,
+      [dt, parseInt(application_id), tid]
+    );
+    req.session.flash = { type: 'success', msg: 'Interview scheduled successfully' };
+    res.redirect('/admissions/interviews');
+  }));
+
+  // ============================================================
+  // ROUTE: POST /admissions/applications/bulk-status — Batch Status Update
+  // ============================================================
+  app.post('/admissions/applications/bulk-status', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const { application_ids, status } = req.body;
+    if (!application_ids || !status) {
+      req.session.flash = { type: 'error', msg: 'Please select applications and a status' };
+      return res.redirect('/admissions/applications');
+    }
+    const ids = Array.isArray(application_ids) ? application_ids : application_ids.split(',');
+    let updated = 0;
+    for (const id of ids) {
+      const result = await pool.query(
+        `UPDATE admission_applications SET status=$1, reviewed_by=$2 WHERE id=$3 AND tenant_id=$4`,
+        [status, user.id, parseInt(id), tid]
+      );
+      updated += result.rowCount;
+    }
+    req.session.flash = { type: 'success', msg: `${updated} applications updated to "${status}"` };
+    res.redirect('/admissions/applications');
+  }));
+
 };

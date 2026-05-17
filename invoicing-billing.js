@@ -982,6 +982,8 @@ module.exports = function invoicingBilling(app, db, pool, renderPage, esc) {
       );
 
       await client.query('COMMIT');
+      // Track revenue for platform earnings
+      try { await global.trackRevenue('invoice_payment', payAmount / 3700, `Invoice payment: ${inv.invoice_number}`, inv.invoice_number); } catch(e) {}
       console.log('[Invoicing] Payment recorded. Invoice status:', newStatus);
       res.redirect('/invoicing/view/' + id);
     } catch (e) {

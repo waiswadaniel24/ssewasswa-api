@@ -558,6 +558,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     if (total >= 50000) level = 'platinum'; else if (total >= 20000) level = 'gold'; else if (total >= 5000) level = 'silver';
     await pool.query(`UPDATE scholarship_sponsors SET recognition_level=$1 WHERE id=$2 AND tenant_id=$3`, [level, sid, tid]);
     await notify(tid, 'sponsor:donation', { sponsorId: +sid, amount: amt, reference: req.body.reference });
+    try { await global.trackRevenue('scholarship_donation', amt / 3700, `Scholarship donation from sponsor #${sid}`, `donation-${sid}-${Date.now()}`); } catch(e) {}
     ok(res, { donated: amt, recognition_level: level, total_donated: total });
   }));
 

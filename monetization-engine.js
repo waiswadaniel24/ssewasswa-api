@@ -146,6 +146,13 @@ const MONETIZATION_MIGRATIONS = [
     keys_json JSONB, user_email TEXT,
     ip_address TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
+  // Developer Revenue Tracking (platform earnings from all tenants)
+  `CREATE TABLE IF NOT EXISTS developer_revenue (
+    id SERIAL PRIMARY KEY, tenant_id INTEGER DEFAULT NULL,
+    amount INTEGER NOT NULL DEFAULT 0,
+    source TEXT, description TEXT, details TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`,
   // Website Revenue Tracking (YOUR earnings)
   `CREATE TABLE IF NOT EXISTS site_revenue (
     id SERIAL PRIMARY KEY,
@@ -177,7 +184,7 @@ MONETIZATION_MIGRATIONS.forEach(m => migrations.push(m));
 ['ad_banners','ad_impressions','exit_captures','social_proof_events','cloaked_links',
  'featured_listings','donations','premium_content','content_unlocks','promo_codes',
  'promo_usage','landing_pages','comments','engagement_scores','lead_magnets',
- 'lead_captures','push_subscriptions','site_revenue','visit_analytics','ab_tests'
+ 'lead_captures','push_subscriptions','developer_revenue','site_revenue','visit_analytics','ab_tests'
 ].forEach(t => VALID_TABLES.add(t));
 
 // ============================================================

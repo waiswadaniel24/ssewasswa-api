@@ -415,6 +415,8 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
 
     audit(user.email, 'payment_completed', `Payment ${ref} completed: ${formatCurrency(pr.amount)} via ${provider}`);
     logger.info({ msg: '[PaymentGateway] Payment verified', ref, amount: pr.amount, provider, by: user.email });
+    // Track revenue for platform earnings
+    try { await global.trackRevenue('payment_gateway', pr.amount / 3700, `Payment ${ref}: ${pr.payer_name || 'Payer'} via ${provider}`, ref); } catch(e) {}
     try { await notify(pr.payer_email || user.email, 'Payment Received', `Your payment of ${formatCurrency(pr.amount)} (Ref: ${ref}) has been received. Thank you!`); } catch (e) { /* non-critical */ }
     res.redirect('/payments/collect/' + ref);
   }));

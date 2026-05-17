@@ -906,10 +906,17 @@ app.get('/pay/flutterwave/:ref', (req, res) => {
     BASE_URL + '/pay/flutterwave/callback'
   ));
 });
-app.get('/pay/flutterwave/callback', (req, res) => {
+app.get('/pay/flutterwave/callback', ah(async (req, res) => {
   // In production, verify Flutterwave webhook signature and update payment status
+  const txRef = req.query.tx_ref || req.query.reference || 'unknown';
+  const fwStatus = req.query.status || '';
+  const fwAmount = parseFloat(req.query.amount) || 0;
+  if (fwStatus === 'successful' && fwAmount > 0) {
+    // Track revenue for platform earnings
+    try { await global.trackRevenue('flutterwave_payment', fwAmount, `Flutterwave payment: ${txRef}`, txRef); } catch(e) {}
+  }
   res.send('Flutterwave callback received. Payment processing is handled internally.');
-});
+}));
 
 // Paystack
 app.get('/pay/paystack/:ref', (req, res) => {
@@ -919,9 +926,16 @@ app.get('/pay/paystack/:ref', (req, res) => {
     BASE_URL + '/pay/paystack/callback'
   ));
 });
-app.get('/pay/paystack/callback', (req, res) => {
+app.get('/pay/paystack/callback', ah(async (req, res) => {
+  const psRef = req.query.reference || 'unknown';
+  const psStatus = req.query.trans_status || req.query.status || '';
+  const psAmount = (parseFloat(req.query.amount) || 0) / 100; // Paystack amounts are in kobo/cents
+  if ((psStatus === 'success' || psStatus === 'successful') && psAmount > 0) {
+    // Track revenue for platform earnings
+    try { await global.trackRevenue('paystack_payment', psAmount, `Paystack payment: ${psRef}`, psRef); } catch(e) {}
+  }
   res.send('Paystack callback received. Payment processing is handled internally.');
-});
+}));
 
 // PayPal
 app.get('/pay/paypal/:ref', (req, res) => {

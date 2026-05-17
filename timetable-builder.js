@@ -785,6 +785,677 @@ module.exports = function timetableBuilder(app, db, pool, renderPage, esc) {
   }));
 
   // ============================================================
+  // NEW DATABASE MIGRATIONS
+  // ============================================================
+  (async () => {
+    const c = await pool.connect().catch(() => null);
+    if (!c) { console.error('[TimetableBuilder] Cannot connect to DB for new migrations'); return; }
+    try {
+      await c.query(`CREATE TABLE IF NOT EXISTS timetable_substitutions (
+        id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        original_period_id INTEGER NOT NULL,
+        substitute_teacher_id INTEGER NOT NULL,
+        reason TEXT,
+        date DATE NOT NULL DEFAULT CURRENT_DATE,
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_ts_tenant ON timetable_substitutions(tenant_id)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_ts_date ON timetable_substitutions(tenant_id, date)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_ts_status ON timetable_substitutions(tenant_id, status)`);
+      await c.query(`CREATE INDEX IF NOT EXISTS idx_ts_original ON timetable_substitutions(original_period_id)`);
+      console.log('[TimetableBuilder] New migrations applied successfully');
+    } catch (e) { console.error('[TimetableBuilder] New migration error:', e.message); }
+    finally { c.release(); }
+  })();
+
+  // -- dark mode CSS addon ------------------------------------------------
+  const TT_DARK_CSS = '<style>\n\
+@media(prefers-color-scheme:dark){\n\
+  .tt-nav a{background:#1e293b;color:#94a3b8}\n\
+  .tt-nav a:hover{background:#334155}.tt-nav a.active{background:#4f46e5;color:#fff}\n\
+  .tt-btn-secondary{background:#334155;color:#cbd5e1}\n\
+  .tt-grid-header{background:#0f172a;color:#94a3b8}\n\
+  .tt-grid-day{background:#0f172a;color:#e2e8f0}\n\
+  .tt-cell{background:#1e293b}\n\
+  .tt-cell:hover{background:#334155}\n\
+  .tt-period{background:#1e1b4b;border-left-color:#6366f1}\n\
+  .tt-period:hover{box-shadow:0 2px 8px rgba(99,102,241,.2)}\n\
+  .tt-period-title{color:#a5b4fc}\n\
+  .tt-period-meta{color:#94a3b8}\n\
+  .tt-table th{background:#0f172a;color:#94a3b8}\n\
+  .tt-table td{color:#cbd5e1;border-bottom-color:#1e293b}\n\
+  .tt-table tr:hover{background:#1e293b}\n\
+  .tt-filter label{color:#94a3b8}\n\
+  .tt-filter input,.tt-filter select{background:#0f172a;border-color:#334155;color:#e2e8f0}\n\
+  .tt-form label{color:#94a3b8}\n\
+  .tt-form input,.tt-form select,.tt-form textarea{background:#0f172a;border-color:#334155;color:#e2e8f0}\n\
+}\n\
+</style>';
+
+  // -- substitution status badge -------------------------------------------
+  function subStatusBadge(status) {
+    const m = {
+      pending: { bg: '#fef3c7', c: '#92400e', l: 'Pending' },
+      completed: { bg: '#dcfce7', c: '#16a34a', l: 'Completed' },
+      cancelled: { bg: '#fee2e2', c: '#dc2626', l: 'Cancelled' }
+    };
+    const v = m[status] || m.pending;
+    return '<span class="badge" style="background:' + v.bg + ';color:' + v.c + '">' + v.l + '</span>';
+  }
+
+  // -- extended navigation helper ------------------------------------------
+  const navExt = (active) => '<div class="tt-nav">' +
+    '<a href="/timetable" class="' + (active === 'dash' ? 'active' : '') + '">📅 Timetable</a>' +
+    '<a href="/timetable/manage" class="' + (active === 'manage' ? 'active' : '') + '">⚙️ Manage</a>' +
+    '<a href="/timetable/lessons" class="' + (active === 'lessons' ? 'active' : '') + '">📚 Lessons</a>' +
+    '<a href="/timetable/live" class="' + (active === 'live' ? 'active' : '') + '">🔴 Live Classes</a>' +
+    '<a href="/timetable/substitutions" class="' + (active === 'substitutions' ? 'active' : '') + '">🔄 Substitutions</a>' +
+    '<a href="/timetable/rooms" class="' + (active === 'rooms' ? 'active' : '') + '">🏢 Rooms</a>' +
+    '<a href="/timetable/bulk-import" class="' + (active === 'bulk-import' ? 'active' : '') + '">📥 Bulk Import</a>' +
+    '<a href="/timetable/conflicts" class="' + (active === 'conflicts' ? 'active' : '') + '">⚠️ Conflicts</a>' +
+    '<a href="/timetable/print" class="' + (active === 'print' ? 'active' : '') + '">🖨️ Print</a>' +
+    '</div>';
+
+  // ============================================================
+  // SUBSTITUTION MANAGEMENT
+  // ============================================================
+  // ROUTE: GET /timetable/substitutions — View/manage teacher substitutions
+  app.get('/timetable/substitutions', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const statusFilter = req.query.status || '';
+
+    const teachers = (await pool.query(
+      "SELECT id, name, email FROM users WHERE tenant_id=$1 AND (role='teacher' OR role='admin') ORDER BY name", [tid]
+    )).rows;
+
+    let where = ['ts.tenant_id=$1'], params = [tid], pi = 2;
+    if (statusFilter) { where.push('ts.status=$' + pi++); params.push(statusFilter); }
+
+    const substitutions = (await pool.query(
+      `SELECT ts.*,
+              tp.day_of_week, tp.period_number, tp.room, tp.start_time, tp.end_time,
+              s.name as subject_name, c.name as class_name,
+              u_orig.name as original_teacher_name,
+              u_sub.name as substitute_teacher_name
+       FROM timetable_substitutions ts
+       LEFT JOIN timetable_periods tp ON tp.id = ts.original_period_id
+       LEFT JOIN subjects s ON s.id = tp.subject_id
+       LEFT JOIN classes c ON c.id = tp.class_id
+       LEFT JOIN users u_orig ON u_orig.id = tp.teacher_id
+       LEFT JOIN users u_sub ON u_sub.id = ts.substitute_teacher_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY ts.date DESC, ts.created_at DESC`,
+      params
+    )).rows;
+
+    const rowsHtml = substitutions.map(s => '<tr>' +
+      '<td>' + fmtDate(s.date) + '</td>' +
+      '<td>' + DAY_NAMES_SHORT[(s.day_of_week || 1) - 1] + ' P' + (s.period_number || '') + '</td>' +
+      '<td><strong>' + esc(s.subject_name || '—') + '</strong></td>' +
+      '<td>' + esc(s.class_name || '—') + '</td>' +
+      '<td>' + esc(s.original_teacher_name || '—') + '</td>' +
+      '<td style="color:#4f46e5;font-weight:600">' + esc(s.substitute_teacher_name || '—') + '</td>' +
+      '<td>' + esc(s.room || '') + '</td>' +
+      '<td>' + subStatusBadge(s.status) + '</td>' +
+      '<td>' +
+        '<form method="POST" action="/timetable/substitutions/' + s.id + '/complete" style="display:inline" onsubmit="return confirm(\'Mark as completed?\')">' +
+          '<button type="submit" class="btn btn-sm btn-green" style="font-size:10px"' + (s.status === 'completed' ? ' disabled' : '') + '>✓</button>' +
+        '</form>' +
+      '</td>' +
+    '</tr>').join('');
+
+    const periods = (await pool.query(
+      `SELECT tp.id, tp.day_of_week, tp.period_number, u.name as teacher_name, s.name as subject_name, c.name as class_name
+       FROM timetable_periods tp
+       LEFT JOIN users u ON u.id = tp.teacher_id
+       LEFT JOIN subjects s ON s.id = tp.subject_id
+       LEFT JOIN classes c ON c.id = tp.class_id
+       WHERE tp.tenant_id = $1
+       ORDER BY tp.day_of_week, tp.period_number`,
+      [tid]
+    )).rows;
+
+    const periodOpts = periods.map(p => '<option value="' + p.id + '">' + DAY_NAMES_SHORT[(p.day_of_week || 1) - 1] + ' P' + (p.period_number || '') + ' — ' + esc(p.teacher_name || 'N/A') + ' (' + esc(p.subject_name || '') + ' ' + esc(p.class_name || '') + ')</option>').join('');
+    const teachOpts = teachers.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('');
+
+    const html = TT_CSS + TT_DARK_CSS + '<div style="max-width:1300px;margin:0 auto">' +
+      navExt('substitutions') +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">' +
+        '<div><h1 style="font-size:24px;color:#1e293b">🔄 Substitutions</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">Manage teacher absences and replacements</p></div>' +
+        '<div style="display:flex;gap:6px">' +
+          ['all','pending','completed','cancelled'].map(s =>
+            '<a href="/timetable/substitutions?status=' + (s === 'all' ? '' : s) + '" class="btn btn-sm ' + (statusFilter === s || (!statusFilter && s === 'all') ? 'btn-blue' : '') + '" style="font-size:11px">' + s.charAt(0).toUpperCase() + s.slice(1) + '</a>'
+          ).join('') +
+        '</div>' +
+      '</div>' +
+      '<div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px">' +
+        '<div class="stat-card"><div class="stat-num" style="color:#f59e0b">' + substitutions.filter(s => s.status === 'pending').length + '</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Pending</div></div>' +
+        '<div class="stat-card"><div class="stat-num" style="color:#16a34a">' + substitutions.filter(s => s.status === 'completed').length + '</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Completed</div></div>' +
+        '<div class="stat-card"><div class="stat-num" style="color:#3b82f6">' + substitutions.length + '</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Total</div></div>' +
+      '</div>' +
+      '<div class="card" style="padding:24px;margin-bottom:20px">' +
+        '<h2 style="color:#1e293b;margin:0 0 16px">+ Create Substitution</h2>' +
+        '<form method="POST" action="/timetable/substitutions" class="tt-form-grid tt-form">' +
+          '<div class="full"><label>Original Period (absent teacher) *</label><select name="original_period_id" required>' + periodOpts + '</select></div>' +
+          '<div><label>Substitute Teacher *</label><select name="substitute_teacher_id" required><option value="">— Select —</option>' + teachOpts + '</select></div>' +
+          '<div><label>Date *</label><input type="date" name="date" value="' + today() + '" required></div>' +
+          '<div class="full"><label>Reason</label><input type="text" name="reason" placeholder="Sick leave, conference, etc."></div>' +
+          '<div><button type="submit" class="tt-btn tt-btn-primary">🔄 Create Substitution</button></div>' +
+        '</form>' +
+      '</div>' +
+      '<div class="card" style="padding:20px">' +
+        '<h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">📋 All Substitutions (' + substitutions.length + ')</h3>' +
+        '<div style="overflow-x:auto"><table class="tt-table">' +
+          '<thead><tr><th>Date</th><th>Period</th><th>Subject</th><th>Class</th><th>Absent</th><th>Substitute</th><th>Room</th><th>Status</th><th></th></tr></thead>' +
+          '<tbody>' + (rowsHtml || '<tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:30px">No substitutions yet</td></tr>') + '</tbody>' +
+        '</table></div>' +
+      '</div>' +
+    '</div>';
+    res.send(renderPage('Teacher Substitutions', html, user, req));
+  }));
+
+  // ROUTE: POST /timetable/substitutions — Create substitution
+  app.post('/timetable/substitutions', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const { original_period_id, substitute_teacher_id, date, reason } = req.body;
+
+    if (!original_period_id || !substitute_teacher_id || !date) {
+      return res.redirect('/timetable/substitutions');
+    }
+
+    try {
+      await pool.query(
+        `INSERT INTO timetable_substitutions (tenant_id, original_period_id, substitute_teacher_id, reason, date, status)
+         VALUES ($1, $2, $3, $4, $5, 'pending')`,
+        [tid, parseInt(original_period_id), parseInt(substitute_teacher_id), reason || null, date || today()]
+      );
+      console.log('[TimetableBuilder] Substitution created by ' + user.email);
+    } catch (e) {
+      console.error('[TimetableBuilder] Error creating substitution:', e.message);
+    }
+    res.redirect('/timetable/substitutions');
+  }));
+
+  // ROUTE: POST /timetable/substitutions/:id/complete — Mark substitution as completed
+  app.post('/timetable/substitutions/:id/complete', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const subId = parseInt(req.params.id);
+
+    await pool.query(
+      `UPDATE timetable_substitutions SET status = 'completed' WHERE id = $1 AND tenant_id = $2`,
+      [subId, tid]
+    );
+    console.log('[TimetableBuilder] Substitution #' + subId + ' marked completed');
+    res.redirect('/timetable/substitutions');
+  }));
+
+  // ROUTE: GET /timetable/substitutions/today — Today's substitutions only
+  app.get('/timetable/substitutions/today', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+
+    const todaySubs = (await pool.query(
+      `SELECT ts.*,
+              tp.day_of_week, tp.period_number, tp.room, tp.start_time, tp.end_time,
+              s.name as subject_name, c.name as class_name,
+              u_orig.name as original_teacher_name,
+              u_sub.name as substitute_teacher_name
+       FROM timetable_substitutions ts
+       LEFT JOIN timetable_periods tp ON tp.id = ts.original_period_id
+       LEFT JOIN subjects s ON s.id = tp.subject_id
+       LEFT JOIN classes c ON c.id = tp.class_id
+       LEFT JOIN users u_orig ON u_orig.id = tp.teacher_id
+       LEFT JOIN users u_sub ON u_sub.id = ts.substitute_teacher_id
+       WHERE ts.tenant_id = $1 AND ts.date = CURRENT_DATE AND ts.status = 'pending'
+       ORDER BY tp.day_of_week, tp.period_number`,
+      [tid]
+    )).rows;
+
+    if (req.headers.accept && req.headers.accept.includes('application/json')) {
+      return res.json({ success: true, count: todaySubs.length, data: todaySubs });
+    }
+
+    const rowsHtml = todaySubs.map(s => '<tr>' +
+      '<td>' + DAY_NAMES_SHORT[(s.day_of_week || 1) - 1] + ' P' + (s.period_number || '') + '</td>' +
+      '<td>' + fmtTime(s.start_time) + ' - ' + fmtTime(s.end_time) + '</td>' +
+      '<td><strong>' + esc(s.subject_name || '—') + '</strong></td>' +
+      '<td>' + esc(s.class_name || '—') + '</td>' +
+      '<td>' + esc(s.room || '') + '</td>' +
+      '<td>' + esc(s.original_teacher_name || '—') + '</td>' +
+      '<td style="color:#4f46e5;font-weight:600">' + esc(s.substitute_teacher_name || '—') + '</td>' +
+      '<td>' + esc(s.reason || '') + '</td>' +
+    '</tr>').join('');
+
+    const html = TT_CSS + TT_DARK_CSS + '<div style="max-width:1200px;margin:0 auto">' +
+      navExt('substitutions') +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">' +
+        '<div><h1 style="font-size:24px;color:#1e293b">📋 Today\'s Substitutions</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">' + fmtDate(today()) + ' — ' + todaySubs.length + ' active substitution(s)</p></div>' +
+        '<a href="/timetable/substitutions" class="tt-btn tt-btn-secondary">View All</a>' +
+      '</div>' +
+      '<div class="card" style="padding:20px">' +
+        '<div style="overflow-x:auto"><table class="tt-table">' +
+          '<thead><tr><th>Period</th><th>Time</th><th>Subject</th><th>Class</th><th>Room</th><th>Absent Teacher</th><th>Substitute</th><th>Reason</th></tr></thead>' +
+          '<tbody>' + (rowsHtml || '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:30px">No substitutions today</td></tr>') + '</tbody>' +
+        '</table></div>' +
+      '</div>' +
+    '</div>';
+    res.send(renderPage('Today\'s Substitutions', html, user, req));
+  }));
+
+  // ============================================================
+  // ROOM ALLOCATION VIEW
+  // ============================================================
+  // ROUTE: GET /timetable/rooms — View all rooms and their utilization
+  app.get('/timetable/rooms', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const selectedDay = req.query.day_of_week || '';
+
+    // Get all rooms
+    const rooms = (await pool.query(
+      `SELECT DISTINCT room FROM timetable_periods
+       WHERE tenant_id = $1 AND room IS NOT NULL AND room != ''
+       ORDER BY room`,
+      [tid]
+    )).rows;
+
+    // For each room, count periods and calculate utilization
+    const roomData = [];
+    for (const r of rooms) {
+      let roomQuery = `SELECT COUNT(*)::int as total_periods,
+              COUNT(DISTINCT day_of_week)::int as days_used,
+              COUNT(DISTINCT teacher_id)::int as teachers_using
+       FROM timetable_periods WHERE tenant_id = $1 AND room = $2`;
+      let roomParams = [tid, r.room];
+      if (selectedDay) { roomQuery += ' AND day_of_week = $3'; roomParams.push(parseInt(selectedDay)); }
+
+      const stats = (await pool.query(roomQuery, roomParams)).rows[0];
+
+      // Get periods for this room
+      let periodQuery = `SELECT tp.*, s.name as subject_name, c.name as class_name, u.name as teacher_name
+       FROM timetable_periods tp
+       LEFT JOIN subjects s ON s.id = tp.subject_id
+       LEFT JOIN classes c ON c.id = tp.class_id
+       LEFT JOIN users u ON u.id = tp.teacher_id
+       WHERE tp.tenant_id = $1 AND tp.room = $2`;
+      let periodParams = [tid, r.room];
+      if (selectedDay) { periodQuery += ' AND tp.day_of_week = $3'; periodParams.push(parseInt(selectedDay)); }
+      periodQuery += ' ORDER BY tp.day_of_week, tp.period_number';
+
+      const periods = (await pool.query(periodQuery, periodParams)).rows;
+
+      roomData.push({ room: r.room, stats, periods });
+    }
+
+    const totalRooms = rooms.length;
+    const totalPeriods = roomData.reduce((s, r) => s + r.stats.total_periods, 0);
+    const maxCapacity = DAYS.length * 8; // assume 8 periods per day
+
+    const roomRows = roomData.map(rd => {
+      const utilization = maxCapacity > 0 ? Math.round(rd.stats.total_periods / maxCapacity * 100) : 0;
+      const utilColor = utilization > 80 ? '#ef4444' : utilization > 50 ? '#f59e0b' : '#16a34a';
+      return '<tr>' +
+        '<td><strong>' + esc(rd.room) + '</strong></td>' +
+        '<td>' + rd.stats.total_periods + '</td>' +
+        '<td>' + rd.stats.days_used + '/' + DAYS.length + '</td>' +
+        '<td>' + rd.stats.teachers_using + '</td>' +
+        '<td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;background:#f1f5f9;border-radius:6px;height:16px;overflow:hidden"><div style="height:100%;width:' + utilization + '%;background:' + utilColor + ';border-radius:6px"></div></div><span style="font-size:11px;font-weight:700;color:' + utilColor + '">' + utilization + '%</span></div></td>' +
+      '</tr>';
+    }).join('');
+
+    // Day filter options
+    const dayFilter = DAYS.map((d, i) =>
+      '<option value="' + (i + 1) + '" ' + (selectedDay == (i + 1) ? 'selected' : '') + '>' + d + '</option>'
+    ).join('');
+
+    const html = TT_CSS + TT_DARK_CSS + '<div style="max-width:1200px;margin:0 auto">' +
+      navExt('rooms') +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">' +
+        '<div><h1 style="font-size:24px;color:#1e293b">🏢 Room Allocation</h1><p style="font-size:13px;color:#94a3b8;margin-top:2px">View room utilization across the timetable</p></div>' +
+        '<div style="display:flex;gap:8px">' +
+          '<select onchange="location.href=\'/timetable/rooms?day_of_week=\'+this.value" style="padding:8px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px">' +
+            '<option value="">All Days</option>' + dayFilter +
+          '</select>' +
+          '<a href="/timetable/rooms/availability" class="tt-btn tt-btn-primary">Check Availability</a>' +
+        '</div>' +
+      '</div>' +
+      '<div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px">' +
+        '<div class="stat-card"><div class="stat-num" style="color:#4f46e5">' + totalRooms + '</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Total Rooms</div></div>' +
+        '<div class="stat-card"><div class="stat-num" style="color:#16a34a">' + totalPeriods + '</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Total Bookings</div></div>' +
+      '</div>' +
+      '<div class="card" style="padding:20px">' +
+        '<h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">📊 Room Utilization (' + totalRooms + ' rooms)</h3>' +
+        '<div style="overflow-x:auto"><table class="tt-table">' +
+          '<thead><tr><th>Room</th><th>Bookings</th><th>Days Used</th><th>Teachers</th><th>Utilization</th></tr></thead>' +
+          '<tbody>' + (roomRows || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:30px">No rooms configured yet</td></tr>') + '</tbody>' +
+        '</table></div>' +
+      '</div>' +
+    '</div>';
+    res.send(renderPage('Room Allocation', html, user, req));
+  }));
+
+  // ROUTE: GET /timetable/rooms/availability — Check room availability for a time slot
+  app.get('/timetable/rooms/availability', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const selDay = req.query.day_of_week || '1';
+    const selPeriod = req.query.period_number || '';
+
+    const rooms = (await pool.query(
+      `SELECT DISTINCT room FROM timetable_periods
+       WHERE tenant_id = $1 AND room IS NOT NULL AND room != ''
+       ORDER BY room`,
+      [tid]
+    )).rows;
+
+    const results = [];
+    for (const r of rooms) {
+      const bookings = (await pool.query(
+        `SELECT tp.*, s.name as subject_name, c.name as class_name, u.name as teacher_name
+         FROM timetable_periods tp
+         LEFT JOIN subjects s ON s.id = tp.subject_id
+         LEFT JOIN classes c ON c.id = tp.class_id
+         LEFT JOIN users u ON u.id = tp.teacher_id
+         WHERE tp.tenant_id = $1 AND tp.room = $2 AND tp.day_of_week = $3
+         ORDER BY tp.period_number`,
+        [tid, r.room, parseInt(selDay)]
+      )).rows;
+
+      const available = selPeriod ?
+        !bookings.find(b => b.period_number == selPeriod) :
+        bookings.length < 8;
+
+      results.push({ room: r.room, bookings, available });
+    }
+
+    const resultsHtml = results.map(r => '<div class="card" style="padding:14px;margin-bottom:10px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
+        '<h4 style="margin:0;color:#1e293b">🏢 ' + esc(r.room) + '</h4>' +
+        '<span class="badge" style="background:' + (r.available ? '#dcfce7' : '#fee2e2') + ';color:' + (r.available ? '#16a34a' : '#dc2626') + '">' + (r.available ? 'Available' : 'Occupied') + '</span>' +
+      '</div>' +
+      (r.bookings.length > 0 ?
+        '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+        r.bookings.map(b => '<span style="padding:4px 10px;border-radius:6px;font-size:11px;background:' + (b.period_number == selPeriod ? '#fee2e2;color:#dc2626' : '#f1f5f9;color:#475569') + '">P' + (b.period_number || '') + ': ' + esc(b.subject_name || '') + ' (' + esc(b.class_name || '') + ')</span>').join('') +
+        '</div>' :
+        '<p class="muted" style="font-size:12px">No bookings for this day</p>') +
+    '</div>').join('');
+
+    const dayOpts = DAYS.map((d, i) => '<option value="' + (i + 1) + '" ' + (selDay == (i + 1) ? 'selected' : '') + '>' + d + '</option>').join('');
+
+    const html = TT_CSS + TT_DARK_CSS + '<div style="max-width:1000px;margin:0 auto">' +
+      navExt('rooms') +
+      '<div style="margin-bottom:20px">' +
+        '<h1 style="font-size:24px;color:#1e293b">🔍 Room Availability</h1>' +
+        '<p style="font-size:13px;color:#94a3b8;margin-top:2px">Find available rooms for a given time slot</p>' +
+      '</div>' +
+      '<div class="tt-filter" style="background:#f8fafc;padding:14px;border-radius:12px;margin-bottom:20px">' +
+        '<div><label>Day</label><select id="daySelect" onchange="location.href=\'/timetable/rooms/availability?day_of_week=\'+this.value+\'&period_number=\'+document.getElementById(\'periodSelect\').value">' + dayOpts + '</select></div>' +
+        '<div><label>Period (optional)</label><select id="periodSelect" onchange="location.href=\'/timetable/rooms/availability?day_of_week=\'+document.getElementById(\'daySelect\').value+\'&period_number=\'+this.value">' +
+          '<option value="">All Periods</option>' +
+          Array.from({length: 12}, (_, i) => '<option value="' + (i + 1) + '" ' + (selPeriod == (i + 1) ? 'selected' : '') + '>Period ' + (i + 1) + '</option>').join('') +
+        '</select></div>' +
+      '</div>' +
+      '<h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">📋 Room Status (' + results.length + ' rooms)</h3>' +
+      (resultsHtml || '<div class="card" style="padding:30px;text-align:center;color:#94a3b8">No rooms configured</div>') +
+    '</div>';
+    res.send(renderPage('Room Availability', html, user, req));
+  }));
+
+  // ============================================================
+  // TEACHER AVAILABILITY
+  // ============================================================
+  // ROUTE: GET /timetable/teacher-availability/:id — Show teacher's free/busy slots
+  app.get('/timetable/teacher-availability/:id', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const teacherId = parseInt(req.params.id);
+
+    const teacher = (await pool.query(
+      "SELECT id, name, email FROM users WHERE id=$1 AND tenant_id=$2",
+      [teacherId, tid]
+    )).rows[0];
+
+    if (!teacher) {
+      return res.status(404).send('Teacher not found');
+    }
+
+    const periods = (await pool.query(
+      `SELECT tp.*, s.name as subject_name, c.name as class_name, tp.room
+       FROM timetable_periods tp
+       LEFT JOIN subjects s ON s.id = tp.subject_id
+       LEFT JOIN classes c ON c.id = tp.class_id
+       WHERE tp.tenant_id = $1 AND tp.teacher_id = $2
+       ORDER BY tp.day_of_week, tp.period_number`,
+      [tid, teacherId]
+    )).rows;
+
+    // Check for blocked slots (substitutions where this teacher is substitute today)
+    const blockedSlots = (await pool.query(
+      `SELECT ts.date, tp.day_of_week, tp.period_number
+       FROM timetable_substitutions ts
+       JOIN timetable_periods tp ON tp.id = ts.original_period_id
+       WHERE ts.tenant_id = $1 AND ts.substitute_teacher_id = $2 AND ts.status = 'pending'`,
+      [tid, teacherId]
+    )).rows;
+
+    // Build availability grid
+    let gridHtml = '';
+    for (let day = 1; day <= DAYS.length; day++) {
+      const dayPeriods = periods.filter(p => p.day_of_week === day);
+      const maxP = Math.max(...periods.map(p => p.period_number || 0), 8);
+
+      gridHtml += '<div style="margin-bottom:12px"><div style="font-weight:700;font-size:13px;color:#4f46e5;margin-bottom:6px">' + DAYS[day - 1] + '</div><div style="display:flex;flex-wrap:wrap;gap:4px">';
+      for (let pn = 1; pn <= maxP; pn++) {
+        const assigned = dayPeriods.find(p => p.period_number === pn);
+        if (assigned) {
+          gridHtml += '<div style="padding:6px 10px;border-radius:6px;font-size:11px;background:#fee2e2;color:#dc2626;cursor:pointer" title="' + esc(assigned.subject_name || '') + ' — ' + esc(assigned.class_name || '') + ' (' + esc(assigned.room || '') + ')">P' + pn + ' 📚</div>';
+        } else {
+          gridHtml += '<div style="padding:6px 10px;border-radius:6px;font-size:11px;background:#dcfce7;color:#16a34a">P' + pn + ' ✓</div>';
+        }
+      }
+      gridHtml += '</div></div>';
+    }
+
+    const html = TT_CSS + TT_DARK_CSS + '<div style="max-width:1000px;margin:0 auto">' +
+      navExt('dash') +
+      '<div style="margin-bottom:20px">' +
+        '<h1 style="font-size:24px;color:#1e293b">👤 Teacher Availability</h1>' +
+        '<p style="font-size:13px;color:#94a3b8;margin-top:2px">' + esc(teacher.name) + ' (' + esc(teacher.email || '') + ')</p>' +
+      '</div>' +
+      '<div class="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px">' +
+        '<div class="stat-card"><div class="stat-num" style="color:#dc2626">' + periods.length + '</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Busy Slots</div></div>' +
+        '<div class="stat-card"><div class="stat-num" style="color:#16a34a">' + (DAYS.length * 8 - periods.length) + '</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Free Slots</div></div>' +
+        '<div class="stat-card"><div class="stat-num" style="color:#f59e0b">' + blockedSlots.length + '</div><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.3px">Substitutions</div></div>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">' +
+        '<div class="card" style="padding:20px">' +
+          '<h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">📅 Weekly Availability</h3>' +
+          '<div style="font-size:11px;margin-bottom:10px"><span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:4px">Free</span> <span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:4px">Busy</span></div>' +
+          gridHtml +
+        '</div>' +
+        '<div>' +
+          '<div class="card" style="padding:20px;margin-bottom:16px">' +
+            '<h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">🚫 Block a Time Slot</h3>' +
+            '<form method="POST" action="/timetable/teacher-availability/' + teacherId + '/block" class="tt-form-grid tt-form">' +
+              '<div><label>Day *</label><select name="day_of_week" required>' + DAYS.map((d, i) => '<option value="' + (i + 1) + '">' + d + '</option>').join('') + '</select></div>' +
+              '<div><label>Period *</label><input type="number" name="period_number" min="1" max="12" value="1" required></div>' +
+              '<div class="full"><label>Reason</label><input type="text" name="reason" placeholder="Meeting, appointment, etc."></div>' +
+              '<div><button type="submit" class="tt-btn tt-btn-primary">🚫 Block Slot</button></div>' +
+            '</form>' +
+          '</div>' +
+          '<div class="card" style="padding:20px">' +
+            '<h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">📚 Current Schedule</h3>' +
+            '<div style="overflow-x:auto;max-height:400px;overflow-y:auto"><table class="tt-table">' +
+              '<thead style="position:sticky;top:0"><tr><th>Day</th><th>Per</th><th>Subject</th><th>Class</th><th>Room</th></tr></thead>' +
+              '<tbody>' + periods.map(p => '<tr><td>' + DAY_NAMES_SHORT[(p.day_of_week || 1) - 1] + '</td><td>P' + (p.period_number || '') + '</td><td>' + esc(p.subject_name || '') + '</td><td>' + esc(p.class_name || '') + '</td><td>' + esc(p.room || '') + '</td></tr>').join('') || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px">No scheduled periods</td></tr>' + '</tbody>' +
+            '</table></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    res.send(renderPage('Teacher Availability', html, user, req));
+  }));
+
+  // ROUTE: POST /timetable/teacher-availability/:id/block — Block a time slot for a teacher
+  app.post('/timetable/teacher-availability/:id/block', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const teacherId = parseInt(req.params.id);
+    const { day_of_week, period_number, reason } = req.body;
+
+    if (!day_of_week || !period_number) {
+      return res.redirect('/timetable/teacher-availability/' + teacherId);
+    }
+
+    // Check if slot is already booked
+    const existing = (await pool.query(
+      `SELECT tp.id FROM timetable_periods tp
+       WHERE tp.tenant_id = $1 AND tp.teacher_id = $2 AND tp.day_of_week = $3 AND tp.period_number = $4`,
+      [tid, teacherId, parseInt(day_of_week), parseInt(period_number)]
+    )).rows[0];
+
+    if (existing) {
+      req.session.flash = { type: 'error', msg: 'That time slot is already assigned. Remove the period first.' };
+      return res.redirect('/timetable/teacher-availability/' + teacherId);
+    }
+
+    // Create a blocked period entry (no subject/class)
+    try {
+      await pool.query(
+        `INSERT INTO timetable_periods (tenant_id, day_of_week, period_number, teacher_id, notes, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [tid, parseInt(day_of_week), parseInt(period_number), teacherId, 'BLOCKED: ' + (reason || 'Unavailable'), user.id]
+      );
+      console.log('[TimetableBuilder] Slot blocked for teacher #' + teacherId + ' by ' + user.email);
+      req.session.flash = { type: 'success', msg: 'Time slot blocked successfully' };
+    } catch (e) {
+      console.error('[TimetableBuilder] Error blocking slot:', e.message);
+    }
+    res.redirect('/timetable/teacher-availability/' + teacherId);
+  }));
+
+  // ============================================================
+  // BULK PERIOD IMPORT
+  // ============================================================
+  // ROUTE: GET /timetable/bulk-import — Show bulk import form
+  app.get('/timetable/bulk-import', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+
+    const subjects = (await pool.query('SELECT id, name FROM subjects WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+    const classes = (await pool.query('SELECT id, name FROM classes WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+    const teachers = (await pool.query(
+      "SELECT id, name FROM users WHERE tenant_id=$1 AND (role='teacher' OR role='admin') ORDER BY name", [tid]
+    )).rows;
+
+    const subjectLookup = subjects.reduce((m, s) => { m[s.name.toLowerCase()] = s.id; return m; }, {});
+    const classLookup = classes.reduce((m, c) => { m[c.name.toLowerCase()] = c.id; return m; }, {});
+    const teacherLookup = teachers.reduce((m, t) => { m[t.name.toLowerCase()] = t.id; return m; }, {});
+
+    const html = TT_CSS + TT_DARK_CSS + '<div style="max-width:900px;margin:0 auto">' +
+      navExt('bulk-import') +
+      '<div style="margin-bottom:20px">' +
+        '<h1 style="font-size:24px;color:#1e293b">📥 Bulk Period Import</h1>' +
+        '<p style="font-size:13px;color:#94a3b8;margin-top:2px">Import multiple timetable periods from CSV data</p>' +
+      '</div>' +
+      '<div class="card" style="padding:24px;margin-bottom:20px">' +
+        '<h2 style="color:#1e293b;margin:0 0 4px">📋 CSV Format</h2>' +
+        '<p style="font-size:13px;color:#94a3b8;margin-bottom:12px">Paste CSV data with columns: <strong>day,period,subject,teacher,room,class</strong> (one row per line)</p>' +
+        '<div style="background:#f8fafc;padding:12px;border-radius:8px;font-family:monospace;font-size:12px;margin-bottom:16px;color:#475569">' +
+          'Monday,1,Mathematics,Mr. Smith,Room 101,Grade 7A<br>' +
+          'Monday,2,English,Ms. Johnson,Room 102,Grade 7A<br>' +
+          'Tuesday,3,Science,Mr. Brown,Lab 1,Grade 8B<br>' +
+          '...' +
+        '</div>' +
+        '<form method="POST" action="/timetable/bulk-import">' +
+          '<div style="margin-bottom:12px"><label style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:4px">CSV Data *</label>' +
+            '<textarea name="csv_data" rows="10" required placeholder="Paste your CSV data here..." style="width:100%;padding:10px 14px;border:2px solid #e2e8f0;border-radius:10px;font-size:13px;font-family:monospace"></textarea>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px">' +
+            '<button type="submit" class="tt-btn tt-btn-primary">📥 Import Periods</button>' +
+          '</div>' +
+        '</form>' +
+      '</div>' +
+      '<div class="card" style="padding:20px">' +
+        '<h3 style="font-size:15px;color:#1e293b;margin:0 0 14px">📚 Available Data for Matching</h3>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
+          '<div><strong style="font-size:12px;color:#64748b">Subjects (' + subjects.length + ')</strong>' +
+            '<div style="max-height:150px;overflow-y:auto;font-size:12px;color:#475569">' + subjects.map(s => esc(s.name)).join(', ') + '</div></div>' +
+          '<div><strong style="font-size:12px;color:#64748b">Teachers (' + teachers.length + ')</strong>' +
+            '<div style="max-height:150px;overflow-y:auto;font-size:12px;color:#475569">' + teachers.map(t => esc(t.name)).join(', ') + '</div></div>' +
+          '<div><strong style="font-size:12px;color:#64748b">Classes (' + classes.length + ')</strong>' +
+            '<div style="max-height:150px;overflow-y:auto;font-size:12px;color:#475569">' + classes.map(c => esc(c.name)).join(', ') + '</div></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    res.send(renderPage('Bulk Import', html, user, req));
+  }));
+
+  // ROUTE: POST /timetable/bulk-import — Process bulk import
+  app.post('/timetable/bulk-import', requireAuth, ah(async (req, res) => {
+    const user = req.session.user, tid = user.tenant_id;
+    const { csv_data } = req.body;
+
+    if (!csv_data || !csv_data.trim()) {
+      req.session.flash = { type: 'error', msg: 'No CSV data provided' };
+      return res.redirect('/timetable/bulk-import');
+    }
+
+    // Build lookups
+    const subjects = (await pool.query('SELECT id, name FROM subjects WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+    const classes = (await pool.query('SELECT id, name FROM classes WHERE tenant_id=$1 ORDER BY name', [tid])).rows;
+    const teachers = (await pool.query(
+      "SELECT id, name FROM users WHERE tenant_id=$1 AND (role='teacher' OR role='admin') ORDER BY name", [tid]
+    )).rows;
+
+    const subjectLookup = {};
+    subjects.forEach(s => { subjectLookup[s.name.toLowerCase()] = s.id; });
+    const classLookup = {};
+    classes.forEach(c => { classLookup[c.name.toLowerCase()] = c.id; });
+    const teacherLookup = {};
+    teachers.forEach(t => { teacherLookup[t.name.toLowerCase()] = t.id; });
+
+    const dayMap = {};
+    DAYS.forEach((d, i) => { dayMap[d.toLowerCase()] = i + 1; });
+
+    const lines = csv_data.trim().split('\n').filter(l => l.trim());
+    let imported = 0, skipped = 0, errors = [];
+
+    for (const line of lines) {
+      // Skip header row
+      if (line.toLowerCase().includes('day,period') || line.toLowerCase().includes('day period')) continue;
+
+      const parts = line.split(',').map(p => p.trim());
+      if (parts.length < 6) { skipped++; errors.push('Invalid format: ' + esc(line.substring(0, 50))); continue; }
+
+      const [dayStr, periodStr, subjectStr, teacherStr, roomStr, classStr] = parts;
+      const dayOfWeek = dayMap[dayStr.toLowerCase()];
+      const periodNumber = parseInt(periodStr);
+
+      if (!dayOfWeek) { skipped++; errors.push('Unknown day: ' + esc(dayStr)); continue; }
+      if (!periodNumber || periodNumber < 1) { skipped++; errors.push('Invalid period: ' + esc(periodStr)); continue; }
+
+      const subjectId = subjectLookup[subjectStr.toLowerCase()] || null;
+      const classId = classLookup[classStr.toLowerCase()] || null;
+      const teacherId = teacherLookup[teacherStr.toLowerCase()] || null;
+
+      try {
+        await pool.query(
+          `INSERT INTO timetable_periods (tenant_id, day_of_week, period_number, subject_id, teacher_id, room, class_id, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [tid, dayOfWeek, periodNumber, subjectId, teacherId, roomStr || null, classId, user.id]
+        );
+        imported++;
+      } catch (e) {
+        skipped++;
+        errors.push('DB error on line: ' + esc(line.substring(0, 50)));
+      }
+    }
+
+    console.log('[TimetableBuilder] Bulk import: ' + imported + ' imported, ' + skipped + ' skipped by ' + user.email);
+    if (errors.length > 0) { console.log('[TimetableBuilder] Errors: ' + errors.slice(0, 10).join('; ')); }
+
+    const flashMsg = imported + ' period(s) imported successfully.' + (skipped > 0 ? ' ' + skipped + ' skipped.' : '');
+    req.session.flash = { type: imported > 0 ? 'success' : 'warning', msg: flashMsg };
+    res.redirect('/timetable/bulk-import');
+  }));
+
+  // ============================================================
   // END MODULE
   // ============================================================
 };

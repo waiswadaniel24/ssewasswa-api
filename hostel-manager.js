@@ -488,6 +488,14 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
         status = CASE WHEN current_occupants + 1 >= capacity THEN 'full' ELSE 'available' END
        WHERE id=$1`, [room_id]);
 
+    try {
+      const roomInfo = await pool.query(
+        `SELECT r.room_number, b.name AS building_name FROM hostel_rooms r JOIN hostel_buildings b ON b.id=r.building_id WHERE r.id=$1 AND r.tenant_id=$2`,
+        [room_id, tid]);
+      const roomLabel = roomInfo.rows[0] ? `${roomInfo.rows[0].building_name} - ${roomInfo.rows[0].room_number}` : `Room ${room_id}`;
+      await global.trackRevenue('hostel_allocation', 0, `Hostel allocation for ${student_name.trim()} in ${roomLabel}`, `hostel-alloc-${room_id}-${Date.now()}`);
+    } catch(e) {}
+
     res.redirect(navUrl('/rooms/' + room_id));
   });
 

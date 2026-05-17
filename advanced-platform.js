@@ -463,6 +463,9 @@ app.post('/api/events/:id/tickets/buy', requireAuth, ah(async (req, res) => {
   await pool.query(`INSERT INTO ticket_purchases (ticket_id, buyer_email, buyer_name, quantity, total_amount, reference, status, qr_code) VALUES ($1,$2,$3,$4,$5,$6,'confirmed',$7)`,
     [ticket_id, u.email, u.name || u.email, qty, totalAmount, reference, qrSvg]);
   await pool.query('UPDATE event_tickets SET sold_quantity = sold_quantity + $1 WHERE id = $2', [qty, ticket_id]);
+  // Track revenue for event ticket purchase
+  try { await global.trackRevenue('event_ticket', totalAmount / 3700, 'Ticket: ' + (ticket.ticket_type||'General') + ' x' + qty + ' for ' + (u.name||u.email), reference); } catch(e) {}
+  try { await global.creditDeveloperRevenue(u.tenant_id, Math.round(totalAmount * 0.05), 'event_ticket', 'Ticket sale: ' + reference); } catch(e) {}
   if (sendEmail) sendEmail(u.email, 'Ticket Confirmed', `Your ticket ${reference} is confirmed. Total: ${totalAmount} ${ticket.currency}`);
   res.redirect(`/ticket/${reference}`);
 }));
