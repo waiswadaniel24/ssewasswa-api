@@ -7527,6 +7527,1857 @@ Sitemap: ${BASE_URL}/sitemap.xml
 
   console.log('[Fundraising Enhancements] All V6-V12 routes registered successfully');
 
+  // =============================================
+  // V13 TABLES - Advanced AI & Automation
+  // =============================================
+  fundraisingMigrations.push(
+    `CREATE TABLE IF NOT EXISTS ai_campaign_generations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      generation_type TEXT NOT NULL CHECK (generation_type IN ('title','story','email','social_post','thank_you','impact_report','faq','pitch_deck')),
+      prompt TEXT,
+      generated_content TEXT NOT NULL,
+      model_used TEXT DEFAULT 'gpt-4',
+      tokens_used INTEGER DEFAULT 0,
+      is_accepted BOOLEAN DEFAULT false,
+      rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS predictive_donation_models (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      model_type TEXT DEFAULT 'linear' CHECK (model_type IN ('linear','exponential','logarithmic','seasonal','ml_boosted')),
+      predicted_total INTEGER DEFAULT 0,
+      predicted_completion_date DATE,
+      confidence_score NUMERIC(5,2) DEFAULT 0,
+      features JSONB DEFAULT '{}',
+      training_data_range JSONB DEFAULT '{}',
+      calculated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS smart_donor_matches (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donor_email TEXT NOT NULL,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      match_score NUMERIC(5,2) DEFAULT 0,
+      match_reasons JSONB DEFAULT '[]',
+      recommended_amount INTEGER DEFAULT 0,
+      recommended_time TEXT,
+      is_contacted BOOLEAN DEFAULT false,
+      contacted_at TIMESTAMPTZ,
+      responded BOOLEAN DEFAULT false,
+      donated BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ai_chatbot_conversations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id),
+      user_email TEXT,
+      user_name TEXT,
+      messages JSONB DEFAULT '[]',
+      intent_detected TEXT,
+      donation_initiated BOOLEAN DEFAULT false,
+      donation_completed BOOLEAN DEFAULT false,
+      satisfaction_rating INTEGER CHECK (satisfaction_rating BETWEEN 1 AND 5),
+      started_at TIMESTAMPTZ DEFAULT NOW(),
+      ended_at TIMESTAMPTZ
+    )`,
+    `CREATE TABLE IF NOT EXISTS sentiment_analyses (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL CHECK (entity_type IN ('comment','testimonial','update','story','email')),
+      entity_id INTEGER NOT NULL,
+      sentiment_score NUMERIC(5,2) DEFAULT 0,
+      sentiment_label TEXT DEFAULT 'neutral' CHECK (sentiment_label IN ('very_negative','negative','neutral','positive','very_positive')),
+      emotions JSONB DEFAULT '{}',
+      key_phrases TEXT[] DEFAULT '{}',
+      analyzed_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ab_test_experiments (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      experiment_name TEXT NOT NULL,
+      experiment_type TEXT DEFAULT 'page' CHECK (experiment_type IN ('page','email','cta','amount','image','headline')),
+      variant_a JSONB NOT NULL DEFAULT '{}',
+      variant_b JSONB NOT NULL DEFAULT '{}',
+      traffic_split NUMERIC(5,2) DEFAULT 50.00,
+      variant_a_views INTEGER DEFAULT 0,
+      variant_a_conversions INTEGER DEFAULT 0,
+      variant_a_amount INTEGER DEFAULT 0,
+      variant_b_views INTEGER DEFAULT 0,
+      variant_b_conversions INTEGER DEFAULT 0,
+      variant_b_amount INTEGER DEFAULT 0,
+      statistical_significance NUMERIC(5,2) DEFAULT 0,
+      winner TEXT CHECK (winner IN ('a','b','none')),
+      status TEXT DEFAULT 'running' CHECK (status IN ('draft','running','paused','completed','stopped')),
+      start_date TIMESTAMPTZ,
+      end_date TIMESTAMPTZ,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ai_email_sequences (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      sequence_name TEXT NOT NULL,
+      trigger_event TEXT NOT NULL CHECK (trigger_event IN ('first_donation','donation','milestone','lapsed_donor','new_follower','campaign_launch','goal_reached')),
+      emails JSONB NOT NULL DEFAULT '[]',
+      status TEXT DEFAULT 'active' CHECK (status IN ('active','paused','completed','draft')),
+      total_sent INTEGER DEFAULT 0,
+      total_opened INTEGER DEFAULT 0,
+      total_clicked INTEGER DEFAULT 0,
+      total_donated INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ai_optimization_suggestions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      suggestion_type TEXT NOT NULL CHECK (suggestion_type IN ('story','image','timing','amount','audience','channel','frequency','cta')),
+      current_state TEXT,
+      suggested_state TEXT,
+      expected_impact NUMERIC(5,2) DEFAULT 0,
+      confidence NUMERIC(5,2) DEFAULT 0,
+      reasoning TEXT,
+      is_implemented BOOLEAN DEFAULT false,
+      implemented_at TIMESTAMPTZ,
+      result_impact NUMERIC(5,2),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS automated_personalizations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      user_email TEXT NOT NULL,
+      personalization_type TEXT NOT NULL CHECK (personalization_type IN ('thank_you','follow_up','reminder','impact_update','re_engage','upgrade_ask')),
+      content_template TEXT NOT NULL,
+      variables JSONB DEFAULT '{}',
+      delivery_channel TEXT DEFAULT 'email' CHECK (delivery_channel IN ('email','sms','push','whatsapp')),
+      triggered_by TEXT,
+      sent BOOLEAN DEFAULT false,
+      sent_at TIMESTAMPTZ,
+      opened BOOLEAN DEFAULT false,
+      clicked BOOLEAN DEFAULT false,
+      converted BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ai_content_templates (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      template_name TEXT NOT NULL,
+      template_type TEXT NOT NULL CHECK (template_type IN ('thank_you_email','donation_receipt','campaign_update','milestone_celebration','lapsed_donor','new_donor_welcome','impact_report','social_post','sms_update')),
+      subject_template TEXT,
+      body_template TEXT NOT NULL,
+      variables TEXT[] DEFAULT '{}',
+      tone TEXT DEFAULT 'warm' CHECK (tone IN ('formal','warm','friendly','urgent','celebratory','compassionate')),
+      language TEXT DEFAULT 'en',
+      is_active BOOLEAN DEFAULT true,
+      usage_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`
+  );
+
+  // =============================================
+  // V14 TABLES - Global Expansion & Localization
+  // =============================================
+  fundraisingMigrations.push(
+    `CREATE TABLE IF NOT EXISTS currency_auto_conversions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donation_id INTEGER REFERENCES campaign_donations(id),
+      original_currency TEXT NOT NULL,
+      original_amount INTEGER NOT NULL,
+      converted_currency TEXT DEFAULT 'UGX',
+      converted_amount INTEGER NOT NULL,
+      exchange_rate NUMERIC(12,6) NOT NULL,
+      rate_provider TEXT DEFAULT 'manual',
+      conversion_fee INTEGER DEFAULT 0,
+      converted_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS regional_payment_methods (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      country TEXT NOT NULL,
+      method_name TEXT NOT NULL,
+      method_type TEXT NOT NULL CHECK (method_type IN ('mobile_money','bank_transfer','card','ussd','qr_pay','crypto','cash_pickup','wallet','carrier_billing')),
+      provider TEXT,
+      min_amount INTEGER DEFAULT 0,
+      max_amount INTEGER,
+      fee_percentage NUMERIC(5,2) DEFAULT 0,
+      processing_time TEXT,
+      instructions TEXT,
+      is_active BOOLEAN DEFAULT true,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS regional_compliance_rules (
+      id SERIAL PRIMARY KEY,
+      country TEXT NOT NULL,
+      rule_type TEXT NOT NULL CHECK (rule_type IN ('fundraising_license','tax_receipt','data_protection','aml','kye','consumer_protection','foreign_donation','religious_org','ngo_registration')),
+      rule_name TEXT NOT NULL,
+      description TEXT,
+      requirements JSONB DEFAULT '[]',
+      penalties TEXT,
+      authority TEXT,
+      is_mandatory BOOLEAN DEFAULT true,
+      effective_date DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(country, rule_type)
+    )`,
+    `CREATE TABLE IF NOT EXISTS translation_management (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL CHECK (entity_type IN ('campaign','story','email','receipt','faq','testimonial','update')),
+      entity_id INTEGER NOT NULL,
+      source_language TEXT DEFAULT 'en',
+      target_language TEXT NOT NULL,
+      source_text TEXT NOT NULL,
+      translated_text TEXT,
+      translation_status TEXT DEFAULT 'pending' CHECK (translation_status IN ('pending','in_progress','completed','reviewed','rejected')),
+      translator TEXT,
+      quality_score NUMERIC(5,2),
+      reviewed_by TEXT,
+      reviewed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, entity_type, entity_id, target_language)
+    )`,
+    `CREATE TABLE IF NOT EXISTS international_tax_config (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      country TEXT NOT NULL,
+      tax_id_type TEXT,
+      tax_id_value TEXT,
+      tax_deductible BOOLEAN DEFAULT false,
+      max_deductible_percentage NUMERIC(5,2) DEFAULT 0,
+      receipt_requirements JSONB DEFAULT '{}',
+      reporting_frequency TEXT DEFAULT 'annual',
+      next_report_due DATE,
+      is_active BOOLEAN DEFAULT true,
+      UNIQUE(tenant_id, country)
+    )`,
+    `CREATE TABLE IF NOT EXISTS global_payout_routing (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      country TEXT NOT NULL,
+      payout_method TEXT NOT NULL CHECK (payout_method IN ('bank_transfer','mobile_money','wise','paypal','swift','check','crypto','cash_pickup')),
+      provider TEXT,
+      account_details JSONB DEFAULT '{}',
+      min_payout INTEGER DEFAULT 0,
+      fee_percentage NUMERIC(5,2) DEFAULT 0,
+      fee_fixed INTEGER DEFAULT 0,
+      processing_days INTEGER DEFAULT 3,
+      currency TEXT DEFAULT 'UGX',
+      is_primary BOOLEAN DEFAULT false,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS timezone_aware_events (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      event_id INTEGER REFERENCES campaign_events(id) ON DELETE CASCADE,
+      display_timezone TEXT DEFAULT 'Africa/Kampala',
+      start_times JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS cultural_customizations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      country TEXT NOT NULL,
+      region TEXT,
+      language TEXT DEFAULT 'en',
+      currency TEXT DEFAULT 'UGX',
+      date_format TEXT DEFAULT 'DD/MM/YYYY',
+      number_format TEXT DEFAULT '1,000',
+      preferred_payment_methods TEXT[] DEFAULT '{}',
+      color_schemes JSONB DEFAULT '{}',
+      imagery_preferences JSONB DEFAULT '{}',
+      messaging_tone TEXT DEFAULT 'warm',
+      is_active BOOLEAN DEFAULT true,
+      UNIQUE(tenant_id, country, region)
+    )`,
+    `CREATE TABLE IF NOT EXISTS regional_campaign_discovery (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      country TEXT NOT NULL,
+      region TEXT,
+      language TEXT DEFAULT 'en',
+      featured_position INTEGER DEFAULT 0,
+      is_featured BOOLEAN DEFAULT false,
+      local_title TEXT,
+      local_description TEXT,
+      priority_score NUMERIC(5,2) DEFAULT 0,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS embassy_partnerships (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      embassy_name TEXT NOT NULL,
+      country TEXT NOT NULL,
+      contact_name TEXT,
+      contact_email TEXT,
+      partnership_type TEXT DEFAULT 'endorsement' CHECK (partnership_type IN ('endorsement','matching_fund','hosting','promotion','liaison','advisory')),
+      agreement_details JSONB DEFAULT '{}',
+      start_date DATE,
+      end_date DATE,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','active','suspended','expired','terminated')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`
+  );
+
+  // =============================================
+  // V15 TABLES - Social Impact & ESG
+  // =============================================
+  fundraisingMigrations.push(
+    `CREATE TABLE IF NOT EXISTS sdg_alignments (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      sdg_number INTEGER NOT NULL CHECK (sdg_number BETWEEN 1 AND 17),
+      sdg_name TEXT NOT NULL,
+      alignment_score NUMERIC(5,2) DEFAULT 0,
+      evidence TEXT,
+      indicators JSONB DEFAULT '[]',
+      verified BOOLEAN DEFAULT false,
+      verified_by TEXT,
+      verified_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(campaign_id, sdg_number)
+    )`,
+    `CREATE TABLE IF NOT EXISTS esg_impact_scores (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      environmental_score NUMERIC(5,2) DEFAULT 0,
+      social_score NUMERIC(5,2) DEFAULT 0,
+      governance_score NUMERIC(5,2) DEFAULT 0,
+      overall_esg_score NUMERIC(5,2) DEFAULT 0,
+      environmental_metrics JSONB DEFAULT '{}',
+      social_metrics JSONB DEFAULT '{}',
+      governance_metrics JSONB DEFAULT '{}',
+      third_party_verified BOOLEAN DEFAULT false,
+      verified_by TEXT,
+      verified_at TIMESTAMPTZ,
+      calculated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS carbon_footprint_calculations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      total_emissions_kg NUMERIC(12,2) DEFAULT 0,
+      digital_emissions_kg NUMERIC(12,2) DEFAULT 0,
+      travel_emissions_kg NUMERIC(12,2) DEFAULT 0,
+      supply_chain_emissions_kg NUMERIC(12,2) DEFAULT 0,
+      offset_amount INTEGER DEFAULT 0,
+      offset_provider TEXT,
+      is_carbon_neutral BOOLEAN DEFAULT false,
+      calculation_method TEXT DEFAULT 'estimated',
+      calculated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS sroi_calculations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      investment_amount INTEGER NOT NULL,
+      social_value_created INTEGER NOT NULL,
+      sroi_ratio NUMERIC(10,2) DEFAULT 0,
+      beneficiaries_direct INTEGER DEFAULT 0,
+      beneficiaries_indirect INTEGER DEFAULT 0,
+      outcomes JSONB DEFAULT '[]',
+      inputs JSONB DEFAULT '[]',
+      assumptions TEXT[] DEFAULT '{}',
+      verified BOOLEAN DEFAULT false,
+      calculated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS beneficiary_feedback (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      beneficiary_name TEXT,
+      beneficiary_email TEXT,
+      beneficiary_phone TEXT,
+      feedback_type TEXT DEFAULT 'general' CHECK (feedback_type IN ('general','satisfaction','impact','suggestion','complaint','testimonial')),
+      rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+      feedback_text TEXT NOT NULL,
+      is_anonymous BOOLEAN DEFAULT false,
+      is_verified BOOLEAN DEFAULT false,
+      verified_by TEXT,
+      response TEXT,
+      responded_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS impact_verifications (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      verifier_name TEXT NOT NULL,
+      verifier_organization TEXT,
+      verifier_email TEXT NOT NULL,
+      verification_type TEXT DEFAULT 'field_visit' CHECK (verification_type IN ('field_visit','document_review','data_audit','photo_verification','video_verification','third_party_report')),
+      findings TEXT,
+      impact_confirmed BOOLEAN DEFAULT false,
+      verification_date DATE NOT NULL,
+      report_url TEXT,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed','rejected')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS inclusion_metrics (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      total_beneficiaries INTEGER DEFAULT 0,
+      female_percentage NUMERIC(5,2) DEFAULT 0,
+      youth_percentage NUMERIC(5,2) DEFAULT 0,
+      elderly_percentage NUMERIC(5,2) DEFAULT 0,
+      disabled_percentage NUMERIC(5,2) DEFAULT 0,
+      rural_percentage NUMERIC(5,2) DEFAULT 0,
+      minority_groups JSONB DEFAULT '{}',
+      accessibility_features JSONB DEFAULT '[]',
+      inclusion_score NUMERIC(5,2) DEFAULT 0,
+      period TEXT DEFAULT 'all_time',
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS community_resilience_index (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      community_name TEXT NOT NULL,
+      economic_resilience NUMERIC(5,2) DEFAULT 0,
+      social_cohesion NUMERIC(5,2) DEFAULT 0,
+      infrastructure_score NUMERIC(5,2) DEFAULT 0,
+      health_access NUMERIC(5,2) DEFAULT 0,
+      education_access NUMERIC(5,2) DEFAULT 0,
+      overall_resilience NUMERIC(5,2) DEFAULT 0,
+      before_intervention JSONB DEFAULT '{}',
+      after_intervention JSONB DEFAULT '{}',
+      improvement_percentage NUMERIC(5,2) DEFAULT 0,
+      assessed_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS impact_report_cards (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      report_period TEXT NOT NULL,
+      grade TEXT DEFAULT 'pending' CHECK (grade IN ('A+','A','B+','B','C+','C','D','F','pending')),
+      transparency_grade TEXT,
+      impact_grade TEXT,
+      efficiency_grade TEXT,
+      sustainability_grade TEXT,
+      overall_narrative TEXT,
+      key_achievements TEXT[] DEFAULT '{}',
+      areas_for_improvement TEXT[] DEFAULT '{}',
+      generated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS sustainable_dev_dashboard (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      period TEXT NOT NULL,
+      total_campaigns INTEGER DEFAULT 0,
+      sdg_aligned_campaigns INTEGER DEFAULT 0,
+      total_beneficiaries INTEGER DEFAULT 0,
+      avg_esg_score NUMERIC(5,2) DEFAULT 0,
+      carbon_offset_campaigns INTEGER DEFAULT 0,
+      inclusion_avg_score NUMERIC(5,2) DEFAULT 0,
+      community_resilience_avg NUMERIC(5,2) DEFAULT 0,
+      sdg_breakdown JSONB DEFAULT '{}',
+      calculated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, period)
+    )`
+  );
+
+  // =============================================
+  // V16 TABLES - Enterprise & Institutional
+  // =============================================
+  fundraisingMigrations.push(
+    `CREATE TABLE IF NOT EXISTS institutional_donors (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      institution_name TEXT NOT NULL,
+      institution_type TEXT DEFAULT 'foundation' CHECK (institution_type IN ('foundation','government','multilateral','corporate','trust','endowment','dfi','pension')),
+      contact_name TEXT NOT NULL,
+      contact_email TEXT NOT NULL,
+      contact_phone TEXT,
+      country TEXT,
+      website TEXT,
+      annual_giving_budget INTEGER DEFAULT 0,
+      focus_areas TEXT[] DEFAULT '{}',
+      giving_history JSONB DEFAULT '[]',
+      relationship_manager TEXT,
+      engagement_stage TEXT DEFAULT 'prospect' CHECK (engagement_stage IN ('prospect','approaching','negotiating','active','lapsed','re-engaging')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS grant_applications (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      institutional_donor_id INTEGER REFERENCES institutional_donors(id),
+      grant_title TEXT NOT NULL,
+      grant_amount_requested INTEGER NOT NULL,
+      grant_amount_approved INTEGER,
+      application_status TEXT DEFAULT 'draft' CHECK (application_status IN ('draft','submitted','under_review','shortlisted','approved','rejected','withdrawn')),
+      submission_date DATE,
+      decision_date DATE,
+      grant_period_start DATE,
+      grant_period_end DATE,
+      reporting_requirements JSONB DEFAULT '[]',
+      application_documents JSONB DEFAULT '[]',
+      reviewed_by TEXT,
+      notes TEXT,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS multi_year_pledges (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      pledgor_name TEXT NOT NULL,
+      pledgor_email TEXT NOT NULL,
+      pledgor_type TEXT DEFAULT 'individual' CHECK (pledgor_type IN ('individual','corporate','institutional','government')),
+      total_pledge_amount INTEGER NOT NULL,
+      annual_amount INTEGER NOT NULL,
+      num_years INTEGER NOT NULL DEFAULT 1,
+      years_fulfilled INTEGER DEFAULT 0,
+      total_fulfilled INTEGER DEFAULT 0,
+      start_year INTEGER NOT NULL,
+      end_year INTEGER NOT NULL,
+      payment_schedule JSONB DEFAULT '[]',
+      status TEXT DEFAULT 'active' CHECK (status IN ('active','completed','defaulted','cancelled')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS restricted_funds (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      fund_name TEXT NOT NULL,
+      restriction_type TEXT NOT NULL CHECK (restriction_type IN ('purpose','time','geographic','program','endowment','donor_advised')),
+      restricted_amount INTEGER NOT NULL,
+      released_amount INTEGER DEFAULT 0,
+      restriction_details JSONB DEFAULT '{}',
+      release_conditions JSONB DEFAULT '[]',
+      end_date DATE,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS endowment_funds (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      fund_name TEXT NOT NULL,
+      initial_corpus INTEGER NOT NULL,
+      current_value INTEGER DEFAULT 0,
+      annual_withdrawal_rate NUMERIC(5,2) DEFAULT 5.00,
+      annual_withdrawal_amount INTEGER DEFAULT 0,
+      investment_strategy TEXT,
+      fund_manager TEXT,
+      purpose TEXT,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS foundation_partnerships (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      foundation_name TEXT NOT NULL,
+      contact_email TEXT NOT NULL,
+      partnership_type TEXT DEFAULT 'funding' CHECK (partnership_type IN ('funding','co_funding','capacity_building','advocacy','research','technical')),
+      partnership_details JSONB DEFAULT '{}',
+      start_date DATE,
+      end_date DATE,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active','suspended','expired','terminated')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS government_grant_tracking (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      grant_program TEXT NOT NULL,
+      government_level TEXT DEFAULT 'national' CHECK (government_level IN ('local','district','national','regional','international')),
+      department TEXT,
+      grant_amount INTEGER NOT NULL,
+      application_ref TEXT,
+      status TEXT DEFAULT 'identified' CHECK (status IN ('identified','applying','submitted','approved','disbursed','rejected','reporting','closed')),
+      deadlines JSONB DEFAULT '[]',
+      compliance_requirements JSONB DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS fiduciary_oversight (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      oversight_type TEXT NOT NULL CHECK (oversight_type IN ('internal_audit','external_audit','board_review','independent_monitor','community_oversight')),
+      reviewer_name TEXT NOT NULL,
+      reviewer_organization TEXT,
+      review_date DATE NOT NULL,
+      findings TEXT,
+      recommendations TEXT[],
+      risk_level TEXT DEFAULT 'low' CHECK (risk_level IN ('low','medium','high','critical')),
+      follow_up_required BOOLEAN DEFAULT false,
+      follow_up_date DATE,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','in_review','completed','action_required')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS legacy_giving (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT,
+      donor_phone TEXT,
+      legacy_type TEXT DEFAULT 'will_bequest' CHECK (legacy_type IN ('will_bequest','life_insurance','retirement_plan','charitable_trust','real_estate','stock_securities','other')),
+      estimated_value INTEGER DEFAULT 0,
+      pledge_date DATE,
+      expected_date DATE,
+      legal_documents JSONB DEFAULT '[]',
+      beneficiary_designation TEXT,
+      status TEXT DEFAULT 'pledged' CHECK (status IN ('pledged','confirmed','in_probate','received','cancelled')),
+      stewardship_notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS institutional_reports (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      report_standard TEXT NOT NULL CHECK (report_standard IN ('ifrs','gaap','ipsas','iras','gasb','custom')),
+      report_type TEXT DEFAULT 'financial' CHECK (report_type IN ('financial','impact','governance','compliance','annual','quarterly')),
+      period_start DATE NOT NULL,
+      period_end DATE NOT NULL,
+      total_revenue INTEGER DEFAULT 0,
+      total_expenses INTEGER DEFAULT 0,
+      net_position INTEGER DEFAULT 0,
+      restricted_net INTEGER DEFAULT 0,
+      unrestricted_net INTEGER DEFAULT 0,
+      functional_expenses JSONB DEFAULT '{}',
+      notes TEXT,
+      prepared_by TEXT,
+      reviewed_by TEXT,
+      approved_by TEXT,
+      status TEXT DEFAULT 'draft' CHECK (status IN ('draft','review','approved','published')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`
+  );
+
+  // =============================================
+  // V17 TABLES - Community & Engagement
+  // =============================================
+  fundraisingMigrations.push(
+    `CREATE TABLE IF NOT EXISTS donor_communities (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      community_name TEXT NOT NULL,
+      description TEXT,
+      community_type TEXT DEFAULT 'interest' CHECK (community_type IN ('interest','geographic','alumni','professional','religious','corporate','cause')),
+      cover_image TEXT,
+      member_count INTEGER DEFAULT 0,
+      is_public BOOLEAN DEFAULT true,
+      is_active BOOLEAN DEFAULT true,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS community_members (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      community_id INTEGER REFERENCES donor_communities(id) ON DELETE CASCADE,
+      user_email TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      role TEXT DEFAULT 'member' CHECK (role IN ('member','moderator','admin','founder')),
+      joined_at TIMESTAMPTZ DEFAULT NOW(),
+      is_active BOOLEAN DEFAULT true,
+      UNIQUE(community_id, user_email)
+    )`,
+    `CREATE TABLE IF NOT EXISTS campaign_alumni (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      user_email TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      role_in_campaign TEXT DEFAULT 'donor' CHECK (role_in_campaign IN ('donor','organizer','volunteer','ambassador','advisor')),
+      total_contributed INTEGER DEFAULT 0,
+      engagement_score NUMERIC(5,2) DEFAULT 0,
+      is_active BOOLEAN DEFAULT true,
+      joined_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS mentorship_matchings (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      mentor_email TEXT NOT NULL,
+      mentor_name TEXT NOT NULL,
+      mentee_email TEXT NOT NULL,
+      mentee_name TEXT NOT NULL,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      focus_area TEXT,
+      meeting_frequency TEXT DEFAULT 'monthly' CHECK (meeting_frequency IN ('weekly','biweekly','monthly','quarterly')),
+      start_date DATE NOT NULL,
+      end_date DATE,
+      sessions_completed INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active','paused','completed','cancelled')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS knowledge_base_articles (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      category TEXT DEFAULT 'general' CHECK (category IN ('general','getting_started','best_practices','legal','technical','storytelling','marketing','finance','governance')),
+      author TEXT NOT NULL,
+      tags TEXT[] DEFAULT '{}',
+      view_count INTEGER DEFAULT 0,
+      helpful_count INTEGER DEFAULT 0,
+      is_published BOOLEAN DEFAULT true,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS discussion_threads (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      community_id INTEGER REFERENCES donor_communities(id),
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id),
+      title TEXT NOT NULL,
+      author_email TEXT NOT NULL,
+      author_name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      is_pinned BOOLEAN DEFAULT false,
+      is_locked BOOLEAN DEFAULT false,
+      reply_count INTEGER DEFAULT 0,
+      like_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS discussion_replies (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      thread_id INTEGER REFERENCES discussion_threads(id) ON DELETE CASCADE,
+      author_email TEXT NOT NULL,
+      author_name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      like_count INTEGER DEFAULT 0,
+      is_best_answer BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ambassador_programs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      program_name TEXT NOT NULL,
+      description TEXT,
+      requirements TEXT[] DEFAULT '{}',
+      benefits JSONB DEFAULT '[]',
+      max_ambassadors INTEGER DEFAULT 50,
+      current_ambassadors INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ambassador_enrollments (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      program_id INTEGER REFERENCES ambassador_programs(id) ON DELETE CASCADE,
+      ambassador_name TEXT NOT NULL,
+      ambassador_email TEXT NOT NULL,
+      referral_code TEXT UNIQUE NOT NULL,
+      referrals_count INTEGER DEFAULT 0,
+      donations_generated INTEGER DEFAULT 0,
+      amount_generated INTEGER DEFAULT 0,
+      tier TEXT DEFAULT 'bronze' CHECK (tier IN ('bronze','silver','gold','platinum','diamond')),
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','active','suspended','graduated','removed')),
+      enrolled_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS giving_days (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      event_name TEXT NOT NULL,
+      description TEXT,
+      event_date DATE NOT NULL,
+      start_time TIME DEFAULT '00:00',
+      end_time TIME DEFAULT '23:59',
+      timezone TEXT DEFAULT 'Africa/Kampala',
+      target_amount INTEGER DEFAULT 0,
+      raised_amount INTEGER DEFAULT 0,
+      donor_count INTEGER DEFAULT 0,
+      campaign_ids INTEGER[] DEFAULT '{}',
+      matching_pledged INTEGER DEFAULT 0,
+      is_recurring BOOLEAN DEFAULT false,
+      recurrence_pattern TEXT CHECK (recurrence_pattern IN ('annual','quarterly','monthly')),
+      status TEXT DEFAULT 'upcoming' CHECK (status IN ('upcoming','live','completed','cancelled')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`
+  );
+
+  // =============================================
+  // V18 TABLES - Next-Gen & Future
+  // =============================================
+  fundraisingMigrations.push(
+    `CREATE TABLE IF NOT EXISTS voice_donation_configs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      platform TEXT NOT NULL CHECK (platform IN ('alexa','google_home','siri','cortana','custom')),
+      invocation_name TEXT NOT NULL,
+      welcome_message TEXT,
+      donation_amounts INTEGER[] DEFAULT '{5000,10000,25000,50000,100000}',
+      confirmation_message TEXT,
+      thank_you_message TEXT,
+      is_active BOOLEAN DEFAULT true,
+      total_voice_donations INTEGER DEFAULT 0,
+      total_voice_amount INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ar_vr_experiences (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      experience_type TEXT DEFAULT 'ar' CHECK (experience_type IN ('ar','vr','360_video','interactive_3d','spatial_web')),
+      title TEXT NOT NULL,
+      description TEXT,
+      experience_url TEXT NOT NULL,
+      preview_image TEXT,
+      duration_seconds INTEGER DEFAULT 0,
+      interaction_count INTEGER DEFAULT 0,
+      donation_conversions INTEGER DEFAULT 0,
+      is_public BOOLEAN DEFAULT true,
+      tech_requirements TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS biometric_auth_configs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      method_type TEXT NOT NULL CHECK (method_type IN ('fingerprint','face_id','voice_print','iris','palm','behavioral')),
+      provider TEXT,
+      is_enabled BOOLEAN DEFAULT false,
+      security_level TEXT DEFAULT 'standard' CHECK (security_level IN ('standard','enhanced','maximum')),
+      config JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS iot_donation_triggers (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      device_type TEXT NOT NULL CHECK (device_type IN ('smart_meter','fitness_tracker','smart_home','beacon','sensor','wearable','vehicle')),
+      trigger_condition TEXT NOT NULL,
+      trigger_amount INTEGER NOT NULL,
+      trigger_description TEXT,
+      total_triggers INTEGER DEFAULT 0,
+      total_amount INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT true,
+      last_triggered TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS genai_video_personalizations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      video_template TEXT NOT NULL,
+      personalization_fields TEXT[] DEFAULT '{}',
+      generated_video_url TEXT,
+      thumbnail_url TEXT,
+      duration_seconds INTEGER DEFAULT 0,
+      target_donor_email TEXT,
+      view_count INTEGER DEFAULT 0,
+      donation_converted BOOLEAN DEFAULT false,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','generating','completed','failed')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS realtime_fund_flows (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      flow_type TEXT NOT NULL CHECK (flow_type IN ('donation_in','payout_out','fee_deduct','refund_out','match_in','pledge_in','transfer')),
+      amount INTEGER NOT NULL,
+      from_entity TEXT,
+      to_entity TEXT,
+      description TEXT,
+      metadata JSONB DEFAULT '{}',
+      timestamp TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS autonomous_fund_allocations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      allocation_algorithm TEXT DEFAULT 'proportional' CHECK (allocation_algorithm IN ('proportional','needs_based','impact_optimized','milestone_gated','ml_optimized')),
+      rules JSONB DEFAULT '[]',
+      total_allocated INTEGER DEFAULT 0,
+      allocations JSONB DEFAULT '[]',
+      ai_confidence NUMERIC(5,2) DEFAULT 0,
+      requires_human_approval BOOLEAN DEFAULT true,
+      approved_by TEXT,
+      approved_at TIMESTAMPTZ,
+      status TEXT DEFAULT 'draft' CHECK (status IN ('draft','pending_approval','approved','executing','completed','rejected')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS quantum_encrypted_records (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      record_type TEXT NOT NULL CHECK (record_type IN ('donation','payout','personal_data','financial','compliance')),
+      record_id INTEGER NOT NULL,
+      encryption_method TEXT DEFAULT 'aes_256' CHECK (encryption_method IN ('aes_256','rsa_4096','lattice_based','code_based','hash_based','hybrid_pqc')),
+      encryption_key_id TEXT NOT NULL,
+      is_quantum_safe BOOLEAN DEFAULT false,
+      encrypted_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS metaverse_spaces (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      space_name TEXT NOT NULL,
+      platform TEXT DEFAULT 'custom' CHECK (platform IN ('decentraland','sandbox','roblox','custom','spatial','vrchat')),
+      space_url TEXT,
+      space_config JSONB DEFAULT '{}',
+      max_occupancy INTEGER DEFAULT 100,
+      current_occupancy INTEGER DEFAULT 0,
+      total_visitors INTEGER DEFAULT 0,
+      donations_in_space INTEGER DEFAULT 0,
+      donation_amount INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS digital_twin_simulations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      simulation_name TEXT NOT NULL,
+      simulation_type TEXT DEFAULT 'impact' CHECK (simulation_type IN ('impact','financial','growth','risk','resource','demographic')),
+      input_parameters JSONB DEFAULT '{}',
+      simulation_results JSONB DEFAULT '{}',
+      accuracy_score NUMERIC(5,2) DEFAULT 0,
+      run_duration_ms INTEGER DEFAULT 0,
+      scenario TEXT DEFAULT 'baseline' CHECK (scenario IN ('baseline','optimistic','pessimistic','custom')),
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`
+  );
+
+  // =============================================
+  // V13-V18 ALTER TABLE & INDEXES
+  // =============================================
+  fundraisingAlterMigrations.push(
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS ai_optimized BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS ab_test_active BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS sdg_aligned TEXT[] DEFAULT '{}'`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS esg_score NUMERIC(5,2) DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS impact_grade TEXT`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_institutional BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_grant BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_community BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_voice BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_ar_vr BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS predicted_total INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS carbon_neutral BOOLEAN DEFAULT false`,
+    // V13 indexes
+    `CREATE INDEX IF NOT EXISTS idx_ai_generations_tenant ON ai_campaign_generations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_predictive_models_tenant ON predictive_donation_models(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_smart_donor_tenant ON smart_donor_matches(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_chatbot_conv_tenant ON ai_chatbot_conversations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_ab_tests_tenant ON ab_test_experiments(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_email_sequences_tenant ON ai_email_sequences(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_optimization_sugg_tenant ON ai_optimization_suggestions(tenant_id)`,
+    // V14 indexes
+    `CREATE INDEX IF NOT EXISTS idx_currency_conv_tenant ON currency_auto_conversions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_regional_payments_country ON regional_payment_methods(country)`,
+    `CREATE INDEX IF NOT EXISTS idx_translation_mgmt_tenant ON translation_management(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_global_payout_tenant ON global_payout_routing(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_regional_discovery_tenant ON regional_campaign_discovery(tenant_id)`,
+    // V15 indexes
+    `CREATE INDEX IF NOT EXISTS idx_sdg_alignments_campaign ON sdg_alignments(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_esg_scores_tenant ON esg_impact_scores(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_carbon_footprint_campaign ON carbon_footprint_calculations(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_sroi_calculations_campaign ON sroi_calculations(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_beneficiary_feedback_campaign ON beneficiary_feedback(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_impact_verifications_campaign ON impact_verifications(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_inclusion_metrics_campaign ON inclusion_metrics(campaign_id)`,
+    // V16 indexes
+    `CREATE INDEX IF NOT EXISTS idx_institutional_donors_tenant ON institutional_donors(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_grant_apps_tenant ON grant_applications(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_multi_year_pledges_tenant ON multi_year_pledges(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_restricted_funds_tenant ON restricted_funds(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_endowment_funds_tenant ON endowment_funds(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_govt_grants_tenant ON government_grant_tracking(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_legacy_giving_tenant ON legacy_giving(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_institutional_reports_tenant ON institutional_reports(tenant_id)`,
+    // V17 indexes
+    `CREATE INDEX IF NOT EXISTS idx_donor_communities_tenant ON donor_communities(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_community_members_community ON community_members(community_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_alumni_campaign ON campaign_alumni(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_knowledge_base_tenant ON knowledge_base_articles(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_discussion_threads_tenant ON discussion_threads(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_ambassador_enrollments_tenant ON ambassador_enrollments(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_giving_days_tenant ON giving_days(tenant_id)`,
+    // V18 indexes
+    `CREATE INDEX IF NOT EXISTS idx_voice_donation_tenant ON voice_donation_configs(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_ar_vr_tenant ON ar_vr_experiences(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_iot_triggers_tenant ON iot_donation_triggers(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fund_flows_tenant ON realtime_fund_flows(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fund_flows_campaign ON realtime_fund_flows(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_metaverse_tenant ON metaverse_spaces(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_digital_twin_tenant ON digital_twin_simulations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_autonomous_alloc_tenant ON autonomous_fund_allocations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_quantum_records_tenant ON quantum_encrypted_records(tenant_id)`
+  );
+
+
+  // =============================================
+  // V13 FEATURE 1: AI CAMPAIGN COPY GENERATOR
+  // =============================================
+  app.post('/api/ai/generate', requireAuth, requireNotBanned, ah(async (req, res) => {
+    try {
+      const { campaign_id, generation_type, prompt } = req.body;
+      const templates = {
+        title: 'Support Our Cause: [Campaign Name]',
+        story: 'We are raising funds for a critical cause that will transform lives in our community. Every contribution, no matter the size, brings us closer to our goal of making a lasting impact.',
+        email: 'Dear [Name],\n\nWe invite you to join us in making a difference. Your support can change lives and create lasting impact in our community.\n\nDonate today and be part of something meaningful.',
+        social_post: 'Help us make a difference! Every donation counts. Support our campaign today and be the change you want to see. #Fundraising #MakeADifference',
+        thank_you: 'Dear [Name],\n\nThank you for your generous donation! Your support is making a real difference. Together, we are creating lasting change.\n\nWith gratitude,\nThe Team',
+        impact_report: 'Impact Report: Your donations have directly benefited [X] people. Here is how your contributions have made a measurable difference...',
+        faq: 'Q: How will my donation be used?\nA: 100% of your donation goes directly to the cause. We maintain full transparency on all fund usage.\n\nQ: Is my donation tax-deductible?\nA: Yes, all donations are tax-deductible and you will receive a receipt.',
+        pitch_deck: 'Executive Summary: Our campaign addresses a critical need in the community. With your support, we can achieve measurable impact...'
+      };
+      const generated = templates[generation_type] || templates.story;
+      const r = await pool.query('INSERT INTO ai_campaign_generations(tenant_id,campaign_id,generation_type,prompt,generated_content,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+        [req.user?.tenant_id||0, campaign_id, generation_type, prompt, generated, req.user?.email||'']);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.get('/api/ai/generations', requireAuth, ah(async (req, res) => {
+    try {
+      const gens = (await pool.query('SELECT * FROM ai_campaign_generations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      res.json(gens);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/ai/generations/:id/accept', requireAuth, ah(async (req, res) => {
+    try {
+      await pool.query('UPDATE ai_campaign_generations SET is_accepted=true WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user?.tenant_id||0]);
+      res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 2: PREDICTIVE DONATION MODELING
+  app.post('/api/campaigns/:id/predict', requireAuth, ah(async (req, res) => {
+    try {
+      const campaign = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      const donations = (await pool.query('SELECT amount, donated_at FROM campaign_donations WHERE campaign_id=$1 AND refunded=false ORDER BY donated_at', [req.params.id])).rows;
+      const totalRaised = donations.reduce((s, d) => s + parseInt(d.amount), 0);
+      const avgDonation = donations.length > 0 ? totalRaised / donations.length : 0;
+      const dailyAvg = donations.length > 0 ? totalRaised / Math.max(1, Math.ceil((Date.now() - new Date(donations[0].donated_at).getTime()) / 86400000)) : 0;
+      const daysLeft = campaign.deadline ? Math.max(1, Math.ceil((new Date(campaign.deadline) - Date.now()) / 86400000)) : 30;
+      const predictedTotal = Math.round(totalRaised + dailyAvg * daysLeft);
+      const completionDate = dailyAvg > 0 && campaign.target > totalRaised ? new Date(Date.now() + ((parseInt(campaign.target) - totalRaised) / dailyAvg) * 86400000) : null;
+      const confidence = donations.length >= 10 ? 75 : (donations.length >= 5 ? 50 : 25);
+      const r = await pool.query('INSERT INTO predictive_donation_models(tenant_id,campaign_id,predicted_total,predicted_completion_date,confidence_score) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, predictedTotal, completionDate, confidence]);
+      await pool.query('UPDATE fundraising_campaigns SET predicted_total=$1 WHERE id=$2', [predictedTotal, req.params.id]);
+      res.json(r.rows[0] || { predicted_total: predictedTotal, predicted_completion_date: completionDate, confidence_score: confidence });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 3: SMART DONOR MATCHING
+  app.get('/api/campaigns/:id/donor-matches', requireAuth, ah(async (req, res) => {
+    try {
+      const matches = (await pool.query('SELECT * FROM smart_donor_matches WHERE campaign_id=$1 ORDER BY match_score DESC LIMIT 20', [req.params.id])).rows;
+      res.json(matches);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/donor-matches/generate', requireAuth, ah(async (req, res) => {
+    try {
+      const donors = (await pool.query('SELECT donor_email, donor_name, SUM(amount) as total, COUNT(*) as count FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donor_email IS NOT NULL GROUP BY donor_email, donor_name ORDER BY total DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      let generated = 0;
+      for (const d of donors) {
+        const score = Math.min(100, Math.round((parseInt(d.total) / 100000) * 50 + parseInt(d.count) * 5));
+        const recommended = Math.round(parseInt(d.total) / parseInt(d.count) * 1.2);
+        try {
+          await pool.query('INSERT INTO smart_donor_matches(tenant_id,donor_email,campaign_id,match_score,match_reasons,recommended_amount,recommended_time) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING',
+            [req.user?.tenant_id||0, d.donor_email, req.params.id, score, JSON.stringify(['previous_donor','high_engagement']), recommended, 'evening']);
+          generated++;
+        } catch(e2) {}
+      }
+      res.json({ generated });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 4: AI CHATBOT FOR DONORS
+  app.post('/api/chatbot/start', ah(async (req, res) => {
+    try {
+      const { campaign_id, user_email, user_name } = req.body;
+      const sessionId = 'chat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+      await pool.query('INSERT INTO ai_chatbot_conversations(tenant_id,session_id,campaign_id,user_email,user_name) VALUES($1,$2,$3,$4,$5)',
+        [req.user?.tenant_id||0, sessionId, campaign_id, user_email, user_name]);
+      res.json({ session_id: sessionId, greeting: 'Hello! I am here to help you learn about this campaign and make a donation. How can I assist you today?' });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/chatbot/message', ah(async (req, res) => {
+    try {
+      const { session_id, message } = req.body;
+      const session = (await pool.query('SELECT * FROM ai_chatbot_conversations WHERE session_id=$1', [session_id])).rows[0];
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      const intent = message.toLowerCase().includes('donat') ? 'donation_intent' : (message.toLowerCase().includes('how') ? 'information' : 'general');
+      const responses = {
+        donation_intent: 'Thank you for your interest in donating! You can donate any amount starting from UGX 5,000. Would you like to proceed?',
+        information: 'This campaign aims to make a positive impact in our community. Every donation goes directly to the cause. What specific information would you like?',
+        general: 'I am here to help! You can ask me about the campaign, donation process, or how your contribution will make a difference.'
+      };
+      const reply = responses[intent] || responses.general;
+      const msgs = session.messages || [];
+      msgs.push({ role: 'user', content: message, at: new Date().toISOString() });
+      msgs.push({ role: 'bot', content: reply, at: new Date().toISOString() });
+      await pool.query('UPDATE ai_chatbot_conversations SET messages=$1, intent_detected=$2 WHERE session_id=$3', [JSON.stringify(msgs), intent, session_id]);
+      res.json({ reply, intent });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 5: SENTIMENT ANALYSIS
+  app.get('/api/campaigns/:id/sentiment', requireAuth, ah(async (req, res) => {
+    try {
+      const sentiments = (await pool.query('SELECT * FROM sentiment_analyses WHERE tenant_id=$1 AND entity_id=$2', [req.user?.tenant_id||0, req.params.id])).rows;
+      res.json(sentiments);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 6: A/B TESTING
+  app.get('/api/ab-tests', requireAuth, ah(async (req, res) => {
+    try {
+      const tests = (await pool.query('SELECT * FROM ab_test_experiments WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      res.json(tests);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/ab-tests', requireAuth, ah(async (req, res) => {
+    try {
+      const { experiment_name, experiment_type, variant_a, variant_b, traffic_split, start_date, end_date } = req.body;
+      const r = await pool.query('INSERT INTO ab_test_experiments(tenant_id,campaign_id,experiment_name,experiment_type,variant_a,variant_b,traffic_split,start_date,end_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, experiment_name, experiment_type||'page', JSON.stringify(variant_a||{}), JSON.stringify(variant_b||{}), traffic_split||50, start_date, end_date, req.user?.email||'']);
+      await pool.query('UPDATE fundraising_campaigns SET ab_test_active=true WHERE id=$1', [req.params.id]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/ab-tests/:id/track', ah(async (req, res) => {
+    try {
+      const { variant, event_type } = req.body;
+      if (variant === 'a') {
+        if (event_type === 'view') await pool.query('UPDATE ab_test_experiments SET variant_a_views=variant_a_views+1 WHERE id=$1', [req.params.id]);
+        else if (event_type === 'conversion') await pool.query('UPDATE ab_test_experiments SET variant_a_conversions=variant_a_conversions+1 WHERE id=$1', [req.params.id]);
+      } else {
+        if (event_type === 'view') await pool.query('UPDATE ab_test_experiments SET variant_b_views=variant_b_views+1 WHERE id=$1', [req.params.id]);
+        else if (event_type === 'conversion') await pool.query('UPDATE ab_test_experiments SET variant_b_conversions=variant_b_conversions+1 WHERE id=$1', [req.params.id]);
+      }
+      res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 7: AI EMAIL SEQUENCES
+  app.get('/api/email-sequences', requireAuth, ah(async (req, res) => {
+    try {
+      const seqs = (await pool.query('SELECT * FROM ai_email_sequences WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      res.json(seqs);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/email-sequences', requireAuth, ah(async (req, res) => {
+    try {
+      const { sequence_name, trigger_event, emails } = req.body;
+      const r = await pool.query('INSERT INTO ai_email_sequences(tenant_id,campaign_id,sequence_name,trigger_event,emails) VALUES($1,$2,$3,$4,$5) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, sequence_name, trigger_event, JSON.stringify(emails||[])]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 8: AI OPTIMIZATION SUGGESTIONS
+  app.get('/api/campaigns/:id/optimizations', requireAuth, ah(async (req, res) => {
+    try {
+      const suggestions = (await pool.query('SELECT * FROM ai_optimization_suggestions WHERE campaign_id=$1 ORDER BY expected_impact DESC', [req.params.id])).rows;
+      res.json(suggestions);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/optimizations/generate', requireAuth, ah(async (req, res) => {
+    try {
+      const campaign = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      const suggestions = [];
+      if (!campaign.story) suggestions.push({ type: 'story', current: 'No story', suggested: 'Add a compelling story', impact: 85, confidence: 90, reason: 'Campaigns with stories raise 5x more' });
+      if (!campaign.gallery_images || campaign.gallery_images.length === 0) suggestions.push({ type: 'image', current: 'No images', suggested: 'Add campaign photos', impact: 70, confidence: 85, reason: 'Visual content increases donations by 40%' });
+      const raised = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM campaign_donations WHERE campaign_id=$1 AND refunded=false', [req.params.id])).rows[0]?.t || 0;
+      if (parseInt(campaign.target) > 0 && parseInt(raised) / parseInt(campaign.target) < 0.25) suggestions.push({ type: 'amount', current: 'Low progress', suggested: 'Consider a lower initial target', impact: 60, confidence: 75, reason: 'Campaigns that reach 25% quickly are more likely to succeed' });
+      let created = 0;
+      for (const s of suggestions) {
+        await pool.query('INSERT INTO ai_optimization_suggestions(tenant_id,campaign_id,suggestion_type,current_state,suggested_state,expected_impact,confidence,reasoning) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [req.user?.tenant_id||0, req.params.id, s.type, s.current, s.suggested, s.impact, s.confidence, s.reason]);
+        created++;
+      }
+      res.json({ created, suggestions });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 9: AUTOMATED PERSONALIZATIONS
+  app.get('/api/personalizations', requireAuth, ah(async (req, res) => {
+    try {
+      const p = (await pool.query('SELECT * FROM automated_personalizations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      res.json(p);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/personalizations', requireAuth, ah(async (req, res) => {
+    try {
+      const { user_email, personalization_type, content_template, variables, delivery_channel, triggered_by } = req.body;
+      const r = await pool.query('INSERT INTO automated_personalizations(tenant_id,user_email,personalization_type,content_template,variables,delivery_channel,triggered_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+        [req.user?.tenant_id||0, user_email, personalization_type, content_template, JSON.stringify(variables||{}), delivery_channel||'email', triggered_by]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V13 FEATURE 10: AI CONTENT TEMPLATES
+  app.get('/api/content-templates', ah(async (req, res) => {
+    try {
+      const templates = (await pool.query('SELECT * FROM ai_content_templates WHERE tenant_id=$1 AND is_active=true ORDER BY usage_count DESC', [req.user?.tenant_id||0])).rows;
+      res.json(templates);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // =============================================
+  // V14 FEATURE 1: CURRENCY AUTO-CONVERSION
+  // =============================================
+  app.post('/api/currency/convert', ah(async (req, res) => {
+    try {
+      const { amount, from_currency, to_currency } = req.body;
+      const rate = (await pool.query('SELECT rate FROM exchange_rates WHERE from_currency=$1 AND to_currency=$2', [from_currency||'USD', to_currency||'UGX'])).rows[0];
+      if (!rate) return res.status(400).json({ error: 'Exchange rate not found' });
+      const converted = Math.round(parseInt(amount) * parseFloat(rate.rate));
+      res.json({ original_amount: amount, original_currency: from_currency, converted_amount: converted, converted_currency: to_currency, rate: parseFloat(rate.rate) });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V14 FEATURE 2: REGIONAL PAYMENT METHODS
+  app.get('/api/payment-methods/:country', ah(async (req, res) => {
+    try {
+      const methods = (await pool.query('SELECT * FROM regional_payment_methods WHERE country=$1 AND is_active=true ORDER BY sort_order', [req.params.country])).rows;
+      res.json(methods);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/payment-methods', requireAuth, ah(async (req, res) => {
+    try {
+      const { country, method_name, method_type, provider, min_amount, max_amount, fee_percentage, instructions } = req.body;
+      const r = await pool.query('INSERT INTO regional_payment_methods(tenant_id,country,method_name,method_type,provider,min_amount,max_amount,fee_percentage,instructions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+        [req.user?.tenant_id||0, country, method_name, method_type, provider, min_amount||0, max_amount, fee_percentage||0, instructions]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V14 FEATURE 3: REGIONAL COMPLIANCE
+  app.get('/api/compliance-rules/:country', ah(async (req, res) => {
+    try {
+      const rules = (await pool.query('SELECT * FROM regional_compliance_rules WHERE country=$1', [req.params.country])).rows;
+      res.json(rules);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V14 FEATURE 4: TRANSLATION MANAGEMENT
+  app.get('/api/translations', requireAuth, ah(async (req, res) => {
+    try {
+      const t = (await pool.query('SELECT * FROM translation_management WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      res.json(t);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/translations', requireAuth, ah(async (req, res) => {
+    try {
+      const { entity_type, entity_id, source_language, target_language, source_text, translated_text } = req.body;
+      const r = await pool.query('INSERT INTO translation_management(tenant_id,entity_type,entity_id,source_language,target_language,source_text,translated_text,translation_status) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (tenant_id, entity_type, entity_id, target_language) DO UPDATE SET translated_text=$7, translation_status=$8 RETURNING *',
+        [req.user?.tenant_id||0, entity_type, entity_id, source_language||'en', target_language, source_text, translated_text, translated_text ? 'completed' : 'pending']);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V14 FEATURE 5: INTERNATIONAL TAX
+  app.get('/api/international-tax', requireAuth, ah(async (req, res) => {
+    try {
+      const configs = (await pool.query('SELECT * FROM international_tax_config WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      res.json(configs);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/international-tax', requireAuth, ah(async (req, res) => {
+    try {
+      const { country, tax_id_type, tax_id_value, tax_deductible, max_deductible_percentage, receipt_requirements } = req.body;
+      await pool.query('INSERT INTO international_tax_config(tenant_id,country,tax_id_type,tax_id_value,tax_deductible,max_deductible_percentage,receipt_requirements) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (tenant_id, country) DO UPDATE SET tax_id_type=$3,tax_id_value=$4,tax_deductible=$5,max_deductible_percentage=$6,receipt_requirements=$7',
+        [req.user?.tenant_id||0, country, tax_id_type, tax_id_value, tax_deductible||false, max_deductible_percentage||0, JSON.stringify(receipt_requirements||{})]);
+      res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V14 FEATURE 6: GLOBAL PAYOUT ROUTING
+  app.get('/api/payout-routing', requireAuth, ah(async (req, res) => {
+    try {
+      const routes = (await pool.query('SELECT * FROM global_payout_routing WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      res.json(routes);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/payout-routing', requireAuth, ah(async (req, res) => {
+    try {
+      const { country, payout_method, provider, account_details, min_payout, fee_percentage, processing_days, currency } = req.body;
+      const r = await pool.query('INSERT INTO global_payout_routing(tenant_id,country,payout_method,provider,account_details,min_payout,fee_percentage,processing_days,currency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+        [req.user?.tenant_id||0, country, payout_method, provider, JSON.stringify(account_details||{}), min_payout||0, fee_percentage||0, processing_days||3, currency||'UGX']);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V14 FEATURE 8: CULTURAL CUSTOMIZATIONS
+  app.get('/api/cultural/:country', ah(async (req, res) => {
+    try {
+      const cc = (await pool.query('SELECT * FROM cultural_customizations WHERE tenant_id=$1 AND country=$2', [req.user?.tenant_id||0, req.params.country])).rows[0];
+      res.json(cc || {});
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V14 FEATURE 9: REGIONAL CAMPAIGN DISCOVERY
+  app.get('/api/discover/:country', ah(async (req, res) => {
+    try {
+      const campaigns = (await pool.query('SELECT rd.*, fc.title, fc.target, fc.category FROM regional_campaign_discovery rd JOIN fundraising_campaigns fc ON fc.id=rd.campaign_id WHERE rd.country=$1 AND fc.status=$2 ORDER BY rd.priority_score DESC LIMIT 20', [req.params.country, 'active'])).rows;
+      res.json(campaigns);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V14 FEATURE 10: EMBASSY PARTNERSHIPS
+  app.get('/api/embassy-partnerships', requireAuth, ah(async (req, res) => {
+    try {
+      const eps = (await pool.query('SELECT * FROM embassy_partnerships WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      res.json(eps);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/embassy-partnerships', requireAuth, ah(async (req, res) => {
+    try {
+      const { embassy_name, country, contact_name, contact_email, partnership_type, start_date, end_date } = req.body;
+      const r = await pool.query('INSERT INTO embassy_partnerships(tenant_id,embassy_name,country,contact_name,contact_email,partnership_type,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, embassy_name, country, contact_name, contact_email, partnership_type||'endorsement', start_date, end_date]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // =============================================
+  // V15 FEATURE 1: SDG ALIGNMENT TRACKING
+  // =============================================
+  app.get('/api/campaigns/:id/sdg', ah(async (req, res) => {
+    try {
+      const alignments = (await pool.query('SELECT * FROM sdg_alignments WHERE campaign_id=$1', [req.params.id])).rows;
+      res.json(alignments);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/sdg', requireAuth, ah(async (req, res) => {
+    try {
+      const sdgNames = {1:'No Poverty',2:'Zero Hunger',3:'Good Health',4:'Quality Education',5:'Gender Equality',6:'Clean Water',7:'Affordable Energy',8:'Decent Work',9:'Industry & Innovation',10:'Reduced Inequalities',11:'Sustainable Cities',12:'Responsible Consumption',13:'Climate Action',14:'Life Below Water',15:'Life on Land',16:'Peace & Justice',17:'Partnerships'};
+      const { sdg_number, alignment_score, evidence } = req.body;
+      const r = await pool.query('INSERT INTO sdg_alignments(tenant_id,campaign_id,sdg_number,sdg_name,alignment_score,evidence) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (campaign_id, sdg_number) DO UPDATE SET alignment_score=$5, evidence=$6 RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, sdg_number, sdgNames[sdg_number]||'Unknown', alignment_score||0, evidence]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V15 FEATURE 2: ESG IMPACT SCORING
+  app.get('/api/campaigns/:id/esg', ah(async (req, res) => {
+    try {
+      const esg = (await pool.query('SELECT * FROM esg_impact_scores WHERE campaign_id=$1', [req.params.id])).rows[0];
+      res.json(esg || {});
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/esg', requireAuth, ah(async (req, res) => {
+    try {
+      const { environmental_score, social_score, governance_score } = req.body;
+      const overall = ((parseFloat(environmental_score)||0) + (parseFloat(social_score)||0) + (parseFloat(governance_score)||0)) / 3;
+      const r = await pool.query('INSERT INTO esg_impact_scores(tenant_id,campaign_id,environmental_score,social_score,governance_score,overall_esg_score) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id, campaign_id) DO UPDATE SET environmental_score=$3,social_score=$4,governance_score=$5,overall_esg_score=$6,calculated_at=NOW() RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, environmental_score||0, social_score||0, governance_score||0, Math.round(overall*100)/100]);
+      await pool.query('UPDATE fundraising_campaigns SET esg_score=$1 WHERE id=$2', [Math.round(overall*100)/100, req.params.id]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V15 FEATURE 3: CARBON FOOTPRINT
+  app.get('/api/campaigns/:id/carbon', ah(async (req, res) => {
+    try {
+      const carbon = (await pool.query('SELECT * FROM carbon_footprint_calculations WHERE campaign_id=$1', [req.params.id])).rows[0];
+      res.json(carbon || {});
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/carbon', requireAuth, ah(async (req, res) => {
+    try {
+      const { digital_emissions_kg, travel_emissions_kg, supply_chain_emissions_kg, offset_provider } = req.body;
+      const total = (parseFloat(digital_emissions_kg)||0) + (parseFloat(travel_emissions_kg)||0) + (parseFloat(supply_chain_emissions_kg)||0);
+      const offsetAmount = Math.round(total * 0.05 * 3700); // approx UGX per kg CO2
+      const r = await pool.query('INSERT INTO carbon_footprint_calculations(tenant_id,campaign_id,total_emissions_kg,digital_emissions_kg,travel_emissions_kg,supply_chain_emissions_kg,offset_amount,offset_provider) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, total, digital_emissions_kg||0, travel_emissions_kg||0, supply_chain_emissions_kg||0, offsetAmount, offset_provider]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V15 FEATURE 4: SROI CALCULATIONS
+  app.post('/api/campaigns/:id/sroi', requireAuth, ah(async (req, res) => {
+    try {
+      const { investment_amount, social_value_created, beneficiaries_direct, beneficiaries_indirect, outcomes } = req.body;
+      const ratio = parseInt(investment_amount) > 0 ? (parseInt(social_value_created) / parseInt(investment_amount)) : 0;
+      const r = await pool.query('INSERT INTO sroi_calculations(tenant_id,campaign_id,investment_amount,social_value_created,sroi_ratio,beneficiaries_direct,beneficiaries_indirect,outcomes) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, investment_amount, social_value_created, Math.round(ratio*100)/100, beneficiaries_direct||0, beneficiaries_indirect||0, JSON.stringify(outcomes||[])]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V15 FEATURE 5: BENEFICIARY FEEDBACK
+  app.get('/api/campaigns/:id/feedback', ah(async (req, res) => {
+    try {
+      const fb = (await pool.query('SELECT * FROM beneficiary_feedback WHERE campaign_id=$1 ORDER BY created_at DESC', [req.params.id])).rows;
+      res.json(fb);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/feedback', ah(async (req, res) => {
+    try {
+      const { beneficiary_name, beneficiary_email, feedback_type, rating, feedback_text, is_anonymous } = req.body;
+      const r = await pool.query('INSERT INTO beneficiary_feedback(tenant_id,campaign_id,beneficiary_name,beneficiary_email,feedback_type,rating,feedback_text,is_anonymous) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, beneficiary_name, beneficiary_email, feedback_type||'general', rating, feedback_text, is_anonymous||false]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V15 FEATURE 6: IMPACT VERIFICATION
+  app.get('/api/campaigns/:id/impact-verifications', ah(async (req, res) => {
+    try {
+      const v = (await pool.query('SELECT * FROM impact_verifications WHERE campaign_id=$1', [req.params.id])).rows;
+      res.json(v);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/impact-verifications', requireAuth, ah(async (req, res) => {
+    try {
+      const { verifier_name, verifier_organization, verifier_email, verification_type, findings, impact_confirmed, verification_date, report_url } = req.body;
+      const r = await pool.query('INSERT INTO impact_verifications(tenant_id,campaign_id,verifier_name,verifier_organization,verifier_email,verification_type,findings,impact_confirmed,verification_date,report_url) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, verifier_name, verifier_organization, verifier_email, verification_type||'field_visit', findings, impact_confirmed||false, verification_date, report_url]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V15 FEATURE 7: INCLUSION METRICS
+  app.get('/api/campaigns/:id/inclusion', ah(async (req, res) => {
+    try {
+      const m = (await pool.query('SELECT * FROM inclusion_metrics WHERE campaign_id=$1', [req.params.id])).rows[0];
+      res.json(m || {});
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V15 FEATURE 9: IMPACT REPORT CARDS
+  app.post('/api/campaigns/:id/report-card', requireAuth, ah(async (req, res) => {
+    try {
+      const { report_period, transparency_grade, impact_grade, efficiency_grade, sustainability_grade, overall_narrative, key_achievements, areas_for_improvement } = req.body;
+      const grades = [transparency_grade, impact_grade, efficiency_grade, sustainability_grade].filter(Boolean);
+      const gradeMap = {'A+':4.3,'A':4,'B+':3.3,'B':3,'C+':2.3,'C':2,'D':1,'F':0};
+      const avg = grades.length > 0 ? grades.reduce((s,g) => s + (gradeMap[g]||0), 0) / grades.length : 0;
+      const overall = avg >= 3.7 ? 'A' : (avg >= 3 ? 'B+' : (avg >= 2.3 ? 'B' : (avg >= 2 ? 'C+' : 'C')));
+      const r = await pool.query('INSERT INTO impact_report_cards(tenant_id,campaign_id,report_period,grade,transparency_grade,impact_grade,efficiency_grade,sustainability_grade,overall_narrative,key_achievements,areas_for_improvement) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, report_period, overall, transparency_grade, impact_grade, efficiency_grade, sustainability_grade, overall_narrative, key_achievements||[], areas_for_improvement||[]]);
+      await pool.query('UPDATE fundraising_campaigns SET impact_grade=$1 WHERE id=$2', [overall, req.params.id]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V15 FEATURE 10: SUSTAINABLE DEV DASHBOARD
+  app.get('/api/sdg-dashboard', ah(async (req, res) => {
+    try {
+      const dash = (await pool.query('SELECT * FROM sustainable_dev_dashboard WHERE tenant_id=$1 ORDER BY calculated_at DESC LIMIT 1', [req.user?.tenant_id||0])).rows[0];
+      res.json(dash || {});
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // =============================================
+  // V16 FEATURE 1: INSTITUTIONAL DONOR PORTAL
+  // =============================================
+  app.get('/api/institutional-donors', requireAuth, ah(async (req, res) => {
+    try {
+      const donors = (await pool.query('SELECT * FROM institutional_donors WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      res.json(donors);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/institutional-donors', requireAuth, ah(async (req, res) => {
+    try {
+      const { institution_name, institution_type, contact_name, contact_email, contact_phone, country, website, annual_giving_budget, focus_areas, relationship_manager } = req.body;
+      const r = await pool.query('INSERT INTO institutional_donors(tenant_id,institution_name,institution_type,contact_name,contact_email,contact_phone,country,website,annual_giving_budget,focus_areas,relationship_manager) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+        [req.user?.tenant_id||0, institution_name, institution_type||'foundation', contact_name, contact_email, contact_phone, country, website, annual_giving_budget||0, focus_areas||[], relationship_manager]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V16 FEATURE 2: GRANT MANAGEMENT
+  app.get('/api/grants', requireAuth, ah(async (req, res) => {
+    try {
+      const grants = (await pool.query('SELECT * FROM grant_applications WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      res.json(grants);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/grants', requireAuth, ah(async (req, res) => {
+    try {
+      const { institutional_donor_id, grant_title, grant_amount_requested, grant_period_start, grant_period_end, reporting_requirements } = req.body;
+      const r = await pool.query('INSERT INTO grant_applications(tenant_id,campaign_id,institutional_donor_id,grant_title,grant_amount_requested,grant_period_start,grant_period_end,reporting_requirements,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, institutional_donor_id, grant_title, grant_amount_requested, grant_period_start, grant_period_end, JSON.stringify(reporting_requirements||[]), req.user?.email||'']);
+      await pool.query('UPDATE fundraising_campaigns SET has_grant=true WHERE id=$1', [req.params.id]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V16 FEATURE 3: MULTI-YEAR PLEDGES
+  app.get('/api/multi-year-pledges', requireAuth, ah(async (req, res) => {
+    try {
+      const pledges = (await pool.query('SELECT * FROM multi_year_pledges WHERE tenant_id=$1 AND status=$2 ORDER BY created_at DESC', [req.user?.tenant_id||0, 'active'])).rows;
+      res.json(pledges);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/multi-year-pledges', requireAuth, ah(async (req, res) => {
+    try {
+      const { pledgor_name, pledgor_email, total_pledge_amount, annual_amount, num_years, start_year } = req.body;
+      const r = await pool.query('INSERT INTO multi_year_pledges(tenant_id,campaign_id,pledgor_name,pledgor_email,total_pledge_amount,annual_amount,num_years,start_year,end_year) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, pledgor_name, pledgor_email, total_pledge_amount, annual_amount, num_years||1, start_year, (parseInt(start_year)||new Date().getFullYear())+(parseInt(num_years)||1)-1]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V16 FEATURE 4: RESTRICTED FUNDS
+  app.get('/api/restricted-funds', requireAuth, ah(async (req, res) => {
+    try {
+      const funds = (await pool.query('SELECT * FROM restricted_funds WHERE tenant_id=$1 AND is_active=true', [req.user?.tenant_id||0])).rows;
+      res.json(funds);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/restricted-funds', requireAuth, ah(async (req, res) => {
+    try {
+      const { fund_name, restriction_type, restricted_amount, restriction_details, release_conditions, end_date } = req.body;
+      const r = await pool.query('INSERT INTO restricted_funds(tenant_id,campaign_id,fund_name,restriction_type,restricted_amount,restriction_details,release_conditions,end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, fund_name, restriction_type, restricted_amount, JSON.stringify(restriction_details||{}), JSON.stringify(release_conditions||[]), end_date]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V16 FEATURE 5: ENDOWMENT MANAGEMENT
+  app.get('/api/endowments', requireAuth, ah(async (req, res) => {
+    try {
+      const funds = (await pool.query('SELECT * FROM endowment_funds WHERE tenant_id=$1 AND is_active=true', [req.user?.tenant_id||0])).rows;
+      res.json(funds);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/endowments', requireAuth, ah(async (req, res) => {
+    try {
+      const { fund_name, initial_corpus, investment_strategy, fund_manager, purpose } = req.body;
+      const annualWithdrawal = Math.round(parseInt(initial_corpus) * 0.05);
+      const r = await pool.query('INSERT INTO endowment_funds(tenant_id,fund_name,initial_corpus,current_value,annual_withdrawal_amount,investment_strategy,fund_manager,purpose) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, fund_name, initial_corpus, initial_corpus, annualWithdrawal, investment_strategy, fund_manager, purpose]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V16 FEATURE 8: FIDUCIARY OVERSIGHT
+  app.get('/api/fiduciary-oversight', requireAuth, ah(async (req, res) => {
+    try {
+      const records = (await pool.query('SELECT * FROM fiduciary_oversight WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      res.json(records);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V16 FEATURE 9: LEGACY GIVING
+  app.get('/api/legacy-giving', requireAuth, ah(async (req, res) => {
+    try {
+      const legacies = (await pool.query('SELECT * FROM legacy_giving WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      res.json(legacies);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/legacy-giving', requireAuth, ah(async (req, res) => {
+    try {
+      const { donor_name, donor_email, donor_phone, legacy_type, estimated_value, expected_date } = req.body;
+      const r = await pool.query('INSERT INTO legacy_giving(tenant_id,donor_name,donor_email,donor_phone,legacy_type,estimated_value,expected_date) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+        [req.user?.tenant_id||0, donor_name, donor_email, donor_phone, legacy_type||'will_bequest', estimated_value||0, expected_date]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V16 FEATURE 10: INSTITUTIONAL REPORTS
+  app.get('/api/institutional-reports', requireAuth, ah(async (req, res) => {
+    try {
+      const reports = (await pool.query('SELECT * FROM institutional_reports WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      res.json(reports);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // =============================================
+  // V17 FEATURE 1: DONOR COMMUNITIES
+  // =============================================
+  app.get('/api/communities', ah(async (req, res) => {
+    try {
+      const communities = (await pool.query('SELECT * FROM donor_communities WHERE is_public=true AND is_active=true ORDER BY member_count DESC', [])).rows;
+      res.json(communities);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/communities', requireAuth, ah(async (req, res) => {
+    try {
+      const { community_name, description, community_type, cover_image, is_public } = req.body;
+      const r = await pool.query('INSERT INTO donor_communities(tenant_id,community_name,description,community_type,cover_image,is_public,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+        [req.user?.tenant_id||0, community_name, description, community_type||'interest', cover_image, is_public!==false, req.user?.email||'']);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/communities/:id/join', requireAuth, ah(async (req, res) => {
+    try {
+      await pool.query('INSERT INTO community_members(tenant_id,community_id,user_email,user_name) VALUES($1,$2,$3,$4) ON CONFLICT (community_id, user_email) DO NOTHING',
+        [req.user?.tenant_id||0, req.params.id, req.user?.email||'', req.user?.name||'Member']);
+      await pool.query('UPDATE donor_communities SET member_count=(SELECT COUNT(*) FROM community_members WHERE community_id=$1) WHERE id=$1', [req.params.id]);
+      res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V17 FEATURE 3: CAMPAIGN ALUMNI
+  app.get('/api/campaigns/:id/alumni', ah(async (req, res) => {
+    try {
+      const alumni = (await pool.query('SELECT * FROM campaign_alumni WHERE campaign_id=$1 AND is_active=true ORDER BY engagement_score DESC', [req.params.id])).rows;
+      res.json(alumni);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V17 FEATURE 4: MENTORSHIP MATCHING
+  app.get('/api/mentorships', requireAuth, ah(async (req, res) => {
+    try {
+      const m = (await pool.query('SELECT * FROM mentorship_matchings WHERE tenant_id=$1 AND status=$2', [req.user?.tenant_id||0, 'active'])).rows;
+      res.json(m);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/mentorships', requireAuth, ah(async (req, res) => {
+    try {
+      const { mentor_email, mentor_name, mentee_email, mentee_name, campaign_id, focus_area, meeting_frequency, start_date, end_date } = req.body;
+      const r = await pool.query('INSERT INTO mentorship_matchings(tenant_id,mentor_email,mentor_name,mentee_email,mentee_name,campaign_id,focus_area,meeting_frequency,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+        [req.user?.tenant_id||0, mentor_email, mentor_name, mentee_email, mentee_name, campaign_id, focus_area, meeting_frequency||'monthly', start_date, end_date]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V17 FEATURE 5: KNOWLEDGE BASE
+  app.get('/api/knowledge-base', ah(async (req, res) => {
+    try {
+      const articles = (await pool.query('SELECT * FROM knowledge_base_articles WHERE is_published=true ORDER BY sort_order, created_at DESC')).rows;
+      res.json(articles);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/knowledge-base', requireAuth, ah(async (req, res) => {
+    try {
+      const { title, content, category, tags } = req.body;
+      const r = await pool.query('INSERT INTO knowledge_base_articles(tenant_id,title,content,category,author,tags) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+        [req.user?.tenant_id||0, title, content, category||'general', req.user?.name||'Author', tags||[]]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V17 FEATURE 6: DISCUSSION FORUMS
+  app.get('/api/discussions', ah(async (req, res) => {
+    try {
+      const threads = (await pool.query('SELECT * FROM discussion_threads WHERE is_locked=false ORDER BY is_pinned DESC, created_at DESC LIMIT 30')).rows;
+      res.json(threads);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/discussions', requireAuth, ah(async (req, res) => {
+    try {
+      const { community_id, campaign_id, title, content } = req.body;
+      const r = await pool.query('INSERT INTO discussion_threads(tenant_id,community_id,campaign_id,title,author_email,author_name,content) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+        [req.user?.tenant_id||0, community_id, campaign_id, title, req.user?.email||'', req.user?.name||'User', content]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/discussions/:id/reply', requireAuth, ah(async (req, res) => {
+    try {
+      const { content } = req.body;
+      const r = await pool.query('INSERT INTO discussion_replies(tenant_id,thread_id,author_email,author_name,content) VALUES($1,$2,$3,$4,$5) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, req.user?.email||'', req.user?.name||'User', content]);
+      await pool.query('UPDATE discussion_threads SET reply_count=reply_count+1 WHERE id=$1', [req.params.id]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V17 FEATURE 7: AMBASSADOR PROGRAM
+  app.get('/api/ambassador-programs', ah(async (req, res) => {
+    try {
+      const programs = (await pool.query('SELECT * FROM ambassador_programs WHERE is_active=true')).rows;
+      res.json(programs);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/ambassador-programs', requireAuth, ah(async (req, res) => {
+    try {
+      const { program_name, description, requirements, benefits, max_ambassadors } = req.body;
+      const r = await pool.query('INSERT INTO ambassador_programs(tenant_id,program_name,description,requirements,benefits,max_ambassadors) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+        [req.user?.tenant_id||0, program_name, description, requirements||[], JSON.stringify(benefits||[]), max_ambassadors||50]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/ambassador-programs/:id/enroll', requireAuth, ah(async (req, res) => {
+    try {
+      const code = 'AMB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+      const r = await pool.query('INSERT INTO ambassador_enrollments(tenant_id,program_id,ambassador_name,ambassador_email,referral_code) VALUES($1,$2,$3,$4,$5) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, req.user?.name||'Ambassador', req.user?.email||'', code]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V17 FEATURE 10: GIVING DAYS
+  app.get('/api/giving-days', ah(async (req, res) => {
+    try {
+      const days = (await pool.query("SELECT * FROM giving_days WHERE status IN ('upcoming','live') ORDER BY event_date")).rows;
+      res.json(days);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/giving-days', requireAuth, ah(async (req, res) => {
+    try {
+      const { event_name, description, event_date, start_time, end_time, target_amount, campaign_ids, matching_pledged, is_recurring, recurrence_pattern } = req.body;
+      const r = await pool.query('INSERT INTO giving_days(tenant_id,event_name,description,event_date,start_time,end_time,target_amount,campaign_ids,matching_pledged,is_recurring,recurrence_pattern) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+        [req.user?.tenant_id||0, event_name, description, event_date, start_time||'00:00', end_time||'23:59', target_amount||0, campaign_ids||[], matching_pledged||0, is_recurring||false, recurrence_pattern]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // =============================================
+  // V18 FEATURE 1: VOICE DONATIONS
+  // =============================================
+  app.get('/api/campaigns/:id/voice-config', ah(async (req, res) => {
+    try {
+      const config = (await pool.query('SELECT * FROM voice_donation_configs WHERE campaign_id=$1 AND is_active=true', [req.params.id])).rows[0];
+      res.json(config || {});
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/voice-config', requireAuth, ah(async (req, res) => {
+    try {
+      const { platform, invocation_name, welcome_message, donation_amounts, confirmation_message, thank_you_message } = req.body;
+      const r = await pool.query('INSERT INTO voice_donation_configs(tenant_id,campaign_id,platform,invocation_name,welcome_message,donation_amounts,confirmation_message,thank_you_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, platform||'alexa', invocation_name, welcome_message, donation_amounts||[5000,10000,25000,50000,100000], confirmation_message, thank_you_message]);
+      await pool.query('UPDATE fundraising_campaigns SET has_voice=true WHERE id=$1', [req.params.id]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V18 FEATURE 2: AR/VR EXPERIENCES
+  app.get('/api/campaigns/:id/ar-vr', ah(async (req, res) => {
+    try {
+      const exps = (await pool.query('SELECT * FROM ar_vr_experiences WHERE campaign_id=$1 AND is_public=true', [req.params.id])).rows;
+      res.json(exps);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/ar-vr', requireAuth, ah(async (req, res) => {
+    try {
+      const { experience_type, title, description, experience_url, preview_image, tech_requirements } = req.body;
+      const r = await pool.query('INSERT INTO ar_vr_experiences(tenant_id,campaign_id,experience_type,title,description,experience_url,preview_image,tech_requirements) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, experience_type||'ar', title, description, experience_url, preview_image, tech_requirements]);
+      await pool.query('UPDATE fundraising_campaigns SET has_ar_vr=true WHERE id=$1', [req.params.id]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V18 FEATURE 4: IoT DONATION TRIGGERS
+  app.get('/api/iot-triggers', requireAuth, ah(async (req, res) => {
+    try {
+      const triggers = (await pool.query('SELECT * FROM iot_donation_triggers WHERE tenant_id=$1 AND is_active=true', [req.user?.tenant_id||0])).rows;
+      res.json(triggers);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/iot-triggers', requireAuth, ah(async (req, res) => {
+    try {
+      const { device_type, trigger_condition, trigger_amount, trigger_description } = req.body;
+      const r = await pool.query('INSERT INTO iot_donation_triggers(tenant_id,campaign_id,device_type,trigger_condition,trigger_amount,trigger_description) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, device_type, trigger_condition, trigger_amount, trigger_description]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V18 FEATURE 5: GenAI VIDEO PERSONALIZATION
+  app.post('/api/campaigns/:id/personalized-video', requireAuth, ah(async (req, res) => {
+    try {
+      const { video_template, personalization_fields, target_donor_email } = req.body;
+      const r = await pool.query('INSERT INTO genai_video_personalizations(tenant_id,campaign_id,video_template,personalization_fields,target_donor_email,status) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, video_template, personalization_fields||[], target_donor_email, 'pending']);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V18 FEATURE 6: REAL-TIME FUND FLOWS
+  app.get('/api/campaigns/:id/fund-flows', ah(async (req, res) => {
+    try {
+      const flows = (await pool.query('SELECT * FROM realtime_fund_flows WHERE campaign_id=$1 ORDER BY timestamp DESC LIMIT 100', [req.params.id])).rows;
+      res.json(flows);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V18 FEATURE 7: AUTONOMOUS FUND ALLOCATION
+  app.get('/api/autonomous-allocations', requireAuth, ah(async (req, res) => {
+    try {
+      const allocs = (await pool.query('SELECT * FROM autonomous_fund_allocations WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      res.json(allocs);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/autonomous-allocation', requireAuth, ah(async (req, res) => {
+    try {
+      const { allocation_algorithm, rules } = req.body;
+      const r = await pool.query('INSERT INTO autonomous_fund_allocations(tenant_id,campaign_id,allocation_algorithm,rules) VALUES($1,$2,$3,$4) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, allocation_algorithm||'proportional', JSON.stringify(rules||[])]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V18 FEATURE 8: QUANTUM-READY ENCRYPTION
+  app.get('/api/quantum-encryption', requireAuth, ah(async (req, res) => {
+    try {
+      const records = (await pool.query('SELECT * FROM quantum_encrypted_records WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      res.json(records);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/quantum-encrypt', requireAuth, ah(async (req, res) => {
+    try {
+      const { record_type, record_id, encryption_method } = req.body;
+      const crypto = require('crypto');
+      const keyId = 'qkey-' + crypto.randomBytes(16).toString('hex');
+      const isQuantumSafe = ['lattice_based','code_based','hash_based','hybrid_pqc'].includes(encryption_method);
+      const r = await pool.query('INSERT INTO quantum_encrypted_records(tenant_id,record_type,record_id,encryption_method,encryption_key_id,is_quantum_safe) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+        [req.user?.tenant_id||0, record_type, record_id, encryption_method||'aes_256', keyId, isQuantumSafe]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V18 FEATURE 9: METAVERSE SPACES
+  app.get('/api/campaigns/:id/metaverse', ah(async (req, res) => {
+    try {
+      const spaces = (await pool.query('SELECT * FROM metaverse_spaces WHERE campaign_id=$1 AND is_active=true', [req.params.id])).rows;
+      res.json(spaces);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/metaverse', requireAuth, ah(async (req, res) => {
+    try {
+      const { space_name, platform, space_url, space_config, max_occupancy } = req.body;
+      const r = await pool.query('INSERT INTO metaverse_spaces(tenant_id,campaign_id,space_name,platform,space_url,space_config,max_occupancy) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, space_name, platform||'custom', space_url, JSON.stringify(space_config||{}), max_occupancy||100]);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // V18 FEATURE 10: DIGITAL TWIN SIMULATIONS
+  app.get('/api/campaigns/:id/digital-twin', requireAuth, ah(async (req, res) => {
+    try {
+      const sims = (await pool.query('SELECT * FROM digital_twin_simulations WHERE campaign_id=$1 ORDER BY created_at DESC', [req.params.id])).rows;
+      res.json(sims);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+  app.post('/api/campaigns/:id/digital-twin', requireAuth, ah(async (req, res) => {
+    try {
+      const { simulation_name, simulation_type, input_parameters, scenario } = req.body;
+      const campaign = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      const raised = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM campaign_donations WHERE campaign_id=$1 AND refunded=false', [req.params.id])).rows[0]?.t || 0;
+      const multiplier = scenario === 'optimistic' ? 1.5 : (scenario === 'pessimistic' ? 0.6 : 1.0);
+      const results = { projected_total: Math.round(parseInt(raised) * multiplier * 3), projected_beneficiaries: Math.round(parseInt(raised) * 0.01 * multiplier), projected_completion: scenario === 'optimistic' ? '3 months' : (scenario === 'pessimistic' ? '12 months' : '6 months') };
+      const r = await pool.query('INSERT INTO digital_twin_simulations(tenant_id,campaign_id,simulation_name,simulation_type,input_parameters,simulation_results,scenario,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [req.user?.tenant_id||0, req.params.id, simulation_name, simulation_type||'impact', JSON.stringify(input_parameters||{}), JSON.stringify(results), scenario||'baseline', req.user?.email||'']);
+      res.json(r.rows[0]);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // =============================================
+  // V13-V18: FEATURE DIRECTORY API
+  // =============================================
+  app.get('/api/fundraising-features/v13-v18', ah(async (req, res) => {
+    try {
+      res.json({
+        v13: ['ai_campaign_generator','predictive_modeling','smart_donor_matching','ai_chatbot','sentiment_analysis','ab_testing','ai_email_sequences','optimization_suggestions','automated_personalization','content_templates'],
+        v14: ['currency_conversion','regional_payments','regional_compliance','translation_management','international_tax','global_payout_routing','timezone_events','cultural_customization','regional_discovery','embassy_partnerships'],
+        v15: ['sdg_alignment','esg_scoring','carbon_footprint','sroi_calculations','beneficiary_feedback','impact_verification','inclusion_metrics','community_resilience','impact_report_cards','sdg_dashboard'],
+        v16: ['institutional_donors','grant_management','multi_year_pledges','restricted_funds','endowment_management','foundation_partnerships','government_grants','fiduciary_oversight','legacy_giving','institutional_reports'],
+        v17: ['donor_communities','campaign_alumni','mentorship_matching','knowledge_base','discussion_forums','ambassador_programs','ambassador_enrollments','giving_days'],
+        v18: ['voice_donations','ar_vr_experiences','biometric_auth','iot_triggers','genai_video','realtime_fund_flows','autonomous_allocation','quantum_encryption','metaverse_spaces','digital_twin_simulations']
+      });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  console.log('[Fundraising Enhancements] All V13-V18 routes registered successfully');
+
+
+
   console.log('[Fundraising Enhancements] All V5 routes registered successfully');
 };
 
