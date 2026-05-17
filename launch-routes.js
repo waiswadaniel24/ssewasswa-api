@@ -21,6 +21,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   const launchMigrations = [
     `CREATE TABLE IF NOT EXISTS scraped_content (
       id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       url TEXT,
       source TEXT,
@@ -29,8 +30,10 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       summary TEXT,
       scraped_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+    `ALTER TABLE scraped_content ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `CREATE TABLE IF NOT EXISTS public_posts (
       id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       content TEXT,
       category TEXT NOT NULL DEFAULT 'news',
@@ -43,6 +46,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       published BOOLEAN DEFAULT true,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+    `ALTER TABLE public_posts ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `ALTER TABLE public_posts ADD COLUMN IF NOT EXISTS slug TEXT`,
     `ALTER TABLE public_posts ADD COLUMN IF NOT EXISTS meta_description TEXT`,
     `ALTER TABLE public_posts ADD COLUMN IF NOT EXISTS tags TEXT[]`,

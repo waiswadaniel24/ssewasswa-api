@@ -137,6 +137,7 @@ module.exports = function inventoryReorder(app, db, pool, renderPage, esc) {
     )`,
     `CREATE TABLE IF NOT EXISTS purchase_order_items (
       id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
       po_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
       item_name VARCHAR(255) NOT NULL,
       item_id INTEGER,
@@ -145,6 +146,7 @@ module.exports = function inventoryReorder(app, db, pool, renderPage, esc) {
       total_cost INTEGER DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+    `ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     // ALTER fallbacks
     `ALTER TABLE IF EXISTS reorder_rules ADD COLUMN IF NOT EXISTS item_id INTEGER`,
     `ALTER TABLE IF EXISTS reorder_rules ADD COLUMN IF NOT EXISTS current_stock INTEGER DEFAULT 0`,

@@ -36,11 +36,13 @@ const PARENT_MIGRATIONS = [
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS parent_students (
-    id SERIAL PRIMARY KEY, parent_id INTEGER REFERENCES parent_accounts(id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES parent_accounts(id) ON DELETE CASCADE,
     student_id INTEGER NOT NULL, relationship VARCHAR(50) NOT NULL DEFAULT 'parent',
     is_emergency_contact BOOLEAN DEFAULT true,
     UNIQUE(parent_id, student_id)
   )`,
+  `ALTER TABLE parent_students ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `CREATE TABLE IF NOT EXISTS parent_messages (
     id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, parent_id INTEGER REFERENCES parent_accounts(id),
     student_id INTEGER, message TEXT NOT NULL, direction VARCHAR(10) DEFAULT 'outbound',
@@ -48,9 +50,11 @@ const PARENT_MIGRATIONS = [
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS parent_login_logs (
-    id SERIAL PRIMARY KEY, parent_id INTEGER REFERENCES parent_accounts(id),
+    id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES parent_accounts(id),
     ip_address VARCHAR(45), user_agent TEXT, login_at TIMESTAMPTZ DEFAULT NOW()
   )`,
+  `ALTER TABLE parent_login_logs ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `CREATE TABLE IF NOT EXISTS parent_notifications (
     id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, parent_id INTEGER REFERENCES parent_accounts(id),
     title VARCHAR(255) NOT NULL, message TEXT NOT NULL, type VARCHAR(50) DEFAULT 'info',

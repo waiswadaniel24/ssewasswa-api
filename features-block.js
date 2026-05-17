@@ -12,10 +12,12 @@ const featureMigrations = [
     created_by VARCHAR(255) NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS quiz_questions (
-    id SERIAL PRIMARY KEY, quiz_id INTEGER NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    quiz_id INTEGER NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
     question_text TEXT NOT NULL, question_type VARCHAR(20) NOT NULL DEFAULT 'multiple_choice',
     options JSONB, correct_answer TEXT, points INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0
   )`,
+  `ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
   `CREATE TABLE IF NOT EXISTS quiz_attempts (
     id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     quiz_id INTEGER NOT NULL REFERENCES quizzes(id), student_email VARCHAR(255) NOT NULL,
@@ -109,10 +111,12 @@ const featureMigrations = [
     notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS clinic_prescription_items (
-    id SERIAL PRIMARY KEY, prescription_id INTEGER NOT NULL REFERENCES clinic_prescriptions(id) ON DELETE CASCADE,
+    id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+    prescription_id INTEGER NOT NULL REFERENCES clinic_prescriptions(id) ON DELETE CASCADE,
     medication_name VARCHAR(255) NOT NULL, dosage VARCHAR(100),
     frequency VARCHAR(100), duration VARCHAR(100), instructions TEXT
-  )`
+  )`,
+  `ALTER TABLE clinic_prescription_items ADD COLUMN IF NOT EXISTS tenant_id INTEGER`
 ];
 featureMigrations.forEach(m => migrations.push(m));
 
