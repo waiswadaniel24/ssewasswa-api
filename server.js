@@ -4049,7 +4049,7 @@ app.get('/school/signin/:id/clock-out', requireAuth, requireNotBanned, ah(async 
   const t = req.session.user.tenant_id;
   const record = (await pool.query('SELECT * FROM sign_in_out WHERE id=$1 AND tenant_id=$2 AND clock_out IS NULL', [req.params.id, t])).rows[0];
   if (!record) return res.redirect('/school/signin');
-  await pool.query('UPDATE sign_in_out SET clock_out=NOW() WHERE id=$1', [req.params.id]);
+  await pool.query('UPDATE sign_in_out SET clock_out=NOW() WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   await audit(req.session.user.email, 'clock_out', (record.name || 'Staff') + ' clocked out');
   res.redirect('/school/signin');
 }));
@@ -5843,7 +5843,7 @@ app.get('/business/transfers/:id/approve', requireAuth, requireNotBanned, requir
   // Add to to_branch
   await pool.query('UPDATE inventory SET quantity = quantity + $1 WHERE tenant_id=$2 AND name=$3', [tr.quantity, t, tr.to_branch]);
   // Update status to completed
-  await pool.query('UPDATE stock_transfers SET status=$1, completed_at=NOW() WHERE id=$2', ['completed', req.params.id]);
+  await pool.query('UPDATE stock_transfers SET status=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3', ['completed', req.params.id, t]);
   await audit(req.session.user.email, 'stock_transfer_approve', `Approved transfer #${req.params.id}: ${tr.quantity}x ${tr.product_name} from ${tr.from_branch} to ${tr.to_branch}`);
   res.redirect('/business/transfers');
 }));
@@ -6534,12 +6534,14 @@ app.get('/clinic/beds/:id/assign', requireAuth, requireNotBanned, ah(async (req,
 }));
 
 app.post('/clinic/beds/:id/assign/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE clinic_beds SET patient_name=$1,reason=$2,status=$3,assigned_at=NOW() WHERE id=$4', [req.body.patient_name, req.body.reason, 'occupied', req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE clinic_beds SET patient_name=$1,reason=$2,status=$3,assigned_at=NOW() WHERE id=$4 AND tenant_id=$5', [req.body.patient_name, req.body.reason, 'occupied', req.params.id, t]);
   res.redirect('/clinic/beds');
 }));
 
 app.get('/clinic/beds/:id/discharge', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE clinic_beds SET patient_name=NULL,reason=NULL,status=$1,assigned_at=NULL WHERE id=$2', ['available', req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE clinic_beds SET patient_name=NULL,reason=NULL,status=$1,assigned_at=NULL WHERE id=$2 AND tenant_id=$3', ['available', req.params.id, t]);
   res.redirect('/clinic/beds');
 }));
 
@@ -6820,10 +6822,10 @@ app.get('/parent/login', (req, res) => {
   res.send(renderPage('Parent Portal', `
     <div class="card" style="max-width:450px;margin:40px auto">
       <h2 style="text-align:center;margin-bottom:20px">Parent Portal</h2>
-      <p class="muted" style="text-align:center;margin-bottom:15px">Enter your email to view your child's information.</p>
+      <p class="muted" style="text-align:center;margin-bottom:15px">Enter your credentials to view your child's information.</p>
       <form method="POST" action="/parent/login">
         <input name="email" type="email" placeholder="Your Email Address" required>
-        <input name="phone" placeholder="Phone (optional)">
+        <input name="password" type="password" placeholder="Password" required>
         <button class="btn" style="width:100%">Login</button>
       </form>
     </div>
@@ -6831,7 +6833,21 @@ app.get('/parent/login', (req, res) => {
 });
 
 app.post('/parent/login', ah(async (req, res) => {
-  const { email, phone } = req.body;
+  const { email, phone, password } = req.body;
+  // SECURITY: Require password for parent login to prevent unauthorized access
+  if (!password) {
+    return res.send(renderPage('Parent Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Password is required. Please contact the school for your parent credentials.</div><a href="/parent/login" class="btn">Try Again</a></div>', null));
+  }
+  // Verify parent has a user account with correct password
+  const parentUser = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
+  if (!parentUser || parentUser.role !== 'parent') {
+    return res.send(renderPage('Parent Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">No parent account found for this email. Please contact the school.</div><a href="/parent/login" class="btn">Try Again</a></div>', null));
+  }
+  const bcrypt = require('bcrypt');
+  const validPassword = await bcrypt.compare(password, parentUser.password || parentUser.password_hash);
+  if (!validPassword) {
+    return res.send(renderPage('Parent Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid password.</div><a href="/parent/login" class="btn">Try Again</a></div>', null));
+  }
   // Find students linked via parent_links or guardian info
   const linkedStudents = [];
   try {
@@ -10657,7 +10673,8 @@ app.get('/accounts/setup-defaults', requireAuth, requireNotBanned, ah(async (req
 }));
 
 app.get('/accounts/:id/ledger', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const account = (await pool.query('SELECT * FROM chart_of_accounts WHERE id=$1', [req.params.id])).rows[0];
+  const t = req.session.user.tenant_id;
+  const account = (await pool.query('SELECT * FROM chart_of_accounts WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   const entries = (await pool.query('SELECT * FROM ledger_entries WHERE account_id=$1 ORDER BY entry_date DESC, created_at DESC LIMIT 100', [req.params.id])).rows;
   const totalDebit = entries.reduce((s,e)=>s+Number(e.debit),0);
   const totalCredit = entries.reduce((s,e)=>s+Number(e.credit),0);
@@ -10686,7 +10703,8 @@ app.post('/accounts/:id/ledger/save', requireAuth, requireNotBanned, ah(async (r
 }));
 
 app.get('/accounts/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('DELETE FROM chart_of_accounts WHERE id=$1', [req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM chart_of_accounts WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   res.redirect('/accounts');
 }));
 
@@ -14998,11 +15016,12 @@ app.post('/school/library/borrow/save', requireAuth, requireNotBanned, ah(async 
 }));
 
 app.get('/school/library/return/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const borrow = (await pool.query('SELECT * FROM library_borrows WHERE id=$1', [req.params.id])).rows[0];
+  const t = req.session.user.tenant_id;
+  const borrow = (await pool.query('SELECT lb.*, b.tenant_id FROM library_borrows lb JOIN library_books b ON lb.book_id=b.id WHERE lb.id=$1 AND b.tenant_id=$2', [req.params.id, t])).rows[0];
   if (!borrow) return res.status(404).send('Not found');
   const fine = borrow.due_date && new Date() > new Date(borrow.due_date) ? Math.floor((Date.now() - new Date(borrow.due_date).getTime()) / 86400000) * 500 : 0;
   await pool.query('UPDATE library_borrows SET return_date=CURRENT_DATE, fine=$1 WHERE id=$2', [fine, req.params.id]);
-  await pool.query('UPDATE library_books SET copies_available=copies_available+1 WHERE id=$1', [borrow.book_id]);
+  await pool.query('UPDATE library_books SET copies_available=copies_available+1 WHERE id=$1 AND tenant_id=$2', [borrow.book_id, t]);
   res.redirect('/school/library');
 }));
 
@@ -15070,7 +15089,8 @@ app.post('/church/choir/song/save', requireAuth, requireNotBanned, ah(async (req
 }));
 
 app.get('/church/choir/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('DELETE FROM choir_members WHERE id=$1', [req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM choir_members WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   res.redirect('/church/choir');
 }));
 
@@ -15326,12 +15346,14 @@ app.post('/church/prayer-requests/save', requireAuth, requireNotBanned, ah(async
 }));
 
 app.get('/church/prayer-requests/:id/pray', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE prayer_requests SET prayer_count=prayer_count+1 WHERE id=$1', [req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE prayer_requests SET prayer_count=prayer_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   res.redirect('/church/prayer-requests');
 }));
 
 app.get('/church/prayer-requests/:id/answer', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE prayer_requests SET is_answered=true WHERE id=$1', [req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE prayer_requests SET is_answered=true WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   res.redirect('/church/prayer-requests');
 }));
 
@@ -15491,13 +15513,14 @@ app.post('/business/payroll/:id/add-employee/save', requireAuth, requireNotBanne
 }));
 
 app.get('/business/payroll/:id/process', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE payroll_runs SET status=$1 WHERE id=$2', ['processed', req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE payroll_runs SET status=$1 WHERE id=$2 AND tenant_id=$3', ['processed', req.params.id, t]);
   res.redirect('/business/payroll');
 }));
 
 app.get('/business/payroll/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('DELETE FROM payroll_items WHERE run_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM payroll_items WHERE run_id=$1 AND tenant_id=$2', [req.params.id, t]);
   await pool.query('DELETE FROM payroll_runs WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   res.redirect('/business/payroll');
 }));
@@ -15537,12 +15560,14 @@ app.post('/business/leave/save', requireAuth, requireNotBanned, ah(async (req, r
 }));
 
 app.get('/business/leave/:id/approve', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE leave_requests SET status=$1, approved_by=$2 WHERE id=$3', ['approved', req.session.user.email, req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE leave_requests SET status=$1, approved_by=$2 WHERE id=$3 AND tenant_id=$4', ['approved', req.session.user.email, req.params.id, t]);
   res.redirect('/business/leave');
 }));
 
 app.get('/business/leave/:id/reject', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE leave_requests SET status=$1, approved_by=$2 WHERE id=$3', ['rejected', req.session.user.email, req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE leave_requests SET status=$1, approved_by=$2 WHERE id=$3 AND tenant_id=$4', ['rejected', req.session.user.email, req.params.id, t]);
   res.redirect('/business/leave');
 }));
 
@@ -15617,20 +15642,22 @@ app.post('/business/projects/:id/tasks/save', requireAuth, requireNotBanned, ah(
 }));
 
 app.get('/business/projects/tasks/:id/start', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const task = (await pool.query('SELECT project_id FROM project_tasks WHERE id=$1', [req.params.id])).rows[0];
-  await pool.query('UPDATE project_tasks SET status=$1 WHERE id=$2', ['in_progress', req.params.id]);
+  const t = req.session.user.tenant_id;
+  const task = (await pool.query('SELECT project_id FROM project_tasks WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  await pool.query('UPDATE project_tasks SET status=$1 WHERE id=$2 AND tenant_id=$3', ['in_progress', req.params.id, t]);
   res.redirect(`/business/projects/${task?.project_id}/tasks`);
 }));
 
 app.get('/business/projects/tasks/:id/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const task = (await pool.query('SELECT project_id FROM project_tasks WHERE id=$1', [req.params.id])).rows[0];
-  await pool.query('UPDATE project_tasks SET status=$1, completed_at=NOW() WHERE id=$2', ['done', req.params.id]);
+  const t = req.session.user.tenant_id;
+  const task = (await pool.query('SELECT project_id FROM project_tasks WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  await pool.query('UPDATE project_tasks SET status=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3', ['done', req.params.id, t]);
   res.redirect(`/business/projects/${task?.project_id}/tasks`);
 }));
 
 app.get('/business/projects/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('DELETE FROM project_tasks WHERE project_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM project_tasks WHERE project_id=$1 AND tenant_id=$2', [req.params.id, t]);
   await pool.query('DELETE FROM projects WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   res.redirect('/business/projects');
 }));

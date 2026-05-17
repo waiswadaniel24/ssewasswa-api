@@ -2250,7 +2250,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     free: 0,
     basic: 100000,
     pro: 200000,
-    enterprise: 0
+    enterprise: 500000
   };
   const PLAN_LIMITS_LAUNCH = {
     free: 50,
@@ -2303,8 +2303,9 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
         // SECURITY: Validate amount matches expected plan price
         const expectedAmount = PLAN_PRICES[plan] || 0;
-        if (amount < expectedAmount * 0.9) { // Allow 10% tolerance for fees
-          console.warn('[Billing] Amount mismatch:', amount, 'for plan', plan, '(expected:', expectedAmount, ')');
+        if (expectedAmount > 0 && amount < expectedAmount * 0.9) { // Allow 10% tolerance for fees
+          console.error('[Billing] Amount mismatch - BLOCKED:', amount, 'for plan', plan, '(expected:', expectedAmount, ')');
+          return res.send(renderPage('Payment Error', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><div style="font-size:48px;margin-bottom:16px">&#9888;&#65039;</div><h2>Payment Amount Mismatch</h2><p>The payment amount does not match the selected plan. Please contact support if this is an error.</p><a href="/billing" class="btn btn-green">Back to Billing</a></div>', user));
         }
 
         // Create/Update subscription
@@ -2891,8 +2892,12 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   app.post('/api/public/ad-click', ah(async (req, res) => {
     const { ad_type, placement, link_url, page_url } = req.body;
     if (!link_url) return res.json({ ok: false });
-    // Estimate CPC revenue (varies by ad type and placement)
+    // SECURITY: Validate ad_type against whitelist, block high-value types from untrusted sources
     const cpcRates = { banner: 0.02, sidebar: 0.015, incontent: 0.03, affiliate: 0.15, video: 0.05, popup: 0.01 };
+    const validTypes = Object.keys(cpcRates);
+    if (!validTypes.includes(ad_type)) return res.json({ ok: false });
+    // Only allow standard ad types from public API; affiliate/video require authentication
+    if (['affiliate', 'video'].includes(ad_type)) return res.json({ ok: false });
     const revenue = cpcRates[ad_type] || 0.02;
     await pool.query(
       'INSERT INTO ad_clicks (ad_type, placement, link_url, revenue_usd, page_url, referrer, user_agent, ip_address) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
@@ -2901,8 +2906,8 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     res.json({ ok: true });
   }));
 
-  // --- Ad revenue stats API ---
-  app.get('/api/public/ad-stats', ah(async (req, res) => {
+  // --- Ad revenue stats API (admin-only) ---
+  app.get('/api/public/ad-stats', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     const today = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE")).rows[0];
     const week = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE - INTERVAL '7 days'")).rows[0];
     const month = (await pool.query("SELECT COUNT(*) as clicks, COALESCE(SUM(revenue_usd),0) as revenue FROM ad_clicks WHERE clicked_at >= CURRENT_DATE - INTERVAL '30 days'")).rows[0];
