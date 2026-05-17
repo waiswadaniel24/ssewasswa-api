@@ -27299,6 +27299,26 @@ try {
   console.warn('[FundraisingUltimate] Failed to load fundraising ultimate:', e.message);
 }
 
+// === FUNDRAISING MEGA (Donor CRM, Pledges, Templates, Tipping, Stretch Goals, Segmentation, Campaign Clone, Bulk Donations, Gift Aid/Tax, Donation Challenges) ===
+['donor_crm_contacts','donor_crm_interactions','campaign_pledges','campaign_templates','donation_tips','tip_settings','campaign_stretch_goals','donor_segments','donor_segment_members','bulk_donation_batches','bulk_donation_items','gift_tax_declarations','tax_receipts','donation_challenges','challenge_participants'].forEach(t => VALID_TABLES.add(t));
+try {
+  const fundraisingMega = require('./fundraising-mega');
+  fundraisingMega(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+  console.log('[FundraisingMega] Mega fundraising features loaded — 10 features, 50+ routes');
+} catch (e) {
+  console.warn('[FundraisingMega] Failed to load fundraising mega:', e.message);
+}
+
+// === FUNDRAISING MEGA2 (Analytics Dashboard, A/B Testing, Donor Retention, Social Proof, Endorsements, Wish List, Corporate Matching, Multi-Currency, QR Menu, Thank-You Videos) ===
+['campaign_ab_tests','donor_retention_metrics','social_proof_events','campaign_endorsements','donation_wishlists','wishlist_fulfillments','corporate_matchers','corporate_match_claims','currency_display_settings','thank_you_videos','thank_you_video_views'].forEach(t => VALID_TABLES.add(t));
+try {
+  const fundraisingMega2 = require('./fundraising-mega2');
+  fundraisingMega2(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+  console.log('[FundraisingMega2] Mega2 fundraising features loaded — 10 features, 50+ routes');
+} catch (e) {
+  console.warn('[FundraisingMega2] Failed to load fundraising mega2:', e.message);
+}
+
 // ============================================================
 // ROUND 3 FEATURES: Leave, Expenses, Visitors, Assets, Feedback, Notes, Announcements
 // ============================================================
