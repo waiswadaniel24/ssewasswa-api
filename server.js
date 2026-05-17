@@ -33264,12 +33264,18 @@ loadSelfExec('revenue-quickstart', 'Revenue');
 // 10. GLOBAL VIRAL ENGINE (search, chat, QR, link shortener, contests, gallery, embeddable widgets, badges, translate)
 loadSelfExec('global-viral-engine', 'GlobalViral');
 
-// Clean up globals — remove temporary bridges
+// 11. GLOBAL EXPANSION ENGINE (i18n, multi-currency, timezone, OTP, social login, payment gateways, global API)
+loadSelfExec('global-expansion-engine', 'GlobalExpansion');
+
+// 12. VIRAL LOOP ENGINE (referral dashboard, reward tracking, social share OG images, push delivery, widgets, invite links, waitlist, badges, digest)
+loadSelfExec('viral-loop-engine', 'ViralLoop');
+
+// Clean up scope bridge globals (app, pool, etc.)
 Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
-delete global.trackRevenue;
-delete global.awardPoints;
-delete global.creditDeveloperRevenue;
-delete global.queueEmail;
+// KEEP cross-module functions on global — route handlers in other modules
+// need trackRevenue, awardPoints, creditDeveloperRevenue, queueEmail at request time.
+// Deleting them would cause ReferenceError crashes when handlers execute.
+// These are lightweight stubs or real functions, harmless to keep.
 
 // ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===
