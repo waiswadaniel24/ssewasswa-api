@@ -33586,6 +33586,92 @@ _v21Modules.forEach(([modPath, label]) => {
 });
 console.log('[V21] === 13 more modules loaded — V21 Massive Batch complete ===');
 
+// === V22 MEGA BATCH: 74 New Modules ===
+const _v22Modules = [
+  ['./ai-lesson-planner-v2', 'AI Lesson Planner V2'],
+  ['./student-heatmap', 'Student Activity Heatmap'],
+  ['./parent-communication', 'Parent Communication Hub'],
+  ['./school-newsletter', 'School Newsletter'],
+  ['./interactive-maps', 'Interactive Campus Map'],
+  ['./weather-station', 'Weather Station'],
+  ['./student-banking', 'Student Banking'],
+  ['./internship-tracker', 'Internship Tracker'],
+  ['./academic-integrity', 'Academic Integrity'],
+  ['./school-radio', 'School Radio'],
+  ['./talent-show', 'Talent Show'],
+  ['./peer-review', 'Peer Review'],
+  ['./smart-parking', 'Smart Parking'],
+  ['./resource-reservation', 'Resource Reservation'],
+  ['./alumni-mentoring', 'Alumni Mentoring'],
+  ['./code-runner', 'Code Runner'],
+  ['./lab-manager', 'Lab Manager'],
+  ['./debate-club', 'Debate Club'],
+  ['./school-newspaper', 'School Newspaper'],
+  ['./parent-workshop', 'Parent Workshop'],
+  ['./student-council', 'Student Council'],
+  ['./green-campus', 'Green Campus'],
+  ['./language-lab', 'Language Lab'],
+  ['./robotics-club', 'Robotics Club'],
+  ['./art-gallery', 'Art Gallery'],
+  ['./music-studio', 'Music Studio'],
+  ['./drama-club', 'Drama Club'],
+  ['./photography-club', 'Photography Club'],
+  ['./cooking-club', 'Cooking Club'],
+  ['./chess-club', 'Chess Club'],
+  ['./science-fair', 'Science Fair'],
+  ['./hackathon-platform', 'Hackathon Platform'],
+  ['./volunteer-hours', 'Volunteer Hours'],
+  ['./ai-dropout-predictor', 'AI Dropout Predictor'],
+  ['./ar-campus-tour', 'AR Campus Tour'],
+  ['./iot-workshop', 'IoT Workshop'],
+  ['./predictive-maintenance', 'Predictive Maintenance'],
+  ['./emotion-analytics', 'Emotion Analytics'],
+  ['./smart-restroom', 'Smart Restroom'],
+  ['./water-quality', 'Water Quality Monitor'],
+  ['./air-quality-monitor', 'Air Quality Monitor'],
+  ['./noise-monitor', 'Noise Monitor'],
+  ['./ai-tutor', 'AI Tutor'],
+  ['./smart-textbook', 'Smart Textbook'],
+  ['./virtual-lab', 'Virtual Lab'],
+  ['./drone-education', 'Drone Education'],
+  ['./blockchain-gradebook', 'Blockchain Gradebook'],
+  ['./ai-resume-builder', 'AI Resume Builder'],
+  ['./job-shadow', 'Job Shadow'],
+  ['./industry-partnerships', 'Industry Partnerships'],
+  ['./innovation-lab', 'Innovation Lab'],
+  ['./startup-incubator', 'Startup Incubator'],
+  ['./school-health-ai', 'School Health AI'],
+  ['./nutrition-ai', 'Nutrition AI'],
+  ['./sleep-tracker', 'Sleep Tracker'],
+  ['./fitness-ai', 'Fitness AI'],
+  ['./wellness-dashboard', 'Wellness Dashboard'],
+  ['./smart-lighting', 'Smart Lighting'],
+  ['./smart-hvac', 'Smart HVAC'],
+  ['./facial-attendance', 'Facial Recognition Attendance'],
+  ['./smart-security', 'Smart Security'],
+  ['./smart-door-lock', 'Smart Door Lock'],
+  ['./metaverse-classroom', 'Metaverse Classroom'],
+  ['./quantum-computing', 'Quantum Computing'],
+  ['./nft-student-art', 'NFT Student Art'],
+  ['./voice-assistant', 'Voice Assistant'],
+  ['./skill-assessment', 'Skill Assessment'],
+  ['./soft-skills', 'Soft Skills'],
+  ['./interview-simulator', 'Interview Simulator'],
+  ['./leadership-program', 'Leadership Program'],
+  ['./gesture-control', 'Gesture Control'],
+  ['./3d-printing', '3D Printing'],
+  ['./smart-desk', 'Smart Desk'],
+  ['./eye-tracking', 'Eye Tracking']
+];
+_v22Modules.forEach(([modPath, label]) => {
+  try {
+    const m = require(modPath);
+    m(app, pool, _v19Opts);
+    console.log('[V22] ' + label + ' loaded');
+  } catch(e) { console.warn('[V22] ' + label + ' Error:', e.message); }
+});
+console.log('[V22] === 74 modules loaded — V22 MEGA BATCH complete ===');
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
