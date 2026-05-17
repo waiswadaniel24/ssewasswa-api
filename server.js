@@ -30385,11 +30385,22 @@ try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.lo
 // expose these variables on the global object, then clean up after.
 // ============================================================
 
-const _globalKeys = ['app','pool','db','ah','esc','renderPage','requireAuth','requireNotBanned',
-  'requireSuperAdmin','audit','notify','notifyAll','sendEmail','sendSMS','migrations',
-  'VALID_TABLES','requestMtnPayment','trackRevenue','awardPoints','creditDeveloperRevenue',
-  'queueEmail'];
-_globalKeys.forEach(k => { if (typeof global[k] === 'undefined' && typeof eval(k) !== 'undefined') global[k] = eval(k); });
+// Variables that exist right now in server.js scope
+const _scopeBridge = {
+  app, pool, db, ah, esc, renderPage, requireAuth, requireNotBanned,
+  requireSuperAdmin, audit, notify, notifyAll, sendEmail, sendSMS, migrations,
+  VALID_TABLES, requestMtnPayment
+};
+
+// Cross-module functions: populated by modules when they load
+// Start as no-op stubs so dependent modules don't crash if loaded out of order
+global.trackRevenue = async () => {};
+global.awardPoints = async () => {};
+global.creditDeveloperRevenue = async () => {};
+global.queueEmail = async () => {};
+
+// Expose all scope variables to global
+Object.entries(_scopeBridge).forEach(([k, v]) => { global[k] = v; });
 
 // Helper: load self-executing module with full error details
 function loadSelfExec(modName, label) {
@@ -30435,7 +30446,11 @@ loadSelfExec('email-automation', 'EmailAuto');
 loadSelfExec('revenue-quickstart', 'Revenue');
 
 // Clean up globals — remove temporary bridges
-_globalKeys.forEach(k => { delete global[k]; });
+Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
+delete global.trackRevenue;
+delete global.awardPoints;
+delete global.creditDeveloperRevenue;
+delete global.queueEmail;
 
 // ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===
