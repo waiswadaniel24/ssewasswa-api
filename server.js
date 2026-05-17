@@ -13576,11 +13576,11 @@ app.get('/pages/:id/preview', requireAuth, requireNotBanned, ah(async (req, res)
   res.send(renderPageV3('Preview: ' + page.title, `
     <div style="position:relative;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;min-height:500px">
       ${page.badge_text ? `<div style="position:absolute;top:15px;right:15px;z-index:10"><span style="background:${page.badge_color||'#4f46e5'};color:white;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;transform:rotate(5deg);display:inline-block">${esc(page.badge_text)}</span></div>` : ''}
-      ${page.header_html || ''}
-      <div style="padding:30px;min-height:300px">${page.content || '<p class="muted">No content yet</p>'}</div>
+      ${sanitizeHTML(page.header_html || '')}
+      <div style="padding:30px;min-height:300px">${sanitizeHTML(page.content || '<p class=\"muted\">No content yet</p>')}</div>
       ${page.stamp_url ? `<div style="position:absolute;${stampPos[page.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(page.stamp_url)}" style="width:120px;height:auto" alt="Stamp"></div>` : ''}
       ${page.signature_name ? `<div style="position:absolute;${sigPos[page.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center;margin:20px"><p style="font-family:cursive;font-size:18px;margin:0">${esc(page.signature_name)}</p>${page.signature_image_url ? `<img src="${esc(page.signature_image_url)}" style="width:150px;height:auto" alt="Signature">` : ''}<div style="width:200px;border-top:1px solid #333;margin-top:5px"></div></div>` : ''}
-      ${page.footer_html || ''}
+      ${sanitizeHTML(page.footer_html || '')}
     </div>
     <div style="text-align:center;margin-top:20px"><a href="/pages/${page.id}/edit" class="btn btn-sm">Edit Page</a> <a href="/pages" class="btn btn-sm">All Pages</a></div>
   `, req.session.user));
@@ -13604,11 +13604,11 @@ app.get('/p/:slug', ah(async (req, res, next) => {
   res.send(renderPageV3(page.title, `
     <div style="position:relative;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;min-height:500px">
       ${page.badge_text ? `<div style="position:absolute;top:15px;right:15px;z-index:10"><span style="background:${page.badge_color||'#4f46e5'};color:white;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;transform:rotate(5deg);display:inline-block">${esc(page.badge_text)}</span></div>` : ''}
-      ${page.header_html || ''}
+      ${sanitizeHTML(page.header_html || '')}
       <div style="padding:30px;min-height:300px">${sanitizeHTML(page.content || '')}</div>
       ${page.stamp_url ? `<div style="position:absolute;${stampPos[page.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(page.stamp_url)}" style="width:120px;height:auto" alt="Stamp"></div>` : ''}
       ${page.signature_name ? `<div style="position:absolute;${sigPos[page.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center;margin:20px"><p style="font-family:cursive;font-size:18px;margin:0">${esc(page.signature_name)}</p>${page.signature_image_url ? `<img src="${esc(page.signature_image_url)}" style="width:150px;height:auto" alt="Signature">` : ''}<div style="width:200px;border-top:1px solid #333;margin-top:5px"></div></div>` : ''}
-      ${page.footer_html || ''}
+      ${sanitizeHTML(page.footer_html || '')}
     </div>
     <p class="muted" style="text-align:center;margin-top:15px">Powered by Comfort</p>
   `, null, { description: page.title + ' - ' + (page.tenant_name || 'Comfort') }));
@@ -19832,7 +19832,7 @@ app.get('/s/:slug', ah(async (req, res) => {
   res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${esc(page.meta_description||'')}"><title>${esc(page.title)} - ${esc(page.org_name)}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1e293b;line-height:1.8}.pub-nav{background:#4f46e5;color:white;padding:15px 30px;display:flex;justify-content:space-between;align-items:center}.pub-nav a{color:white;text-decoration:none;padding:8px 16px;border-radius:6px}.pub-hero{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:80px 30px;text-align:center}.pub-content{max-width:900px;margin:40px auto;padding:0 20px}.pub-footer{background:#1e293b;color:white;padding:30px;text-align:center;margin-top:60px}</style></head><body>
     <nav class="pub-nav"><div style="font-size:22px;font-weight:800">${esc(page.org_name)}</div><div><a href="/">Home</a></div></nav>
     <div class="pub-hero"><h1 style="font-size:42px">${esc(page.hero_title||page.title)}</h1><p style="font-size:18px;opacity:0.9">${esc(page.hero_subtitle||'')}</p></div>
-    <div class="pub-content">${page.content||''}</div>
+    <div class="pub-content">${sanitizeHTML(page.content||'')}</div>
     <div class="pub-footer"><p>&copy; ${new Date().getFullYear()} ${esc(page.org_name)}</p></div></body></html>`);
 }));
 
@@ -30614,8 +30614,9 @@ app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
       return res.send(renderPage('2FA Setup', '<div class="card alert alert-error"><h2>Invalid Code</h2><p>The code you entered is incorrect. Please try again.</p><a href="/settings/2fa" class="btn">Back</a></div>', req.session.user));
     }
   } catch(e) {
-    // otplib not available - accept 6-digit code as fallback (dev environment)
-    console.warn('[2FA] otplib verification failed, accepting code:', e.message);
+    // SECURITY: Hard-fail if TOTP verification throws — never accept unverified codes
+    console.error('[2FA] otplib verification failed:', e.message);
+    return res.send(renderPage('2FA Setup', '<div class="card alert alert-error"><h2>Verification Error</h2><p>Could not verify your code. Please try again.</p><a href="/settings/2fa" class="btn">Back</a></div>', req.session.user));
   }
   const backupCodes = Array.from({length:10}, () => require('crypto').randomBytes(4).toString('hex'));
   await pool.query("INSERT INTO user_2fa (email,tenant_id,secret,enabled,backup_codes) VALUES ($1,$2,$3,true,$4) ON CONFLICT (email) DO UPDATE SET secret=$3,enabled=true,backup_codes=$4",
@@ -30631,10 +30632,8 @@ app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/settings/2fa/disable', requireAuth, ah(async (req, res) => {
-  await pool.query("UPDATE user_2fa SET enabled=false WHERE email=$1", [req.session.user.email]);
-  res.redirect('/settings/2fa');
-}));
+// REMOVED: Duplicate insecure /settings/2fa/disable endpoint.
+// The secure version with password verification is defined earlier in the file (requires current_password + bcrypt check).
 
 // ============================================================
 // === 10. AUDIT LOG ===
