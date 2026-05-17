@@ -30102,6 +30102,9 @@ try { require('./features-block'); console.log('[FeaturesBlock] 33 feature route
 // === VIRAL CONTENT ENGINE: Growth, SEO, Revenue, Jobs, Referrals, Trending ===
 try { require('./viral-content-engine'); console.log('[ViralEngine] Content scraping, referrals, jobs, SEO pages, trending, newsletter, gamification loaded'); } catch(e) { console.warn('[ViralEngine] Error:', e.message); }
 
+// === REVENUE QUICKSTART: Tips, Pricing, Ads, Commissions, MoMo Payments ===
+try { require('./revenue-quickstart'); console.log('[Revenue] Tips, pricing, ads, service packages, ad placements loaded'); } catch(e) { console.warn('[Revenue] Error:', e.message); }
+
 // ============================================================
 // === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
 // ============================================================
