@@ -33316,6 +33316,58 @@ _v19Modules.forEach(([modPath, label]) => {
 });
 console.log('[V19] === 10 modules loaded — V19 Massive Feature Upgrade complete ===');
 
+// === V19 CONTINUED: 5 More Modules ===
+[
+  'parent_teacher_chat','chat_conversations','chat_messages','chat_announcements','chat_announcement_reads',
+  'aptitude_tests','aptitude_answers','interest_responses','career_library','career_recommendations',
+  'university_programs','career_counselling_sessions',
+  'referral_codes','referral_tracking','referral_rewards_config','referral_reward_claims','referral_payouts',
+  'wallet_accounts','wallet_transactions','wallet_savings',
+  'tutor_profiles','tutoring_sessions','tutoring_reviews','tutoring_hours',
+  'mood_checkins','wellness_resources','counsellor_bookings_mh','anonymous_reports','sleep_logs','gratitude_entries'
+].forEach(t => VALID_TABLES.add(t));
+
+const _v19bModules = [
+  ['./parent-teacher-chat', 'Parent-Teacher Chat'],
+  ['./career-guidance', 'Career Guidance & Aptitude'],
+  ['./referral-rewards', 'Referral Rewards Program'],
+  ['./pocket-money', 'Student Pocket Money Wallet'],
+  ['./peer-tutoring', 'Peer Tutoring Marketplace'],
+  ['./mental-health', 'Mental Health & Wellness']
+];
+_v19bModules.forEach(([modPath, label]) => {
+  try {
+    const m = require(modPath);
+    m(app, pool, _v19Opts);
+    console.log('[V19+] ' + label + ' loaded');
+  } catch(e) { console.warn('[V19+] ' + label + ' Error:', e.message); }
+});
+console.log('[V19+] === 6 more modules loaded — V19 continued ===');
+
+// === V20 FINAL BATCH: 5 More School Modules ===
+[
+  'exam_seating_plans','exam_seats','room_layout_templates',
+  'teacher_absences','teacher_substitutions',
+  'gate_passes','visitor_passes','late_arrivals',
+  'bullying_reports','bullying_case_notes','bullying_resources',
+  'merch_products','merch_orders','merch_order_items','merch_campaigns','merch_stock_history'
+].forEach(t => VALID_TABLES.add(t));
+
+[
+  ['./exam-seating', 'Exam Seating Arranger'],
+  ['./teacher-substitution', 'Teacher Substitution Manager'],
+  ['./gate-pass', 'Digital Gate Pass System'],
+  ['./anti-bullying', 'Anti-Bullying Reporting'],
+  ['./school-merch', 'School Merchandise Store']
+].forEach(([modPath, label]) => {
+  try {
+    const m = require(modPath);
+    m(app, pool, _v19Opts);
+    console.log('[V20] ' + label + ' loaded');
+  } catch(e) { console.warn('[V20] ' + label + ' Error:', e.message); }
+});
+console.log('[V20] === 5 more modules loaded — V20 complete ===');
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
