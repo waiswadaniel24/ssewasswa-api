@@ -33400,6 +33400,47 @@ console.log('[V19+] === 6 more modules loaded — V19 continued ===');
 });
 console.log('[V20] === 5 more modules loaded — V20 complete ===');
 
+// === V21 BATCH: 13 More School Modules ===
+[
+  'social_media_posts','social_media_accounts','social_media_templates','social_media_post_rules','social_media_hashtags','social_media_approvals','social_media_scheduled',
+  'virtual_meetings','meeting_participants','meeting_recordings','meeting_templates','meeting_notes',
+  'bus_routes','bus_fleet','bus_stops','bus_student_assignments','bus_trips','bus_maintenance','bus_notifications_log','bus_settings',
+  'flashcard_decks','flashcards','flashcard_progress','study_sessions','flashcard_imports','deck_ratings',
+  'cert_templates','blockchain_certificates','blockchain_ledger','cert_requests','cert_verification_log',
+  'collab_requests','collab_projects','collab_project_members','collab_resources','collab_forums','collab_forum_posts','collab_exchange_pairs','collab_competitions','collab_competition_teams','collab_knowledge_articles','collab_events','collab_messages',
+  'carpool_groups','carpool_members','carpool_schedules','carpool_rides','carpool_stops','carpool_emergency_contacts','carpool_messages','carpool_ride_logs',
+  'classroom_rooms','classroom_inventory','classroom_sensors','classroom_sensor_readings','classroom_bookings','classroom_maintenance','classroom_energy_logs','classroom_signage','classroom_lesson_recordings',
+  'procurement_vendors','procurement_requisitions','procurement_requisition_items','procurement_purchase_orders','procurement_po_items','procurement_rfq','procurement_rfq_quotes','procurement_contracts','procurement_budgets','procurement_audit_log',
+  'learning_paths','path_modules','skill_tree','student_skills','adaptive_assessments','assessment_questions','learning_progress','intervention_alerts','learning_goals',
+  'omr_templates','omr_answer_keys','omr_exams','omr_scanned_sheets','omr_results','omr_result_analysis',
+  'whiteboard_sessions','whiteboard_pages','whiteboard_content','whiteboard_templates','whiteboard_collaborators','whiteboard_submissions','whiteboard_version_history',
+  'podcast_channels','podcast_episodes','podcast_listens','podcast_comments','podcast_subscriptions','podcast_student_submissions'
+].forEach(t => VALID_TABLES.add(t));
+
+const _v21Modules = [
+  ['./social-media-autopost', 'Social Media AutoPost'],
+  ['./video-conferencing', 'Video Conferencing'],
+  ['./bus-route-optimizer', 'Bus Route Optimizer'],
+  ['./spaced-repetition', 'Spaced Repetition Flashcards'],
+  ['./blockchain-certificates', 'Blockchain Certificates'],
+  ['./cross-school-collab', 'Cross-School Collaboration'],
+  ['./carpool-coordination', 'Carpool Coordination'],
+  ['./smart-classroom', 'Smart Classroom IoT'],
+  ['./supply-chain-procurement', 'Supply Chain Procurement'],
+  ['./adaptive-learning', 'Adaptive Learning Paths'],
+  ['./omr-scanner', 'OMR Sheet Scanner'],
+  ['./interactive-whiteboard', 'Interactive Whiteboard'],
+  ['./campus-podcast', 'Campus Podcast']
+];
+_v21Modules.forEach(([modPath, label]) => {
+  try {
+    const m = require(modPath);
+    m(app, pool, _v19Opts);
+    console.log('[V21] ' + label + ' loaded');
+  } catch(e) { console.warn('[V21] ' + label + ' Error:', e.message); }
+});
+console.log('[V21] === 13 more modules loaded — V21 Massive Batch complete ===');
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
