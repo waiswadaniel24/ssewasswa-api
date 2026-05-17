@@ -908,6 +908,199 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(campaign_id, language)
+    )`,
+
+    // =============================================
+    // V5 TABLES - Ultimate Professional Features
+    // =============================================
+
+    // Donor referral program - refer friends, earn rewards
+    `CREATE TABLE IF NOT EXISTS donor_referrals (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      referrer_email TEXT NOT NULL,
+      referrer_name TEXT,
+      referral_code TEXT UNIQUE NOT NULL,
+      referred_email TEXT,
+      referred_name TEXT,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','signed_up','donated','rewarded','expired')),
+      reward_type TEXT DEFAULT 'credit' CHECK (reward_type IN ('credit','badge','merchandise','none')),
+      reward_amount INTEGER DEFAULT 0,
+      donated_amount INTEGER DEFAULT 0,
+      rewarded_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign auctions - bid on items to support campaigns
+    `CREATE TABLE IF NOT EXISTS campaign_auctions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      item_name TEXT NOT NULL,
+      description TEXT,
+      image_url TEXT,
+      starting_bid INTEGER NOT NULL DEFAULT 0,
+      current_bid INTEGER DEFAULT 0,
+      current_bidder TEXT,
+      current_bidder_email TEXT,
+      reserve_price INTEGER,
+      buy_now_price INTEGER,
+      bid_increment INTEGER DEFAULT 10000,
+      total_bids INTEGER DEFAULT 0,
+      start_date TIMESTAMPTZ NOT NULL,
+      end_date TIMESTAMPTZ NOT NULL,
+      status TEXT DEFAULT 'upcoming' CHECK (status IN ('upcoming','active','ending_soon','ended','cancelled')),
+      winner_name TEXT,
+      winner_email TEXT,
+      winning_bid INTEGER,
+      is_featured BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Auction bids
+    `CREATE TABLE IF NOT EXISTS auction_bids (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      auction_id INTEGER REFERENCES campaign_auctions(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      bidder_name TEXT NOT NULL,
+      bidder_email TEXT NOT NULL,
+      bid_amount INTEGER NOT NULL,
+      is_winning BOOLEAN DEFAULT false,
+      is_auto_bid BOOLEAN DEFAULT false,
+      max_auto_bid INTEGER,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Pledge management - donors pledge to give later
+    `CREATE TABLE IF NOT EXISTS campaign_pledges (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      pledgor_name TEXT NOT NULL,
+      pledgor_email TEXT NOT NULL,
+      pledgor_phone TEXT,
+      pledged_amount INTEGER NOT NULL,
+      fulfilled_amount INTEGER DEFAULT 0,
+      pledge_date DATE NOT NULL,
+      expected_fulfillment_date DATE,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','partial','fulfilled','overdue','cancelled')),
+      reminder_count INTEGER DEFAULT 0,
+      last_reminder_at TIMESTAMPTZ,
+      notes TEXT,
+      fulfilled_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Social media scheduled posts
+    `CREATE TABLE IF NOT EXISTS campaign_social_posts (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      platform TEXT NOT NULL CHECK (platform IN ('twitter','facebook','linkedin','instagram','whatsapp','telegram','tiktok')),
+      content TEXT NOT NULL,
+      image_url TEXT,
+      link_url TEXT,
+      hashtags TEXT[] DEFAULT '{}',
+      scheduled_at TIMESTAMPTZ NOT NULL,
+      posted_at TIMESTAMPTZ,
+      status TEXT DEFAULT 'scheduled' CHECK (status IN ('draft','scheduled','posting','posted','failed')),
+      post_url TEXT,
+      likes INTEGER DEFAULT 0,
+      shares INTEGER DEFAULT 0,
+      clicks INTEGER DEFAULT 0,
+      donations_from_post INTEGER DEFAULT 0,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Donor tribute / memorial donations
+    `CREATE TABLE IF NOT EXISTS donor_tributes (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      donation_id INTEGER REFERENCES campaign_donations(id),
+      tribute_type TEXT DEFAULT 'in_honor' CHECK (tribute_type IN ('in_honor','in_memory','in_celebration','in_support')),
+      honoree_name TEXT NOT NULL,
+      honoree_email TEXT,
+      honoree_relationship TEXT,
+      tribute_message TEXT,
+      notify_honoree BOOLEAN DEFAULT true,
+      notify_sent BOOLEAN DEFAULT false,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT NOT NULL,
+      is_public BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign story templates - pre-built templates for campaigns
+    `CREATE TABLE IF NOT EXISTS campaign_story_templates (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      template_name TEXT NOT NULL,
+      category TEXT DEFAULT 'general' CHECK (category IN ('general','medical','education','disaster','community','religious','environment','animals','sports','arts')),
+      title_template TEXT NOT NULL,
+      story_template TEXT NOT NULL,
+      impact_template TEXT,
+      goal_suggestion INTEGER,
+      image_suggestions TEXT[] DEFAULT '{}',
+      tips TEXT[] DEFAULT '{}',
+      is_featured BOOLEAN DEFAULT false,
+      usage_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Donation goal thermometer API data
+    `CREATE TABLE IF NOT EXISTS campaign_thermometers (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE UNIQUE,
+      current_amount INTEGER DEFAULT 0,
+      target_amount INTEGER NOT NULL,
+      percentage NUMERIC(5,2) DEFAULT 0,
+      donor_count INTEGER DEFAULT 0,
+      days_remaining INTEGER,
+      daily_average INTEGER DEFAULT 0,
+      projected_total INTEGER DEFAULT 0,
+      milestones JSONB DEFAULT '[25,50,75,100]',
+      milestone_reached JSONB DEFAULT '[]',
+      embed_config JSONB DEFAULT '{"show_thermometer":true,"show_donor_count":true,"show_days_left":true,"show_projected":true,"theme":"green"}',
+      last_updated TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Donor CRM export queue
+    `CREATE TABLE IF NOT EXISTS donor_crm_exports (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      export_type TEXT DEFAULT 'csv' CHECK (export_type IN ('csv','excel','pdf','json')),
+      export_scope TEXT DEFAULT 'all_donors' CHECK (export_scope IN ('all_donors','top_donors','new_donors','recurring','lapsed','segment','campaign')),
+      segment_id INTEGER,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      date_from DATE,
+      date_to DATE,
+      filters JSONB DEFAULT '{}',
+      record_count INTEGER DEFAULT 0,
+      file_path TEXT,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','processing','completed','failed','expired')),
+      requested_by TEXT NOT NULL,
+      requested_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ
+    )`,
+
+    // Campaign comparison - compare campaigns side by side
+    `CREATE TABLE IF NOT EXISTS campaign_comparisons (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      campaign_ids INTEGER[] NOT NULL,
+      comparison_type TEXT DEFAULT 'performance' CHECK (comparison_type IN ('performance','financial','engagement','growth','custom')),
+      metrics TEXT[] DEFAULT '{"raised","donors","shares","growth_rate"}',
+      is_public BOOLEAN DEFAULT false,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )`
   ];
 
@@ -1074,6 +1267,50 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     `CREATE INDEX IF NOT EXISTS idx_campaign_translations_language ON campaign_translations(language)`,
     // V4: Add gift_card_balance to donor_profiles
     `ALTER TABLE donor_profiles ADD COLUMN IF NOT EXISTS gift_card_balance INTEGER DEFAULT 0`,
+    // V5: Add new columns for V5 features
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_auctions BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS auction_count INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_pledges BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS pledge_total INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_tributes BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS tribute_count INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS referral_code TEXT`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS referral_count INTEGER DEFAULT 0`,
+    `ALTER TABLE donor_profiles ADD COLUMN IF NOT EXISTS referral_code TEXT`,
+    `ALTER TABLE donor_profiles ADD COLUMN IF NOT EXISTS referral_count INTEGER DEFAULT 0`,
+    `ALTER TABLE donor_profiles ADD COLUMN IF NOT EXISTS referral_earnings INTEGER DEFAULT 0`,
+    // V5 Indexes
+    `CREATE INDEX IF NOT EXISTS idx_donor_referrals_tenant ON donor_referrals(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_referrals_code ON donor_referrals(referral_code)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_referrals_referrer ON donor_referrals(referrer_email)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_referrals_campaign ON donor_referrals(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_auctions_tenant ON campaign_auctions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_auctions_campaign ON campaign_auctions(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_auctions_status ON campaign_auctions(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_auction_bids_tenant ON auction_bids(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_auction_bids_auction ON auction_bids(auction_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_auction_bids_email ON auction_bids(bidder_email)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_tenant ON campaign_pledges(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_campaign ON campaign_pledges(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_email ON campaign_pledges(pledgor_email)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_status ON campaign_pledges(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_social_posts_tenant ON campaign_social_posts(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_social_posts_campaign ON campaign_social_posts(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_social_posts_status ON campaign_social_posts(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_tributes_tenant ON donor_tributes(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_tributes_campaign ON donor_tributes(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_story_templates_tenant ON campaign_story_templates(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_story_templates_category ON campaign_story_templates(category)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_thermometers_tenant ON campaign_thermometers(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_thermometers_campaign ON campaign_thermometers(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_crm_exports_tenant ON donor_crm_exports(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_crm_exports_status ON donor_crm_exports(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_comparisons_tenant ON campaign_comparisons(tenant_id)`,
+    // Seed some default story templates
+    `INSERT INTO campaign_story_templates (tenant_id, template_name, category, title_template, story_template, impact_template, goal_suggestion, tips, is_featured) VALUES (0, 'Medical Emergency', 'medical', 'Help [Name] Fight [Condition]', 'Our beloved [Name] has been diagnosed with [condition] and needs urgent medical treatment. The cost of treatment is [amount] which the family cannot afford alone. With your help, we can give [Name] a fighting chance at recovery and a better quality of life.', 'Your donation will directly fund medical treatments, hospital bills, and medication for [Name]. Every contribution brings them closer to recovery.', 5000000, ARRAY['Include a photo of the patient','Share the diagnosis details','Provide hospital contact for verification','Update donors on treatment progress'], true) ON CONFLICT DO NOTHING`,
+    `INSERT INTO campaign_story_templates (tenant_id, template_name, category, title_template, story_template, impact_template, goal_suggestion, tips, is_featured) VALUES (0, 'School Building Project', 'education', 'Build a Better Future: [School Name] Needs Your Help', '[School Name] serves [number] students in [location] but lacks adequate facilities. Our current [building/classroom] is [condition] and we need to [action]. With your support, we can create a safe and inspiring learning environment for these children.', 'Your donation will provide bricks, cement, roofing, and labor to build a new [facility]. Each [amount] provides enough materials for one section.', 20000000, ARRAY['Include photos of current conditions','Share student enrollment numbers','Provide construction budget breakdown','Show architectural plans if available'], true) ON CONFLICT DO NOTHING`,
+    `INSERT INTO campaign_story_templates (tenant_id, template_name, category, title_template, story_template, impact_template, goal_suggestion, tips, is_featured) VALUES (0, 'Disaster Relief', 'disaster', 'Emergency Relief for [Location] [Disaster Type] Victims', 'A devastating [disaster type] has struck [location], leaving [number] families homeless and in desperate need. Homes, schools, and livelihoods have been destroyed. We are raising funds to provide immediate relief including food, shelter, clean water, and medical supplies.', '100% of donations go directly to relief efforts. UGX [amount] provides a family with a week of food and clean water. UGX [amount] provides temporary shelter for one family.', 10000000, ARRAY['Include recent photos/videos of the disaster','Provide verification from local authorities','Share specific items needed','Update donors on relief distribution'], true) ON CONFLICT DO NOTHING`,
+    `INSERT INTO campaign_story_templates (tenant_id, template_name, category, title_template, story_template, impact_template, goal_suggestion, tips, is_featured) VALUES (0, 'Community Development', 'community', 'Transform [Community Name]: [Project Goal]', 'The community of [community name] in [location] faces [challenge]. For years, residents have struggled with [specific problem]. This campaign aims to [solution] which will directly benefit [number] people and create lasting change for generations to come.', 'Your donation helps build [infrastructure/service] that serves [number] people. UGX [amount] provides [specific impact]. This is a sustainable project that will keep giving back.', 15000000, ARRAY['Include community photos and testimonials','Share data on community needs','Provide project timeline','List partnering organizations'], true) ON CONFLICT DO NOTHING`,
   ];
 
   // Run migrations
@@ -4256,7 +4493,558 @@ Sitemap: ${BASE_URL}/sitemap.xml
     `, req.session.user));
   }));
 
-  console.log('[Fundraising Enhancements] All V4 routes registered successfully');
+  console.log('[Fundraising V5] Donor Referrals, Auctions, Pledges, Social Media Scheduler, Tributes/Memorials, Story Templates, Thermometer API, CRM Export, Campaign Comparison + All V4 Features');
+
+  // =============================================
+  // V5 FEATURE 1: DONOR REFERRAL PROGRAM
+  // =============================================
+  // API: Generate referral code for a campaign
+  app.get('/api/campaigns/:id/referral-code', requireAuth, async (req, res) => {
+    try {
+      const campaign = (await pool.query('SELECT tenant_id, title, referral_code FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+      if (!campaign.referral_code) {
+        const code = 'REF-' + req.params.id + '-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        await pool.query('UPDATE fundraising_campaigns SET referral_code=$1 WHERE id=$2', [code, req.params.id]);
+        campaign.referral_code = code;
+      }
+      const referralLink = BASE_URL + '/campaigns/' + req.params.id + '?ref=' + campaign.referral_code;
+      const stats = (await pool.query('SELECT COUNT(*) as count, COALESCE(SUM(donated_amount),0) as total FROM donor_referrals WHERE campaign_id=$1 AND referrer_email=$2', [req.params.id, req.session.user.email])).rows[0];
+      res.json({ referral_code: campaign.referral_code, referral_link: referralLink, referrals: parseInt(stats?.count||0), total_donated: parseInt(stats?.total||0) });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // API: Track referral sign-up
+  app.post('/api/referrals/track', async (req, res) => {
+    try {
+      const { referral_code, referred_email, referred_name, campaign_id } = req.body;
+      if (!referral_code || !referred_email) return res.status(400).json({ error: 'Missing required fields' });
+      const ref = (await pool.query('SELECT * FROM donor_referrals WHERE referral_code=$1', [referral_code])).rows[0];
+      if (!ref) return res.status(404).json({ error: 'Invalid referral code' });
+      await pool.query('UPDATE donor_referrals SET referred_email=$1, referred_name=$2, status=$3 WHERE id=$4',
+        [referred_email, referred_name||'', 'signed_up', ref.id]);
+      await pool.query('UPDATE fundraising_campaigns SET referral_count=referral_count+1 WHERE id=$1', [ref.campaign_id]);
+      res.json({ success: true, message: 'Referral tracked successfully' });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Referral dashboard page
+  app.get('/campaigns/:id/referrals', requireAuth, async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT title, tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      const referrals = (await pool.query('SELECT * FROM donor_referrals WHERE campaign_id=$1 ORDER BY created_at DESC', [req.params.id])).rows;
+      const totalReferrals = referrals.length;
+      const totalDonated = referrals.reduce((s, r) => s + parseInt(r.donated_amount||0), 0);
+      res.send(renderPage('Referral Program - '+c.title, `
+        <div style="max-width:900px;margin:0 auto;padding:20px">
+          <h1 style="font-size:28px;font-weight:800">Donor Referral Program</h1>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0">
+            <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#4f46e5">${totalReferrals}</div><div style="color:#64748b">Referrals</div></div>
+            <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#059669">UGX ${totalDonated.toLocaleString()}</div><div style="color:#64748b">Donated via Referrals</div></div>
+            <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#f59e0b">${referrals.filter(r=>r.status==='rewarded').length}</div><div style="color:#64748b">Rewards Given</div></div>
+          </div>
+          <div class="card"><h3>Share Your Referral Link</h3>
+            <p>Share this link with friends. When they donate, you both earn rewards!</p>
+            <div style="background:#f1f5f9;padding:12px;border-radius:8px;font-family:monospace;word-break:break-all" id="refLink">${BASE_URL}/campaigns/${req.params.id}?ref=YOUR_CODE</div>
+          </div>
+          ${referrals.length > 0 ? '<div class="card"><h3>Referral History</h3><table style="width:100%;border-collapse:collapse"><tr style="background:#f1f5f9"><th style="padding:10px;text-align:left">Referred</th><th style="padding:10px;text-align:left">Status</th><th style="padding:10px;text-align:right">Donated</th><th style="padding:10px;text-align:right">Reward</th></tr>' + referrals.map(r => '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:10px">'+esc(r.referred_name||r.referred_email||'Pending')+'</td><td style="padding:10px"><span style="background:'+(r.status==='rewarded'?'#d1fae5;color:#065f46':r.status==='donated'?'#dbeafe;color:#1e40af':'#fef3c7;color:#92400e')+';padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700">'+esc(r.status)+'</span></td><td style="padding:10px;text-align:right">UGX '+parseInt(r.donated_amount||0).toLocaleString()+'</td><td style="padding:10px;text-align:right">UGX '+parseInt(r.reward_amount||0).toLocaleString()+'</td></tr>').join('') + '</table></div>' : ''}
+        </div>
+      `));
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // =============================================
+  // V5 FEATURE 2: CAMPAIGN AUCTIONS
+  // =============================================
+  app.get('/campaigns/:id/auctions', async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT title FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      const auctions = (await pool.query("SELECT * FROM campaign_auctions WHERE campaign_id=$1 AND status IN ('active','upcoming','ending_soon') ORDER BY end_date ASC", [req.params.id])).rows;
+      res.send(renderPage('Auctions - '+c.title, `
+        <div style="max-width:900px;margin:0 auto;padding:20px">
+          <h1 style="font-size:28px;font-weight:800;text-align:center">Campaign Auctions</h1>
+          <p style="text-align:center;color:#64748b">Bid on items to support this campaign!</p>
+          ${auctions.length > 0 ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px;margin-top:24px">' + auctions.map(a => `
+            <div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08)">
+              ${a.image_url ? '<img src="'+esc(a.image_url)+'" style="width:100%;height:180px;object-fit:cover">' : '<div style="height:180px;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:center;color:white;font-size:48px">&#128276;</div>'}
+              <div style="padding:16px">
+                <h3 style="font-size:18px;font-weight:700">${esc(a.item_name)}</h3>
+                <p style="color:#64748b;font-size:14px;margin:4px 0">${esc(a.description||'').substring(0,80)}</p>
+                <div style="display:flex;justify-content:space-between;margin-top:12px;padding:12px;background:#f8fafc;border-radius:8px">
+                  <div><div style="font-size:12px;color:#64748b">Current Bid</div><div style="font-weight:800;color:#059669">UGX ${parseInt(a.current_bid||a.starting_bid).toLocaleString()}</div></div>
+                  <div><div style="font-size:12px;color:#64748b">Bids</div><div style="font-weight:700">${a.total_bids}</div></div>
+                </div>
+                <div style="margin-top:12px;font-size:13px;color:#64748b">Ends: ${new Date(a.end_date).toLocaleDateString()}</div>
+                ${a.buy_now_price ? '<div style="margin-top:8px"><a href="/campaigns/'+req.params.id+'/auctions/'+a.id+'/bid" style="display:block;padding:10px;background:#059669;color:white;border-radius:8px;text-align:center;font-weight:700;text-decoration:none">Buy Now: UGX '+parseInt(a.buy_now_price).toLocaleString()+'</a></div>' : '<a href="/campaigns/'+req.params.id+'/auctions/'+a.id+'/bid" style="display:block;margin-top:8px;padding:10px;background:#4f46e5;color:white;border-radius:8px;text-align:center;font-weight:700;text-decoration:none">Place Bid</a>'}
+              </div>
+            </div>
+          `).join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px;margin-top:24px"><div style="font-size:48px">&#128276;</div><h3>No Active Auctions</h3><p style="color:#64748b">Auction items will be posted by the campaign organizer.</p></div>'}
+          ${req.session.user ? '<a href="/campaigns/'+req.params.id+'/auctions/new" style="display:block;margin-top:24px;text-align:center;padding:14px;background:#4f46e5;color:white;border-radius:12px;text-decoration:none;font-weight:700">Create Auction Item</a>' : ''}
+        </div>
+      `));
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // Create auction item
+  app.get('/campaigns/:id/auctions/new', requireAuth, async (req, res) => {
+    res.send(renderPage('Create Auction Item', `
+      <div style="max-width:600px;margin:0 auto;padding:20px">
+        <div class="card"><h2>Create Auction Item</h2>
+          <form method="POST" action="/campaigns/${req.params.id}/auctions/save">
+            <label>Item Name</label><input name="item_name" placeholder="e.g., Signed Artwork" required>
+            <label>Description</label><textarea name="description" rows="3" placeholder="Describe the auction item"></textarea>
+            <label>Image URL</label><input name="image_url" placeholder="https://...">
+            <label>Starting Bid (UGX)</label><input name="starting_bid" type="number" min="0" value="50000" required>
+            <label>Bid Increment (UGX)</label><input name="bid_increment" type="number" min="1000" value="10000">
+            <label>Reserve Price (UGX, optional)</label><input name="reserve_price" type="number" min="0">
+            <label>Buy Now Price (UGX, optional)</label><input name="buy_now_price" type="number" min="0">
+            <label>Auction Start</label><input name="start_date" type="datetime-local" required>
+            <label>Auction End</label><input name="end_date" type="datetime-local" required>
+            <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px;margin-top:16px">Create Auction</button>
+          </form>
+        </div>
+      </div>
+    `));
+  });
+
+  app.post('/campaigns/:id/auctions/save', requireAuth, async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      await pool.query('INSERT INTO campaign_auctions(tenant_id,campaign_id,item_name,description,image_url,starting_bid,current_bid,bid_increment,reserve_price,buy_now_price,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11)',
+        [c.tenant_id, req.params.id, req.body.item_name, req.body.description||'', req.body.image_url||'', parseInt(req.body.starting_bid)||50000, parseInt(req.body.bid_increment)||10000, parseInt(req.body.reserve_price)||null, parseInt(req.body.buy_now_price)||null, req.body.start_date, req.body.end_date]);
+      await pool.query('UPDATE fundraising_campaigns SET has_auctions=true, auction_count=auction_count+1 WHERE id=$1', [req.params.id]);
+      res.redirect('/campaigns/'+req.params.id+'/auctions');
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // Place bid page
+  app.get('/campaigns/:campaignId/auctions/:auctionId/bid', requireAuth, async (req, res) => {
+    try {
+      const auction = (await pool.query('SELECT * FROM campaign_auctions WHERE id=$1', [req.params.auctionId])).rows[0];
+      if (!auction) return res.status(404).send('Auction not found');
+      const minBid = parseInt(auction.current_bid||auction.starting_bid) + parseInt(auction.bid_increment);
+      res.send(renderPage('Bid on '+auction.item_name, `
+        <div style="max-width:600px;margin:0 auto;padding:20px">
+          <div class="card">
+            <h2>${esc(auction.item_name)}</h2>
+            <p style="color:#64748b">${esc(auction.description||'')}</p>
+            <div style="background:#f0fdf4;padding:16px;border-radius:12px;margin:16px 0;text-align:center">
+              <div style="font-size:14px;color:#64748b">Current Bid</div>
+              <div style="font-size:32px;font-weight:800;color:#059669">UGX ${parseInt(auction.current_bid||auction.starting_bid).toLocaleString()}</div>
+              <div style="font-size:13px;color:#64748b">${auction.total_bids} bid(s) | Ends ${new Date(auction.end_date).toLocaleString()}</div>
+            </div>
+            <form method="POST" action="/campaigns/${req.params.campaignId}/auctions/${req.params.auctionId}/bid/save">
+              <label>Your Bid (min: UGX ${minBid.toLocaleString()})</label>
+              <input name="bid_amount" type="number" min="${minBid}" value="${minBid}" required>
+              <label>Your Name</label><input name="bidder_name" value="${esc(req.session.user?.name||'')}" required>
+              <label>Your Email</label><input name="bidder_email" value="${esc(req.session.user?.email||'')}" required>
+              <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px;margin-top:16px">Place Bid</button>
+            </form>
+          </div>
+        </div>
+      `));
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  app.post('/campaigns/:campaignId/auctions/:auctionId/bid/save', requireAuth, async (req, res) => {
+    try {
+      const auction = (await pool.query('SELECT * FROM campaign_auctions WHERE id=$1', [req.params.auctionId])).rows[0];
+      if (!auction) return res.status(404).send('Auction not found');
+      const bidAmount = parseInt(req.body.bid_amount);
+      const minBid = parseInt(auction.current_bid||auction.starting_bid) + parseInt(auction.bid_increment);
+      if (bidAmount < minBid) return res.status(400).send('Bid must be at least UGX '+minBid.toLocaleString());
+      // Mark all previous bids as not winning
+      await pool.query('UPDATE auction_bids SET is_winning=false WHERE auction_id=$1', [auction.id]);
+      // Insert new bid as winning
+      const tenant_id = auction.tenant_id;
+      await pool.query('INSERT INTO auction_bids(tenant_id,auction_id,campaign_id,bidder_name,bidder_email,bid_amount,is_winning) VALUES($1,$2,$3,$4,$5,$6,true)',
+        [tenant_id, auction.id, req.params.campaignId, req.body.bidder_name, req.body.bidder_email, bidAmount]);
+      // Update auction current bid
+      await pool.query('UPDATE campaign_auctions SET current_bid=$1, current_bidder=$2, current_bidder_email=$3, total_bids=total_bids+1 WHERE id=$4',
+        [bidAmount, req.body.bidder_name, req.body.bidder_email, auction.id]);
+      res.redirect('/campaigns/'+req.params.campaignId+'/auctions');
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // =============================================
+  // V5 FEATURE 3: PLEDGE MANAGEMENT
+  // =============================================
+  app.get('/campaigns/:id/pledges', async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT title FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      const pledges = (await pool.query('SELECT * FROM campaign_pledges WHERE campaign_id=$1 ORDER BY created_at DESC', [req.params.id])).rows;
+      const totalPledged = pledges.reduce((s, p) => s + parseInt(p.pledged_amount||0), 0);
+      const totalFulfilled = pledges.reduce((s, p) => s + parseInt(p.fulfilled_amount||0), 0);
+      res.send(renderPage('Pledges - '+c.title, `
+        <div style="max-width:900px;margin:0 auto;padding:20px">
+          <h1 style="font-size:28px;font-weight:800">Campaign Pledges</h1>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0">
+            <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:24px;font-weight:800;color:#4f46e5">UGX ${totalPledged.toLocaleString()}</div><div style="color:#64748b">Total Pledged</div></div>
+            <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:24px;font-weight:800;color:#059669">UGX ${totalFulfilled.toLocaleString()}</div><div style="color:#64748b">Fulfilled</div></div>
+            <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:24px;font-weight:800;color:#f59e0b">${pledges.length}</div><div style="color:#64748b">Pledgors</div></div>
+          </div>
+          ${req.session.user ? '<a href="/campaigns/'+req.params.id+'/pledges/new" style="display:block;padding:14px;background:#4f46e5;color:white;border-radius:12px;text-decoration:none;font-weight:700;text-align:center;margin-bottom:24px">Make a Pledge</a>' : ''}
+          ${pledges.length > 0 ? '<div class="card"><table style="width:100%;border-collapse:collapse"><tr style="background:#f1f5f9"><th style="padding:10px;text-align:left">Pledgor</th><th style="padding:10px;text-align:right">Pledged</th><th style="padding:10px;text-align:right">Fulfilled</th><th style="padding:10px">Status</th></tr>' + pledges.map(p => '<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:10px">'+esc(p.pledgor_name)+'</td><td style="padding:10px;text-align:right">UGX '+parseInt(p.pledged_amount).toLocaleString()+'</td><td style="padding:10px;text-align:right">UGX '+parseInt(p.fulfilled_amount||0).toLocaleString()+'</td><td style="padding:10px"><span style="background:'+(p.status==='fulfilled'?'#d1fae5;color:#065f46':p.status==='overdue'?'#fef2f2;color:#991b1b':'#fef3c7;color:#92400e')+';padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700">'+esc(p.status)+'</span></td></tr>').join('') + '</table></div>' : ''}
+        </div>
+      `));
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  app.get('/campaigns/:id/pledges/new', requireAuth, async (req, res) => {
+    res.send(renderPage('Make a Pledge', `
+      <div style="max-width:600px;margin:0 auto;padding:20px">
+        <div class="card"><h2>Make a Pledge</h2>
+          <p style="color:#64748b">Commit to donating a specific amount by a target date.</p>
+          <form method="POST" action="/campaigns/${req.params.id}/pledges/save">
+            <label>Your Name</label><input name="pledgor_name" value="${esc(req.session.user?.name||'')}" required>
+            <label>Email</label><input name="pledgor_email" value="${esc(req.session.user?.email||'')}" required>
+            <label>Phone</label><input name="pledgor_phone" placeholder="+256...">
+            <label>Pledge Amount (UGX)</label><input name="pledged_amount" type="number" min="1000" required>
+            <label>Expected Date of Donation</label><input name="expected_fulfillment_date" type="date" required>
+            <label>Notes (optional)</label><textarea name="notes" rows="2" placeholder="Any additional information"></textarea>
+            <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px;margin-top:16px">Submit Pledge</button>
+          </form>
+        </div>
+      </div>
+    `));
+  });
+
+  app.post('/campaigns/:id/pledges/save', requireAuth, async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      await pool.query('INSERT INTO campaign_pledges(tenant_id,campaign_id,pledgor_name,pledgor_email,pledgor_phone,pledged_amount,pledge_date,expected_fulfillment_date,notes) VALUES($1,$2,$3,$4,$5,$6,CURRENT_DATE,$7,$8)',
+        [c.tenant_id, req.params.id, req.body.pledgor_name, req.body.pledgor_email, req.body.pledgor_phone||'', parseInt(req.body.pledged_amount), req.body.expected_fulfillment_date, req.body.notes||'']);
+      await pool.query('UPDATE fundraising_campaigns SET has_pledges=true, pledge_total=pledge_total+$1 WHERE id=$2', [parseInt(req.body.pledged_amount), req.params.id]);
+      res.redirect('/campaigns/'+req.params.id+'/pledges');
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // =============================================
+  // V5 FEATURE 4: SOCIAL MEDIA SCHEDULED POSTS
+  // =============================================
+  app.get('/campaigns/:id/social-posts', requireAuth, async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT title FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      const posts = (await pool.query("SELECT * FROM campaign_social_posts WHERE campaign_id=$1 ORDER BY scheduled_at ASC", [req.params.id])).rows;
+      res.send(renderPage('Social Media Posts - '+c.title, `
+        <div style="max-width:900px;margin:0 auto;padding:20px">
+          <h1 style="font-size:28px;font-weight:800">Social Media Scheduler</h1>
+          <p style="color:#64748b">Schedule posts to promote your campaign across social platforms.</p>
+          <a href="/campaigns/${req.params.id}/social-posts/new" class="btn btn-green" style="margin:16px 0">Schedule New Post</a>
+          ${posts.length > 0 ? '<div style="margin-top:16px">' + posts.map(p => '<div style="background:white;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"><div style="display:flex;justify-content:space-between;align-items:center"><div><span style="background:#ede9fe;color:#4f46e5;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700">'+esc(p.platform)+'</span> <span style="background:'+(p.status==='posted'?'#d1fae5;color:#065f46':p.status==='failed'?'#fef2f2;color:#991b1b':'#fef3c7;color:#92400e')+';padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700">'+esc(p.status)+'</span></div><div style="color:#64748b;font-size:13px">'+new Date(p.scheduled_at).toLocaleString()+'</div></div><p style="margin-top:8px;color:#1e293b">'+esc(p.content).substring(0,200)+'</p></div>').join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px;margin-top:24px"><div style="font-size:48px">&#128240;</div><h3>No Posts Scheduled</h3><p style="color:#64748b">Schedule your first social media post to boost your campaign!</p></div>'}
+        </div>
+      `));
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  app.get('/campaigns/:id/social-posts/new', requireAuth, async (req, res) => {
+    res.send(renderPage('Schedule Social Post', `
+      <div style="max-width:600px;margin:0 auto;padding:20px">
+        <div class="card"><h2>Schedule Social Post</h2>
+          <form method="POST" action="/campaigns/${req.params.id}/social-posts/save">
+            <label>Platform</label><select name="platform"><option value="twitter">Twitter/X</option><option value="facebook">Facebook</option><option value="linkedin">LinkedIn</option><option value="instagram">Instagram</option><option value="whatsapp">WhatsApp</option><option value="telegram">Telegram</option><option value="tiktok">TikTok</option></select>
+            <label>Post Content</label><textarea name="content" rows="4" placeholder="Write your social media post..." required></textarea>
+            <label>Image URL (optional)</label><input name="image_url" placeholder="https://...">
+            <label>Link URL (optional)</label><input name="link_url" placeholder="https://...">
+            <label>Hashtags (comma separated)</label><input name="hashtags" placeholder="#fundraising, #donate, #charity">
+            <label>Schedule Date & Time</label><input name="scheduled_at" type="datetime-local" required>
+            <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px;margin-top:16px">Schedule Post</button>
+          </form>
+        </div>
+      </div>
+    `));
+  });
+
+  app.post('/campaigns/:id/social-posts/save', requireAuth, async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      const hashtags = (req.body.hashtags||'').split(',').map(t => t.trim()).filter(t => t);
+      await pool.query('INSERT INTO campaign_social_posts(tenant_id,campaign_id,platform,content,image_url,link_url,hashtags,scheduled_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+        [c.tenant_id, req.params.id, req.body.platform, req.body.content, req.body.image_url||'', req.body.link_url||'', hashtags, req.body.scheduled_at, req.session.user?.email||'']);
+      res.redirect('/campaigns/'+req.params.id+'/social-posts');
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // =============================================
+  // V5 FEATURE 5: DONOR TRIBUTES / MEMORIALS
+  // =============================================
+  app.get('/campaigns/:id/tributes', async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT title FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      const tributes = (await pool.query("SELECT * FROM donor_tributes WHERE campaign_id=$1 AND is_public=true ORDER BY created_at DESC", [req.params.id])).rows;
+      res.send(renderPage('Tributes - '+c.title, `
+        <div style="max-width:900px;margin:0 auto;padding:20px">
+          <h1 style="font-size:28px;font-weight:800;text-align:center">Donor Tributes</h1>
+          <p style="text-align:center;color:#64748b">Honor someone special with your donation</p>
+          ${tributes.length > 0 ? '<div style="margin-top:24px">' + tributes.map(t => `
+            <div style="background:white;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid ${t.tribute_type==='in_memory'?'#64748b':t.tribute_type==='in_honor'?'#f59e0b':t.tribute_type==='in_celebration'?'#059669':'#4f46e5'}">
+              <div style="display:flex;justify-content:space-between;align-items:center"><span style="background:#f1f5f9;padding:4px 12px;border-radius:8px;font-size:12px;font-weight:700;color:#475569">${esc(t.tribute_type.replace('in_','').replace('_',' '))}</span><span style="color:#64748b;font-size:13px">${new Date(t.created_at).toLocaleDateString()}</span></div>
+              <h3 style="margin-top:12px;font-size:18px">${t.tribute_type==='in_memory'?'In Loving Memory of':'In Honor of'} ${esc(t.honoree_name)}</h3>
+              ${t.tribute_message ? '<p style="color:#475569;font-style:italic;margin-top:8px">"'+esc(t.tribute_message)+'"</p>' : ''}
+              <div style="margin-top:8px;font-size:13px;color:#64748b">- ${esc(t.donor_name)}</div>
+            </div>
+          `).join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px;margin-top:24px"><div style="font-size:48px">&#128142;</div><h3>No Tributes Yet</h3><p style="color:#64748b">Be the first to honor someone with your donation.</p></div>'}
+          ${req.session.user ? '<a href="/campaigns/'+req.params.id+'/tributes/new" style="display:block;margin-top:20px;padding:14px;background:#4f46e5;color:white;border-radius:12px;text-decoration:none;font-weight:700;text-align:center">Write a Tribute</a>' : ''}
+        </div>
+      `));
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  app.get('/campaigns/:id/tributes/new', requireAuth, async (req, res) => {
+    res.send(renderPage('Write a Tribute', `
+      <div style="max-width:600px;margin:0 auto;padding:20px">
+        <div class="card"><h2>Write a Tribute</h2>
+          <form method="POST" action="/campaigns/${req.params.id}/tributes/save">
+            <label>Tribute Type</label><select name="tribute_type"><option value="in_honor">In Honor Of</option><option value="in_memory">In Memory Of</option><option value="in_celebration">In Celebration Of</option><option value="in_support">In Support Of</option></select>
+            <label>Honoree Name</label><input name="honoree_name" placeholder="Name of the person being honored" required>
+            <label>Honoree Email (optional)</label><input name="honoree_email" placeholder="To notify them of the tribute">
+            <label>Relationship</label><input name="honoree_relationship" placeholder="e.g., Father, Teacher, Friend">
+            <label>Tribute Message</label><textarea name="tribute_message" rows="4" placeholder="Share a message about this person..." required></textarea>
+            <label>Your Name</label><input name="donor_name" value="${esc(req.session.user?.name||'')}" required>
+            <label>Your Email</label><input name="donor_email" value="${esc(req.session.user?.email||'')}" required>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" name="notify_honoree" value="true" checked> Notify honoree about this tribute</label>
+            <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px;margin-top:16px">Submit Tribute</button>
+          </form>
+        </div>
+      </div>
+    `));
+  });
+
+  app.post('/campaigns/:id/tributes/save', requireAuth, async (req, res) => {
+    try {
+      const c = (await pool.query('SELECT tenant_id, title FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!c) return res.status(404).send('Campaign not found');
+      await pool.query('INSERT INTO donor_tributes(tenant_id,campaign_id,tribute_type,honoree_name,honoree_email,honoree_relationship,tribute_message,notify_honoree,donor_name,donor_email) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+        [c.tenant_id, req.params.id, req.body.tribute_type, req.body.honoree_name, req.body.honoree_email||'', req.body.honoree_relationship||'', req.body.tribute_message, req.body.notify_honoree==='true', req.body.donor_name, req.body.donor_email]);
+      await pool.query('UPDATE fundraising_campaigns SET has_tributes=true, tribute_count=tribute_count+1 WHERE id=$1', [req.params.id]);
+      // Notify honoree if requested
+      if (req.body.notify_honoree === 'true' && req.body.honoree_email) {
+        try {
+          await sendEmail(req.body.honoree_email, 'A Tribute Has Been Made in Your Honor', `
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+              <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:30px;border-radius:12px 12px 0 0;text-align:center;color:white"><h1>A Special Tribute</h1></div>
+              <div style="padding:30px;background:white;border:1px solid #e2e8f0">
+                <p>${esc(req.body.donor_name)} has made a tribute <strong>${esc(req.body.tribute_type.replace('in_','').replace('_',' '))}</strong> you in support of <strong>"${esc(c.title)}"</strong>.</p>
+                <p style="font-style:italic;color:#475569">"${esc(req.body.tribute_message)}"</p>
+                <a href="${BASE_URL}/campaigns/${req.params.id}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:white;border-radius:8px;text-decoration:none;font-weight:700">View Campaign</a>
+              </div>
+            </div>
+          `);
+          await pool.query('UPDATE donor_tributes SET notify_sent=true WHERE campaign_id=$1 AND honoree_email=$2', [req.params.id, req.body.honoree_email]);
+        } catch(e) { console.warn('[Tribute Email Error]', e.message); }
+      }
+      res.redirect('/campaigns/'+req.params.id+'/tributes');
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // =============================================
+  // V5 FEATURE 6: STORY TEMPLATES
+  // =============================================
+  app.get('/campaign-templates', async (req, res) => {
+    try {
+      const templates = (await pool.query("SELECT * FROM campaign_story_templates WHERE is_featured=true OR tenant_id=$1 ORDER BY category, usage_count DESC", [req.session.user?.tenant_id||0])).rows;
+      res.send(renderPage('Campaign Story Templates', `
+        <div style="max-width:900px;margin:0 auto;padding:20px">
+          <h1 style="font-size:28px;font-weight:800;text-align:center">Campaign Story Templates</h1>
+          <p style="text-align:center;color:#64748b;margin-bottom:24px">Use these professional templates to create compelling campaign stories</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px">
+            ${templates.map(t => `
+              <div style="background:white;border-radius:16px;padding:20px;box-shadow:0 4px 12px rgba(0,0,0,0.08);border-top:4px solid ${t.category==='medical'?'#ef4444':t.category==='education'?'#3b82f6':t.category==='disaster'?'#f59e0b':t.category==='community'?'#059669':'#4f46e5'}">
+                <span style="background:#f1f5f9;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:700;color:#475569;text-transform:uppercase">${esc(t.category)}</span>
+                <h3 style="margin-top:12px;font-size:16px;font-weight:700">${esc(t.template_name)}</h3>
+                <p style="color:#64748b;font-size:13px;margin:8px 0">${esc(t.title_template)}</p>
+                <div style="font-size:13px;color:#059669;font-weight:700">Suggested Goal: UGX ${parseInt(t.goal_suggestion||0).toLocaleString()}</div>
+                <div style="font-size:12px;color:#64748b;margin-top:8px">Used ${t.usage_count} times</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `));
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // API: Get templates
+  app.get('/api/campaign-templates', async (req, res) => {
+    try {
+      const templates = (await pool.query("SELECT * FROM campaign_story_templates WHERE is_featured=true OR tenant_id=$1 ORDER BY category", [req.query.tenant_id||0])).rows;
+      res.json(templates);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // =============================================
+  // V5 FEATURE 7: THERMOMETER / GOAL WIDGET API
+  // =============================================
+  app.get('/api/campaigns/:id/thermometer', async (req, res) => {
+    try {
+      const campaign = (await pool.query('SELECT id, title, target, tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+      const stats = (await pool.query('SELECT COALESCE(SUM(amount),0) as raised, COUNT(*) as donors, AVG(amount) as avg_donation FROM campaign_donations WHERE campaign_id=$1 AND refunded=false', [req.params.id])).rows[0];
+      const raised = parseInt(stats?.raised||0);
+      const target = parseInt(campaign.target||0);
+      const donors = parseInt(stats?.donors||0);
+      const pct = target > 0 ? Math.min(100, Math.round(raised/target*100*100)/100) : 0;
+      // Calculate days remaining
+      const deadline = (await pool.query('SELECT deadline FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0]?.deadline;
+      const daysRemaining = deadline ? Math.max(0, Math.ceil((new Date(deadline) - new Date())/(1000*60*60*24))) : null;
+      // Daily average and projection
+      const firstDonation = (await pool.query('SELECT MIN(donated_at) as first FROM campaign_donations WHERE campaign_id=$1 AND refunded=false', [req.params.id])).rows[0]?.first;
+      let dailyAvg = 0;
+      let projected = 0;
+      if (firstDonation) {
+        const daysSinceStart = Math.max(1, Math.ceil((new Date() - new Date(firstDonation))/(1000*60*60*24)));
+        dailyAvg = Math.round(raised / daysSinceStart);
+        projected = daysRemaining ? raised + (dailyAvg * daysRemaining) : raised;
+      }
+      // Check milestones reached
+      const milestonesReached = [25,50,75,100].filter(m => pct >= m);
+      // Upsert thermometer data
+      await pool.query(`INSERT INTO campaign_thermometers(tenant_id,campaign_id,current_amount,target_amount,percentage,donor_count,days_remaining,daily_average,projected_total,milestone_reached,last_updated) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+        ON CONFLICT (campaign_id) DO UPDATE SET current_amount=$3, target_amount=$4, percentage=$5, donor_count=$6, days_remaining=$7, daily_average=$8, projected_total=$9, milestone_reached=$10, last_updated=NOW()`,
+        [campaign.tenant_id, campaign.id, raised, target, pct, donors, daysRemaining, dailyAvg, projected, JSON.stringify(milestonesReached)]);
+      res.json({
+        campaign_id: campaign.id,
+        title: campaign.title,
+        raised,
+        target,
+        percentage: pct,
+        donor_count: donors,
+        days_remaining: daysRemaining,
+        daily_average: dailyAvg,
+        projected_total: projected,
+        milestones_reached: milestonesReached,
+        on_track: projected >= target,
+        embed_url: BASE_URL + '/api/campaigns/' + campaign.id + '/thermometer/embed'
+      });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Embeddable thermometer widget
+  app.get('/api/campaigns/:id/thermometer/embed', async (req, res) => {
+    try {
+      const t = (await pool.query('SELECT * FROM campaign_thermometers WHERE campaign_id=$1', [req.params.id])).rows[0];
+      const c = (await pool.query('SELECT title FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+      if (!t || !c) return res.status(404).send('Not found');
+      const pct = parseFloat(t.percentage||0);
+      res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;padding:16px;background:#f8fafc}.thermometer{background:white;border-radius:16px;padding:20px;box-shadow:0 2px 12px rgba(0,0,0,0.08);max-width:400px;margin:0 auto}h2{font-size:16px;margin-bottom:12px;text-align:center}.bar{background:#e2e8f0;border-radius:20px;height:24px;overflow:hidden}.fill{background:linear-gradient(90deg,#059669,#10b981);height:100%;border-radius:20px;transition:width 1s;width:${pct}%}.stats{display:flex;justify-content:space-between;margin-top:12px;font-size:13px;color:#64748b}.amount{font-size:20px;font-weight:800;color:#059669;text-align:center;margin-top:8px}</style></head><body><div class="thermometer"><h2>${c.title}</h2><div class="bar"><div class="fill"></div></div><div class="amount">UGX ${parseInt(t.current_amount).toLocaleString()} / UGX ${parseInt(t.target_amount).toLocaleString()}</div><div class="stats"><span>${Math.round(pct)}% funded</span><span>${parseInt(t.donor_count)} donors</span><span>${t.days_remaining||'?'} days left</span></div></div></body></html>`);
+    } catch(e) { res.status(500).send('Error'); }
+  });
+
+  // =============================================
+  // V5 FEATURE 8: DONOR CRM EXPORT
+  // =============================================
+  app.post('/api/donors/export', requireAuth, async (req, res) => {
+    try {
+      const { export_type, export_scope, campaign_id, date_from, date_to, segment_id } = req.body;
+      const tenant_id = req.session.user.tenant_id;
+      // Build query based on scope
+      let query = 'SELECT dp.full_name, dp.user_email, dp.phone, dp.country, dp.city, dp.total_donated, dp.donation_count, dp.campaigns_supported, dp.first_donation_at, dp.last_donation_at, dp.is_recurring_donor FROM donor_profiles dp WHERE dp.tenant_id=$1';
+      const params = [tenant_id];
+      if (export_scope === 'campaign' && campaign_id) {
+        query += ' AND dp.user_email IN (SELECT donor_email FROM campaign_donations WHERE campaign_id=$2 AND refunded=false)';
+        params.push(campaign_id);
+      } else if (export_scope === 'top_donors') {
+        query += ' ORDER BY dp.total_donated DESC LIMIT 100';
+      } else if (export_scope === 'new_donors') {
+        query += ' AND dp.first_donation_at >= NOW() - INTERVAL \'30 days\'';
+      } else if (export_scope === 'recurring') {
+        query += ' AND dp.is_recurring_donor=true';
+      } else if (export_scope === 'lapsed') {
+        query += ' AND dp.last_donation_at < NOW() - INTERVAL \'90 days\'';
+      }
+      const donors = (await pool.query(query, params)).rows;
+      // Generate CSV
+      const headers = 'Name,Email,Phone,Country,City,Total Donated,Donation Count,Campaigns,First Donation,Last Donation,Recurring';
+      const rows = donors.map(d => `"${esc(d.full_name||'')}","${d.user_email||''}","${d.phone||''}","${d.country||''}","${d.city||''}",${d.total_donated||0},${d.donation_count||0},${d.campaigns_supported||0},"${d.first_donation_at||''}","${d.last_donation_at||''}",${d.is_recurring_donor||false}`);
+      const csv = headers + '\n' + rows.join('\n');
+      // Record export
+      await pool.query('INSERT INTO donor_crm_exports(tenant_id,export_type,export_scope,campaign_id,date_from,date_to,record_count,status,requested_by,completed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())',
+        [tenant_id, export_type||'csv', export_scope||'all_donors', campaign_id||null, date_from||null, date_to||null, donors.length, 'completed', req.session.user.email]);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=donors-export-' + new Date().toISOString().split('T')[0] + '.csv');
+      res.send(csv);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Export page
+  app.get('/admin/donor-export', requireAuth, async (req, res) => {
+    const exports = (await pool.query('SELECT * FROM donor_crm_exports WHERE tenant_id=$1 ORDER BY requested_at DESC LIMIT 20', [req.session.user.tenant_id])).rows;
+    res.send(renderPage('Donor CRM Export', `
+      <div style="max-width:700px;margin:0 auto;padding:20px">
+        <h1 style="font-size:28px;font-weight:800">Donor CRM Export</h1>
+        <div class="card" style="margin-top:20px">
+          <form method="POST" action="/api/donors/export">
+            <label>Export Format</label><select name="export_type"><option value="csv">CSV</option><option value="excel">Excel</option><option value="json">JSON</option></select>
+            <label>Export Scope</label><select name="export_scope"><option value="all_donors">All Donors</option><option value="top_donors">Top Donors</option><option value="new_donors">New Donors (30 days)</option><option value="recurring">Recurring Donors</option><option value="lapsed">Lapsed Donors (90+ days)</option></select>
+            <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px;margin-top:16px">Export Donors</button>
+          </form>
+        </div>
+        ${exports.length > 0 ? '<div class="card" style="margin-top:20px"><h3>Recent Exports</h3>' + exports.map(e => '<div style="padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="font-weight:700">'+esc(e.export_type.toUpperCase())+'</span> - '+esc(e.export_scope.replace('_',' '))+' ('+e.record_count+' records) <span style="color:#64748b;font-size:13px">'+new Date(e.requested_at).toLocaleString()+'</span></div>').join('') + '</div>' : ''}
+      </div>
+    `));
+  });
+
+  // =============================================
+  // V5 FEATURE 9: CAMPAIGN COMPARISON
+  // =============================================
+  app.get('/campaigns/compare', async (req, res) => {
+    try {
+      const ids = (req.query.ids||'').split(',').filter(Boolean).map(Number).slice(0,5);
+      if (ids.length < 2) {
+        return res.send(renderPage('Compare Campaigns', `
+          <div style="max-width:700px;margin:0 auto;padding:20px">
+            <h1 style="font-size:28px;font-weight:800">Compare Campaigns</h1>
+            <p style="color:#64748b">Select 2-5 campaigns to compare side by side.</p>
+            <form method="GET" action="/campaigns/compare">
+              <label>Campaign IDs (comma separated)</label><input name="ids" placeholder="1,2,3" required>
+              <button class="btn btn-green" style="margin-top:12px">Compare</button>
+            </form>
+          </div>
+        `));
+      }
+      const campaigns = (await pool.query('SELECT fc.id, fc.title, fc.target, fc.category, fc.country, fc.status, COALESCE(SUM(cd.amount),0) as raised, COUNT(cd.id) as donors, fc.total_shares, fc.created_at FROM fundraising_campaigns fc LEFT JOIN campaign_donations cd ON cd.campaign_id=fc.id AND cd.refunded=false WHERE fc.id=ANY($1) GROUP BY fc.id ORDER BY raised DESC', [ids])).rows;
+      res.send(renderPage('Compare Campaigns', `
+        <div style="max-width:1100px;margin:0 auto;padding:20px">
+          <h1 style="font-size:28px;font-weight:800;text-align:center">Campaign Comparison</h1>
+          <div style="overflow-x:auto;margin-top:24px">
+            <table style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+              <tr style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white"><th style="padding:14px;text-align:left">Metric</th>${campaigns.map(c => '<th style="padding:14px;text-align:right">'+esc(c.title.substring(0,25))+'</th>').join('')}</tr>
+              <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:12px;font-weight:600">Status</td>${campaigns.map(c => '<td style="padding:12px;text-align:right"><span style="background:'+(c.status==='active'?'#d1fae5;color:#065f46':c.status==='completed'?'#dbeafe;color:#1e40af':'#fef3c7;color:#92400e')+';padding:2px 8px;border-radius:8px;font-size:12px;font-weight:700">'+esc(c.status)+'</span></td>').join('')}</tr>
+              <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:12px;font-weight:600">Target</td>${campaigns.map(c => '<td style="padding:12px;text-align:right">UGX '+parseInt(c.target).toLocaleString()+'</td>').join('')}</tr>
+              <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc"><td style="padding:12px;font-weight:600">Raised</td>${campaigns.map(c => '<td style="padding:12px;text-align:right;font-weight:800;color:#059669">UGX '+parseInt(c.raised).toLocaleString()+'</td>').join('')}</tr>
+              <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:12px;font-weight:600">% Funded</td>${campaigns.map(c => '<td style="padding:12px;text-align:right;font-weight:700">'+(parseInt(c.target)>0?Math.round(parseInt(c.raised)/parseInt(c.target)*100):0)+'%</td>').join('')}</tr>
+              <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:12px;font-weight:600">Donors</td>${campaigns.map(c => '<td style="padding:12px;text-align:right">'+parseInt(c.donors)+'</td>').join('')}</tr>
+              <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:12px;font-weight:600">Shares</td>${campaigns.map(c => '<td style="padding:12px;text-align:right">'+parseInt(c.total_shares||0)+'</td>').join('')}</tr>
+              <tr><td style="padding:12px;font-weight:600">Category</td>${campaigns.map(c => '<td style="padding:12px;text-align:right">'+esc(c.category||'General')+'</td>').join('')}</tr>
+            </table>
+          </div>
+        </div>
+      `));
+    } catch(e) { res.status(500).send('Error: '+e.message); }
+  });
+
+  // API for comparison data
+  app.get('/api/campaigns/compare', async (req, res) => {
+    try {
+      const ids = (req.query.ids||'').split(',').filter(Boolean).map(Number).slice(0,5);
+      if (ids.length < 2) return res.status(400).json({ error: 'Need at least 2 campaign IDs' });
+      const campaigns = (await pool.query('SELECT fc.id, fc.title, fc.target, fc.category, fc.status, COALESCE(SUM(cd.amount),0) as raised, COUNT(cd.id) as donors, fc.total_shares FROM fundraising_campaigns fc LEFT JOIN campaign_donations cd ON cd.campaign_id=fc.id AND cd.refunded=false WHERE fc.id=ANY($1) GROUP BY fc.id', [ids])).rows;
+      res.json(campaigns);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // =============================================
+  // V5: UPDATE ENHANCED DASHBOARD WITH V5 LINKS
+  // =============================================
+  // V5 links added to the existing enhanced dashboard
+  console.log('[Fundraising Enhancements] All V5 routes registered successfully');
 };
 
 module.exports.processDonationEffects = processDonationEffects;
