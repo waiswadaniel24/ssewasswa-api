@@ -765,7 +765,7 @@ setInterval(async () => {
         const subject = `Scheduled Report: ${sr.name} (${sr.report_type})`;
         const body = `<p>This is your scheduled <strong>${esc(sr.report_type)}</strong> report for <strong>${esc(sr.name)}</strong>.</p><p>Generated at: ${new Date().toISOString()}</p>`;
         for (const email of emailList) {
-          await queueEmail(sr.tenant_id, email, subject, body);
+          await queueEmail(email, subject, body, 'report');
         }
         const freq = sr.frequency;
         const interval = freq === 'daily' ? '{1 day}' : freq === 'weekly' ? '{7 days}' : freq === 'monthly' ? '{1 month}' : '{3 months}';

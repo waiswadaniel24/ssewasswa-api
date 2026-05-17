@@ -904,4 +904,7 @@ setInterval(async () => {
   }
 }, SCRAPE_INTERVAL);
 
+// Export cross-module function to global scope for dependent modules
+if (typeof awardPoints === 'function') global.awardPoints = awardPoints;
+
 console.log('[ViralEngine] Module loaded — scraping, referrals, jobs, SEO, trending, newsletter ready');

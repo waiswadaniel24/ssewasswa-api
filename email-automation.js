@@ -329,4 +329,8 @@ async function seedEmailTemplates() {
 }
 
 seedEmailTemplates().catch(e => console.warn('[EmailAuto] Template seed error:', e.message));
+
+// Export cross-module functions to global scope
+if (typeof queueEmail === 'function') global.queueEmail = queueEmail;
+
 console.log('[EmailAuto] LOADED: Welcome series, daily digest, referral invite, engagement reminder, milestone notification, email queue, broadcast, unsubscribe tracking, 5 templates');

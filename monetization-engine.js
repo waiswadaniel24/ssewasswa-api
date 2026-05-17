@@ -1430,4 +1430,8 @@ async function seedMonetizationData() {
 // Run seed on load
 seedMonetizationData().catch(e => console.warn('[MonetizationEngine] Seed error:', e.message));
 
+// Export cross-module functions to global scope for dependent modules
+if (typeof trackRevenue === 'function') global.trackRevenue = trackRevenue;
+if (typeof creditDeveloperRevenue === 'function') global.creditDeveloperRevenue = creditDeveloperRevenue;
+
 console.log('[MonetizationEngine] LOADED: Ad system ($CPM), exit popups, social proof, affiliate cloaker, donations, premium content lock, sitemap, robots.txt, promo codes, revenue dashboard, landing pages, lead magnets, cookie consent, CTA bar, push notifications, comments, engagement scoring');

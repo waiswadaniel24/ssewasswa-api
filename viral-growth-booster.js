@@ -199,10 +199,10 @@ app.get('/polls', ah(async (req, res) => {
       } catch(e) { btns.forEach(b => b.disabled = false); }
     }
     function sharePoll(id) {
-      window.open('https://wa.me/?text=' + encodeURIComponent('Vote in this poll on Comfort Zone! ' + BASE_URL + '/polls#poll-' + id));
+      window.open('https://wa.me/?text=' + encodeURIComponent('Vote in this poll on Comfort Zone! ' + BASE_URL2 + '/polls#poll-' + id));
     }
     function sharePollTwitter(id) {
-      window.open('https://twitter.com/intent/tweet?text=' + encodeURIComponent('Just voted in this poll! Cast your vote: ' + BASE_URL + '/polls#poll-' + id));
+      window.open('https://twitter.com/intent/tweet?text=' + encodeURIComponent('Just voted in this poll! Cast your vote: ' + BASE_URL2 + '/polls#poll-' + id));
     }
     </script>
   `, null, true));
@@ -357,10 +357,10 @@ app.get('/quizzes/:id', ah(async (req, res) => {
       }, correct ? 800 : 1500);
     }
     function shareQuizResult() {
-      window.open('https://wa.me/?text=' + encodeURIComponent('I scored '+score+'/'+totalQ+' on "'+decodeURIComponent('${encodeURIComponent(quiz.title)}')+'" quiz! Can you beat me? ' + BASE_URL + '/quizzes/${quiz.id}'));
+      window.open('https://wa.me/?text=' + encodeURIComponent('I scored '+score+'/'+totalQ+' on "'+decodeURIComponent('${encodeURIComponent(quiz.title)}')+'" quiz! Can you beat me? ' + BASE_URL2 + '/quizzes/${quiz.id}'));
     }
     function shareQuizTwitter() {
-      window.open('https://twitter.com/intent/tweet?text=' + encodeURIComponent('I scored '+score+'/'+totalQ+' on "'+decodeURIComponent('${encodeURIComponent(quiz.title)}')+'"! Think you can do better? ' + BASE_URL + '/quizzes/${quiz.id}'));
+      window.open('https://twitter.com/intent/tweet?text=' + encodeURIComponent('I scored '+score+'/'+totalQ+' on "'+decodeURIComponent('${encodeURIComponent(quiz.title)}')+'"! Think you can do better? ' + BASE_URL2 + '/quizzes/${quiz.id}'));
     }
     </script>
   `, null, true));
@@ -443,7 +443,7 @@ app.get('/testimonials', ah(async (req, res) => {
       await fetch('/api/testimonials/like/'+id,{method:'POST'}).catch(()=>{});
     }
     function shareTestimonial(id) {
-      window.open('https://wa.me/?text='+encodeURIComponent('Check out this testimonial on Comfort Zone! '+BASE_URL+'/testimonials'));
+      window.open('https://wa.me/?text='+encodeURIComponent('Check out this testimonial on Comfort Zone! '+BASE_URL2+'/testimonials'));
     }
     </script>
   `, null, true));
@@ -600,8 +600,8 @@ app.get('/forum/topic/:id', ah(async (req, res) => {
       </div>
     </div>
     <script>
-    function shareTopic(id){window.open('https://wa.me/?text='+encodeURIComponent('Check out this discussion on Comfort Zone: '+BASE_URL+'/forum/topic/'+id))}
-    function shareTopicTwitter(id){window.open('https://twitter.com/intent/tweet?text='+encodeURIComponent('Join this discussion: '+BASE_URL+'/forum/topic/'+id))}
+    function shareTopic(id){window.open('https://wa.me/?text='+encodeURIComponent('Check out this discussion on Comfort Zone: '+BASE_URL2+'/forum/topic/'+id))}
+    function shareTopicTwitter(id){window.open('https://twitter.com/intent/tweet?text='+encodeURIComponent('Join this discussion: '+BASE_URL2+'/forum/topic/'+id))}
     </script>
   `, null, true));
 }));
@@ -679,7 +679,7 @@ app.post('/waitlist/join/:id', ah(async (req, res) => {
       <div style="font-size:64px;margin-bottom:16px">You are #${parseInt(pos) + 1}!</div>
       <h2>You are on the waitlist</h2>
       <p style="color:#64748b;margin:12px 0 24px">We will notify you as soon as we launch. Share with friends to move up the list!</p>
-      <a href="https://wa.me/?text=${encodeURIComponent('Join the waitlist for Comfort Zone! ' + BASE_URL2 + '/waitlist')}" target="_blank" class="btn" style="background:#25d366;display:inline-block;padding:12px 24px">Share on WhatsApp</a>
+      <a href="https://wa.me/?text=${encodeURIComponent('Join the waitlist for Comfort Zone! ' + BASE_URL22 + '/waitlist')}" target="_blank" class="btn" style="background:#25d366;display:inline-block;padding:12px 24px">Share on WhatsApp</a>
     </div>
   `, null, true));
 }));
@@ -711,7 +711,7 @@ app.get('/stories', ah(async (req, res) => {
     </div>
     <script>
     async function likeStory(id){await fetch('/api/stories/like/'+id,{method:'POST'}).catch(()=>{});}
-    function shareStory(id){window.open('https://wa.me/?text='+encodeURIComponent('Read this success story: '+BASE_URL+'/stories'));}
+    function shareStory(id){window.open('https://wa.me/?text='+encodeURIComponent('Read this success story: '+BASE_URL2+'/stories'));}
     </script>
   `, null, true));
 }));

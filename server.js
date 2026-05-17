@@ -30377,32 +30377,65 @@ try { const m = require('./homework'); m(app, pool, _newModOpts); console.log('[
 try { const m = require('./discipline'); m(app, pool, _newModOpts); console.log('[Discipline] Discipline module loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
 try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.log('[MultiBranch] Multi-branch module loaded'); } catch(e) { console.warn('[MultiBranch] Error:', e.message); }
 
-// === FEATURES BLOCK: Exams, WhatsApp, Branches, Clinic, Scheduled Reports ===
-try { require('./features-block'); console.log('[FeaturesBlock] 33 feature routes loaded (exams, whatsapp, branches, clinic, scheduled-reports, dev/portals)'); } catch(e) { console.warn('[FeaturesBlock] Error:', e.message); }
+// ============================================================
+// === SELF-EXECUTING MODULE LOADER — Global Scope Bridge ===
+// ============================================================
+// These modules reference app/pool/ah/esc/renderPage etc. as globals.
+// Node.js require() creates a new module scope, so we temporarily
+// expose these variables on the global object, then clean up after.
+// ============================================================
 
-// === VIRAL CONTENT ENGINE: Growth, SEO, Revenue, Jobs, Referrals, Trending ===
-try { require('./viral-content-engine'); console.log('[ViralEngine] Content scraping, referrals, jobs, SEO pages, trending, newsletter, gamification loaded'); } catch(e) { console.warn('[ViralEngine] Error:', e.message); }
+const _globalKeys = ['app','pool','db','ah','esc','renderPage','requireAuth','requireNotBanned',
+  'requireSuperAdmin','audit','notify','notifyAll','sendEmail','sendSMS','migrations',
+  'VALID_TABLES','requestMtnPayment','trackRevenue','awardPoints','creditDeveloperRevenue',
+  'queueEmail'];
+_globalKeys.forEach(k => { if (typeof global[k] === 'undefined' && typeof eval(k) !== 'undefined') global[k] = eval(k); });
 
-// === REVENUE QUICKSTART: Tips, Pricing, Ads, Commissions, MoMo Payments ===
-try { require('./revenue-quickstart'); console.log('[Revenue] Tips, pricing, ads, service packages, ad placements loaded'); } catch(e) { console.warn('[Revenue] Error:', e.message); }
+// Helper: load self-executing module with full error details
+function loadSelfExec(modName, label) {
+  try {
+    require('./' + modName);
+    console.log('[' + label + '] Module loaded successfully');
+    return true;
+  } catch(e) {
+    console.error('[' + label + '] FAILED:', e.message);
+    console.error('[' + label + '] Stack:', e.stack?.split('\n').slice(0,3).join(' | '));
+    return false;
+  }
+}
 
-// === ULTIMATE MONETIZATION ENGINE: Ads CPM, Exit Popups, Social Proof, Affiliate Cloaker, Donations, Premium Content, Sitemap, Revenue Dashboard, Promo Codes, Landing Pages, Lead Magnets ===
-try { require('./monetization-engine'); console.log('[Monetization] Ad CPM system, exit popups, social proof, affiliate links, donations, premium content lock, sitemap/robots, promo codes, revenue dashboard, landing pages, lead magnets, cookie consent, CTA bar, push notifications, comments, engagement scoring ALL LOADED'); } catch(e) { console.warn('[Monetization] Error:', e.message); }
+// Load order matters: monetization defines trackRevenue/creditDeveloperRevenue,
+// viral-content defines awardPoints — others depend on these.
 
-// === VIRAL GROWTH BOOSTER: Polls, Quizzes, Testimonials, Community Forums, Countdowns, User Stories, Feedback Widget, Invite Codes ===
-try { require('./viral-growth-booster'); console.log('[ViralGrowth] Polls, quizzes, testimonials, community forums, viral countdowns, user stories, feedback widget, invite codes, achievement badges ALL LOADED'); } catch(e) { console.warn('[ViralGrowth] Error:', e.message); }
+// 1. MONETIZATION ENGINE (defines trackRevenue, creditDeveloperRevenue)
+loadSelfExec('monetization-engine', 'Monetization');
 
-// === ENGAGEMENT ENGINE: Daily Challenges, Streaks, Achievements, Rewards Store, Leaderboard, User Profiles ===
-try { require('./engagement-engine'); console.log('[Engagement] Daily challenges, streaks, 15 achievements, 8 rewards, leaderboard, gamification ALL LOADED'); } catch(e) { console.warn('[Engagement] Error:', e.message); }
+// 2. VIRAL CONTENT ENGINE (defines awardPoints)
+loadSelfExec('viral-content-engine', 'ViralEngine');
 
-// === SEO TRAFFIC ENGINE: Auto-blog, keyword tracker, smart 404, search pings, schema markup ===
-try { require('./seo-traffic-engine'); console.log('[SEO] Auto-blog (30+ posts), 20 target keywords, smart 404, search pings, schema/OG auto-tags ALL LOADED'); } catch(e) { console.warn('[SEO] Error:', e.message); }
+// 3. FEATURES BLOCK (exams, whatsapp, branches, clinic, scheduled-reports)
+loadSelfExec('features-block', 'FeaturesBlock');
 
-// === ANALYTICS INTELLIGENCE: Real-time dashboard, funnels, session tracking, device stats ===
-try { require('./analytics-engine'); console.log('[Analytics] Real-time dashboard, conversion funnels, session/page/event tracking, daily aggregation ALL LOADED'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
+// 4. VIRAL GROWTH BOOSTER (depends on trackRevenue)
+loadSelfExec('viral-growth-booster', 'ViralGrowth');
 
-// === EMAIL AUTOMATION: Welcome series, digest, referral invite, re-engagement, milestones ===
-try { require('./email-automation'); console.log('[EmailAuto] 5 email templates, email queue, broadcast, unsubscribe tracking, engagement triggers ALL LOADED'); } catch(e) { console.warn('[EmailAuto] Error:', e.message); }
+// 5. ENGAGEMENT ENGINE (depends on awardPoints, trackRevenue)
+loadSelfExec('engagement-engine', 'Engagement');
+
+// 6. SEO TRAFFIC ENGINE
+loadSelfExec('seo-traffic-engine', 'SEO');
+
+// 7. ANALYTICS INTELLIGENCE
+loadSelfExec('analytics-engine', 'Analytics');
+
+// 8. EMAIL AUTOMATION (depends on trackRevenue)
+loadSelfExec('email-automation', 'EmailAuto');
+
+// 9. REVENUE QUICKSTART (depends on requestMtnPayment)
+loadSelfExec('revenue-quickstart', 'Revenue');
+
+// Clean up globals — remove temporary bridges
+_globalKeys.forEach(k => { delete global[k]; });
 
 // ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===

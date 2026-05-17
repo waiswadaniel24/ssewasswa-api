@@ -176,7 +176,7 @@ app.get('/blog/:slug', ah(async (req, res) => {
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/^\- (.+)$/gm, '<li>$1</li>')
-    .replace(/^\| (.+) \|$/gm, '<tr>' + (('$1'.split('|').map(c=>`<td style="padding:8px;border:1px solid #e2e8f0">${c.trim()}</td>`).join('')) + '</tr>')
+    .replace(/^\| (.+) \|$/gm, '<tr>' + (('$1'.split('|').map(c=>`<td style="padding:8px;border:1px solid #e2e8f0">${c.trim()}</td>`).join('')) + '</tr>'))
     .replace(/\n\n/g, '<br><br>')
     .replace(/^(\d+)\. \*\*(.+?)\*\*: (.+)$/gm, '<div style="margin:8px 0"><strong>$1. $2</strong>: $3</div>');
 
