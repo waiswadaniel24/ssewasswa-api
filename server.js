@@ -19896,6 +19896,7 @@ app.get('/fundraising', requireAuth, requireNotBanned, requireFundraisingSubscri
         <a href="/my-donations" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">My Donations</a>
         <a href="/admin/payouts" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Payouts</a>
         <a href="/admin/refunds" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Refunds</a>
+        <a href="/discover" class="btn" style="background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4)">Discover (Public)</a>
       </div>
     </div>
     <div class="stats">
@@ -19931,6 +19932,8 @@ app.get('/fundraising', requireAuth, requireNotBanned, requireFundraisingSubscri
         (c.offer_count>0?'<span>&bull; '+(c.offer_count)+' offers</span>':'')+
         '</div>'+
         '<div style="display:flex;gap:6px;flex-wrap:wrap"><a href="/fundraising/'+c.id+'" class="btn btn-sm">View</a><a href="/fundraising/'+c.id+'/donate" class="btn btn-sm btn-green">Donate</a>'+
+        '<a href="/campaigns/'+c.id+'/matching" class="btn btn-sm" style="background:#f59e0b;color:white">Match</a>'+
+        '<a href="/campaigns/'+c.id+'/comments" class="btn btn-sm" style="background:#7c3aed;color:white">Comments</a>'+
         (c.status==='active'?'<a href="/fundraising/'+c.id+'/close" class="btn btn-sm">Close</a>':'')+
         '<a href="/fundraising/'+c.id+'/delete" class="btn btn-sm btn-red" onclick="return confirm(\'Delete this campaign?\')">Del</a></div></div>';
     }).join('')||'<p class="muted" style="text-align:center;padding:40px">No campaigns yet. <a href="/fundraising/new" class="btn btn-green">Create Your First Campaign</a></p>'}</div></div>
@@ -20236,23 +20239,29 @@ app.get('/fundraising/:id/donate', requireAuth, requireNotBanned, requireFundrai
 }));
 
 app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
-  const { donor_name, amount, method, message, donate_anonymously } = req.body;
+  const { donor_name, amount, method, message, donate_anonymously, donor_email, donor_phone } = req.body;
   const displayName = donate_anonymously ? 'Anonymous' : (donor_name || 'Anonymous');
+  const isAnonymous = donate_anonymously ? true : false;
+  const donorEmail = donor_email || req.session.user.email || null;
+  const donorPhone = donor_phone || null;
   const camp = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
-  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [camp?.tenant_id || req.session.user.tenant_id, req.params.id, displayName, amount||0, method||'cash', message||'']);
+  const t = camp?.tenant_id || req.session.user.tenant_id;
+
+  // Insert donation with extra fields
+  const donationResult = await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,donor_email,donor_phone,amount,method,message,is_anonymous) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
+    [t, req.params.id, displayName, donorEmail, donorPhone, amount||0, method||'cash', message||'', isAnonymous]);
+  const donationId = donationResult.rows[0]?.id;
+
   // 5% platform fee
   const fee = Math.round(parseInt(amount||0) * 0.05);
   if (fee > 0) {
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
     await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Donation fee - Campaign #'+req.params.id]);
   }
-  // Trigger matching donations
-  try { const fp = require('./fundraising-pro'); } catch(e) {}
-  // Trigger milestones check
+  // Trigger post-donation processing (matching, badges, thank you, milestones, followers)
   try {
-    const campt = camp?.tenant_id || req.session.user.tenant_id;
-    await pool.query('INSERT INTO campaign_milestones(tenant_id,campaign_id,milestone_type,percentage,message) SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS (SELECT 1 FROM campaign_milestones WHERE campaign_id=$2 AND percentage=1)', [campt, req.params.id, 'donation', 1, 'First donation received!']);
-  } catch(e) {}
+    if (_processDonationEffects) await _processDonationEffects({ tenant_id: t, campaign_id: req.params.id, donation_id: donationId, donor_name: displayName, donor_email: donorEmail, donor_phone: donorPhone, amount, method, message, is_anonymous: isAnonymous });
+  } catch(e) { /* non-blocking */ }
   res.redirect('/fundraising/'+req.params.id);
 }));
 
@@ -20375,12 +20384,25 @@ app.get('/discover/:id', ah(async (req, res) => {
   const c = (await pool.query('SELECT fc.*, t.name as org_name, t.type as org_type, t.subdomain, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id) as donor_count FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id = t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Campaign not found');
   await pool.query('UPDATE fundraising_campaigns SET views_count=COALESCE(views_count,0)+1 WHERE id=$1', [c.id]);
-  const [donations, updates] = await Promise.all([
-    pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 ORDER BY donated_at DESC LIMIT 20', c.id),
-    pool.query("SELECT * FROM campaign_updates WHERE campaign_id=$1 AND is_public=true ORDER BY created_at DESC LIMIT 10", c.id)
+  const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
+  const [donations, updates, matchingSponsors, recentComments, testimonials, impacts, isFollowing] = await Promise.all([
+    pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 AND refunded=false ORDER BY donated_at DESC LIMIT 20', c.id),
+    pool.query("SELECT * FROM campaign_updates WHERE campaign_id=$1 AND is_public=true ORDER BY created_at DESC LIMIT 10", c.id),
+    pool.query("SELECT * FROM matching_donations WHERE campaign_id=$1 AND status='active' AND is_public=true ORDER BY created_at DESC", [req.params.id]),
+    pool.query("SELECT * FROM campaign_comments WHERE campaign_id=$1 AND status='visible' ORDER BY is_pinned DESC, created_at DESC LIMIT 5", [req.params.id]),
+    pool.query("SELECT * FROM campaign_testimonials WHERE campaign_id=$1 AND is_approved=true ORDER BY is_featured DESC, created_at DESC LIMIT 3", [req.params.id]),
+    pool.query('SELECT * FROM donor_impact WHERE campaign_id=$1 AND verified=true ORDER BY created_at DESC LIMIT 5', [req.params.id]),
+    req.session.user ? pool.query('SELECT id FROM campaign_followers WHERE campaign_id=$1 AND user_email=$2', [req.params.id, req.session.user.email]) : { rows: [] }
   ]);
   const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
   const tiers = (typeof c.investment_tiers === 'string' ? JSON.parse(c.investment_tiers) : c.investment_tiers) || [];
+  const followStatus = isFollowing.rows?.length > 0;
+
+  // Open Graph meta tags for SEO and social sharing
+  const ogTitle = c.seo_title || c.title;
+  const ogDesc = c.seo_description || (c.description||'').substring(0, 200);
+  const ogImage = c.image_url || baseUrl+'/og-default.png';
+  const ogUrl = baseUrl+'/discover/'+c.id;
 
   const content = `
     <div style="max-width:900px;margin:0 auto;padding:20px">
@@ -20405,29 +20427,38 @@ app.get('/discover/:id', ah(async (req, res) => {
         </div>
         ${tiers.length > 0 ? '<div style="margin-bottom:24px"><h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Investment Tiers</h3>'+tiers.map(tier=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:#f8fafc;border-radius:10px;margin-bottom:8px"><span style="font-weight:700;font-size:15px">'+esc(tier.name)+'</span><span style="color:#059669;font-weight:800;font-size:16px">UGX '+(parseInt(tier.amount)||0).toLocaleString()+'</span><span style="color:#64748b;font-size:13px">'+esc(tier.benefits||'')+'</span></div>').join('')+'</div>' : ''}
         <div style="display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap">
-          ${req.session.user ? '<a href="/discover/'+c.id+'/offer" style="flex:1;display:block;text-align:center;padding:14px;background:#f59e0b;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Make Investment Offer</a><a href="/discover/'+c.id+'/donate" style="flex:1;display:block;text-align:center;padding:14px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Quick Donate</a>' : '<a href="/register" style="flex:1;display:block;text-align:center;padding:14px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Sign Up to Support</a>'}
+          ${req.session.user ? '<a href="/discover/'+c.id+'/offer" style="flex:1;display:block;text-align:center;padding:14px;background:#f59e0b;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Make Investment Offer</a><a href="/discover/'+c.id+'/donate" style="flex:1;display:block;text-align:center;padding:14px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Quick Donate</a>'+(followStatus?'<a href="/campaigns/'+c.id+'/unfollow" style="flex:1;display:block;text-align:center;padding:14px;background:#64748b;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Unfollow</a>':'<a href="/campaigns/'+c.id+'/follow" style="flex:1;display:block;text-align:center;padding:14px;background:#4f46e5;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Follow Campaign</a>') : '<a href="/register" style="flex:1;display:block;text-align:center;padding:14px;background:#059669;color:white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Sign Up to Support</a>'}
         </div>
+        ${matchingSponsors.rows.length > 0 ? '<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:12px;padding:20px;margin-bottom:24px"><h3 style="font-size:18px;font-weight:700;margin-bottom:12px;color:#92400e">Matching Sponsors - Your Donation Counts Double!</h3>'+matchingSponsors.rows.map(m=>'<div style="display:flex;align-items:center;gap:12px;padding:10px;background:white;border-radius:10px;margin-bottom:8px">'+(m.sponsor_logo?'<img src="'+esc(m.sponsor_logo)+'" style="height:32px;border-radius:4px">':'<div style="width:32px;height:32px;background:#f59e0b;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:14px">'+esc(m.sponsor_name.charAt(0))+'</div>')+'<div><strong>'+esc(m.sponsor_name)+'</strong><br><span style="font-size:13px;color:#92400e">Matches '+parseFloat(m.match_ratio).toFixed(0)+':1 up to UGX '+(parseInt(m.max_match_amount)||0).toLocaleString()+'</span>'+(m.message?'<br><span style="font-size:12px;color:#64748b">'+esc(m.message)+'</span>':'')+'</div></div>').join('')+'</div>' : ''}
+        ${impacts.rows.length > 0 ? '<div style="margin-bottom:24px"><h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Real Impact</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">'+impacts.rows.map(i=>'<div style="background:#f0fdf4;border-radius:12px;padding:16px;text-align:center"><div style="font-size:24px;font-weight:900;color:#059669">'+esc(i.impact_value||'0')+'</div><div style="font-size:13px;color:#64748b">'+esc(i.impact_unit||'people helped')+'</div></div>').join('')+'</div></div>' : ''}
         ${updates.rows.length > 0 ? '<h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Campaign Updates</h3>'+updates.rows.map(u=>'<div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px;border-left:4px solid '+(u.update_type==='milestone'?'#059669':u.update_type==='urgent'?'#ef4444':'#64748b')+'"><strong>'+esc(u.title)+'</strong><span class="muted" style="margin-left:8px;font-size:12px">'+(u.created_at?new Date(u.created_at).toLocaleDateString():'')+'</span>'+(u.content?'<p style="margin:6px 0;font-size:14px;color:#475569">'+esc(u.content).replace(/\n/g,'<br>')+'</p>':'')+'</div>').join('') : ''}
-        ${donations.rows.length > 0 ? '<h3 style="font-size:18px;font-weight:700;margin:20px 0 12px">Recent Supporters ('+donations.rows.length+')</h3>'+donations.rows.slice(0,10).map(d=>'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9"><span>'+(d.donor_name==='Anonymous'?'Supporter':esc(d.donor_name))+'</span><span style="font-weight:700;color:#059669">UGX '+(parseInt(d.amount)||0).toLocaleString()+'</span></div>').join('') : ''}
+        ${donations.rows.length > 0 ? '<h3 style="font-size:18px;font-weight:700;margin:20px 0 12px">Recent Supporters ('+donations.rows.length+')</h3>'+donations.rows.slice(0,10).map(d=>'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9"><span>'+(d.is_anonymous||d.donor_name==='Anonymous'?'Supporter':esc(d.donor_name))+'</span><span style="font-weight:700;color:#059669">UGX '+(parseInt(d.amount)||0).toLocaleString()+'</span></div>').join('') : ''}
+        ${testimonials.rows.length > 0 ? '<div style="margin-top:20px"><h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Testimonials</h3>'+testimonials.rows.map(t=>'<div style="background:#faf5ff;border-radius:12px;padding:16px;margin-bottom:10px;border-left:4px solid #7c3aed"><p style="font-style:italic;color:#475569;margin-bottom:8px">"'+esc(t.content)+'"</p><div style="display:flex;align-items:center;gap:8px"><strong style="font-size:14px">'+esc(t.author_name)+'</strong>'+(t.author_title?'<span style="font-size:12px;color:#64748b">'+esc(t.author_title)+'</span>':'')+(t.rating?'<span style="color:#f59e0b;font-size:12px">'+'★'.repeat(t.rating)+'</span>':'')+'</div></div>').join('')+'</div>' : ''}
+        ${recentComments.rows.length > 0 ? '<div style="margin-top:20px"><h3 style="font-size:18px;font-weight:700;margin-bottom:12px">Words of Support</h3>'+recentComments.rows.map(cm=>'<div style="padding:10px;border-bottom:1px solid #f1f5f9"><strong style="font-size:14px">'+esc(cm.is_anonymous?'Supporter':cm.author_name)+'</strong> <span class="muted" style="font-size:12px">'+(cm.created_at?new Date(cm.created_at).toLocaleDateString():'')+'</span><p style="margin:4px 0;font-size:14px;color:#475569">'+esc(cm.content)+'</p></div>').join('')+'<a href="/campaigns/'+c.id+'/comments" style="font-size:13px;color:#7c3aed;font-weight:600;margin-top:8px;display:inline-block">View All Comments & Leave Yours</a></div>' : ''}
         <div style="margin-top:24px;padding-top:20px;border-top:2px solid #e2e8f0">
           <h3 style="font-size:16px;font-weight:700;margin-bottom:12px">Share This Campaign</h3>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <a href="https://wa.me/?text='+encodeURIComponent('${esc(c.title)} - Support this cause! ${BASE_URL}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#25d366;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">WhatsApp</a>
-            <a href="https://twitter.com/intent/tweet?text='+encodeURIComponent('Support "${esc(c.title)}"')+'&url='+encodeURIComponent('${BASE_URL}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#1da1f2;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Twitter/X</a>
-            <a href="https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent('${BASE_URL}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#1877f2;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Facebook</a>
-            <button onclick="navigator.clipboard.writeText('${BASE_URL}/discover/${c.id}');this.textContent='Copied!'" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#475569;color:white;border-radius:8px;font-weight:600;font-size:13px;border:none;cursor:pointer">Copy Link</button>
+            <a href="https://wa.me/?text='+encodeURIComponent('${esc(c.title)} - Support this cause! ${baseUrl}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#25d366;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">WhatsApp</a>
+            <a href="https://twitter.com/intent/tweet?text='+encodeURIComponent('Support "${esc(c.title)}"')+'&url='+encodeURIComponent('${baseUrl}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#1da1f2;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Twitter/X</a>
+            <a href="https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent('${baseUrl}/discover/${c.id}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#1877f2;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Facebook</a>
+            <a href="https://t.me/share/url?url='+encodeURIComponent('${baseUrl}/discover/${c.id}')+'&text='+encodeURIComponent('Support: ${esc(c.title)}')+'" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#0088cc;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Telegram</a>
+            <button onclick="navigator.clipboard.writeText('${baseUrl}/discover/${c.id}');this.textContent='Copied!'" style="display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:#475569;color:white;border-radius:8px;font-weight:600;font-size:13px;border:none;cursor:pointer">Copy Link</button>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
             <a href="/campaigns/${c.id}/donors" style="font-size:13px;color:#7c3aed;font-weight:600">View Donor Wall</a>
             <a href="/campaigns/${c.id}/comments" style="font-size:13px;color:#059669;font-weight:600">Leave Encouragement</a>
             <a href="/campaigns/${c.id}/qr" style="font-size:13px;color:#0891b2;font-weight:600">Get QR Code</a>
             <a href="/campaigns/${c.id}/embed" style="font-size:13px;color:#64748b;font-weight:600">Embed on Website</a>
+            <a href="/campaigns/${c.id}/testimonials" style="font-size:13px;color:#7c3aed;font-weight:600">Testimonials</a>
+            <a href="/campaigns/${c.id}/milestones" style="font-size:13px;color:#f59e0b;font-weight:600">Milestones</a>
+            <a href="/campaigns/${c.id}/impact" style="font-size:13px;color:#059669;font-weight:600">Impact</a>
+            <a href="/campaigns/${c.id}/story" style="font-size:13px;color:#4f46e5;font-weight:600">Stories</a>
           </div>
         </div>
       </div>
     </div>
   `;
-  res.send(renderPage(c.title+' - Comfort Zone', content, req.session.user || null, '/discover/'+c.id));
+  res.send(renderPage(c.title+' - Comfort Zone Fundraising', content, req.session.user || null, '/discover/'+c.id));
 }));
 
 // Public donate page
@@ -20440,6 +20471,7 @@ app.get('/discover/:id/donate', requireAuth, requireFundraisingSubscription, ah(
       <form method="POST" action="/discover/${c.id}/donate-save">
         <input name="donor_name" placeholder="Your Name (or leave blank for anonymous)">
         <input name="donor_email" type="email" placeholder="Your Email" value="${esc(req.session.user.email||'')}">
+        <input name="donor_phone" placeholder="Phone (for thank you SMS)">
         <input name="amount" type="number" placeholder="Amount (UGX)" required>
         <select name="method"><option value="mobile_money">MTN Mobile Money</option><option value="airtel_money">Airtel Money</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card Payment</option><option value="cash">Cash</option></select>
         <textarea name="message" rows="2" placeholder="Message of support (optional)"></textarea>
@@ -20452,14 +20484,29 @@ app.get('/discover/:id/donate', requireAuth, requireFundraisingSubscription, ah(
 app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
-  const { donor_name, donor_email, amount, method, message, donate_anonymously } = req.body;
+  const { donor_name, donor_email, amount, method, message, donate_anonymously, donor_phone } = req.body;
   const displayName = donate_anonymously ? 'Anonymous' : (donor_name||req.session.user.name||'Anonymous');
-  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [c.tenant_id, c.id, displayName, amount||0, method||'mobile_money', message||'']);
+  const isAnonymous = donate_anonymously ? true : false;
+  const donorEmail = donor_email || req.session.user.email || null;
+  const donorPhone = donor_phone || null;
+
+  // Insert donation with extra fields
+  const donationResult = await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,donor_email,donor_phone,amount,method,message,is_anonymous) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
+    [c.tenant_id, c.id, displayName, donorEmail, donorPhone, amount||0, method||'mobile_money', message||'', isAnonymous]);
+  const donationId = donationResult.rows[0]?.id;
+
+  // Platform fee
   const fee = Math.round(parseInt(amount||0) * 0.05);
   if (fee > 0) {
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
     await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Public donation fee - Campaign #'+c.id]);
   }
+
+  // Trigger post-donation processing (matching, badges, thank you, milestones, followers)
+  try {
+    if (_processDonationEffects) await _processDonationEffects({ tenant_id: c.tenant_id, campaign_id: c.id, donation_id: donationId, donor_name: displayName, donor_email: donorEmail, donor_phone: donorPhone, amount, method, message, is_anonymous: isAnonymous });
+  } catch(e) { /* non-blocking */ }
+
   res.redirect('/discover/'+c.id);
 }));
 
@@ -30241,6 +30288,21 @@ try { require('./analytics-engine'); console.log('[Analytics] Real-time dashboar
 
 // === EMAIL AUTOMATION: Welcome series, digest, referral invite, re-engagement, milestones ===
 try { require('./email-automation'); console.log('[EmailAuto] 5 email templates, email queue, broadcast, unsubscribe tracking, engagement triggers ALL LOADED'); } catch(e) { console.warn('[EmailAuto] Error:', e.message); }
+
+// ============================================================
+// === FUNDRAISING ENHANCEMENTS — Professional Features ===
+// Social Sharing, Donor Dashboard, Payouts, Donor Wall, QR Codes,
+// Refund Handling, Embed Widget, Matching Donations, Comments,
+// Thank You SMS/Email, Campaign Following, Testimonials, Milestones,
+// Impact Tracking, SEO/Sitemap, Trending, Global Visibility
+// ============================================================
+let _processDonationEffects = null;
+try {
+  const fundraisingEnhancements = require('./fundraising-enhancements');
+  fundraisingEnhancements(app, pool, ah, requireAuth, requireNotBanned, requireFundraisingSubscription, renderPage, esc, notify, notifyAll, sendEmail, sendSMS);
+  _processDonationEffects = fundraisingEnhancements.processDonationEffects;
+  console.log('[FundraisingEnhancements] Professional fundraising features loaded - Social Sharing, Donor Dashboard, Payouts, Donor Wall, QR Codes, Refunds, Embed Widget, Matching Donations, Comments, Thank You, Following, Testimonials, Milestones, Impact, SEO, Trending');
+} catch(e) { console.warn('[FundraisingEnhancements] Error:', e.message); }
 
 // ============================================================
 // === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
