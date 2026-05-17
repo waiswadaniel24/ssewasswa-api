@@ -10169,8 +10169,8 @@ app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async 
   doc.end();
 }));
 
-// === PUBLIC API DOCS ===
-app.get('/api-docs', (req, res) => {
+// === DASHBOARD API DOCS (for authenticated users only) ===
+app.get('/dashboard/api-docs', requireAuth, (req, res) => {
   res.send(renderPage('API Documentation', `
     <div class="hero"><h1>API Documentation</h1><p>RESTful API for Comfort Platform &bull; OpenAPI 3.0</p></div>
     <div class="card">

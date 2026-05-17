@@ -999,7 +999,30 @@ label {
   a { color: #333; text-decoration: underline; }
   footer { background: none; color: #333; }
 }
+
+/* === Page Hero (p-hero) === */
+.p-hero {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: white;
+  position: relative;
+  overflow: hidden;
+}
+.p-hero::before {
+  content: '';
+  position: absolute;
+  top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+.p-hero h1, .p-hero p {
+  position: relative;
+}
+[data-theme="dark"] .p-hero {
+  background: linear-gradient(135deg, #312e81 0%, #4c1d95 100%);
+}
 `;
+
   }
 
   // ============================================================
@@ -1831,7 +1854,13 @@ ${getPublicScripts()}
     const translations = {
       en: { nav_features:'Features', nav_pricing:'Pricing', nav_about:'About', nav_contact:'Contact', nav_login:'Login', nav_register:'Start Free', hero_title:'The Operating System for African Institutions', hero_sub:'One platform. All your operations. Built for Uganda, designed for Africa.', cta_start:'Start Free', cta_login:'Login', cookie_msg:'We use cookies to improve your experience.', cookie_accept:'Accept', cookie_reject:'Reject', search_placeholder:'Search Comfort...', dark_toggle:'Toggle dark mode' },
       sw: { nav_features:'Features', nav_pricing:'Bei', nav_about:'Kuhusu', nav_contact:'Wasiliana', nav_login:'Ingia', nav_register:'Anza Bure', hero_title:'Mfumo wa Uendeshaji kwa Taasisi za Afrika', hero_sub:'Jukwaa moja. Shughuli zako zote. Lililoundwa kwa Uganda.', cta_start:'Anza Bure', cta_login:'Ingia', cookie_msg:'Tunatumia kuki kuboresha uzoefu wako.', cookie_accept:'Kubali', cookie_reject:'Kataa', search_placeholder:'Tafuta Comfort...', dark_toggle:'Badilisha hali ya giza' },
-      fr: { nav_features:'Fonctionnalités', nav_pricing:'Tarifs', nav_about:'À propos', nav_contact:'Contact', nav_login:'Connexion', nav_register:'Commencer', hero_title:'Le Système d\'Exploitation pour les Institutions Africaines', hero_sub:'Une plateforme. Toutes vos opérations.', cta_start:'Commencer', cta_login:'Connexion', cookie_msg:'Nous utilisons des cookies pour améliorer votre expérience.', cookie_accept:'Accepter', cookie_reject:'Refuser', search_placeholder:'Rechercher...', dark_toggle:'Mode sombre' }
+      fr: { nav_features:'Fonctionnalités', nav_pricing:'Tarifs', nav_about:'À propos', nav_contact:'Contact', nav_login:'Connexion', nav_register:'Commencer', hero_title:'Le Système d\'Exploitation pour les Institutions Africaines', hero_sub:'Une plateforme. Toutes vos opérations.', cta_start:'Commencer', cta_login:'Connexion', cookie_msg:'Nous utilisons des cookies pour améliorer votre expérience.', cookie_accept:'Accepter', cookie_reject:'Refuser', search_placeholder:'Rechercher...', dark_toggle:'Mode sombre' },
+      ar: { nav_features:'الميزات', nav_pricing:'الأسعار', nav_about:'من نحن', nav_contact:'اتصل بنا', nav_login:'تسجيل الدخول', nav_register:'ابدأ مجاناً', hero_title:'نظام التشغيل للمؤسسات الأفريقية', hero_sub:'منصة واحدة. جميع عملياتك.', cta_start:'ابدأ مجاناً', cta_login:'تسجيل الدخول', cookie_msg:'نستخدم ملفات تعريف الارتباط لتحسين تجربتك.', cookie_accept:'قبول', cookie_reject:'رفض', search_placeholder:'بحث...', dark_toggle:'الوضع الداكن' },
+      es: { nav_features:'Características', nav_pricing:'Precios', nav_about:'Acerca de', nav_contact:'Contacto', nav_login:'Iniciar sesión', nav_register:'Comenzar gratis', hero_title:'El Sistema Operativo para Instituciones Africanas', hero_sub:'Una plataforma. Todas tus operaciones.', cta_start:'Comenzar gratis', cta_login:'Iniciar sesión', cookie_msg:'Usamos cookies para mejorar tu experiencia.', cookie_accept:'Aceptar', cookie_reject:'Rechazar', search_placeholder:'Buscar...', dark_toggle:'Modo oscuro' },
+      hi: { nav_features:'सुविधाएँ', nav_pricing:'मूल्य', nav_about:'हमारे बारे में', nav_contact:'संपर्क', nav_login:'लॉग इन', nav_register:'मुफ्त शुरू करें', hero_title:'अफ्रीकी संस्थाओं के लिए ऑपरेटिंग सिस्टम', hero_sub:'एक मंच। आपके सभी संचालन।', cta_start:'मुफ्त शुरू करें', cta_login:'लॉग इन', cookie_msg:'हम आपके अनुभव को बेहतर बनाने के लिए कुकीज़ का उपयोग करते हैं।', cookie_accept:'स्वीकार करें', cookie_reject:'अस्वीकार करें', search_placeholder:'खोजें...', dark_toggle:'डार्क मोड' },
+      zh: { nav_features:'功能', nav_pricing:'定价', nav_about:'关于', nav_contact:'联系我们', nav_login:'登录', nav_register:'免费开始', hero_title:'非洲机构的操作系统', hero_sub:'一个平台，所有运营。', cta_start:'免费开始', cta_login:'登录', cookie_msg:'我们使用Cookie来改善您的体验。', cookie_accept:'接受', cookie_reject:'拒绝', search_placeholder:'搜索...', dark_toggle:'深色模式' },
+      pt: { nav_features:'Recursos', nav_pricing:'Preços', nav_about:'Sobre', nav_contact:'Contato', nav_login:'Entrar', nav_register:'Começar grátis', hero_title:'O Sistema Operacional para Instituições Africanas', hero_sub:'Uma plataforma. Todas as suas operações.', cta_start:'Começar grátis', cta_login:'Entrar', cookie_msg:'Usamos cookies para melhorar sua experiência.', cookie_accept:'Aceitar', cookie_reject:'Rejeitar', search_placeholder:'Pesquisar...', dark_toggle:'Modo escuro' },
+      am: { nav_features:'ባህሪያት', nav_pricing:'ዋጋዎች', nav_about:'ስለ እኛ', nav_contact:'ያግኙን', nav_login:'ግባ', nav_register:'ነፃ ይጀምሩ', hero_title:'ለአፍሪካ ተቋማት የኦፕሬቲንግ ስርዓት', hero_sub:'አንድ መድረክ። ሁሉም ኦፕሬሽኖችዎ።', cta_start:'ነፃ ይጀምሩ', cta_login:'ግባ', cookie_msg:'ልምድዎን ለማሻሻል ኩኪዎችን እንጠቀማለን።', cookie_accept:'ተቀበል', cookie_reject:'ውድቅ አድርግ', search_placeholder:'ፈልግ...', dark_toggle:'ጨለማ ሁነታ' }
     };
     res.json({ locale, translations: translations[locale] || translations.en });
   });
@@ -1842,7 +1871,7 @@ ${getPublicScripts()}
   app.get('/help-center', portalLimiter, (req, res) => {
     const css = getPublicCSS(); const nav = getPublicNav('en'); const footer = getPublicFooter(); const cookie = getCookieConsent();
     const head = getSEOHead('Help Center — Comfort', 'Get help with Comfort Platform. FAQs, guides, and support.', '/help-center', 'website');
-    const html = `<!DOCTYPE html><html lang="en">${head}<style>${css}</style><body>
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Help Center — Comfort</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="section" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;text-align:center;padding:60px 20px">
@@ -1869,7 +1898,7 @@ ${footer}${cookie}
   app.get('/privacy', portalLimiter, (req, res) => {
     const css = getPublicCSS(); const nav = getPublicNav('en'); const footer = getPublicFooter(); const cookie = getCookieConsent();
     const head = getSEOHead('Privacy Policy — Comfort', 'Comfort Platform Privacy Policy', '/privacy', 'website');
-    const html = `<!DOCTYPE html><html lang="en">${head}<style>${css}</style><body>
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Privacy Policy — Comfort</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}<main id="main-content" role="main"><div class="container" style="max-width:800px;margin:40px auto;padding:0 20px">
 <h1 style="font-size:32px;font-weight:800;margin-bottom:24px">Privacy Policy</h1>
 <p style="color:#64748b;margin-bottom:24px">Last updated: ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</p>
@@ -1892,7 +1921,7 @@ ${nav}<main id="main-content" role="main"><div class="container" style="max-widt
   app.get('/terms', portalLimiter, (req, res) => {
     const css = getPublicCSS(); const nav = getPublicNav('en'); const footer = getPublicFooter(); const cookie = getCookieConsent();
     const head = getSEOHead('Terms of Service — Comfort', 'Comfort Platform Terms of Service', '/terms', 'website');
-    const html = `<!DOCTYPE html><html lang="en">${head}<style>${css}</style><body>
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Terms of Service — Comfort</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}<main id="main-content" role="main"><div class="container" style="max-width:800px;margin:40px auto;padding:0 20px">
 <h1 style="font-size:32px;font-weight:800;margin-bottom:24px">Terms of Service</h1>
 <p style="color:#64748b;margin-bottom:24px">Last updated: ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</p>
@@ -1993,7 +2022,7 @@ app.get('/about', (req, res) => {
   const footer = getPublicFooter();
   const cookie = getCookieConsent();
   const head = getSEOHead('About Comfort — The Operating System for African Institutions', 'Learn about Comfort Platform, our mission to empower 1 million African institutions with affordable technology, our team, and our values.', '/about', 'website');
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>About Comfort — The Operating System for African Institutions</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="About Comfort">
@@ -2006,19 +2035,19 @@ ${nav}
 <section class="section" aria-label="Company Story">
   <div class="container" style="max-width:800px">
     <h2 class="section-title">Our Story</h2>
-    <p style="color:#475569;font-size:16px;line-height:1.8;text-align:center">Comfort was born from the frustration of watching African schools, clinics, hotels, and businesses struggle with spreadsheets, paper ledgers, and expensive foreign software that was never designed for their needs. In 2023, our founder set out to build one platform that could adapt to any institution type — from a small primary school in Mukono to a boutique hotel in Entebbe — and make it affordable enough for everyone. Today, over 500 institutions across 10+ countries trust Comfort to run their operations.</p>
+    <p style="color:var(--text-secondary);font-size:16px;line-height:1.8;text-align:center">Comfort was born from the frustration of watching African schools, clinics, hotels, and businesses struggle with spreadsheets, paper ledgers, and expensive foreign software that was never designed for their needs. In 2023, our founder set out to build one platform that could adapt to any institution type — from a small primary school in Mukono to a boutique hotel in Entebbe — and make it affordable enough for everyone. Today, over 500 institutions across 10+ countries trust Comfort to run their operations.</p>
   </div>
 </section>
 
-<section class="section" style="background:#f1f5f9" aria-label="Mission Vision Values">
+<section class="section" style="background:var(--bg-secondary)" aria-label="Mission Vision Values">
   <div class="container">
     <h2 class="section-title">Mission, Vision &amp; Values</h2>
     <p class="section-sub">The principles that guide everything we build.</p>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
-      <div class="card" role="article"><div class="card-top" style="background:#4f46e5"></div><div class="card-emoji" aria-hidden="true">🎯</div><h3>Our Mission</h3><p style="font-size:14px;color:#475569;line-height:1.7">To empower 1 million African institutions with affordable, accessible technology that simplifies operations and drives growth.</p></div>
-      <div class="card" role="article"><div class="card-top" style="background:#059669"></div><div class="card-emoji" aria-hidden="true">🔭</div><h3>Our Vision</h3><p style="font-size:14px;color:#475569;line-height:1.7">An Africa where every institution, no matter how small, has access to the same caliber of management tools as the world's best organizations.</p></div>
-      <div class="card" role="article"><div class="card-top" style="background:#0891b2"></div><div class="card-emoji" aria-hidden="true">🌍</div><h3>Built for Africa</h3><p style="font-size:14px;color:#475569;line-height:1.7">Offline-first, mobile money payments, local currency pricing, tax compliance, and features designed for how African businesses actually work.</p></div>
-      <div class="card" role="article"><div class="card-top" style="background:#7c3aed"></div><div class="card-emoji" aria-hidden="true">🔒</div><h3>Trust &amp; Security</h3><p style="font-size:14px;color:#475569;line-height:1.7">End-to-end encryption, role-based access, audit logging, two-factor authentication. Your data stays yours, always.</p></div>
+      <div class="card" role="article"><div class="card-top" style="background:#4f46e5"></div><div class="card-emoji" aria-hidden="true">🎯</div><h3>Our Mission</h3><p style="font-size:14px;color:var(--text-secondary);line-height:1.7">To empower 1 million African institutions with affordable, accessible technology that simplifies operations and drives growth.</p></div>
+      <div class="card" role="article"><div class="card-top" style="background:#059669"></div><div class="card-emoji" aria-hidden="true">🔭</div><h3>Our Vision</h3><p style="font-size:14px;color:var(--text-secondary);line-height:1.7">An Africa where every institution, no matter how small, has access to the same caliber of management tools as the world's best organizations.</p></div>
+      <div class="card" role="article"><div class="card-top" style="background:#0891b2"></div><div class="card-emoji" aria-hidden="true">🌍</div><h3>Built for Africa</h3><p style="font-size:14px;color:var(--text-secondary);line-height:1.7">Offline-first, mobile money payments, local currency pricing, tax compliance, and features designed for how African businesses actually work.</p></div>
+      <div class="card" role="article"><div class="card-top" style="background:#7c3aed"></div><div class="card-emoji" aria-hidden="true">🔒</div><h3>Trust &amp; Security</h3><p style="font-size:14px;color:var(--text-secondary);line-height:1.7">End-to-end encryption, role-based access, audit logging, two-factor authentication. Your data stays yours, always.</p></div>
     </div>
   </div>
 </section>
@@ -2028,22 +2057,22 @@ ${nav}
     <h2 class="section-title">Meet Our Team</h2>
     <p class="section-sub">A passionate team building the future of African business software.</p>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
-      <div class="card" style="text-align:center" role="article"><div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#7c3aed);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:28px;font-weight:700" aria-hidden="true">S</div><h4 style="font-size:16px;font-weight:700">Samuel Ssewasswa</h4><p style="font-size:13px;color:#64748b">Founder &amp; CEO</p></div>
-      <div class="card" style="text-align:center" role="article"><div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#059669,#0d9488);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:28px;font-weight:700" aria-hidden="true">A</div><h4 style="font-size:16px;font-weight:700">Aisha Nalubega</h4><p style="font-size:13px;color:#64748b">Head of Engineering</p></div>
-      <div class="card" style="text-align:center" role="article"><div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#0891b2,#0e7490);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:28px;font-weight:700" aria-hidden="true">J</div><h4 style="font-size:16px;font-weight:700">James Okello</h4><p style="font-size:13px;color:#64748b">Head of Sales</p></div>
-      <div class="card" style="text-align:center" role="article"><div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#ea580c);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:28px;font-weight:700" aria-hidden="true">P</div><h4 style="font-size:16px;font-weight:700">Patricia Ario</h4><p style="font-size:13px;color:#64748b">Head of Customer Success</p></div>
+      <div class="card" style="text-align:center" role="article"><div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#7c3aed);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:28px;font-weight:700" aria-hidden="true">S</div><h4 style="font-size:16px;font-weight:700">Samuel Ssewasswa</h4><p style="font-size:13px;color:var(--text-muted)">Founder &amp; CEO</p></div>
+      <div class="card" style="text-align:center" role="article"><div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#059669,#0d9488);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:28px;font-weight:700" aria-hidden="true">A</div><h4 style="font-size:16px;font-weight:700">Aisha Nalubega</h4><p style="font-size:13px;color:var(--text-muted)">Head of Engineering</p></div>
+      <div class="card" style="text-align:center" role="article"><div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#0891b2,#0e7490);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:28px;font-weight:700" aria-hidden="true">J</div><h4 style="font-size:16px;font-weight:700">James Okello</h4><p style="font-size:13px;color:var(--text-muted)">Head of Sales</p></div>
+      <div class="card" style="text-align:center" role="article"><div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#ea580c);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:white;font-size:28px;font-weight:700" aria-hidden="true">P</div><h4 style="font-size:16px;font-weight:700">Patricia Ario</h4><p style="font-size:13px;color:var(--text-muted)">Head of Customer Success</p></div>
     </div>
   </div>
 </section>
 
-<section class="section" style="background:#f1f5f9" aria-label="Stats">
+<section class="section" style="background:var(--bg-secondary)" aria-label="Stats">
   <div class="container">
     <h2 class="section-title">Comfort by the Numbers</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:24px;max-width:800px;margin:0 auto">
-      <div style="text-align:center;padding:32px 16px"><div style="font-size:42px;font-weight:900;color:#4f46e5">500+</div><div style="font-size:14px;color:#64748b;font-weight:600">Institutions</div></div>
-      <div style="text-align:center;padding:32px 16px"><div style="font-size:42px;font-weight:900;color:#059669">15</div><div style="font-size:14px;color:#64748b;font-weight:600">Sectors</div></div>
-      <div style="text-align:center;padding:32px 16px"><div style="font-size:42px;font-weight:900;color:#0891b2">9</div><div style="font-size:14px;color:#64748b;font-weight:600">Languages</div></div>
-      <div style="text-align:center;padding:32px 16px"><div style="font-size:42px;font-weight:900;color:#7c3aed">10+</div><div style="font-size:14px;color:#64748b;font-weight:600">Countries</div></div>
+      <div style="text-align:center;padding:32px 16px"><div style="font-size:42px;font-weight:900;color:#4f46e5">500+</div><div style="font-size:14px;color:var(--text-muted);font-weight:600">Institutions</div></div>
+      <div style="text-align:center;padding:32px 16px"><div style="font-size:42px;font-weight:900;color:#059669">15</div><div style="font-size:14px;color:var(--text-muted);font-weight:600">Sectors</div></div>
+      <div style="text-align:center;padding:32px 16px"><div style="font-size:42px;font-weight:900;color:#0891b2">9</div><div style="font-size:14px;color:var(--text-muted);font-weight:600">Languages</div></div>
+      <div style="text-align:center;padding:32px 16px"><div style="font-size:42px;font-weight:900;color:#7c3aed">10+</div><div style="font-size:14px;color:var(--text-muted);font-weight:600">Countries</div></div>
     </div>
   </div>
 </section>
@@ -2075,14 +2104,14 @@ app.get('/contact', (req, res) => {
   const captchaA = Math.floor(Math.random() * 5) + 3;
   const captchaB = Math.floor(Math.random() * 5) + 1;
   const captchaAnswer = String(captchaA + captchaB);
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Contact Us — Comfort</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="section" aria-label="Contact Form">
   <div class="container" style="max-width:600px">
     <h1 class="section-title">Get in Touch</h1>
     <p class="section-sub">We'd love to hear from you. Fill out the form below and we'll get back within 24 hours.</p>
-    <div class="card" style="background:white;border-radius:16px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
+    <div class="card" style="background:var(--bg-card);border-radius:16px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid var(--border-color)">
       <form method="POST" action="/contact" aria-label="Contact form" novalidate>
         <input type="hidden" name="_csrf" value="${req.csrfToken}">
         <input type="hidden" name="captcha_answer" value="${captchaAnswer}">
@@ -2091,24 +2120,24 @@ ${nav}
           <label for="website_url">Website URL</label>
           <input type="text" name="website_url" id="website_url" tabindex="-1" autocomplete="off">
         </div>
-        <label for="contact-name" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Name *</label>
-        <input id="contact-name" name="name" required aria-required="true" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
-        <label for="contact-email" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Email *</label>
-        <input id="contact-email" name="email" type="email" required aria-required="true" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
-        <label for="contact-phone" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Phone</label>
-        <input id="contact-phone" name="phone" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
-        <label for="contact-subject" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Subject *</label>
-        <select id="contact-subject" name="subject" required aria-required="true" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;background:white">
+        <label for="contact-name" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Name *</label>
+        <input id="contact-name" name="name" required aria-required="true" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
+        <label for="contact-email" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Email *</label>
+        <input id="contact-email" name="email" type="email" required aria-required="true" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
+        <label for="contact-phone" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Phone</label>
+        <input id="contact-phone" name="phone" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
+        <label for="contact-subject" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Subject *</label>
+        <select id="contact-subject" name="subject" required aria-required="true" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px;background:var(--bg-card)">
           <option value="">Select...</option><option>Sales Inquiry</option><option>Technical Support</option><option>Partnership</option><option>Feature Request</option><option>Bug Report</option><option>Other</option>
         </select>
-        <label for="contact-message" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Message *</label>
-        <textarea id="contact-message" name="message" required aria-required="true" rows="5" placeholder="How can we help?" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;font-family:inherit;min-height:120px;resize:vertical"></textarea>
-        <label for="contact-captcha" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:12px">What is ${captchaA} + ${captchaB}? *</label>
-        <input id="contact-captcha" name="captcha" type="number" required aria-required="true" style="width:120px;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
+        <label for="contact-message" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Message *</label>
+        <textarea id="contact-message" name="message" required aria-required="true" rows="5" placeholder="How can we help?" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px;font-family:inherit;min-height:120px;resize:vertical"></textarea>
+        <label for="contact-captcha" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:12px">What is ${captchaA} + ${captchaB}? *</label>
+        <input id="contact-captcha" name="captcha" type="number" required aria-required="true" style="width:120px;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
         <button type="submit" style="display:block;width:100%;padding:14px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;margin-top:16px">Send Message</button>
       </form>
     </div>
-    <div style="text-align:center;margin-top:24px;color:#64748b;font-size:14px">Or email us at <a href="mailto:hello@comfort.ug">hello@comfort.ug</a> | WhatsApp: <a href="https://wa.me/256700000000">+256 700 000 000</a></div>
+    <div style="text-align:center;margin-top:24px;color:var(--text-muted);font-size:14px">Or email us at <a href="mailto:hello@comfort.ug">hello@comfort.ug</a> | WhatsApp: <a href="https://wa.me/256700000000">+256 700 000 000</a></div>
   </div>
 </section>
 </main>
@@ -2125,11 +2154,11 @@ app.post('/contact', contactLimiter, ah(async (req, res) => {
   // Honeypot check — if filled, it's a bot
   if (website_url && website_url.length > 0) {
     // Silently ignore — return success to not alert bots
-    return res.send('<div style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">&#10003;</div><h1>Message Sent!</h1><p style="color:#64748b">We\'ll get back to you within 24 hours.</p><a href="/" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Back to Home</a></div>');
+    return res.send('<div style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">&#10003;</div><h1>Message Sent!</h1><p style="color:var(--text-muted)">We\'ll get back to you within 24 hours.</p><a href="/" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Back to Home</a></div>');
   }
   // CAPTCHA verification
   if (!captcha || String(captcha).trim() !== String(captcha_answer).trim()) {
-    return res.status(400).send('<div style="text-align:center;padding:60px"><h2>CAPTCHA Failed</h2><p style="color:#64748b">Please try again with the correct answer.</p><a href="/contact" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Go Back</a></div>');
+    return res.status(400).send('<div style="text-align:center;padding:60px"><h2>CAPTCHA Failed</h2><p style="color:var(--text-muted)">Please try again with the correct answer.</p><a href="/contact" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Go Back</a></div>');
   }
   // Validate inputs
   if (!name || !email || !message || name.length > 255 || email.length > 255 || (subject && subject.length > 255) || message.length > 5000) {
@@ -2146,7 +2175,7 @@ app.post('/contact', contactLimiter, ah(async (req, res) => {
     return res.status(500).send('Something went wrong. Please try again.');
   }
   try { sendEmail('hello@comfort.ug', 'Contact: ' + safeSubject, '<p><strong>' + esc(name) + '</strong> (' + esc(email) + ')</p><p>' + esc(message) + '</p>'); } catch (e) { if (logger) logger.warn('Contact email send failed', e); }
-  res.send('<div style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">&#10003;</div><h1>Message Sent!</h1><p style="color:#64748b">We\'ll get back to you within 24 hours.</p><a href="/" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Back to Home</a></div>');
+  res.send('<div style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">&#10003;</div><h1>Message Sent!</h1><p style="color:var(--text-muted)">We\'ll get back to you within 24 hours.</p><a href="/" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Back to Home</a></div>');
 }));
 
 // ============================================================
@@ -2212,7 +2241,7 @@ app.get('/features', (req, res) => {
       {name:'Audit Logging',desc:'Complete audit trail of all actions for compliance and accountability.'}
     ]}
   ];
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Features — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="Features Hero">
@@ -2226,7 +2255,7 @@ ${categories.map(cat => `
   <div class="container" style="max-width:1100px">
     <h2 class="section-title"><span aria-hidden="true">${cat.emoji}</span> ${cat.title}</h2>
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">
-      ${cat.features.map(f => `<div class="card" role="article" style="padding:20px"><h4 style="font-size:15px;font-weight:700;margin-bottom:6px;color:${cat.color}">${f.name}</h4><p style="font-size:13px;color:#475569;line-height:1.6">${f.desc}</p></div>`).join('')}
+      ${cat.features.map(f => `<div class="card" role="article" style="padding:20px"><h4 style="font-size:15px;font-weight:700;margin-bottom:6px;color:${cat.color}">${f.name}</h4><p style="font-size:13px;color:var(--text-secondary);line-height:1.6">${f.desc}</p></div>`).join('')}
     </div>
   </div>
 </section>`).join('')}
@@ -2265,7 +2294,7 @@ app.get('/changelog', ah(async (req, res) => {
     ];
   }
   const catColors = {Feature:'#059669',Enhancement:'#2563eb',Fix:'#d97706',Security:'#dc2626'};
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Changelog — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="Changelog Hero">
@@ -2283,14 +2312,14 @@ ${nav}
         const dateStr = e.date ? new Date(e.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
         return `<div style="position:relative;margin-bottom:32px" role="article">
           <div style="position:absolute;left:-33px;top:6px;width:18px;height:18px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 0 0 2px ${color}" aria-hidden="true"></div>
-          <div style="background:white;border-radius:14px;padding:24px;border:1px solid #e2e8f0;box-shadow:0 1px 6px rgba(0,0,0,0.04)">
+          <div style="background:var(--bg-card);border-radius:14px;padding:24px;border:1px solid var(--border-color);box-shadow:0 1px 6px rgba(0,0,0,0.04)">
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-              <span style="font-size:20px;font-weight:800;color:#1e293b">v${esc(e.version)}</span>
+              <span style="font-size:20px;font-weight:800;color:var(--text-primary)">v${esc(e.version)}</span>
               <span style="display:inline-block;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:700;color:white;background:${color}">${esc(e.category)}</span>
-              <span style="font-size:12px;color:#94a3b8">${dateStr}</span>
+              <span style="font-size:12px;color:var(--text-muted)">${dateStr}</span>
             </div>
             <h3 style="font-size:16px;font-weight:700;margin-bottom:6px">${esc(e.title)}</h3>
-            ${e.description ? '<p style="font-size:14px;color:#475569;line-height:1.6">'+esc(e.description)+'</p>' : ''}
+            ${e.description ? '<p style="font-size:14px;color:var(--text-secondary);line-height:1.6">'+esc(e.description)+'</p>' : ''}
           </div>
         </div>`;
       }).join('')}
@@ -2326,7 +2355,7 @@ app.get('/careers', (req, res) => {
     {icon:'&#128218;',title:'Learning Budget',desc:'Annual budget for courses, books, conferences, and certifications.'},
     {icon:'&#127758;',title:'Remote-Friendly',desc:'Work from anywhere. We trust you to deliver results.'}
   ];
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Careers — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="Careers Hero">
@@ -2343,21 +2372,21 @@ ${nav}
       ${jobs.map(j => `<div class="card" role="article">
         <h3 style="font-size:17px;font-weight:700;margin-bottom:8px;color:#4f46e5">${esc(j.title)}</h3>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <span style="padding:3px 10px;background:#f1f5f9;border-radius:6px;font-size:12px;font-weight:600;color:#475569">${esc(j.dept)}</span>
+          <span style="padding:3px 10px;background:var(--bg-secondary);border-radius:6px;font-size:12px;font-weight:600;color:var(--text-secondary)">${esc(j.dept)}</span>
           <span style="padding:3px 10px;background:#f0fdf4;border-radius:6px;font-size:12px;font-weight:600;color:#059669">${esc(j.loc)}</span>
           <span style="padding:3px 10px;background:#eff6ff;border-radius:6px;font-size:12px;font-weight:600;color:#2563eb">${esc(j.type)}</span>
         </div>
-        <p style="font-size:13px;color:#475569;line-height:1.6;margin-bottom:16px">${esc(j.desc)}</p>
+        <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:16px">${esc(j.desc)}</p>
         <a href="/contact?subject=Job Application: ${encodeURIComponent(j.title)}" class="btn btn-primary" style="font-size:13px;padding:8px 20px">Apply Now</a>
       </div>`).join('')}
     </div>
   </div>
 </section>
-<section class="section" style="background:#f1f5f9" aria-label="Benefits">
+<section class="section" style="background:var(--bg-secondary)" aria-label="Benefits">
   <div class="container" style="max-width:800px">
     <h2 class="section-title">Why Comfort?</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
-      ${benefits.map(b => `<div style="text-align:center;padding:24px"><div style="font-size:36px;margin-bottom:8px" aria-hidden="true">${b.icon}</div><h4 style="font-size:15px;font-weight:700;margin-bottom:4px">${b.title}</h4><p style="font-size:13px;color:#64748b">${b.desc}</p></div>`).join('')}
+      ${benefits.map(b => `<div style="text-align:center;padding:24px"><div style="font-size:36px;margin-bottom:8px" aria-hidden="true">${b.icon}</div><h4 style="font-size:15px;font-weight:700;margin-bottom:4px">${b.title}</h4><p style="font-size:13px;color:var(--text-muted)">${b.desc}</p></div>`).join('')}
     </div>
   </div>
 </section>
@@ -2386,7 +2415,7 @@ app.get('/partners', (req, res) => {
     {name:'Distribution Partners',icon:'&#127759;',color:'#059669',benefits:['Resell Comfort to your network','Competitive commission rates','Marketing materials & collateral','Sales training & certification','Lead sharing program','Regional exclusivity options']},
     {name:'Reseller Partners',icon:'&#129309;',color:'#0891b2',benefits:['White-label options available','Volume discount pricing','Dedicated account manager','Custom onboarding for clients','Revenue sharing model','Co-branded landing pages']}
   ];
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Partners — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="Partners Hero">
@@ -2403,19 +2432,19 @@ ${nav}
       ${tiers.map(t => `<div class="card" role="article">
         <div style="font-size:36px;margin-bottom:12px" aria-hidden="true">${t.icon}</div>
         <h3 style="font-size:18px;font-weight:800;color:${t.color};margin-bottom:12px">${t.name}</h3>
-        <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2.2">${t.benefits.map(b => '<li style="padding-left:20px;position:relative"><span style="position:absolute;left:0;color:'+t.color+';font-weight:700">&#10003;</span>'+b+'</li>').join('')}</ul>
+        <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-secondary);line-height:2.2">${t.benefits.map(b => '<li style="padding-left:20px;position:relative"><span style="position:absolute;left:0;color:'+t.color+';font-weight:700">&#10003;</span>'+b+'</li>').join('')}</ul>
       </div>`).join('')}
     </div>
   </div>
 </section>
-<section class="section" style="background:#f1f5f9" aria-label="Partner Logos">
+<section class="section" style="background:var(--bg-secondary)" aria-label="Partner Logos">
   <div class="container" style="text-align:center">
     <h2 class="section-title">Trusted by Leading Organizations</h2>
     <div style="display:flex;gap:40px;justify-content:center;flex-wrap:wrap;align-items:center;margin-top:32px;opacity:0.5">
-      <div style="width:120px;height:40px;background:#cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#64748b;font-weight:600">Partner 1</div>
-      <div style="width:120px;height:40px;background:#cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#64748b;font-weight:600">Partner 2</div>
-      <div style="width:120px;height:40px;background:#cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#64748b;font-weight:600">Partner 3</div>
-      <div style="width:120px;height:40px;background:#cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#64748b;font-weight:600">Partner 4</div>
+      <div style="width:120px;height:40px;background:#cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted);font-weight:600">Partner 1</div>
+      <div style="width:120px;height:40px;background:#cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted);font-weight:600">Partner 2</div>
+      <div style="width:120px;height:40px;background:#cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted);font-weight:600">Partner 3</div>
+      <div style="width:120px;height:40px;background:#cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted);font-weight:600">Partner 4</div>
     </div>
   </div>
 </section>
@@ -2426,14 +2455,14 @@ ${nav}
       <form method="POST" action="/contact" aria-label="Partner application">
         <input type="hidden" name="_csrf" value="${req.csrfToken}">
         <input type="hidden" name="subject" value="Partnership Application">
-        <label for="partner-name" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Name *</label>
-        <input id="partner-name" name="name" required style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
-        <label for="partner-email" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Email *</label>
-        <input id="partner-email" name="email" type="email" required style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
-        <label for="partner-company" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Company</label>
-        <input id="partner-company" name="phone" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px" placeholder="Your company name">
-        <label for="partner-tier" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Partnership Tier *</label>
-        <select id="partner-tier" name="message" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;background:white">
+        <label for="partner-name" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Name *</label>
+        <input id="partner-name" name="name" required style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
+        <label for="partner-email" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Email *</label>
+        <input id="partner-email" name="email" type="email" required style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
+        <label for="partner-company" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Company</label>
+        <input id="partner-company" name="phone" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px" placeholder="Your company name">
+        <label for="partner-tier" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Partnership Tier *</label>
+        <select id="partner-tier" name="message" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px;background:var(--bg-card)">
           <option value="Technology Partner">Technology Partner</option><option value="Distribution Partner">Distribution Partner</option><option value="Reseller Partner">Reseller Partner</option>
         </select>
         <button type="submit" style="display:block;width:100%;padding:14px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;margin-top:12px">Apply Now</button>
@@ -2457,7 +2486,7 @@ app.get('/demo', (req, res) => {
   const cookie = getCookieConsent();
   const head = getSEOHead('Book a Demo — Comfort Platform', 'See Comfort in action. Book a personalized demo and discover how it can transform your institution.', '/demo', 'website');
   const typeOptions = PORTAL_TYPES.map(p => `<option value="${p.type}">${p.emoji} ${p.label}</option>`).join('');
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Book a Demo — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="Demo Hero">
@@ -2475,20 +2504,20 @@ ${nav}
           <form method="POST" action="/contact" aria-label="Demo request form">
             <input type="hidden" name="_csrf" value="${req.csrfToken}">
             <input type="hidden" name="subject" value="Demo Request">
-            <label for="demo-name" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Name *</label>
-            <input id="demo-name" name="name" required style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
-            <label for="demo-email" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Email *</label>
-            <input id="demo-email" name="email" type="email" required style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
-            <label for="demo-phone" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Phone</label>
-            <input id="demo-phone" name="phone" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px" placeholder="+256 700 000 000">
-            <label for="demo-type" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Institution Type *</label>
-            <select id="demo-type" name="institution_type" required style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;background:white">
+            <label for="demo-name" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Name *</label>
+            <input id="demo-name" name="name" required style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
+            <label for="demo-email" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Email *</label>
+            <input id="demo-email" name="email" type="email" required style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
+            <label for="demo-phone" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Phone</label>
+            <input id="demo-phone" name="phone" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px" placeholder="+256 700 000 000">
+            <label for="demo-type" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Institution Type *</label>
+            <select id="demo-type" name="institution_type" required style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px;background:var(--bg-card)">
               <option value="">Select...</option>${typeOptions}
             </select>
-            <label for="demo-date" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Preferred Date/Time</label>
-            <input id="demo-date" name="preferred_date" type="datetime-local" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px">
-            <label for="demo-msg" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Message</label>
-            <textarea id="demo-msg" name="message" rows="3" placeholder="Tell us about your institution and what you'd like to see..." style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;font-family:inherit;resize:vertical"></textarea>
+            <label for="demo-date" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Preferred Date/Time</label>
+            <input id="demo-date" name="preferred_date" type="datetime-local" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px">
+            <label for="demo-msg" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Message</label>
+            <textarea id="demo-msg" name="message" rows="3" placeholder="Tell us about your institution and what you'd like to see..." style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px;font-family:inherit;resize:vertical"></textarea>
             <button type="submit" style="display:block;width:100%;padding:14px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;margin-top:12px">Book Demo</button>
           </form>
         </div>
@@ -2496,18 +2525,18 @@ ${nav}
       <div>
         <h2 style="font-size:24px;font-weight:800;margin-bottom:20px">Watch 2-Minute Demo</h2>
         <div style="background:#1e293b;border-radius:16px;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;margin-bottom:32px;border:1px solid #334155" role="img" aria-label="Demo video placeholder">
-          <div style="text-align:center;color:#94a3b8"><div style="font-size:48px;margin-bottom:8px" aria-hidden="true">&#9654;</div><p style="font-size:14px">Demo video coming soon</p></div>
+          <div style="text-align:center;color:var(--text-muted)"><div style="font-size:48px;margin-bottom:8px" aria-hidden="true">&#9654;</div><p style="font-size:14px">Demo video coming soon</p></div>
         </div>
         <h3 style="font-size:18px;font-weight:700;margin-bottom:16px">What Our Users Say</h3>
         <div class="card" style="padding:20px;margin-bottom:12px">
           <div style="color:#f59e0b;font-size:14px;margin-bottom:8px" aria-label="5 stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-          <p style="font-size:13px;color:#475569;font-style:italic;line-height:1.7">"Comfort replaced 5 different tools. Our school runs everything from fees to report cards in one place."</p>
-          <p style="font-size:12px;color:#64748b;margin-top:8px;font-weight:600">Grace N. — Headteacher, Kampala</p>
+          <p style="font-size:13px;color:var(--text-secondary);font-style:italic;line-height:1.7">"Comfort replaced 5 different tools. Our school runs everything from fees to report cards in one place."</p>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:8px;font-weight:600">Grace N. — Headteacher, Kampala</p>
         </div>
         <div class="card" style="padding:20px">
           <div style="color:#f59e0b;font-size:14px;margin-bottom:8px" aria-label="5 stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-          <p style="font-size:13px;color:#475569;font-style:italic;line-height:1.7">"Revenue is up 30% since we started using Comfort's hotel module."</p>
-          <p style="font-size:12px;color:#64748b;margin-top:8px;font-weight:600">Robert M. — Manager, Entebbe</p>
+          <p style="font-size:13px;color:var(--text-secondary);font-style:italic;line-height:1.7">"Revenue is up 30% since we started using Comfort's hotel module."</p>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:8px;font-weight:600">Robert M. — Manager, Entebbe</p>
         </div>
       </div>
     </div>
@@ -2549,7 +2578,7 @@ app.get('/compare', (req, res) => {
     {name:'GDPR Compliant',comfort:true,spreadsheets:false,erp:true,paper:false}
   ];
   function check(val) { return val ? '<span style="color:#059669;font-weight:700;font-size:18px" aria-label="Yes">&#10003;</span>' : '<span style="color:#dc2626;font-weight:700;font-size:18px" aria-label="No">&#10007;</span>'; }
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Comfort vs Spreadsheets, ERP, Paper — Compare</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="Compare Hero">
@@ -2560,19 +2589,19 @@ ${nav}
 </section>
 <section class="section" aria-label="Comparison Table">
   <div class="container" style="max-width:900px;overflow-x:auto">
-    <table style="width:100%;border-collapse:collapse;background:white;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);font-size:14px" role="table" aria-label="Feature comparison">
+    <table style="width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);font-size:14px" role="table" aria-label="Feature comparison">
       <thead>
-        <tr style="background:#f1f5f9">
-          <th style="padding:16px;text-align:left;font-weight:700;color:#1e293b;min-width:220px">Feature</th>
+        <tr style="background:var(--bg-secondary)">
+          <th style="padding:16px;text-align:left;font-weight:700;color:var(--text-primary);min-width:220px">Feature</th>
           <th style="padding:16px;text-align:center;font-weight:800;color:#4f46e5;min-width:100px;background:#eff6ff">Comfort</th>
-          <th style="padding:16px;text-align:center;font-weight:700;color:#64748b;min-width:100px">Spreadsheets</th>
-          <th style="padding:16px;text-align:center;font-weight:700;color:#64748b;min-width:100px">Generic ERP</th>
-          <th style="padding:16px;text-align:center;font-weight:700;color:#64748b;min-width:100px">Paper-Based</th>
+          <th style="padding:16px;text-align:center;font-weight:700;color:var(--text-muted);min-width:100px">Spreadsheets</th>
+          <th style="padding:16px;text-align:center;font-weight:700;color:var(--text-muted);min-width:100px">Generic ERP</th>
+          <th style="padding:16px;text-align:center;font-weight:700;color:var(--text-muted);min-width:100px">Paper-Based</th>
         </tr>
       </thead>
       <tbody>
-        ${features.map((f, i) => `<tr style="border-bottom:1px solid #f1f5f9;${i % 2 === 0 ? '' : 'background:#fafbfc'}">
-          <td style="padding:12px 16px;color:#334155;font-weight:500">${f.name}</td>
+        ${features.map((f, i) => `<tr style="border-bottom:1px solid var(--border-color);${i % 2 === 0 ? '' : 'background:var(--bg-secondary)'}">
+          <td style="padding:12px 16px;color:var(--text-primary);font-weight:500">${f.name}</td>
           <td style="padding:12px 16px;text-align:center;background:#f0fdf4">${check(f.comfort)}</td>
           <td style="padding:12px 16px;text-align:center">${check(f.spreadsheets)}</td>
           <td style="padding:12px 16px;text-align:center">${check(f.erp)}</td>
@@ -2611,7 +2640,7 @@ app.get('/security', (req, res) => {
     {icon:'&#128190;',title:'Data Backup',desc:'Automatic daily backups with point-in-time recovery. 30-day retention period.'}
   ];
   const badges = ['SSL/TLS','AES-256','GDPR','SOC 2 Type II','OWASP Top 10','ISO 27001'];
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Security — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="Security Hero">
@@ -2624,15 +2653,15 @@ ${nav}
   <div class="container" style="max-width:1000px">
     <h2 class="section-title">How We Protect You</h2>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
-      ${secFeatures.map(f => `<div class="card" role="article"><div style="font-size:32px;margin-bottom:12px" aria-hidden="true">${f.icon}</div><h3 style="font-size:17px;font-weight:700;margin-bottom:8px;color:#4f46e5">${f.title}</h3><p style="font-size:14px;color:#475569;line-height:1.7">${f.desc}</p></div>`).join('')}
+      ${secFeatures.map(f => `<div class="card" role="article"><div style="font-size:32px;margin-bottom:12px" aria-hidden="true">${f.icon}</div><h3 style="font-size:17px;font-weight:700;margin-bottom:8px;color:#4f46e5">${f.title}</h3><p style="font-size:14px;color:var(--text-secondary);line-height:1.7">${f.desc}</p></div>`).join('')}
     </div>
   </div>
 </section>
-<section class="section" style="background:#f1f5f9" aria-label="Compliance Badges">
+<section class="section" style="background:var(--bg-secondary)" aria-label="Compliance Badges">
   <div class="container" style="text-align:center">
     <h2 class="section-title">Compliance &amp; Standards</h2>
     <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:24px">
-      ${badges.map(b => `<span style="display:inline-block;padding:10px 24px;background:white;border:2px solid #e2e8f0;border-radius:12px;font-size:14px;font-weight:700;color:#334155">${b}</span>`).join('')}
+      ${badges.map(b => `<span style="display:inline-block;padding:10px 24px;background:var(--bg-card);border:2px solid var(--border-color);border-radius:12px;font-size:14px;font-weight:700;color:var(--text-primary)">${b}</span>`).join('')}
     </div>
   </div>
 </section>
@@ -2640,7 +2669,7 @@ ${nav}
   <div class="container" style="max-width:800px">
     <h2 class="section-title">Our Security Practices</h2>
     <div class="card" style="padding:28px">
-      <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2.4">
+      <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-secondary);line-height:2.4">
         <li style="padding-left:24px;position:relative"><span style="position:absolute;left:0;color:#059669;font-weight:700">&#10003;</span> Regular penetration testing by third-party security firms</li>
         <li style="padding-left:24px;position:relative"><span style="position:absolute;left:0;color:#059669;font-weight:700">&#10003;</span> Automated vulnerability scanning in CI/CD pipeline</li>
         <li style="padding-left:24px;position:relative"><span style="position:absolute;left:0;color:#059669;font-weight:700">&#10003;</span> Security-focused code reviews for all changes</li>
@@ -2651,12 +2680,12 @@ ${nav}
     </div>
   </div>
 </section>
-<section class="section" style="background:#f1f5f9" aria-label="Responsible Disclosure">
+<section class="section" style="background:var(--bg-secondary)" aria-label="Responsible Disclosure">
   <div class="container" style="max-width:700px">
     <h2 class="section-title">Responsible Disclosure</h2>
     <div class="card" style="padding:28px">
-      <p style="font-size:14px;color:#475569;line-height:1.8;margin-bottom:16px">We take security vulnerabilities seriously. If you discover a security issue, please report it responsibly:</p>
-      <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2.2">
+      <p style="font-size:14px;color:var(--text-secondary);line-height:1.8;margin-bottom:16px">We take security vulnerabilities seriously. If you discover a security issue, please report it responsibly:</p>
+      <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-secondary);line-height:2.2">
         <li style="padding-left:24px;position:relative"><span style="position:absolute;left:0;color:#4f46e5;font-weight:700">1.</span> Email <strong>security@comfort.ug</strong> with details of the vulnerability</li>
         <li style="padding-left:24px;position:relative"><span style="position:absolute;left:0;color:#4f46e5;font-weight:700">2.</span> Allow us 72 hours to acknowledge receipt</li>
         <li style="padding-left:24px;position:relative"><span style="position:absolute;left:0;color:#4f46e5;font-weight:700">3.</span> We'll work with you to understand and fix the issue</li>
@@ -2685,7 +2714,7 @@ app.get('/api-docs', (req, res) => {
   const footer = getPublicFooter();
   const cookie = getCookieConsent();
   const head = getSEOHead('API Docs — Comfort Developer Hub', 'Build on Comfort. REST API with JSON responses, API key authentication, and SDKs for JavaScript, Python, and more.', '/api-docs', 'website');
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>API Docs — Comfort Developer Hub</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="API Docs Hero">
@@ -2699,14 +2728,14 @@ ${nav}
     <h2 class="section-title">Quick Start</h2>
     <div class="card" style="padding:24px;margin-bottom:24px">
       <h3 style="font-size:16px;font-weight:700;margin-bottom:12px;color:#4f46e5">Authentication</h3>
-      <p style="font-size:14px;color:#475569;margin-bottom:16px">Include your API key in the <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:13px">Authorization</code> header:</p>
+      <p style="font-size:14px;color:var(--text-secondary);margin-bottom:16px">Include your API key in the <code style="background:var(--bg-secondary);padding:2px 6px;border-radius:4px;font-size:13px">Authorization</code> header:</p>
       <pre style="background:#1e293b;color:#e2e8f0;padding:20px;border-radius:12px;font-size:13px;overflow-x:auto;line-height:1.8"><code>Authorization: Bearer sk_live_your_api_key_here</code></pre>
     </div>
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px">Code Examples</h3>
     <div style="display:flex;gap:8px;margin-bottom:12px" role="tablist" aria-label="Code language tabs">
-      <button class="code-tab active" onclick="showCode('curl')" role="tab" aria-selected="true" style="padding:8px 16px;border-radius:8px;border:1px solid #e2e8f0;background:#4f46e5;color:white;font-size:13px;font-weight:600;cursor:pointer">curl</button>
-      <button class="code-tab" onclick="showCode('js')" role="tab" aria-selected="false" style="padding:8px 16px;border-radius:8px;border:1px solid #e2e8f0;background:white;color:#475569;font-size:13px;font-weight:600;cursor:pointer">JavaScript</button>
-      <button class="code-tab" onclick="showCode('py')" role="tab" aria-selected="false" style="padding:8px 16px;border-radius:8px;border:1px solid #e2e8f0;background:white;color:#475569;font-size:13px;font-weight:600;cursor:pointer">Python</button>
+      <button class="code-tab active" onclick="showCode('curl')" role="tab" aria-selected="true" style="padding:8px 16px;border-radius:8px;border:1px solid var(--border-color);background:#4f46e5;color:white;font-size:13px;font-weight:600;cursor:pointer">curl</button>
+      <button class="code-tab" onclick="showCode('js')" role="tab" aria-selected="false" style="padding:8px 16px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer">JavaScript</button>
+      <button class="code-tab" onclick="showCode('py')" role="tab" aria-selected="false" style="padding:8px 16px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer">Python</button>
     </div>
     <div id="code-curl" class="code-block" role="tabpanel"><pre style="background:#1e293b;color:#e2e8f0;padding:20px;border-radius:12px;font-size:13px;overflow-x:auto;line-height:1.8"><code>curl -X GET https://api.comfort.ug/v1/tenants \\
   -H "Authorization: Bearer sk_live_your_api_key" \\
@@ -2730,11 +2759,11 @@ response = requests.get(
 data = response.json()</code></pre></div>
   </div>
 </section>
-<section class="section" style="background:#f1f5f9" aria-label="Endpoint Categories">
+<section class="section" style="background:var(--bg-secondary)" aria-label="Endpoint Categories">
   <div class="container" style="max-width:900px">
     <h2 class="section-title">Endpoint Categories</h2>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px">
-      ${[{name:'Tenants',methods:'GET, POST, PATCH',color:'#4f46e5'},{name:'Users',methods:'GET, POST, PATCH, DELETE',color:'#059669'},{name:'Records',methods:'GET, POST, PATCH, DELETE',color:'#0891b2'},{name:'Billing',methods:'GET, POST',color:'#d97706'},{name:'Reports',methods:'GET, POST',color:'#7c3aed'}].map(e => `<div class="card" style="padding:20px;text-align:center"><h4 style="font-size:16px;font-weight:700;color:${e.color};margin-bottom:8px">${e.name}</h4><p style="font-size:12px;color:#64748b">${e.methods}</p></div>`).join('')}
+      ${[{name:'Tenants',methods:'GET, POST, PATCH',color:'#4f46e5'},{name:'Users',methods:'GET, POST, PATCH, DELETE',color:'#059669'},{name:'Records',methods:'GET, POST, PATCH, DELETE',color:'#0891b2'},{name:'Billing',methods:'GET, POST',color:'#d97706'},{name:'Reports',methods:'GET, POST',color:'#7c3aed'}].map(e => `<div class="card" style="padding:20px;text-align:center"><h4 style="font-size:16px;font-weight:700;color:${e.color};margin-bottom:8px">${e.name}</h4><p style="font-size:12px;color:var(--text-muted)">${e.methods}</p></div>`).join('')}
     </div>
   </div>
 </section>
@@ -2744,23 +2773,23 @@ data = response.json()</code></pre></div>
     <div class="card" style="padding:24px">
       <form id="api-tester" aria-label="API tester">
         <div style="display:flex;gap:8px;margin-bottom:12px">
-          <select id="api-method" style="padding:10px;border:2px solid #e2e8f0;border-radius:8px;font-size:14px;background:white" aria-label="HTTP method">
+          <select id="api-method" style="padding:10px;border:2px solid var(--border-color);border-radius:8px;font-size:14px;background:var(--bg-card)" aria-label="HTTP method">
             <option>GET</option><option>POST</option><option>PATCH</option><option>DELETE</option>
           </select>
-          <input id="api-url" value="/v1/tenants" style="flex:1;padding:10px;border:2px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:monospace" aria-label="API endpoint" placeholder="/v1/tenants">
+          <input id="api-url" value="/v1/tenants" style="flex:1;padding:10px;border:2px solid var(--border-color);border-radius:8px;font-size:14px;font-family:monospace" aria-label="API endpoint" placeholder="/v1/tenants">
         </div>
         <button type="button" onclick="testApi()" style="padding:10px 24px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer">Send Request</button>
-        <div id="api-response" style="margin-top:16px;padding:16px;background:#f8fafc;border-radius:8px;font-family:monospace;font-size:12px;color:#475569;min-height:60px;display:none" aria-live="polite"></div>
+        <div id="api-response" style="margin-top:16px;padding:16px;background:var(--bg-primary);border-radius:8px;font-family:monospace;font-size:12px;color:var(--text-secondary);min-height:60px;display:none" aria-live="polite"></div>
       </form>
     </div>
   </div>
 </section>
-<section class="section" style="background:#f1f5f9" aria-label="Rate Limits and SDKs">
+<section class="section" style="background:var(--bg-secondary)" aria-label="Rate Limits and SDKs">
   <div class="container" style="max-width:800px">
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px">
       <div class="card" style="padding:24px">
         <h3 style="font-size:17px;font-weight:700;margin-bottom:12px;color:#4f46e5">Rate Limits</h3>
-        <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2.2">
+        <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-secondary);line-height:2.2">
           <li><strong>Free:</strong> 60 requests/minute</li>
           <li><strong>Basic:</strong> 200 requests/minute</li>
           <li><strong>Pro:</strong> 1,000 requests/minute</li>
@@ -2769,7 +2798,7 @@ data = response.json()</code></pre></div>
       </div>
       <div class="card" style="padding:24px">
         <h3 style="font-size:17px;font-weight:700;margin-bottom:12px;color:#059669">SDKs &amp; Libraries</h3>
-        <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2.2">
+        <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-secondary);line-height:2.2">
           <li><strong>Node.js</strong> — npm install @comfort/sdk</li>
           <li><strong>Python</strong> — pip install comfort-sdk</li>
           <li><strong>PHP</strong> — composer require comfort/sdk</li>
@@ -2805,7 +2834,7 @@ app.get('/onboarding', (req, res) => {
   const cookie = getCookieConsent();
   const head = getSEOHead('Onboarding — Comfort Platform', 'Set up your institution in 5 easy steps.', '/onboarding', 'website');
   const typeOptions = PORTAL_TYPES.map(p => `<option value="${p.type}">${p.emoji} ${p.label}</option>`).join('');
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Onboarding — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="section" aria-label="Onboarding Wizard">
@@ -2823,7 +2852,7 @@ ${nav}
       <div class="card" style="padding:40px;text-align:center">
         <div style="font-size:48px;margin-bottom:16px" aria-hidden="true">&#127881;</div>
         <h2 style="font-size:28px;font-weight:800;margin-bottom:8px">Welcome to Comfort!</h2>
-        <p style="font-size:16px;color:#64748b;margin-bottom:24px;line-height:1.7">You're just 5 steps away from transforming how your institution operates. Let's get you set up!</p>
+        <p style="font-size:16px;color:var(--text-muted);margin-bottom:24px;line-height:1.7">You're just 5 steps away from transforming how your institution operates. Let's get you set up!</p>
         <button onclick="goToStep(2)" class="btn btn-primary" style="padding:14px 40px;font-size:16px">Let's Go &#8594;</button>
       </div>
     </div>
@@ -2833,14 +2862,14 @@ ${nav}
       <div class="card" style="padding:32px">
         <h2 style="font-size:22px;font-weight:800;margin-bottom:20px">Set Up Your Institution</h2>
         <form id="onboard-inst" aria-label="Institution details">
-          <label for="onb-type" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Institution Type *</label>
-          <select id="onb-type" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;background:white"><option value="">Select...</option>${typeOptions}</select>
-          <label for="onb-name" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Institution Name *</label>
-          <input id="onb-name" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px" placeholder="e.g. Sunrise Primary School">
-          <label for="onb-addr" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-top:8px">Address</label>
-          <input id="onb-addr" style="width:100%;padding:12px;margin:6px 0;border:2px solid #e2e8f0;border-radius:10px;font-size:15px" placeholder="Kampala, Uganda">
+          <label for="onb-type" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Institution Type *</label>
+          <select id="onb-type" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px;background:var(--bg-card)"><option value="">Select...</option>${typeOptions}</select>
+          <label for="onb-name" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Institution Name *</label>
+          <input id="onb-name" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px" placeholder="e.g. Sunrise Primary School">
+          <label for="onb-addr" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-top:8px">Address</label>
+          <input id="onb-addr" style="width:100%;padding:12px;margin:6px 0;border:2px solid var(--border-color);border-radius:10px;font-size:15px" placeholder="Kampala, Uganda">
           <div style="display:flex;gap:12px;margin-top:20px">
-            <button type="button" onclick="goToStep(1)" style="flex:1;padding:14px;background:white;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;color:#475569">&#8592; Back</button>
+            <button type="button" onclick="goToStep(1)" style="flex:1;padding:14px;background:var(--bg-card);border:2px solid var(--border-color);border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;color:var(--text-secondary)">&#8592; Back</button>
             <button type="button" onclick="goToStep(3)" class="btn btn-primary" style="flex:2;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white">Next &#8594;</button>
           </div>
         </form>
@@ -2851,14 +2880,14 @@ ${nav}
     <div id="step-3" class="onboarding-step" style="display:none" role="group" aria-label="Step 3: Add Records">
       <div class="card" style="padding:32px">
         <h2 style="font-size:22px;font-weight:800;margin-bottom:8px">Add Your First Records</h2>
-        <p style="font-size:14px;color:#64748b;margin-bottom:20px">You can always add more later. For now, let's get started with a few.</p>
-        <div style="text-align:center;padding:40px;background:#f8fafc;border-radius:12px;border:2px dashed #e2e8f0">
+        <p style="font-size:14px;color:var(--text-muted);margin-bottom:20px">You can always add more later. For now, let's get started with a few.</p>
+        <div style="text-align:center;padding:40px;background:var(--bg-primary);border-radius:12px;border:2px dashed var(--border-color)">
           <div style="font-size:36px;margin-bottom:8px" aria-hidden="true">&#128228;</div>
-          <p style="font-size:15px;color:#475569;font-weight:600">Import or add records manually from your dashboard.</p>
-          <p style="font-size:13px;color:#94a3b8;margin-top:8px">Supports CSV import, manual entry, and API</p>
+          <p style="font-size:15px;color:var(--text-secondary);font-weight:600">Import or add records manually from your dashboard.</p>
+          <p style="font-size:13px;color:var(--text-muted);margin-top:8px">Supports CSV import, manual entry, and API</p>
         </div>
         <div style="display:flex;gap:12px;margin-top:20px">
-          <button type="button" onclick="goToStep(2)" style="flex:1;padding:14px;background:white;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;color:#475569">&#8592; Back</button>
+          <button type="button" onclick="goToStep(2)" style="flex:1;padding:14px;background:var(--bg-card);border:2px solid var(--border-color);border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;color:var(--text-secondary)">&#8592; Back</button>
           <button type="button" onclick="goToStep(4)" class="btn btn-primary" style="flex:2;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white">Next &#8594;</button>
         </div>
       </div>
@@ -2868,16 +2897,16 @@ ${nav}
     <div id="step-4" class="onboarding-step" style="display:none" role="group" aria-label="Step 4: Invite Team">
       <div class="card" style="padding:32px">
         <h2 style="font-size:22px;font-weight:800;margin-bottom:8px">Invite Your Team</h2>
-        <p style="font-size:14px;color:#64748b;margin-bottom:20px">Add team members so they can start using Comfort right away.</p>
+        <p style="font-size:14px;color:var(--text-muted);margin-bottom:20px">Add team members so they can start using Comfort right away.</p>
         <div id="invite-list" aria-label="Invite email list">
           <div style="display:flex;gap:8px;margin-bottom:8px">
-            <input id="invite-email-1" type="email" placeholder="colleague@example.com" style="flex:1;padding:12px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px" aria-label="Team member email">
-            <select style="padding:12px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px;background:white" aria-label="Role"><option>Staff</option><option>Manager</option><option>Admin</option></select>
+            <input id="invite-email-1" type="email" placeholder="colleague@example.com" style="flex:1;padding:12px;border:2px solid var(--border-color);border-radius:10px;font-size:14px" aria-label="Team member email">
+            <select style="padding:12px;border:2px solid var(--border-color);border-radius:10px;font-size:14px;background:var(--bg-card)" aria-label="Role"><option>Staff</option><option>Manager</option><option>Admin</option></select>
           </div>
         </div>
         <button type="button" onclick="addInviteField()" style="font-size:13px;color:#4f46e5;font-weight:600;background:none;border:none;cursor:pointer;padding:8px 0">+ Add another</button>
         <div style="display:flex;gap:12px;margin-top:20px">
-          <button type="button" onclick="goToStep(3)" style="flex:1;padding:14px;background:white;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;color:#475569">&#8592; Back</button>
+          <button type="button" onclick="goToStep(3)" style="flex:1;padding:14px;background:var(--bg-card);border:2px solid var(--border-color);border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;color:var(--text-secondary)">&#8592; Back</button>
           <button type="button" onclick="goToStep(5)" class="btn btn-primary" style="flex:2;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white">Next &#8594;</button>
         </div>
       </div>
@@ -2888,7 +2917,7 @@ ${nav}
       <div class="card" style="padding:40px;text-align:center">
         <div style="font-size:48px;margin-bottom:16px" aria-hidden="true">&#127942;</div>
         <h2 style="font-size:28px;font-weight:800;margin-bottom:8px;color:#059669">You're All Set!</h2>
-        <p style="font-size:16px;color:#64748b;margin-bottom:24px;line-height:1.7">Your institution is configured and ready to go. Head to your dashboard to start exploring.</p>
+        <p style="font-size:16px;color:var(--text-muted);margin-bottom:24px;line-height:1.7">Your institution is configured and ready to go. Head to your dashboard to start exploring.</p>
         <a href="/dashboard" class="btn btn-primary" style="padding:14px 40px;font-size:16px;text-decoration:none;display:inline-block">Go to Dashboard &#8594;</a>
       </div>
     </div>
@@ -2936,7 +2965,7 @@ app.get('/portal/:subdomain', portalLimiter, ah(async (req, res, next) => {
 
   // Look up tenant
   const tenant = (await pool.query('SELECT id, name, type, sub_type, subdomain, logo_url, description, address, phone, email, approved, business_type, health_institution_type, working_hours FROM tenants WHERE subdomain=$1 AND approved=true', [subdomain])).rows[0];
-  if (!tenant) return res.status(404).send('<div style="text-align:center;padding:60px" role="alert"><h1>Institution Not Found</h1><p style="color:#64748b">This institution does not exist or is not approved.</p><a href="/">Go to Comfort Home</a></div>');
+  if (!tenant) return res.status(404).send('<div style="text-align:center;padding:60px" role="alert"><h1>Institution Not Found</h1><p style="color:var(--text-muted)">This institution does not exist or is not approved.</p><a href="/">Go to Comfort Home</a></div>');
 
   const isHealth = tenant.type === 'clinic' || tenant.type === 'health';
   const isSchool = tenant.type === 'school';
@@ -3033,14 +3062,14 @@ app.get('/portal/:subdomain', portalLimiter, ah(async (req, res, next) => {
     highlights = `<div style="text-align:center;margin-top:16px;font-size:15px;opacity:0.9">Wide selection of products | Competitive prices | Friendly service</div>`;
   }
 
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
-<nav style="background:white;border-bottom:1px solid #e2e8f0;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(0,0,0,0.04)" role="navigation" aria-label="Tenant navigation">
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(tenant.name)} — ${esc(instLabel)}</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
+<nav style="background:var(--bg-card);border-bottom:1px solid var(--border-color);padding:12px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(0,0,0,0.04)" role="navigation" aria-label="Tenant navigation">
   <div style="font-size:20px;font-weight:800;color:#0d9488;display:flex;align-items:center;gap:8px">${tenant.logo_url ? '<img src="'+esc(tenant.logo_url)+'" alt="'+esc(tenant.name)+'" style="height:28px;border-radius:6px">' : '&#9670; Comfort'}</div>
   <div style="display:flex;gap:16px;align-items:center">
-    <a href="#hours" style="font-size:13px;font-weight:600;color:#475569;padding:6px 14px;border-radius:8px;text-decoration:none">Hours</a>
-    <a href="#contact" style="font-size:13px;font-weight:600;color:#475569;padding:6px 14px;border-radius:8px;text-decoration:none">Contact</a>
+    <a href="#hours" style="font-size:13px;font-weight:600;color:var(--text-secondary);padding:6px 14px;border-radius:8px;text-decoration:none">Hours</a>
+    <a href="#contact" style="font-size:13px;font-weight:600;color:var(--text-secondary);padding:6px 14px;border-radius:8px;text-decoration:none">Contact</a>
     <a href="${cta.href}" class="btn btn-primary" style="font-size:13px;padding:8px 18px;text-decoration:none;background:linear-gradient(135deg,#0d9488,#0891b2);color:white;border-radius:8px;border:none;cursor:pointer">${cta.label}</a>
-    <a href="/login" style="font-size:13px;color:#475569;text-decoration:none">Login</a>
+    <a href="/login" style="font-size:13px;color:var(--text-secondary);text-decoration:none">Login</a>
   </div>
 </nav>
 
@@ -3064,7 +3093,7 @@ app.get('/portal/:subdomain', portalLimiter, ah(async (req, res, next) => {
 <section id="hours" style="padding:48px 20px" aria-label="Working Hours">
   <div style="max-width:600px;margin:0 auto">
     <h2 style="text-align:center;font-size:24px;font-weight:800;margin-bottom:24px">Working Hours</h2>
-    <div style="background:white;border-radius:16px;padding:24px;box-shadow:0 1px 6px rgba(0,0,0,0.05);border:1px solid #e2e8f0">
+    <div style="background:var(--bg-card);border-radius:16px;padding:24px;box-shadow:0 1px 6px rgba(0,0,0,0.05);border:1px solid var(--border-color)">
       <div style="text-align:center;margin-bottom:20px">
         <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:700;background:${todayStatus.open && todayStatus.isCurrentlyOpen ? '#dcfce7;color:#16a34a' : '#fee2e2;color:#dc2626'}">
           <span style="width:8px;height:8px;border-radius:50%;background:${todayStatus.open && todayStatus.isCurrentlyOpen ? '#16a34a' : '#dc2626'}"></span>
@@ -3073,21 +3102,21 @@ app.get('/portal/:subdomain', portalLimiter, ah(async (req, res, next) => {
       </div>
       ${days.map(day => {
         const s = isOpenToday(day);
-        return '<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:14px"><span style="font-weight:600;color:#334155">'+day+(day === currentDay ? ' (Today)' : '')+'</span>'+(s.open ? '<span style="color:#64748b">'+esc(s.hours)+'</span>' : '<span style="color:#ef4444;font-weight:500">Closed</span>')+'</div>';
+        return '<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-color);font-size:14px"><span style="font-weight:600;color:var(--text-primary)">'+day+(day === currentDay ? ' (Today)' : '')+'</span>'+(s.open ? '<span style="color:var(--text-muted)">'+esc(s.hours)+'</span>' : '<span style="color:#ef4444;font-weight:500">Closed</span>')+'</div>';
       }).join('')}
     </div>
   </div>
 </section>
 
 ${reviews.length > 0 ? `
-<section style="padding:48px 20px;background:#f1f5f9" aria-label="Reviews">
+<section style="padding:48px 20px;background:var(--bg-secondary)" aria-label="Reviews">
   <div style="max-width:700px;margin:0 auto">
     <h2 style="text-align:center;font-size:24px;font-weight:800;margin-bottom:24px">Reviews</h2>
     <div style="display:grid;gap:16px">
-      ${reviews.map(r => `<div style="background:white;border-radius:14px;padding:20px;border:1px solid #e2e8f0">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-weight:700;font-size:14px">${esc(r.patient_name || 'Anonymous')}</span><span style="font-size:12px;color:#94a3b8">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</span></div>
+      ${reviews.map(r => `<div style="background:var(--bg-card);border-radius:14px;padding:20px;border:1px solid var(--border-color)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-weight:700;font-size:14px">${esc(r.patient_name || 'Anonymous')}</span><span style="font-size:12px;color:var(--text-muted)">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</span></div>
         <div style="color:#f59e0b;font-size:14px;margin-bottom:6px">${renderStars(r.rating)}</div>
-        ${r.comment ? '<p style="font-size:13px;color:#475569">'+esc(r.comment)+'</p>' : ''}
+        ${r.comment ? '<p style="font-size:13px;color:var(--text-secondary)">'+esc(r.comment)+'</p>' : ''}
       </div>`).join('')}
     </div>
   </div>
@@ -3096,10 +3125,10 @@ ${reviews.length > 0 ? `
 <section id="contact" style="padding:48px 20px" aria-label="Contact">
   <div style="max-width:600px;margin:0 auto">
     <h2 style="text-align:center;font-size:24px;font-weight:800;margin-bottom:24px">Contact Us</h2>
-    <div style="background:white;border-radius:16px;padding:24px;box-shadow:0 1px 6px rgba(0,0,0,0.05);border:1px solid #e2e8f0">
+    <div style="background:var(--bg-card);border-radius:16px;padding:24px;box-shadow:0 1px 6px rgba(0,0,0,0.05);border:1px solid var(--border-color)">
       ${tenant.phone ? '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;font-size:14px"><span style="font-size:18px" aria-hidden="true">&#128222;</span><a href="tel:'+esc(tenant.phone)+'" style="color:#0d9488;font-weight:600">'+esc(tenant.phone)+'</a></div>' : ''}
       ${tenant.email ? '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;font-size:14px"><span style="font-size:18px" aria-hidden="true">&#9993;</span><a href="mailto:'+esc(tenant.email)+'" style="color:#0d9488;font-weight:600">'+esc(tenant.email)+'</a></div>' : ''}
-      ${tenant.address ? '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;font-size:14px"><span style="font-size:18px" aria-hidden="true">&#128205;</span><span style="font-weight:600;color:#1e293b">'+esc(tenant.address)+'</span></div>' : ''}
+      ${tenant.address ? '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;font-size:14px"><span style="font-size:18px" aria-hidden="true">&#128205;</span><span style="font-weight:600;color:var(--text-primary)">'+esc(tenant.address)+'</span></div>' : ''}
     </div>
   </div>
 </section>
@@ -3193,7 +3222,7 @@ app.get('/pricing-calculator', (req, res) => {
   const cookie = getCookieConsent();
   const head = getSEOHead('Pricing Calculator — Comfort Platform', 'Calculate your Comfort subscription cost. Adjust users, records, and currency to find the right plan.', '/pricing-calculator', 'website');
   const typeOptions = PORTAL_TYPES.map(p => `<option value="${p.type}" data-price="${p.price === 'FREE' ? '0' : p.price.replace(/,/g,'')}">${p.emoji} ${p.label}</option>`).join('');
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pricing Calculator — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="p-hero" aria-label="Calculator Hero">
@@ -3207,20 +3236,20 @@ ${nav}
     <div class="card" style="padding:32px">
       <div style="display:grid;grid-template-columns:1fr;gap:20px">
         <div>
-          <label for="calc-type" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px">Institution Type *</label>
-          <select id="calc-type" onchange="calculatePrice()" style="width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;background:white">${typeOptions}</select>
+          <label for="calc-type" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px">Institution Type *</label>
+          <select id="calc-type" onchange="calculatePrice()" style="width:100%;padding:12px;border:2px solid var(--border-color);border-radius:10px;font-size:15px;background:var(--bg-card)">${typeOptions}</select>
         </div>
         <div>
-          <label for="calc-users" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px">Number of Users: <span id="user-count">5</span></label>
+          <label for="calc-users" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px">Number of Users: <span id="user-count">5</span></label>
           <input id="calc-users" type="range" min="1" max="100" value="5" oninput="document.getElementById('user-count').textContent=this.value;calculatePrice()" style="width:100%;accent-color:#4f46e5" aria-label="Number of users">
         </div>
         <div>
-          <label for="calc-records" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px">Number of Records: <span id="record-count">500</span></label>
+          <label for="calc-records" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px">Number of Records: <span id="record-count">500</span></label>
           <input id="calc-records" type="range" min="100" max="10000" step="100" value="500" oninput="document.getElementById('record-count').textContent=this.value;calculatePrice()" style="width:100%;accent-color:#4f46e5" aria-label="Number of records">
         </div>
         <div>
-          <label for="calc-currency" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px">Currency</label>
-          <select id="calc-currency" onchange="calculatePrice()" style="width:100%;padding:12px;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;background:white">
+          <label for="calc-currency" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px">Currency</label>
+          <select id="calc-currency" onchange="calculatePrice()" style="width:100%;padding:12px;border:2px solid var(--border-color);border-radius:10px;font-size:15px;background:var(--bg-card)">
             <option value="UGX">UGX — Ugandan Shilling</option>
             <option value="USD">USD — US Dollar</option>
             <option value="KES">KES — Kenyan Shilling</option>
@@ -3230,12 +3259,12 @@ ${nav}
           </select>
         </div>
         <div>
-          <label for="calc-billing" style="font-size:13px;font-weight:600;color:#475569;display:block;margin-bottom:6px">Billing Period</label>
+          <label for="calc-billing" style="font-size:13px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px">Billing Period</label>
           <div style="display:flex;gap:12px" role="radiogroup" aria-label="Billing period">
             <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:2px solid #4f46e5;border-radius:10px;cursor:pointer;font-weight:600;color:#4f46e5;background:#eff6ff">
               <input type="radio" name="billing" value="monthly" checked onchange="calculatePrice()" style="accent-color:#4f46e5"> Monthly
             </label>
-            <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:2px solid #e2e8f0;border-radius:10px;cursor:pointer;font-weight:600;color:#475569">
+            <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border:2px solid var(--border-color);border-radius:10px;cursor:pointer;font-weight:600;color:var(--text-secondary)">
               <input type="radio" name="billing" value="annual" onchange="calculatePrice()" style="accent-color:#4f46e5"> Annual <span style="font-size:11px;color:#059669;font-weight:700">Save 20%</span>
             </label>
           </div>
@@ -3244,8 +3273,8 @@ ${nav}
     </div>
 
     <div id="calc-result" class="card" style="margin-top:24px;padding:32px;text-align:center;border:2px solid #4f46e5" aria-live="polite">
-      <div style="font-size:14px;color:#64748b;font-weight:600;margin-bottom:8px">Recommended Plan: <span id="rec-plan" style="color:#4f46e5">Basic</span></div>
-      <div id="calc-price" style="font-size:42px;font-weight:900;color:#4f46e5;margin-bottom:4px">UGX 100,000<span style="font-size:16px;font-weight:400;color:#64748b">/month</span></div>
+      <div style="font-size:14px;color:var(--text-muted);font-weight:600;margin-bottom:8px">Recommended Plan: <span id="rec-plan" style="color:#4f46e5">Basic</span></div>
+      <div id="calc-price" style="font-size:42px;font-weight:900;color:#4f46e5;margin-bottom:4px">UGX 100,000<span style="font-size:16px;font-weight:400;color:var(--text-muted)">/month</span></div>
       <div id="calc-annual" style="font-size:14px;color:#059669;font-weight:600;margin-bottom:20px"></div>
       <a href="/register" class="btn btn-primary" style="padding:14px 40px;font-size:16px;text-decoration:none;display:inline-block">Start Free Trial</a>
     </div>
@@ -3294,10 +3323,10 @@ app.get('/verify-email', ah(async (req, res) => {
   const head = getSEOHead('Verify Email — Comfort Platform', 'Verify your email address to complete registration.', '/verify-email', 'website');
 
   if (!token) {
-    const html = `<!DOCTYPE html><html lang="en">${head}<body>
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verify Email — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main" style="display:flex;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:20px">
-  <div><div style="font-size:48px;margin-bottom:16px" aria-hidden="true">&#9888;&#65039;</div><h1 style="font-size:28px;margin-bottom:8px">Invalid Link</h1><p style="color:#64748b;margin-bottom:24px">This verification link is invalid or has expired.</p><a href="/register" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px">Register Again</a></div>
+  <div><div style="font-size:48px;margin-bottom:16px" aria-hidden="true">&#9888;&#65039;</div><h1 style="font-size:28px;margin-bottom:8px">Invalid Link</h1><p style="color:var(--text-muted);margin-bottom:24px">This verification link is invalid or has expired.</p><a href="/register" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px">Register Again</a></div>
 </main>
 ${footer}${cookie}
 </body></html>`;
@@ -3310,10 +3339,10 @@ ${footer}${cookie}
       [token]
     );
     if (!result.rows.length) {
-      const html = `<!DOCTYPE html><html lang="en">${head}<body>
+      const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main" style="display:flex;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:20px">
-  <div><div style="font-size:48px;margin-bottom:16px" aria-hidden="true">&#9888;&#65039;</div><h1 style="font-size:28px;margin-bottom:8px">Link Expired</h1><p style="color:#64748b;margin-bottom:24px">This verification link has expired. Please request a new one.</p><a href="/contact" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px">Contact Support</a></div>
+  <div><div style="font-size:48px;margin-bottom:16px" aria-hidden="true">&#9888;&#65039;</div><h1 style="font-size:28px;margin-bottom:8px">Link Expired</h1><p style="color:var(--text-muted);margin-bottom:24px">This verification link has expired. Please request a new one.</p><a href="/contact" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px">Contact Support</a></div>
 </main>
 ${footer}${cookie}
 </body></html>`;
@@ -3326,10 +3355,10 @@ ${footer}${cookie}
 
     await pool.query('UPDATE email_verifications SET verified=true WHERE id=$1', [result.rows[0].id]);
 
-    const html = `<!DOCTYPE html><html lang="en">${head}<body>
+    const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email Verified — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main" style="display:flex;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:20px">
-  <div><div style="font-size:48px;margin-bottom:16px" aria-hidden="true">&#10003;</div><h1 style="font-size:28px;color:#059669;margin-bottom:8px">Email Verified!</h1><p style="color:#64748b;margin-bottom:24px">Your email <strong>${esc(result.rows[0].email)}</strong> has been verified successfully.</p><a href="/login" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px">Login to Dashboard &#8594;</a></div>
+  <div><div style="font-size:48px;margin-bottom:16px" aria-hidden="true">&#10003;</div><h1 style="font-size:28px;color:#059669;margin-bottom:8px">Email Verified!</h1><p style="color:var(--text-muted);margin-bottom:24px">Your email <strong>${esc(result.rows[0].email)}</strong> has been verified successfully.</p><a href="/login" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;border-radius:10px;font-weight:700;text-decoration:none;font-size:16px">Login to Dashboard &#8594;</a></div>
 </main>
 ${footer}${cookie}
 <script>setTimeout(function(){window.location.href='/login?verified=true';},5000);</script>
@@ -3337,7 +3366,7 @@ ${footer}${cookie}
     res.send(html);
   } catch (e) {
     if (logger) logger.error('Email verification failed', e);
-    res.status(500).send('<div style="text-align:center;padding:60px" role="alert"><h1>Error</h1><p style="color:#64748b">Something went wrong. Please try again.</p><a href="/">Go Home</a></div>');
+    res.status(500).send('<div style="text-align:center;padding:60px" role="alert"><h1>Error</h1><p style="color:var(--text-muted)">Something went wrong. Please try again.</p><a href="/">Go Home</a></div>');
   }
 }));
 
@@ -3360,45 +3389,45 @@ app.get('/cookie-policy', (req, res) => {
     {category:'Preferences',name:'theme',purpose:'Stores your light/dark mode preference',duration:'1 year'},
     {category:'Preferences',name:'locale',purpose:'Stores your language preference',duration:'1 year'}
   ];
-  const html = `<!DOCTYPE html><html lang="en">${head}<body>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cookie Policy — Comfort Platform</title><link rel="icon" href="/favicon.png">${head}<style>${css}</style></head><body>
 ${nav}
 <main id="main-content" role="main">
 <section class="section" aria-label="Cookie Policy">
   <div class="container" style="max-width:800px">
     <h1 style="font-size:32px;font-weight:800;margin-bottom:8px">Cookie Policy</h1>
-    <p style="color:#64748b;margin-bottom:32px;font-size:14px">Last updated: March 2025</p>
-    <p style="color:#475569;font-size:15px;line-height:1.8;margin-bottom:32px">Comfort Platform uses cookies and similar tracking technologies to provide, secure, and improve our services. This policy explains what cookies we use, why, and how you can control them.</p>
+    <p style="color:var(--text-muted);margin-bottom:32px;font-size:14px">Last updated: March 2025</p>
+    <p style="color:var(--text-secondary);font-size:15px;line-height:1.8;margin-bottom:32px">Comfort Platform uses cookies and similar tracking technologies to provide, secure, and improve our services. This policy explains what cookies we use, why, and how you can control them.</p>
 
     <h2 style="font-size:20px;font-weight:700;margin-bottom:16px">Cookies We Use</h2>
     <div style="overflow-x:auto;margin-bottom:32px">
-      <table style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,0.04);font-size:14px" role="table" aria-label="Cookie details">
+      <table style="width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:12px;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,0.04);font-size:14px" role="table" aria-label="Cookie details">
         <thead>
-          <tr style="background:#f1f5f9">
-            <th style="padding:12px 16px;text-align:left;font-weight:700;color:#1e293b">Category</th>
-            <th style="padding:12px 16px;text-align:left;font-weight:700;color:#1e293b">Name</th>
-            <th style="padding:12px 16px;text-align:left;font-weight:700;color:#1e293b">Purpose</th>
-            <th style="padding:12px 16px;text-align:left;font-weight:700;color:#1e293b">Duration</th>
+          <tr style="background:var(--bg-secondary)">
+            <th style="padding:12px 16px;text-align:left;font-weight:700;color:var(--text-primary)">Category</th>
+            <th style="padding:12px 16px;text-align:left;font-weight:700;color:var(--text-primary)">Name</th>
+            <th style="padding:12px 16px;text-align:left;font-weight:700;color:var(--text-primary)">Purpose</th>
+            <th style="padding:12px 16px;text-align:left;font-weight:700;color:var(--text-primary)">Duration</th>
           </tr>
         </thead>
         <tbody>
-          ${cookies.map((c, i) => `<tr style="border-bottom:1px solid #f1f5f9;${i % 2 === 0 ? '' : 'background:#fafbfc'}">
+          ${cookies.map((c, i) => `<tr style="border-bottom:1px solid var(--border-color);${i % 2 === 0 ? '' : 'background:var(--bg-secondary)'}">
             <td style="padding:12px 16px"><span style="display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;color:${c.category==='Essential'?'#059669':c.category==='Analytics'?'#2563eb':'#d97706'};background:${c.category==='Essential'?'#f0fdf4':c.category==='Analytics'?'#eff6ff':'#fffbeb'}">${c.category}</span></td>
-            <td style="padding:12px 16px;font-family:monospace;font-size:13px;color:#334155">${esc(c.name)}</td>
-            <td style="padding:12px 16px;color:#475569">${c.purpose}</td>
-            <td style="padding:12px 16px;color:#64748b;white-space:nowrap">${c.duration}</td>
+            <td style="padding:12px 16px;font-family:monospace;font-size:13px;color:var(--text-primary)">${esc(c.name)}</td>
+            <td style="padding:12px 16px;color:var(--text-secondary)">${c.purpose}</td>
+            <td style="padding:12px 16px;color:var(--text-muted);white-space:nowrap">${c.duration}</td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>
 
     <h2 style="font-size:20px;font-weight:700;margin-bottom:16px">Managing Cookies in Your Browser</h2>
-    <p style="color:#475569;font-size:15px;line-height:1.8;margin-bottom:16px">You can control and delete cookies through your browser settings. Note that removing cookies may affect your experience on Comfort.</p>
+    <p style="color:var(--text-secondary);font-size:15px;line-height:1.8;margin-bottom:16px">You can control and delete cookies through your browser settings. Note that removing cookies may affect your experience on Comfort.</p>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:32px">
-      ${[{name:'Chrome',instructions:'Settings > Privacy and Security > Cookies'},{name:'Firefox',instructions:'Settings > Privacy & Security > Cookies'},{name:'Safari',instructions:'Preferences > Privacy > Manage Website Data'},{name:'Edge',instructions:'Settings > Cookies and Site Permissions'}].map(b => `<div class="card" style="padding:16px"><h4 style="font-size:14px;font-weight:700;margin-bottom:4px">${b.name}</h4><p style="font-size:12px;color:#64748b">${b.instructions}</p></div>`).join('')}
+      ${[{name:'Chrome',instructions:'Settings > Privacy and Security > Cookies'},{name:'Firefox',instructions:'Settings > Privacy & Security > Cookies'},{name:'Safari',instructions:'Preferences > Privacy > Manage Website Data'},{name:'Edge',instructions:'Settings > Cookies and Site Permissions'}].map(b => `<div class="card" style="padding:16px"><h4 style="font-size:14px;font-weight:700;margin-bottom:4px">${b.name}</h4><p style="font-size:12px;color:var(--text-muted)">${b.instructions}</p></div>`).join('')}
     </div>
 
     <h2 style="font-size:20px;font-weight:700;margin-bottom:16px">Your Choices</h2>
-    <ul style="font-size:15px;color:#475569;line-height:2;padding-left:20px">
+    <ul style="font-size:15px;color:var(--text-secondary);line-height:2;padding-left:20px">
       <li><strong>Essential cookies</strong> cannot be disabled — they are required for Comfort to function.</li>
       <li><strong>Analytics cookies</strong> can be opted out via the cookie consent banner.</li>
       <li><strong>Preference cookies</strong> can be cleared but will reset your preferences.</li>
