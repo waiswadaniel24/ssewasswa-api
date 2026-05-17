@@ -27,11 +27,11 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
   async function processDonationEffects({ tenant_id, campaign_id, donation_id, donor_name, donor_email, donor_phone, amount, method, message, is_anonymous }) {
     // 1. Process matching donations
     try {
-      const activeMatches = (await pool.query("SELECT * FROM matching_donations WHERE campaign_id=$1 AND status='active' AND matched_so_far < max_match_amount", [campaign_id])).rows;
+      const activeMatches = (await pool.query("SELECT * FROM matching_donations WHERE campaign_id=$1 AND tenant_id=$2 AND status='active' AND matched_so_far < max_match_amount", [campaign_id])).rows;
       for (const match of activeMatches) {
         const matchAmount = Math.min(Math.round(parseInt(amount) * parseFloat(match.match_ratio)), parseInt(match.max_match_amount) - parseInt(match.matched_so_far));
         if (matchAmount > 0) {
-          await pool.query('UPDATE matching_donations SET matched_so_far=matched_so_far+$1 WHERE id=$2', [matchAmount, match.id]);
+          await pool.query('UPDATE matching_donations SET matched_so_far=matched_so_far+$1 WHERE id=$2 AND tenant_id=$3', [matchAmount, match.id]);
           if (donation_id) {
             await pool.query('UPDATE campaign_donations SET matching_contribution=$1 WHERE id=$2', [matchAmount, donation_id]);
           }
@@ -46,7 +46,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     // 2. Update donor badges
     try {
       if (donor_email) {
-        const totalDonated = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE donor_email=$1 AND refunded=false', [donor_email])).rows[0]?.total || 0;
+        const totalDonated = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE donor_email=$1 AND refunded=false AND tenant_id=$2', [donor_email])).rows[0]?.total || 0;
         const badge = calculateBadge(parseInt(totalDonated));
         if (badge) {
           await pool.query(`INSERT INTO donor_recognition(tenant_id,donor_email,donor_name,badge_type,total_donated,campaigns_supported) VALUES($1,$2,$3,$4,$5,(SELECT COUNT(DISTINCT campaign_id) FROM campaign_donations WHERE donor_email=$2))
@@ -111,11 +111,10 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
             await pool.query('INSERT INTO campaign_progress_timeline(tenant_id,campaign_id,event_type,title,description,icon,is_highlighted) VALUES($1,$2,$3,$4,$5,$6,$7)',
               [tenant_id, campaign_id, 'milestone', mp+'% Milestone!', 'Campaign reached '+mp+'% of goal', '🎯', mp >= 75]);
             if (mp === 100) {
-              await pool.query("UPDATE fundraising_campaigns SET status='completed' WHERE id=$1", [campaign_id]);
+              await pool.query("UPDATE fundraising_campaigns SET status='completed' WHERE id=$1 AND tenant_id=$2", [campaign_id]);
               await pool.query('INSERT INTO campaign_progress_timeline(tenant_id,campaign_id,event_type,title,description,icon,is_highlighted) VALUES($1,$2,$3,$4,$5,$6,$7)',
                 [tenant_id, campaign_id, 'goal_reached', 'Goal Reached!', 'Campaign has reached 100% of its fundraising goal!', '🏆', true]);
             }
-            break;
           }
         }
       }
@@ -144,7 +143,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     // 9. Update donor profile
     try {
       if (donor_email) {
-        const totalDonated = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(*) as count, COUNT(DISTINCT campaign_id) as camps FROM campaign_donations WHERE donor_email=$1 AND refunded=false', [donor_email])).rows[0];
+        const totalDonated = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(*) as count, COUNT(DISTINCT campaign_id) as camps FROM campaign_donations WHERE donor_email=$1 AND refunded=false AND tenant_id=$2', [donor_email])).rows[0];
         const firstDonation = (await pool.query('SELECT MIN(donated_at) as first FROM campaign_donations WHERE donor_email=$1 AND refunded=false', [donor_email])).rows[0]?.first;
         await pool.query(`INSERT INTO donor_profiles(tenant_id,user_email,full_name,phone,total_donated,donation_count,campaigns_supported,first_donation_at,last_donation_at)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,NOW())
@@ -249,6 +248,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     // Campaign shares tracking
     `CREATE TABLE IF NOT EXISTS campaign_shares (
       id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
       campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
       shared_by TEXT,
       platform TEXT CHECK (platform IN ('whatsapp','twitter','facebook','linkedin','email','link_copy','telegram','other')),
@@ -278,6 +278,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     // Campaign followers - users who want updates
     `CREATE TABLE IF NOT EXISTS campaign_followers (
       id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
       campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
       user_email TEXT NOT NULL,
       notify_on_update BOOLEAN DEFAULT true,
@@ -779,6 +780,125 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       ticket_code TEXT,
       registered_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+
+
+    // Platform wallet - track platform fees
+    `CREATE TABLE IF NOT EXISTS platform_wallet (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      balance INTEGER DEFAULT 0,
+      total_earned INTEGER DEFAULT 0,
+      total_withdrawn INTEGER DEFAULT 0,
+      currency TEXT DEFAULT 'UGX',
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Developer revenue tracking
+    `CREATE TABLE IF NOT EXISTS developer_revenue (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      description TEXT,
+      reference_id TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign updates (referenced by FK but not created)
+    `CREATE TABLE IF NOT EXISTS campaign_updates (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      image_url TEXT,
+      is_major BOOLEAN DEFAULT false,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign reports/complaints
+    `CREATE TABLE IF NOT EXISTS campaign_reports (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      reporter_email TEXT NOT NULL,
+      reporter_name TEXT,
+      reason TEXT NOT NULL CHECK (reason IN ('fraud','misinformation','inappropriate','duplicate','spam','copyright','other')),
+      description TEXT,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','investigating','resolved','dismissed','escalated')),
+      investigated_by TEXT,
+      investigated_at TIMESTAMPTZ,
+      resolution TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // KYC/Identity verification for campaign creators
+    `CREATE TABLE IF NOT EXISTS creator_kyc (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      user_email TEXT NOT NULL,
+      full_name TEXT NOT NULL,
+      id_type TEXT DEFAULT 'national_id' CHECK (id_type IN ('national_id','passport','driving_permit','voter_card')),
+      id_number TEXT NOT NULL,
+      id_document_url TEXT,
+      selfie_url TEXT,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','under_review','approved','rejected','expired')),
+      reviewed_by TEXT,
+      reviewed_at TIMESTAMPTZ,
+      verified_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, user_email)
+    )`,
+
+    // Platform reviews
+    `CREATE TABLE IF NOT EXISTS platform_reviews (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      reviewer_email TEXT NOT NULL,
+      reviewer_name TEXT NOT NULL,
+      rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+      review_text TEXT,
+      review_category TEXT DEFAULT 'general' CHECK (review_category IN ('general','trust','usability','support','payments','features')),
+      is_verified BOOLEAN DEFAULT false,
+      is_featured BOOLEAN DEFAULT false,
+      status TEXT DEFAULT 'visible' CHECK (status IN ('visible','hidden','flagged')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Fund usage proof / spending transparency
+    `CREATE TABLE IF NOT EXISTS fund_usage_proofs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT,
+      amount_spent INTEGER NOT NULL,
+      receipt_url TEXT,
+      photo_url TEXT,
+      category TEXT DEFAULT 'general',
+      verified BOOLEAN DEFAULT false,
+      verified_by TEXT,
+      verified_at TIMESTAMPTZ,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Payout 2FA verification
+    `CREATE TABLE IF NOT EXISTS payout_verifications (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      payout_id INTEGER REFERENCES payout_requests(id),
+      verification_code TEXT NOT NULL,
+      code_type TEXT DEFAULT 'email_otp' CHECK (code_type IN ('email_otp','sms_otp','app_totp')),
+      verified BOOLEAN DEFAULT false,
+      verified_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ NOT NULL,
+      attempts INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`
 
     // =============================================
     // V4 TABLES - Additional Success Features
@@ -1544,7 +1664,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
   }));
 
   app.get('/admin/payouts/:id/approve', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
-    await pool.query("UPDATE payout_requests SET status='approved', processed_by=$1 WHERE id=$2", [req.session.user.email, req.params.id]);
+    await pool.query("UPDATE payout_requests SET status='approved', processed_by=$1 WHERE id=$2 AND tenant_id=$3", [req.session.user.email, req.params.id]);
     res.redirect('/admin/payouts');
   }));
 
@@ -2906,7 +3026,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 AND refunded=false ORDER BY donated_at DESC LIMIT 20', [req.params.id]),
       pool.query("SELECT * FROM campaign_updates WHERE campaign_id=$1 AND is_public=true ORDER BY created_at DESC LIMIT 10", [req.params.id]),
       pool.query('SELECT * FROM campaign_milestones WHERE campaign_id=$1 ORDER BY target_amount', [req.params.id]),
-      pool.query("SELECT * FROM matching_donations WHERE campaign_id=$1 AND status='active'", [req.params.id]),
+      pool.query("SELECT * FROM matching_donations WHERE campaign_id=$1 AND tenant_id=$2 AND status='active'", [req.params.id]),
       pool.query("SELECT * FROM campaign_comments WHERE campaign_id=$1 AND status='visible' ORDER BY created_at DESC LIMIT 20", [req.params.id]),
       pool.query("SELECT * FROM campaign_testimonials WHERE campaign_id=$1 AND is_approved=true ORDER BY created_at DESC LIMIT 10", [req.params.id]),
       pool.query('SELECT * FROM donor_impact WHERE campaign_id=$1 ORDER BY created_at DESC', [req.params.id]),
@@ -6400,7 +6520,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { title, description, stream_url, stream_platform, scheduled_start, scheduled_end, host_name, host_email, is_public } = req.body;
       const r = await pool.query('INSERT INTO campaign_livestreams(tenant_id,campaign_id,title,description,stream_url,stream_platform,scheduled_start,scheduled_end,host_name,host_email,is_public) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, title, description, stream_url, stream_platform||'youtube', scheduled_start, scheduled_end, host_name, host_email, is_public!==false]);
+        [req.session.user?.tenant_id||0, req.params.id, title, description, stream_url, stream_platform||'youtube', scheduled_start, scheduled_end, host_name, host_email, is_public!==false]);
       await pool.query('UPDATE fundraising_campaigns SET has_livestream=true, stream_count=(SELECT COUNT(*) FROM campaign_livestreams WHERE campaign_id=$1) WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -6431,7 +6551,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const stream = (await pool.query('SELECT campaign_id FROM campaign_livestreams WHERE id=$1', [req.params.id])).rows[0];
       if (!stream) return res.status(404).json({ error: 'Stream not found' });
       const r = await pool.query('INSERT INTO stream_chat_messages(tenant_id,stream_id,campaign_id,user_name,user_email,message,message_type) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, stream.campaign_id, req.user?.name||'Guest', req.user?.email||'', message, message_type||'chat']);
+        [req.session.user?.tenant_id||0, req.params.id, stream.campaign_id, req.session.user?.name||'Guest', req.session.user?.email||'', message, message_type||'chat']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6461,7 +6581,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { title, description, event_date, end_date, venue_url, capacity, ticket_price, dress_code, theme, is_public } = req.body;
       const r = await pool.query('INSERT INTO virtual_galas(tenant_id,campaign_id,title,description,event_date,end_date,venue_url,capacity,ticket_price,dress_code,theme,is_public) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, title, description, event_date, end_date, venue_url, capacity, ticket_price||0, dress_code, theme||'elegant', is_public!==false]);
+        [req.session.user?.tenant_id||0, req.params.id, title, description, event_date, end_date, venue_url, capacity, ticket_price||0, dress_code, theme||'elegant', is_public!==false]);
       await pool.query('UPDATE fundraising_campaigns SET has_virtual_gala=true WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -6480,7 +6600,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const stream = (await pool.query('SELECT campaign_id FROM campaign_livestreams WHERE id=$1', [req.params.id])).rows[0];
       if (!stream) return res.status(404).json({ error: 'Stream not found' });
       const r = await pool.query('INSERT INTO stream_polls(tenant_id,stream_id,campaign_id,question,options,show_results,allow_multiple) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, stream.campaign_id, question, JSON.stringify(options), show_results!==false, allow_multiple||false]);
+        [req.session.user?.tenant_id||0, req.params.id, stream.campaign_id, question, JSON.stringify(options), show_results!==false, allow_multiple||false]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6509,7 +6629,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const stream = (await pool.query('SELECT campaign_id FROM campaign_livestreams WHERE id=$1', [req.params.id])).rows[0];
       if (!stream) return res.status(404).json({ error: 'Stream not found' });
       const r = await pool.query('INSERT INTO stream_recordings(tenant_id,stream_id,campaign_id,recording_url,thumbnail_url,duration_seconds,title,description,is_public,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,true,NOW()) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, stream.campaign_id, recording_url, thumbnail_url, duration_seconds||0, title, description]);
+        [req.session.user?.tenant_id||0, req.params.id, stream.campaign_id, recording_url, thumbnail_url, duration_seconds||0, title, description]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6527,7 +6647,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const stream = (await pool.query('SELECT campaign_id FROM campaign_livestreams WHERE id=$1', [req.params.id])).rows[0];
       if (!stream) return res.status(404).json({ error: 'Stream not found' });
       const r = await pool.query('INSERT INTO stream_takeovers(tenant_id,stream_id,campaign_id,influencer_name,influencer_handle,influencer_platform,influencer_followers,takeover_start,takeover_end,promo_message,profile_image) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, stream.campaign_id, influencer_name, influencer_handle, influencer_platform, influencer_followers||0, takeover_start, takeover_end, promo_message, profile_image]);
+        [req.session.user?.tenant_id||0, req.params.id, stream.campaign_id, influencer_name, influencer_handle, influencer_platform, influencer_followers||0, takeover_start, takeover_end, promo_message, profile_image]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6545,7 +6665,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const stream = (await pool.query('SELECT campaign_id FROM campaign_livestreams WHERE id=$1', [req.params.id])).rows[0];
       if (!stream) return res.status(404).json({ error: 'Stream not found' });
       const r = await pool.query('INSERT INTO watch_parties(tenant_id,stream_id,campaign_id,host_name,host_email,party_name,max_attendees) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, stream.campaign_id, req.user?.name||'Host', req.user?.email||'', party_name, max_attendees||50]);
+        [req.session.user?.tenant_id||0, req.params.id, stream.campaign_id, req.session.user?.name||'Host', req.session.user?.email||'', party_name, max_attendees||50]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6572,7 +6692,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const gala = (await pool.query('SELECT campaign_id FROM virtual_galas WHERE id=$1', [req.params.id])).rows[0];
       if (!gala) return res.status(404).json({ error: 'Gala not found' });
       const r = await pool.query(`INSERT INTO virtual_venues(tenant_id,gala_id,campaign_id,venue_name,primary_color,secondary_color,background_image,logo_url,banner_url,font_family,custom_css,welcome_message,exit_message,donation_cta,layout) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING RETURNING *`,
-        [req.user?.tenant_id||0, req.params.id, gala.campaign_id, venue_name, primary_color||'#059669', secondary_color||'#10b981', background_image, logo_url, banner_url, font_family||'sans-serif', custom_css, welcome_message, exit_message, donation_cta, layout||'standard']);
+        [req.session.user?.tenant_id||0, req.params.id, gala.campaign_id, venue_name, primary_color||'#059669', secondary_color||'#10b981', background_image, logo_url, banner_url, font_family||'sans-serif', custom_css, welcome_message, exit_message, donation_cta, layout||'standard']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6582,7 +6702,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // =============================================
   app.get('/api/corporate-matching', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
     try {
-      const programs = (await pool.query('SELECT * FROM corporate_matching_programs WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const programs = (await pool.query('SELECT * FROM corporate_matching_programs WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(programs);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6590,7 +6710,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { company_name, contact_name, contact_email, contact_phone, match_ratio, max_annual_match, min_employee_donation, requires_receipt } = req.body;
       const r = await pool.query('INSERT INTO corporate_matching_programs(tenant_id,company_name,contact_name,contact_email,contact_phone,match_ratio,max_annual_match,min_employee_donation,requires_receipt) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-        [req.user?.tenant_id||0, company_name, contact_name, contact_email, contact_phone, match_ratio||1.0, max_annual_match||0, min_employee_donation||0, requires_receipt!==false]);
+        [req.session.user?.tenant_id||0, company_name, contact_name, contact_email, contact_phone, match_ratio||1.0, max_annual_match||0, min_employee_donation||0, requires_receipt!==false]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6598,7 +6718,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V7 FEATURE 3: PAYROLL GIVING
   app.get('/api/payroll-giving', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const enrollments = (await pool.query('SELECT * FROM payroll_giving_enrollments WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const enrollments = (await pool.query('SELECT * FROM payroll_giving_enrollments WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(enrollments);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6606,7 +6726,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { program_id, campaign_id, employee_name, employee_email, employee_id, monthly_amount, pay_period, start_date } = req.body;
       const r = await pool.query('INSERT INTO payroll_giving_enrollments(tenant_id,program_id,campaign_id,employee_name,employee_email,employee_id,monthly_amount,pay_period,start_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-        [req.user?.tenant_id||0, program_id, campaign_id, employee_name, employee_email, employee_id, monthly_amount, pay_period||'monthly', start_date]);
+        [req.session.user?.tenant_id||0, program_id, campaign_id, employee_name, employee_email, employee_id, monthly_amount, pay_period||'monthly', start_date]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6622,7 +6742,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { tier_name, min_sponsorship, max_sponsorship, benefits, logo_placement, available_slots } = req.body;
       const r = await pool.query('INSERT INTO corporate_sponsorship_tiers(tenant_id,campaign_id,tier_name,min_sponsorship,max_sponsorship,benefits,logo_placement,available_slots) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, tier_name, min_sponsorship, max_sponsorship, JSON.stringify(benefits||[]), logo_placement||'footer', available_slots]);
+        [req.session.user?.tenant_id||0, req.params.id, tier_name, min_sponsorship, max_sponsorship, JSON.stringify(benefits||[]), logo_placement||'footer', available_slots]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6630,7 +6750,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V7 FEATURE 5: EMPLOYEE GIVING CAMPAIGNS
   app.get('/api/employee-giving', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const campaigns = (await pool.query('SELECT * FROM employee_giving_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const campaigns = (await pool.query('SELECT * FROM employee_giving_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(campaigns);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6638,7 +6758,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { program_id, title, description, start_date, end_date, target_amount, matching_available } = req.body;
       const r = await pool.query('INSERT INTO employee_giving_campaigns(tenant_id,program_id,title,description,start_date,end_date,target_amount,matching_available) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, program_id, title, description, start_date, end_date, target_amount||0, matching_available!==false]);
+        [req.session.user?.tenant_id||0, program_id, title, description, start_date, end_date, target_amount||0, matching_available!==false]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6646,16 +6766,16 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V7 FEATURE 6: CSR REPORTS
   app.get('/api/csr-reports', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const reports = (await pool.query('SELECT * FROM csr_reports WHERE tenant_id=$1 ORDER BY generated_at DESC', [req.user?.tenant_id||0])).rows;
+      const reports = (await pool.query('SELECT * FROM csr_reports WHERE tenant_id=$1 ORDER BY generated_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(reports);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.post('/api/csr-reports/generate', requireAuth, ah(async (req, res) => {
     try {
       const { program_id, report_period } = req.body;
-      const donations = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(DISTINCT donor_email) as donors FROM campaign_donations WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows[0];
+      const donations = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(DISTINCT donor_email) as donors FROM campaign_donations WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows[0];
       const r = await pool.query('INSERT INTO csr_reports(tenant_id,program_id,report_period,total_donated,participating_employees) VALUES($1,$2,$3,$4,$5) RETURNING *',
-        [req.user?.tenant_id||0, program_id, report_period, parseInt(donations.total)||0, parseInt(donations.donors)||0]);
+        [req.session.user?.tenant_id||0, program_id, report_period, parseInt(donations.total)||0, parseInt(donations.donors)||0]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6663,7 +6783,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V7 FEATURE 9: CORPORATE LEADERBOARD
   app.get('/api/corporate-leaderboard', ah(async (req, res) => {
     try {
-      const lb = (await pool.query("SELECT * FROM corporate_leaderboard WHERE tenant_id=$1 AND period='all_time' ORDER BY rank, total_donated DESC LIMIT 20", [req.user?.tenant_id||0])).rows;
+      const lb = (await pool.query("SELECT * FROM corporate_leaderboard WHERE tenant_id=$1 AND period='all_time' ORDER BY rank, total_donated DESC LIMIT 20", [req.session.user?.tenant_id||0])).rows;
       res.json(lb);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6671,7 +6791,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V7 FEATURE 10: B2B INVOICES
   app.get('/api/corporate-invoices', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const invoices = (await pool.query('SELECT * FROM corporate_invoices WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const invoices = (await pool.query('SELECT * FROM corporate_invoices WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(invoices);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6680,7 +6800,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const { program_id, company_name, company_email, amount, due_date, line_items, notes } = req.body;
       const invNum = 'INV-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
       const r = await pool.query('INSERT INTO corporate_invoices(tenant_id,program_id,invoice_number,company_name,company_email,amount,due_date,line_items,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-        [req.user?.tenant_id||0, program_id, invNum, company_name, company_email, amount, due_date, JSON.stringify(line_items||[]), notes]);
+        [req.session.user?.tenant_id||0, program_id, invNum, company_name, company_email, amount, due_date, JSON.stringify(line_items||[]), notes]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6690,7 +6810,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // =============================================
   app.get('/api/tax-receipts', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const receipts = (await pool.query('SELECT * FROM tax_receipts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      const receipts = (await pool.query('SELECT * FROM tax_receipts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.session.user?.tenant_id||0])).rows;
       res.json(receipts);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6710,7 +6830,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { entity_type, limit } = req.query;
       let q = 'SELECT * FROM financial_audit_trail WHERE tenant_id=$1';
-      const params = [req.user?.tenant_id||0];
+      const params = [req.session.user?.tenant_id||0];
       if (entity_type) { q += ' AND entity_type=$2'; params.push(entity_type); }
       q += ' ORDER BY changed_at DESC LIMIT ' + (parseInt(limit)||50);
       const trail = (await pool.query(q, params)).rows;
@@ -6721,7 +6841,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V8 FEATURE 3: REGULATORY COMPLIANCE CHECK
   app.get('/api/compliance-checks', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const checks = (await pool.query('SELECT * FROM compliance_checks WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const checks = (await pool.query('SELECT * FROM compliance_checks WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(checks);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6729,7 +6849,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { entity_type, entity_id, check_type, country, requirements } = req.body;
       const r = await pool.query('INSERT INTO compliance_checks(tenant_id,entity_type,entity_id,check_type,country,requirements) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, entity_type, entity_id, check_type, country||'Uganda', JSON.stringify(requirements||[])]);
+        [req.session.user?.tenant_id||0, entity_type, entity_id, check_type, country||'Uganda', JSON.stringify(requirements||[])]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6738,7 +6858,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   app.get('/api/tax-statements', requireAuth, ah(async (req, res) => {
     try {
       const year = req.query.year || new Date().getFullYear();
-      const statements = (await pool.query('SELECT * FROM donor_tax_statements WHERE tenant_id=$1 AND tax_year=$2', [req.user?.tenant_id||0, year])).rows;
+      const statements = (await pool.query('SELECT * FROM donor_tax_statements WHERE tenant_id=$1 AND tax_year=$2', [req.session.user?.tenant_id||0, year])).rows;
       res.json(statements);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6748,12 +6868,12 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const yearStart = year + '-01-01';
       const yearEnd = year + '-12-31';
       const donors = (await pool.query("SELECT donor_email, donor_name, SUM(amount) as total, COUNT(*) as count, COUNT(DISTINCT campaign_id) as camps FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donated_at >= $2 AND donated_at <= $3 AND donor_email IS NOT NULL GROUP BY donor_email, donor_name",
-        [req.user?.tenant_id||0, yearStart, yearEnd])).rows;
+        [req.session.user?.tenant_id||0, yearStart, yearEnd])).rows;
       let generated = 0;
       for (const d of donors) {
         try {
           await pool.query(`INSERT INTO donor_tax_statements(tenant_id,donor_email,donor_name,tax_year,total_donated,tax_deductible_total,num_donations,campaigns_supported,pdf_generated) VALUES($1,$2,$3,$4,$5,$6,$7,$8,false) ON CONFLICT (tenant_id, donor_email, tax_year) DO UPDATE SET total_donated=$5, tax_deductible_total=$6, num_donations=$7, campaigns_supported=$8, generated_at=NOW()`,
-            [req.user?.tenant_id||0, d.donor_email, d.donor_name, year, parseInt(d.total), parseInt(d.total), parseInt(d.count), parseInt(d.camps)]);
+            [req.session.user?.tenant_id||0, d.donor_email, d.donor_name, year, parseInt(d.total), parseInt(d.total), parseInt(d.count), parseInt(d.camps)]);
           generated++;
         } catch(e2) {}
       }
@@ -6776,7 +6896,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V8 FEATURE 6: AML CHECKS
   app.get('/api/aml-flags', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const flags = (await pool.query('SELECT * FROM aml_flags WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const flags = (await pool.query('SELECT * FROM aml_flags WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(flags);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6784,7 +6904,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { investigation_status, resolution } = req.body;
       await pool.query('UPDATE aml_flags SET investigation_status=$1, resolution=$2, reviewed_by=$3, reviewed_at=NOW() WHERE id=$4',
-        [investigation_status, resolution, req.user?.email||'', req.params.id]);
+        [investigation_status, resolution, req.session.user?.email||'', req.params.id]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6794,15 +6914,15 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { export_type, format, filters, date_from, date_to } = req.body;
       const r = await pool.query('INSERT INTO data_export_jobs(tenant_id,export_type,format,filters,date_from,date_to,requested_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, export_type, format||'csv', JSON.stringify(filters||{}), date_from, date_to, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, export_type, format||'csv', JSON.stringify(filters||{}), date_from, date_to, req.session.user?.email||'']);
       // Simple synchronous export for small datasets
       let data = [];
       if (export_type === 'donations') {
-        data = (await pool.query('SELECT * FROM campaign_donations WHERE tenant_id=$1 AND refunded=false ORDER BY donated_at DESC LIMIT 10000', [req.user?.tenant_id||0])).rows;
+        data = (await pool.query('SELECT * FROM campaign_donations WHERE tenant_id=$1 AND refunded=false ORDER BY donated_at DESC LIMIT 10000', [req.session.user?.tenant_id||0])).rows;
       } else if (export_type === 'donors') {
-        data = (await pool.query('SELECT * FROM donor_profiles WHERE tenant_id=$1 ORDER BY total_donated DESC', [req.user?.tenant_id||0])).rows;
+        data = (await pool.query('SELECT * FROM donor_profiles WHERE tenant_id=$1 ORDER BY total_donated DESC', [req.session.user?.tenant_id||0])).rows;
       } else if (export_type === 'campaigns') {
-        data = (await pool.query('SELECT * FROM fundraising_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+        data = (await pool.query('SELECT * FROM fundraising_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       }
       await pool.query('UPDATE data_export_jobs SET record_count=$1, status=$2, completed_at=NOW() WHERE id=$3', [data.length, 'completed', r.rows[0].id]);
       if (format === 'json') {
@@ -6825,7 +6945,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V8 FEATURE 8: COMPLIANCE DOCUMENT VAULT
   app.get('/api/compliance-documents', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const docs = (await pool.query('SELECT * FROM compliance_documents WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const docs = (await pool.query('SELECT * FROM compliance_documents WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(docs);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6833,7 +6953,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { document_type, title, description, file_url, file_type, expiry_date } = req.body;
       const r = await pool.query('INSERT INTO compliance_documents(tenant_id,document_type,title,description,file_url,file_type,expiry_date,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, document_type, title, description, file_url, file_type||'pdf', expiry_date, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, document_type, title, description, file_url, file_type||'pdf', expiry_date, req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6841,7 +6961,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V8 FEATURE 9: AUTOMATED REPORTING SCHEDULES
   app.get('/api/reporting-schedules', requireAuth, ah(async (req, res) => {
     try {
-      const schedules = (await pool.query('SELECT * FROM reporting_schedules WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const schedules = (await pool.query('SELECT * FROM reporting_schedules WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(schedules);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6849,7 +6969,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { report_type, frequency, recipients, format } = req.body;
       const r = await pool.query('INSERT INTO reporting_schedules(tenant_id,report_type,frequency,recipients,format,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, report_type, frequency||'monthly', recipients||[], format||'pdf', req.user?.email||'']);
+        [req.session.user?.tenant_id||0, report_type, frequency||'monthly', recipients||[], format||'pdf', req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6857,7 +6977,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V8 FEATURE 10: BOARD/GOVERNANCE REPORTS
   app.get('/api/board-reports', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const reports = (await pool.query('SELECT * FROM board_reports WHERE tenant_id=$1 ORDER BY generated_at DESC', [req.user?.tenant_id||0])).rows;
+      const reports = (await pool.query('SELECT * FROM board_reports WHERE tenant_id=$1 ORDER BY generated_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(reports);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6865,10 +6985,10 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { title, report_period } = req.body;
       const stats = (await pool.query('SELECT COUNT(*) as total, COALESCE(SUM(CASE WHEN status=$2 THEN 1 ELSE 0 END),0) as active, COALESCE(SUM(CASE WHEN status=$3 THEN 1 ELSE 0 END),0) as completed FROM fundraising_campaigns WHERE tenant_id=$1',
-        [req.user?.tenant_id||0, 'active', 'completed'])).rows[0];
-      const donations = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(DISTINCT donor_email) as donors FROM campaign_donations WHERE tenant_id=$1 AND refunded=false', [req.user?.tenant_id||0])).rows[0];
+        [req.session.user?.tenant_id||0, 'active', 'completed'])).rows[0];
+      const donations = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(DISTINCT donor_email) as donors FROM campaign_donations WHERE tenant_id=$1 AND refunded=false', [req.session.user?.tenant_id||0])).rows[0];
       const r = await pool.query('INSERT INTO board_reports(tenant_id,title,report_period,total_campaigns,active_campaigns,completed_campaigns,total_raised,total_donors) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, title, report_period, parseInt(stats.total)||0, parseInt(stats.active)||0, parseInt(stats.completed)||0, parseInt(donations.total)||0, parseInt(donations.donors)||0]);
+        [req.session.user?.tenant_id||0, title, report_period, parseInt(stats.total)||0, parseInt(stats.active)||0, parseInt(stats.completed)||0, parseInt(donations.total)||0, parseInt(donations.donors)||0]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6882,7 +7002,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const shortCode = Math.random().toString(36).substring(2, 8) + Date.now().toString(36).slice(-4);
       const fullUrl = BASE_URL + '/' + link_type + '/' + entity_id;
       const r = await pool.query('INSERT INTO deep_links(tenant_id,link_type,entity_id,short_code,full_url,utm_source,utm_medium,utm_campaign) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, link_type, entity_id, shortCode, fullUrl, utm_source, utm_medium, utm_campaign]);
+        [req.session.user?.tenant_id||0, link_type, entity_id, shortCode, fullUrl, utm_source, utm_medium, utm_campaign]);
       res.json({ ...r.rows[0], short_url: BASE_URL + '/dl/' + shortCode });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6900,13 +7020,13 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { endpoint, p256dh, auth_key, device_type } = req.body;
       await pool.query('INSERT INTO push_subscriptions(tenant_id,user_email,endpoint,p256dh,auth_key,device_type) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',
-        [req.user?.tenant_id||0, req.user?.email||'', endpoint, p256dh, auth_key, device_type||'web']);
+        [req.session.user?.tenant_id||0, req.session.user?.email||'', endpoint, p256dh, auth_key, device_type||'web']);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.delete('/api/push/unsubscribe', requireAuth, ah(async (req, res) => {
     try {
-      await pool.query('DELETE FROM push_subscriptions WHERE user_email=$1', [req.user?.email||'']);
+      await pool.query('DELETE FROM push_subscriptions WHERE user_email=$1', [req.session.user?.email||'']);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6914,7 +7034,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V9 FEATURE 3: OFFLINE DONATION RECORDING
   app.get('/api/offline-donations', requireAuth, requireNotBanned, ah(async (req, res) => {
     try {
-      const donations = (await pool.query('SELECT * FROM offline_donations WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const donations = (await pool.query('SELECT * FROM offline_donations WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(donations);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6922,7 +7042,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { campaign_id, donor_name, donor_email, donor_phone, amount, method, description, collection_date } = req.body;
       const r = await pool.query('INSERT INTO offline_donations(tenant_id,campaign_id,donor_name,donor_email,donor_phone,amount,method,description,collected_by,collection_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-        [req.user?.tenant_id||0, campaign_id, donor_name, donor_email, donor_phone, amount, method||'cash', description, req.user?.name||'', collection_date||new Date()]);
+        [req.session.user?.tenant_id||0, campaign_id, donor_name, donor_email, donor_phone, amount, method||'cash', description, req.session.user?.name||'', collection_date||new Date()]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6930,7 +7050,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { status } = req.body;
       const od = (await pool.query('SELECT * FROM offline_donations WHERE id=$1', [req.params.id])).rows[0];
-      await pool.query('UPDATE offline_donations SET status=$1, verified_by=$2, verified_at=NOW() WHERE id=$3', [status||'verified', req.user?.email||'', req.params.id]);
+      await pool.query('UPDATE offline_donations SET status=$1, verified_by=$2, verified_at=NOW() WHERE id=$3', [status||'verified', req.session.user?.email||'', req.params.id]);
       if (status === 'verified' && od) {
         await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,donor_email,amount,method,message) VALUES($1,$2,$3,$4,$5,$6,$7)',
           [od.tenant_id, od.campaign_id, od.donor_name, od.donor_email, od.amount, od.method, od.description||'Offline donation']);
@@ -6951,7 +7071,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
         try { await sendSMS(p.donor_phone, message); sent++; } catch(e2) {}
       }
       await pool.query('INSERT INTO sms_campaign_broadcasts(tenant_id,campaign_id,message,target_group,recipients_count,delivered_count,status,sent_at) VALUES($1,$2,$3,$4,$5,$6,$7,NOW())',
-        [req.user?.tenant_id||0, campaign_id, message, target_group||'all_donors', phones.length, sent, 'sent']);
+        [req.session.user?.tenant_id||0, campaign_id, message, target_group||'all_donors', phones.length, sent, 'sent']);
       res.json({ sent, total: phones.length });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -6979,7 +7099,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const { campaign_id, provider, phone_number, amount } = req.body;
       const txRef = 'MM-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
       const r = await pool.query('INSERT INTO mobile_money_transactions(tenant_id,campaign_id,provider,phone_number,amount,transaction_ref,status) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, campaign_id, provider, phone_number, amount, txRef, 'pending']);
+        [req.session.user?.tenant_id||0, campaign_id, provider, phone_number, amount, txRef, 'pending']);
       res.json({ transaction_ref: txRef, id: r.rows[0].id, status: 'pending' });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7016,7 +7136,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { location_name, latitude, longitude, radius_km, country, region, district, address, is_primary } = req.body;
       const r = await pool.query('INSERT INTO campaign_locations(tenant_id,campaign_id,location_name,latitude,longitude,radius_km,country,region,district,address,is_primary) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, location_name, latitude, longitude, radius_km||50, country, region, district, address, is_primary||false]);
+        [req.session.user?.tenant_id||0, req.params.id, location_name, latitude, longitude, radius_km||50, country, region, district, address, is_primary||false]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7024,7 +7144,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V9 FEATURE 10: NOTIFICATION PREFERENCES
   app.get('/api/notification-preferences', requireAuth, ah(async (req, res) => {
     try {
-      const prefs = (await pool.query('SELECT * FROM user_notification_prefs WHERE tenant_id=$1 AND user_email=$2', [req.user?.tenant_id||0, req.user?.email||''])).rows[0];
+      const prefs = (await pool.query('SELECT * FROM user_notification_prefs WHERE tenant_id=$1 AND user_email=$2', [req.session.user?.tenant_id||0, req.session.user?.email||''])).rows[0];
       res.json(prefs || { email_new_donation: true, email_milestone: true, push_new_donation: true, push_milestone: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7033,7 +7153,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const prefs = req.body;
       await pool.query(`INSERT INTO user_notification_prefs(tenant_id,user_email,email_new_donation,email_milestone,email_campaign_update,email_weekly_summary,email_monthly_report,sms_donation_confirm,sms_campaign_urgent,push_new_donation,push_milestone,push_campaign_update,push_comment_reply,quiet_hours_start,quiet_hours_end) 
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (tenant_id, user_email) DO UPDATE SET email_new_donation=$3,email_milestone=$4,email_campaign_update=$5,email_weekly_summary=$6,email_monthly_report=$7,sms_donation_confirm=$8,sms_campaign_urgent=$9,push_new_donation=$10,push_milestone=$11,push_campaign_update=$12,push_comment_reply=$13,quiet_hours_start=$14,quiet_hours_end=$15,updated_at=NOW()`,
-        [req.user?.tenant_id||0, req.user?.email||'', prefs.email_new_donation!==false, prefs.email_milestone!==false, prefs.email_campaign_update!==false, prefs.email_weekly_summary!==false, prefs.email_monthly_report||false, prefs.sms_donation_confirm!==false, prefs.sms_campaign_urgent||false, prefs.push_new_donation!==false, prefs.push_milestone!==false, prefs.push_campaign_update!==false, prefs.push_comment_reply!==false, prefs.quiet_hours_start||'22:00', prefs.quiet_hours_end||'08:00']);
+        [req.session.user?.tenant_id||0, req.session.user?.email||'', prefs.email_new_donation!==false, prefs.email_milestone!==false, prefs.email_campaign_update!==false, prefs.email_weekly_summary!==false, prefs.email_monthly_report||false, prefs.sms_donation_confirm!==false, prefs.sms_campaign_urgent||false, prefs.push_new_donation!==false, prefs.push_milestone!==false, prefs.push_campaign_update!==false, prefs.push_comment_reply!==false, prefs.quiet_hours_start||'22:00', prefs.quiet_hours_end||'08:00']);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7050,9 +7170,9 @@ Sitemap: ${BASE_URL}/sitemap.xml
   app.post('/api/campaigns/:id/fundraisers', requireAuth, ah(async (req, res) => {
     try {
       const { page_title, page_story, personal_goal, fundraiser_photo } = req.body;
-      const slug = (req.user?.name||'fundraiser').toLowerCase().replace(/[^a-z0-9]/g,'-') + '-' + Date.now().toString(36);
+      const slug = (req.session.user?.name||'fundraiser').toLowerCase().replace(/[^a-z0-9]/g,'-') + '-' + Date.now().toString(36);
       const r = await pool.query('INSERT INTO personal_fundraiser_pages(tenant_id,campaign_id,fundraiser_name,fundraiser_email,page_title,page_story,personal_goal,fundraiser_photo,slug,is_approved) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, req.user?.name||'Fundraiser', req.user?.email||'', page_title, page_story, personal_goal||0, fundraiser_photo, slug]);
+        [req.session.user?.tenant_id||0, req.params.id, req.session.user?.name||'Fundraiser', req.session.user?.email||'', page_title, page_story, personal_goal||0, fundraiser_photo, slug]);
       await pool.query('UPDATE fundraising_campaigns SET has_p2p=true, p2p_page_count=(SELECT COUNT(*) FROM personal_fundraiser_pages WHERE campaign_id=$1) WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -7091,7 +7211,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { team_name, team_photo, team_goal, description, is_public } = req.body;
       const r = await pool.query('INSERT INTO fundraising_teams(tenant_id,campaign_id,team_name,team_photo,team_captain,team_captain_email,team_goal,description,is_public) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, team_name, team_photo, req.user?.name||'Captain', req.user?.email||'', team_goal||0, description, is_public!==false]);
+        [req.session.user?.tenant_id||0, req.params.id, team_name, team_photo, req.session.user?.name||'Captain', req.session.user?.email||'', team_goal||0, description, is_public!==false]);
       await pool.query('UPDATE fundraising_campaigns SET team_count=(SELECT COUNT(*) FROM fundraising_teams WHERE campaign_id=$1) WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -7099,7 +7219,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   app.post('/api/teams/:id/join', requireAuth, ah(async (req, res) => {
     try {
       await pool.query('INSERT INTO fundraising_team_members(tenant_id,team_id,member_name,member_email) VALUES($1,$2,$3,$4) ON CONFLICT (team_id, member_email) DO NOTHING',
-        [req.user?.tenant_id||0, req.params.id, req.user?.name||'Member', req.user?.email||'']);
+        [req.session.user?.tenant_id||0, req.params.id, req.session.user?.name||'Member', req.session.user?.email||'']);
       await pool.query('UPDATE fundraising_teams SET member_count=(SELECT COUNT(*) FROM fundraising_team_members WHERE team_id=$1) WHERE id=$1', [req.params.id]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -7112,7 +7232,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const entityType = type || 'individual';
       const periodFilter = period || 'all_time';
       const lb = (await pool.query('SELECT * FROM fundraising_leaderboard WHERE tenant_id=$1 AND entity_type=$2 AND period=$3 ORDER BY rank_position, amount_raised DESC LIMIT 25',
-        [req.user?.tenant_id||0, entityType, periodFilter])).rows;
+        [req.session.user?.tenant_id||0, entityType, periodFilter])).rows;
       res.json(lb);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7128,7 +7248,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { message, message_type } = req.body;
       const r = await pool.query('INSERT INTO team_chat_messages(tenant_id,team_id,sender_name,sender_email,message,message_type) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, req.user?.name||'Member', req.user?.email||'', message, message_type||'text']);
+        [req.session.user?.tenant_id||0, req.params.id, req.session.user?.name||'Member', req.session.user?.email||'', message, message_type||'text']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7152,7 +7272,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { title, description, challenge_type, start_date, end_date, prize_description, max_participants } = req.body;
       const r = await pool.query('INSERT INTO p2p_challenges(tenant_id,campaign_id,title,description,challenge_type,start_date,end_date,prize_description,max_participants,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, title, description, challenge_type||'most_raised', start_date, end_date, prize_description, max_participants||100, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, req.params.id, title, description, challenge_type||'most_raised', start_date, end_date, prize_description, max_participants||100, req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7170,7 +7290,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // =============================================
   app.get('/api/blockchain-ledger', ah(async (req, res) => {
     try {
-      const ledger = (await pool.query('SELECT * FROM blockchain_ledger WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      const ledger = (await pool.query('SELECT * FROM blockchain_ledger WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.session.user?.tenant_id||0])).rows;
       res.json(ledger);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7208,7 +7328,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { nft_name, nft_description, nft_image_url, min_donation_amount } = req.body;
       const r = await pool.query('INSERT INTO nft_rewards(tenant_id,campaign_id,nft_name,nft_description,nft_image_url,min_donation_amount) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, nft_name, nft_description, nft_image_url, min_donation_amount||0]);
+        [req.session.user?.tenant_id||0, req.params.id, nft_name, nft_description, nft_image_url, min_donation_amount||0]);
       await pool.query('UPDATE fundraising_campaigns SET has_nft_rewards=true WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -7226,7 +7346,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { category, description, amount, vendor_name, invoice_url, receipt_url, spent_date } = req.body;
       const r = await pool.query('INSERT INTO fund_spending_records(tenant_id,campaign_id,category,description,amount,vendor_name,invoice_url,receipt_url,spent_date,spent_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, category, description, amount, vendor_name, invoice_url, receipt_url, spent_date, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, req.params.id, category, description, amount, vendor_name, invoice_url, receipt_url, spent_date, req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7242,7 +7362,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { contract_address, chain, total_deposited, milestones, release_conditions } = req.body;
       const r = await pool.query('INSERT INTO escrow_contracts(tenant_id,campaign_id,contract_address,chain,total_deposited,milestones,release_conditions) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, contract_address, chain||'ethereum', total_deposited||0, JSON.stringify(milestones||[]), JSON.stringify(release_conditions||{})]);
+        [req.session.user?.tenant_id||0, req.params.id, contract_address, chain||'ethereum', total_deposited||0, JSON.stringify(milestones||[]), JSON.stringify(release_conditions||{})]);
       await pool.query('UPDATE fundraising_campaigns SET has_escrow=true WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -7253,7 +7373,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { wallet_address, wallet_type, chain } = req.body;
       await pool.query('INSERT INTO crypto_wallet_connections(tenant_id,user_email,wallet_address,wallet_type,chain) VALUES($1,$2,$3,$4,$5) ON CONFLICT (tenant_id, wallet_address) DO UPDATE SET last_used=NOW(), is_active=true',
-        [req.user?.tenant_id||0, req.user?.email||'', wallet_address, wallet_type||'metamask', chain||'ethereum']);
+        [req.session.user?.tenant_id||0, req.session.user?.email||'', wallet_address, wallet_type||'metamask', chain||'ethereum']);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7285,7 +7405,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { title, description, proposal_type, voting_start, voting_end } = req.body;
       const r = await pool.query('INSERT INTO dao_proposals(tenant_id,campaign_id,title,description,proposal_type,voting_start,voting_end,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, title, description, proposal_type||'fund_allocation', voting_start, voting_end, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, req.params.id, title, description, proposal_type||'fund_allocation', voting_start, voting_end, req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7294,7 +7414,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const { vote } = req.body;
       if (!['for','against','abstain'].includes(vote)) return res.status(400).json({ error: 'Invalid vote' });
       await pool.query('INSERT INTO dao_votes(tenant_id,proposal_id,voter_email,vote) VALUES($1,$2,$3,$4) ON CONFLICT (proposal_id, voter_email) DO UPDATE SET vote=$4, voted_at=NOW()',
-        [req.user?.tenant_id||0, req.params.id, req.user?.email||'', vote]);
+        [req.session.user?.tenant_id||0, req.params.id, req.session.user?.email||'', vote]);
       if (vote === 'for') await pool.query('UPDATE dao_proposals SET votes_for=votes_for+1 WHERE id=$1', [req.params.id]);
       else if (vote === 'against') await pool.query('UPDATE dao_proposals SET votes_against=votes_against+1 WHERE id=$1', [req.params.id]);
       else await pool.query('UPDATE dao_proposals SET votes_abstain=votes_abstain+1 WHERE id=$1', [req.params.id]);
@@ -7307,7 +7427,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { source_chain, destination_chain, amount, token_symbol, bridge_provider, source_tx_hash } = req.body;
       const r = await pool.query('INSERT INTO cross_chain_bridges(tenant_id,source_chain,destination_chain,amount,token_symbol,bridge_provider,source_tx_hash) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, source_chain, destination_chain, amount, token_symbol, bridge_provider||'native', source_tx_hash]);
+        [req.session.user?.tenant_id||0, source_chain, destination_chain, amount, token_symbol, bridge_provider||'native', source_tx_hash]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7317,7 +7437,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // =============================================
   app.get('/api/whitelabel', requireAuth, ah(async (req, res) => {
     try {
-      const brand = (await pool.query('SELECT * FROM whitelabel_branding WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows[0];
+      const brand = (await pool.query('SELECT * FROM whitelabel_branding WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows[0];
       res.json(brand || {});
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7325,7 +7445,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const b = req.body;
       await pool.query(`INSERT INTO whitelabel_branding(tenant_id,brand_name,tagline,logo_url,favicon_url,primary_color,secondary_color,accent_color,font_heading,font_body,custom_css,custom_header_html,custom_footer_html,homepage_layout,social_links) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (tenant_id) DO UPDATE SET brand_name=$2,tagline=$3,logo_url=$4,favicon_url=$5,primary_color=$6,secondary_color=$7,accent_color=$8,font_heading=$9,font_body=$10,custom_css=$11,custom_header_html=$12,custom_footer_html=$13,homepage_layout=$14,social_links=$15,updated_at=NOW()`,
-        [req.user?.tenant_id||0, b.brand_name, b.tagline, b.logo_url, b.favicon_url, b.primary_color||'#059669', b.secondary_color||'#10b981', b.accent_color||'#0ea5e9', b.font_heading||'sans-serif', b.font_body||'sans-serif', b.custom_css, b.custom_header_html, b.custom_footer_html, b.homepage_layout||'standard', JSON.stringify(b.social_links||{})]);
+        [req.session.user?.tenant_id||0, b.brand_name, b.tagline, b.logo_url, b.favicon_url, b.primary_color||'#059669', b.secondary_color||'#10b981', b.accent_color||'#0ea5e9', b.font_heading||'sans-serif', b.font_body||'sans-serif', b.custom_css, b.custom_header_html, b.custom_footer_html, b.homepage_layout||'standard', JSON.stringify(b.social_links||{})]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7341,7 +7461,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { api_name, description, endpoint, method, category, pricing_type, documentation_url } = req.body;
       const r = await pool.query('INSERT INTO api_marketplace_listings(tenant_id,api_name,description,endpoint,method,category,pricing_type,documentation_url) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, api_name, description, endpoint, method||'GET', category||'data', pricing_type||'free', documentation_url]);
+        [req.session.user?.tenant_id||0, api_name, description, endpoint, method||'GET', category||'data', pricing_type||'free', documentation_url]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7349,7 +7469,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V12 FEATURE 3: WEBHOOK INTEGRATIONS
   app.get('/api/webhooks', requireAuth, ah(async (req, res) => {
     try {
-      const hooks = (await pool.query('SELECT id,url,events,is_active,last_triggered_at,failure_count,success_count,created_at FROM webhook_subscriptions WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const hooks = (await pool.query('SELECT id,url,events,is_active,last_triggered_at,failure_count,success_count,created_at FROM webhook_subscriptions WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(hooks);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7359,13 +7479,13 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const crypto = require('crypto');
       const secret = crypto.randomBytes(32).toString('hex');
       const r = await pool.query('INSERT INTO webhook_subscriptions(tenant_id,url,events,secret,created_by) VALUES($1,$2,$3,$4,$5) RETURNING id,url,events,is_active',
-        [req.user?.tenant_id||0, url, events||[], secret, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, url, events||[], secret, req.session.user?.email||'']);
       res.json({ ...r.rows[0], secret });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.delete('/api/webhooks/:id', requireAuth, ah(async (req, res) => {
     try {
-      await pool.query('DELETE FROM webhook_subscriptions WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user?.tenant_id||0]);
+      await pool.query('DELETE FROM webhook_subscriptions WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user?.tenant_id||0]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7373,14 +7493,14 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V12 FEATURE 4: CUSTOM DOMAIN MAPPING
   app.get('/api/custom-domains', requireAuth, ah(async (req, res) => {
     try {
-      const domains = (await pool.query('SELECT id,domain,ssl_enabled,dns_verified,is_primary,status,created_at FROM custom_domains WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const domains = (await pool.query('SELECT id,domain,ssl_enabled,dns_verified,is_primary,status,created_at FROM custom_domains WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(domains);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.post('/api/custom-domains', requireAuth, ah(async (req, res) => {
     try {
       const { domain } = req.body;
-      const r = await pool.query('INSERT INTO custom_domains(tenant_id,domain) VALUES($1,$2) RETURNING id,domain,status', [req.user?.tenant_id||0, domain]);
+      const r = await pool.query('INSERT INTO custom_domains(tenant_id,domain) VALUES($1,$2) RETURNING id,domain,status', [req.session.user?.tenant_id||0, domain]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7397,7 +7517,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const c = req.body;
       const embedKey = 'emb_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36).slice(-4);
       const r = await pool.query('INSERT INTO embed_sdk_configs(tenant_id,campaign_id,embed_key,allowed_origins,widget_type,primary_color,show_progress,show_donor_count,show_recent_donations,custom_css) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (embed_key) DO NOTHING RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, embedKey, c.allowed_origins||[], c.widget_type||'card', c.primary_color||'#059669', c.show_progress!==false, c.show_donor_count!==false, c.show_recent_donations||false, c.custom_css]);
+        [req.session.user?.tenant_id||0, req.params.id, embedKey, c.allowed_origins||[], c.widget_type||'card', c.primary_color||'#059669', c.show_progress!==false, c.show_donor_count!==false, c.show_recent_donations||false, c.custom_css]);
       await pool.query('UPDATE fundraising_campaigns SET embed_enabled=true WHERE id=$1', [req.params.id]);
       res.json({ ...r.rows[0], embed_url: BASE_URL + '/embed/' + req.params.id + '?key=' + embedKey });
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -7406,7 +7526,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V12 FEATURE 6: ZAPIER/MAKE INTEGRATION
   app.get('/api/automations', requireAuth, ah(async (req, res) => {
     try {
-      const autos = (await pool.query('SELECT * FROM automation_integrations WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const autos = (await pool.query('SELECT * FROM automation_integrations WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(autos);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7414,7 +7534,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { platform, integration_name, webhook_url, config, events } = req.body;
       const r = await pool.query('INSERT INTO automation_integrations(tenant_id,platform,integration_name,webhook_url,config,events,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, platform, integration_name, webhook_url, JSON.stringify(config||{}), events||[], req.user?.email||'']);
+        [req.session.user?.tenant_id||0, platform, integration_name, webhook_url, JSON.stringify(config||{}), events||[], req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7422,7 +7542,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V12 FEATURE 7: MULTI-PORTAL DASHBOARD
   app.get('/api/portal-access', requireAuth, ah(async (req, res) => {
     try {
-      const portals = (await pool.query('SELECT pa.*, t.name as tenant_name FROM portal_access pa JOIN tenants t ON t.id=pa.tenant_id WHERE pa.user_email=$1', [req.user?.email||''])).rows;
+      const portals = (await pool.query('SELECT pa.*, t.name as tenant_name FROM portal_access pa JOIN tenants t ON t.id=pa.tenant_id WHERE pa.user_email=$1', [req.session.user?.email||''])).rows;
       res.json(portals);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7430,7 +7550,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { user_email, role } = req.body;
       await pool.query('INSERT INTO portal_access(user_email,tenant_id,role,invited_by) VALUES($1,$2,$3,$4) ON CONFLICT (user_email, tenant_id) DO NOTHING',
-        [user_email, req.user?.tenant_id||0, role||'viewer', req.user?.email||'']);
+        [user_email, req.session.user?.tenant_id||0, role||'viewer', req.session.user?.email||'']);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7438,7 +7558,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V12 FEATURE 8: PLUGIN SYSTEM
   app.get('/api/plugins', requireAuth, ah(async (req, res) => {
     try {
-      const plugins = (await pool.query('SELECT * FROM platform_plugins WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const plugins = (await pool.query('SELECT * FROM platform_plugins WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(plugins);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7446,14 +7566,14 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { plugin_name, plugin_slug, version, description, config } = req.body;
       const r = await pool.query('INSERT INTO platform_plugins(tenant_id,plugin_name,plugin_slug,version,description,config) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id, plugin_slug) DO UPDATE SET version=$4, config=$6, updated_at=NOW() RETURNING *',
-        [req.user?.tenant_id||0, plugin_name, plugin_slug, version||'1.0.0', description, JSON.stringify(config||{})]);
+        [req.session.user?.tenant_id||0, plugin_name, plugin_slug, version||'1.0.0', description, JSON.stringify(config||{})]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.post('/api/plugins/:id/toggle', requireAuth, ah(async (req, res) => {
     try {
       const { is_enabled } = req.body;
-      await pool.query('UPDATE platform_plugins SET is_enabled=$1 WHERE id=$2 AND tenant_id=$3', [is_enabled, req.params.id, req.user?.tenant_id||0]);
+      await pool.query('UPDATE platform_plugins SET is_enabled=$1 WHERE id=$2 AND tenant_id=$3', [is_enabled, req.params.id, req.session.user?.tenant_id||0]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7461,7 +7581,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V12 FEATURE 9: DEVELOPER API KEYS
   app.get('/api/api-keys', requireAuth, ah(async (req, res) => {
     try {
-      const keys = (await pool.query('SELECT id,key_prefix,name,permissions,rate_limit,usage_count,last_used,is_active,created_at FROM api_keys WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const keys = (await pool.query('SELECT id,key_prefix,name,permissions,rate_limit,usage_count,last_used,is_active,created_at FROM api_keys WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(keys);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -7473,13 +7593,13 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
       const keyPrefix = rawKey.substring(0, 8);
       await pool.query('INSERT INTO api_keys(tenant_id,key_hash,key_prefix,name,permissions,rate_limit,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)',
-        [req.user?.tenant_id||0, keyHash, keyPrefix, name, permissions||['read'], rate_limit||1000, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, keyHash, keyPrefix, name, permissions||['read'], rate_limit||1000, req.session.user?.email||'']);
       res.json({ key: rawKey, prefix: keyPrefix, name });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.delete('/api/api-keys/:id', requireAuth, ah(async (req, res) => {
     try {
-      await pool.query('UPDATE api_keys SET is_active=false WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user?.tenant_id||0]);
+      await pool.query('UPDATE api_keys SET is_active=false WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user?.tenant_id||0]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8531,19 +8651,19 @@ Sitemap: ${BASE_URL}/sitemap.xml
       };
       const generated = templates[generation_type] || templates.story;
       const r = await pool.query('INSERT INTO ai_campaign_generations(tenant_id,campaign_id,generation_type,prompt,generated_content,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, campaign_id, generation_type, prompt, generated, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, campaign_id, generation_type, prompt, generated, req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.get('/api/ai/generations', requireAuth, ah(async (req, res) => {
     try {
-      const gens = (await pool.query('SELECT * FROM ai_campaign_generations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      const gens = (await pool.query('SELECT * FROM ai_campaign_generations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.session.user?.tenant_id||0])).rows;
       res.json(gens);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.post('/api/ai/generations/:id/accept', requireAuth, ah(async (req, res) => {
     try {
-      await pool.query('UPDATE ai_campaign_generations SET is_accepted=true WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user?.tenant_id||0]);
+      await pool.query('UPDATE ai_campaign_generations SET is_accepted=true WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user?.tenant_id||0]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8561,7 +8681,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const completionDate = dailyAvg > 0 && campaign.target > totalRaised ? new Date(Date.now() + ((parseInt(campaign.target) - totalRaised) / dailyAvg) * 86400000) : null;
       const confidence = donations.length >= 10 ? 75 : (donations.length >= 5 ? 50 : 25);
       const r = await pool.query('INSERT INTO predictive_donation_models(tenant_id,campaign_id,predicted_total,predicted_completion_date,confidence_score) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, predictedTotal, completionDate, confidence]);
+        [req.session.user?.tenant_id||0, req.params.id, predictedTotal, completionDate, confidence]);
       await pool.query('UPDATE fundraising_campaigns SET predicted_total=$1 WHERE id=$2', [predictedTotal, req.params.id]);
       res.json(r.rows[0] || { predicted_total: predictedTotal, predicted_completion_date: completionDate, confidence_score: confidence });
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -8576,14 +8696,14 @@ Sitemap: ${BASE_URL}/sitemap.xml
   }));
   app.post('/api/campaigns/:id/donor-matches/generate', requireAuth, ah(async (req, res) => {
     try {
-      const donors = (await pool.query('SELECT donor_email, donor_name, SUM(amount) as total, COUNT(*) as count FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donor_email IS NOT NULL GROUP BY donor_email, donor_name ORDER BY total DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      const donors = (await pool.query('SELECT donor_email, donor_name, SUM(amount) as total, COUNT(*) as count FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donor_email IS NOT NULL GROUP BY donor_email, donor_name ORDER BY total DESC LIMIT 50', [req.session.user?.tenant_id||0])).rows;
       let generated = 0;
       for (const d of donors) {
         const score = Math.min(100, Math.round((parseInt(d.total) / 100000) * 50 + parseInt(d.count) * 5));
         const recommended = Math.round(parseInt(d.total) / parseInt(d.count) * 1.2);
         try {
           await pool.query('INSERT INTO smart_donor_matches(tenant_id,donor_email,campaign_id,match_score,match_reasons,recommended_amount,recommended_time) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING',
-            [req.user?.tenant_id||0, d.donor_email, req.params.id, score, JSON.stringify(['previous_donor','high_engagement']), recommended, 'evening']);
+            [req.session.user?.tenant_id||0, d.donor_email, req.params.id, score, JSON.stringify(['previous_donor','high_engagement']), recommended, 'evening']);
           generated++;
         } catch(e2) {}
       }
@@ -8597,7 +8717,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const { campaign_id, user_email, user_name } = req.body;
       const sessionId = 'chat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
       await pool.query('INSERT INTO ai_chatbot_conversations(tenant_id,session_id,campaign_id,user_email,user_name) VALUES($1,$2,$3,$4,$5)',
-        [req.user?.tenant_id||0, sessionId, campaign_id, user_email, user_name]);
+        [req.session.user?.tenant_id||0, sessionId, campaign_id, user_email, user_name]);
       res.json({ session_id: sessionId, greeting: 'Hello! I am here to help you learn about this campaign and make a donation. How can I assist you today?' });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8624,7 +8744,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V13 FEATURE 5: SENTIMENT ANALYSIS
   app.get('/api/campaigns/:id/sentiment', requireAuth, ah(async (req, res) => {
     try {
-      const sentiments = (await pool.query('SELECT * FROM sentiment_analyses WHERE tenant_id=$1 AND entity_id=$2', [req.user?.tenant_id||0, req.params.id])).rows;
+      const sentiments = (await pool.query('SELECT * FROM sentiment_analyses WHERE tenant_id=$1 AND entity_id=$2', [req.session.user?.tenant_id||0, req.params.id])).rows;
       res.json(sentiments);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8632,7 +8752,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V13 FEATURE 6: A/B TESTING
   app.get('/api/ab-tests', requireAuth, ah(async (req, res) => {
     try {
-      const tests = (await pool.query('SELECT * FROM ab_test_experiments WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const tests = (await pool.query('SELECT * FROM ab_test_experiments WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(tests);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8640,7 +8760,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { experiment_name, experiment_type, variant_a, variant_b, traffic_split, start_date, end_date } = req.body;
       const r = await pool.query('INSERT INTO ab_test_experiments(tenant_id,campaign_id,experiment_name,experiment_type,variant_a,variant_b,traffic_split,start_date,end_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, experiment_name, experiment_type||'page', JSON.stringify(variant_a||{}), JSON.stringify(variant_b||{}), traffic_split||50, start_date, end_date, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, req.params.id, experiment_name, experiment_type||'page', JSON.stringify(variant_a||{}), JSON.stringify(variant_b||{}), traffic_split||50, start_date, end_date, req.session.user?.email||'']);
       await pool.query('UPDATE fundraising_campaigns SET ab_test_active=true WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -8662,7 +8782,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V13 FEATURE 7: AI EMAIL SEQUENCES
   app.get('/api/email-sequences', requireAuth, ah(async (req, res) => {
     try {
-      const seqs = (await pool.query('SELECT * FROM ai_email_sequences WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const seqs = (await pool.query('SELECT * FROM ai_email_sequences WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(seqs);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8670,7 +8790,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { sequence_name, trigger_event, emails } = req.body;
       const r = await pool.query('INSERT INTO ai_email_sequences(tenant_id,campaign_id,sequence_name,trigger_event,emails) VALUES($1,$2,$3,$4,$5) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, sequence_name, trigger_event, JSON.stringify(emails||[])]);
+        [req.session.user?.tenant_id||0, req.params.id, sequence_name, trigger_event, JSON.stringify(emails||[])]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8693,7 +8813,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       let created = 0;
       for (const s of suggestions) {
         await pool.query('INSERT INTO ai_optimization_suggestions(tenant_id,campaign_id,suggestion_type,current_state,suggested_state,expected_impact,confidence,reasoning) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
-          [req.user?.tenant_id||0, req.params.id, s.type, s.current, s.suggested, s.impact, s.confidence, s.reason]);
+          [req.session.user?.tenant_id||0, req.params.id, s.type, s.current, s.suggested, s.impact, s.confidence, s.reason]);
         created++;
       }
       res.json({ created, suggestions });
@@ -8703,7 +8823,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V13 FEATURE 9: AUTOMATED PERSONALIZATIONS
   app.get('/api/personalizations', requireAuth, ah(async (req, res) => {
     try {
-      const p = (await pool.query('SELECT * FROM automated_personalizations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      const p = (await pool.query('SELECT * FROM automated_personalizations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.session.user?.tenant_id||0])).rows;
       res.json(p);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8711,7 +8831,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { user_email, personalization_type, content_template, variables, delivery_channel, triggered_by } = req.body;
       const r = await pool.query('INSERT INTO automated_personalizations(tenant_id,user_email,personalization_type,content_template,variables,delivery_channel,triggered_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, user_email, personalization_type, content_template, JSON.stringify(variables||{}), delivery_channel||'email', triggered_by]);
+        [req.session.user?.tenant_id||0, user_email, personalization_type, content_template, JSON.stringify(variables||{}), delivery_channel||'email', triggered_by]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8719,7 +8839,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V13 FEATURE 10: AI CONTENT TEMPLATES
   app.get('/api/content-templates', ah(async (req, res) => {
     try {
-      const templates = (await pool.query('SELECT * FROM ai_content_templates WHERE tenant_id=$1 AND is_active=true ORDER BY usage_count DESC', [req.user?.tenant_id||0])).rows;
+      const templates = (await pool.query('SELECT * FROM ai_content_templates WHERE tenant_id=$1 AND is_active=true ORDER BY usage_count DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(templates);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8748,7 +8868,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { country, method_name, method_type, provider, min_amount, max_amount, fee_percentage, instructions } = req.body;
       const r = await pool.query('INSERT INTO regional_payment_methods(tenant_id,country,method_name,method_type,provider,min_amount,max_amount,fee_percentage,instructions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-        [req.user?.tenant_id||0, country, method_name, method_type, provider, min_amount||0, max_amount, fee_percentage||0, instructions]);
+        [req.session.user?.tenant_id||0, country, method_name, method_type, provider, min_amount||0, max_amount, fee_percentage||0, instructions]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8764,7 +8884,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V14 FEATURE 4: TRANSLATION MANAGEMENT
   app.get('/api/translations', requireAuth, ah(async (req, res) => {
     try {
-      const t = (await pool.query('SELECT * FROM translation_management WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.user?.tenant_id||0])).rows;
+      const t = (await pool.query('SELECT * FROM translation_management WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [req.session.user?.tenant_id||0])).rows;
       res.json(t);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8772,7 +8892,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { entity_type, entity_id, source_language, target_language, source_text, translated_text } = req.body;
       const r = await pool.query('INSERT INTO translation_management(tenant_id,entity_type,entity_id,source_language,target_language,source_text,translated_text,translation_status) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (tenant_id, entity_type, entity_id, target_language) DO UPDATE SET translated_text=$7, translation_status=$8 RETURNING *',
-        [req.user?.tenant_id||0, entity_type, entity_id, source_language||'en', target_language, source_text, translated_text, translated_text ? 'completed' : 'pending']);
+        [req.session.user?.tenant_id||0, entity_type, entity_id, source_language||'en', target_language, source_text, translated_text, translated_text ? 'completed' : 'pending']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8780,7 +8900,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V14 FEATURE 5: INTERNATIONAL TAX
   app.get('/api/international-tax', requireAuth, ah(async (req, res) => {
     try {
-      const configs = (await pool.query('SELECT * FROM international_tax_config WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const configs = (await pool.query('SELECT * FROM international_tax_config WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(configs);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8788,7 +8908,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { country, tax_id_type, tax_id_value, tax_deductible, max_deductible_percentage, receipt_requirements } = req.body;
       await pool.query('INSERT INTO international_tax_config(tenant_id,country,tax_id_type,tax_id_value,tax_deductible,max_deductible_percentage,receipt_requirements) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (tenant_id, country) DO UPDATE SET tax_id_type=$3,tax_id_value=$4,tax_deductible=$5,max_deductible_percentage=$6,receipt_requirements=$7',
-        [req.user?.tenant_id||0, country, tax_id_type, tax_id_value, tax_deductible||false, max_deductible_percentage||0, JSON.stringify(receipt_requirements||{})]);
+        [req.session.user?.tenant_id||0, country, tax_id_type, tax_id_value, tax_deductible||false, max_deductible_percentage||0, JSON.stringify(receipt_requirements||{})]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8796,7 +8916,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V14 FEATURE 6: GLOBAL PAYOUT ROUTING
   app.get('/api/payout-routing', requireAuth, ah(async (req, res) => {
     try {
-      const routes = (await pool.query('SELECT * FROM global_payout_routing WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const routes = (await pool.query('SELECT * FROM global_payout_routing WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(routes);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8804,7 +8924,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { country, payout_method, provider, account_details, min_payout, fee_percentage, processing_days, currency } = req.body;
       const r = await pool.query('INSERT INTO global_payout_routing(tenant_id,country,payout_method,provider,account_details,min_payout,fee_percentage,processing_days,currency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-        [req.user?.tenant_id||0, country, payout_method, provider, JSON.stringify(account_details||{}), min_payout||0, fee_percentage||0, processing_days||3, currency||'UGX']);
+        [req.session.user?.tenant_id||0, country, payout_method, provider, JSON.stringify(account_details||{}), min_payout||0, fee_percentage||0, processing_days||3, currency||'UGX']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8812,7 +8932,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V14 FEATURE 8: CULTURAL CUSTOMIZATIONS
   app.get('/api/cultural/:country', ah(async (req, res) => {
     try {
-      const cc = (await pool.query('SELECT * FROM cultural_customizations WHERE tenant_id=$1 AND country=$2', [req.user?.tenant_id||0, req.params.country])).rows[0];
+      const cc = (await pool.query('SELECT * FROM cultural_customizations WHERE tenant_id=$1 AND country=$2', [req.session.user?.tenant_id||0, req.params.country])).rows[0];
       res.json(cc || {});
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8828,7 +8948,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V14 FEATURE 10: EMBASSY PARTNERSHIPS
   app.get('/api/embassy-partnerships', requireAuth, ah(async (req, res) => {
     try {
-      const eps = (await pool.query('SELECT * FROM embassy_partnerships WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const eps = (await pool.query('SELECT * FROM embassy_partnerships WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(eps);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8836,7 +8956,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { embassy_name, country, contact_name, contact_email, partnership_type, start_date, end_date } = req.body;
       const r = await pool.query('INSERT INTO embassy_partnerships(tenant_id,embassy_name,country,contact_name,contact_email,partnership_type,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, embassy_name, country, contact_name, contact_email, partnership_type||'endorsement', start_date, end_date]);
+        [req.session.user?.tenant_id||0, embassy_name, country, contact_name, contact_email, partnership_type||'endorsement', start_date, end_date]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8855,7 +8975,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const sdgNames = {1:'No Poverty',2:'Zero Hunger',3:'Good Health',4:'Quality Education',5:'Gender Equality',6:'Clean Water',7:'Affordable Energy',8:'Decent Work',9:'Industry & Innovation',10:'Reduced Inequalities',11:'Sustainable Cities',12:'Responsible Consumption',13:'Climate Action',14:'Life Below Water',15:'Life on Land',16:'Peace & Justice',17:'Partnerships'};
       const { sdg_number, alignment_score, evidence } = req.body;
       const r = await pool.query('INSERT INTO sdg_alignments(tenant_id,campaign_id,sdg_number,sdg_name,alignment_score,evidence) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (campaign_id, sdg_number) DO UPDATE SET alignment_score=$5, evidence=$6 RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, sdg_number, sdgNames[sdg_number]||'Unknown', alignment_score||0, evidence]);
+        [req.session.user?.tenant_id||0, req.params.id, sdg_number, sdgNames[sdg_number]||'Unknown', alignment_score||0, evidence]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8872,7 +8992,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const { environmental_score, social_score, governance_score } = req.body;
       const overall = ((parseFloat(environmental_score)||0) + (parseFloat(social_score)||0) + (parseFloat(governance_score)||0)) / 3;
       const r = await pool.query('INSERT INTO esg_impact_scores(tenant_id,campaign_id,environmental_score,social_score,governance_score,overall_esg_score) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id, campaign_id) DO UPDATE SET environmental_score=$3,social_score=$4,governance_score=$5,overall_esg_score=$6,calculated_at=NOW() RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, environmental_score||0, social_score||0, governance_score||0, Math.round(overall*100)/100]);
+        [req.session.user?.tenant_id||0, req.params.id, environmental_score||0, social_score||0, governance_score||0, Math.round(overall*100)/100]);
       await pool.query('UPDATE fundraising_campaigns SET esg_score=$1 WHERE id=$2', [Math.round(overall*100)/100, req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -8891,7 +9011,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const total = (parseFloat(digital_emissions_kg)||0) + (parseFloat(travel_emissions_kg)||0) + (parseFloat(supply_chain_emissions_kg)||0);
       const offsetAmount = Math.round(total * 0.05 * 3700); // approx UGX per kg CO2
       const r = await pool.query('INSERT INTO carbon_footprint_calculations(tenant_id,campaign_id,total_emissions_kg,digital_emissions_kg,travel_emissions_kg,supply_chain_emissions_kg,offset_amount,offset_provider) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, total, digital_emissions_kg||0, travel_emissions_kg||0, supply_chain_emissions_kg||0, offsetAmount, offset_provider]);
+        [req.session.user?.tenant_id||0, req.params.id, total, digital_emissions_kg||0, travel_emissions_kg||0, supply_chain_emissions_kg||0, offsetAmount, offset_provider]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8902,7 +9022,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const { investment_amount, social_value_created, beneficiaries_direct, beneficiaries_indirect, outcomes } = req.body;
       const ratio = parseInt(investment_amount) > 0 ? (parseInt(social_value_created) / parseInt(investment_amount)) : 0;
       const r = await pool.query('INSERT INTO sroi_calculations(tenant_id,campaign_id,investment_amount,social_value_created,sroi_ratio,beneficiaries_direct,beneficiaries_indirect,outcomes) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, investment_amount, social_value_created, Math.round(ratio*100)/100, beneficiaries_direct||0, beneficiaries_indirect||0, JSON.stringify(outcomes||[])]);
+        [req.session.user?.tenant_id||0, req.params.id, investment_amount, social_value_created, Math.round(ratio*100)/100, beneficiaries_direct||0, beneficiaries_indirect||0, JSON.stringify(outcomes||[])]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8918,7 +9038,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { beneficiary_name, beneficiary_email, feedback_type, rating, feedback_text, is_anonymous } = req.body;
       const r = await pool.query('INSERT INTO beneficiary_feedback(tenant_id,campaign_id,beneficiary_name,beneficiary_email,feedback_type,rating,feedback_text,is_anonymous) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, beneficiary_name, beneficiary_email, feedback_type||'general', rating, feedback_text, is_anonymous||false]);
+        [req.session.user?.tenant_id||0, req.params.id, beneficiary_name, beneficiary_email, feedback_type||'general', rating, feedback_text, is_anonymous||false]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8934,7 +9054,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { verifier_name, verifier_organization, verifier_email, verification_type, findings, impact_confirmed, verification_date, report_url } = req.body;
       const r = await pool.query('INSERT INTO impact_verifications(tenant_id,campaign_id,verifier_name,verifier_organization,verifier_email,verification_type,findings,impact_confirmed,verification_date,report_url) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, verifier_name, verifier_organization, verifier_email, verification_type||'field_visit', findings, impact_confirmed||false, verification_date, report_url]);
+        [req.session.user?.tenant_id||0, req.params.id, verifier_name, verifier_organization, verifier_email, verification_type||'field_visit', findings, impact_confirmed||false, verification_date, report_url]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8956,7 +9076,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const avg = grades.length > 0 ? grades.reduce((s,g) => s + (gradeMap[g]||0), 0) / grades.length : 0;
       const overall = avg >= 3.7 ? 'A' : (avg >= 3 ? 'B+' : (avg >= 2.3 ? 'B' : (avg >= 2 ? 'C+' : 'C')));
       const r = await pool.query('INSERT INTO impact_report_cards(tenant_id,campaign_id,report_period,grade,transparency_grade,impact_grade,efficiency_grade,sustainability_grade,overall_narrative,key_achievements,areas_for_improvement) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, report_period, overall, transparency_grade, impact_grade, efficiency_grade, sustainability_grade, overall_narrative, key_achievements||[], areas_for_improvement||[]]);
+        [req.session.user?.tenant_id||0, req.params.id, report_period, overall, transparency_grade, impact_grade, efficiency_grade, sustainability_grade, overall_narrative, key_achievements||[], areas_for_improvement||[]]);
       await pool.query('UPDATE fundraising_campaigns SET impact_grade=$1 WHERE id=$2', [overall, req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -8965,7 +9085,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V15 FEATURE 10: SUSTAINABLE DEV DASHBOARD
   app.get('/api/sdg-dashboard', ah(async (req, res) => {
     try {
-      const dash = (await pool.query('SELECT * FROM sustainable_dev_dashboard WHERE tenant_id=$1 ORDER BY calculated_at DESC LIMIT 1', [req.user?.tenant_id||0])).rows[0];
+      const dash = (await pool.query('SELECT * FROM sustainable_dev_dashboard WHERE tenant_id=$1 ORDER BY calculated_at DESC LIMIT 1', [req.session.user?.tenant_id||0])).rows[0];
       res.json(dash || {});
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8975,7 +9095,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // =============================================
   app.get('/api/institutional-donors', requireAuth, ah(async (req, res) => {
     try {
-      const donors = (await pool.query('SELECT * FROM institutional_donors WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const donors = (await pool.query('SELECT * FROM institutional_donors WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(donors);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8983,7 +9103,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { institution_name, institution_type, contact_name, contact_email, contact_phone, country, website, annual_giving_budget, focus_areas, relationship_manager } = req.body;
       const r = await pool.query('INSERT INTO institutional_donors(tenant_id,institution_name,institution_type,contact_name,contact_email,contact_phone,country,website,annual_giving_budget,focus_areas,relationship_manager) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-        [req.user?.tenant_id||0, institution_name, institution_type||'foundation', contact_name, contact_email, contact_phone, country, website, annual_giving_budget||0, focus_areas||[], relationship_manager]);
+        [req.session.user?.tenant_id||0, institution_name, institution_type||'foundation', contact_name, contact_email, contact_phone, country, website, annual_giving_budget||0, focus_areas||[], relationship_manager]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8991,7 +9111,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V16 FEATURE 2: GRANT MANAGEMENT
   app.get('/api/grants', requireAuth, ah(async (req, res) => {
     try {
-      const grants = (await pool.query('SELECT * FROM grant_applications WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const grants = (await pool.query('SELECT * FROM grant_applications WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(grants);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -8999,7 +9119,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { institutional_donor_id, grant_title, grant_amount_requested, grant_period_start, grant_period_end, reporting_requirements } = req.body;
       const r = await pool.query('INSERT INTO grant_applications(tenant_id,campaign_id,institutional_donor_id,grant_title,grant_amount_requested,grant_period_start,grant_period_end,reporting_requirements,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, institutional_donor_id, grant_title, grant_amount_requested, grant_period_start, grant_period_end, JSON.stringify(reporting_requirements||[]), req.user?.email||'']);
+        [req.session.user?.tenant_id||0, req.params.id, institutional_donor_id, grant_title, grant_amount_requested, grant_period_start, grant_period_end, JSON.stringify(reporting_requirements||[]), req.session.user?.email||'']);
       await pool.query('UPDATE fundraising_campaigns SET has_grant=true WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -9008,7 +9128,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V16 FEATURE 3: MULTI-YEAR PLEDGES
   app.get('/api/multi-year-pledges', requireAuth, ah(async (req, res) => {
     try {
-      const pledges = (await pool.query('SELECT * FROM multi_year_pledges WHERE tenant_id=$1 AND status=$2 ORDER BY created_at DESC', [req.user?.tenant_id||0, 'active'])).rows;
+      const pledges = (await pool.query('SELECT * FROM multi_year_pledges WHERE tenant_id=$1 AND status=$2 ORDER BY created_at DESC', [req.session.user?.tenant_id||0, 'active'])).rows;
       res.json(pledges);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9016,7 +9136,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { pledgor_name, pledgor_email, total_pledge_amount, annual_amount, num_years, start_year } = req.body;
       const r = await pool.query('INSERT INTO multi_year_pledges(tenant_id,campaign_id,pledgor_name,pledgor_email,total_pledge_amount,annual_amount,num_years,start_year,end_year) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, pledgor_name, pledgor_email, total_pledge_amount, annual_amount, num_years||1, start_year, (parseInt(start_year)||new Date().getFullYear())+(parseInt(num_years)||1)-1]);
+        [req.session.user?.tenant_id||0, req.params.id, pledgor_name, pledgor_email, total_pledge_amount, annual_amount, num_years||1, start_year, (parseInt(start_year)||new Date().getFullYear())+(parseInt(num_years)||1)-1]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9024,7 +9144,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V16 FEATURE 4: RESTRICTED FUNDS
   app.get('/api/restricted-funds', requireAuth, ah(async (req, res) => {
     try {
-      const funds = (await pool.query('SELECT * FROM restricted_funds WHERE tenant_id=$1 AND is_active=true', [req.user?.tenant_id||0])).rows;
+      const funds = (await pool.query('SELECT * FROM restricted_funds WHERE tenant_id=$1 AND is_active=true', [req.session.user?.tenant_id||0])).rows;
       res.json(funds);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9032,7 +9152,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { fund_name, restriction_type, restricted_amount, restriction_details, release_conditions, end_date } = req.body;
       const r = await pool.query('INSERT INTO restricted_funds(tenant_id,campaign_id,fund_name,restriction_type,restricted_amount,restriction_details,release_conditions,end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, fund_name, restriction_type, restricted_amount, JSON.stringify(restriction_details||{}), JSON.stringify(release_conditions||[]), end_date]);
+        [req.session.user?.tenant_id||0, req.params.id, fund_name, restriction_type, restricted_amount, JSON.stringify(restriction_details||{}), JSON.stringify(release_conditions||[]), end_date]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9040,7 +9160,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V16 FEATURE 5: ENDOWMENT MANAGEMENT
   app.get('/api/endowments', requireAuth, ah(async (req, res) => {
     try {
-      const funds = (await pool.query('SELECT * FROM endowment_funds WHERE tenant_id=$1 AND is_active=true', [req.user?.tenant_id||0])).rows;
+      const funds = (await pool.query('SELECT * FROM endowment_funds WHERE tenant_id=$1 AND is_active=true', [req.session.user?.tenant_id||0])).rows;
       res.json(funds);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9049,7 +9169,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const { fund_name, initial_corpus, investment_strategy, fund_manager, purpose } = req.body;
       const annualWithdrawal = Math.round(parseInt(initial_corpus) * 0.05);
       const r = await pool.query('INSERT INTO endowment_funds(tenant_id,fund_name,initial_corpus,current_value,annual_withdrawal_amount,investment_strategy,fund_manager,purpose) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, fund_name, initial_corpus, initial_corpus, annualWithdrawal, investment_strategy, fund_manager, purpose]);
+        [req.session.user?.tenant_id||0, fund_name, initial_corpus, initial_corpus, annualWithdrawal, investment_strategy, fund_manager, purpose]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9057,7 +9177,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V16 FEATURE 8: FIDUCIARY OVERSIGHT
   app.get('/api/fiduciary-oversight', requireAuth, ah(async (req, res) => {
     try {
-      const records = (await pool.query('SELECT * FROM fiduciary_oversight WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const records = (await pool.query('SELECT * FROM fiduciary_oversight WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(records);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9065,7 +9185,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V16 FEATURE 9: LEGACY GIVING
   app.get('/api/legacy-giving', requireAuth, ah(async (req, res) => {
     try {
-      const legacies = (await pool.query('SELECT * FROM legacy_giving WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const legacies = (await pool.query('SELECT * FROM legacy_giving WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(legacies);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9073,7 +9193,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { donor_name, donor_email, donor_phone, legacy_type, estimated_value, expected_date } = req.body;
       const r = await pool.query('INSERT INTO legacy_giving(tenant_id,donor_name,donor_email,donor_phone,legacy_type,estimated_value,expected_date) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, donor_name, donor_email, donor_phone, legacy_type||'will_bequest', estimated_value||0, expected_date]);
+        [req.session.user?.tenant_id||0, donor_name, donor_email, donor_phone, legacy_type||'will_bequest', estimated_value||0, expected_date]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9081,7 +9201,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V16 FEATURE 10: INSTITUTIONAL REPORTS
   app.get('/api/institutional-reports', requireAuth, ah(async (req, res) => {
     try {
-      const reports = (await pool.query('SELECT * FROM institutional_reports WHERE tenant_id=$1 ORDER BY created_at DESC', [req.user?.tenant_id||0])).rows;
+      const reports = (await pool.query('SELECT * FROM institutional_reports WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user?.tenant_id||0])).rows;
       res.json(reports);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9099,14 +9219,14 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { community_name, description, community_type, cover_image, is_public } = req.body;
       const r = await pool.query('INSERT INTO donor_communities(tenant_id,community_name,description,community_type,cover_image,is_public,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, community_name, description, community_type||'interest', cover_image, is_public!==false, req.user?.email||'']);
+        [req.session.user?.tenant_id||0, community_name, description, community_type||'interest', cover_image, is_public!==false, req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
   app.post('/api/communities/:id/join', requireAuth, ah(async (req, res) => {
     try {
       await pool.query('INSERT INTO community_members(tenant_id,community_id,user_email,user_name) VALUES($1,$2,$3,$4) ON CONFLICT (community_id, user_email) DO NOTHING',
-        [req.user?.tenant_id||0, req.params.id, req.user?.email||'', req.user?.name||'Member']);
+        [req.session.user?.tenant_id||0, req.params.id, req.session.user?.email||'', req.session.user?.name||'Member']);
       await pool.query('UPDATE donor_communities SET member_count=(SELECT COUNT(*) FROM community_members WHERE community_id=$1) WHERE id=$1', [req.params.id]);
       res.json({ success: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -9123,7 +9243,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V17 FEATURE 4: MENTORSHIP MATCHING
   app.get('/api/mentorships', requireAuth, ah(async (req, res) => {
     try {
-      const m = (await pool.query('SELECT * FROM mentorship_matchings WHERE tenant_id=$1 AND status=$2', [req.user?.tenant_id||0, 'active'])).rows;
+      const m = (await pool.query('SELECT * FROM mentorship_matchings WHERE tenant_id=$1 AND status=$2', [req.session.user?.tenant_id||0, 'active'])).rows;
       res.json(m);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9131,7 +9251,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { mentor_email, mentor_name, mentee_email, mentee_name, campaign_id, focus_area, meeting_frequency, start_date, end_date } = req.body;
       const r = await pool.query('INSERT INTO mentorship_matchings(tenant_id,mentor_email,mentor_name,mentee_email,mentee_name,campaign_id,focus_area,meeting_frequency,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-        [req.user?.tenant_id||0, mentor_email, mentor_name, mentee_email, mentee_name, campaign_id, focus_area, meeting_frequency||'monthly', start_date, end_date]);
+        [req.session.user?.tenant_id||0, mentor_email, mentor_name, mentee_email, mentee_name, campaign_id, focus_area, meeting_frequency||'monthly', start_date, end_date]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9147,7 +9267,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { title, content, category, tags } = req.body;
       const r = await pool.query('INSERT INTO knowledge_base_articles(tenant_id,title,content,category,author,tags) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, title, content, category||'general', req.user?.name||'Author', tags||[]]);
+        [req.session.user?.tenant_id||0, title, content, category||'general', req.session.user?.name||'Author', tags||[]]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9163,7 +9283,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { community_id, campaign_id, title, content } = req.body;
       const r = await pool.query('INSERT INTO discussion_threads(tenant_id,community_id,campaign_id,title,author_email,author_name,content) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, community_id, campaign_id, title, req.user?.email||'', req.user?.name||'User', content]);
+        [req.session.user?.tenant_id||0, community_id, campaign_id, title, req.session.user?.email||'', req.session.user?.name||'User', content]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9171,7 +9291,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { content } = req.body;
       const r = await pool.query('INSERT INTO discussion_replies(tenant_id,thread_id,author_email,author_name,content) VALUES($1,$2,$3,$4,$5) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, req.user?.email||'', req.user?.name||'User', content]);
+        [req.session.user?.tenant_id||0, req.params.id, req.session.user?.email||'', req.session.user?.name||'User', content]);
       await pool.query('UPDATE discussion_threads SET reply_count=reply_count+1 WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -9188,7 +9308,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { program_name, description, requirements, benefits, max_ambassadors } = req.body;
       const r = await pool.query('INSERT INTO ambassador_programs(tenant_id,program_name,description,requirements,benefits,max_ambassadors) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, program_name, description, requirements||[], JSON.stringify(benefits||[]), max_ambassadors||50]);
+        [req.session.user?.tenant_id||0, program_name, description, requirements||[], JSON.stringify(benefits||[]), max_ambassadors||50]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9196,7 +9316,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const code = 'AMB-' + Math.random().toString(36).substring(2, 8).toUpperCase();
       const r = await pool.query('INSERT INTO ambassador_enrollments(tenant_id,program_id,ambassador_name,ambassador_email,referral_code) VALUES($1,$2,$3,$4,$5) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, req.user?.name||'Ambassador', req.user?.email||'', code]);
+        [req.session.user?.tenant_id||0, req.params.id, req.session.user?.name||'Ambassador', req.session.user?.email||'', code]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9212,7 +9332,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { event_name, description, event_date, start_time, end_time, target_amount, campaign_ids, matching_pledged, is_recurring, recurrence_pattern } = req.body;
       const r = await pool.query('INSERT INTO giving_days(tenant_id,event_name,description,event_date,start_time,end_time,target_amount,campaign_ids,matching_pledged,is_recurring,recurrence_pattern) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-        [req.user?.tenant_id||0, event_name, description, event_date, start_time||'00:00', end_time||'23:59', target_amount||0, campaign_ids||[], matching_pledged||0, is_recurring||false, recurrence_pattern]);
+        [req.session.user?.tenant_id||0, event_name, description, event_date, start_time||'00:00', end_time||'23:59', target_amount||0, campaign_ids||[], matching_pledged||0, is_recurring||false, recurrence_pattern]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9230,7 +9350,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { platform, invocation_name, welcome_message, donation_amounts, confirmation_message, thank_you_message } = req.body;
       const r = await pool.query('INSERT INTO voice_donation_configs(tenant_id,campaign_id,platform,invocation_name,welcome_message,donation_amounts,confirmation_message,thank_you_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, platform||'alexa', invocation_name, welcome_message, donation_amounts||[5000,10000,25000,50000,100000], confirmation_message, thank_you_message]);
+        [req.session.user?.tenant_id||0, req.params.id, platform||'alexa', invocation_name, welcome_message, donation_amounts||[5000,10000,25000,50000,100000], confirmation_message, thank_you_message]);
       await pool.query('UPDATE fundraising_campaigns SET has_voice=true WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -9247,7 +9367,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { experience_type, title, description, experience_url, preview_image, tech_requirements } = req.body;
       const r = await pool.query('INSERT INTO ar_vr_experiences(tenant_id,campaign_id,experience_type,title,description,experience_url,preview_image,tech_requirements) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, experience_type||'ar', title, description, experience_url, preview_image, tech_requirements]);
+        [req.session.user?.tenant_id||0, req.params.id, experience_type||'ar', title, description, experience_url, preview_image, tech_requirements]);
       await pool.query('UPDATE fundraising_campaigns SET has_ar_vr=true WHERE id=$1', [req.params.id]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -9256,7 +9376,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V18 FEATURE 4: IoT DONATION TRIGGERS
   app.get('/api/iot-triggers', requireAuth, ah(async (req, res) => {
     try {
-      const triggers = (await pool.query('SELECT * FROM iot_donation_triggers WHERE tenant_id=$1 AND is_active=true', [req.user?.tenant_id||0])).rows;
+      const triggers = (await pool.query('SELECT * FROM iot_donation_triggers WHERE tenant_id=$1 AND is_active=true', [req.session.user?.tenant_id||0])).rows;
       res.json(triggers);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9264,7 +9384,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { device_type, trigger_condition, trigger_amount, trigger_description } = req.body;
       const r = await pool.query('INSERT INTO iot_donation_triggers(tenant_id,campaign_id,device_type,trigger_condition,trigger_amount,trigger_description) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, device_type, trigger_condition, trigger_amount, trigger_description]);
+        [req.session.user?.tenant_id||0, req.params.id, device_type, trigger_condition, trigger_amount, trigger_description]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9274,7 +9394,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { video_template, personalization_fields, target_donor_email } = req.body;
       const r = await pool.query('INSERT INTO genai_video_personalizations(tenant_id,campaign_id,video_template,personalization_fields,target_donor_email,status) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, video_template, personalization_fields||[], target_donor_email, 'pending']);
+        [req.session.user?.tenant_id||0, req.params.id, video_template, personalization_fields||[], target_donor_email, 'pending']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9290,7 +9410,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V18 FEATURE 7: AUTONOMOUS FUND ALLOCATION
   app.get('/api/autonomous-allocations', requireAuth, ah(async (req, res) => {
     try {
-      const allocs = (await pool.query('SELECT * FROM autonomous_fund_allocations WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const allocs = (await pool.query('SELECT * FROM autonomous_fund_allocations WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(allocs);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9298,7 +9418,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { allocation_algorithm, rules } = req.body;
       const r = await pool.query('INSERT INTO autonomous_fund_allocations(tenant_id,campaign_id,allocation_algorithm,rules) VALUES($1,$2,$3,$4) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, allocation_algorithm||'proportional', JSON.stringify(rules||[])]);
+        [req.session.user?.tenant_id||0, req.params.id, allocation_algorithm||'proportional', JSON.stringify(rules||[])]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9306,7 +9426,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V18 FEATURE 8: QUANTUM-READY ENCRYPTION
   app.get('/api/quantum-encryption', requireAuth, ah(async (req, res) => {
     try {
-      const records = (await pool.query('SELECT * FROM quantum_encrypted_records WHERE tenant_id=$1', [req.user?.tenant_id||0])).rows;
+      const records = (await pool.query('SELECT * FROM quantum_encrypted_records WHERE tenant_id=$1', [req.session.user?.tenant_id||0])).rows;
       res.json(records);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9317,7 +9437,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const keyId = 'qkey-' + crypto.randomBytes(16).toString('hex');
       const isQuantumSafe = ['lattice_based','code_based','hash_based','hybrid_pqc'].includes(encryption_method);
       const r = await pool.query('INSERT INTO quantum_encrypted_records(tenant_id,record_type,record_id,encryption_method,encryption_key_id,is_quantum_safe) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-        [req.user?.tenant_id||0, record_type, record_id, encryption_method||'aes_256', keyId, isQuantumSafe]);
+        [req.session.user?.tenant_id||0, record_type, record_id, encryption_method||'aes_256', keyId, isQuantumSafe]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9333,7 +9453,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     try {
       const { space_name, platform, space_url, space_config, max_occupancy } = req.body;
       const r = await pool.query('INSERT INTO metaverse_spaces(tenant_id,campaign_id,space_name,platform,space_url,space_config,max_occupancy) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, space_name, platform||'custom', space_url, JSON.stringify(space_config||{}), max_occupancy||100]);
+        [req.session.user?.tenant_id||0, req.params.id, space_name, platform||'custom', space_url, JSON.stringify(space_config||{}), max_occupancy||100]);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9353,7 +9473,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       const multiplier = scenario === 'optimistic' ? 1.5 : (scenario === 'pessimistic' ? 0.6 : 1.0);
       const results = { projected_total: Math.round(parseInt(raised) * multiplier * 3), projected_beneficiaries: Math.round(parseInt(raised) * 0.01 * multiplier), projected_completion: scenario === 'optimistic' ? '3 months' : (scenario === 'pessimistic' ? '12 months' : '6 months') };
       const r = await pool.query('INSERT INTO digital_twin_simulations(tenant_id,campaign_id,simulation_name,simulation_type,input_parameters,simulation_results,scenario,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-        [req.user?.tenant_id||0, req.params.id, simulation_name, simulation_type||'impact', JSON.stringify(input_parameters||{}), JSON.stringify(results), scenario||'baseline', req.user?.email||'']);
+        [req.session.user?.tenant_id||0, req.params.id, simulation_name, simulation_type||'impact', JSON.stringify(input_parameters||{}), JSON.stringify(results), scenario||'baseline', req.session.user?.email||'']);
       res.json(r.rows[0]);
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -9379,6 +9499,319 @@ Sitemap: ${BASE_URL}/sitemap.xml
 
 
   console.log('[Fundraising Enhancements] All V5 routes registered successfully');
-};
 
-module.exports.processDonationEffects = processDonationEffects;
+  // =============================================
+  // CRITICAL MISSING ROUTES - Trust & Rating Features
+  // =============================================
+
+  // Health check endpoint for fundraising module
+  app.get('/api/fundraising/health', ah(async (req, res) => {
+    try {
+      const result = await pool.query('SELECT 1 as ok');
+      const campaignCount = (await pool.query('SELECT COUNT(*) as count FROM fundraising_campaigns')).rows[0]?.count || 0;
+      const donationCount = (await pool.query('SELECT COUNT(*) as count FROM campaign_donations')).rows[0]?.count || 0;
+      res.json({
+        status: 'ok',
+        module: 'fundraising-enhancements',
+        version: 'V18',
+        database: result.rows ? 'connected' : 'disconnected',
+        stats: { campaigns: parseInt(campaignCount), donations: parseInt(donationCount) },
+        timestamp: new Date().toISOString()
+      });
+    } catch(e) {
+      res.status(503).json({ status: 'error', message: e.message, timestamp: new Date().toISOString() });
+    }
+  }));
+
+  // Platform reviews - submit and view
+  app.get('/api/platform-reviews', ah(async (req, res) => {
+    const tid = req.session?.user?.tenant_id || req.query.tenant_id || 0;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+    const reviews = (await pool.query('SELECT * FROM platform_reviews WHERE tenant_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT $3 OFFSET $4', [tid, 'visible', limit, offset])).rows;
+    const total = (await pool.query('SELECT COUNT(*) as count FROM platform_reviews WHERE tenant_id=$1 AND status=$2', [tid, 'visible'])).rows[0]?.count || 0;
+    const avgRating = (await pool.query('SELECT AVG(rating) as avg FROM platform_reviews WHERE tenant_id=$1 AND status=$2', [tid, 'visible'])).rows[0]?.avg || 0;
+    res.json({ reviews, total: parseInt(total), page, totalPages: Math.ceil(total/limit), averageRating: parseFloat(avgRating).toFixed(1) });
+  }));
+
+  app.post('/api/platform-reviews', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { reviewer_name, rating, review_text, review_category } = req.body;
+    if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'Rating must be between 1 and 5' });
+    await pool.query('INSERT INTO platform_reviews(tenant_id,reviewer_email,reviewer_name,rating,review_text,review_category) VALUES($1,$2,$3,$4,$5,$6)',
+      [tid, req.session.user.email, reviewer_name||req.session.user.name, rating, review_text||'', review_category||'general']);
+    res.json({ success: true, message: 'Review submitted successfully' });
+  }));
+
+  // Campaign reports/complaints
+  app.post('/api/campaigns/:id/report', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { reason, description } = req.body;
+    if (!reason) return res.status(400).json({ error: 'Reason is required' });
+    const campaign = (await pool.query('SELECT id FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    await pool.query('INSERT INTO campaign_reports(tenant_id,campaign_id,reporter_email,reporter_name,reason,description) VALUES($1,$2,$3,$4,$5,$6)',
+      [tid, req.params.id, req.session.user.email, req.session.user.name||'Reporter', reason, description||'']);
+    res.json({ success: true, message: 'Report submitted. Our team will review it.' });
+  }));
+
+  app.get('/admin/campaign-reports', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const status = req.query.status || 'pending';
+    const reports = (await pool.query('SELECT cr.*, fc.title as campaign_title FROM campaign_reports cr JOIN fundraising_campaigns fc ON cr.campaign_id=fc.id WHERE cr.tenant_id=$1 AND cr.status=$2 ORDER BY cr.created_at DESC LIMIT 50', [tid, status])).rows;
+    res.json({ reports });
+  }));
+
+  app.post('/admin/campaign-reports/:id/investigate', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { resolution } = req.body;
+    await pool.query('UPDATE campaign_reports SET status=$1,investigated_by=$2,investigated_at=NOW(),resolution=$3 WHERE id=$4 AND tenant_id=$5',
+      ['investigating', req.session.user.email, resolution||'', req.params.id, tid]);
+    res.json({ success: true });
+  }));
+
+  app.post('/admin/campaign-reports/:id/resolve', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { status, resolution } = req.body;
+    await pool.query('UPDATE campaign_reports SET status=$1,investigated_by=$2,investigated_at=NOW(),resolution=$3 WHERE id=$4 AND tenant_id=$5',
+      [status||'resolved', req.session.user.email, resolution||'', req.params.id, tid]);
+    res.json({ success: true });
+  }));
+
+  // KYC / Creator identity verification
+  app.post('/api/kyc/submit', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { full_name, id_type, id_number, id_document_url, selfie_url } = req.body;
+    if (!full_name || !id_type || !id_number) return res.status(400).json({ error: 'Full name, ID type, and ID number are required' });
+    await pool.query(`INSERT INTO creator_kyc(tenant_id,user_email,full_name,id_type,id_number,id_document_url,selfie_url) VALUES($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (tenant_id, user_email) DO UPDATE SET full_name=$3,id_type=$4,id_number=$5,id_document_url=$6,selfie_url=$7,status='pending',reviewed_by=NULL,reviewed_at=NULL`,
+      [tid, req.session.user.email, full_name, id_type, id_number, id_document_url||'', selfie_url||'']);
+    res.json({ success: true, message: 'KYC documents submitted for review' });
+  }));
+
+  app.get('/api/kyc/status', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const kyc = (await pool.query('SELECT * FROM creator_kyc WHERE tenant_id=$1 AND user_email=$2', [tid, req.session.user.email])).rows[0];
+    res.json({ kyc: kyc || null });
+  }));
+
+  app.get('/admin/kyc-pending', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const pending = (await pool.query("SELECT * FROM creator_kyc WHERE tenant_id=$1 AND status='pending' ORDER BY created_at DESC", [tid])).rows;
+    res.json({ pending });
+  }));
+
+  app.post('/admin/kyc/:id/approve', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    await pool.query("UPDATE creator_kyc SET status='approved',reviewed_by=$1,reviewed_at=NOW(),verified_at=NOW() WHERE id=$2 AND tenant_id=$3",
+      [req.session.user.email, req.params.id, tid]);
+    res.json({ success: true });
+  }));
+
+  app.post('/admin/kyc/:id/reject', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { notes } = req.body;
+    await pool.query("UPDATE creator_kyc SET status='rejected',reviewed_by=$1,reviewed_at=NOW(),notes=$2 WHERE id=$3 AND tenant_id=$4",
+      [req.session.user.email, notes||'', req.params.id, tid]);
+    res.json({ success: true });
+  }));
+
+  // Fund usage proof / spending transparency
+  app.post('/api/campaigns/:id/spending-proof', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { title, description, amount_spent, receipt_url, photo_url, category } = req.body;
+    if (!title || !amount_spent) return res.status(400).json({ error: 'Title and amount spent are required' });
+    const campaign = (await pool.query('SELECT id FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    await pool.query('INSERT INTO fund_usage_proofs(tenant_id,campaign_id,title,description,amount_spent,receipt_url,photo_url,category,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [tid, req.params.id, title, description||'', amount_spent, receipt_url||'', photo_url||'', category||'general', req.session.user.email]);
+    res.json({ success: true, message: 'Spending proof added successfully' });
+  }));
+
+  app.get('/api/campaigns/:id/spending-proof', ah(async (req, res) => {
+    const tid = req.session?.user?.tenant_id || req.query.tenant_id || 0;
+    const proofs = (await pool.query('SELECT * FROM fund_usage_proofs WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [req.params.id, tid])).rows;
+    const totalSpent = (await pool.query('SELECT COALESCE(SUM(amount_spent),0) as total FROM fund_usage_proofs WHERE campaign_id=$1 AND tenant_id=$2 AND verified=true', [req.params.id, tid])).rows[0]?.total || 0;
+    res.json({ proofs, totalVerifiedSpent: parseInt(totalSpent) });
+  }));
+
+  // Payout 2FA - request OTP before processing
+  app.post('/api/payouts/:id/request-otp', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const payout = (await pool.query('SELECT * FROM payout_requests WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+    if (!payout) return res.status(404).json({ error: 'Payout not found' });
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expires = new Date(Date.now() + 15 * 60 * 1000); // 15 min
+    await pool.query('INSERT INTO payout_verifications(tenant_id,payout_id,verification_code,code_type,expires_at) VALUES($1,$2,$3,$4,$5)',
+      [tid, req.params.id, code, 'email_otp', expires]);
+    // Send OTP via email
+    if (req.session.user.email) {
+      try {
+        await sendEmail(req.session.user.email, 'Payout Verification Code', 
+          `<div style="font-family:sans-serif;text-align:center;padding:40px">
+            <h2>Verification Code</h2>
+            <div style="font-size:32px;font-weight:700;letter-spacing:8px;color:#059669;padding:20px;background:#f0fdf4;border-radius:8px;display:inline-block">${code}</div>
+            <p>This code expires in 15 minutes. Use it to verify payout #${req.params.id}.</p>
+          </div>`);
+      } catch(e) { console.warn('[OTP Email Error]', e.message); }
+    }
+    res.json({ success: true, message: 'Verification code sent to your email' });
+  }));
+
+  app.post('/api/payouts/:id/verify-otp', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'Verification code is required' });
+    const verification = (await pool.query('SELECT * FROM payout_verifications WHERE payout_id=$1 AND tenant_id=$2 AND verification_code=$3 AND verified=false AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1',
+      [req.params.id, tid, code])).rows[0];
+    if (!verification) return res.status(400).json({ error: 'Invalid or expired verification code' });
+    await pool.query('UPDATE payout_verifications SET verified=true,verified_at=NOW() WHERE id=$1', [verification.id]);
+    // Now approve the payout
+    await pool.query("UPDATE payout_requests SET status='approved',processed_by=$1 WHERE id=$2 AND tenant_id=$3",
+      [req.session.user.email, req.params.id, tid]);
+    res.json({ success: true, message: 'Payout verified and approved' });
+  }));
+
+  // Donor data privacy - export, delete, anonymize
+  app.get('/api/donor/data-export', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const email = req.session.user.email;
+    const donations = (await pool.query('SELECT * FROM campaign_donations WHERE donor_email=$1 AND tenant_id=$2 AND refunded=false', [email, tid])).rows;
+    const profile = (await pool.query('SELECT * FROM donor_profiles WHERE user_email=$1 AND tenant_id=$2', [email, tid])).rows[0];
+    const badges = (await pool.query('SELECT * FROM donor_recognition WHERE donor_email=$1 AND tenant_id=$2', [email, tid])).rows;
+    const streaks = (await pool.query('SELECT * FROM donor_streaks WHERE donor_email=$1 AND tenant_id=$2', [email, tid])).rows;
+    res.json({ donations, profile, badges, streaks, exportedAt: new Date().toISOString() });
+  }));
+
+  app.post('/api/donor/data-anonymize', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const email = req.session.user.email;
+    // Anonymize donations instead of deleting (preserve financial records)
+    await pool.query("UPDATE campaign_donations SET donor_name='Anonymous Donor',donor_email='anonymized_'+SUBSTRING(MD5(RANDOM()::TEXT),1,8) WHERE donor_email=$1 AND tenant_id=$2", [email, tid]);
+    await pool.query("UPDATE donor_profiles SET full_name='Anonymous User' WHERE user_email=$1 AND tenant_id=$2", [email, tid]);
+    await pool.query("DELETE FROM donor_recognition WHERE donor_email=$1 AND tenant_id=$2", [email, tid]);
+    await pool.query("DELETE FROM donor_streaks WHERE donor_email=$1 AND tenant_id=$2", [email, tid]);
+    res.json({ success: true, message: 'Your data has been anonymized. Donation records are preserved for financial compliance but your identity has been removed.' });
+  }));
+
+  // Donation receipt download (enhanced with PDF-like format)
+  app.get('/api/donations/:id/receipt', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const donation = (await pool.query('SELECT cd.*, fc.title as campaign_title FROM campaign_donations cd JOIN fundraising_campaigns fc ON cd.campaign_id=fc.id WHERE cd.id=$1 AND cd.tenant_id=$2',
+      [req.params.id, tid])).rows[0];
+    if (!donation) return res.status(404).json({ error: 'Donation not found' });
+    const receipt = (await pool.query('SELECT * FROM donation_receipts WHERE donation_id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+    res.json({ donation, receipt });
+  }));
+
+  // Paginated campaigns list with proper pagination
+  app.get('/api/campaigns/paginated', ah(async (req, res) => {
+    const tid = req.session?.user?.tenant_id || req.query.tenant_id || 0;
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const offset = (page - 1) * limit;
+    const sort = req.query.sort || 'created_at';
+    const order = req.query.order === 'asc' ? 'ASC' : 'DESC';
+    const category = req.query.category;
+    const status = req.query.status || 'active';
+    
+    let whereClause = 'WHERE tenant_id=$1 AND status=$2';
+    let params = [tid, status];
+    let paramIdx = 3;
+    
+    if (category) {
+      whereClause += ` AND category=$${paramIdx}`;
+      params.push(category);
+      paramIdx++;
+    }
+    
+    const allowedSorts = ['created_at','views_count','donor_count','target','title'];
+    const safeSort = allowedSorts.includes(sort) ? sort : 'created_at';
+    
+    const data = (await pool.query(`SELECT * FROM fundraising_campaigns ${whereClause} ORDER BY ${safeSort} ${order} LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+    const total = (await pool.query(`SELECT COUNT(*) as count FROM fundraising_campaigns ${whereClause}`, params)).rows[0]?.count || 0;
+    
+    res.json({ data, total: parseInt(total), page, limit, totalPages: Math.ceil(total/limit) });
+  }));
+
+  // Paginated donations list
+  app.get('/api/donations/paginated', requireAuth, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const offset = (page - 1) * limit;
+    const campaign_id = req.query.campaign_id;
+    
+    let whereClause = 'WHERE tenant_id=$1 AND refunded=false';
+    let params = [tid];
+    let paramIdx = 2;
+    
+    if (campaign_id) {
+      whereClause += ` AND campaign_id=$${paramIdx}`;
+      params.push(campaign_id);
+      paramIdx++;
+    }
+    
+    const data = (await pool.query(`SELECT * FROM campaign_donations ${whereClause} ORDER BY donated_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+    const total = (await pool.query(`SELECT COUNT(*) as count FROM campaign_donations ${whereClause}`, params)).rows[0]?.count || 0;
+    
+    res.json({ data, total: parseInt(total), page, limit, totalPages: Math.ceil(total/limit) });
+  }));
+
+  // Campaign clone/duplicate
+  app.post('/api/campaigns/:id/clone', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const tid = req.session.user.tenant_id;
+    const original = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
+    if (!original) return res.status(404).json({ error: 'Campaign not found' });
+    const newTitle = (req.body.title || original.title + ' (Copy)').substring(0, 200);
+    const result = await pool.query('INSERT INTO fundraising_campaigns(tenant_id,title,description,target,status,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING id',
+      [tid, newTitle, original.description, original.target, 'draft', req.session.user.email]);
+    res.json({ success: true, newCampaignId: result.rows[0].id, message: 'Campaign cloned as draft' });
+  }));
+
+  // Email unsubscribe endpoint
+  app.get('/api/email/unsubscribe/:token', ah(async (req, res) => {
+    try {
+      const decoded = Buffer.from(req.params.token, 'base64').toString();
+      const [email, campaignId] = decoded.split(':');
+      if (email) {
+        await pool.query('UPDATE campaign_followers SET notify_on_update=false,notify_on_milestone=false,notify_on_comment=false WHERE user_email=$1 AND campaign_id=$2', [email, campaignId||0]);
+        await pool.query("UPDATE donor_profiles SET communication_prefs='{\"email\":false,\"sms\":false,\"whatsapp\":false}' WHERE user_email=$1", [email]);
+      }
+      res.send('<html><body style="text-align:center;padding:50px;font-family:sans-serif"><h2>You have been unsubscribed</h2><p>You will no longer receive fundraising emails.</p></body></html>');
+    } catch(e) {
+      res.status(400).send('Invalid unsubscribe link');
+    }
+  }));
+
+  // Donation amount validation middleware helper
+  function validateDonationAmount(amount) {
+    const num = parseInt(amount);
+    if (isNaN(num) || num < 500) return { valid: false, error: 'Minimum donation is UGX 500' };
+    if (num > 500000000) return { valid: false, error: 'Maximum single donation is UGX 500,000,000' };
+    return { valid: true, amount: num };
+  }
+
+  // Rate limiting tracking (simple in-memory, per-tenant)
+  const donationRateLimit = new Map();
+  function checkDonationRateLimit(key, maxPerMinute = 5) {
+    const now = Date.now();
+    const record = donationRateLimit.get(key);
+    if (!record || now - record.windowStart > 60000) {
+      donationRateLimit.set(key, { windowStart: now, count: 1 });
+      return { allowed: true, remaining: maxPerMinute - 1 };
+    }
+    if (record.count >= maxPerMinute) {
+      return { allowed: false, remaining: 0, retryAfter: Math.ceil((60000 - (now - record.windowStart)) / 1000) };
+    }
+    record.count++;
+    return { allowed: true, remaining: maxPerMinute - record.count };
+  }
+
+  // Expose for use in donate-save routes
+  module.exports.validateDonationAmount = validateDonationAmount;
+  module.exports.checkDonationRateLimit = checkDonationRateLimit;
+
+
+};

@@ -21960,7 +21960,7 @@ const requireFundraisingSubscription = async (req, res, next) => {
     const sub = (await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id])).rows[0];
     if (!sub || sub.plan === 'free') return res.redirect('/upgrade/fundraising');
     return next();
-  } catch(e) { return next(); }
+  } catch(e) { console.warn('[requireFundraisingSubscription Error]', e.message); return res.redirect('/upgrade/fundraising'); }
 };
 
 app.get('/fundraising', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
@@ -22349,7 +22349,7 @@ app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, requireF
   // Trigger post-donation processing (matching, badges, thank you, milestones, followers)
   try {
     if (_processDonationEffects) await _processDonationEffects({ tenant_id: t, campaign_id: req.params.id, donation_id: donationId, donor_name: displayName, donor_email: donorEmail, donor_phone: donorPhone, amount, method, message, is_anonymous: isAnonymous });
-  } catch(e) { /* non-blocking */ }
+  } catch(e) { console.warn('[processDonationEffects Error]', e.message); }
   res.redirect('/fundraising/'+req.params.id);
 }));
 
@@ -22582,7 +22582,7 @@ app.get('/discover/:id/donate', requireAuth, requireFundraisingSubscription, ah(
   `, req.session.user));
 }));
 
-app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
+app.post('/discover/:id/donate-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
   const { donor_name, donor_email, amount, method, message, donate_anonymously, donor_phone } = req.body;
@@ -22609,7 +22609,7 @@ app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscriptio
   // Trigger post-donation processing (matching, badges, thank you, milestones, followers)
   try {
     if (_processDonationEffects) await _processDonationEffects({ tenant_id: c.tenant_id, campaign_id: c.id, donation_id: donationId, donor_name: displayName, donor_email: donorEmail, donor_phone: donorPhone, amount, method, message, is_anonymous: isAnonymous });
-  } catch(e) { /* non-blocking */ }
+  } catch(e) { console.warn('[processDonationEffects Error]', e.message); }
 
   res.redirect('/discover/'+c.id);
 }));

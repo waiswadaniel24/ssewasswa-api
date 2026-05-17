@@ -149,7 +149,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // 1. SOCIAL SHARING BUTTONS
   // =============================================
   // API endpoint to get share data for a campaign
-  app.get('/api/campaigns/:id/share', ah(async (req, res) => {
+  app.get('/api/pro/campaigns/:id/share', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.json({ error: 'Not found' });
     const url = BASE_URL + '/discover/' + c.id;
@@ -171,7 +171,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 2. DONOR DASHBOARD
   // =============================================
-  app.get('/my-donations', requireAuth, ah(async (req, res) => {
+  app.get('/pro/my-donations', requireAuth, ah(async (req, res) => {
     const email = req.session.user.email;
     const t = req.session.user.tenant_id;
 
@@ -295,7 +295,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   }));
 
   // Admin: Process payout requests
-  app.get('/admin/payouts', requireAuth, ah(async (req, res) => {
+  app.get('/pro/admin/payouts', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const payouts = (await pool.query('SELECT cp.*, fc.title as campaign_title FROM campaign_payouts cp JOIN fundraising_campaigns fc ON cp.campaign_id=fc.id WHERE cp.tenant_id=$1 ORDER BY cp.created_at DESC', [t])).rows;
     res.send(renderPage('Manage Payouts', `
@@ -334,7 +334,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 4. DONOR WALL / RECOGNITION
   // =============================================
-  app.get('/campaigns/:id/donors', ah(async (req, res) => {
+  app.get('/pro/campaigns/:id/donors', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
 
@@ -383,7 +383,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 5. QR CODES FOR CAMPAIGNS
   // =============================================
-  app.get('/campaigns/:id/qr', ah(async (req, res) => {
+  app.get('/pro/campaigns/:id/qr', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     const campaignUrl = BASE_URL + '/discover/' + c.id;
@@ -424,7 +424,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 6. REFUND HANDLING
   // =============================================
-  app.get('/admin/refunds', requireAuth, ah(async (req, res) => {
+  app.get('/pro/admin/refunds', requireAuth, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const transactions = (await pool.query(`SELECT it.*, fc.title as campaign_title, i.full_name as investor_name
       FROM investment_transactions it
@@ -475,7 +475,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 7. CAMPAIGN EMBED WIDGET
   // =============================================
-  app.get('/campaigns/:id/embed', ah(async (req, res) => {
+  app.get('/pro/campaigns/:id/embed', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) as raised FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
@@ -525,7 +525,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 8. MATCHING DONATIONS
   // =============================================
-  app.get('/fundraising/:id/matching', requireAuth, requireNotBanned, ah(async (req, res) => {
+  app.get('/pro/fundraising/:id/matching', requireAuth, requireNotBanned, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!c) return res.status(404).send('Not found');
@@ -542,7 +542,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `, req.session.user));
   }));
 
-  app.get('/fundraising/:id/matching/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  app.get('/pro/fundraising/:id/matching/new', requireAuth, requireNotBanned, ah(async (req, res) => {
     const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     res.send(renderPage('Add Matching Sponsor', `
@@ -566,7 +566,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `, req.session.user));
   }));
 
-  app.post('/fundraising/:id/matching/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  app.post('/pro/fundraising/:id/matching/save', requireAuth, requireNotBanned, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const { sponsor_name, sponsor_email, match_ratio, max_amount, start_date, end_date } = req.body;
     await pool.query('INSERT INTO matching_donations(tenant_id,campaign_id,sponsor_name,sponsor_email,match_ratio,max_amount,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
