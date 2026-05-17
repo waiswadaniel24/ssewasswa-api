@@ -27,7 +27,7 @@ const LOGIN_LOCKOUT_WINDOW = 15 * 60 * 1000; // 15 minutes
 const LOGIN_MAX_ATTEMPTS = 5;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
-const REQUEST_TIMEOUT_MS = 30 * 1000; // 30 seconds
+const REQUEST_TIMEOUT_MS = 120 * 1000; // 120 seconds (increased for Render free plan with many modules)
 const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
 const VALID_PATIENT_TYPES = ['student', 'staff', 'patient', 'other', 'family', 'employee'];
 const VALID_CLINIC_INSTITUTION_TYPES = ['general_hospital','referral_hospital','district_hospital','health_centre_ii','health_centre_iii','health_centre_iv','private_clinic','specialist_clinic','dental_clinic','eye_clinic','mental_health','maternity','pharmacy','laboratory','radiology','rehabilitation','hospice','community_health'];
@@ -124,8 +124,10 @@ const pool = new Pool({
   // Using NODE_ENV check breaks when Render doesn't set NODE_ENV=production by default.
   ssl: { rejectUnauthorized: false },
   max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000
+  idleTimeoutMillis: 60000,      // increased from 30s → 60s: keep idle connections longer to reduce reconnection overhead
+  connectionTimeoutMillis: 30000,  // increased from 10s → 30s: more patience during DB spin-up on free plan
+  statement_timeout: 60000,        // 60s per query max: prevent runaway queries from hogging pool connections
+  query_timeout: 45000             // 45s client-side query timeout
 });
 
 // === SECURITY ===
@@ -35721,6 +35723,10 @@ server.listen(PORT, () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`WebSocket: ws${process.env.NODE_ENV === 'production' ? 's' : ''}://localhost:${PORT}/ws/notifications`);
 });
+// Increase HTTP server timeouts to prevent freezing on Render free plan
+server.timeout = 120000;            // 120s overall request timeout (default is 120s in Node 18+ but explicit is safer)
+server.keepAliveTimeout = 75000;    // 75s keep-alive timeout (default 5s is too short for slow DB spin-ups)
+server.headersTimeout = 80000;      // Must be > keepAliveTimeout
 // Deploy trigger 1783498600
 // Deploy trigger v17-upgrade
 // Deploy trigger redeploy-$(date +%s)
