@@ -27299,6 +27299,21 @@ try {
   console.warn('[FundraisingPro] Failed to load fundraising pro:', e.message);
 }
 
+// === FUNDRAISING ENHANCEMENTS (Post-donation effects, matching, badges, thank-you, milestones, receipts, social proof, V5-V18 bonus features) ===
+let _processDonationEffects = null;
+try {
+  const fundraisingEnhancements = require('./fundraising-enhancements');
+  fundraisingEnhancements(app, pool, ah, requireAuth, requireNotBanned, requireFundraisingSubscription, renderPage, esc, notify, notifyAll, sendEmail, sendSMS);
+  if (typeof fundraisingEnhancements.processDonationEffects === 'function') {
+    _processDonationEffects = fundraisingEnhancements.processDonationEffects;
+    console.log('[FundraisingEnhancements] V5-V18 features loaded — processDonationEffects wired up');
+  } else {
+    console.log('[FundraisingEnhancements] V5-V18 features loaded — processDonationEffects NOT found in exports');
+  }
+} catch (e) {
+  console.warn('[FundraisingEnhancements] Failed to load:', e.message);
+}
+
 // === FUNDRAISING ULTIMATE (recurring donations, impact calculator, loyalty tiers, campaign grader, emergency mode, harambee, WhatsApp donate, mobile money auto-detect, funeral funds, AI story writer) ===
 ['recurring_donations','impact_items','campaign_impact_goals','donor_loyalty_tiers','donor_loyalty_ledger','campaign_grades','emergency_campaigns','harambee_pools','harambee_contributions','harambee_distributions','whatsapp_donate_config','whatsapp_donate_sessions','mobile_money_providers','donation_payment_attempts','funeral_funds','funeral_contributions','ai_campaign_stories'].forEach(t => VALID_TABLES.add(t));
 try {
@@ -27388,6 +27403,66 @@ setTimeout(() => {
     console.warn('[FundraisingUltimate6] Failed to load:', e.message);
   }
 }, 11000);
+
+// === FUNDRAISING ULTIMATE7 (Crypto Donations, In-Kind Donations, Planned Giving/Bequests, Board Giving, Event Ticketing, Auction Platform, Sponsorship Management, Donor Advised Funds) ===
+['crypto_donations','crypto_wallets','crypto_transactions','inkind_donations','inkind_categories','planned_giving','bequests','board_giving_pledges','board_members','event_tickets','ticket_tiers','ticket_purchases','auction_items','auction_bids','sponsorship_packages','sponsorship_purchases','donor_advised_funds','daf_grants'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate7 = require('./fundraising-ultimate7');
+    fundraisingUltimate7(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate7] Advanced Donation Types & Events loaded — 8 features, 50+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate7] Failed to load:', e.message);
+  }
+}, 13000);
+
+// === FUNDRAISING ULTIMATE8 (Capital Campaigns, Tribute/Memorial, Crowdfunding Perks, Thermometer Widgets, Donor Portal, Email Builder, Direct Mail, Donor Heatmaps) ===
+['capital_campaigns','capital_phases','capital_pledges','tribute_donations','memorial_pages','crowdfunding_perks','perk_claims','campaign_thermometers','thermometer_views','donor_portal_sessions','donor_portal_preferences','email_campaign_builder','email_templates_builder','direct_mail_campaigns','direct_mail_recipients','donor_heatmap_data','regional_donation_stats'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate8 = require('./fundraising-ultimate8');
+    fundraisingUltimate8(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate8] Campaign Enhancement & Donor Experience loaded — 8 features, 50+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate8] Failed to load:', e.message);
+  }
+}, 15000);
+
+// === FUNDRAISING ULTIMATE9 (Virtual Events, Gala Management, Wealth Screening, Grant Writing Assistant, Tax Statement Generator, Giving Days, Installment Plans, Engagement Scoring) ===
+['virtual_events','virtual_event_attendees','fundraising_galas','gala_tables','gala_seats','wealth_screening_results','donor_wealth_indicators','grant_proposals','grant_writing_templates','donor_tax_statements','tax_statement_batches','giving_days','giving_day_challenges','giving_day_leaderboards','installment_plans','installment_payments','donor_engagement_scores','engagement_activities'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate9 = require('./fundraising-ultimate9');
+    fundraisingUltimate9(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate9] Events, Intelligence & Financial Pro loaded — 8 features, 50+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate9] Failed to load:', e.message);
+  }
+}, 17000);
+
+// === FUNDRAISING ULTIMATE10 (Landing Page Builder, Payment Gateway Hub, Donor Renewal, Gift Clubs, Video Integration, Stock/Securities, Real Estate, IRA Rollovers) ===
+['landing_pages','landing_page_versions','payment_gateways','gateway_transactions','donor_renewal_campaigns','renewal_reminders','donor_gift_clubs','gift_club_members','campaign_videos','video_engagement','stock_donations','stock_valuations','real_estate_donations','ira_rollovers','ira_distributions'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate10 = require('./fundraising-ultimate10');
+    fundraisingUltimate10(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate10] Pages, Payments & Asset Giving loaded — 8 features, 50+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate10] Failed to load:', e.message);
+  }
+}, 19000);
+
+// === FUNDRAISING ULTIMATE11 (Vehicle Donations, Family Foundations, Mobile Experience, Risk Assessment, Compliance Checker, Impact Reports, Collaboration Portal, Communication Hub) ===
+['vehicle_donations','vehicle_valuations','family_foundations','foundation_members','foundation_grants','mobile_experience_config','push_notifications','campaign_risk_assessments','risk_mitigation_plans','fundraising_compliance_checks','compliance_requirements','donation_impact_reports','impact_report_sections','campaign_collaboration','collaboration_tasks','communication_hub','unified_messages'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate11 = require('./fundraising-ultimate11');
+    fundraisingUltimate11(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate11] Special Assets & Platform Pro loaded — 8 features, 50+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate11] Failed to load:', e.message);
+  }
+}, 21000);
 
 // ============================================================
 // ROUND 3 FEATURES: Leave, Expenses, Visitors, Assets, Feedback, Notes, Announcements
