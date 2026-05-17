@@ -20513,6 +20513,9 @@ app.get('/discover/:id', ah(async (req, res) => {
           <span style="background:#05966920;color:#059669;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">${esc(c.category)}</span>
           ${c.urgent==='urgent'||c.urgent==='critical'?'<span style="background:#fee2e2;color:#991b1b;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">URGENT</span>':''}
           ${c.featured?'<span style="background:#fef3c7;color:#92400e;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">Featured</span>':''}
+          ${c.is_verified||c.verification_badge!=='none'?'<span style="background:#d1fae5;color:#065f46;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">&#9989; Verified</span>':''}
+          ${c.has_rewards?'<span style="background:#fef3c7;color:#92400e;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">&#127873; Rewards</span>':''}
+          ${c.has_volunteers?'<span style="background:#e0e7ff;color:#3730a3;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700">&#128588; Volunteers</span>':''}
         </div>
         <h1 style="font-size:32px;font-weight:900;color:#1e293b;margin:0 0 8px 0">${esc(c.title)}</h1>
         <p style="color:#64748b;font-size:16px;margin-bottom:16px">by ${esc(c.org_name)} &bull; ${esc(c.org_type)} ${c.location?'&bull; '+esc(c.location):''}</p>
@@ -20558,6 +20561,12 @@ app.get('/discover/:id', ah(async (req, res) => {
             <a href="/campaigns/${c.id}/peer" style="font-size:13px;color:#ec4899;font-weight:600">Peer Fundraising</a>
             <a href="/campaigns/${c.id}/trust" style="font-size:13px;color:#06b6d4;font-weight:600">Trust Score</a>
             <a href="/campaigns/${c.id}/timeline" style="font-size:13px;color:#7c3aed;font-weight:600">Timeline</a>
+            <a href="/campaigns/${c.id}/rewards" style="font-size:13px;color:#f59e0b;font-weight:600">Rewards</a>
+            <a href="/campaigns/${c.id}/wishlist" style="font-size:13px;color:#059669;font-weight:600">Wishlist</a>
+            <a href="/campaigns/${c.id}/volunteers" style="font-size:13px;color:#4f46e5;font-weight:600">Volunteer</a>
+            <a href="/campaigns/${c.id}/endorsements" style="font-size:13px;color:#f59e0b;font-weight:600">Endorsements</a>
+            <a href="/campaigns/${c.id}/faq" style="font-size:13px;color:#0891b2;font-weight:600">FAQ</a>
+            <a href="/campaigns/${c.id}/events" style="font-size:13px;color:#ef4444;font-weight:600">Events</a>
           </div>
         </div>
       </div>
@@ -31190,4 +31199,4 @@ server.listen(PORT, () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`WebSocket: ws${process.env.NODE_ENV === 'production' ? 's' : ''}://localhost:${PORT}/ws/notifications`);
 });
-// Deploy trigger 1783498400
+// Deploy trigger 1783498500

@@ -490,6 +490,294 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       review_text TEXT,
       is_verified BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // =============================================
+    // NEW V3 TABLES - Additional Success Features
+    // =============================================
+
+    // Campaign verification - admin-verified campaigns get trust badges
+    `CREATE TABLE IF NOT EXISTS campaign_verifications (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      verification_type TEXT DEFAULT 'standard' CHECK (verification_type IN ('standard','enhanced','premium','government','ngo_registered')),
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','under_review','approved','rejected','expired','revoked')),
+      submitted_by TEXT NOT NULL,
+      documents JSONB DEFAULT '[]',
+      notes TEXT,
+      admin_notes TEXT,
+      reviewed_by TEXT,
+      reviewed_at TIMESTAMPTZ,
+      verified_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ,
+      badge_level TEXT DEFAULT 'none' CHECK (badge_level IN ('none','verified','trusted','premium','gold')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Donation rewards/tiers - donors get rewards at different giving levels
+    `CREATE TABLE IF NOT EXISTS campaign_reward_tiers (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT,
+      min_amount INTEGER NOT NULL,
+      max_amount INTEGER,
+      reward_type TEXT DEFAULT 'digital' CHECK (reward_type IN ('digital','physical','experience','recognition','custom')),
+      reward_details JSONB DEFAULT '{}',
+      image_url TEXT,
+      estimated_delivery DATE,
+      quantity_available INTEGER,
+      quantity_claimed INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT true,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Reward claims - when donors claim a reward
+    `CREATE TABLE IF NOT EXISTS reward_claims (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      reward_tier_id INTEGER REFERENCES campaign_reward_tiers(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      donation_id INTEGER REFERENCES campaign_donations(id),
+      donor_email TEXT,
+      donor_name TEXT NOT NULL,
+      donor_phone TEXT,
+      shipping_address TEXT,
+      claim_status TEXT DEFAULT 'pending' CHECK (claim_status IN ('pending','confirmed','shipped','delivered','cancelled')),
+      tracking_number TEXT,
+      notes TEXT,
+      claimed_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign wishlists - specific items needed, not just money
+    `CREATE TABLE IF NOT EXISTS campaign_wishlists (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      item_name TEXT NOT NULL,
+      description TEXT,
+      quantity_needed INTEGER NOT NULL DEFAULT 1,
+      quantity_fulfilled INTEGER DEFAULT 0,
+      estimated_cost INTEGER DEFAULT 0,
+      category TEXT DEFAULT 'supplies' CHECK (category IN ('supplies','equipment','food','clothing','medical','technology','building_materials','services','other')),
+      priority TEXT DEFAULT 'medium' CHECK (priority IN ('low','medium','high','urgent')),
+      image_url TEXT,
+      link TEXT,
+      is_fulfilled BOOLEAN DEFAULT false,
+      fulfilled_by TEXT,
+      fulfilled_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Wishlist pledges - people pledge to provide specific items
+    `CREATE TABLE IF NOT EXISTS wishlist_pledges (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      wishlist_id INTEGER REFERENCES campaign_wishlists(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      pledger_name TEXT NOT NULL,
+      pledger_email TEXT,
+      pledger_phone TEXT,
+      quantity_pledged INTEGER NOT NULL DEFAULT 1,
+      message TEXT,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','confirmed','delivered','cancelled')),
+      pledged_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Volunteer sign-ups - people can volunteer time for campaigns
+    `CREATE TABLE IF NOT EXISTS campaign_volunteers (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      volunteer_name TEXT NOT NULL,
+      volunteer_email TEXT NOT NULL,
+      volunteer_phone TEXT,
+      skills TEXT[] DEFAULT '{}',
+      availability TEXT DEFAULT 'flexible' CHECK (availability IN ('flexible','weekdays','weekends','mornings','evenings','full_time')),
+      hours_pledged INTEGER DEFAULT 0,
+      hours_completed INTEGER DEFAULT 0,
+      role TEXT,
+      motivation TEXT,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','approved','active','completed','declined')),
+      approved_by TEXT,
+      approved_at TIMESTAMPTZ,
+      started_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      certificate_issued BOOLEAN DEFAULT false,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign endorsements - notable people endorse campaigns
+    `CREATE TABLE IF NOT EXISTS campaign_endorsements (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      endorser_name TEXT NOT NULL,
+      endorser_title TEXT,
+      endorser_organization TEXT,
+      endorser_photo TEXT,
+      endorser_email TEXT,
+      endorsement_text TEXT NOT NULL,
+      is_public BOOLEAN DEFAULT true,
+      is_featured BOOLEAN DEFAULT false,
+      is_verified BOOLEAN DEFAULT false,
+      verified_by TEXT,
+      verified_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Donor streaks - gamification for consecutive giving
+    `CREATE TABLE IF NOT EXISTS donor_streaks (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donor_email TEXT NOT NULL,
+      current_streak INTEGER DEFAULT 0,
+      longest_streak INTEGER DEFAULT 0,
+      last_donation_date DATE,
+      streak_type TEXT DEFAULT 'monthly' CHECK (streak_type IN ('daily','weekly','monthly')),
+      total_streak_donations INTEGER DEFAULT 0,
+      streak_start_date DATE,
+      rewards_claimed INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT true,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, donor_email, streak_type)
+    )`,
+
+    // Campaign collaboration - multiple orgs can co-own a campaign
+    `CREATE TABLE IF NOT EXISTS campaign_collaborators (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      collaborator_tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      role TEXT DEFAULT 'viewer' CHECK (role IN ('owner','co_owner','editor','viewer','fundraiser')),
+      contribution_percentage INTEGER DEFAULT 0,
+      invited_by TEXT,
+      invited_at TIMESTAMPTZ DEFAULT NOW(),
+      accepted_at TIMESTAMPTZ,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined','revoked')),
+      notes TEXT,
+      UNIQUE(campaign_id, collaborator_tenant_id)
+    )`,
+
+    // Donation tips - optional platform support tips on donations
+    `CREATE TABLE IF NOT EXISTS donation_tips (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donation_id INTEGER REFERENCES campaign_donations(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      donor_name TEXT,
+      donor_email TEXT,
+      tip_amount INTEGER NOT NULL DEFAULT 0,
+      tip_percentage NUMERIC(5,2) DEFAULT 0,
+      base_donation INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Donor retention analytics - track repeat vs one-time donors
+    `CREATE TABLE IF NOT EXISTS donor_retention_analytics (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      period_start DATE NOT NULL,
+      period_end DATE NOT NULL,
+      total_donors INTEGER DEFAULT 0,
+      new_donors INTEGER DEFAULT 0,
+      repeat_donors INTEGER DEFAULT 0,
+      retained_donors INTEGER DEFAULT 0,
+      churned_donors INTEGER DEFAULT 0,
+      reactivated_donors INTEGER DEFAULT 0,
+      retention_rate NUMERIC(5,2) DEFAULT 0,
+      avg_donation_new INTEGER DEFAULT 0,
+      avg_donation_repeat INTEGER DEFAULT 0,
+      ltv_estimate INTEGER DEFAULT 0,
+      calculated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, period_start, period_end)
+    )`,
+
+    // Campaign success scores - smart scoring for optimization
+    `CREATE TABLE IF NOT EXISTS campaign_success_scores (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      overall_score NUMERIC(5,2) DEFAULT 0,
+      story_quality_score NUMERIC(5,2) DEFAULT 0,
+      media_quality_score NUMERIC(5,2) DEFAULT 0,
+      engagement_score NUMERIC(5,2) DEFAULT 0,
+      momentum_score NUMERIC(5,2) DEFAULT 0,
+      trust_score NUMERIC(5,2) DEFAULT 0,
+      social_proof_score NUMERIC(5,2) DEFAULT 0,
+      urgency_score NUMERIC(5,2) DEFAULT 0,
+      transparency_score NUMERIC(5,2) DEFAULT 0,
+      recommendations JSONB DEFAULT '[]',
+      last_calculated TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(tenant_id, campaign_id)
+    )`,
+
+    // Campaign updates notifications - when campaigns post updates
+    `CREATE TABLE IF NOT EXISTS campaign_update_notifications (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      update_id INTEGER REFERENCES campaign_updates(id),
+      notification_type TEXT DEFAULT 'update' CHECK (notification_type IN ('update','milestone','urgent','thank_you','media')),
+      recipients_count INTEGER DEFAULT 0,
+      sent_count INTEGER DEFAULT 0,
+      failed_count INTEGER DEFAULT 0,
+      sent_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign FAQ - frequently asked questions per campaign
+    `CREATE TABLE IF NOT EXISTS campaign_faqs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      is_featured BOOLEAN DEFAULT false,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Campaign events - fundraising events linked to campaigns
+    `CREATE TABLE IF NOT EXISTS campaign_events (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT,
+      event_type TEXT DEFAULT 'fundraiser' CHECK (event_type IN ('fundraiser','gala','auction','walkathon','webinar','concert','volunteer_day','other')),
+      event_date TIMESTAMPTZ NOT NULL,
+      end_date TIMESTAMPTZ,
+      location TEXT,
+      virtual_link TEXT,
+      capacity INTEGER,
+      registered_count INTEGER DEFAULT 0,
+      ticket_price INTEGER DEFAULT 0,
+      image_url TEXT,
+      is_public BOOLEAN DEFAULT true,
+      status TEXT DEFAULT 'upcoming' CHECK (status IN ('upcoming','ongoing','completed','cancelled')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Event registrations
+    `CREATE TABLE IF NOT EXISTS campaign_event_registrations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      event_id INTEGER REFERENCES campaign_events(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      attendee_name TEXT NOT NULL,
+      attendee_email TEXT NOT NULL,
+      attendee_phone TEXT,
+      num_tickets INTEGER DEFAULT 1,
+      amount_paid INTEGER DEFAULT 0,
+      registration_status TEXT DEFAULT 'registered' CHECK (registration_status IN ('registered','confirmed','cancelled','attended','no_show')),
+      ticket_code TEXT,
+      registered_at TIMESTAMPTZ DEFAULT NOW()
     )`
   ];
 
@@ -552,6 +840,24 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     `ALTER TABLE campaign_milestones ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `ALTER TABLE campaign_stories ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `ALTER TABLE donor_impact ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+    // V3: New columns for fundraising_campaigns
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS verification_badge TEXT DEFAULT 'none'`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_rewards BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_wishlist BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_volunteers BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS volunteer_count INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS endorsement_count INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_faq BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS has_events BOOLEAN DEFAULT false`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS event_count INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS tip_total INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS success_score NUMERIC(5,2) DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS wishlist_items_count INTEGER DEFAULT 0`,
+    `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS reward_tiers_count INTEGER DEFAULT 0`,
+    `ALTER TABLE campaign_donations ADD COLUMN IF NOT EXISTS tip_amount INTEGER DEFAULT 0`,
+    `ALTER TABLE campaign_donations ADD COLUMN IF NOT EXISTS reward_tier_id INTEGER`,
+    `ALTER TABLE campaign_donations ADD COLUMN IF NOT EXISTS reward_claimed BOOLEAN DEFAULT false`,
     // Backfill tenant_id
     `UPDATE investor_offers io SET tenant_id = (SELECT tenant_id FROM fundraising_campaigns WHERE id = io.campaign_id) WHERE io.tenant_id IS NULL`,
     `UPDATE investment_transactions it SET tenant_id = (SELECT tenant_id FROM fundraising_campaigns WHERE id = it.campaign_id) WHERE it.tenant_id IS NULL`,
@@ -587,6 +893,37 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     `CREATE INDEX IF NOT EXISTS idx_campaign_trust_reviews_campaign ON campaign_trust_reviews(campaign_id)`,
     `CREATE INDEX IF NOT EXISTS idx_exchange_rates_pair ON exchange_rates(from_currency, to_currency)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_donations_receipt ON campaign_donations(receipt_number)`,
+    // V3 Indexes for new tables
+    `CREATE INDEX IF NOT EXISTS idx_campaign_verifications_tenant ON campaign_verifications(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_verifications_campaign ON campaign_verifications(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_reward_tiers_tenant ON campaign_reward_tiers(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_reward_tiers_campaign ON campaign_reward_tiers(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_reward_claims_tenant ON reward_claims(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_reward_claims_reward ON reward_claims(reward_tier_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_wishlists_tenant ON campaign_wishlists(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_wishlists_campaign ON campaign_wishlists(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_wishlist_pledges_tenant ON wishlist_pledges(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_wishlist_pledges_wishlist ON wishlist_pledges(wishlist_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_volunteers_tenant ON campaign_volunteers(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_volunteers_campaign ON campaign_volunteers(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_endorsements_tenant ON campaign_endorsements(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_endorsements_campaign ON campaign_endorsements(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_streaks_tenant ON donor_streaks(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_streaks_email ON donor_streaks(donor_email)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_collaborators_tenant ON campaign_collaborators(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_collaborators_campaign ON campaign_collaborators(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donation_tips_tenant ON donation_tips(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donation_tips_donation ON donation_tips(donation_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_retention_analytics_tenant ON donor_retention_analytics(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_success_scores_tenant ON campaign_success_scores(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_success_scores_campaign ON campaign_success_scores(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_faqs_tenant ON campaign_faqs(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_faqs_campaign ON campaign_faqs(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_events_tenant ON campaign_events(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_events_campaign ON campaign_events(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_event_registrations_tenant ON campaign_event_registrations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_event_registrations_event ON campaign_event_registrations(event_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_update_notifications_tenant ON campaign_update_notifications(tenant_id)`,
   ];
 
   // Run migrations
@@ -2303,5 +2640,881 @@ Sitemap: ${BASE_URL}/sitemap.xml
   }));
 
   console.log('[Fundraising Enhancements] All routes registered successfully');
-  console.log('[Fundraising V2] Multi-Currency, Deadline Reminders, Donation Receipts, Goal Breakdown, Social Proof, Trust Score, P2P Fundraising, Progress Timeline, Email Marketing, Countdown Widget, Donor Profiles, JSON-LD SEO, Gallery, Enhanced Dashboard');
+  console.log('[Fundraising V3] Verification Badges, Rewards/Tiers, Wishlists, Volunteers, Endorsements, Donor Streaks, Collaboration, Tipping, Retention Analytics, Success Score, Events, FAQ + All V2 Features');
+
+  // =============================================
+  // V3 FEATURE 1: CAMPAIGN VERIFICATION BADGE
+  // =============================================
+
+  // Submit verification request
+  app.get('/campaigns/:id/verify', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+    if (!c) return res.status(404).send('Campaign not found');
+    const existing = (await pool.query('SELECT * FROM campaign_verifications WHERE campaign_id=$1 ORDER BY created_at DESC LIMIT 1', [req.params.id])).rows[0];
+    res.send(renderPage('Verify Campaign', `
+      <div style="max-width:700px;margin:0 auto;padding:20px">
+        <div style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:16px;color:white;text-align:center;margin-bottom:24px">
+          <div style="font-size:48px;margin-bottom:12px">&#9989;</div>
+          <h1>Campaign Verification</h1>
+          <p>Get a verified badge to build trust and attract more donors</p>
+        </div>
+        ${existing ? '<div class="card" style="margin-bottom:20px;border-left:4px solid '+(existing.status==='approved'?'#059669':existing.status==='pending'?'#f59e0b':'#ef4444')+'"><h4>Current Status: <span style="color:'+(existing.status==='approved'?'#059669':existing.status==='pending'?'#f59e0b':'#ef4444')+'">'+esc(existing.status.toUpperCase())+'</span></h4>'+(existing.badge_level!=='none'?'<p>Badge Level: <strong>'+esc(existing.badge_level)+'</strong></p>':'')+(existing.admin_notes?'<p>Admin Notes: '+esc(existing.admin_notes)+'</p>':'')+'</div>' : ''}
+        <div class="card">
+          <h3>Why Get Verified?</h3>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:16px 0">
+            <div style="text-align:center;padding:16px;background:#f0fdf4;border-radius:12px"><div style="font-size:32px">&#128176;</div><strong>More Donations</strong><br><span style="font-size:13px;color:#64748b">Verified campaigns raise 3x more</span></div>
+            <div style="text-align:center;padding:16px;background:#eff6ff;border-radius:12px"><div style="font-size:32px">&#127760;</div><strong>Global Visibility</strong><br><span style="font-size:13px;color:#64748b">Featured in discovery results</span></div>
+            <div style="text-align:center;padding:16px;background:#fef3c7;border-radius:12px"><div style="font-size:32px">&#11088;</div><strong>Trust Badge</strong><br><span style="font-size:13px;color:#64748b">Donors trust verified campaigns</span></div>
+          </div>
+        </div>
+        <form method="POST" action="/campaigns/${req.params.id}/verify-save" class="card">
+          <h3>Submit Verification</h3>
+          <label>Verification Type</label>
+          <select name="verification_type">
+            <option value="standard">Standard Verification</option>
+            <option value="enhanced">Enhanced (with documents)</option>
+            <option value="premium">Premium (full audit)</option>
+            <option value="government">Government Registered</option>
+            <option value="ngo_registered">NGO Registered</option>
+          </select>
+          <label>Supporting Documents (describe what you can provide)</label>
+          <textarea name="notes" rows="4" placeholder="E.g., Registration certificate, bank statements, ID copies, project proposal, etc."></textarea>
+          <label>Organization Contact Person</label>
+          <input name="contact_person" placeholder="Full name" required>
+          <label>Contact Phone</label>
+          <input name="contact_phone" placeholder="+256 xxx xxx xxx">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Submit Verification Request</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/verify-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const { verification_type, notes, contact_person, contact_phone } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_verifications(tenant_id,campaign_id,verification_type,submitted_by,notes) VALUES($1,$2,$3,$4,$5)',
+      [t, req.params.id, verification_type||'standard', req.session.user.email, notes||'']);
+    await pool.query('UPDATE fundraising_campaigns SET is_verified=true WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+    res.redirect('/campaigns/'+req.params.id+'/verify');
+  }));
+
+  // Admin approve verification
+  app.get('/admin/verifications/:id/approve', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const { badge_level } = req.query;
+    await pool.query('UPDATE campaign_verifications SET status=$1,badge_level=$2,reviewed_by=$3,reviewed_at=NOW(),verified_at=NOW() WHERE id=$4',
+      ['approved', badge_level||'verified', req.session.user.email, req.params.id]);
+    const v = (await pool.query('SELECT campaign_id FROM campaign_verifications WHERE id=$1', [req.params.id])).rows[0];
+    if (v) await pool.query('UPDATE fundraising_campaigns SET is_verified=true,verification_badge=$1 WHERE id=$2', [badge_level||'verified', v.campaign_id]);
+    res.redirect('/admin/verifications');
+  }));
+
+  // Admin list verifications
+  app.get('/admin/verifications', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const verifications = (await pool.query('SELECT cv.*, fc.title as campaign_title FROM campaign_verifications cv JOIN fundraising_campaigns fc ON cv.campaign_id=fc.id WHERE cv.tenant_id=$1 ORDER BY cv.created_at DESC', [req.session.user.tenant_id])).rows;
+    res.send(renderPage('Campaign Verifications', `
+      <div class="card"><h3>Campaign Verifications</h3>
+      <table><tr><th>Campaign</th><th>Type</th><th>Status</th><th>Badge</th><th>Submitted</th><th>Actions</th></tr>
+      ${verifications.map(v => '<tr><td>'+esc(v.campaign_title)+'</td><td>'+esc(v.verification_type)+'</td><td><span class="tag" style="background:'+(v.status==='approved'?'#d1fae5;color:#065f46':v.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+esc(v.status)+'</span></td><td>'+esc(v.badge_level)+'</td><td>'+new Date(v.created_at).toLocaleDateString()+'</td><td>'+(v.status==='pending'?'<a href="/admin/verifications/'+v.id+'/approve?badge_level=verified" class="btn btn-sm btn-green">Approve</a> <a href="/admin/verifications/'+v.id+'/approve?badge_level=trusted" class="btn btn-sm" style="background:#4f46e5;color:white">Trusted</a> <a href="/admin/verifications/'+v.id+'/approve?badge_level=gold" class="btn btn-sm" style="background:#f59e0b;color:white">Gold</a>':'Approved')+'</td></tr>').join('')||'<tr><td colspan="6">No verifications yet</td></tr>'}
+      </table></div>
+    `, req.session.user));
+  }));
+
+  // API: Get verification status for a campaign
+  app.get('/api/campaigns/:id/verification', ah(async (req, res) => {
+    const v = (await pool.query('SELECT status, badge_level, verified_at FROM campaign_verifications WHERE campaign_id=$1 AND status=$2 ORDER BY verified_at DESC LIMIT 1', [req.params.id, 'approved'])).rows[0];
+    res.json(v || { status: 'none', badge_level: 'none' });
+  }));
+
+  // =============================================
+  // V3 FEATURE 2: DONATION REWARDS / TIERS
+  // =============================================
+
+  // View reward tiers for a campaign
+  app.get('/campaigns/:id/rewards', ah(async (req, res) => {
+    const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
+    if (!c) return res.status(404).send('Campaign not found');
+    const rewards = (await pool.query('SELECT * FROM campaign_reward_tiers WHERE campaign_id=$1 AND is_active=true ORDER BY min_amount ASC', [req.params.id])).rows;
+    res.send(renderPage('Rewards - '+c.title, `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="text-align:center;margin-bottom:24px">
+          <h1 style="font-size:28px;font-weight:800">Rewards for "${esc(c.title)}"</h1>
+          <p style="color:#64748b">Donate and receive exclusive rewards!</p>
+        </div>
+        ${rewards.length > 0 ? '<div style="display:grid;gap:20px">' + rewards.map(r => {
+          const pct = r.quantity_available ? Math.round(parseInt(r.quantity_claimed||0)/parseInt(r.quantity_available)*100) : 0;
+          return '<div style="background:white;border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:2px solid '+(r.min_amount>=1000000?'#f59e0b':r.min_amount>=500000?'#7c3aed':r.min_amount>=100000?'#059669':'#4f46e5')+'"><div style="display:flex;justify-content:space-between;align-items:start"><div><h3 style="font-size:20px;font-weight:700">'+esc(r.title)+'</h3><p style="color:#64748b;margin:8px 0">'+esc(r.description||'')+'</p></div><div style="text-align:right"><div style="font-size:24px;font-weight:800;color:#059669">UGX '+parseInt(r.min_amount).toLocaleString()+'</div>'+(r.max_amount?'<div style="font-size:13px;color:#64748b">to UGX '+parseInt(r.max_amount).toLocaleString()+'</div>':'')+'</div></div><div style="display:flex;gap:8px;margin-top:12px"><span class="tag" style="background:#e0e7ff;color:#3730a3">'+esc(r.reward_type)+'</span>'+(r.quantity_available?'<span class="tag" style="background:#fef3c7;color:#92400e">'+parseInt(r.quantity_claimed||0)+'/'+parseInt(r.quantity_available)+' claimed</span>':'<span class="tag" style="background:#d1fae5;color:#065f46">Unlimited</span>')+(r.estimated_delivery?'<span class="tag" style="background:#f0fdf4;color:#065f46">Delivery: '+new Date(r.estimated_delivery).toLocaleDateString()+'</span>':'')+'</div>'+(c.status==='active'?'<a href="/discover/'+c.id+'/donate" style="display:block;margin-top:12px;text-align:center;padding:10px;background:#059669;color:white;border-radius:10px;font-weight:700;text-decoration:none">Donate to Get This Reward</a>':'')+'</div>';
+        }).join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#127873;</div><h3>No Rewards Available Yet</h3><p style="color:#64748b">The campaign organizer has not set up rewards yet.</p></div>'}
+        ${req.session.user && c.tenant_id === req.session.user.tenant_id ? '<a href="/campaigns/'+c.id+'/rewards/manage" class="btn" style="margin-top:20px;background:#4f46e5;color:white">Manage Rewards</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  // Manage reward tiers
+  app.get('/campaigns/:id/rewards/manage', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const rewards = (await pool.query('SELECT * FROM campaign_reward_tiers WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY sort_order, min_amount', [req.params.id, req.session.user.tenant_id])).rows;
+    res.send(renderPage('Manage Rewards', `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <h2>Manage Reward Tiers</h2>
+          <a href="/campaigns/${req.params.id}/rewards/new" class="btn btn-green">Add Reward Tier</a>
+        </div>
+        <div class="card">
+          <table><tr><th>Title</th><th>Min Amount</th><th>Type</th><th>Claimed</th><th>Status</th><th>Actions</th></tr>
+          ${rewards.map(r => '<tr><td><strong>'+esc(r.title)+'</strong></td><td>UGX '+parseInt(r.min_amount).toLocaleString()+'</td><td>'+esc(r.reward_type)+'</td><td>'+parseInt(r.quantity_claimed||0)+(r.quantity_available?'/'+parseInt(r.quantity_available):'')+'</td><td><span class="tag" style="background:'+(r.is_active?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b')+'">'+(r.is_active?'Active':'Inactive')+'</span></td><td><a href="/campaigns/'+req.params.id+'/rewards/'+r.id+'/claims" class="btn btn-sm">Claims</a></td></tr>').join('')||'<tr><td colspan="6">No reward tiers yet. Add one to incentivize donors!</td></tr>'}
+          </table>
+        </div>
+      </div>
+    `, req.session.user));
+  }));
+
+  // New reward tier form
+  app.get('/campaigns/:id/rewards/new', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    res.send(renderPage('Add Reward Tier', `
+      <div style="max-width:600px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/rewards/save" class="card">
+          <h2>Add Reward Tier</h2>
+          <label>Reward Title</label><input name="title" placeholder="e.g., Bronze Supporter" required>
+          <label>Description</label><textarea name="description" rows="3" placeholder="What the donor receives"></textarea>
+          <label>Minimum Amount (UGX)</label><input name="min_amount" type="number" placeholder="100000" required>
+          <label>Maximum Amount (UGX, optional)</label><input name="max_amount" type="number" placeholder="Leave blank for no max">
+          <label>Reward Type</label>
+          <select name="reward_type"><option value="digital">Digital (e.g., certificate, shout-out)</option><option value="physical">Physical (e.g., t-shirt, mug)</option><option value="experience">Experience (e.g., dinner, tour)</option><option value="recognition">Recognition (e.g., named on wall)</option><option value="custom">Custom</option></select>
+          <label>Quantity Available (leave blank for unlimited)</label><input name="quantity_available" type="number" placeholder="100">
+          <label>Estimated Delivery Date</label><input name="estimated_delivery" type="date">
+          <label>Sort Order</label><input name="sort_order" type="number" value="0">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Create Reward Tier</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/rewards/save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const { title, description, min_amount, max_amount, reward_type, quantity_available, estimated_delivery, sort_order } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_reward_tiers(tenant_id,campaign_id,title,description,min_amount,max_amount,reward_type,quantity_available,estimated_delivery,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+      [t, req.params.id, title, description||'', min_amount, max_amount||null, reward_type||'digital', quantity_available||null, estimated_delivery||null, sort_order||0]);
+    await pool.query('UPDATE fundraising_campaigns SET has_rewards=true, reward_tiers_count=(SELECT COUNT(*) FROM campaign_reward_tiers WHERE campaign_id=$1 AND is_active=true) WHERE id=$1', [req.params.id]);
+    res.redirect('/campaigns/'+req.params.id+'/rewards/manage');
+  }));
+
+  // View reward claims
+  app.get('/campaigns/:campaignId/rewards/:rewardId/claims', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const claims = (await pool.query('SELECT rc.*, crt.title as reward_title FROM reward_claims rc JOIN campaign_reward_tiers crt ON rc.reward_tier_id=crt.id WHERE rc.reward_tier_id=$1 AND rc.tenant_id=$2 ORDER BY rc.claimed_at DESC', [req.params.rewardId, req.session.user.tenant_id])).rows;
+    res.send(renderPage('Reward Claims', `
+      <div class="card"><h3>Reward Claims</h3>
+      <table><tr><th>Donor</th><th>Status</th><th>Claimed</th><th>Actions</th></tr>
+      ${claims.map(cl => '<tr><td>'+esc(cl.donor_name)+'<br><span style="font-size:12px;color:#64748b">'+esc(cl.donor_email||'')+'</span></td><td><span class="tag" style="background:'+({pending:'#fef3c7;color:#92400e',confirmed:'#e0e7ff;color:#3730a3',shipped:'#f0fdf4;color:#065f46',delivered:'#d1fae5;color:#065f46',cancelled:'#fee2e2;color:#991b1b'}[cl.claim_status]||'#f1f5f9')+'">'+esc(cl.claim_status)+'</span></td><td>'+new Date(cl.claimed_at).toLocaleDateString()+'</td><td>'+(cl.claim_status==='pending'?'<a href="/campaigns/rewards/claims/'+cl.id+'/confirm" class="btn btn-sm btn-green">Confirm</a>':'')+(cl.claim_status==='confirmed'?'<a href="/campaigns/rewards/claims/'+cl.id+'/ship" class="btn btn-sm" style="background:#4f46e5;color:white">Mark Shipped</a>':'')+(cl.claim_status==='shipped'?'<a href="/campaigns/rewards/claims/'+cl.id+'/deliver" class="btn btn-sm btn-green">Mark Delivered</a>':'')+'</td></tr>').join('')||'<tr><td colspan="4">No claims yet</td></tr>'}
+      </table></div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/rewards/claims/:id/confirm', requireAuth, requireNotBanned, ah(async (req, res) => {
+    await pool.query("UPDATE reward_claims SET claim_status='confirmed', updated_at=NOW() WHERE id=$1", [req.params.id]);
+    res.redirect('back');
+  }));
+  app.get('/campaigns/rewards/claims/:id/ship', requireAuth, requireNotBanned, ah(async (req, res) => {
+    await pool.query("UPDATE reward_claims SET claim_status='shipped', updated_at=NOW() WHERE id=$1", [req.params.id]);
+    res.redirect('back');
+  }));
+  app.get('/campaigns/rewards/claims/:id/deliver', requireAuth, requireNotBanned, ah(async (req, res) => {
+    await pool.query("UPDATE reward_claims SET claim_status='delivered', updated_at=NOW() WHERE id=$1", [req.params.id]);
+    res.redirect('back');
+  }));
+
+  // =============================================
+  // V3 FEATURE 3: CAMPAIGN WISHLISTS
+  // =============================================
+
+  app.get('/campaigns/:id/wishlist', ah(async (req, res) => {
+    const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
+    if (!c) return res.status(404).send('Campaign not found');
+    const items = (await pool.query('SELECT * FROM campaign_wishlists WHERE campaign_id=$1 ORDER BY priority DESC, created_at', [req.params.id])).rows;
+    const priorityColors = { low:'#94a3b8', medium:'#0891b2', high:'#f59e0b', urgent:'#ef4444' };
+    res.send(renderPage('Wishlist - '+c.title, `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="text-align:center;margin-bottom:24px">
+          <h1 style="font-size:28px;font-weight:800">Campaign Wishlist</h1>
+          <p style="color:#64748b">Help by providing specific items needed for "${esc(c.title)}"</p>
+        </div>
+        ${items.length > 0 ? '<div style="display:grid;gap:16px">' + items.map(i => {
+          const fulfilledPct = i.quantity_needed > 0 ? Math.round(parseInt(i.quantity_fulfilled||0)/parseInt(i.quantity_needed)*100) : 0;
+          return '<div style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border-left:4px solid '+(priorityColors[i.priority]||'#94a3b8')+'"><div style="display:flex;justify-content:space-between;align-items:start"><div><h3 style="font-weight:700">'+esc(i.item_name)+'</h3>'+(i.description?'<p style="color:#64748b;font-size:14px;margin:4px 0">'+esc(i.description)+'</p>':'')+'</div><div style="text-align:right"><span class="tag" style="background:'+priorityColors[i.priority]+'20;color:'+priorityColors[i.priority]+'">'+esc(i.priority)+'</span><div style="margin-top:8px;font-size:20px;font-weight:800;color:#059669">'+parseInt(i.quantity_fulfilled||0)+'/'+parseInt(i.quantity_needed)+'</div></div></div><div style="background:#e2e8f0;height:8px;border-radius:4px;margin:12px 0"><div style="background:linear-gradient(90deg,#059669,#10b981);height:8px;border-radius:4px;width:'+fulfilledPct+'%"></div></div>'+(i.estimated_cost?'<div style="font-size:13px;color:#64748b">Est. cost: UGX '+parseInt(i.estimated_cost).toLocaleString()+' each</div>':'')+(i.is_fulfilled?'<div style="margin-top:8px;padding:8px;background:#d1fae5;color:#065f46;border-radius:8px;text-align:center;font-weight:700">Fully Fulfilled!</div>':(req.session.user?'<a href="/campaigns/'+c.id+'/wishlist/'+i.id+'/pledge" style="display:block;margin-top:8px;text-align:center;padding:8px;background:#059669;color:white;border-radius:8px;text-decoration:none;font-weight:700">Pledge to Provide</a>':''))+'</div>';
+        }).join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#128221;</div><h3>No Wishlist Items</h3><p style="color:#64748b">The organizer has not added specific items needed yet.</p></div>'}
+        ${req.session.user && c.tenant_id === req.session.user.tenant_id ? '<a href="/campaigns/'+c.id+'/wishlist/manage" class="btn" style="margin-top:20px;background:#4f46e5;color:white">Manage Wishlist</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  // Pledge to provide a wishlist item
+  app.get('/campaigns/:campaignId/wishlist/:itemId/pledge', requireAuth, ah(async (req, res) => {
+    const item = (await pool.query('SELECT * FROM campaign_wishlists WHERE id=$1', [req.params.itemId])).rows[0];
+    if (!item) return res.status(404).send('Item not found');
+    res.send(renderPage('Pledge Item', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.campaignId}/wishlist/${req.params.itemId}/pledge-save" class="card">
+          <h2>Pledge: ${esc(item.item_name)}</h2>
+          <p style="color:#64748b">${parseInt(item.quantity_fulfilled||0)} of ${parseInt(item.quantity_needed)} needed</p>
+          <label>Your Name</label><input name="pledger_name" value="${esc(req.session.user?.name||'')}" required>
+          <label>Email</label><input name="pledger_email" value="${esc(req.session.user?.email||'')}" required>
+          <label>Phone</label><input name="pledger_phone" placeholder="+256 xxx xxx xxx">
+          <label>Quantity You Will Provide</label><input name="quantity_pledged" type="number" min="1" max="${parseInt(item.quantity_needed)-parseInt(item.quantity_fulfilled||0)}" value="1" required>
+          <label>Message (optional)</label><textarea name="message" rows="2" placeholder="Any details about your pledge"></textarea>
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Pledge to Provide</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:campaignId/wishlist/:itemId/pledge-save', requireAuth, ah(async (req, res) => {
+    const { pledger_name, pledger_email, pledger_phone, quantity_pledged, message } = req.body;
+    const t = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.campaignId])).rows[0]?.tenant_id;
+    await pool.query('INSERT INTO wishlist_pledges(tenant_id,wishlist_id,campaign_id,pledger_name,pledger_email,pledger_phone,quantity_pledged,message) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+      [t, req.params.itemId, req.params.campaignId, pledger_name, pledger_email, pledger_phone, quantity_pledged, message||'']);
+    await pool.query('UPDATE campaign_wishlists SET quantity_fulfilled=quantity_fulfilled+$1 WHERE id=$2', [quantity_pledged, req.params.itemId]);
+    await pool.query("UPDATE campaign_wishlists SET is_fulfilled=true WHERE id=$1 AND quantity_fulfilled>=quantity_needed", [req.params.itemId]);
+    res.redirect('/campaigns/'+req.params.campaignId+'/wishlist');
+  }));
+
+  // Manage wishlist (organizer view)
+  app.get('/campaigns/:id/wishlist/manage', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const items = (await pool.query('SELECT cw.*, (SELECT COUNT(*) FROM wishlist_pledges WHERE wishlist_id=cw.id) as pledge_count FROM campaign_wishlists cw WHERE cw.campaign_id=$1 AND cw.tenant_id=$2 ORDER BY priority DESC', [req.params.id, req.session.user.tenant_id])).rows;
+    res.send(renderPage('Manage Wishlist', `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <h2>Manage Wishlist</h2>
+          <a href="/campaigns/${req.params.id}/wishlist/new" class="btn btn-green">Add Item</a>
+        </div>
+        <div class="card">
+          <table><tr><th>Item</th><th>Needed</th><th>Fulfilled</th><th>Priority</th><th>Pledges</th><th>Status</th></tr>
+          ${items.map(i => '<tr><td><strong>'+esc(i.item_name)+'</strong></td><td>'+parseInt(i.quantity_needed)+'</td><td>'+parseInt(i.quantity_fulfilled||0)+'</td><td>'+esc(i.priority)+'</td><td>'+parseInt(i.pledge_count||0)+'</td><td>'+(i.is_fulfilled?'<span style="color:#059669;font-weight:700">Fulfilled</span>':'In Progress')+'</td></tr>').join('')||'<tr><td colspan="6">No items yet</td></tr>'}
+          </table>
+        </div>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/wishlist/new', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    res.send(renderPage('Add Wishlist Item', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/wishlist/save" class="card">
+          <h2>Add Item to Wishlist</h2>
+          <label>Item Name</label><input name="item_name" placeholder="e.g., Textbooks, Medical Supplies" required>
+          <label>Description</label><textarea name="description" rows="2" placeholder="Details about the item"></textarea>
+          <label>Quantity Needed</label><input name="quantity_needed" type="number" value="1" required>
+          <label>Estimated Cost per Unit (UGX)</label><input name="estimated_cost" type="number" placeholder="50000">
+          <label>Category</label>
+          <select name="category"><option value="supplies">Supplies</option><option value="equipment">Equipment</option><option value="food">Food</option><option value="clothing">Clothing</option><option value="medical">Medical</option><option value="technology">Technology</option><option value="building_materials">Building Materials</option><option value="services">Services</option><option value="other">Other</option></select>
+          <label>Priority</label>
+          <select name="priority"><option value="medium">Medium</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select>
+          <label>Image URL (optional)</label><input name="image_url" placeholder="https://...">
+          <label>Purchase Link (optional)</label><input name="link" placeholder="https://...">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Add Item</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/wishlist/save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const { item_name, description, quantity_needed, estimated_cost, category, priority, image_url, link } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_wishlists(tenant_id,campaign_id,item_name,description,quantity_needed,estimated_cost,category,priority,image_url,link) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+      [t, req.params.id, item_name, description||'', quantity_needed, estimated_cost||0, category||'supplies', priority||'medium', image_url||null, link||null]);
+    await pool.query('UPDATE fundraising_campaigns SET has_wishlist=true, wishlist_items_count=(SELECT COUNT(*) FROM campaign_wishlists WHERE campaign_id=$1) WHERE id=$1', [req.params.id]);
+    res.redirect('/campaigns/'+req.params.id+'/wishlist/manage');
+  }));
+
+  // =============================================
+  // V3 FEATURE 4: VOLUNTEER SIGN-UPS
+  // =============================================
+
+  app.get('/campaigns/:id/volunteers', ah(async (req, res) => {
+    const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
+    if (!c) return res.status(404).send('Campaign not found');
+    const volunteers = (await pool.query("SELECT * FROM campaign_volunteers WHERE campaign_id=$1 AND status IN ('approved','active') ORDER BY created_at DESC", [req.params.id])).rows;
+    const pending = req.session.user ? (await pool.query("SELECT id FROM campaign_volunteers WHERE campaign_id=$1 AND volunteer_email=$2 AND status='pending'", [req.params.id, req.session.user.email])).rows : [];
+    res.send(renderPage('Volunteers - '+c.title, `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <div style="text-align:center;margin-bottom:24px">
+          <h1 style="font-size:28px;font-weight:800">Volunteer for "${esc(c.title)}"</h1>
+          <p style="color:#64748b">Your time and skills can make a real difference!</p>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#4f46e5">${volunteers.length}</div><div style="color:#64748b">Active Volunteers</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#059669">${volunteers.reduce((a,v) => a+parseInt(v.hours_pledged||0), 0)}</div><div style="color:#64748b">Hours Pledged</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#f59e0b">${volunteers.reduce((a,v) => a+parseInt(v.hours_completed||0), 0)}</div><div style="color:#64748b">Hours Completed</div></div>
+        </div>
+        ${req.session.user && !pending.length ? '<a href="/campaigns/'+c.id+'/volunteers/sign-up" style="display:block;margin-bottom:24px;padding:16px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;text-align:center;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px">Sign Up to Volunteer</a>' : ''}
+        ${volunteers.length > 0 ? '<div class="card"><h3>Our Volunteers</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">' + volunteers.map(v => '<div style="padding:12px;background:#f8fafc;border-radius:10px;text-align:center"><div style="font-weight:700">'+esc(v.volunteer_name)+'</div>'+(v.role?'<div style="font-size:13px;color:#64748b">'+esc(v.role)+'</div>':'')+'<div style="font-size:12px;color:#059669">'+parseInt(v.hours_pledged||0)+'h pledged</div></div>').join('') + '</div></div>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/volunteers/sign-up', requireAuth, ah(async (req, res) => {
+    res.send(renderPage('Volunteer Sign Up', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/volunteers/save" class="card">
+          <h2>Volunteer Sign Up</h2>
+          <label>Full Name</label><input name="volunteer_name" value="${esc(req.session.user?.name||'')}" required>
+          <label>Email</label><input name="volunteer_email" value="${esc(req.session.user?.email||'')}" required>
+          <label>Phone</label><input name="volunteer_phone" placeholder="+256 xxx xxx xxx">
+          <label>Skills (comma-separated)</label><input name="skills" placeholder="e.g., teaching, construction, medical, IT">
+          <label>Availability</label>
+          <select name="availability"><option value="flexible">Flexible</option><option value="weekdays">Weekdays Only</option><option value="weekends">Weekends Only</option><option value="mornings">Mornings</option><option value="evenings">Evenings</option><option value="full_time">Full Time</option></select>
+          <label>Hours You Can Pledge</label><input name="hours_pledged" type="number" placeholder="10" value="10">
+          <label>Preferred Role (optional)</label><input name="role" placeholder="e.g., Teacher, Coordinator, Driver">
+          <label>Why do you want to volunteer?</label><textarea name="motivation" rows="3" placeholder="Tell us about your motivation"></textarea>
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Sign Up to Volunteer</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/volunteers/save', requireAuth, ah(async (req, res) => {
+    const { volunteer_name, volunteer_email, volunteer_phone, skills, availability, hours_pledged, role, motivation } = req.body;
+    const t = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0]?.tenant_id;
+    await pool.query('INSERT INTO campaign_volunteers(tenant_id,campaign_id,volunteer_name,volunteer_email,volunteer_phone,skills,availability,hours_pledged,role,motivation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+      [t, req.params.id, volunteer_name, volunteer_email, volunteer_phone||null, skills ? skills.split(',').map(s=>s.trim()) : [], availability||'flexible', hours_pledged||0, role||null, motivation||'']);
+    await pool.query('UPDATE fundraising_campaigns SET has_volunteers=true, volunteer_count=(SELECT COUNT(*) FROM campaign_volunteers WHERE campaign_id=$1 AND status IN ($2,$3)) WHERE id=$1', [req.params.id, 'approved', 'active']);
+    res.redirect('/campaigns/'+req.params.id+'/volunteers');
+  }));
+
+  // Admin manage volunteers
+  app.get('/campaigns/:id/volunteers/manage', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const volunteers = (await pool.query('SELECT * FROM campaign_volunteers WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [req.params.id, req.session.user.tenant_id])).rows;
+    res.send(renderPage('Manage Volunteers', `
+      <div class="card"><h3>Manage Volunteers</h3>
+      <table><tr><th>Name</th><th>Skills</th><th>Hours</th><th>Status</th><th>Actions</th></tr>
+      ${volunteers.map(v => '<tr><td>'+esc(v.volunteer_name)+'<br><span style="font-size:12px;color:#64748b">'+esc(v.volunteer_email)+'</span></td><td>'+(v.skills||[]).map(s=>'<span class="tag" style="background:#e0e7ff;color:#3730a3">'+esc(s)+'</span>').join(' ')+'</td><td>'+parseInt(v.hours_pledged||0)+'h / '+parseInt(v.hours_completed||0)+'h</td><td><span class="tag" style="background:'+({pending:'#fef3c7;color:#92400e',approved:'#d1fae5;color:#065f46',active:'#e0e7ff;color:#3730a3',completed:'#f0fdf4;color:#065f46',declined:'#fee2e2;color:#991b1b'}[v.status]||'#f1f5f9')+'">'+esc(v.status)+'</span></td><td>'+(v.status==='pending'?'<a href="/campaigns/volunteers/'+v.id+'/approve" class="btn btn-sm btn-green">Approve</a> <a href="/campaigns/volunteers/'+v.id+'/decline" class="btn btn-sm" style="background:#ef4444;color:white">Decline</a>':'')+(v.status==='approved'?'<a href="/campaigns/volunteers/'+v.id+'/activate" class="btn btn-sm" style="background:#4f46e5;color:white">Activate</a>':'')+'</td></tr>').join('')||'<tr><td colspan="5">No volunteers yet</td></tr>'}
+      </table></div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/volunteers/:id/approve', requireAuth, requireNotBanned, ah(async (req, res) => {
+    await pool.query("UPDATE campaign_volunteers SET status='approved', approved_by=$1, approved_at=NOW() WHERE id=$2", [req.session.user.email, req.params.id]);
+    res.redirect('back');
+  }));
+  app.get('/campaigns/volunteers/:id/decline', requireAuth, requireNotBanned, ah(async (req, res) => {
+    await pool.query("UPDATE campaign_volunteers SET status='declined' WHERE id=$1", [req.params.id]);
+    res.redirect('back');
+  }));
+  app.get('/campaigns/volunteers/:id/activate', requireAuth, requireNotBanned, ah(async (req, res) => {
+    await pool.query("UPDATE campaign_volunteers SET status='active', started_at=NOW() WHERE id=$1", [req.params.id]);
+    res.redirect('back');
+  }));
+
+  // =============================================
+  // V3 FEATURE 5: CAMPAIGN ENDORSEMENTS
+  // =============================================
+
+  app.get('/campaigns/:id/endorsements', ah(async (req, res) => {
+    const endorsements = (await pool.query('SELECT * FROM campaign_endorsements WHERE campaign_id=$1 AND is_public=true ORDER BY is_featured DESC, created_at DESC', [req.params.id])).rows;
+    res.send(renderPage('Endorsements', `
+      <div style="max-width:800px;margin:0 auto;padding:20px">
+        <h2 style="text-align:center;margin-bottom:24px">Endorsements</h2>
+        ${endorsements.length > 0 ? endorsements.map(e => '<div style="background:white;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)'+(e.is_featured?';border:2px solid #f59e0b':'')+'"><div style="display:flex;gap:16px;align-items:start">'+(e.endorser_photo?'<img src="'+esc(e.endorser_photo)+'" style="width:60px;height:60px;border-radius:50%;object-fit:cover">':'<div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:center;color:white;font-size:24px;font-weight:700">'+esc((e.endorser_name||'A')[0])+'</div>')+'<div><div style="font-weight:700;font-size:16px">'+esc(e.endorser_name)+'</div>'+(e.endorser_title?'<div style="font-size:13px;color:#64748b">'+esc(e.endorser_title)+(e.endorser_organization?' at '+esc(e.endorser_organization):'')+'</div>':'')+'<p style="margin-top:8px;color:#475569;font-style:italic">"'+esc(e.endorsement_text)+'"</p></div></div>'+(e.is_verified?'<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">Verified</span>':'')+'</div>').join('') : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#11088;</div><h3>No Endorsements Yet</h3><p style="color:#64748b">Be the first to endorse this campaign!</p></div>'}
+        ${req.session.user ? '<a href="/campaigns/'+req.params.id+'/endorsements/new" style="display:block;margin-top:20px;padding:16px;background:#4f46e5;color:white;text-align:center;border-radius:12px;text-decoration:none;font-weight:700">Write an Endorsement</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/endorsements/new', requireAuth, ah(async (req, res) => {
+    res.send(renderPage('Write Endorsement', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/endorsements/save" class="card">
+          <h2>Write an Endorsement</h2>
+          <p style="color:#64748b">Share why you support this campaign</p>
+          <label>Your Name</label><input name="endorser_name" value="${esc(req.session.user?.name||'')}" required>
+          <label>Your Title (optional)</label><input name="endorser_title" placeholder="e.g., CEO, Pastor, Teacher">
+          <label>Organization (optional)</label><input name="endorser_organization" placeholder="e.g., ABC Foundation">
+          <label>Endorsement</label><textarea name="endorsement_text" rows="4" placeholder="Why do you endorse this campaign? What impact will it have?" required></textarea>
+          <label>Photo URL (optional)</label><input name="endorser_photo" placeholder="https://...">
+          <label>Email (for verification)</label><input name="endorser_email" value="${esc(req.session.user?.email||'')}">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Submit Endorsement</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/endorsements/save', requireAuth, ah(async (req, res) => {
+    const { endorser_name, endorser_title, endorser_organization, endorser_photo, endorser_email, endorsement_text } = req.body;
+    const t = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0]?.tenant_id;
+    await pool.query('INSERT INTO campaign_endorsements(tenant_id,campaign_id,endorser_name,endorser_title,endorser_organization,endorser_photo,endorser_email,endorsement_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+      [t, req.params.id, endorser_name, endorser_title||null, endorser_organization||null, endorser_photo||null, endorser_email||null, endorsement_text]);
+    await pool.query('UPDATE fundraising_campaigns SET endorsement_count=(SELECT COUNT(*) FROM campaign_endorsements WHERE campaign_id=$1 AND is_public=true) WHERE id=$1', [req.params.id]);
+    res.redirect('/campaigns/'+req.params.id+'/endorsements');
+  }));
+
+  // =============================================
+  // V3 FEATURE 6: DONOR STREAKS & GAMIFICATION
+  // =============================================
+
+  // Update donor streak after donation (called from processDonationEffects)
+  async function updateDonorStreak(tenant_id, donor_email, donation_date) {
+    if (!donor_email) return;
+    const today = donation_date ? new Date(donation_date) : new Date();
+    const monthKey = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0');
+    try {
+      const existing = (await pool.query('SELECT * FROM donor_streaks WHERE tenant_id=$1 AND donor_email=$2 AND streak_type=$3', [tenant_id, donor_email, 'monthly'])).rows[0];
+      if (existing) {
+        const lastDate = existing.last_donation_date ? new Date(existing.last_donation_date) : null;
+        const lastMonth = lastDate ? lastDate.getFullYear() + '-' + String(lastDate.getMonth()+1).padStart(2,'0') : null;
+        if (lastMonth === monthKey) {
+          // Same month, just update total
+          await pool.query('UPDATE donor_streaks SET total_streak_donations=total_streak_donations+1, updated_at=NOW() WHERE id=$1', [existing.id]);
+        } else {
+          // Check if consecutive month
+          const isConsecutive = lastDate && (today.getFullYear() === lastDate.getFullYear() && today.getMonth() === lastDate.getMonth() + 1 || today.getFullYear() === lastDate.getFullYear() + 1 && today.getMonth() === 0 && lastDate.getMonth() === 11);
+          if (isConsecutive) {
+            const newStreak = existing.current_streak + 1;
+            await pool.query('UPDATE donor_streaks SET current_streak=$1, longest_streak=GREATEST(longest_streak,$1), last_donation_date=$2, total_streak_donations=total_streak_donations+1, updated_at=NOW() WHERE id=$3',
+              [newStreak, today, existing.id]);
+          } else {
+            // Streak broken, restart
+            await pool.query('UPDATE donor_streaks SET current_streak=1, last_donation_date=$1, streak_start_date=$1, total_streak_donations=total_streak_donations+1, updated_at=NOW() WHERE id=$2',
+              [today, existing.id]);
+          }
+        }
+      } else {
+        await pool.query('INSERT INTO donor_streaks(tenant_id,donor_email,current_streak,longest_streak,last_donation_date,streak_type,total_streak_donations,streak_start_date) VALUES($1,$2,1,1,$3,$4,1,$3)',
+          [tenant_id, donor_email, today, 'monthly']);
+      }
+    } catch(e) { console.warn('[Streak Error]', e.message); }
+  }
+
+  // API: Get donor streak info
+  app.get('/api/donor-streak', requireAuth, ah(async (req, res) => {
+    const streak = (await pool.query('SELECT * FROM donor_streaks WHERE tenant_id=$1 AND donor_email=$2', [req.session.user.tenant_id, req.session.user.email])).rows[0];
+    res.json(streak || { current_streak: 0, longest_streak: 0 });
+  }));
+
+  // Public donor leaderboard
+  app.get('/donor-leaderboard', ah(async (req, res) => {
+    const { period } = req.query;
+    let dateFilter = '';
+    if (period === 'month') dateFilter = " AND donated_at >= NOW() - INTERVAL '30 days'";
+    else if (period === 'week') dateFilter = " AND donated_at >= NOW() - INTERVAL '7 days'";
+    const topDonors = (await pool.query('SELECT donor_name, donor_email, COUNT(*) as donation_count, SUM(amount) as total_donated, COUNT(DISTINCT campaign_id) as campaigns FROM campaign_donations WHERE is_anonymous=false AND refunded=false' + dateFilter + ' GROUP BY donor_name, donor_email ORDER BY total_donated DESC LIMIT 50')).rows;
+    res.send(renderPage('Donor Leaderboard', `
+      <div style="max-width:800px;margin:0 auto;padding:20px">
+        <div style="text-align:center;margin-bottom:24px">
+          <h1 style="font-size:28px;font-weight:800">Donor Leaderboard</h1>
+          <p style="color:#64748b">Our most generous supporters</p>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+            <a href="/donor-leaderboard" class="btn btn-sm" style="${!period?'background:#4f46e5;color:white':''}">All Time</a>
+            <a href="/donor-leaderboard?period=month" class="btn btn-sm" style="${period==='month'?'background:#4f46e5;color:white':''}">This Month</a>
+            <a href="/donor-leaderboard?period=week" class="btn btn-sm" style="${period==='week'?'background:#4f46e5;color:white':''}">This Week</a>
+          </div>
+        </div>
+        <div class="card">
+          <table><tr><th>Rank</th><th>Donor</th><th>Total Donated</th><th>Donations</th><th>Campaigns</th></tr>
+          ${topDonors.map((d, i) => '<tr'+(i<3?' style="background:'+['#fef3c7','#f1f5f9','#fef2f2'][i]+'"':'')+'><td style="font-weight:800;font-size:18px">'+(i<3?['&#129351;','&#129352;','&#129353;'][i]:(i+1))+'</td><td><strong>'+esc(d.donor_name)+'</strong></td><td style="font-weight:700;color:#059669">UGX '+parseInt(d.total_donated).toLocaleString()+'</td><td>'+parseInt(d.donation_count)+'</td><td>'+parseInt(d.campaigns)+'</td></tr>').join('')||'<tr><td colspan="5">No donations yet</td></tr>'}
+          </table>
+        </div>
+      </div>
+    `, req.session.user));
+  }));
+
+  // =============================================
+  // V3 FEATURE 7: CAMPAIGN COLLABORATION
+  // =============================================
+
+  app.get('/campaigns/:id/collaborate', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const collaborators = (await pool.query('SELECT cc.*, t.name as org_name FROM campaign_collaborators cc JOIN tenants t ON cc.collaborator_tenant_id=t.id WHERE cc.campaign_id=$1', [req.params.id])).rows;
+    res.send(renderPage('Campaign Collaboration', `
+      <div style="max-width:800px;margin:0 auto;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <h2>Campaign Collaborators</h2>
+          <a href="/campaigns/${req.params.id}/collaborate/invite" class="btn btn-green">Invite Organization</a>
+        </div>
+        <div class="card">
+          <table><tr><th>Organization</th><th>Role</th><th>Contribution</th><th>Status</th><th>Actions</th></tr>
+          ${collaborators.map(c => '<tr><td>'+esc(c.org_name)+'</td><td>'+esc(c.role)+'</td><td>'+parseInt(c.contribution_percentage||0)+'%</td><td><span class="tag" style="background:'+({pending:'#fef3c7;color:#92400e',accepted:'#d1fae5;color:#065f46',declined:'#fee2e2;color:#991b1b',revoked:'#f1f5f9;color:#64748b'}[c.status]||'#f1f5f9')+'">'+esc(c.status)+'</span></td><td>'+(c.status==='pending'?'<a href="/campaigns/collaborate/'+c.id+'/revoke" class="btn btn-sm" style="background:#ef4444;color:white">Revoke</a>':'')+'</td></tr>').join('')||'<tr><td colspan="5">No collaborators yet. Invite other organizations to co-manage this campaign!</td></tr>'}
+          </table>
+        </div>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/collaborate/invite', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const orgs = (await pool.query("SELECT id, name, type FROM tenants WHERE id!=$1 AND approved=true AND banned=false ORDER BY name", [req.session.user.tenant_id])).rows;
+    res.send(renderPage('Invite Collaborator', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/collaborate/invite-save" class="card">
+          <h2>Invite Collaborator</h2>
+          <label>Select Organization</label>
+          <select name="collaborator_tenant_id" required>
+            <option value="">Choose an organization...</option>
+            ${orgs.map(o => '<option value="'+o.id+'">'+esc(o.name)+' ('+esc(o.type)+')</option>').join('')}
+          </select>
+          <label>Role</label>
+          <select name="role"><option value="viewer">Viewer</option><option value="editor">Editor</option><option value="fundraiser">Fundraiser</option><option value="co_owner">Co-Owner</option></select>
+          <label>Contribution Percentage</label><input name="contribution_percentage" type="number" min="0" max="100" value="50">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Send Invitation</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/collaborate/invite-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const { collaborator_tenant_id, role, contribution_percentage } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_collaborators(tenant_id,campaign_id,collaborator_tenant_id,role,contribution_percentage,invited_by) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (campaign_id, collaborator_tenant_id) DO NOTHING',
+      [t, req.params.id, collaborator_tenant_id, role||'viewer', contribution_percentage||0, req.session.user.email]);
+    res.redirect('/campaigns/'+req.params.id+'/collaborate');
+  }));
+
+  // =============================================
+  // V3 FEATURE 8: DONATION TIPPING
+  // =============================================
+
+  // API: Process tip with donation
+  app.post('/api/donations/:id/tip', requireAuth, ah(async (req, res) => {
+    const { tip_amount, tip_percentage } = req.body;
+    const donation = (await pool.query('SELECT * FROM campaign_donations WHERE id=$1', [req.params.id])).rows[0];
+    if (!donation) return res.status(404).json({ error: 'Donation not found' });
+    const tipAmt = parseInt(tip_amount) || Math.round(parseInt(donation.amount) * parseFloat(tip_percentage||0) / 100);
+    if (tipAmt <= 0) return res.json({ success: true, tip: 0 });
+    await pool.query('INSERT INTO donation_tips(tenant_id,donation_id,campaign_id,donor_name,donor_email,tip_amount,tip_percentage,base_donation) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+      [donation.tenant_id, donation.id, donation.campaign_id, donation.donor_name, donation.donor_email, tipAmt, tip_percentage||0, donation.amount]);
+    await pool.query('UPDATE campaign_donations SET tip_amount=$1 WHERE id=$2', [tipAmt, donation.id]);
+    // Tip goes to platform wallet
+    await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [tipAmt]);
+    await pool.query('UPDATE fundraising_campaigns SET tip_total=COALESCE(tip_total,0)+$1 WHERE id=$2', [tipAmt, donation.campaign_id]);
+    res.json({ success: true, tip: tipAmt });
+  }));
+
+  // =============================================
+  // V3 FEATURE 9: DONOR RETENTION ANALYTICS
+  // =============================================
+
+  app.get('/admin/donor-retention', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    // Calculate retention for current month
+    const now = new Date();
+    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    // Get analytics
+    const [analytics, recentRetention] = await Promise.all([
+      pool.query('SELECT * FROM donor_retention_analytics WHERE tenant_id=$1 ORDER BY period_start DESC LIMIT 12', [t]),
+      pool.query(`
+        WITH this_month AS (SELECT DISTINCT donor_email FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donated_at >= $2),
+        last_month AS (SELECT DISTINCT donor_email FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donated_at >= $3 AND donated_at < $2)
+        SELECT
+          (SELECT COUNT(*) FROM this_month) as current_donors,
+          (SELECT COUNT(*) FROM this_month WHERE donor_email NOT IN (SELECT donor_email FROM last_month)) as new_donors,
+          (SELECT COUNT(*) FROM this_month tm WHERE EXISTS (SELECT 1 FROM last_month lm WHERE lm.donor_email = tm.donor_email)) as repeat_donors
+      `, [t, periodStart, new Date(now.getFullYear(), now.getMonth() - 1, 1)])
+    ]);
+    const r = recentRetention.rows[0] || {};
+    const retentionRate = r.current_donors > 0 && r.repeat_donors > 0 ? Math.round(parseInt(r.repeat_donors)/parseInt(r.current_donors)*100) : 0;
+
+    res.send(renderPage('Donor Retention Analytics', `
+      <div style="max-width:1000px;margin:0 auto;padding:20px">
+        <h1 style="margin-bottom:24px">Donor Retention Analytics</h1>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#4f46e5">${parseInt(r.current_donors||0)}</div><div style="color:#64748b">Current Month Donors</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#059669">${parseInt(r.new_donors||0)}</div><div style="color:#64748b">New Donors</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:#f59e0b">${parseInt(r.repeat_donors||0)}</div><div style="color:#64748b">Repeat Donors</div></div>
+          <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="font-size:32px;font-weight:800;color:${retentionRate>=50?'#059669':retentionRate>=30?'#f59e0b':'#ef4444'}">${retentionRate}%</div><div style="color:#64748b">Retention Rate</div></div>
+        </div>
+        <div class="card">
+          <h3>Historical Retention Data</h3>
+          <table><tr><th>Period</th><th>Total</th><th>New</th><th>Repeat</th><th>Retained</th><th>Churned</th><th>Rate</th></tr>
+          ${analytics.rows.map(a => '<tr><td>'+new Date(a.period_start).toLocaleDateString()+' - '+new Date(a.period_end).toLocaleDateString()+'</td><td>'+parseInt(a.total_donors||0)+'</td><td>'+parseInt(a.new_donors||0)+'</td><td>'+parseInt(a.repeat_donors||0)+'</td><td>'+parseInt(a.retained_donors||0)+'</td><td>'+parseInt(a.churned_donors||0)+'</td><td style="font-weight:700;color:'+(parseFloat(a.retention_rate)>=50?'#059669':parseFloat(a.retention_rate)>=30?'#f59e0b':'#ef4444')+'">'+parseFloat(a.retention_rate).toFixed(1)+'%</td></tr>').join('')||'<tr><td colspan="7">No historical data yet. Data is calculated monthly.</td></tr>'}
+          </table>
+        </div>
+        <div class="card" style="margin-top:20px">
+          <h3>Tips to Improve Retention</h3>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px">
+            <div style="padding:16px;background:#f0fdf4;border-radius:10px"><strong style="color:#059669">Send Thank You Messages</strong><p style="font-size:13px;color:#64748b">Donors who receive thank yous are 40% more likely to give again</p></div>
+            <div style="padding:16px;background:#eff6ff;border-radius:10px"><strong style="color:#4f46e5">Share Impact Updates</strong><p style="font-size:13px;color:#64748b">Show donors exactly how their money was used</p></div>
+            <div style="padding:16px;background:#fef3c7;border-radius:10px"><strong style="color:#92400e">Set Up Recurring Donations</strong><p style="font-size:13px;color:#64748b">Monthly givers have 4x higher lifetime value</p></div>
+          </div>
+        </div>
+      </div>
+    `, req.session.user));
+  }));
+
+  // API: Calculate and save retention analytics
+  app.post('/api/calculate-retention', requireAuth, requireNotBanned, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { period_start, period_end } = req.body;
+    const ps = period_start ? new Date(period_start) : new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+    const pe = period_end ? new Date(period_end) : new Date(new Date().getFullYear(), new Date().getMonth(), 0);
+    try {
+      const total = (await pool.query('SELECT COUNT(DISTINCT donor_email) as count FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donor_email IS NOT NULL AND donated_at >= $2 AND donated_at <= $3', [t, ps, pe])).rows[0]?.count || 0;
+      const prevStart = new Date(ps); prevStart.setMonth(prevStart.getMonth() - 1);
+      const prevDonors = (await pool.query('SELECT DISTINCT donor_email FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donor_email IS NOT NULL AND donated_at >= $2 AND donated_at < $3', [t, prevStart, ps])).rows.map(r => r.donor_email);
+      const newDonors = (await pool.query('SELECT COUNT(DISTINCT cd.donor_email) as count FROM campaign_donations cd WHERE cd.tenant_id=$1 AND cd.refunded=false AND cd.donor_email IS NOT NULL AND cd.donated_at >= $2 AND cd.donated_at <= $3 AND cd.donor_email NOT IN (SELECT DISTINCT donor_email FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donor_email IS NOT NULL AND donated_at < $2)', [t, ps, pe])).rows[0]?.count || 0;
+      const repeatDonors = parseInt(total) - parseInt(newDonors);
+      const retained = prevDonors.length > 0 ? (await pool.query('SELECT COUNT(DISTINCT donor_email) as count FROM campaign_donations WHERE tenant_id=$1 AND refunded=false AND donor_email = ANY($2) AND donated_at >= $3 AND donated_at <= $4', [t, prevDonors, ps, pe])).rows[0]?.count || 0 : 0;
+      const churned = prevDonors.length - parseInt(retained);
+      const rate = prevDonors.length > 0 ? Math.round(parseInt(retained)/prevDonors.length*100) : 0;
+      await pool.query(`INSERT INTO donor_retention_analytics(tenant_id,period_start,period_end,total_donors,new_donors,repeat_donors,retained_donors,retention_rate)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (tenant_id, period_start, period_end) DO UPDATE SET total_donors=$4,new_donors=$5,repeat_donors=$6,retained_donors=$7,retention_rate=$8,calculated_at=NOW()`,
+        [t, ps, pe, total, newDonors, repeatDonors, retained, rate]);
+      res.json({ success: true, total, newDonors, repeatDonors, retained, churned, rate });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  }));
+
+  // =============================================
+  // V3 FEATURE 10: CAMPAIGN SUCCESS SCORE
+  // =============================================
+
+  app.get('/campaigns/:id/success-score', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!c) return res.status(404).send('Campaign not found');
+    const score = (await pool.query('SELECT * FROM campaign_success_scores WHERE campaign_id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    res.send(renderPage('Campaign Success Score', `
+      <div style="max-width:800px;margin:0 auto;padding:20px">
+        <div style="text-align:center;margin-bottom:24px">
+          <h1 style="font-size:28px;font-weight:800">Campaign Success Score</h1>
+          <h2 style="color:#64748b;font-size:18px">${esc(c.title)}</h2>
+        </div>
+        ${score ? `
+        <div style="background:linear-gradient(135deg,${parseFloat(score.overall_score)>=70?'#059669,#10b981':parseFloat(score.overall_score)>=40?'#f59e0b,#fbbf24':'#ef4444,#f87171'});padding:30px;border-radius:16px;color:white;text-align:center;margin-bottom:24px">
+          <div style="font-size:64px;font-weight:900">${parseFloat(score.overall_score).toFixed(0)}</div>
+          <div style="font-size:18px;opacity:0.9">out of 100</div>
+          <div style="font-size:16px;margin-top:8px">${parseFloat(score.overall_score)>=70?'Excellent - This campaign is well-positioned for success!':parseFloat(score.overall_score)>=40?'Good - Some improvements could boost performance':'Needs Work - Key areas need attention'}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin-bottom:24px">
+          ${[['Story Quality',score.story_quality_score,'How compelling your campaign story is'],['Media Quality',score.media_quality_score,'Images and videos effectiveness'],['Engagement',score.engagement_score,'Donor engagement and interaction'],['Momentum',score.momentum_score,'Growth rate and donation velocity'],['Trust',score.trust_score,'Verification, transparency, reviews'],['Social Proof',score.social_proof_score,'Donor count, shares, comments'],['Urgency',score.urgency_score,'Deadline and urgency level'],['Transparency',score.transparency_score,'Goal breakdown, updates, receipts']].map(([name,val,desc]) => '<div style="background:white;border-radius:10px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)"><div style="display:flex;justify-content:space-between"><strong>'+name+'</strong><span style="font-weight:800;color:'+(parseFloat(val)>=70?'#059669':parseFloat(val)>=40?'#f59e0b':'#ef4444')+'">'+parseFloat(val).toFixed(0)+'/100</span></div><div style="background:#e2e8f0;height:8px;border-radius:4px;margin:8px 0"><div style="background:'+(parseFloat(val)>=70?'#059669':parseFloat(val)>=40?'#f59e0b':'#ef4444')+';height:8px;border-radius:4px;width:'+parseFloat(val)+'%"></div></div><div style="font-size:12px;color:#64748b">'+desc+'</div></div>').join('')}
+        </div>
+        ${score.recommendations && score.recommendations.length > 0 ? '<div class="card"><h3>Recommendations</h3>' + (typeof score.recommendations === 'string' ? JSON.parse(score.recommendations) : score.recommendations).map(r => '<div style="padding:12px;border-left:3px solid #4f46e5;margin-bottom:8px;background:#f8fafc;border-radius:0 8px 8px 0"><strong>'+esc(r.title||'Tip')+'</strong><p style="font-size:14px;color:#64748b;margin:4px 0 0 0">'+esc(r.description||r)+'</p></div>').join('') + '</div>' : ''}
+        ` : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#127919;</div><h3>No Score Calculated Yet</h3><p style="color:#64748b;margin-bottom:16px">Calculate your campaign success score to get personalized recommendations.</p><a href="/api/campaigns/'+req.params.id+'/calculate-score" class="btn btn-green">Calculate Score</a></div>'}
+        <div style="margin-top:20px"><a href="/api/campaigns/${req.params.id}/calculate-score" class="btn" style="background:#4f46e5;color:white">Recalculate Score</a></div>
+      </div>
+    `, req.session.user));
+  }));
+
+  // API: Calculate campaign success score
+  app.get('/api/campaigns/:id/calculate-score', ah(async (req, res) => {
+    const c = (await pool.query('SELECT fc.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=fc.id AND refunded=false) as donor_count FROM fundraising_campaigns fc WHERE fc.id=$1', [req.params.id])).rows[0];
+    if (!c) return res.status(404).json({ error: 'Campaign not found' });
+
+    const recommendations = [];
+    // Story quality
+    const descLen = (c.description||'').length;
+    const storyQuality = Math.min(100, Math.round((descLen / 500) * 60 + (c.story ? 20 : 0) + (c.impact_summary ? 20 : 0)));
+    if (storyQuality < 70) recommendations.push({ title: 'Improve Your Story', description: 'Add more details to your campaign description. Aim for 500+ words with emotional stories and specific impact details.' });
+
+    // Media quality
+    const mediaQuality = Math.min(100, (c.image_url ? 40 : 0) + (c.video_url ? 30 : 0) + ((c.gallery_images||[]).length > 0 ? 20 : 0) + ((c.video_urls||[]).length > 0 ? 10 : 0));
+    if (mediaQuality < 70) recommendations.push({ title: 'Add More Media', description: 'Campaigns with images and videos raise 2x more. Add a compelling cover image and a video telling your story.' });
+
+    // Engagement
+    const donorCount = parseInt(c.donor_count||0);
+    const engagementScore = Math.min(100, Math.round((donorCount / 50) * 30 + parseInt(c.total_comments||0) * 5 + parseInt(c.total_shares||0) * 3 + parseInt(c.total_followers||0) * 2));
+    if (engagementScore < 70) recommendations.push({ title: 'Boost Engagement', description: 'Share your campaign on social media, encourage comments, and ask supporters to follow for updates.' });
+
+    // Momentum
+    const pct = c.target > 0 ? parseInt(c.raised||0)/parseInt(c.target) : 0;
+    const momentumScore = Math.min(100, Math.round(pct * 60 + (pct > 0.1 ? 20 : 0) + (pct > 0.25 ? 20 : 0)));
+    if (momentumScore < 50) recommendations.push({ title: 'Build Momentum', description: 'Early donations are crucial. Ask your closest network to donate first to build social proof.' });
+
+    // Trust
+    const trustScore = Math.min(100, (c.is_verified ? 40 : 0) + (c.verification_badge !== 'none' ? 20 : 0) + (parseFloat(c.trust_score||0) > 0 ? 20 : 0) + (parseInt(c.endorsement_count||0) > 0 ? 20 : 0));
+    if (trustScore < 70) recommendations.push({ title: 'Build Trust', description: 'Get verified, add endorsements from notable people, and share transparent updates regularly.' });
+
+    // Social proof
+    const socialProofScore = Math.min(100, (donorCount > 0 ? 30 : 0) + (parseInt(c.total_testimonials||0) > 0 ? 25 : 0) + (parseInt(c.total_shares||0) > 0 ? 25 : 0) + (c.matching_active ? 20 : 0));
+    if (socialProofScore < 70) recommendations.push({ title: 'Increase Social Proof', description: 'Add testimonials from beneficiaries, enable donation matching, and encourage social sharing.' });
+
+    // Urgency
+    const daysLeft = c.deadline ? Math.max(0, Math.ceil((new Date(c.deadline) - new Date()) / (1000*60*60*24))) : 999;
+    const urgencyScore = Math.min(100, (c.urgency_level === 'urgent' || c.urgency_level === 'critical' ? 40 : c.urgency_level === 'high' ? 30 : 10) + (daysLeft <= 7 ? 30 : daysLeft <= 30 ? 20 : 0) + (c.deadline ? 30 : 0));
+    if (urgencyScore < 50) recommendations.push({ title: 'Create Urgency', description: 'Set a deadline, use urgency levels, and communicate time-sensitivity to donors.' });
+
+    // Transparency
+    const transparencyScore = Math.min(100, ((c.goal_breakdown||[]).length > 0 ? 30 : 0) + (c.has_faq ? 20 : 0) + (c.organization_description ? 20 : 0) + (parseInt(c.total_shares||0) > 2 ? 15 : 0) + (c.estimated_beneficiaries > 0 ? 15 : 0));
+    if (transparencyScore < 70) recommendations.push({ title: 'Be More Transparent', description: 'Add a goal breakdown showing how funds will be used, FAQ section, and beneficiary estimates.' });
+
+    const overall = Math.round((storyQuality + mediaQuality + engagementScore + momentumScore + trustScore + socialProofScore + urgencyScore + transparencyScore) / 8);
+
+    const tenant_id = c.tenant_id;
+    await pool.query(`INSERT INTO campaign_success_scores(tenant_id,campaign_id,overall_score,story_quality_score,media_quality_score,engagement_score,momentum_score,trust_score,social_proof_score,urgency_score,transparency_score,recommendations,last_calculated)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+      ON CONFLICT (tenant_id, campaign_id) DO UPDATE SET overall_score=$3,story_quality_score=$4,media_quality_score=$5,engagement_score=$6,momentum_score=$7,trust_score=$8,social_proof_score=$9,urgency_score=$10,transparency_score=$11,recommendations=$12,last_calculated=NOW()`,
+      [tenant_id, c.id, overall, storyQuality, mediaQuality, engagementScore, momentumScore, trustScore, socialProofScore, urgencyScore, transparencyScore, JSON.stringify(recommendations)]);
+    await pool.query('UPDATE fundraising_campaigns SET success_score=$1 WHERE id=$2', [overall, c.id]);
+
+    // Redirect back if from browser, or return JSON
+    if (req.headers.accept && req.headers.accept.includes('text/html')) {
+      res.redirect('/campaigns/'+c.id+'/success-score');
+    } else {
+      res.json({ success: true, overall, scores: { storyQuality, mediaQuality, engagementScore, momentumScore, trustScore, socialProofScore, urgencyScore, transparencyScore }, recommendations });
+    }
+  }));
+
+  // =============================================
+  // V3 FEATURE 11: CAMPAIGN FAQ
+  // =============================================
+
+  app.get('/campaigns/:id/faq', ah(async (req, res) => {
+    const faqs = (await pool.query('SELECT * FROM campaign_faqs WHERE campaign_id=$1 ORDER BY sort_order, created_at', [req.params.id])).rows;
+    res.send(renderPage('FAQ', `
+      <div style="max-width:800px;margin:0 auto;padding:20px">
+        <h1 style="text-align:center;margin-bottom:24px">Frequently Asked Questions</h1>
+        ${faqs.length > 0 ? faqs.map(f => '<div style="background:white;border-radius:12px;padding:20px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"><h3 style="color:#1e293b">'+esc(f.question)+'</h3><p style="color:#475569;line-height:1.6;margin-top:8px">'+esc(f.answer)+'</p></div>').join('') : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#10067;</div><h3>No FAQ Yet</h3><p style="color:#64748b">Questions and answers will be added by the organizer.</p></div>'}
+        ${req.session.user ? '<a href="/campaigns/'+req.params.id+'/faq/new" style="display:block;margin-top:20px;text-align:center;padding:14px;background:#4f46e5;color:white;border-radius:12px;text-decoration:none;font-weight:700">Add a Question</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/faq/new', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    res.send(renderPage('Add FAQ', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/faq/save" class="card">
+          <h2>Add FAQ</h2>
+          <label>Question</label><input name="question" placeholder="What would donors want to know?" required>
+          <label>Answer</label><textarea name="answer" rows="4" placeholder="Provide a clear, helpful answer" required></textarea>
+          <label>Sort Order</label><input name="sort_order" type="number" value="0">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Add FAQ</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/faq/save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const { question, answer, sort_order } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_faqs(tenant_id,campaign_id,question,answer,sort_order,created_by) VALUES($1,$2,$3,$4,$5,$6)',
+      [t, req.params.id, question, answer, sort_order||0, req.session.user.email]);
+    await pool.query('UPDATE fundraising_campaigns SET has_faq=true WHERE id=$1', [req.params.id]);
+    res.redirect('/campaigns/'+req.params.id+'/faq');
+  }));
+
+  // =============================================
+  // V3 FEATURE 12: CAMPAIGN EVENTS
+  // =============================================
+
+  app.get('/campaigns/:id/events', ah(async (req, res) => {
+    const events = (await pool.query('SELECT * FROM campaign_events WHERE campaign_id=$1 AND is_public=true ORDER BY event_date ASC', [req.params.id])).rows;
+    const eventTypeIcons = { fundraiser:'&#127881;', gala:'&#128142;', auction:'&#127942;', walkathon:'&#128694;', webinar:'&#128187;', concert:'&#127925;', volunteer_day:'&#9997;', other:'&#128197;' };
+    res.send(renderPage('Campaign Events', `
+      <div style="max-width:900px;margin:0 auto;padding:20px">
+        <h1 style="text-align:center;margin-bottom:24px">Campaign Events</h1>
+        ${events.length > 0 ? '<div style="display:grid;gap:16px">' + events.map(e => {
+          const isPast = new Date(e.event_date) < new Date();
+          return '<div style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);display:flex;gap:20px;align-items:start;opacity:'+(isPast?'0.7':'1')+'"><div style="text-align:center;min-width:80px"><div style="font-size:32px">'+(eventTypeIcons[e.event_type]||'&#128197;')+'</div><div style="font-weight:800;color:#4f46e5">'+new Date(e.event_date).toLocaleDateString('en',{month:'short',day:'numeric'})+'</div><div style="font-size:12px;color:#64748b">'+new Date(e.event_date).toLocaleDateString('en',{year:'numeric'})+'</div></div><div style="flex:1"><h3 style="font-weight:700">'+esc(e.title)+'</h3>'+(e.description?'<p style="color:#64748b;font-size:14px;margin:4px 0">'+esc(e.description)+'</p>':'')+'<div style="display:flex;gap:8px;margin-top:8px;font-size:13px">'+(e.location?'<span style="color:#64748b">&#128205; '+esc(e.location)+'</span>':'')+(e.virtual_link?'<a href="'+esc(e.virtual_link)+'" style="color:#4f46e5">&#127760; Join Online</a>':'')+(e.ticket_price>0?'<span style="color:#059669;font-weight:700">UGX '+parseInt(e.ticket_price).toLocaleString()+'</span>':'<span style="color:#059669;font-weight:700">Free</span>')+(e.capacity?'<span style="color:#64748b">'+parseInt(e.registered_count||0)+'/'+parseInt(e.capacity)+' registered</span>':'')+'</div>'+(e.status==='upcoming'&&req.session.user?'<a href="/campaigns/'+e.campaign_id+'/events/'+e.id+'/register" style="display:inline-block;margin-top:8px;padding:8px 16px;background:#059669;color:white;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px">Register</a>':'')+'</div></div>';
+        }).join('') + '</div>' : '<div style="text-align:center;padding:40px;background:white;border-radius:16px"><div style="font-size:48px">&#128197;</div><h3>No Events Scheduled</h3><p style="color:#64748b">Events will be posted by the campaign organizer.</p></div>'}
+        ${req.session.user ? '<a href="/campaigns/'+req.params.id+'/events/new" style="display:block;margin-top:20px;text-align:center;padding:14px;background:#4f46e5;color:white;border-radius:12px;text-decoration:none;font-weight:700">Create Event</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  app.get('/campaigns/:id/events/new', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    res.send(renderPage('Create Event', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.id}/events/save" class="card">
+          <h2>Create Event</h2>
+          <label>Event Title</label><input name="title" placeholder="e.g., Charity Gala 2025" required>
+          <label>Description</label><textarea name="description" rows="3" placeholder="Event details"></textarea>
+          <label>Event Type</label>
+          <select name="event_type"><option value="fundraiser">Fundraiser</option><option value="gala">Gala</option><option value="auction">Auction</option><option value="walkathon">Walkathon</option><option value="webinar">Webinar</option><option value="concert">Concert</option><option value="volunteer_day">Volunteer Day</option><option value="other">Other</option></select>
+          <label>Event Date & Time</label><input name="event_date" type="datetime-local" required>
+          <label>End Date (optional)</label><input name="end_date" type="datetime-local">
+          <label>Location</label><input name="location" placeholder="Physical venue address">
+          <label>Virtual Link (optional)</label><input name="virtual_link" placeholder="https://zoom.us/...">
+          <label>Capacity (leave blank for unlimited)</label><input name="capacity" type="number" placeholder="200">
+          <label>Ticket Price (UGX, 0 for free)</label><input name="ticket_price" type="number" value="0">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">Create Event</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:id/events/save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+    const { title, description, event_type, event_date, end_date, location, virtual_link, capacity, ticket_price, image_url } = req.body;
+    const t = req.session.user.tenant_id;
+    await pool.query('INSERT INTO campaign_events(tenant_id,campaign_id,title,description,event_type,event_date,end_date,location,virtual_link,capacity,ticket_price,image_url) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+      [t, req.params.id, title, description||'', event_type||'fundraiser', event_date, end_date||null, location||null, virtual_link||null, capacity||null, ticket_price||0, image_url||null]);
+    await pool.query('UPDATE fundraising_campaigns SET has_events=true, event_count=(SELECT COUNT(*) FROM campaign_events WHERE campaign_id=$1 AND status=$2) WHERE id=$1', [req.params.id, 'upcoming']);
+    res.redirect('/campaigns/'+req.params.id+'/events');
+  }));
+
+  // Register for event
+  app.get('/campaigns/:campaignId/events/:eventId/register', requireAuth, ah(async (req, res) => {
+    const event = (await pool.query('SELECT * FROM campaign_events WHERE id=$1', [req.params.eventId])).rows[0];
+    if (!event) return res.status(404).send('Event not found');
+    res.send(renderPage('Register for Event', `
+      <div style="max-width:500px;margin:0 auto;padding:20px">
+        <form method="POST" action="/campaigns/${req.params.campaignId}/events/${req.params.eventId}/register-save" class="card">
+          <h2>Register: ${esc(event.title)}</h2>
+          ${event.ticket_price > 0 ? '<p style="color:#059669;font-weight:700;font-size:18px">Ticket Price: UGX '+parseInt(event.ticket_price).toLocaleString()+'</p>' : '<p style="color:#059669;font-weight:700">Free Event</p>'}
+          <label>Your Name</label><input name="attendee_name" value="${esc(req.session.user?.name||'')}" required>
+          <label>Email</label><input name="attendee_email" value="${esc(req.session.user?.email||'')}" required>
+          <label>Phone</label><input name="attendee_phone" placeholder="+256 xxx xxx xxx">
+          <label>Number of Tickets</label><input name="num_tickets" type="number" min="1" max="10" value="1">
+          <button class="btn btn-green" style="width:100%;padding:14px;font-size:16px">${event.ticket_price > 0 ? 'Register & Pay' : 'Register'}</button>
+        </form>
+      </div>
+    `, req.session.user));
+  }));
+
+  app.post('/campaigns/:campaignId/events/:eventId/register-save', requireAuth, ah(async (req, res) => {
+    const { attendee_name, attendee_email, attendee_phone, num_tickets } = req.body;
+    const event = (await pool.query('SELECT * FROM campaign_events WHERE id=$1', [req.params.eventId])).rows[0];
+    if (!event) return res.status(404).send('Event not found');
+    const t = event.tenant_id;
+    const ticketCode = 'TKT-' + Date.now().toString(36).toUpperCase();
+    const amountPaid = parseInt(num_tickets||1) * parseInt(event.ticket_price||0);
+    await pool.query('INSERT INTO campaign_event_registrations(tenant_id,event_id,campaign_id,attendee_name,attendee_email,attendee_phone,num_tickets,amount_paid,ticket_code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [t, req.params.eventId, req.params.campaignId, attendee_name, attendee_email, attendee_phone||null, num_tickets||1, amountPaid, ticketCode]);
+    await pool.query('UPDATE campaign_events SET registered_count=registered_count+$1 WHERE id=$2', [num_tickets||1, req.params.eventId]);
+    // If paid event, create donation
+    if (amountPaid > 0) {
+      await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)',
+        [t, req.params.campaignId, attendee_name, amountPaid, 'event_ticket', 'Event ticket: '+event.title+' x'+(num_tickets||1)]);
+    }
+    res.send(renderPage('Registration Confirmed', `
+      <div style="max-width:500px;margin:0 auto;padding:20px;text-align:center">
+        <div style="background:linear-gradient(135deg,#059669,#10b981);padding:40px;border-radius:16px;color:white;margin-bottom:24px">
+          <div style="font-size:48px;margin-bottom:12px">&#9989;</div>
+          <h1>Registration Confirmed!</h1>
+          <p>You are registered for "${esc(event.title)}"</p>
+          <div style="background:rgba(255,255,255,0.2);padding:16px;border-radius:12px;margin-top:16px">
+            <div style="font-size:13px;opacity:0.8">Ticket Code</div>
+            <div style="font-size:24px;font-weight:800;letter-spacing:2px">${esc(ticketCode)}</div>
+            <div style="font-size:13px;opacity:0.8;margin-top:4px">${parseInt(num_tickets||1)} ticket(s) | ${new Date(event.event_date).toLocaleString()}</div>
+          </div>
+        </div>
+        ${event.virtual_link ? '<a href="'+esc(event.virtual_link)+'" style="display:block;padding:14px;background:#4f46e5;color:white;border-radius:12px;text-decoration:none;font-weight:700;text-align:center">Join Virtual Event</a>' : ''}
+      </div>
+    `, req.session.user));
+  }));
+
+  // =============================================
+  // V3: ENHANCED DONATE PAGE WITH TIPS & REWARDS
+  // =============================================
+
+  // API: Get reward tiers for donation page
+  app.get('/api/campaigns/:id/rewards', ah(async (req, res) => {
+    const rewards = (await pool.query('SELECT id, title, description, min_amount, max_amount, reward_type, quantity_available, quantity_claimed FROM campaign_reward_tiers WHERE campaign_id=$1 AND is_active=true ORDER BY min_amount ASC', [req.params.id])).rows;
+    res.json(rewards);
+  }));
+
+  // API: Global fundraising stats for homepage
+  app.get('/api/global-fundraising-stats', ah(async (req, res) => {
+    const stats = await Promise.all([
+      pool.query("SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE refunded=false"),
+      pool.query("SELECT COUNT(DISTINCT campaign_id) as count FROM campaign_donations"),
+      pool.query("SELECT COUNT(*) as count FROM fundraising_campaigns WHERE is_public=true AND status='active'"),
+      pool.query("SELECT COUNT(DISTINCT donor_email) as count FROM campaign_donations WHERE donor_email IS NOT NULL AND refunded=false")
+    ]);
+    res.json({
+      total_donated: parseInt(stats[0].rows[0]?.total||0),
+      total_campaigns_funded: parseInt(stats[1].rows[0]?.count||0),
+      active_campaigns: parseInt(stats[2].rows[0]?.count||0),
+      total_donors: parseInt(stats[3].rows[0]?.count||0)
+    });
+  }));
+
+  // Update processDonationEffects to include V3 features (streaks)
+  const originalProcessDonation = processDonationEffects;
+  // We'll update streaks directly in the donate-save flow
+
+  console.log('[Fundraising Enhancements] All routes registered successfully');
+  console.log('[Fundraising V3] Verification Badges, Rewards/Tiers, Wishlists, Volunteers, Endorsements, Donor Streaks, Collaboration, Tipping, Retention Analytics, Success Score, Events, FAQ + All V2 Features');
 };
