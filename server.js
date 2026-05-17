@@ -33273,6 +33273,49 @@ try {
   console.log('[SchoolV18b] School upgrade Part 2 loaded (V18) — 10 features, 30+ routes');
 } catch(e) { console.warn('[SchoolV18b] Error:', e.message); }
 
+// === V19 MASSIVE FEATURE UPGRADE: 10 New Modules (50+ new features) ===
+const _v19ModuleList = [
+  'ai_auto_grading', 'emergency_alerts', 'gamification', 'digital_signatures',
+  'school_elections', 'smart_hostel', 'uniform_shop', 'canteen_preorder',
+  'staff_performance', 'lost_found'
+];
+const _v19TableList = [
+  'ai_grading_results','plagiarism_checks','ai_generated_questions',
+  'emergency_alerts','emergency_templates','emergency_drills',
+  'gamification_points','gamification_badges','gamification_earned_badges','gamification_rewards','gamification_redemptions','gamification_streaks',
+  'signature_requests','signature_records','signed_documents',
+  'elections','election_candidates','election_votes','school_polls','poll_votes',
+  'hostel_rooms_smart','room_allocations','room_swap_requests','room_inspections','room_maintenance',
+  'shop_products','shop_orders','shop_order_items','shop_stock_history',
+  'canteen_menu_items','canteen_weekly_menu','canteen_orders','canteen_order_items','canteen_wallet',
+  'staff_kpi_scores','staff_student_feedback','staff_classroom_observations','staff_professional_development',
+  'lost_found_items','lost_found_claims'
+];
+_v19TableList.forEach(t => VALID_TABLES.add(t));
+
+const _v19Opts = { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT: uiT || ((k)=>k), awardPoints: (() => {}), trackRevenue: global.trackRevenue || (() => {}) };
+
+const _v19Modules = [
+  ['./ai-auto-grading', 'AI Auto-Grading & Plagiarism'],
+  ['./emergency-alerts', 'Emergency Alert System'],
+  ['./gamification-engine', 'Gamification Engine'],
+  ['./digital-signatures', 'Digital Signatures'],
+  ['./school-elections', 'School Elections & Voting'],
+  ['./smart-hostel', 'Smart Hostel Allocation'],
+  ['./uniform-shop', 'School Uniform Shop'],
+  ['./canteen-preorder', 'Canteen Pre-ordering'],
+  ['./staff-performance', 'Staff Performance Dashboard'],
+  ['./lost-found', 'Lost & Found Management']
+];
+_v19Modules.forEach(([modPath, label]) => {
+  try {
+    const m = require(modPath);
+    m(app, pool, _v19Opts);
+    console.log('[V19] ' + label + ' loaded');
+  } catch(e) { console.warn('[V19] ' + label + ' Error:', e.message); }
+});
+console.log('[V19] === 10 modules loaded — V19 Massive Feature Upgrade complete ===');
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 
