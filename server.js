@@ -33151,7 +33151,7 @@ const _tenantMw = (req, res, next) => {
   req.user = req.session.user;
   next();
 };
-const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth: requireAuth, wsBroadcast, redis: redisCache };
+const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth: requireAuth, wsBroadcast, redis: redisCache, ah, esc, renderPage, notify, sendEmail, sendSMS };
 
 // Batch 1: Old-style modules (app, db, pool, renderPage, esc)
 ['approval_requests','approval_actions','approval_notifications','approval_steps','approval_workflow_templates','approval_workflows'].forEach(t => VALID_TABLES.add(t));

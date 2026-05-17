@@ -898,7 +898,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       expires_at TIMESTAMPTZ NOT NULL,
       attempts INTEGER DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW()
-    )`
+    )`,
 
     // =============================================
     // V4 TABLES - Additional Success Features

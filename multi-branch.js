@@ -24,10 +24,10 @@
  *   const mb = require('./multi-branch');
  *   mb(app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis });
  *
- * module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => { ... }
+ * module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis, ah }) => { ... }
  */
 
-module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => {
+module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis, ah }) => {
   const BASE = '/api/multi-branch';
 
   // ── Validation Sets ─────────────────────────────────────────────────────────
