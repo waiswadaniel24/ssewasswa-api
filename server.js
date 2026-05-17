@@ -30068,6 +30068,9 @@ try { const m = require('./homework'); m(app, pool, _newModOpts); console.log('[
 try { const m = require('./discipline'); m(app, pool, _newModOpts); console.log('[Discipline] Discipline module loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
 try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.log('[MultiBranch] Multi-branch module loaded'); } catch(e) { console.warn('[MultiBranch] Error:', e.message); }
 
+// === FEATURES BLOCK: Exams, WhatsApp, Branches, Clinic, Scheduled Reports ===
+try { require('./features-block'); console.log('[FeaturesBlock] 33 feature routes loaded (exams, whatsapp, branches, clinic, scheduled-reports, dev/portals)'); } catch(e) { console.warn('[FeaturesBlock] Error:', e.message); }
+
 // ============================================================
 // === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
 // ============================================================
