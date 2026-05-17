@@ -30065,6 +30065,9 @@ try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.lo
 // === FEATURES BLOCK: Exams, WhatsApp, Branches, Clinic, Scheduled Reports ===
 try { require('./features-block'); console.log('[FeaturesBlock] 33 feature routes loaded (exams, whatsapp, branches, clinic, scheduled-reports, dev/portals)'); } catch(e) { console.warn('[FeaturesBlock] Error:', e.message); }
 
+// === VIRAL CONTENT ENGINE: Growth, SEO, Revenue, Jobs, Referrals, Trending ===
+try { require('./viral-content-engine'); console.log('[ViralEngine] Content scraping, referrals, jobs, SEO pages, trending, newsletter, gamification loaded'); } catch(e) { console.warn('[ViralEngine] Error:', e.message); }
+
 // ============================================================
 // === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
 // ============================================================
