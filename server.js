@@ -33244,7 +33244,7 @@ try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.lo
   'meal_attendance_v18','sickbay_medicine_inventory','user_accessibility_settings'
 ].forEach(t => VALID_TABLES.add(t));
 try {
-  const _v18bOpts = { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT: uiT || ((k)=>k), awardPoints: (() => {}), trackRevenue: global.trackRevenue || (() => {}) };
+  const _v18bOpts = { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail: global.queueEmail || (() => {}), uiT: (typeof uiT !== 'undefined' ? uiT : (k) => k), awardPoints: global.awardPoints || (() => {}), trackRevenue: global.trackRevenue || (() => {}) };
   const m = require('./school-v18-b');
   m(app, pool, _v18bOpts);
   console.log('[SchoolV18b] School upgrade Part 2 loaded (V18) — 10 features, 30+ routes');

@@ -13,6 +13,8 @@ module.exports = function aiAssistant(app, db, pool, renderPage, esc) {
   };
 
   const ah = (fn) => (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(err => { console.error('[AI]', err); res.status(500).send('Internal error'); });
+  };
 
   // -- subscription gate --------------------------------------------------
   const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
@@ -25,8 +27,6 @@ module.exports = function aiAssistant(app, db, pool, renderPage, esc) {
       if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
     } catch (e) { /* allow through on DB error */ }
     next();
-  };
-    Promise.resolve(fn(req, res, next)).catch(err => { console.error('[AI]', err); res.status(500).send('Internal error'); });
   };
 
   let ZAI;
