@@ -9685,7 +9685,7 @@ app.get('/campaigns/:id/pledge', requireAuth, requireNotBanned, (req, res) => {
 
 app.post('/campaigns/:id/pledge', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { donor_name, amount, paid } = req.body;
-  await pool.query('INSERT INTO campaign_pledges(campaign_id,donor_name,amount,paid) VALUES($1,$2,$3,$4)', [req.params.id, donor_name, amount, paid||0]);
+  await pool.query('INSERT INTO campaign_pledges(tenant_id,campaign_id,donor_name,amount,paid) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, req.params.id, donor_name, amount, paid||0]);
   await pool.query('UPDATE campaigns SET raised=raised+$1 WHERE id=$2', [paid||0, req.params.id]);
   res.redirect('/campaigns/' + req.params.id);
 }));
@@ -16765,7 +16765,7 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
     `CREATE TABLE IF NOT EXISTS deliveries (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, order_no TEXT, customer_name TEXT, customer_address TEXT, items JSONB, driver_name TEXT, vehicle TEXT, status TEXT DEFAULT 'pending', dispatched_at TIMESTAMPTZ, delivered_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS public_pages (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, slug TEXT NOT NULL, page_type TEXT DEFAULT 'page', page_order INTEGER DEFAULT 1, content TEXT, hero_title TEXT, hero_subtitle TEXT, meta_description TEXT, is_published BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, slug))`,
     `CREATE TABLE IF NOT EXISTS fundraising_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, target INTEGER DEFAULT 0, deadline DATE, category TEXT DEFAULT 'general', organizer TEXT, contact_phone TEXT, status TEXT DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS campaign_donations (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, donor_name TEXT, amount INTEGER DEFAULT 0, method TEXT DEFAULT 'cash', message TEXT, donated_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS campaign_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, donor_name TEXT, amount INTEGER DEFAULT 0, method TEXT DEFAULT 'cash', message TEXT, donated_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS scraped_content (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, source TEXT, title TEXT, summary TEXT, url TEXT, category TEXT DEFAULT 'news', scraped_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, title, source))`,
     `CREATE TABLE IF NOT EXISTS scrape_sources (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, url TEXT NOT NULL, category TEXT DEFAULT 'news', scrape_type TEXT DEFAULT 'rss', selector TEXT, max_items INTEGER DEFAULT 20, is_active BOOLEAN DEFAULT true, last_scraped_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS shop_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, order_no TEXT NOT NULL, buyer_email TEXT, buyer_name TEXT, buyer_phone TEXT, items JSONB NOT NULL, total INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', payment_method TEXT, payment_ref TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(order_no))`,
@@ -16773,7 +16773,7 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
     `CREATE TABLE IF NOT EXISTS fundraising_investors (id SERIAL PRIMARY KEY, user_email TEXT UNIQUE NOT NULL, full_name TEXT NOT NULL, phone TEXT, organization TEXT, investor_type TEXT DEFAULT 'individual' CHECK (investor_type IN ('individual','corporate','ngo','foundation','angel','venture')), interests TEXT[] DEFAULT '{}', total_invested INTEGER DEFAULT 0, campaigns_supported INTEGER DEFAULT 0, is_verified BOOLEAN DEFAULT false, bio TEXT, website TEXT, profile_image TEXT, preferred_categories TEXT[] DEFAULT '{}', min_investment INTEGER DEFAULT 0, max_investment INTEGER DEFAULT 0, preferred_currency TEXT DEFAULT 'UGX', notification_prefs JSONB DEFAULT '{"email":true,"in_app":true,"sms":false}', created_at TIMESTAMPTZ DEFAULT NOW(), last_active TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS investor_offers (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, investor_email TEXT REFERENCES fundraising_investors(user_email) ON DELETE CASCADE, amount_offered INTEGER NOT NULL, offer_status TEXT DEFAULT 'pending' CHECK (offer_status IN ('pending','accepted','countered','declined','withdrawn')), message TEXT, counter_amount INTEGER, terms TEXT, offered_at TIMESTAMPTZ DEFAULT NOW(), responded_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS investment_transactions (id SERIAL PRIMARY KEY, offer_id INTEGER REFERENCES investor_offers(id) ON DELETE CASCADE, investor_email TEXT REFERENCES fundraising_investors(user_email), campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, amount INTEGER NOT NULL, transaction_type TEXT DEFAULT 'donation' CHECK (transaction_type IN ('donation','investment','grant','loan','pledge_payment')), payment_method TEXT DEFAULT 'mobile_money', payment_ref TEXT, status TEXT DEFAULT 'completed' CHECK (status IN ('completed','pending','failed','refunded')), platform_fee INTEGER DEFAULT 0, net_amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX', created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS campaign_updates (id SERIAL PRIMARY KEY, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, update_type TEXT DEFAULT 'general' CHECK (update_type IN ('general','milestone','urgent','financial','thank_you','media')), is_public BOOLEAN DEFAULT true, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS campaign_updates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, update_type TEXT DEFAULT 'general' CHECK (update_type IN ('general','milestone','urgent','financial','thank_you','media')), is_public BOOLEAN DEFAULT true, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true`,
     `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS image_url TEXT`,
     `ALTER TABLE fundraising_campaigns ADD COLUMN IF NOT EXISTS video_url TEXT`,
@@ -16788,13 +16788,22 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
     `ALTER TABLE campaign_donations ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `ALTER TABLE campaign_pledges ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `ALTER TABLE peer_fundraisers ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+    `ALTER TABLE campaign_updates ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+    `ALTER TABLE investor_offers ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+    `ALTER TABLE investment_transactions ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_donations_campaign ON campaign_donations(campaign_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_donations_tenant ON campaign_donations(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_tenant ON campaign_pledges(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_investor_offers_campaign ON investor_offers(campaign_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_investor_offers_tenant ON investor_offers(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_investment_transactions_tenant ON investment_transactions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_updates_tenant ON campaign_updates(tenant_id)`,
     // Backfill tenant_id for campaign_donations from fundraising_campaigns
     `UPDATE campaign_donations cd SET tenant_id = (SELECT tenant_id FROM fundraising_campaigns WHERE id = cd.campaign_id) WHERE cd.tenant_id IS NULL`,
     `UPDATE campaign_pledges cp SET tenant_id = (SELECT tenant_id FROM campaigns WHERE id = cp.campaign_id) WHERE cp.tenant_id IS NULL`,
+    `UPDATE campaign_updates cu SET tenant_id = (SELECT tenant_id FROM fundraising_campaigns WHERE id = cu.campaign_id) WHERE cu.tenant_id IS NULL`,
+    `UPDATE investor_offers io SET tenant_id = (SELECT tenant_id FROM fundraising_campaigns WHERE id = io.campaign_id) WHERE io.tenant_id IS NULL`,
+    `UPDATE investment_transactions it SET tenant_id = (SELECT tenant_id FROM fundraising_campaigns WHERE id = it.campaign_id) WHERE it.tenant_id IS NULL`,
     `ALTER TABLE public_pages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
     `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS image_url TEXT`,
     `ALTER TABLE school_shop_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
@@ -20110,7 +20119,8 @@ app.get('/fundraising/:id/update', requireAuth, requireNotBanned, requireFundrai
 
 app.post('/fundraising/:id/update-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const { title, content, update_type } = req.body;
-  await pool.query('INSERT INTO campaign_updates(campaign_id,title,content,update_type,created_by) VALUES($1,$2,$3,$4,$5)', [req.params.id, title, content||'', update_type||'general', req.session.user.email]);
+  const camp = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+  await pool.query('INSERT INTO campaign_updates(tenant_id,campaign_id,title,content,update_type,created_by) VALUES($1,$2,$3,$4,$5,$6)', [camp?.tenant_id || req.session.user.tenant_id, req.params.id, title, content||'', update_type||'general', req.session.user.email]);
   res.redirect('/fundraising/'+req.params.id);
 }));
 
@@ -20138,9 +20148,9 @@ app.get('/fundraising/offers/:id/accept', requireAuth, requireNotBanned, ah(asyn
   // Create transaction record
   const fee = Math.round(parseInt(offer.amount_offered) * 0.05);
   const net = parseInt(offer.amount_offered) - fee;
-  await pool.query('INSERT INTO investment_transactions(offer_id,investor_email,campaign_id,amount,transaction_type,status,platform_fee,net_amount) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [offer.id, offer.investor_email, offer.campaign_id, offer.amount_offered, 'investment', 'completed', fee, net]);
+  await pool.query('INSERT INTO investment_transactions(tenant_id,offer_id,investor_email,campaign_id,amount,transaction_type,status,platform_fee,net_amount) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [offer.tenant_id, offer.id, offer.investor_email, offer.campaign_id, offer.amount_offered, 'investment', 'completed', fee, net]);
   // Also record as donation
-  await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [offer.campaign_id, offer.full_name || offer.investor_email, offer.amount_offered, 'investment', 'Investment offer accepted']);
+  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [offer.tenant_id, offer.campaign_id, offer.full_name || offer.investor_email, offer.amount_offered, 'investment', 'Investment offer accepted']);
   // Update platform wallet
   await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
   await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Investment fee - Campaign #'+offer.campaign_id]);
@@ -20176,7 +20186,8 @@ app.get('/fundraising/:id/donate', requireAuth, requireNotBanned, requireFundrai
 
 app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const { donor_name, amount, method, message } = req.body;
-  await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [req.params.id, donor_name||'Anonymous', amount||0, method||'cash', message||'']);
+  const camp = (await pool.query('SELECT tenant_id FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [camp?.tenant_id || req.session.user.tenant_id, req.params.id, donor_name||'Anonymous', amount||0, method||'cash', message||'']);
   // 5% platform fee
   const fee = Math.round(parseInt(amount||0) * 0.05);
   if (fee > 0) {
@@ -20367,7 +20378,7 @@ app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscriptio
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
   const { donor_name, donor_email, amount, method, message } = req.body;
-  await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [c.id, donor_name||req.session.user.name||'Anonymous', amount||0, method||'mobile_money', message||'']);
+  await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)', [c.tenant_id, c.id, donor_name||req.session.user.name||'Anonymous', amount||0, method||'mobile_money', message||'']);
   const fee = Math.round(parseInt(amount||0) * 0.05);
   if (fee > 0) {
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
@@ -20415,7 +20426,7 @@ app.post('/discover/:id/offer-save', requireAuth, requireFundraisingSubscription
     ON CONFLICT (user_email) DO UPDATE SET full_name=$2,phone=$3,organization=$4,investor_type=$5,preferred_categories=$6,last_active=NOW()`,
     [req.session.user.email, full_name||req.session.user.name, phone||'', organization||'', investor_type||'individual', interestsArr]);
   // Create offer
-  await pool.query('INSERT INTO investor_offers(campaign_id,investor_email,amount_offered,message,offer_status) VALUES($1,$2,$3,$4,$5)', [c.id, req.session.user.email, amount_offered||0, message||'', 'pending']);
+  await pool.query('INSERT INTO investor_offers(tenant_id,campaign_id,investor_email,amount_offered,message,offer_status) VALUES($1,$2,$3,$4,$5,$6)', [c.tenant_id, c.id, req.session.user.email, amount_offered||0, message||'', 'pending']);
   // Notify the campaign organizer
   try {
     const orgUsers = (await pool.query('SELECT email FROM users WHERE tenant_id=$1 LIMIT 10', [c.tenant_id])).rows;
@@ -20533,6 +20544,29 @@ app.get('/investor/edit', requireAuth, requireFundraisingSubscription, ah(async 
         </div>
         <button type="submit" class="btn btn-green" style="width:100%;margin-top:20px">Save Changes</button>
       </form>
+    </div>
+  `, req.session.user));
+}));
+
+// Investor notifications
+app.get('/investor/notifications', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
+  const email = req.session.user.email;
+  let investor = (await pool.query('SELECT * FROM fundraising_investors WHERE user_email=$1', [email])).rows[0];
+  if (!investor) return res.redirect('/investor/register');
+  const notifications = (await pool.query("SELECT * FROM notifications WHERE user_email=$1 AND type='fundraising' ORDER BY created_at DESC LIMIT 50", [email])).rows;
+  res.send(renderPage('Investor Notifications', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+      <h1>Investor Notifications</h1>
+      <p>${esc(investor.full_name)} &bull; ${esc(investor.investor_type)}</p>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <a href="/investor/dashboard" class="btn btn-sm">Back to Dashboard</a>
+      <a href="/discover" class="btn btn-green btn-sm">Discover Campaigns</a>
+    </div>
+    <div class="card">
+      <h2>Notifications (${notifications.length})</h2>
+      ${notifications.length ? '<table><tr><th>Message</th><th>Date</th><th>Read</th></tr>'+
+        notifications.map(n=>'<tr><td>'+esc(n.message||n.title||'')+'</td><td>'+(n.created_at?new Date(n.created_at).toLocaleDateString():'')+'</td><td><a href="/notifications/'+n.id+'/read" class="btn btn-sm">Mark Read</a></td></tr>').join('')+'</table>' : '<p class="muted" style="text-align:center;padding:40px">No fundraising notifications yet. Create offers and you will be notified of updates!</p>'}
     </div>
   `, req.session.user));
 }));
