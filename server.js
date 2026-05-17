@@ -27287,6 +27287,16 @@ try {
   console.warn('[FundraisingPro] Failed to load fundraising pro:', e.message);
 }
 
+// === FUNDRAISING ULTIMATE (recurring donations, impact calculator, loyalty tiers, campaign grader, emergency mode, harambee, WhatsApp donate, mobile money auto-detect, funeral funds, AI story writer) ===
+['recurring_donations','impact_items','campaign_impact_goals','donor_loyalty_tiers','donor_loyalty_ledger','campaign_grades','emergency_campaigns','harambee_pools','harambee_contributions','harambee_distributions','whatsapp_donate_config','whatsapp_donate_sessions','mobile_money_providers','donation_payment_attempts','funeral_funds','funeral_contributions','ai_campaign_stories'].forEach(t => VALID_TABLES.add(t));
+try {
+  const fundraisingUltimate = require('./fundraising-ultimate');
+  fundraisingUltimate(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+  console.log('[FundraisingUltimate] Ultimate fundraising features loaded — 10 features, 60+ routes');
+} catch (e) {
+  console.warn('[FundraisingUltimate] Failed to load fundraising ultimate:', e.message);
+}
+
 // ============================================================
 // ROUND 3 FEATURES: Leave, Expenses, Visitors, Assets, Feedback, Notes, Announcements
 // ============================================================
