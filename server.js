@@ -1650,7 +1650,8 @@ const migrations = [
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('quotations', 'Quotations', 'Create and manage price quotations for customers', '3.0', 'business', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('deliveries', 'Deliveries', 'Track order dispatch and delivery status', '3.0', 'business', 'None', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('public_site', 'Public Website', 'Build a public-facing website with pages', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
-  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('fundraising', 'Fundraising', 'Launch campaigns and collect donations', '3.0', 'core', 'None', true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active, min_plan) VALUES ('fundraising', 'Fundraising', 'Launch campaigns and collect donations', '3.0', 'core', 'None', true, 'basic') ON CONFLICT DO NOTHING`,
+  `UPDATE feature_flags SET min_plan='basic' WHERE feature_key='fundraising'`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('entertainment_hub', 'Entertainment Hub', 'Videos, music, news and auto-scraped content', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`,
   `INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ('web_scraping', 'Web Scraping', 'Auto-import news and events from external sites', '3.0', 'core', 'z-ai-web-dev-sdk', true) ON CONFLICT DO NOTHING`,
   // ============ v12 BLOG & ADVERT ENHANCEMENTS ============
@@ -8885,24 +8886,33 @@ app.get('/library/download/:id', ah(async (req, res) => {
   res.status(200).send('OK');
 }));
 
-// === FUNDRAISING UPGRADE ===
+// === FUNDRAISING UPGRADE / SUBSCRIPTION REQUIRED ===
 app.get('/upgrade/fundraising', requireAuth, (req, res) => {
-  res.send(renderPage('Fundraising Module', `
+  res.send(renderPage('Subscribe to Use Fundraising', `
     <div class="card" style="max-width:600px;margin:40px auto;text-align:center">
-      <h1>Add Fundraising</h1>
-      <p>Enable donations, campaigns, and donor management for your organization.</p>
-      <p><b>Platform Fee: 5% per donation</b></p>
-      <form method="POST" action="/upgrade/fundraising/activate">
-        <button class="btn btn-gold" style="font-size:18px;padding:15px 30px">Activate Fundraising</button>
-      </form>
+      <div style="font-size:48px;margin-bottom:16px">💰</div>
+      <h1>Subscription Required</h1>
+      <p style="margin-bottom:8px">To <strong>create campaigns, accept donations, and manage investors</strong>, you need an active subscription.</p>
+      <p class="muted" style="margin-bottom:24px">Browsing and discovering campaigns is always free. Subscribe to unlock the full fundraising toolkit for your organization.</p>
+      <div style="display:grid;gap:14px;max-width:420px;margin:0 auto;text-align:left">
+        <div style="padding:16px;border:2px solid #f59e0b;border-radius:10px;text-align:center">
+          <strong style="font-size:18px">Basic Plan</strong><br><span class="muted">Create campaigns and accept donations</span><br>
+          <a href="/billing/subscribe/basic" class="btn btn-gold" style="margin-top:10px">Subscribe Now</a>
+        </div>
+        <div style="padding:16px;border:2px solid #4f46e5;border-radius:10px;text-align:center">
+          <strong style="font-size:18px">Pro Plan</strong><br><span class="muted">Everything in Basic + analytics + investor tools</span><br>
+          <a href="/billing/subscribe/pro" class="btn" style="margin-top:10px;background:#4f46e5;color:white">Subscribe Now</a>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:20px">Platform fee: <b>5% per donation</b> &bull; <a href="/discover">Browse campaigns for free</a></p>
     </div>
   `, req.session.user));
 });
 
-app.post('/upgrade/fundraising/activate', requireAuth, ah(async (req, res) => {
-  await pool.query('UPDATE tenants SET has_fundraising=true WHERE id=$1', [req.session.user.tenant_id]);
- res.redirect('/portal/organization');
-}));
+app.post('/upgrade/fundraising/activate', requireAuth, (req, res) => {
+  // Legacy endpoint - redirect to subscription page
+  res.redirect('/upgrade/fundraising');
+});
 
 // === AUTO-ENABLE FUNDRAISING FOR SUPER_ADMIN ===
 app.use(async (req, res, next) => {
@@ -19832,8 +19842,21 @@ app.get('/s/:slug', ah(async (req, res) => {
 
 // ============================================================
 // === FUNDRAISING / CROWDFUNDING / INVESTOR DISCOVERY ===
+// === VIEWING /discover and /p/fundraising is PUBLIC (no login) ===
+// === USING features REQUIRES subscription (super_admin bypasses all) ===
 // ============================================================
-app.get('/fundraising', requireAuth, requireNotBanned, ah(async (req, res) => {
+
+// Helper: require active subscription for fundraising actions (super_admin always passes)
+const requireFundraisingSubscription = async (req, res, next) => {
+  try {
+    if (req.session.user?.role === 'super_admin') return next();
+    const sub = (await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id])).rows[0];
+    if (!sub || sub.plan === 'free') return res.redirect('/upgrade/fundraising');
+    return next();
+  } catch(e) { return next(); }
+};
+
+app.get('/fundraising', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const campaigns = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=c.id) as donation_count, (SELECT COUNT(*) FROM investor_offers WHERE campaign_id=c.id AND offer_status IN (\'pending\',\'accepted\')) as offer_count FROM fundraising_campaigns c WHERE c.tenant_id=$1 ORDER BY c.created_at DESC', [t])).rows;
   const totalRaised = campaigns.reduce((a,c)=>a+parseInt(c.raised||0),0);
@@ -19899,7 +19922,7 @@ app.get('/fundraising', requireAuth, requireNotBanned, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/fundraising/new', requireAuth, requireNotBanned, (req, res) => {
+app.get('/fundraising/new', requireAuth, requireNotBanned, requireFundraisingSubscription, (req, res) => {
   res.send(renderPage('New Campaign', `
     <div class="card" style="max-width:750px;margin:40px auto">
       <h2>Create Fundraising Campaign</h2>
@@ -19948,7 +19971,7 @@ app.get('/fundraising/new', requireAuth, requireNotBanned, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/fundraising/save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { title, description, target, deadline, category, organizer, contact_phone, location, image_url, min_investment, urgency_level, tags, is_public, featured } = req.body;
   // Build investment tiers from form fields
@@ -19975,7 +19998,7 @@ app.post('/fundraising/save', requireAuth, requireNotBanned, ah(async (req, res)
   res.redirect('/fundraising');
 }));
 
-app.get('/fundraising/analytics', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/fundraising/analytics', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const [campaigns, donations, offers, investors] = await Promise.all([
     pool.query('SELECT id,title,raised::integer,target::integer,status,created_at FROM (SELECT c.id,c.title,c.target,c.status,c.created_at,(SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised FROM fundraising_campaigns c WHERE c.tenant_id=$1) sub', [t]),
@@ -20015,7 +20038,7 @@ app.get('/fundraising/analytics', requireAuth, requireNotBanned, ah(async (req, 
   `, req.session.user));
 }));
 
-app.get('/fundraising/investors', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/fundraising/investors', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const investors = (await pool.query('SELECT i.*, (SELECT COUNT(*) FROM investment_transactions WHERE investor_email=i.user_email AND campaign_id IN (SELECT id FROM fundraising_campaigns WHERE tenant_id=$1)) as transactions_with_us, (SELECT COALESCE(SUM(amount),0) FROM investment_transactions WHERE investor_email=i.user_email AND campaign_id IN (SELECT id FROM fundraising_campaigns WHERE tenant_id=$1)) as invested_with_us FROM fundraising_investors i ORDER BY i.total_invested DESC, i.created_at DESC', [t])).rows;
   res.send(renderPage('Investors', `
@@ -20040,7 +20063,7 @@ app.get('/fundraising/investors', requireAuth, requireNotBanned, ah(async (req, 
   `, req.session.user));
 }));
 
-app.get('/fundraising/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/fundraising/:id', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const c = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised, (SELECT COUNT(*) FROM campaign_donations WHERE campaign_id=c.id) as donation_count, (SELECT COUNT(*) FROM investor_offers WHERE campaign_id=c.id AND offer_status IN (\'pending\',\'accepted\')) as offer_count FROM fundraising_campaigns c WHERE c.id=$1 AND c.tenant_id=$2', [req.params.id, t])).rows[0];
   if (!c) return res.status(404).send('Not found');
@@ -20088,7 +20111,7 @@ app.get('/fundraising/:id', requireAuth, requireNotBanned, ah(async (req, res) =
 }));
 
 // Campaign update post
-app.get('/fundraising/:id/update', requireAuth, requireNotBanned, (req, res) => {
+app.get('/fundraising/:id/update', requireAuth, requireNotBanned, requireFundraisingSubscription, (req, res) => {
   res.send(renderPage('Post Update', `<div class="card" style="max-width:600px;margin:40px auto"><h2>Post Campaign Update</h2>
     <form method="POST" action="/fundraising/${req.params.id}/update-save">
       <input name="title" placeholder="Update title" required>
@@ -20098,14 +20121,14 @@ app.get('/fundraising/:id/update', requireAuth, requireNotBanned, (req, res) => 
     </form></div>`, req.session.user));
 });
 
-app.post('/fundraising/:id/update-save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/fundraising/:id/update-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const { title, content, update_type } = req.body;
   await pool.query('INSERT INTO campaign_updates(campaign_id,title,content,update_type,created_by) VALUES($1,$2,$3,$4,$5)', [req.params.id, title, content||'', update_type||'general', req.session.user.email]);
   res.redirect('/fundraising/'+req.params.id);
 }));
 
 // Campaign offer management
-app.get('/fundraising/:id/offers', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/fundraising/:id/offers', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!c) return res.status(404).send('Not found');
@@ -20151,7 +20174,7 @@ app.get('/fundraising/offers/:id/decline', requireAuth, requireNotBanned, ah(asy
   res.redirect('/fundraising/'+offer.campaign_id+'/offers');
 }));
 
-app.get('/fundraising/:id/donate', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/fundraising/:id/donate', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
   if (!c) return res.status(404).send('Not found');
   res.send(renderPage('Donate', `<div class="card" style="max-width:550px;margin:40px auto"><h2>Donate to: ${esc(c.title)}</h2>
@@ -20164,7 +20187,7 @@ app.get('/fundraising/:id/donate', requireAuth, requireNotBanned, ah(async (req,
     </form></div>`, req.session.user));
 }));
 
-app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   const { donor_name, amount, method, message } = req.body;
   await pool.query('INSERT INTO campaign_donations(campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5)', [req.params.id, donor_name||'Anonymous', amount||0, method||'cash', message||'']);
   // 5% platform fee
@@ -20176,12 +20199,12 @@ app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, ah(async
   res.redirect('/fundraising/'+req.params.id);
 }));
 
-app.get('/fundraising/:id/close', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/fundraising/:id/close', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   await pool.query('UPDATE fundraising_campaigns SET status=$1 WHERE id=$2 AND tenant_id=$3', ['completed', req.params.id, req.session.user.tenant_id]);
   res.redirect('/fundraising');
 }));
 
-app.get('/fundraising/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/fundraising/:id/delete', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
   await pool.query('DELETE FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   res.redirect('/fundraising');
 }));
@@ -20336,7 +20359,7 @@ app.get('/discover/:id', ah(async (req, res) => {
 }));
 
 // Public donate page
-app.get('/discover/:id/donate', requireAuth, ah(async (req, res) => {
+app.get('/discover/:id/donate', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
   res.send(renderPage('Donate: '+c.title, `
@@ -20353,7 +20376,7 @@ app.get('/discover/:id/donate', requireAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/discover/:id/donate-save', requireAuth, ah(async (req, res) => {
+app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
   const { donor_name, donor_email, amount, method, message } = req.body;
@@ -20367,7 +20390,7 @@ app.post('/discover/:id/donate-save', requireAuth, ah(async (req, res) => {
 }));
 
 // Investment offer from discover page
-app.get('/discover/:id/offer', requireAuth, ah(async (req, res) => {
+app.get('/discover/:id/offer', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
   const investor = (await pool.query('SELECT * FROM fundraising_investors WHERE user_email=$1', [req.session.user.email])).rows[0];
@@ -20395,7 +20418,7 @@ app.get('/discover/:id/offer', requireAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/discover/:id/offer-save', requireAuth, ah(async (req, res) => {
+app.post('/discover/:id/offer-save', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
   const { full_name, organization, phone, investor_type, amount_offered, message, interests } = req.body;
@@ -20419,7 +20442,7 @@ app.post('/discover/:id/offer-save', requireAuth, ah(async (req, res) => {
 // ============================================================
 // === INVESTOR DASHBOARD ===
 // ============================================================
-app.get('/investor/register', requireAuth, (req, res) => {
+app.get('/investor/register', requireAuth, requireFundraisingSubscription, (req, res) => {
   const existing = {}; // Will be filled if profile exists
   res.send(renderPage('Become an Investor', `
     <div class="card" style="max-width:650px;margin:40px auto">
@@ -20450,7 +20473,7 @@ app.get('/investor/register', requireAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/investor/register-save', requireAuth, ah(async (req, res) => {
+app.post('/investor/register-save', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const { full_name, organization, phone, website, investor_type, preferred_currency, bio, preferred_categories, min_investment, max_investment, notif_email, notif_inapp } = req.body;
   const cats = preferred_categories ? preferred_categories.split(',').map(s=>s.trim()).filter(Boolean) : [];
   const notifPrefs = JSON.stringify({ email: !!notif_email, in_app: !!notif_inapp, sms: false });
@@ -20461,7 +20484,7 @@ app.post('/investor/register-save', requireAuth, ah(async (req, res) => {
   res.redirect('/investor/dashboard');
 }));
 
-app.get('/investor/dashboard', requireAuth, ah(async (req, res) => {
+app.get('/investor/dashboard', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const email = req.session.user.email;
   let investor = (await pool.query('SELECT * FROM fundraising_investors WHERE user_email=$1', [email])).rows[0];
   if (!investor) return res.redirect('/investor/register');
@@ -20501,7 +20524,7 @@ app.get('/investor/dashboard', requireAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/investor/edit', requireAuth, ah(async (req, res) => {
+app.get('/investor/edit', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const investor = (await pool.query('SELECT * FROM fundraising_investors WHERE user_email=$1', [req.session.user.email])).rows[0];
   if (!investor) return res.redirect('/investor/register');
   res.send(renderPage('Edit Investor Profile', `
