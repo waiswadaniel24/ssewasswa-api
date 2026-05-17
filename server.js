@@ -27329,6 +27329,66 @@ try {
   console.warn('[FundraisingMega2] Failed to load fundraising mega2:', e.message);
 }
 
+// === FUNDRAISING ULTIMATE2 (Donor Journey, Capacity Scoring, Major Gift Pipeline, Prospect Research, Moves Management, Stewardship Plans, Donor Surveys, Churn Predictor, Smart Recommendations, Comm Prefs, Relationship Mapping, Next Best Action, Donor LTV, Re-engagement, Annual Giving Predictor) ===
+['donor_journeys','donor_capacity_scores','major_gift_pipeline','major_gift_activities','prospect_research','moves_management','stewardship_plans','stewardship_actions','donor_surveys','donor_survey_responses','donor_churn_scores','donor_recommendations','donor_comm_prefs','donor_relationships','donor_next_actions','donor_ltv','reengagement_campaigns','reengagement_logs','annual_giving_forecasts'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate2 = require('./fundraising-ultimate2');
+    fundraisingUltimate2(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate2] Donor Intelligence & CRM Pro loaded — 15 features, 80+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate2] Failed to load:', e.message);
+  }
+}, 3000);
+
+// === FUNDRAISING ULTIMATE3 (A/B Testing, Smart Scheduling, Co-Creation, Bundle Packs, Health Monitor, Calendar Planner, Goal Recommender, Storyboard Builder, Form Builder, Success Blueprint, Thank You Engine, Micro Round-Ups, Donation Scheduler, Seasonality Adjuster, Amount Suggestions) ===
+['campaign_ab_tests3','campaign_schedules','scheduling_insights','campaign_co_creators','campaign_edit_history','campaign_bundles','campaign_bundle_items','campaign_health_scores','fundraising_calendar','goal_recommendations','campaign_storyboards','storyboard_sections','donation_forms','donation_form_submissions','campaign_blueprints','thank_you_templates','thank_you_log','micro_roundup_settings','micro_roundup_transactions','scheduled_donations','seasonality_profiles','amount_suggestions','amount_suggestion_settings'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate3 = require('./fundraising-ultimate3');
+    fundraisingUltimate3(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate3] Campaign Optimization & Smart Tools loaded — 15 features, 80+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate3] Failed to load:', e.message);
+  }
+}, 5000);
+
+// === FUNDRAISING ULTIMATE4 (Fund Allocation, Budget Tracking, Reconciliation, Grant Management, Endowment, Multi-Currency Wallet, Receipt Batches, Donation Splits, Fund Categories, Anonymity Manager, Payment Router, Financial Dashboard Pro, Compliance Vault, Audit Trail Pro, Fund Balance Calculator) ===
+['fund_allocations','fund_allocation_entries','fundraising_budgets','budget_line_items','reconciliation_batches','reconciliation_items','grants','grant_reports','endowments','endowment_transactions','currency_wallets','currency_transactions','receipt_batches','receipt_batch_items','donation_splits','donation_split_items','fund_categories','fund_category_assignments','donation_anonymity_settings','anonymous_donations','payment_routing_rules','payment_routing_log','financial_dashboard_config','financial_snapshots','compliance_docs','compliance_reminders','enhanced_audit_trail','audit_reports','fund_balances'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate4 = require('./fundraising-ultimate4');
+    fundraisingUltimate4(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate4] Financial, Compliance & Legal Suite loaded — 15 features, 75+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate4] Failed to load:', e.message);
+  }
+}, 7000);
+
+// === FUNDRAISING ULTIMATE5 (Community Hub, Forums Pro, Mentorship, Peer Groups, Regional Chapters, Alumni Network, CSR Portal, Ambassador Pro, Referral Pro, Impact Stories, Volunteer Time, Giving Circles, Community Events, Donor Wall Pro, Recognition Awards) ===
+['community_hub_posts','community_hub_reactions','forum_categories_pro','forum_threads_pro','forum_replies_pro','mentorship_programs','mentorship_pairs','mentorship_sessions','peer_groups','peer_group_members','peer_group_events','regional_chapters','chapter_members','chapter_activities','alumni_networks','alumni_members','alumni_events','csr_portals','csr_projects','csr_reports','ambassadors_pro','ambassador_activities','ambassador_rewards','referral_tiers_pro','referral_tracking_pro','impact_stories','impact_story_reactions','volunteer_profiles','volunteer_time_logs','giving_circles','giving_circle_members','giving_circle_nominations','giving_circle_votes','community_events_pro','community_event_registrations','donor_wall_config_pro','donor_wall_entries_pro','recognition_awards','recognition_recipients'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate5 = require('./fundraising-ultimate5');
+    fundraisingUltimate5(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate5] Community, Social & Engagement Pro loaded — 15 features, 80+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate5] Failed to load:', e.message);
+  }
+}, 9000);
+
+// === FUNDRAISING ULTIMATE6 (Integration Hub, CRM Sync, Email Marketing, Accounting Sync, Webhook Manager, API Gateway, Data Import/Export, White Label Pro, Multi-Language, Custom Domains, SSO/OAuth, Donor 2FA, Privacy & Consent, Data Retention, Plugin Marketplace) ===
+['integration_configs','integration_sync_log','crm_sync_configs','crm_sync_queue','email_marketing_configs','email_campaign_sync','accounting_sync_configs','accounting_sync_records','webhook_endpoints_pro','webhook_deliveries','api_gateway_keys_pro','api_gateway_logs','api_rate_limits_pro','data_import_jobs','data_export_jobs','import_error_rows','whitelabel_pro_config','language_configs','translations','custom_domains','sso_configs','sso_sessions','donor_2fa_configs','donor_2fa_attempts','privacy_consent_records','privacy_settings','data_retention_policies','data_retention_log','platform_plugins','plugin_marketplace'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => {
+  try {
+    const fundraisingUltimate6 = require('./fundraising-ultimate6');
+    fundraisingUltimate6(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+    console.log('[FundraisingUltimate6] Integration, Automation & Platform Pro loaded — 15 features, 80+ routes');
+  } catch (e) {
+    console.warn('[FundraisingUltimate6] Failed to load:', e.message);
+  }
+}, 11000);
+
 // ============================================================
 // ROUND 3 FEATURES: Leave, Expenses, Visitors, Assets, Feedback, Notes, Announcements
 // ============================================================
