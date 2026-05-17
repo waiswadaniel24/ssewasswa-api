@@ -1074,6 +1074,19 @@ const migrations = [
   // v11.0 - Customer debts
   `ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)`,
   `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)`,
+  // v12.0 - invoices items column (JSONB for line items)
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'`,
+  // v12.0 - patient_queue completed_at column (for clinic reports avg wait time)
+  `ALTER TABLE patient_queue ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`,
+  // v12.0 - invoices invoice_number and payer columns
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_number TEXT`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payer_name TEXT`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payer_email TEXT`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax INTEGER DEFAULT 0`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_date DATE`,
+  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'`,
   // v11.0 - Purchase orders
   `CREATE TABLE IF NOT EXISTS purchase_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, po_no TEXT, supplier TEXT, items JSONB, total INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Tax reports
@@ -6411,7 +6424,7 @@ app.post('/sickbay/save', requireAuth, requireNotBanned, ah(async (req, res) => 
   const t = req.session.user.tenant_id;
   const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, action, notes } = req.body;
   const complaintText = complaint + (action && action !== 'none' ? ` [Action: ${action}]` : '');
-  await pool.query('INSERT INTO sickbay_visits(tenant_id,patient_name,visit_type,seen_by,visit_date,complaint,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaintText, treatment||null, notes||null]);
+  await pool.query('INSERT INTO sickbay_visits(tenant_id,patient_name,visit_type,seen_by,visit_date,complaint,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_name, visit_type||'first_aid', seen_by||null, visit_date||new Date().toISOString().split('T')[0], complaintText, treatment||null, notes||null]);
   await audit(req.session.user.email, 'sickbay_visit', `${patient_name}: ${visit_type||'first_aid'}`);
   res.redirect('/sickbay');
 }));
@@ -6443,7 +6456,7 @@ app.get('/sickbay/visits/:id/edit', requireAuth, requireNotBanned, ah(async (req
 app.post('/sickbay/visits/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, status, notes } = req.body;
-  await pool.query('UPDATE sickbay_visits SET patient_name=$1,visit_type=$2,seen_by=$3,visit_date=$4,complaint=$5,treatment=$6,status=$7,notes=$8 WHERE tenant_id=$9 AND id=$10', [patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaint, treatment||null, status||'active', notes||null, t, req.params.id]);
+  await pool.query('UPDATE sickbay_visits SET patient_name=$1,visit_type=$2,seen_by=$3,visit_date=$4,complaint=$5,treatment=$6,status=$7,notes=$8 WHERE tenant_id=$9 AND id=$10', [patient_name, visit_type||'first_aid', seen_by||null, visit_date||new Date().toISOString().split('T')[0], complaint, treatment||null, status||'active', notes||null, t, req.params.id]);
   res.redirect('/sickbay');
 }));
 
@@ -14871,7 +14884,7 @@ app.get('/school/health', requireAuth, requireNotBanned, requireFeature('health_
   `, req.session.user));
 }));
 
-app.get('/school/health/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/school/health/new', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
   res.send(renderPage('Add Health Profile', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Student Health Profile</h2>
@@ -14887,13 +14900,13 @@ app.get('/school/health/new', requireAuth, requireNotBanned, ah(async (req, res)
   `, req.session.user));
 }));
 
-app.post('/school/health/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/school/health/save', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO student_health(tenant_id,student_id,blood_group,allergies,conditions,emergency_contact,emergency_phone,last_checkup,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (student_id) DO UPDATE SET blood_group=$3,allergies=$4,conditions=$5,emergency_contact=$6,emergency_phone=$7,last_checkup=$8,notes=$9', [t, req.body.student_id, req.body.blood_group, req.body.allergies, req.body.conditions, req.body.emergency_contact, req.body.emergency_phone, req.body.last_checkup||null, req.body.notes]);
   res.redirect('/school/health');
 }));
 
-app.get('/school/health/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/school/health/:id/edit', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const rec = (await pool.query('SELECT sh.*,s.name as student_name FROM student_health sh JOIN students s ON s.id=sh.student_id WHERE sh.student_id=$1 AND sh.tenant_id=$2', [req.params.id, t])).rows[0];
   if (!rec) return res.status(404).send('Not found');
@@ -14910,7 +14923,7 @@ app.get('/school/health/:id/edit', requireAuth, requireNotBanned, ah(async (req,
   `, req.session.user));
 }));
 
-app.get('/school/health/visit/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/school/health/visit/new', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
   res.send(renderPage('Clinic Visit', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Record Clinic Visit</h2>
@@ -14925,9 +14938,9 @@ app.get('/school/health/visit/new', requireAuth, requireNotBanned, ah(async (req
   `, req.session.user));
 }));
 
-app.post('/school/health/visit/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/school/health/visit/save', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.visit_date||'CURRENT_DATE', req.body.complaint, req.body.diagnosis, req.body.treatment, req.body.seen_by]);
+  await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.visit_date||new Date().toISOString().split('T')[0], req.body.complaint, req.body.diagnosis, req.body.treatment, req.body.seen_by]);
   res.redirect('/school/health');
 }));
 
@@ -17277,7 +17290,7 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
     const interactions = [];
     for (let a = 0; a < medNames.length; a++) {
       for (let b = a + 1; b < medNames.length; b++) {
-        const check = (await pool.query("SELECT * FROM drug_interactions WHERE ((LOWER(drug_a)=$1 AND LOWER(drug_b)=$2) OR (LOWER(drug_a)=$2 AND LOWER(drug_b)=$1)) AND (tenant_id=$3 OR tenant_id IS NULL)", [medNames[a], medNames[b], t])).rows;
+        const check = (await pool.query("SELECT * FROM drug_interactions WHERE (LOWER(drug_a)=$1 AND LOWER(drug_b)=$2) OR (LOWER(drug_a)=$2 AND LOWER(drug_b)=$1)", [medNames[a], medNames[b]])).rows;
         if (check.length > 0) {
           interactions.push(...check);
         }
@@ -17308,7 +17321,7 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
       // Still allow but flag
       const allergyNote = 'ALLERGY ALERT: Patient may be allergic to: ' + matchedAllergies.join(', ');
       const existingNotes = notes || '';
-      const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, allergyNote + (existingNotes ? ' | ' + existingNotes : '')]);
+      const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, allergyNote + (existingNotes ? ' | ' + existingNotes : ''), 'pending']);
       const rxId = rx.rows[0].id;
       i = 1;
       while (req.body[`medicine_${i}`]) {
@@ -17412,14 +17425,15 @@ app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanne
     if (stock && stock.expiry_date && new Date(stock.expiry_date) < new Date()) {
       return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Drug Expired</h2><p><strong>${esc(item.medicine_name)}</strong> expired on ${new Date(stock.expiry_date).toLocaleDateString()}</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
     }
-    await pool.query('UPDATE prescription_items SET status=$1,dispensed_by=$2,dispensed_at=NOW() WHERE id=$3', ['dispensed', pharmacist_id, item.id]);
-    // Decrement pharmacy inventory stock
+    // Decrement pharmacy inventory stock FIRST (atomic)
     if (stock) {
       const result = (await pool.query('UPDATE pharmacy_inventory SET quantity = quantity - $1 WHERE medicine_name=$2 AND tenant_id=$3 AND quantity >= $1 RETURNING quantity', [qty, item.medicine_name, t])).rows[0];
       if (!result) {
         return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Stock Update Failed</h2><p>Insufficient <strong>${esc(item.medicine_name)}</strong> (concurrent update). Please try again.</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
       }
     }
+    // THEN mark as dispensed
+    await pool.query('UPDATE prescription_items SET status=$1,dispensed_by=$2,dispensed_at=NOW() WHERE id=$3', ['dispensed', pharmacist_id, item.id]);
     await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, rx.patient_name, item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
   }
   await pool.query("UPDATE prescriptions SET status='dispensed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
@@ -19645,8 +19659,8 @@ const publicBookingLimiter = rateLimit({
 
 // GET /clinic/book/:tenant_subdomain — Public appointment booking
 app.get('/clinic/book/:tenant_subdomain', publicBookingLimiter, ah(async (req, res) => {
-  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
-  if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic does not exist.</p></div>', null));
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.tenant_subdomain])).rows[0];
+  if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic does not exist or is not yet approved.</p></div>', null));
   const doctors = (await pool.query("SELECT name FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [tenant.id])).rows;
   const today = new Date().toISOString().split('T')[0];
   const success = req.query.success === '1';
@@ -19687,7 +19701,7 @@ app.get('/clinic/book/:tenant_subdomain', publicBookingLimiter, ah(async (req, r
 
 // POST /clinic/book/:tenant_subdomain/save — Save public appointment
 app.post('/clinic/book/:tenant_subdomain/save', publicBookingLimiter, ah(async (req, res) => {
-  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.tenant_subdomain])).rows[0];
   if (!tenant) return res.status(404).send('Clinic not found');
   const { patient_name, phone, appointment_date, appointment_time, doctor_name, reason } = req.body;
   if (!patient_name || !phone || !appointment_date || !appointment_time || !reason) {
@@ -31807,7 +31821,7 @@ app.post('/branches/select', requireAuth, requireNotBanned, ah(async (req, res) 
 // ============================================================
 // FEATURE 5: ENHANCED CLINIC PORTAL
 // ============================================================
-app.get('/clinic-enhanced', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patientCount = (await pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tid])).rows[0].count;
   const todayAppts = (await pool.query("SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=CURRENT_DATE", [tid])).rows[0].count;
@@ -31833,7 +31847,7 @@ app.get('/clinic-enhanced', requireAuth, requireNotBanned, ah(async (req, res) =
   res.send(renderPage('Clinic Dashboard', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const search = req.query.search || '';
   const rows = search
@@ -31863,7 +31877,7 @@ app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, ah(async (re
   res.send(renderPage('Patients', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>Register New Patient</h1>
   </div>
@@ -31901,7 +31915,7 @@ app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, ah(async
   res.send(renderPage('Register Patient', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, full_name, date_of_birth, gender, phone, address, blood_type, allergies, emergency_contact, emergency_phone, insurance_provider, insurance_number } = req.body;
   const pid = patient_id || 'PT-' + Date.now().toString(36).toUpperCase();
@@ -31913,7 +31927,7 @@ app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, ah(asy
   res.redirect('/clinic-enhanced/patients');
 }));
 
-app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT * FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
@@ -31953,7 +31967,7 @@ app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, ah(async
   res.send(renderPage('Patient: ' + patient.full_name, html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const rows = (await pool.query(`
     SELECT a.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -31977,7 +31991,7 @@ app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, ah(async
   res.send(renderPage('Appointments', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patients = (await pool.query('SELECT id, full_name, patient_id FROM clinic_patients WHERE tenant_id=$1 ORDER BY full_name LIMIT 200', [tid])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
@@ -32004,7 +32018,7 @@ app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, ah(a
   res.send(renderPage('Book Appointment', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, appointment_date, appointment_time, doctor_name, department, reason } = req.body;
   await pool.query(
@@ -32015,7 +32029,7 @@ app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, ah
   res.redirect('/clinic-enhanced/appointments');
 }));
 
-app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const queue = (await pool.query(`
     SELECT a.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -32049,7 +32063,7 @@ app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, ah(async (req, 
   res.send(renderPage('Clinic Queue', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   for (const [key, value] of Object.entries(req.body)) {
     if (key.startsWith('status_')) {
@@ -32060,7 +32074,7 @@ app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, ah(asyn
   res.redirect('/clinic-enhanced/queue');
 }));
 
-app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT id, full_name, patient_id FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.patientId, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
@@ -32087,7 +32101,7 @@ app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNot
   res.send(renderPage('New Consultation', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, appointment_id, doctor_name, chief_complaint, history, examination, diagnosis, weight, temperature, blood_pressure, notes } = req.body;
   await pool.query(
@@ -32099,7 +32113,7 @@ app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, a
   res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
 
-app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const rows = (await pool.query(`
     SELECT pr.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -32118,7 +32132,7 @@ app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, ah(asyn
   res.send(renderPage('Prescriptions', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { consultation_id, patient_id, prescribed_by, notes } = req.body;
   const result = await pool.query(
@@ -32140,7 +32154,7 @@ app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, a
   res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
 
-app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const totalPatients = (await pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tid])).rows[0].count;
   const totalAppts = (await pool.query('SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1', [tid])).rows[0].count;
@@ -33354,49 +33368,11 @@ try {
 
 // ============================================================
 // === 1. CLINIC QUEUE, PRESCRIPTIONS, SICK BAY ===
+// NOTE: GET /clinic/queue and GET /clinic/prescriptions are defined earlier (patient_queue table
+// and prescriptions table). The POST/action routes below use clinic_queue and clinic_prescriptions.
 // ============================================================
-app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [waiting, inConsult, completed, todayStats] = await Promise.all([
-    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='waiting' ORDER BY token_number, priority DESC, created_at", [t]),
-    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='in-consultation' ORDER BY started_at", [t]),
-    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='completed' AND completed_at::date=CURRENT_DATE ORDER BY completed_at DESC", [t]),
-    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='completed') as seen, AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60) as avg_wait FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])
-  ]);
-  const s = todayStats.rows[0] || {};
-  res.send(renderPage('Patient Queue', `
-    <div class="hero" style="background:linear-gradient(135deg,#ef4444,#f97316)"><h1>Patient Queue</h1><p>Manage patient flow efficiently</p></div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${waiting.rows.length}</div><div>Waiting</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${inConsult.rows.length}</div><div>In Consultation</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#10b981">${s.seen||0}</div><div>Seen Today</div></div>
-      <div class="stat-card"><div class="stat-num">${Math.round(s.avg_wait||0)}m</div><div>Avg Wait</div></div>
-    </div>
-    <div style="display:flex;gap:12px;margin-bottom:20px">
-      <a href="/clinic/queue" class="btn btn-green">Queue</a>
-      <a href="/clinic/prescriptions" class="btn">Prescriptions</a>
-      <a href="/clinic/sick-bay" class="btn">Sick Bay</a>
-    </div>
-    <div class="card"><h3>Waiting Patients (${waiting.rows.length})</h3>
-      <table><tr><th>Token</th><th>Patient</th><th>Complaint</th><th>Priority</th><th>Wait</th><th>Action</th></tr>
-      ${waiting.rows.map(p => {
-        const waitMin = Math.round((Date.now() - new Date(p.created_at).getTime()) / 60000);
-        return `<tr><td><span style="background:#f59e0b;color:white;padding:4px 10px;border-radius:6px;font-weight:700">#${p.token_number}</span></td><td><strong>${esc(p.patient_name)}</strong></td><td>${esc(p.complaint||'')}</td><td><span class="tag" style="background:${p.priority==='urgent'?'#fee2e2;color:#991b1b':'#f0f0f0'}">${esc(p.priority)}</span></td><td>${waitMin}m</td><td><form method="POST" action="/clinic/queue/${p.id}/call" style="display:inline"><button class="btn btn-sm" style="background:#3b82f6;color:white">Call</button></form></td></tr>`;
-      }).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px" class="muted">No patients waiting</td></tr>'}
-      </table>
-    </div>
-    ${inConsult.rows.length > 0 ? '<div class="card" style="margin-top:16px"><h3>In Consultation</h3><table><tr><th>Token</th><th>Patient</th><th>Doctor</th><th>Started</th><th>Action</th></tr>'+inConsult.rows.map(p=>'<tr><td>#'+p.token_number+'</td><td>'+esc(p.patient_name)+'</td><td class="muted">'+esc(p.doctor_id||'')+'</td><td>'+(p.started_at?new Date(p.started_at).toLocaleTimeString():'')+'</td><td><form method="POST" action="/clinic/queue/'+p.id+'/complete" style="display:inline"><button class="btn btn-sm btn-green">Complete</button></form></td></tr>').join('')+'</table></div>' : ''}
-    <div class="card" style="margin-top:16px"><h3>Check In Patient</h3>
-      <form method="POST" action="/clinic/queue/checkin" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end">
-        <div><label>Patient Name *</label><input name="patient_name" required></div>
-        <div><label>Complaint</label><input name="complaint" placeholder="Chief complaint"></div>
-        <div><label>Priority</label><select name="priority"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="emergency">Emergency</option></select></div>
-        <div><button class="btn btn-green" style="width:100%">Check In</button></div>
-      </form>
-    </div>
-  `, req.session.user));
-}));
 
+// POST /clinic/queue/checkin — Add patient to clinic_queue
 app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { patient_name, complaint, priority } = req.body;
@@ -33406,30 +33382,22 @@ app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, requireFeature(
   res.redirect('/clinic/queue');
 }));
 
+// POST /clinic/queue/:id/call — Call next patient from clinic_queue
 app.post('/clinic/queue/:id/call', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query("UPDATE clinic_queue SET status='in-consultation',started_at=NOW(),doctor_id=$1 WHERE id=$2 AND tenant_id=$3", [req.session.user.name||'', req.params.id, t]);
   res.redirect('/clinic/queue');
 }));
 
+// POST /clinic/queue/:id/complete — Complete consultation in clinic_queue
 app.post('/clinic/queue/:id/complete', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query("UPDATE clinic_queue SET status='completed',completed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
   res.redirect('/clinic/queue');
 }));
 
-// Prescriptions
-app.get('/clinic/prescriptions', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const rx = (await pool.query("SELECT * FROM clinic_prescriptions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
-  res.send(renderPage('Prescriptions', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Prescriptions</h1></div>
-    <div style="margin-bottom:16px"><a href="/clinic/prescriptions/new" class="btn btn-green">+ New Prescription</a> <a href="/clinic/queue" class="btn">Back to Queue</a></div>
-    <div class="card"><table><tr><th>Date</th><th>Patient</th><th>Diagnosis</th><th>By</th></tr>
-      ${rx.map(r=>'<tr><td>'+(r.created_at?new Date(r.created_at).toLocaleDateString():'')+'</td><td><strong>'+esc(r.patient_name)+'</strong></td><td>'+esc(r.diagnosis||'')+'</td><td class="muted">'+esc(r.prescribed_by||'')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">No prescriptions yet</td></tr>'}
-    </table></div>
-  `, req.session.user));
-}));
+// NOTE: GET /clinic/prescriptions is defined earlier (prescriptions table).
+// The routes below use clinic_prescriptions table.
 
 app.get('/clinic/prescriptions/new', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), (req, res) => {
   res.send(renderPage('New Prescription', `
@@ -34590,9 +34558,6 @@ app.get('/clinic/prescriptions/refill-requests', requireAuth, requireNotBanned, 
     await pool.query('CREATE INDEX IF NOT EXISTS idx_rx_refills_tenant ON prescription_refills(tenant_id)');
   } catch(e) { console.warn('[v12] prescription_refills:', e.message); }
 })();
-
-// Update patient portal refill endpoint to store request
-const origRefillHandler = null; // Will be intercepted below
 
 app.post('/clinic/prescriptions/refill/:id/approve', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;

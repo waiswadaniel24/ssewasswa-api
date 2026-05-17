@@ -96,6 +96,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
     // Drop legacy plan_key column if it exists from older schema
     `ALTER TABLE subscription_plans DROP COLUMN IF EXISTS plan_key`,
     // Seed external links
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_external_links_url ON external_links(url)`,
     `INSERT INTO external_links (title, url, category, description, sort_order) VALUES
       ('New Vision', 'https://www.newvision.co.ug', 'news', 'Uganda''s leading newspaper', 1),
       ('Daily Monitor', 'https://www.monitor.co.ug', 'news', 'Uganda''s independent newspaper', 2),
@@ -114,7 +115,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ('Ministry of Health Uganda', 'https://www.health.go.ug', 'health', 'Uganda Ministry of Health', 15),
       ('WHO Uganda', 'https://www.who.int/countries/uga', 'health', 'World Health Organization Uganda', 16),
       ('Uganda Medical Association', 'https://www.uma.co.ug', 'health', 'Uganda Medical Association', 17)
-    ON CONFLICT DO NOTHING`,
+    ON CONFLICT (url) DO NOTHING`,
     // Add public_url column to campaigns if missing
     `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS public_url TEXT`,
     `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS image_url TEXT`,
@@ -3219,8 +3220,8 @@ async function syncOfflineData() {
       categories[l.category].push(l);
     });
 
-    const catIcons = { news: '&#128240;', government: '&#127963;', education: '&#127891;', entertainment: '&#127925;', events: '&#127881;', religion: '&#9938;', general: '&#127760;' };
-    const catColors = { news: '#0891b2', government: '#4f46e5', education: '#059669', entertainment: '#7c3aed', events: '#d97706', religion: '#a855f7', general: '#64748b' };
+    const catIcons = { news: '&#128240;', government: '&#127963;', education: '&#127891;', entertainment: '&#127925;', events: '&#127881;', religion: '&#9938;', health: '&#127973;', general: '&#127760;' };
+    const catColors = { news: '#1a56db', government: '#7c3aed', education: '#059669', entertainment: '#dc2626', events: '#ea580c', religion: '#0d9488', health: '#0891b2', general: '#64748b' };
 
     const sections = Object.entries(categories).map(([cat, items]) => `
       <div style="margin-bottom:32px">
