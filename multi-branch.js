@@ -623,11 +623,11 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
           notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE TABLE IF NOT EXISTS branch_kpis (
-          id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+          id SERIAL, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
           branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
           period VARCHAR(20) NOT NULL DEFAULT 'monthly', period_date DATE NOT NULL,
           metrics JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ DEFAULT NOW(),
-          CONSTRAINT branch_kpis_pkey PRIMARY KEY (tenant_id, branch_id, period, period_date)
+          PRIMARY KEY (tenant_id, branch_id, period, period_date)
         );
         CREATE TABLE IF NOT EXISTS branch_holidays (
           id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

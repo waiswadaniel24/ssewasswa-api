@@ -796,8 +796,8 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     const tid = req.tenant.id, months = parseInt(req.query.months) || 12;
     const rows = await pool.query(
       `SELECT TO_CHAR(di.created_at, 'YYYY-MM') AS month, di.severity, COUNT(*)::int AS count
-       FROM discipline_incidents di WHERE di.tenant_id=$1 AND di.created_at >= CURRENT_DATE - ($2 || ' months')::interval
-       GROUP BY TO_CHAR(di.created_at, 'YYYY-MM'), di.severity ORDER BY month, severity`, [tid, months]);
+       FROM discipline_incidents di WHERE di.tenant_id=$1 AND di.created_at >= CURRENT_DATE - $2::interval
+       GROUP BY TO_CHAR(di.created_at, 'YYYY-MM'), di.severity ORDER BY month, severity`, [tid, months + ' months']);
     ok(res, { months_period: months, data: rows.rows });
   }));
 

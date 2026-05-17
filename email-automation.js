@@ -1,3 +1,6 @@
+// Pool reference: available via global._scopeBridge during loadSelfExec
+const _ea_pool = (typeof pool !== 'undefined') ? pool : (typeof global.pool !== 'undefined') ? global.pool : null;
+
 // ============================================================
 // === EMAIL AUTOMATION ENGINE ===
 // ============================================================
@@ -192,8 +195,10 @@ const EMAIL_TEMPLATES = {
 // ============================================================
 
 async function queueEmail(toEmail, subject, htmlBody, type, delayHours) {
+  const _p = (typeof pool !== 'undefined') ? pool : (typeof global.pool !== 'undefined') ? global.pool : null;
+  if (!_p) return;
   const scheduledAt = delayHours ? new Date(Date.now() + delayHours * 3600000).toISOString() : new Date().toISOString();
-  await pool.query(
+  await _p.query(
     `INSERT INTO email_queue (to_email, subject, html_body, email_type, scheduled_at) VALUES ($1, $2, $3, $4, $5)`,
     [toEmail, subject, htmlBody, type || 'transactional', scheduledAt]
   );
@@ -320,8 +325,10 @@ app.get('/unsubscribe', ah(async (req, res) => {
 
 // Seed email templates
 async function seedEmailTemplates() {
+  if (typeof pool === 'undefined' && typeof global.pool === 'undefined') { console.warn('[EmailAuto] Pool not available, skipping seed'); return; }
+  const _p = pool || global.pool;
   for (const [key, tmpl] of Object.entries(EMAIL_TEMPLATES)) {
-    await pool.query(
+    await _p.query(
       `INSERT INTO email_templates (template_name, subject, html_template, category) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
       [tmpl.name, tmpl.subject, tmpl.html, tmpl.category]
     ).catch(() => {});

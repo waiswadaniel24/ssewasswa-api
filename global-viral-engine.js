@@ -1,3 +1,6 @@
+// Pool reference: available via global._scopeBridge during loadSelfExec
+const _gv_pool = (typeof pool !== 'undefined') ? pool : (typeof global.pool !== 'undefined') ? global.pool : null;
+
 // ============================================================
 // === GLOBAL VIRAL ENGINE — Make Comfort Zone Go Worldwide ===
 // ============================================================

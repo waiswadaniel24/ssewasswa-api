@@ -33275,6 +33275,7 @@ function loadSelfExec(modName, label) {
 
 // Load order matters: monetization defines trackRevenue/creditDeveloperRevenue,
 // viral-content defines awardPoints — others depend on these.
+// Stagger loading with delays to prevent DB pool exhaustion on free plan
 
 // 1. MONETIZATION ENGINE (defines trackRevenue, creditDeveloperRevenue)
 loadSelfExec('monetization-engine', 'Monetization');
@@ -33286,49 +33287,52 @@ loadSelfExec('viral-content-engine', 'ViralEngine');
 loadSelfExec('features-block', 'FeaturesBlock');
 
 // 4. VIRAL GROWTH BOOSTER (depends on trackRevenue)
-loadSelfExec('viral-growth-booster', 'ViralGrowth');
+setTimeout(() => loadSelfExec('viral-growth-booster', 'ViralGrowth'), 1000);
 
 // 5. ENGAGEMENT ENGINE (depends on awardPoints, trackRevenue)
-loadSelfExec('engagement-engine', 'Engagement');
+setTimeout(() => loadSelfExec('engagement-engine', 'Engagement'), 2000);
 
 // 6. SEO TRAFFIC ENGINE
-loadSelfExec('seo-traffic-engine', 'SEO');
+setTimeout(() => loadSelfExec('seo-traffic-engine', 'SEO'), 3000);
 
 // 7. ANALYTICS INTELLIGENCE
-loadSelfExec('analytics-engine', 'Analytics');
+setTimeout(() => loadSelfExec('analytics-engine', 'Analytics'), 4000);
 
 // 8. EMAIL AUTOMATION (depends on trackRevenue)
-loadSelfExec('email-automation', 'EmailAuto');
+setTimeout(() => loadSelfExec('email-automation', 'EmailAuto'), 5000);
 
 // 9. REVENUE QUICKSTART (depends on requestMtnPayment)
-loadSelfExec('revenue-quickstart', 'Revenue');
+setTimeout(() => loadSelfExec('revenue-quickstart', 'Revenue'), 5500);
 
 // 10. GLOBAL VIRAL ENGINE (search, chat, QR, link shortener, contests, gallery, embeddable widgets, badges, translate)
-loadSelfExec('global-viral-engine', 'GlobalViral');
+setTimeout(() => loadSelfExec('global-viral-engine', 'GlobalViral'), 6000);
 
 // 11. GLOBAL EXPANSION ENGINE (i18n, multi-currency, timezone, OTP, social login, payment gateways, global API)
-loadSelfExec('global-expansion-engine', 'GlobalExpansion');
+setTimeout(() => loadSelfExec('global-expansion-engine', 'GlobalExpansion'), 7000);
 
 // 12. VIRAL LOOP ENGINE (referral dashboard, reward tracking, social share OG images, push delivery, widgets, invite links, waitlist, badges, digest)
-loadSelfExec('viral-loop-engine', 'ViralLoop');
+setTimeout(() => loadSelfExec('viral-loop-engine', 'ViralLoop'), 8000);
 
 // 13. REAL-TIME ENGINE (SSE notifications, live activity feed, presence, typing, collaboration, stats, event bus)
-loadSelfExec('realtime-engine', 'RealTime');
+setTimeout(() => loadSelfExec('realtime-engine', 'RealTime'), 9000);
 
 // 14. MEDIA ENGINE (video hosting, podcast with RSS, live streaming with chat, media hub)
-loadSelfExec('media-engine', 'MediaEngine');
+setTimeout(() => loadSelfExec('media-engine', 'MediaEngine'), 10000);
 
 // 15. MARKETPLACE VENDOR (vendor storefronts, product listings, reviews & ratings, wishlist, comparison, trust system)
-loadSelfExec('marketplace-vendor', 'MarketplaceVendor');
+setTimeout(() => loadSelfExec('marketplace-vendor', 'MarketplaceVendor'), 11000);
 
 // 16. AI CONTENT ENGINE (blog generator, social posts, bulk report comments, recommendations, auto-tag, summarizer, smart search)
-loadSelfExec('ai-content-engine', 'AIContent');
+setTimeout(() => loadSelfExec('ai-content-engine', 'AIContent'), 12000);
 
 // 17. ADVANCED PLATFORM (GDPR/privacy, dark mode, scheduled reports, event ticketing with QR, team challenges, mentorship, accessibility)
-loadSelfExec('advanced-platform', 'AdvancedPlatform');
+setTimeout(() => loadSelfExec('advanced-platform', 'AdvancedPlatform'), 13000);
 
-// Clean up scope bridge globals (app, pool, etc.)
-Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
+// Keep pool, app, db, ah, esc, renderPage, requireAuth, requireNotBanned as globals
+// Self-exec modules' route handlers need them at request time
+// Only clean up non-essential globals
+const _keepGlobals = ['app','pool','db','ah','esc','renderPage','requireAuth','requireNotBanned','requireSuperAdmin','audit','notify','notifyAll','sendEmail','sendSMS','migrations'];
+Object.keys(_scopeBridge).forEach(k => { if (!_keepGlobals.includes(k)) delete global[k]; });
 // KEEP cross-module functions on global — route handlers in other modules
 // need trackRevenue, awardPoints, creditDeveloperRevenue, queueEmail at request time.
 // Deleting them would cause ReferenceError crashes when handlers execute.
@@ -34363,31 +34367,45 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
 // === v14-v17+ DATABASE TABLES ===
 // ============================================================
 (async () => {
+  // Wait a bit for DB pool to be available (free plan has limited connections)
+  await new Promise(r => setTimeout(r, 2000));
+  const maxRetries = 3;
+  async function retryQuery(sql, params) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await retryQuery(sql, params);
+      } catch(e) {
+        if (attempt === maxRetries) throw e;
+        console.warn('[v14-v17] Retry ' + attempt + '/' + maxRetries + ' for query...');
+        await new Promise(r => setTimeout(r, attempt * 2000));
+      }
+    }
+  }
   try {
     // v14: AI Triage
-    await pool.query(`CREATE TABLE IF NOT EXISTS ai_triage_logs (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS ai_triage_logs (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       patient_id INTEGER, patient_name TEXT, symptoms TEXT NOT NULL,
       severity VARCHAR(20) DEFAULT 'mild', recommendation TEXT,
       department TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_ai_triage_tenant ON ai_triage_logs(tenant_id)');
+    await retryQuery('CREATE INDEX IF NOT EXISTS idx_ai_triage_tenant ON ai_triage_logs(tenant_id)');
 
     // v14: Smart Notifications
-    await pool.query(`CREATE TABLE IF NOT EXISTS notification_templates (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS notification_templates (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       name TEXT NOT NULL, channel VARCHAR(20) DEFAULT 'in_app',
       subject TEXT, body TEXT NOT NULL, variables TEXT[],
       is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS notification_history (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS notification_history (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       template_id INTEGER REFERENCES notification_templates(id),
       recipient TEXT NOT NULL, channel VARCHAR(20) DEFAULT 'in_app',
       subject TEXT, body TEXT, status VARCHAR(20) DEFAULT 'sent',
       sent_at TIMESTAMPTZ DEFAULT NOW(), read_at TIMESTAMPTZ
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS notification_preferences (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS notification_preferences (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       user_email TEXT NOT NULL, channel VARCHAR(20) DEFAULT 'in_app',
       enabled BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -34395,23 +34413,23 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v14: Patient Kiosk
-    await pool.query(`CREATE TABLE IF NOT EXISTS kiosk_checkins (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS kiosk_checkins (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       patient_id INTEGER, patient_name TEXT, visit_type VARCHAR(50),
       department TEXT, queue_number INTEGER, status VARCHAR(20) DEFAULT 'waiting',
       checked_in_at TIMESTAMPTZ DEFAULT NOW(), seen_at TIMESTAMPTZ
     )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_kiosk_tenant ON kiosk_checkins(tenant_id)');
+    await retryQuery('CREATE INDEX IF NOT EXISTS idx_kiosk_tenant ON kiosk_checkins(tenant_id)');
 
     // v14: Health Wallet
-    await pool.query(`CREATE TABLE IF NOT EXISTS health_wallets (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS health_wallets (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       patient_id INTEGER NOT NULL, balance INTEGER DEFAULT 0,
       currency VARCHAR(10) DEFAULT 'UGX', is_active BOOLEAN DEFAULT true,
       created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(tenant_id, patient_id)
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS wallet_transactions (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS wallet_transactions (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       wallet_id INTEGER REFERENCES health_wallets(id),
       type VARCHAR(20) NOT NULL CHECK (type IN ('topup','spend','refund','adjustment')),
@@ -34419,15 +34437,15 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
       description TEXT, reference TEXT, created_by TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_wallet_tx_tenant ON wallet_transactions(tenant_id)');
+    await retryQuery('CREATE INDEX IF NOT EXISTS idx_wallet_tx_tenant ON wallet_transactions(tenant_id)');
 
     // v14: Theatre/Surgery
-    await pool.query(`CREATE TABLE IF NOT EXISTS theatres (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS theatres (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       name TEXT NOT NULL, type VARCHAR(50), floor TEXT,
       status VARCHAR(20) DEFAULT 'available', created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS surgery_schedules (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS surgery_schedules (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       patient_id INTEGER NOT NULL, patient_name TEXT, procedure_name TEXT NOT NULL,
       theatre_id INTEGER REFERENCES theatres(id),
@@ -34436,7 +34454,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
       estimated_duration_min INTEGER, status VARCHAR(20) DEFAULT 'scheduled',
       notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS surgery_records (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS surgery_records (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       schedule_id INTEGER REFERENCES surgery_schedules(id),
       patient_id INTEGER, procedure_name TEXT, surgeon TEXT,
@@ -34446,7 +34464,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v15: ICU/CCU Monitoring
-    await pool.query(`CREATE TABLE IF NOT EXISTS icu_patients (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS icu_patients (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       patient_id INTEGER NOT NULL, patient_name TEXT,
       bed_number TEXT, admission_date DATE NOT NULL,
@@ -34454,7 +34472,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
       attending_doctor TEXT, status VARCHAR(20) DEFAULT 'admitted',
       discharged_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS icu_vitals (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS icu_vitals (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       icu_patient_id INTEGER REFERENCES icu_patients(id),
       recorded_at TIMESTAMPTZ DEFAULT NOW(),
@@ -34462,8 +34480,8 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
       resp_rate INTEGER, spo2 INTEGER, gcs INTEGER, blood_sugar INTEGER,
       pain_score INTEGER, urine_output INTEGER, notes TEXT
     )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_icu_vitals_tenant ON icu_vitals(tenant_id)');
-    await pool.query(`CREATE TABLE IF NOT EXISTS icu_handovers (
+    await retryQuery('CREATE INDEX IF NOT EXISTS idx_icu_vitals_tenant ON icu_vitals(tenant_id)');
+    await retryQuery(`CREATE TABLE IF NOT EXISTS icu_handovers (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       icu_patient_id INTEGER REFERENCES icu_patients(id),
       shift_from TEXT, shift_to TEXT, handed_over_by TEXT,
@@ -34472,7 +34490,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v15: Radiology/Imaging
-    await pool.query(`CREATE TABLE IF NOT EXISTS imaging_orders (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS imaging_orders (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       patient_id INTEGER NOT NULL, patient_name TEXT,
       ordering_doctor TEXT, modality VARCHAR(50) NOT NULL,
@@ -34480,7 +34498,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
       urgency VARCHAR(20) DEFAULT 'routine', status VARCHAR(20) DEFAULT 'ordered',
       ordered_at TIMESTAMPTZ DEFAULT NOW(), completed_at TIMESTAMPTZ
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS imaging_results (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS imaging_results (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       order_id INTEGER REFERENCES imaging_orders(id),
       patient_id INTEGER, radiologist TEXT,
@@ -34490,13 +34508,13 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v15: Clinical Pathways
-    await pool.query(`CREATE TABLE IF NOT EXISTS clinical_pathways (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS clinical_pathways (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       name TEXT NOT NULL, condition TEXT, description TEXT,
       steps JSONB DEFAULT '[]', estimated_duration_days INTEGER,
       is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS pathway_instances (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS pathway_instances (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       pathway_id INTEGER REFERENCES clinical_pathways(id),
       patient_id INTEGER NOT NULL, patient_name TEXT,
@@ -34506,7 +34524,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v15: Drug Formulary
-    await pool.query(`CREATE TABLE IF NOT EXISTS drug_formulary (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS drug_formulary (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       drug_name TEXT NOT NULL, generic_name TEXT,
       strength TEXT, dosage_form VARCHAR(50),
@@ -34518,25 +34536,25 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v15: Supply Chain
-    await pool.query(`CREATE TABLE IF NOT EXISTS suppliers (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS suppliers (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       name TEXT NOT NULL, contact_person TEXT, phone TEXT, email TEXT,
       address TEXT, category VARCHAR(50), rating INTEGER DEFAULT 0,
       is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS supply_purchase_orders (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS supply_purchase_orders (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       po_number TEXT UNIQUE, supplier_id INTEGER REFERENCES suppliers(id),
       supplier_name TEXT, items JSONB, total_amount INTEGER DEFAULT 0,
       status VARCHAR(20) DEFAULT 'draft', order_date DATE DEFAULT CURRENT_DATE,
       expected_date DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS supply_po_items (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS supply_po_items (
       id SERIAL PRIMARY KEY, po_id INTEGER REFERENCES supply_purchase_orders(id) ON DELETE CASCADE,
       item_name TEXT NOT NULL, quantity INTEGER NOT NULL, unit VARCHAR(20),
       unit_price INTEGER, total_price INTEGER, received_qty INTEGER DEFAULT 0
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS goods_received_notes (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS goods_received_notes (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       po_id INTEGER REFERENCES supply_purchase_orders(id),
       received_by TEXT, grn_number TEXT, received_date DATE DEFAULT CURRENT_DATE,
@@ -34544,7 +34562,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v16: FHIR API
-    await pool.query(`CREATE TABLE IF NOT EXISTS fhir_audit_log (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS fhir_audit_log (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       resource_type VARCHAR(50), operation VARCHAR(20),
       request_url TEXT, response_status INTEGER,
@@ -34552,7 +34570,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v16: Electronic Prescriptions
-    await pool.query(`CREATE TABLE IF NOT EXISTS electronic_prescriptions (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS electronic_prescriptions (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       patient_id INTEGER NOT NULL, patient_name TEXT,
       prescriber TEXT, prescriber_license TEXT,
@@ -34561,7 +34579,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
       issued_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ,
       dispensed_by TEXT, dispensed_at TIMESTAMPTZ
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS erx_verification_log (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS erx_verification_log (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       rx_id INTEGER REFERENCES electronic_prescriptions(id),
       verified_by TEXT, verification_status VARCHAR(20),
@@ -34569,14 +34587,14 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v16: Lab Automation
-    await pool.query(`CREATE TABLE IF NOT EXISTS lab_automation_rules (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS lab_automation_rules (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       test_name TEXT NOT NULL, condition_field VARCHAR(50),
       operator VARCHAR(10), threshold_value NUMERIC,
       action VARCHAR(50) DEFAULT 'flag', is_active BOOLEAN DEFAULT true,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS lab_quality_control (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS lab_quality_control (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       test_name TEXT, lot_number TEXT, expected_value NUMERIC,
       actual_value NUMERIC, is_within_range BOOLEAN,
@@ -34584,7 +34602,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v16: Multi-location Sync
-    await pool.query(`CREATE TABLE IF NOT EXISTS sync_log (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS sync_log (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       source_location TEXT, target_location TEXT,
       entity_type VARCHAR(50), entity_id INTEGER,
@@ -34594,7 +34612,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v17: Analytics
-    await pool.query(`CREATE TABLE IF NOT EXISTS analytics_cache (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS analytics_cache (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       metric_key TEXT NOT NULL, metric_data JSONB,
       period_start DATE, period_end DATE,
@@ -34603,14 +34621,14 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v17: Revenue Cycle
-    await pool.query(`CREATE TABLE IF NOT EXISTS revenue_cycle_metrics (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS revenue_cycle_metrics (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       period TEXT NOT NULL, total_billed INTEGER DEFAULT 0,
       total_collected INTEGER DEFAULT 0, total_outstanding INTEGER DEFAULT 0,
       denial_rate NUMERIC(5,2) DEFAULT 0, avg_days_to_payment NUMERIC(6,1) DEFAULT 0,
       claim_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS claim_denials (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS claim_denials (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       claim_id INTEGER, patient_name TEXT, insurer TEXT,
       denial_code VARCHAR(20), denial_reason TEXT,
@@ -34620,7 +34638,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v17: Compliance Audit
-    await pool.query(`CREATE TABLE IF NOT EXISTS compliance_audit_log (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS compliance_audit_log (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       category VARCHAR(50) NOT NULL, action TEXT NOT NULL,
       performed_by TEXT, target_entity VARCHAR(50),
@@ -34630,14 +34648,14 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v17: Mobile API
-    await pool.query(`CREATE TABLE IF NOT EXISTS mobile_tokens (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS mobile_tokens (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       user_id INTEGER NOT NULL, device_id TEXT,
       token TEXT NOT NULL, platform VARCHAR(20),
       is_active BOOLEAN DEFAULT true, last_used TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
-    await pool.query(`CREATE TABLE IF NOT EXISTS mobile_devices (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS mobile_devices (
       id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       user_id INTEGER, device_name TEXT, device_type VARCHAR(20),
       os_version TEXT, app_version TEXT,
@@ -34646,7 +34664,7 @@ app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, req
     )`);
 
     // v17: Data Export
-    await pool.query(`CREATE TABLE IF NOT EXISTS export_jobs (
+    await retryQuery(`CREATE TABLE IF NOT EXISTS export_jobs (
       id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       export_type VARCHAR(50) NOT NULL, format VARCHAR(20) DEFAULT 'csv',
       filters JSONB, status VARCHAR(20) DEFAULT 'pending',
