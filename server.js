@@ -30139,6 +30139,9 @@ try { require('./viral-content-engine'); console.log('[ViralEngine] Content scra
 // === REVENUE QUICKSTART: Tips, Pricing, Ads, Commissions, MoMo Payments ===
 try { require('./revenue-quickstart'); console.log('[Revenue] Tips, pricing, ads, service packages, ad placements loaded'); } catch(e) { console.warn('[Revenue] Error:', e.message); }
 
+// === ULTIMATE MONETIZATION ENGINE: Ads CPM, Exit Popups, Social Proof, Affiliate Cloaker, Donations, Premium Content, Sitemap, Revenue Dashboard, Promo Codes, Landing Pages, Lead Magnets ===
+try { require('./monetization-engine'); console.log('[Monetization] Ad CPM system, exit popups, social proof, affiliate links, donations, premium content lock, sitemap/robots, promo codes, revenue dashboard, landing pages, lead magnets, cookie consent, CTA bar, push notifications, comments, engagement scoring ALL LOADED'); } catch(e) { console.warn('[Monetization] Error:', e.message); }
+
 // ============================================================
 // === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
 // ============================================================
