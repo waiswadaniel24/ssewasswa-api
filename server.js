@@ -30067,6 +30067,7 @@ try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.lo
 // ============================================================
 
 // --- MIGRATIONS: New Tables ---
+(async () => {
   const tables = [
     `CREATE TABLE IF NOT EXISTS clinic_queue (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name TEXT, patient_id INTEGER, complaint TEXT, token_number INTEGER DEFAULT 1, status TEXT DEFAULT 'waiting', priority TEXT DEFAULT 'normal', created_at TIMESTAMP DEFAULT NOW(), started_at TIMESTAMP, completed_at TIMESTAMP, doctor_id INTEGER)`,
     `CREATE TABLE IF NOT EXISTS clinic_prescriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_id INTEGER, patient_name TEXT, diagnosis TEXT, medications JSONB DEFAULT '[]', notes TEXT, prescribed_by TEXT, created_at TIMESTAMP DEFAULT NOW())`,
