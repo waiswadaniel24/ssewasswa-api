@@ -30454,6 +30454,9 @@ loadSelfExec('email-automation', 'EmailAuto');
 // 9. REVENUE QUICKSTART (depends on requestMtnPayment)
 loadSelfExec('revenue-quickstart', 'Revenue');
 
+// 10. GLOBAL VIRAL ENGINE (search, chat, QR, link shortener, contests, gallery, embeddable widgets, badges, translate)
+loadSelfExec('global-viral-engine', 'GlobalViral');
+
 // Clean up globals — remove temporary bridges
 Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
 delete global.trackRevenue;
