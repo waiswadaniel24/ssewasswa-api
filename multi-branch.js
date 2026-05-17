@@ -78,12 +78,27 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   };
   const pag = (data, page, limit, total) => ({ data, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
 
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.user?.role === 'super_admin') return next();
+    try {
+      const tid = req.tenant?.id || req.user?.tenant_id;
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [tid]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) {
+        return res.status(403).json({ error: 'Subscription required', min_plan: minPlan, current_plan: plan, message: `Upgrade to ${minPlan} or higher to access this feature.` });
+      }
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
+
   // ═════════════════════════════════════════════════════════════════════════════
   // SECTION 1 — BRANCH MANAGEMENT (CRUD)
   // ═════════════════════════════════════════════════════════════════════════════
 
   // List branches
-  app.get(`${BASE}/branches`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/branches`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const { page, limit, offset } = pg(req);
     const sf = req.query.status;
@@ -97,7 +112,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Get single branch
-  app.get(`${BASE}/branches/:id`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/branches/:id`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, bid = n(req.params.id);
     if (!bid) return j(res, 400, { error: 'Invalid branch ID' });
     const r = await pool.query(`SELECT b.*, u.name AS manager_name FROM branches b LEFT JOIN users u ON u.id = b.manager_id AND u.tenant_id = b.tenant_id WHERE b.id = $1 AND b.tenant_id = $2`, [bid, tid]);
@@ -106,7 +121,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Create branch
-  app.post(`${BASE}/branches`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.post(`${BASE}/branches`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email;
     const { name, code, address, city, country, phone, email, latitude, longitude, manager_id, capacity, facilities, operating_hours, settings, logo, status, established_date } = req.body;
     const bname = s(name);
@@ -128,7 +143,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Update branch
-  app.put(`${BASE}/branches/:id`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.put(`${BASE}/branches/:id`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email, bid = n(req.params.id);
     if (!bid) return j(res, 400, { error: 'Invalid branch ID' });
     const ex = await pool.query('SELECT id FROM branches WHERE id=$1 AND tenant_id=$2', [bid, tid]);
@@ -149,7 +164,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Search branches by name, code, city, or country
-  app.get(`${BASE}/branches/search`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/branches/search`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const q = s(req.query.q);
     if (!q) return j(res, 400, { error: 'Search query (q) is required' });
@@ -175,7 +190,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Branch statistics (summary counts per branch)
-  app.get(`${BASE}/branches/stats`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/branches/stats`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const rows = await pool.query(
       `SELECT b.id, b.name, b.status, b.city, b.capacity,
@@ -207,7 +222,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Delete branch (soft — sets inactive; blocks if active transfers exist)
-  app.delete(`${BASE}/branches/:id`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.delete(`${BASE}/branches/:id`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email, bid = n(req.params.id);
     if (!bid) return j(res, 400, { error: 'Invalid branch ID' });
     const ex = await pool.query('SELECT id,name FROM branches WHERE id=$1 AND tenant_id=$2', [bid, tid]);
@@ -226,7 +241,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═════════════════════════════════════════════════════════════════════════════
 
   // Create transfer request
-  app.post(`${BASE}/transfers`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.post(`${BASE}/transfers`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email;
     const { entity_type, entity_id, from_branch_id, to_branch_id, effective_date, notes } = req.body;
     if (!ENTITY_TYPES.has(entity_type)) return j(res, 400, { error: `entity_type: ${[...ENTITY_TYPES].join(', ')}` });
@@ -249,7 +264,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // List transfers
-  app.get(`${BASE}/transfers`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/transfers`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const { page, limit, offset } = pg(req);
     const { status, entity_type, branch_id } = req.query;
@@ -265,7 +280,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Approve / reject transfer
-  app.put(`${BASE}/transfers/:id/approve`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.put(`${BASE}/transfers/:id/approve`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email, xid = n(req.params.id);
     const { action, notes } = req.body;
     if (!xid) return j(res, 400, { error: 'Invalid transfer ID' });
@@ -280,7 +295,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Complete transfer
-  app.put(`${BASE}/transfers/:id/complete`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.put(`${BASE}/transfers/:id/complete`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email, xid = n(req.params.id);
     const ex = await pool.query('SELECT * FROM branch_transfers WHERE id=$1 AND tenant_id=$2 AND status=$3', [xid, tid, 'approved']);
     if (!ex.rows.length) return j(res, 404, { error: 'Transfer not found or not approved' });
@@ -295,7 +310,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═════════════════════════════════════════════════════════════════════════════
 
   // Create inter-branch resource request
-  app.post(`${BASE}/inter-requests`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.post(`${BASE}/inter-requests`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email;
     const { from_branch_id, to_branch_id, request_type, resource_type, resource_id, quantity, notes } = req.body;
     if (!n(from_branch_id) || !n(to_branch_id)) return j(res, 400, { error: 'from_branch_id and to_branch_id required' });
@@ -316,7 +331,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // List inter-branch requests
-  app.get(`${BASE}/inter-requests`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/inter-requests`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const { page, limit, offset } = pg(req);
     const { status, request_type, branch_id } = req.query;
@@ -332,7 +347,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Approve / reject inter-branch request
-  app.put(`${BASE}/inter-requests/:id/approve`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.put(`${BASE}/inter-requests/:id/approve`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email, rid = n(req.params.id);
     const { action, notes } = req.body;
     if (!rid) return j(res, 400, { error: 'Invalid request ID' });
@@ -351,7 +366,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═════════════════════════════════════════════════════════════════════════════
 
   // Record KPI metrics (upsert)
-  app.post(`${BASE}/kpis`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.post(`${BASE}/kpis`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email;
     const { branch_id, period, period_date, metrics } = req.body;
     if (!n(branch_id)) return j(res, 400, { error: 'branch_id required' });
@@ -371,7 +386,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Get KPIs
-  app.get(`${BASE}/kpis`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/kpis`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const { branch_id, period, from_date, to_date } = req.query;
     const { page, limit, offset } = pg(req);
@@ -393,7 +408,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Branch ranking / benchmarking
-  app.get(`${BASE}/kpis/ranking`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/kpis/ranking`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const { period, metric_key } = req.query;
     const ck = `mb:ranking:${tid}:${period||'monthly'}:${metric_key||'all'}`;
@@ -421,7 +436,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // SECTION 5 — CENTRALIZED DASHBOARD
   // ═════════════════════════════════════════════════════════════════════════════
 
-  app.get(`${BASE}/dashboard`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/dashboard`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const ck = `mb:dashboard:${tid}`;
     const cached = await cacheGet(ck);
@@ -451,7 +466,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═════════════════════════════════════════════════════════════════════════════
 
   // Update branch settings (JSONB deep merge)
-  app.put(`${BASE}/branches/:id/settings`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.put(`${BASE}/branches/:id/settings`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email, bid = n(req.params.id);
     if (!bid) return j(res, 400, { error: 'Invalid branch ID' });
     const br = await pool.query('SELECT id,settings FROM branches WHERE id=$1 AND tenant_id=$2', [bid, tid]);
@@ -466,7 +481,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Add holiday (single branch or all branches)
-  app.post(`${BASE}/holidays`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.post(`${BASE}/holidays`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email;
     const { branch_id, name, date: hdate, is_recurring } = req.body;
     if (!s(name)) return j(res, 400, { error: 'Holiday name required' });
@@ -493,7 +508,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // List holidays
-  app.get(`${BASE}/holidays`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/holidays`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const bid = n(req.query.branch_id), yr = n(req.query.year);
     let w = 'WHERE h.tenant_id=$1', p = [tid], i = 2;
@@ -504,7 +519,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Delete holiday
-  app.delete(`${BASE}/holidays/:id`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.delete(`${BASE}/holidays/:id`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email, hid = n(req.params.id);
     if (!hid) return j(res, 400, { error: 'Invalid holiday ID' });
     const ex = await pool.query('SELECT id FROM branch_holidays WHERE id=$1 AND tenant_id=$2', [hid, tid]);
@@ -518,7 +533,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // SECTION 7 — COMMUNICATION (Broadcast)
   // ═════════════════════════════════════════════════════════════════════════════
 
-  app.post(`${BASE}/broadcast`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.post(`${BASE}/broadcast`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id, uid = req.user?.email || req.session?.user?.email;
     const { title, message, branch_ids, priority, channels } = req.body;
     if (!s(title)) return j(res, 400, { error: 'title required' });
@@ -547,7 +562,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═════════════════════════════════════════════════════════════════════════════
 
   // Cross-branch audit log
-  app.get(`${BASE}/audit`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/audit`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const { page, limit, offset } = pg(req);
     const { action, branch_id, from_date, to_date } = req.query;
@@ -568,7 +583,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // Entity transfer history
-  app.get(`${BASE}/audit/entity-history`, tenantMiddleware, requireAuth, h(async (req, res) => {
+  app.get(`${BASE}/audit/entity-history`, tenantMiddleware, requireAuth, requireSubscription('pro'), h(async (req, res) => {
     const tid = req.tenant.id;
     const { entity_type, entity_id } = req.query;
     if (!entity_type || !ENTITY_TYPES.has(entity_type)) return j(res, 400, { error: `entity_type: ${[...ENTITY_TYPES].join(', ')}` });

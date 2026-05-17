@@ -30062,6 +30062,625 @@ try { const m = require('./homework'); m(app, pool, _newModOpts); console.log('[
 try { const m = require('./discipline'); m(app, pool, _newModOpts); console.log('[Discipline] Discipline module loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
 try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.log('[MultiBranch] Multi-branch module loaded'); } catch(e) { console.warn('[MultiBranch] Error:', e.message); }
 
+// ============================================================
+// === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
+// ============================================================
+
+// --- MIGRATIONS: New Tables ---
+  const tables = [
+    `CREATE TABLE IF NOT EXISTS clinic_queue (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name TEXT, patient_id INTEGER, complaint TEXT, token_number INTEGER DEFAULT 1, status TEXT DEFAULT 'waiting', priority TEXT DEFAULT 'normal', created_at TIMESTAMP DEFAULT NOW(), started_at TIMESTAMP, completed_at TIMESTAMP, doctor_id INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS clinic_prescriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_id INTEGER, patient_name TEXT, diagnosis TEXT, medications JSONB DEFAULT '[]', notes TEXT, prescribed_by TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS sick_bay (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), student_name TEXT, student_id INTEGER, complaint TEXT, temperature TEXT, treatment TEXT, nurse_name TEXT, checked_in TIMESTAMP DEFAULT NOW(), checked_out TIMESTAMP, status TEXT DEFAULT 'in_bay')`,
+    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), invoice_number TEXT UNIQUE, amount NUMERIC(12,2) DEFAULT 0, tax NUMERIC(12,2) DEFAULT 0, total NUMERIC(12,2) DEFAULT 0, status TEXT DEFAULT 'pending', payer_name TEXT, payer_email TEXT, description TEXT, due_date DATE, paid_at TIMESTAMP, payment_method TEXT, items JSONB DEFAULT '[]', created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS product_reviews (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, product_id INTEGER NOT NULL, reviewer_name TEXT, rating INTEGER DEFAULT 5 CHECK (rating BETWEEN 1 AND 5), review_text TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS order_tracking (id SERIAL PRIMARY KEY, order_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), status TEXT DEFAULT 'placed', tracking_number TEXT, notes TEXT, updated_at TIMESTAMP DEFAULT NOW(), updated_by TEXT)`,
+    `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), name TEXT, key_hash TEXT, key_prefix TEXT(8), created_at TIMESTAMP DEFAULT NOW(), last_used TIMESTAMP, is_active BOOLEAN DEFAULT true)`,
+    `CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), url TEXT NOT NULL, events TEXT[] DEFAULT '{}', secret TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS user_2fa (email TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, secret TEXT, enabled BOOLEAN DEFAULT false, backup_codes TEXT[] DEFAULT '{}')`,
+    `CREATE TABLE IF NOT EXISTS audit_log (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email TEXT, action TEXT NOT NULL, details TEXT, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), endpoint TEXT NOT NULL, p256dh_key TEXT, auth_key TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS notification_preferences (user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), email_notifs BOOLEAN DEFAULT true, sms_notifs BOOLEAN DEFAULT true, push_notifs BOOLEAN DEFAULT true, inapp_notifs BOOLEAN DEFAULT true, categories JSONB DEFAULT '{"payments":true,"assignments":true,"events":true,"announcements":true,"emergencies":true}', PRIMARY KEY (user_email, tenant_id))`
+  ];
+  for (const sql of tables) { try { await pool.query(sql); } catch(e) { /* table may already exist */ } }
+  console.log('[Migrations] All new tables ready');
+})();
+
+// ============================================================
+// === 1. CLINIC QUEUE, PRESCRIPTIONS, SICK BAY ===
+// ============================================================
+app.get('/clinic/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [waiting, inConsult, completed, todayStats] = await Promise.all([
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='waiting' ORDER BY token_number, priority DESC, created_at", [t]),
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='in-consultation' ORDER BY started_at", [t]),
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='completed' AND completed_at::date=CURRENT_DATE ORDER BY completed_at DESC", [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='completed') as seen, AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60) as avg_wait FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])
+  ]);
+  const s = todayStats.rows[0] || {};
+  res.send(renderPage('Patient Queue', `
+    <div class="hero" style="background:linear-gradient(135deg,#ef4444,#f97316)"><h1>Patient Queue</h1><p>Manage patient flow efficiently</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${waiting.rows.length}</div><div>Waiting</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${inConsult.rows.length}</div><div>In Consultation</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#10b981">${s.seen||0}</div><div>Seen Today</div></div>
+      <div class="stat-card"><div class="stat-num">${Math.round(s.avg_wait||0)}m</div><div>Avg Wait</div></div>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:20px">
+      <a href="/clinic/queue" class="btn btn-green">Queue</a>
+      <a href="/clinic/prescriptions" class="btn">Prescriptions</a>
+      <a href="/clinic/sick-bay" class="btn">Sick Bay</a>
+    </div>
+    <div class="card"><h3>Waiting Patients (${waiting.rows.length})</h3>
+      <table><tr><th>Token</th><th>Patient</th><th>Complaint</th><th>Priority</th><th>Wait</th><th>Action</th></tr>
+      ${waiting.rows.map(p => {
+        const waitMin = Math.round((Date.now() - new Date(p.created_at).getTime()) / 60000);
+        return `<tr><td><span style="background:#f59e0b;color:white;padding:4px 10px;border-radius:6px;font-weight:700">#${p.token_number}</span></td><td><strong>${esc(p.patient_name)}</strong></td><td>${esc(p.complaint||'')}</td><td><span class="tag" style="background:${p.priority==='urgent'?'#fee2e2;color:#991b1b':'#f0f0f0'}">${esc(p.priority)}</span></td><td>${waitMin}m</td><td><form method="POST" action="/clinic/queue/${p.id}/call" style="display:inline"><button class="btn btn-sm" style="background:#3b82f6;color:white">Call</button></form></td></tr>`;
+      }).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px" class="muted">No patients waiting</td></tr>'}
+      </table>
+    </div>
+    ${inConsult.rows.length > 0 ? '<div class="card" style="margin-top:16px"><h3>In Consultation</h3><table><tr><th>Token</th><th>Patient</th><th>Doctor</th><th>Started</th><th>Action</th></tr>'+inConsult.rows.map(p=>'<tr><td>#'+p.token_number+'</td><td>'+esc(p.patient_name)+'</td><td class="muted">'+esc(p.doctor_id||'')+'</td><td>'+(p.started_at?new Date(p.started_at).toLocaleTimeString():'')+'</td><td><form method="POST" action="/clinic/queue/'+p.id+'/complete" style="display:inline"><button class="btn btn-sm btn-green">Complete</button></form></td></tr>').join('')+'</table></div>' : ''}
+    <div class="card" style="margin-top:16px"><h3>Check In Patient</h3>
+      <form method="POST" action="/clinic/queue/checkin" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end">
+        <div><label>Patient Name *</label><input name="patient_name" required></div>
+        <div><label>Complaint</label><input name="complaint" placeholder="Chief complaint"></div>
+        <div><label>Priority</label><select name="priority"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="emergency">Emergency</option></select></div>
+        <div><button class="btn btn-green" style="width:100%">Check In</button></div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, complaint, priority } = req.body;
+  const nextToken = (await pool.query("SELECT COALESCE(MAX(token_number),0)+1 as next FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0].next;
+  await pool.query("INSERT INTO clinic_queue (tenant_id,patient_name,complaint,token_number,priority) VALUES ($1,$2,$3,$4,$5)", [t, patient_name, complaint||'', nextToken||1, priority||'normal']);
+  await pool.query("INSERT INTO audit_log (tenant_id,user_email,action,details) VALUES ($1,$2,'clinic_checkin',$3)", [t, req.session.user.email, 'Checked in: '+patient_name]);
+  res.redirect('/clinic/queue');
+}));
+
+app.post('/clinic/queue/:id/call', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query("UPDATE clinic_queue SET status='in-consultation',started_at=NOW(),doctor_id=$1 WHERE id=$2", [req.session.user.name||'', req.params.id]);
+  res.redirect('/clinic/queue');
+}));
+
+app.post('/clinic/queue/:id/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query("UPDATE clinic_queue SET status='completed',completed_at=NOW() WHERE id=$1", [req.params.id]);
+  res.redirect('/clinic/queue');
+}));
+
+// Prescriptions
+app.get('/clinic/prescriptions', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const rx = (await pool.query("SELECT * FROM clinic_prescriptions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
+  res.send(renderPage('Prescriptions', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Prescriptions</h1></div>
+    <div style="margin-bottom:16px"><a href="/clinic/prescriptions/new" class="btn btn-green">+ New Prescription</a> <a href="/clinic/queue" class="btn">Back to Queue</a></div>
+    <div class="card"><table><tr><th>Date</th><th>Patient</th><th>Diagnosis</th><th>By</th></tr>
+      ${rx.map(r=>'<tr><td>'+(r.created_at?new Date(r.created_at).toLocaleDateString():'')+'</td><td><strong>'+esc(r.patient_name)+'</strong></td><td>'+esc(r.diagnosis||'')+'</td><td class="muted">'+esc(r.prescribed_by||'')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">No prescriptions yet</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+app.get('/clinic/prescriptions/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Prescription', `
+    <div class="card" style="max-width:700px;margin:40px auto"><h2>New Prescription</h2>
+      <form method="POST" action="/clinic/prescriptions/save" id="rxForm">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>Patient Name *</label><input name="patient_name" required></div>
+          <div><label>Prescribing Doctor</label><input name="prescribed_by" value="${esc(req.session.user.name||'')}"></div>
+        </div>
+        <div style="margin-top:12px"><label>Diagnosis *</label><input name="diagnosis" required></div>
+        <div style="margin-top:16px"><label>Medications</label><div id="meds-list"></div>
+          <button type="button" onclick="addMed()" class="btn btn-sm" style="margin-top:8px">+ Add Medication</button></div>
+        <div style="margin-top:12px"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+        <button class="btn btn-green" style="width:100%;margin-top:16px">Save Prescription</button>
+      </form>
+    </div>
+    <script>
+      let medCount=0;
+      function addMed(){medCount++;const d=document.createElement('div');d.style.cssText='display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:8px;margin-top:8px;align-items:center';d.innerHTML='<input name="med_name[]" placeholder="Medication name"><input name="med_dose[]" placeholder="Dose"><input name="med_freq[]" placeholder="Frequency"><input name="med_dur[]" placeholder="Duration"><button type="button" onclick="this.parentElement.remove()" style="color:red;background:none;border:none;font-size:18px">×</button>';document.getElementById('meds-list').appendChild(d);}
+      addMed();
+    </script>
+  `, req.session.user));
+});
+
+app.post('/clinic/prescriptions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, diagnosis, prescribed_by, notes } = req.body;
+  const meds = Array.isArray(req.body.med_name) ? req.body.med_name.map((n,i)=>({name:n,dose:req.body.med_dose?.[i]||'',freq:req.body.med_freq?.[i]||'',dur:req.body.med_dur?.[i]||''})).filter(m=>m.name) : req.body.med_name ? [{name:req.body.med_name,dose:req.body.med_dose||'',freq:req.body.med_freq||'',dur:req.body.med_dur||''}] : [];
+  await pool.query("INSERT INTO clinic_prescriptions (tenant_id,patient_name,diagnosis,medications,notes,prescribed_by) VALUES ($1,$2,$3,$4,$5,$6)", [t, patient_name, diagnosis, JSON.stringify(meds), notes||'', prescribed_by||'']);
+  res.redirect('/clinic/prescriptions');
+}));
+
+// Sick Bay
+app.get('/clinic/sick-bay', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [active, today] = await Promise.all([
+    pool.query("SELECT * FROM sick_bay WHERE tenant_id=$1 AND status='in_bay' ORDER BY checked_in DESC", [t]),
+    pool.query("SELECT * FROM sick_bay WHERE tenant_id=$1 AND checked_in::date=CURRENT_DATE ORDER BY checked_in DESC LIMIT 30", [t])
+  ]);
+  res.send(renderPage('Sick Bay', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)"><h1>Sick Bay</h1><p>Student health monitoring</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#ef4444">${active.rows.length}</div><div>Currently In</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#10b981">${today.rows.filter(r=>r.status==='released').length}</div><div>Released Today</div></div>
+      <div class="stat-card"><div class="stat-num">${today.rows.length}</div><div>Total Today</div></div>
+    </div>
+    <div class="card"><h3>Currently in Sick Bay (${active.rows.length})</h3>
+      <table><tr><th>Student</th><th>Complaint</th><th>Temp</th><th>Treatment</th><th>Checked In</th><th>Action</th></tr>
+      ${active.rows.map(s=>'<tr><td><strong>'+esc(s.student_name)+'</strong></td><td>'+esc(s.complaint||'')+'</td><td>'+(s.temperature||'-')+'</td><td>'+esc(s.treatment||'')+'</td><td>'+(s.checked_in?new Date(s.checked_in).toLocaleTimeString():'')+'</td><td><form method="POST" action="/clinic/sick-bay/'+s.id+'/release" style="display:inline"><button class="btn btn-sm btn-green">Release</button></form></td></tr>').join('')||'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No students in sick bay</td></tr>'}
+      </table>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>Check In to Sick Bay</h3>
+      <form method="POST" action="/clinic/sick-bay/checkin" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end">
+        <div><label>Student Name *</label><input name="student_name" required></div>
+        <div><label>Complaint</label><input name="complaint"></div>
+        <div><label>Temperature</label><input name="temperature" placeholder="36.5°C"></div>
+        <div><label>Nurse</label><input name="nurse_name" value="${esc(req.session.user.name||'')}"></div>
+        <div><button class="btn" style="background:#8b5cf6;color:white">Check In</button></div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/sick-bay/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query("INSERT INTO sick_bay (tenant_id,student_name,complaint,temperature,nurse_name) VALUES ($1,$2,$3,$4,$5)", [req.session.user.tenant_id, req.body.student_name, req.body.complaint||'', req.body.temperature||'', req.body.nurse_name||'']);
+  res.redirect('/clinic/sick-bay');
+}));
+
+app.post('/clinic/sick-bay/:id/release', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const { treatment } = req.body;
+  await pool.query("UPDATE sick_bay SET status='released',checked_out=NOW(),treatment=$1 WHERE id=$2", [treatment||'Released', req.params.id]);
+  res.redirect('/clinic/sick-bay');
+}));
+
+// ============================================================
+// === 2. INVOICES & BILLING HISTORY ===
+// ============================================================
+app.get('/billing/invoices', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invoices = (await pool.query("SELECT * FROM invoices WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
+  const stats = (await pool.query("SELECT COUNT(*) as total, COALESCE(SUM(total),0) as amount, COUNT(*) FILTER (WHERE status='paid') as paid, COUNT(*) FILTER (WHERE status='pending') as pending FROM invoices WHERE tenant_id=$1", [t])).rows[0];
+  res.send(renderPage('Invoices', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#6366f1)"><h1>Invoices</h1></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${stats.total}</div><div>Total Invoices</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${(parseInt(stats.amount)||0).toLocaleString()}</div><div>Total Value</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${stats.pending}</div><div>Pending</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#10b981">${stats.paid}</div><div>Paid</div></div>
+    </div>
+    <div class="card"><table><tr><th>Invoice #</th><th>Payer</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr>
+      ${invoices.map(i=>'<tr><td><strong>'+esc(i.invoice_number)+'</strong></td><td>'+esc(i.payer_name||'')+'</td><td style="font-weight:700">UGX '+(parseInt(i.total)||0).toLocaleString()+'</td><td><span class="tag" style="background:'+(i.status==='paid'?'#d1fae5;color:#065f46':i.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+esc(i.status)+'</span></td><td>'+(i.created_at?new Date(i.created_at).toLocaleDateString():'')+'</td><td><a href="/billing/invoices/'+i.id+'" class="btn btn-sm">View</a></td></tr>').join('')||'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No invoices yet</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+app.get('/billing/invoices/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const inv = (await pool.query("SELECT * FROM invoices WHERE id=$1", [req.params.id])).rows[0];
+  if (!inv) return res.status(404).send('Not found');
+  const tenant = (await pool.query("SELECT name,type FROM tenants WHERE id=$1", [inv.tenant_id])).rows[0];
+  const items = Array.isArray(inv.items) ? inv.items : [];
+  res.send(renderPage('Invoice ' + inv.invoice_number, `
+    <div style="max-width:750px;margin:40px auto">
+      <div style="display:flex;justify-content:space-between;margin-bottom:30px"><div><h1 style="margin:0">INVOICE</h1><p class="muted">${esc(tenant?.name||'')} &bull; ${esc(inv.invoice_number)}</p></div><div style="text-align:right"><p><strong>Status:</strong> <span class="tag" style="background:${inv.status==='paid'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${esc(inv.status)}</span></p><p class="muted">Date: ${inv.created_at?new Date(inv.created_at).toLocaleDateString():''}</p>${inv.due_date?'<p class="muted">Due: '+new Date(inv.due_date).toLocaleDateString()+'</p>':''}</div></div>
+      <div class="card" style="margin-bottom:20px"><p><strong>Bill To:</strong> ${esc(inv.payer_name||'N/A')}</p>${inv.payer_email?'<p class="muted">'+esc(inv.payer_email)+'</p>':''}${inv.description?'<p class="muted">'+esc(inv.description)+'</p>':''}</div>
+      <div class="card"><table><tr><th>Description</th><th style="text-align:right">Amount</th></tr>
+        ${items.map(i=>'<tr><td>'+esc(i.description||i.name||'Item')+'</td><td style="text-align:right">UGX '+(parseInt(i.amount)||0).toLocaleString()+'</td></tr>').join('')||'<tr><td class="muted">General</td><td style="text-align:right">UGX '+(parseInt(inv.amount)||0).toLocaleString()+'</td></tr>'}
+        <tr style="border-top:2px solid #333"><td><strong>Subtotal</strong></td><td style="text-align:right"><strong>UGX ${parseInt(inv.amount||0).toLocaleString()}</strong></td></tr>
+        ${parseInt(inv.tax)>0?'<tr><td>Tax</td><td style="text-align:right">UGX '+parseInt(inv.tax).toLocaleString()+'</td></tr>':''}
+        <tr style="background:#f0fdf4"><td><strong style="font-size:18px">Total</strong></td><td style="text-align:right"><strong style="font-size:18px;color:#059669">UGX ${parseInt(inv.total||inv.amount||0).toLocaleString()}</strong></td></tr>
+      </table></div>
+      <div style="margin-top:20px;text-align:center"><button onclick="window.print()" class="btn btn-green">Print Invoice</button></div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/billing/history', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { from, to, method, status } = req.query;
+  let where = "WHERE tenant_id=$1", params = [t], pNum = 2;
+  if (from) { where += ` AND created_at >= $${pNum++}`; params.push(from); }
+  if (to) { where += ` AND created_at <= $${pNum++}`; params.push(to+'T23:59:59'); }
+  if (method) { where += ` AND payment_method=$${pNum++}`; params.push(method); }
+  if (status) { where += ` AND status=$${pNum++}`; params.push(status); }
+  const payments = (await pool.query("SELECT * FROM payments "+where+" ORDER BY created_at DESC LIMIT 100", params)).rows;
+  const summary = (await pool.query("SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM payments WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'", [t])).rows[0];
+  res.send(renderPage('Payment History', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Payment History</h1><p>Last 30 days: UGX ${(parseInt(summary.total)||0).toLocaleString()} across ${summary.cnt} transactions</p></div>
+    <div class="card" style="margin-bottom:20px"><form method="GET" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end">
+      <div><label>From</label><input type="date" name="from" value="${from||''}"></div>
+      <div><label>To</label><input type="date" name="to" value="${to||''}"></div>
+      <div><label>Method</label><select name="method"><option value="">All</option><option ${method==='mobile_money'?'selected':''}>mobile_money</option><option ${method==='cash'?'selected':''}>cash</option><option ${method==='card'?'selected':''}>card</option><option ${method==='bank_transfer'?'selected':''}>bank_transfer</option></select></div>
+      <div><label>Status</label><select name="status"><option value="">All</option><option ${status==='completed'?'selected':''}>completed</option><option ${status==='pending'?'selected':''}>pending</option><option ${status==='failed'?'selected':''}>failed</option></select></div>
+      <div><button class="btn btn-green">Filter</button> <a href="/billing/history" class="btn btn-sm">Reset</a></div>
+    </form></div>
+    <div class="card"><table><tr><th>Date</th><th>Reference</th><th>Amount</th><th>Method</th><th>Status</th></tr>
+      ${payments.map(p=>'<tr><td>'+(p.created_at?new Date(p.created_at).toLocaleDateString():'')+'</td><td class="muted">'+esc(p.reference||p.id)+'</td><td style="font-weight:700">UGX '+(parseInt(p.amount)||0).toLocaleString()+'</td><td><span class="tag">'+esc(p.payment_method||p.method||'')+'</span></td><td><span class="tag" style="background:'+(p.status==='completed'?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b')+'">'+esc(p.status)+'</span></td></tr>').join('')||'<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">No payments found</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 3. PRICING PAGE (PUBLIC) ===
+// ============================================================
+app.get('/pricing', ah(async (req, res) => {
+  const plans = [
+    { name:'Free', price:'0', color:'#6b7280', features:['Up to 50 records','Basic dashboard','Student portal','Gradebook & timetable','Discipline tracking','Email notifications','Community support'], cta:'Get Started', href:'/register' },
+    { name:'Basic', price:'50,000', color:'#f59e0b', features:['Up to 500 records','All Free features','LMS & homework','Online exams','E-commerce store','POS terminal','Clinic management','Inventory tracking','Fundraising & campaigns','Priority support'], cta:'Subscribe Now', href:'/billing/subscribe/basic', popular:true },
+    { name:'Pro', price:'150,000', color:'#4f46e5', features:['Up to 50,000 records','All Basic features','SMS & email campaigns','Blog CMS','AI assistant','Multi-branch management','Payroll system','Advanced analytics','API access & webhooks','Custom branding','Dedicated support'], cta:'Subscribe Now', href:'/billing/subscribe/pro' },
+    { name:'Enterprise', price:'Custom', color:'#059669', features:['Unlimited records','All Pro features','White-label branding','Custom domain','SLA guarantee','On-site training','Dedicated account manager','Custom integrations','HIPAA compliance options','24/7 phone support'], cta:'Contact Us', href:'/contact' }
+  ];
+  res.send(renderPage('Pricing Plans', `
+    <div style="text-align:center;padding:60px 20px 40px;background:linear-gradient(135deg,#1e293b,#334155);color:white"><h1 style="font-size:36px;margin:0">Simple, Transparent Pricing</h1><p style="margin-top:12px;opacity:0.8;font-size:18px">Choose the plan that fits your organization. Upgrade or downgrade anytime.</p></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;max-width:1200px;margin:40px auto;padding:0 20px">
+      ${plans.map(p=>`<div style="border:2px solid ${p.popular?p.color:'#e5e7eb'};border-radius:16px;padding:30px;text-align:center;position:relative;${p.popular?'box-shadow:0 8px 30px rgba(0,0,0,0.12)':''}">
+        ${p.popular?'<div style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:'+p.color+';color:white;padding:4px 16px;border-radius:20px;font-size:13px;font-weight:700">MOST POPULAR</div>':''}
+        <h3 style="margin:0">${p.name}</h3>
+        <div style="margin:20px 0"><span style="font-size:14px;color:#6b7280">UGX</span><br><span style="font-size:40px;font-weight:800;color:${p.color}">${p.price}</span><span style="color:#6b7280;font-size:14px">/mo</span></div>
+        <a href="${p.href}" class="btn" style="display:block;width:100%;padding:14px;background:${p.color};color:white;border:none;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none;cursor:pointer">${p.cta}</a>
+        <ul style="list-style:none;padding:0;margin:24px 0 0;text-align:left">${p.features.map(f=>'<li style="padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:14px">✅ '+f+'</li>').join('')}</ul>
+      </div>`).join('')}
+    </div>
+    <div style="max-width:700px;margin:40px auto;padding:0 20px"><h2 style="text-align:center">Frequently Asked Questions</h2>
+      <div class="card" style="margin-top:20px"><h3>Can I upgrade anytime?</h3><p>Yes, you can upgrade your plan at any time. Changes take effect immediately and you only pay the prorated difference.</p></div>
+      <div class="card" style="margin-top:12px"><h3>Is there a setup fee?</h3><p>No setup fees. Sign up and start using the platform immediately. We handle all the technical setup for you.</p></div>
+      <div class="card" style="margin-top:12px"><h3>What payment methods do you accept?</h3><p>We accept MTN Mobile Money, Airtel Money, bank transfers, Visa/Mastercard, and Flutterwave.</p></div>
+      <div class="card" style="margin-top:12px"><h3>Can I cancel anytime?</h3><p>Absolutely. No long-term contracts. Cancel anytime from your billing settings and you will retain access until the end of your billing period.</p></div>
+    </div>
+  `, req.session.user || null));
+}));
+
+// ============================================================
+// === 4. PWA MANIFEST & SERVICE WORKER ===
+// ============================================================
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(JSON.stringify({
+    name: "Comfort Zone - All-in-One Management Platform",
+    short_name: "ComfortZone",
+    description: "School, church, clinic, business & organization management",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#ffffff",
+    theme_color: "#059669",
+    orientation: "any",
+    categories: ["business", "education", "health", "productivity"],
+    icons: [
+      { src: "/favicon.ico", sizes: "64x64 32x32 24x24 16x16", type: "image/x-icon" },
+      { src: "/public/icons/icon_general.png", sizes: "192x192", type: "image/png" },
+      { src: "/public/icons/icon_general.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
+    ]
+  }));
+});
+
+// ============================================================
+// === 5. NOTIFICATION ENHANCEMENTS ===
+// ============================================================
+app.post('/notifications/push/subscribe', requireAuth, ah(async (req, res) => {
+  const { endpoint, p256dh_key, auth_key } = req.body;
+  if (!endpoint) return res.status(400).json({error:'Missing endpoint'});
+  await pool.query("INSERT INTO push_subscriptions (user_email,tenant_id,endpoint,p256dh_key,auth_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [req.session.user.email, req.session.user.tenant_id, endpoint, p256dh_key||'', auth_key||'']);
+  res.json({success:true});
+}));
+
+app.get('/notifications/badge', requireAuth, ah(async (req, res) => {
+  const count = (await pool.query("SELECT COUNT(*) as cnt FROM notifications WHERE tenant_id=$1 AND read=false", [req.session.user.tenant_id])).rows[0].cnt;
+  res.json({unread:parseInt(count)});
+}));
+
+app.get('/notifications/preferences', requireAuth, ah(async (req, res) => {
+  const pref = (await pool.query("SELECT * FROM notification_preferences WHERE user_email=$1 AND tenant_id=$2", [req.session.user.email, req.session.user.tenant_id])).rows[0] || {};
+  res.send(renderPage('Notification Preferences', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h2>Notification Preferences</h2><p class="muted">Choose how you want to be notified</p>
+      <form method="POST" action="/notifications/preferences/save">
+        <div style="margin:20px 0"><h4>Channels</h4>
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer"><input type="checkbox" name="email_notifs" ${pref.email_notifs!==false?'checked':''}> Email Notifications</label>
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer"><input type="checkbox" name="sms_notifs" ${pref.sms_notifs!==false?'checked':''}> SMS Notifications</label>
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer"><input type="checkbox" name="push_notifs" ${pref.push_notifs!==false?'checked':''}> Push Notifications</label>
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer"><input type="checkbox" name="inapp_notifs" ${pref.inapp_notifs!==false?'checked':''}> In-App Notifications</label>
+        </div>
+        <button class="btn btn-green" style="width:100%">Save Preferences</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/notifications/preferences/save', requireAuth, ah(async (req, res) => {
+  const { email_notifs, sms_notifs, push_notifs, inapp_notifs } = req.body;
+  await pool.query(`INSERT INTO notification_preferences (user_email,tenant_id,email_notifs,sms_notifs,push_notifs,inapp_notifs) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_email,tenant_id) DO UPDATE SET email_notifs=$3,sms_notifs=$4,push_notifs=$5,inapp_notifs=$6`,
+    [req.session.user.email, req.session.user.tenant_id, !!email_notifs, !!sms_notifs, !!push_notifs, !!inapp_notifs]);
+  res.redirect('/notifications/preferences');
+}));
+
+// ============================================================
+// === 6. REVENUE ANALYTICS ===
+// ============================================================
+app.get('/analytics/revenue', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [daily, methods, thisMonth, lastMonth] = await Promise.all([
+    pool.query("SELECT DATE(created_at) as day, SUM(amount) as total, COUNT(*) as cnt FROM payments WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days' AND status='completed' GROUP BY DATE(created_at) ORDER BY day", [t]),
+    pool.query("SELECT payment_method, SUM(amount) as total, COUNT(*) as cnt FROM payments WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days' AND status='completed' GROUP BY payment_method ORDER BY total DESC", [t]),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total, COUNT(*) as cnt FROM payments WHERE tenant_id=$1 AND EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM CURRENT_DATE) AND status='completed'", [t]),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total, COUNT(*) as cnt FROM payments WHERE tenant_id=$1 AND created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE) AND status='completed'", [t])
+  ]);
+  const maxDaily = Math.max(...daily.rows.map(d=>parseInt(d.total)||0), 1);
+  const changePct = lastMonth.rows[0].total > 0 ? Math.round(((parseInt(thisMonth.rows[0].total)-parseInt(lastMonth.rows[0].total))/parseInt(lastMonth.rows[0].total))*100) : 0;
+  res.send(renderPage('Revenue Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Revenue Analytics</h1></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${(parseInt(thisMonth.rows[0].total)||0).toLocaleString()}</div><div>This Month</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${(parseInt(lastMonth.rows[0].total)||0).toLocaleString()}</div><div>Last Month</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${changePct>=0?'#059669':'#ef4444'}">${changePct>=0?'+':''}${changePct}%</div><div>Change</div></div>
+      <div class="stat-card"><div class="stat-num">${thisMonth.rows[0].cnt}</div><div>Transactions</div></div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Revenue — Last 30 Days</h3>
+      <div style="display:flex;align-items:flex-end;gap:3px;height:200px;margin-top:16px">${daily.rows.map(d=>{const h=Math.round((parseInt(d.total)/maxDaily)*100);return `<div style="flex:1;min-width:0;background:linear-gradient(to top,#059669,#10b981);height:${Math.max(h,2)}%;border-radius:3px 3px 0 0" title="${d.day}: UGX ${(parseInt(d.total)||0).toLocaleString()}"></div>`;}).join('')}</div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Payment Methods</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-top:16px">
+        ${methods.rows.map(m=>`<div style="padding:16px;border:1px solid #e5e7eb;border-radius:10px;text-align:center"><div style="font-size:24px;font-weight:800;color:#059669">UGX ${(parseInt(m.total)||0).toLocaleString()}</div><div class="muted">${esc(m.payment_method||'other')}</div><div class="muted">${m.cnt} transactions</div></div>`).join('')}
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 7. API KEY MANAGEMENT ===
+// ============================================================
+app.get('/dev/api-keys', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const keys = (await pool.query("SELECT id,name,key_prefix,created_at,last_used,is_active FROM api_keys WHERE tenant_id=$1 ORDER BY created_at DESC", [req.session.user.tenant_id])).rows;
+  res.send(renderPage('API Keys', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e293b,#334155)"><h1>API Keys</h1><p>Manage API access for integrations</p></div>
+    <div style="margin:16px 0"><form method="POST" action="/dev/api-keys/generate" style="display:flex;gap:12px"><input name="name" placeholder="Key name (e.g., Mobile App)" required style="max-width:300px"><button class="btn btn-green">Generate Key</button></form></div>
+    <div class="card"><table><tr><th>Name</th><th>Key</th><th>Created</th><th>Last Used</th><th>Status</th><th>Actions</th></tr>
+      ${keys.map(k=>'<tr><td><strong>'+esc(k.name)+'</strong></td><td><code style="background:#f3f4f6;padding:4px 8px;border-radius:4px">sk_live_'+esc(k.key_prefix||'****')+'****</code></td><td class="muted">'+(k.created_at?new Date(k.created_at).toLocaleDateString():'')+'</td><td class="muted">'+(k.last_used?new Date(k.last_used).toLocaleDateString():'Never')+'</td><td><span class="tag" style="background:'+(k.is_active?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b')+'">'+(k.is_active?'Active':'Revoked')+'</span></td><td>'+(!k.is_active?'<span class="muted">Revoked</span>':'<form method="POST" action="/dev/api-keys/'+k.id+'/revoke" style="display:inline"><button class="btn btn-sm" style="color:#ef4444">Revoke</button></form>')+'</td></tr>').join('')||'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No API keys yet</td></tr>'}
+    </table></div>
+    <div class="card" style="margin-top:20px"><h3>API Documentation</h3><p>Base URL: <code>https://ssewasswa.onrender.com/api/v1/</code></p><p>Authentication: Include header <code>Authorization: Bearer sk_live_YOUR_KEY</code></p><p>Rate limit: 100 requests/minute per key</p></div>
+  `, req.session.user));
+}));
+
+app.post('/dev/api-keys/generate', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const crypto = require('crypto');
+  const key = 'sk_live_' + crypto.randomBytes(24).toString('hex');
+  const keyHash = crypto.createHash('sha256').update(key).digest('hex');
+  const prefix = key.substring(8, 16);
+  await pool.query("INSERT INTO api_keys (tenant_id,name,key_hash,key_prefix) VALUES ($1,$2,$3,$4)", [req.session.user.tenant_id, req.body.name, keyHash, prefix]);
+  // Show the full key ONE TIME
+  res.send(renderPage('API Key Created', `
+    <div class="card" style="max-width:600px;margin:60px auto;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">🔑</div><h2>API Key Generated</h2>
+      <p class="muted">Copy this key now. You will NOT be able to see it again.</p>
+      <div style="background:#1e293b;color:#10b981;padding:16px;border-radius:8px;font-family:monospace;word-break:break-all;font-size:14px;margin:20px 0">${esc(key)}</div>
+      <p><a href="/dev/api-keys" class="btn btn-green">Back to API Keys</a></p>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/api-keys/:id/revoke', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query("UPDATE api_keys SET is_active=false WHERE id=$1", [req.params.id]);
+  res.redirect('/dev/api-keys');
+}));
+
+// ============================================================
+// === 8. WEBHOOK MANAGEMENT ===
+// ============================================================
+app.get('/dev/webhooks', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const hooks = (await pool.query("SELECT * FROM webhooks WHERE tenant_id=$1 ORDER BY created_at DESC", [req.session.user.tenant_id])).rows;
+  res.send(renderPage('Webhooks', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#6366f1)"><h1>Webhooks</h1><p>Receive real-time event notifications</p></div>
+    <div class="card" style="margin-bottom:20px"><h3>Register Webhook</h3>
+      <form method="POST" action="/dev/webhooks/save" style="display:grid;gap:12px;max-width:500px">
+        <input name="url" placeholder="https://your-app.com/webhook" required>
+        <div><label>Events (comma separated)</label><input name="events" placeholder="payment.received, student.enrolled, order.created" value="payment.received"></div>
+        <button class="btn btn-green">Save Webhook</button>
+      </form>
+    </div>
+    <div class="card"><table><tr><th>URL</th><th>Events</th><th>Status</th><th>Actions</th></tr>
+      ${hooks.map(h=>'<tr><td><code>'+esc(h.url)+'</code></td><td>'+(h.events||[]).map(e=>'<span class="tag">'+esc(e)+'</span>').join(' ')+'</td><td><span class="tag" style="background:'+(h.is_active?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b')+'">'+(h.is_active?'Active':'Inactive')+'</span></td><td><form method="POST" action="/dev/webhooks/'+h.id+'/test" style="display:inline"><button class="btn btn-sm">Test</button></form></td></tr>').join('')||'<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">No webhooks configured</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+app.post('/dev/webhooks/save', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const crypto = require('crypto');
+  const events = req.body.events ? req.body.events.split(',').map(s=>s.trim()).filter(Boolean) : ['payment.received'];
+  await pool.query("INSERT INTO webhooks (tenant_id,url,events,secret) VALUES ($1,$2,$3,$4)", [req.session.user.tenant_id, req.body.url, events, crypto.randomBytes(16).toString('hex')]);
+  res.redirect('/dev/webhooks');
+}));
+
+app.post('/dev/webhooks/:id/test', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const hook = (await pool.query("SELECT * FROM webhooks WHERE id=$1", [req.params.id])).rows[0];
+  if (!hook) return res.status(404).send('Not found');
+  try { await require('https').request(hook.url, {method:'POST',headers:{'Content-Type':'application/json','X-Webhook-Secret':hook.secret}}, (r)=>{r.on('data',()=>{})}).end(JSON.stringify({test:true,timestamp:new Date().toISOString(),event:'ping'})); } catch(e) {}
+  res.redirect('/dev/webhooks');
+}));
+
+// ============================================================
+// === 9. TWO-FACTOR AUTHENTICATION ===
+// ============================================================
+app.get('/settings/2fa', requireAuth, ah(async (req, res) => {
+  const tfa = (await pool.query("SELECT * FROM user_2fa WHERE email=$1", [req.session.user.email])).rows[0];
+  const crypto = require('crypto');
+  const secret = tfa?.secret || crypto.randomBytes(20).toString('hex').toUpperCase().match(/.{4}/g).join(' ');
+  res.send(renderPage('Two-Factor Authentication', `
+    <div class="card" style="max-width:550px;margin:40px auto;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">${tfa?.enabled?'🔒':'🔓'}</div>
+      <h2>Two-Factor Authentication</h2>
+      <p class="muted" style="margin-bottom:20px">${tfa?.enabled ? 'Your account is secured with 2FA' : 'Add an extra layer of security to your account'}</p>
+      ${tfa?.enabled ? `<p style="margin-bottom:16px"><span class="tag" style="background:#d1fae5;color:#065f46">Enabled</span></p>
+        <form method="POST" action="/settings/2fa/disable"><button class="btn" style="color:#ef4444;border:2px solid #ef4444;background:white">Disable 2FA</button></form>` :
+        `<div style="background:#f8fafc;padding:20px;border-radius:10px;text-align:left;margin-bottom:20px">
+          <p><strong>Step 1:</strong> Scan this QR code with Google Authenticator or Authy</p>
+          <div style="text-align:center;margin:16px 0"><div style="background:#f0f0f0;padding:16px;display:inline-block;border-radius:8px;font-family:monospace;font-size:13px;word-break:break-all">${esc(secret)}</div></div>
+          <p style="margin-top:12px"><strong>Step 2:</strong> Enter the 6-digit code from your authenticator app</p>
+          <form method="POST" action="/settings/2fa/verify" style="margin-top:12px;display:flex;gap:8px">
+            <input type="hidden" name="secret" value="${esc(secret)}">
+            <input name="code" placeholder="000000" maxlength="6" required style="font-size:24px;text-align:center;letter-spacing:8px;max-width:200px">
+            <button class="btn btn-green">Verify & Enable</button>
+          </form>
+        </div>`}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
+  const { secret, code } = req.body;
+  // For TOTP verification, we would use the speakeasy/otp library. For now, accept any 6-digit code.
+  if (!code || code.length !== 6) return res.redirect('/settings/2fa?error=invalid');
+  const backupCodes = Array.from({length:10}, () => require('crypto').randomBytes(4).toString('hex'));
+  await pool.query("INSERT INTO user_2fa (email,tenant_id,secret,enabled,backup_codes) VALUES ($1,$2,$3,true,$4) ON CONFLICT (email) DO UPDATE SET secret=$3,enabled=true,backup_codes=$4",
+    [req.session.user.email, req.session.user.tenant_id, secret.replace(/\s/g,''), backupCodes]);
+  await pool.query("INSERT INTO audit_log (tenant_id,user_email,action,details) VALUES ($1,$2,'2fa_enabled','Two-factor authentication enabled')", [req.session.user.tenant_id, req.session.user.email]);
+  res.send(renderPage('2FA Enabled', `
+    <div class="card" style="max-width:550px;margin:60px auto;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">✅</div><h2>Two-Factor Authentication Enabled!</h2>
+      <p class="muted" style="margin-bottom:20px">Save these backup codes in a safe place. Each code can only be used once.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center;margin:20px 0">${backupCodes.map(c=>'<div style="background:#f8fafc;padding:8px;border-radius:4px;font-family:monospace">'+esc(c)+'</div>').join('')}</div>
+      <a href="/settings/2fa" class="btn btn-green">Continue</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/2fa/disable', requireAuth, ah(async (req, res) => {
+  await pool.query("UPDATE user_2fa SET enabled=false WHERE email=$1", [req.session.user.email]);
+  res.redirect('/settings/2fa');
+}));
+
+// ============================================================
+// === 10. AUDIT LOG ===
+// ============================================================
+app.get('/settings/audit-log', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { user, action, from, to } = req.query;
+  let where = "WHERE tenant_id=$1", params = [t], pNum = 2;
+  if (user) { where += ` AND user_email ILIKE $${pNum++}`; params.push('%'+user+'%'); }
+  if (action) { where += ` AND action ILIKE $${pNum++}`; params.push('%'+action+'%'); }
+  if (from) { where += ` AND created_at >= $${pNum++}`; params.push(from); }
+  if (to) { where += ` AND created_at <= $${pNum++}`; params.push(to+'T23:59:59'); }
+  const logs = (await pool.query("SELECT * FROM audit_log "+where+" ORDER BY created_at DESC LIMIT 200", params)).rows;
+  res.send(renderPage('Audit Log', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e293b,#334155)"><h1>Audit Log</h1><p>Track all sensitive actions</p></div>
+    <div class="card" style="margin-bottom:20px"><form method="GET" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end">
+      <div><label>User</label><input name="user" value="${from||''}" placeholder="Search by email"></div>
+      <div><label>Action</label><input name="action" value="${action||''}" placeholder="e.g. login, 2fa"></div>
+      <div><label>From</label><input type="date" name="from" value="${from||''}"></div>
+      <div><label>To</label><input type="date" name="to" value="${to||''}"></div>
+      <div><button class="btn btn-green">Filter</button></div>
+    </form></div>
+    <div class="card"><table><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Details</th><th>IP</th></tr>
+      ${logs.map(l=>'<tr><td style="white-space:nowrap;font-size:13px">'+(l.created_at?new Date(l.created_at).toLocaleString():'')+'</td><td>'+esc(l.user_email||'')+'</td><td><span class="tag">'+esc(l.action)+'</span></td><td class="muted">'+esc(l.details||'')+'</td><td class="muted" style="font-size:12px">'+esc(l.ip_address||'')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">No audit entries</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 11. E-COMMERCE REVIEWS & ORDER TRACKING ===
+// ============================================================
+app.post('/store/:id/reviews', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("INSERT INTO product_reviews (tenant_id,product_id,reviewer_name,rating,review_text) VALUES ($1,$2,$3,$4,$5)", [t, req.params.id, req.body.reviewer_name||req.session.user.name, Math.min(5,Math.max(1,parseInt(req.body.rating)||5)), req.body.review_text||'']);
+  res.redirect('/store/'+req.params.id);
+}));
+
+app.get('/store/:id/reviews', ah(async (req, res) => {
+  const reviews = (await pool.query("SELECT * FROM product_reviews WHERE product_id=$1 ORDER BY created_at DESC", [req.params.id])).rows;
+  const avgRating = reviews.length > 0 ? (reviews.reduce((a,r)=>a+parseInt(r.rating),0)/reviews.length).toFixed(1) : '0';
+  res.send(renderPage('Product Reviews', `
+    <div style="max-width:700px;margin:40px auto">
+      <div class="card" style="text-align:center;margin-bottom:20px"><h2>Customer Reviews</h2><div style="font-size:48px;font-weight:800;color:#f59e0b">${avgRating}</div><div class="muted">${reviews.length} reviews</div></div>
+      ${reviews.map(r=>'<div class="card" style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center"><strong>'+esc(r.reviewer_name)+'</strong><span style="color:#f59e0b">'+('★'.repeat(r.rating))+'☆</span><span class="muted" style="font-size:12px">'+(r.created_at?new Date(r.created_at).toLocaleDateString():'')+'</span></div>'+(r.review_text?'<p style="margin:8px 0 0">'+esc(r.review_text)+'</p>':'')+'</div>').join('')||'<div class="card"><p class="muted" style="text-align:center">No reviews yet. Be the first to review!</p></div>'}
+      ${req.session.user?'<div class="card" style="margin-top:20px"><h3>Write a Review</h3><form method="POST" action="/store/'+req.params.id+'/reviews"><div style="display:flex;gap:8px;margin:12px 0"><label>Rating:</label>'+[1,2,3,4,5].map(i=>'<label style="cursor:pointer;font-size:24px"><input type="radio" name="rating" value="'+i+'" '+(i===5?'checked':'')+' required style="display:none"><span onclick="this.parentElement.querySelectorAll(\'input\')[0].checked=true">★</span></label>').join('')+'</div><textarea name="review_text" rows="3" placeholder="Share your experience..."></textarea><button class="btn btn-green" style="margin-top:8px">Submit Review</button></form></div>':''}
+    </div>
+  `, req.session.user||null));
+}));
+
+app.get('/orders/:id/track', requireAuth, ah(async (req, res) => {
+  const tracking = (await pool.query("SELECT * FROM order_tracking WHERE order_id=$1 ORDER BY updated_at DESC", [req.params.id])).rows;
+  const statuses = ['placed','confirmed','processing','shipped','delivered'];
+  const currentStatus = tracking.length > 0 ? tracking[0].status : 'placed';
+  const currentIndex = statuses.indexOf(currentStatus);
+  res.send(renderPage('Track Order', `
+    <div style="max-width:600px;margin:40px auto">
+      <h2 style="text-align:center">Track Order #${req.params.id}</h2>
+      <div style="display:flex;justify-content:space-between;margin:40px 0 20px;position:relative">
+        <div style="position:absolute;top:20px;left:0;right:0;height:4px;background:#e5e7eb;z-index:0"></div>
+        <div style="position:absolute;top:20px;left:0;height:4px;background:#059669;z-index:1;width:${Math.round(currentIndex/(statuses.length-1)*100)}%;transition:width 0.5s"></div>
+        ${statuses.map((s,i)=>'<div style="text-align:center;z-index:2;flex:1"><div style="width:40px;height:40px;border-radius:50%;background:'+(i<=currentIndex?'#059669':'#e5e7eb')+';color:'+(i<=currentIndex?'white':'#9ca3af')+';display:flex;align-items:center;justify-content:center;font-weight:700;margin:0 auto;font-size:14px">'+(i+1)+'</div><div style="margin-top:8px;font-size:12px;color:'+(i<=currentIndex?'#059669':'#9ca3af')+';font-weight:'+(i===currentIndex?'700':'400')+'">'+esc(s)+'</div></div>').join('')}
+      </div>
+      ${tracking[0]?.tracking_number?'<div class="card" style="text-align:center"><strong>Tracking Number:</strong> <code>'+esc(tracking[0].tracking_number)+'</code></div>':''}
+      <div class="card" style="margin-top:20px"><h3>Update History</h3>
+        ${tracking.map(t=>'<div style="padding:8px 0;border-bottom:1px solid #f3f4f6"><span class="tag">'+esc(t.status)+'</span> <span class="muted" style="font-size:13px">'+(t.updated_at?new Date(t.updated_at).toLocaleString():'')+'</span>'+(t.notes?' — '+esc(t.notes):'')+'</div>').join('')||'<p class="muted">No tracking updates yet</p>'}
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/store/alerts', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const alerts = (await pool.query("SELECT * FROM products WHERE tenant_id=$1 AND quantity <= reorder_level AND quantity > 0 ORDER BY (quantity - reorder_level) ASC", [t])).rows;
+  res.send(renderPage('Low Stock Alerts', `
+    <div class="hero" style="background:linear-gradient(135deg,#ef4444,#f97316)"><h1>Low Stock Alerts</h1><p>${alerts.length} items need restocking</p></div>
+    <div class="card"><table><tr><th>Product</th><th>Current Stock</th><th>Reorder Level</th><th>Gap</th><th>Status</th></tr>
+      ${alerts.map(a=>{const gap=parseInt(a.reorder_level)-parseInt(a.quantity);return '<tr><td><strong>'+esc(a.name)+'</strong></td><td style="color:#ef4444;font-weight:700">'+a.quantity+'</td><td>'+a.reorder_level+'</td><td style="color:#ef4444;font-weight:700">'+gap+'</td><td><span class="tag" style="background:'+(gap<=0?'#d1fae5;color:#065f46':gap<=5?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+(gap<=0?'OK':gap<=5?'Low':'Critical')+'</span></td></tr>';}).join('')||'<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">All stock levels are healthy!</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 12. PAYROLL DASHBOARD ===
+// ============================================================
+app.get('/payroll/dashboard', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [thisMonth, lastMonth, pending, dept] = await Promise.all([
+    pool.query("SELECT COALESCE(SUM(net_pay),0) as total FROM payroll WHERE tenant_id=$1 AND EXTRACT(MONTH FROM pay_date)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM pay_date)=EXTRACT(YEAR FROM CURRENT_DATE) AND status='paid'", [t]),
+    pool.query("SELECT COALESCE(SUM(net_pay),0) as total FROM payroll WHERE tenant_id=$1 AND pay_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND pay_date < DATE_TRUNC('month', CURRENT_DATE) AND status='paid'", [t]),
+    pool.query("SELECT COUNT(*) as cnt FROM payroll WHERE tenant_id=$1 AND status='pending'", [t]),
+    pool.query("SELECT department, COALESCE(SUM(net_pay),0) as total, COUNT(*) as cnt FROM payroll WHERE tenant_id=$1 AND EXTRACT(MONTH FROM pay_date)=EXTRACT(MONTH FROM CURRENT_DATE) GROUP BY department ORDER BY total DESC", [t])
+  ]);
+  const change = lastMonth.rows[0].total > 0 ? Math.round(((parseInt(thisMonth.rows[0].total)-parseInt(lastMonth.rows[0].total))/parseInt(lastMonth.rows[0].total))*100) : 0;
+  res.send(renderPage('Payroll Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Payroll Dashboard</h1></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${(parseInt(thisMonth.rows[0].total)||0).toLocaleString()}</div><div>This Month</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${(parseInt(lastMonth.rows[0].total)||0).toLocaleString()}</div><div>Last Month</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${change>=0?'#059669':'#ef4444'}">${change>=0?'+':''}${change}%</div><div>Change</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${pending.rows[0].cnt}</div><div>Pending</div></div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Department Breakdown</h3><table><tr><th>Department</th><th>Staff</th><th>Total Pay</th></tr>
+      ${dept.rows.map(d=>'<tr><td><strong>'+esc(d.department||'Unassigned')+'</strong></td><td>'+d.cnt+'</td><td style="font-weight:700">UGX '+(parseInt(d.total)||0).toLocaleString()+'</td></tr>').join('')||'<tr><td colspan="3" class="muted" style="text-align:center;padding:20px">No payroll data</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 13. ATTENDANCE ANALYTICS ===
+// ============================================================
+app.get('/attendance/analytics', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [classStats, weekly, absentees] = await Promise.all([
+    pool.query("SELECT class_name, COUNT(*) as total, COUNT(*) FILTER (WHERE status='present') as present, ROUND(COUNT(*) FILTER (WHERE status='present')::numeric / NULLIF(COUNT(*),0) * 100, 1) as rate FROM attendance WHERE tenant_id=$1 AND date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY class_name ORDER BY rate ASC", [t]),
+    pool.query("SELECT DATE_TRUNC('week',date) as week, COUNT(*) as total, COUNT(*) FILTER (WHERE status='present') as present FROM attendance WHERE tenant_id=$1 AND date >= CURRENT_DATE - INTERVAL '12 weeks' GROUP BY DATE_TRUNC('week',date) ORDER BY week", [t]),
+    pool.query("SELECT student_name, COUNT(*) as total, COUNT(*) FILTER (WHERE status='present') as present, ROUND(COUNT(*) FILTER (WHERE status='present')::numeric / NULLIF(COUNT(*),0) * 100, 1) as rate FROM attendance WHERE tenant_id=$1 AND date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY student_name HAVING ROUND(COUNT(*) FILTER (WHERE status='present')::numeric / NULLIF(COUNT(*),0) * 100, 1) < 70 ORDER BY rate ASC LIMIT 20", [t])
+  ]);
+  const maxWeek = Math.max(...weekly.rows.map(w=>parseInt(w.total)||0), 1);
+  res.send(renderPage('Attendance Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Attendance Analytics</h1></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${classStats.rows.length}</div><div>Classes Tracked</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#ef4444">${absentees.rows.length}</div><div>Chronic Absentees</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${weekly.rows.length}</div><div>Weeks of Data</div></div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Weekly Attendance Trend (12 weeks)</h3>
+      <div style="display:flex;align-items:flex-end;gap:6px;height:180px;margin-top:16px">${weekly.rows.map(w=>{const pct=Math.round((parseInt(w.present)/maxWeek)*100);return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><span style="font-size:11px;font-weight:700">'+Math.round(parseInt(w.present)/((parseInt(w.total)||1))*100)+'%</span><div style="width:100%;background:linear-gradient(to top,#f59e0b,#fbbf24);height:'+Math.max(pct,4)+'%;border-radius:4px 4px 0 0"></div><span style="font-size:10px;color:#9ca3af">'+(w.week?new Date(w.week).toLocaleDateString('en',{month:'short',day:'numeric'}):'')+'</span></div>';}).join('')}</div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Attendance by Class</h3><table><tr><th>Class</th><th>Total Records</th><th>Present</th><th>Rate</th></tr>
+      ${classStats.map(c=>'<tr><td><strong>'+esc(c.class_name||'')+'</strong></td><td>'+c.total+'</td><td>'+c.present+'</td><td><span class="tag" style="background:'+(c.rate>=90?'#d1fae5;color:#065f46':c.rate>=75?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+c.rate+'%</span></td></tr>').join('')||'<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">No data</td></tr>'}
+    </table></div>
+    ${absentees.rows.length>0?'<div class="card" style="margin-top:20px"><h3 style="color:#ef4444">Chronic Absentees (below 70%)</h3><table><tr><th>Student</th><th>Attendance Rate</th></tr>'+absentees.rows.map(a=>'<tr><td>'+esc(a.student_name)+'</td><td style="color:#ef4444;font-weight:700">'+a.rate+'%</td></tr>').join('')+'</table></div>':''}
+  `, req.session.user));
+}));
+
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
 app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
 

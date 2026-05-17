@@ -13,6 +13,19 @@
 module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   const requireAuth = (req, res, next) => { if (!req.session?.user) return res.redirect('/login'); next(); };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
   const PS = 20; // page size for lists
@@ -571,7 +584,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  1. GET /email-campaigns — Dashboard
   // ═══════════════════════════════════════════════════════
-  app.get('/email-campaigns', requireAuth, ah(async (req, res) => {
+  app.get('/email-campaigns', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
 
     const stats = (await pool.query(`
@@ -678,7 +691,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  2. GET /email-campaigns/new — Create campaign form
   // ═══════════════════════════════════════════════════════
-  app.get('/email-campaigns/new', requireAuth, ah(async (req, res) => {
+  app.get('/email-campaigns/new', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
 
     // Get classes for specific_class filter
@@ -957,7 +970,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  3. POST /email-campaigns/new — Save campaign (draft or send)
   // ═══════════════════════════════════════════════════════
-  app.post('/email-campaigns/new', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/new', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
     const { name, subject, preheader, body_html, body_text, sender_name, sender_email,
@@ -1014,7 +1027,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   }));
 
   // POST /email-campaigns/send-now — Send campaign immediately from form
-  app.post('/email-campaigns/send-now', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/send-now', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
     const { name, subject, preheader, body_html, body_text, sender_name, sender_email,
@@ -1064,7 +1077,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  4. GET /email-campaigns/all — List all campaigns
   // ═══════════════════════════════════════════════════════
-  app.get('/email-campaigns/all', requireAuth, ah(async (req, res) => {
+  app.get('/email-campaigns/all', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { status, q, date_from, date_to, page = 1 } = req.query;
     const off = (parseInt(page) - 1) * PS;
@@ -1182,7 +1195,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  5. GET /email-campaigns/:id — Campaign detail + analytics
   // ═══════════════════════════════════════════════════════
-  app.get('/email-campaigns/:id', requireAuth, ah(async (req, res) => {
+  app.get('/email-campaigns/:id', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const cid = parseInt(req.params.id);
 
@@ -1346,7 +1359,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  6. POST /email-campaigns/:id/send — Send campaign
   // ═══════════════════════════════════════════════════════
-  app.post('/email-campaigns/:id/send', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/:id/send', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const cid = parseInt(req.params.id);
 
@@ -1383,7 +1396,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  7. POST /email-campaigns/:id/duplicate — Duplicate
   // ═══════════════════════════════════════════════════════
-  app.post('/email-campaigns/:id/duplicate', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/:id/duplicate', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
     const cid = parseInt(req.params.id);
@@ -1409,7 +1422,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  8. POST /email-campaigns/:id/delete — Delete campaign
   // ═══════════════════════════════════════════════════════
-  app.post('/email-campaigns/:id/delete', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/:id/delete', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const cid = parseInt(req.params.id);
 
@@ -1431,7 +1444,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  9. GET /email-campaigns/subscribers — Subscriber management
   // ═══════════════════════════════════════════════════════
-  app.get('/email-campaigns/subscribers', requireAuth, ah(async (req, res) => {
+  app.get('/email-campaigns/subscribers', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { status, q, tag, page = 1 } = req.query;
     const off = (parseInt(page) - 1) * PS;
@@ -1600,21 +1613,21 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   }));
 
   // Subscriber delete (inline)
-  app.post('/email-campaigns/subscribers/:id/delete', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/subscribers/:id/delete', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     await pool.query(`DELETE FROM email_subscribers WHERE id=$1 AND tenant_id=$2`, [parseInt(req.params.id), tid]);
     res.redirect('/email-campaigns/subscribers');
   }));
 
   // Subscriber unsubscribe (inline)
-  app.post('/email-campaigns/subscribers/:id/unsubscribe', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/subscribers/:id/unsubscribe', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     await pool.query(`UPDATE email_subscribers SET status='unsubscribed' WHERE id=$1 AND tenant_id=$2`, [parseInt(req.params.id), tid]);
     res.redirect('/email-campaigns/subscribers');
   }));
 
   // Subscriber export (CSV)
-  app.get('/email-campaigns/subscribers/export', requireAuth, ah(async (req, res) => {
+  app.get('/email-campaigns/subscribers/export', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { status, q, tag } = req.query;
 
@@ -1644,7 +1657,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  10. POST /email-campaigns/subscribers/add — Add subscriber
   // ═══════════════════════════════════════════════════════
-  app.post('/email-campaigns/subscribers/add', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/subscribers/add', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { email, name, tags } = req.body;
 
@@ -1677,7 +1690,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  11. POST /email-campaigns/subscribers/import — Bulk import
   // ═══════════════════════════════════════════════════════
-  app.post('/email-campaigns/subscribers/import', requireAuth, ah(async (req, res) => {
+  app.post('/email-campaigns/subscribers/import', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { csv_data, source } = req.body;
 
@@ -1740,7 +1753,7 @@ module.exports = function emailCampaigns(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  12. GET /email-campaigns/templates — Pre-built templates
   // ═══════════════════════════════════════════════════════
-  app.get('/email-campaigns/templates', requireAuth, ah(async (req, res) => {
+  app.get('/email-campaigns/templates', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
 
     const catColors = {

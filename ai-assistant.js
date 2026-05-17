@@ -13,6 +13,19 @@ module.exports = function aiAssistant(app, db, pool, renderPage, esc) {
   };
 
   const ah = (fn) => (req, res, next) => {
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
     Promise.resolve(fn(req, res, next)).catch(err => { console.error('[AI]', err); res.status(500).send('Internal error'); });
   };
 
@@ -142,7 +155,7 @@ module.exports = function aiAssistant(app, db, pool, renderPage, esc) {
   /* ════════════════════════════════════════════
      ROUTE 1 — GET /ai  (Chat Interface)
      ════════════════════════════════════════════ */
-  app.get('/ai', requireAuth, ah(async (req, res) => {
+  app.get('/ai', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const convos = (await pool.query(
       `SELECT id,title,model,context_type,created_at FROM ai_conversations
        WHERE tenant_id=$1 AND user_id=$2 ORDER BY updated_at DESC NULLS LAST, created_at DESC LIMIT 50`,
@@ -304,7 +317,7 @@ ta.addEventListener('input',function(){this.style.height='auto';this.style.heigh
   /* ════════════════════════════════════════════
      ROUTE 2 — POST /ai/chat
      ════════════════════════════════════════════ */
-  app.post('/ai/chat', requireAuth, ah(async (req, res) => {
+  app.post('/ai/chat', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const { message, conversationId, model } = req.body;
     if (!message || !message.trim()) return res.json({ error: 'Message required' });
     const settings = await getSettings(req.tenantId);
@@ -344,7 +357,7 @@ ta.addEventListener('input',function(){this.style.height='auto';this.style.heigh
   /* ════════════════════════════════════════════
      ROUTE 3 — GET /ai/conversations
      ════════════════════════════════════════════ */
-  app.get('/ai/conversations', requireAuth, ah(async (req, res) => {
+  app.get('/ai/conversations', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const convos = (await pool.query(
       `SELECT c.id,c.title,c.model,c.context_type,c.created_at,
         COALESCE(json_agg(json_build_object('role',m.role,'content',m.content,'created_at',m.created_at)
@@ -358,7 +371,7 @@ ta.addEventListener('input',function(){this.style.height='auto';this.style.heigh
   /* ════════════════════════════════════════════
      ROUTE 4 — DELETE /ai/conversations/:id
      ════════════════════════════════════════════ */
-  app.delete('/ai/conversations/:id', requireAuth, ah(async (req, res) => {
+  app.delete('/ai/conversations/:id', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     await pool.query(`DELETE FROM ai_conversations WHERE id=$1 AND tenant_id=$2 AND user_id=$3`,
       [req.params.id, req.tenantId, req.userId]);
     res.json({ ok: true });
@@ -367,7 +380,7 @@ ta.addEventListener('input',function(){this.style.height='auto';this.style.heigh
   /* ════════════════════════════════════════════
      ROUTE 5 — GET /ai/prompts  (Prompt Library)
      ════════════════════════════════════════════ */
-  app.get('/ai/prompts', requireAuth, ah(async (req, res) => {
+  app.get('/ai/prompts', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const { cat } = req.query;
     let sql = `SELECT * FROM ai_prompts WHERE tenant_id=$1 AND is_active=true`;
     const params = [req.tenantId];
@@ -428,7 +441,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   /* ════════════════════════════════════════════
      ROUTE 6 — GET /ai/prompts/new
      ════════════════════════════════════════════ */
-  app.get('/ai/prompts/new', requireAuth, ah(async (req, res) => {
+  app.get('/ai/prompts/new', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     res.send(renderPage('Create Prompt', `
 <style>
   .prompt-form{max-width:640px;margin:0 auto}
@@ -466,7 +479,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   /* ════════════════════════════════════════════
      ROUTE 7 — POST /ai/prompts/create
      ════════════════════════════════════════════ */
-  app.post('/ai/prompts/create', requireAuth, ah(async (req, res) => {
+  app.post('/ai/prompts/create', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const { name, category, description, prompt_text } = req.body;
     if (!name || !prompt_text) return res.redirect('/ai/prompts/new');
     const variables = (prompt_text.match(/\{\{(\w+)\}\}/g) || []).map(v => v.replace(/[{}]/g, ''));
@@ -480,7 +493,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   /* ════════════════════════════════════════════
      ROUTE 8 — DELETE /ai/prompts/:id
      ════════════════════════════════════════════ */
-  app.delete('/ai/prompts/:id', requireAuth, ah(async (req, res) => {
+  app.delete('/ai/prompts/:id', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     await pool.query(`DELETE FROM ai_prompts WHERE id=$1 AND tenant_id=$2 AND is_system=false`,
       [req.params.id, req.tenantId]);
     res.json({ ok: true });
@@ -489,7 +502,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   /* ════════════════════════════════════════════
      ROUTE 9 — POST /ai/prompts/:id/use
      ════════════════════════════════════════════ */
-  app.post('/ai/prompts/:id/use', requireAuth, ah(async (req, res) => {
+  app.post('/ai/prompts/:id/use', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const r = await pool.query(`SELECT prompt_text,variables FROM ai_prompts WHERE id=$1 AND tenant_id=$2`,
       [req.params.id, req.tenantId]);
     if (!r.rows[0]) return res.json({ error: 'Prompt not found' });
@@ -500,7 +513,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   /* ════════════════════════════════════════════
      ROUTE 10 — GET /ai/settings
      ════════════════════════════════════════════ */
-  app.get('/ai/settings', requireAuth, ah(async (req, res) => {
+  app.get('/ai/settings', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const s = await getSettings(req.tenantId);
     res.send(renderPage('AI Settings', `
 <style>
@@ -561,7 +574,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   /* ════════════════════════════════════════════
      ROUTE 11 — POST /ai/settings/save
      ════════════════════════════════════════════ */
-  app.post('/ai/settings/save', requireAuth, ah(async (req, res) => {
+  app.post('/ai/settings/save', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const { model, temperature, maxTokens } = req.body;
     await pool.query(
       `UPDATE tenants SET ai_model=$1,ai_temperature=$2,ai_max_tokens=$3 WHERE id=$4`,
@@ -572,7 +585,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   /* ════════════════════════════════════════════
      ROUTE 12 — GET /ai/report  (Analytics)
      ════════════════════════════════════════════ */
-  app.get('/ai/report', requireAuth, ah(async (req, res) => {
+  app.get('/ai/report', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.tenantId;
     const totalConvos = (await pool.query(`SELECT COUNT(*)::int AS n FROM ai_conversations WHERE tenant_id=$1`, [tid])).rows[0].n;
     const totalMsgs = (await pool.query(`SELECT COUNT(*)::int AS n FROM ai_messages WHERE tenant_id=$1`, [tid])).rows[0].n;
@@ -666,7 +679,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   /* ════════════════════════════════════════════
      ROUTE 13 — GET /api/ai/suggestions
      ════════════════════════════════════════════ */
-  app.get('/api/ai/suggestions', requireAuth, ah(async (req, res) => {
+  app.get('/api/ai/suggestions', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const { page, context } = req.query;
     const suggestions = {
       dashboard: [

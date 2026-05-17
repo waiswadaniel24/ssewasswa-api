@@ -14,6 +14,19 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   };
   const navUrl = (action) => `/canteen${action}`;
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
   const MEALS = ['breakfast','lunch','snack','dinner'];
   const STATUSES = ['pending','preparing','ready','fulfilled'];
@@ -105,7 +118,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 1 — Dashboard
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/canteen', requireAuth, async (req, res) => {
+  app.get('/canteen', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const today = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
 
@@ -199,7 +212,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 2 — Weekly Menu Planner
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/canteen/menu', requireAuth, async (req, res) => {
+  app.get('/canteen/menu', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const menuItems = await pool.query(
       `SELECT * FROM canteen_menu WHERE tenant_id=$1 AND is_active=true
@@ -285,7 +298,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 3 — Add menu item
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/canteen/menu/add', requireAuth, async (req, res) => {
+  app.post('/canteen/menu/add', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { item_name, description, day_of_week, meal_type, price, calories, tags } = req.body;
     if (!item_name || !item_name.trim()) {
@@ -304,7 +317,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 4 — Delete menu item
   // ═══════════════════════════════════════════════════════════════════════════
-  app.delete('/canteen/menu/:id', requireAuth, async (req, res) => {
+  app.delete('/canteen/menu/:id', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const result = await pool.query(
@@ -315,7 +328,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
 
   // ROUTE 5 — Save entire weekly menu
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/canteen/menu/weekly', requireAuth, async (req, res) => {
+  app.post('/canteen/menu/weekly', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { menu_data } = req.body;
     if (!menu_data) return res.send('<div class="alert">No menu data provided.</div><a href="javascript:history.back()">Go back</a>');
@@ -340,7 +353,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 6 — Order page (select from available items)
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/canteen/order', requireAuth, async (req, res) => {
+  app.get('/canteen/order', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const today = DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1];
 
@@ -406,7 +419,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 7 — Place order
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/canteen/order/place', requireAuth, async (req, res) => {
+  app.post('/canteen/order/place', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { customer_name, payment_method, notes, items } = req.body;
 
@@ -447,7 +460,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 8 — Order queue with status management
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/canteen/orders', requireAuth, async (req, res) => {
+  app.get('/canteen/orders', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const statusFilter = req.query.status || '';
 
@@ -526,7 +539,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 9 — Update order status
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/canteen/orders/:id/status', requireAuth, async (req, res) => {
+  app.post('/canteen/orders/:id/status', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const { status } = req.body;
@@ -565,7 +578,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 10 — Ingredient Inventory
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/canteen/inventory', requireAuth, async (req, res) => {
+  app.get('/canteen/inventory', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const inventory = await pool.query(
       `SELECT * FROM canteen_inventory WHERE tenant_id=$1
@@ -641,7 +654,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 11 — Add / Restock ingredient
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/canteen/inventory/add', requireAuth, async (req, res) => {
+  app.post('/canteen/inventory/add', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { ingredient_name, quantity, unit, reorder_level, supplier } = req.body;
     if (!ingredient_name || !ingredient_name.trim()) {
@@ -674,7 +687,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 12 — Update ingredient quantity
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/canteen/inventory/:id/update', requireAuth, async (req, res) => {
+  app.post('/canteen/inventory/:id/update', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const { quantity } = req.body;
@@ -695,7 +708,7 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 13 — Sales Reports
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/canteen/report', requireAuth, async (req, res) => {
+  app.get('/canteen/report', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
 
     const [dailyRevenue, weeklyRevenue] = await Promise.all([

@@ -21,6 +21,19 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
 
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
+
   if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s))
     .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
@@ -170,7 +183,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 1: GET /clinic — Dashboard
   // ============================================================
-  app.get('/clinic', requireAuth, ah(async (req, res) => {
+  app.get('/clinic', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const [patientCount, todayAppts, queueList, apptTypeRows, visitRows] = await Promise.all([
@@ -290,7 +303,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 2: GET /clinic/patients — Patient registry
   // ============================================================
-  app.get('/clinic/patients', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/patients', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const search = (req.query.q || '').trim();
     const genderFilter = req.query.gender || '';
@@ -357,7 +370,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 3: GET /clinic/patients/:id — Patient profile
   // ============================================================
-  app.get('/clinic/patients/:id', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/patients/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, pid = req.params.id;
 
     const patient = (await pool.query(
@@ -488,7 +501,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 4: POST /clinic/patients — Register new patient
   // ============================================================
-  app.post('/clinic/patients', requireAuth, ah(async (req, res) => {
+  app.post('/clinic/patients', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { patient_name, date_of_birth, gender, phone, email, blood_group, address, emergency_contact, emergency_phone, insurance_provider, insurance_number } = req.body;
 
@@ -508,7 +521,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 5: GET /clinic/appointments — Appointment list
   // ============================================================
-  app.get('/clinic/appointments', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/appointments', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const statusFilter = req.query.status || '';
     const dateFrom = req.query.from || '';
@@ -591,7 +604,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 6: POST /clinic/appointments — Book appointment
   // ============================================================
-  app.post('/clinic/appointments', requireAuth, ah(async (req, res) => {
+  app.post('/clinic/appointments', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { patient_id, appointment_date, appointment_time, appointment_type, doctor_name, notes } = req.body;
 
@@ -611,7 +624,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 7: POST /clinic/appointments/:id/status
   // ============================================================
-  app.post('/clinic/appointments/:id/status', requireAuth, ah(async (req, res) => {
+  app.post('/clinic/appointments/:id/status', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { status } = req.body;
     const validStatuses = ['scheduled', 'completed', 'cancelled', 'no_show', 'in_progress'];
@@ -629,7 +642,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 8: GET /clinic/consultations — Consultation records
   // ============================================================
-  app.get('/clinic/consultations', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/consultations', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const consultations = (await pool.query(
@@ -667,7 +680,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 9: POST /clinic/consultations — Create consultation
   // ============================================================
-  app.post('/clinic/consultations', requireAuth, ah(async (req, res) => {
+  app.post('/clinic/consultations', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { patient_id, doctor_id, consultation_date, diagnosis, notes, treatment, follow_up_date } = req.body;
 
@@ -694,7 +707,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 10: GET /clinic/prescriptions — Prescription list
   // ============================================================
-  app.get('/clinic/prescriptions', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/prescriptions', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const prescriptions = (await pool.query(
@@ -734,7 +747,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 11: POST /clinic/prescriptions — Create prescription
   // ============================================================
-  app.post('/clinic/prescriptions', requireAuth, ah(async (req, res) => {
+  app.post('/clinic/prescriptions', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { patient_id, doctor_id, notes, items } = req.body;
 
@@ -771,7 +784,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 12: GET /clinic/pharmacy — Pharmacy inventory
   // ============================================================
-  app.get('/clinic/pharmacy', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/pharmacy', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const search = (req.query.q || '').trim();
 
@@ -859,7 +872,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 13: POST /clinic/pharmacy/dispense — Dispense medication
   // ============================================================
-  app.post('/clinic/pharmacy/dispense', requireAuth, ah(async (req, res) => {
+  app.post('/clinic/pharmacy/dispense', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { patient_id, drug_id, quantity_dispensed, notes } = req.body;
 
@@ -898,7 +911,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 14: GET /clinic/lab — Lab requests and results
   // ============================================================
-  app.get('/clinic/lab', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/lab', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const [labRequests, labResults] = await Promise.all([
@@ -965,7 +978,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 15: POST /clinic/lab — Create lab request / record results
   // ============================================================
-  app.post('/clinic/lab', requireAuth, ah(async (req, res) => {
+  app.post('/clinic/lab', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { action, patient_id, test_name, result_value, result_status, request_id } = req.body;
 
@@ -999,7 +1012,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 16: GET /clinic/queue — Today's patient queue
   // ============================================================
-  app.get('/clinic/queue', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/queue', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const queueList = (await pool.query(
@@ -1053,7 +1066,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   }));
 
   // Queue status update endpoint
-  app.post('/clinic/queue/:id/status', requireAuth, ah(async (req, res) => {
+  app.post('/clinic/queue/:id/status', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const validStatuses = ['waiting', 'in_progress', 'completed', 'cancelled'];
     const { status } = req.body;
@@ -1070,7 +1083,7 @@ module.exports = function clinicManagement(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 17: GET /clinic/api/stats — JSON API
   // ============================================================
-  app.get('/clinic/api/stats', requireAuth, ah(async (req, res) => {
+  app.get('/clinic/api/stats', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const [patientCount, todayAppts, queueLen, labPending, lowStock] = await Promise.all([

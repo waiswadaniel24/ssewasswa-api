@@ -105,6 +105,19 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   const requireAuth = (req, res, next) => { if (!req.session || !req.session.user) return res.redirect('/login'); next(); };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
+
   // ============================================================
   // DATABASE MIGRATIONS
   // ============================================================
@@ -187,7 +200,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 1: GET /visitors — Dashboard
   // ============================================================
-  app.get('/visitors', requireAuth, ah(async (req, res) => {
+  app.get('/visitors', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { status, search } = req.query;
 
@@ -253,7 +266,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 2: GET /visitors/check-in — Check-In Form
   // ============================================================
-  app.get('/visitors/check-in', requireAuth, ah(async (req, res) => {
+  app.get('/visitors/check-in', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const pendingPre = (await pool.query(
       `SELECT * FROM pre_registrations WHERE tenant_id=$1 AND status='pending' AND expected_date <= CURRENT_DATE ORDER BY expected_time LIMIT 20`, [tid]
@@ -330,7 +343,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 3: POST /visitors/check-in — Process Check-In
   // ============================================================
-  app.post('/visitors/check-in', requireAuth, ah(async (req, res) => {
+  app.post('/visitors/check-in', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { full_name, email, phone, company, purpose, purpose_details, host_name, host_department, id_type, id_number, vehicle_plate, badge_number, notes } = req.body;
     if (!full_name || !full_name.trim() || !purpose) return res.redirect('/visitors/check-in');
@@ -349,7 +362,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 4: POST /visitors/:id/check-out — Process Check-Out
   // ============================================================
-  app.post('/visitors/:id/check-out', requireAuth, ah(async (req, res) => {
+  app.post('/visitors/:id/check-out', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, vid = req.params.id;
     const result = await pool.query(`UPDATE visitors SET check_out_time=NOW(), status='checked_out' WHERE id=$1 AND tenant_id=$2 AND status='checked_in' RETURNING id`, [vid, tid]);
     if (result.rows.length) console.log(`[Visitors] Check-out: visitor #${vid} by ${user.email}`);
@@ -359,7 +372,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 5: GET /visitors/pre-register — Pre-Registration Form
   // ============================================================
-  app.get('/visitors/pre-register', requireAuth, ah(async (req, res) => {
+  app.get('/visitors/pre-register', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user;
     const html = VL_CSS + `<div style="max-width:700px;margin:0 auto">
       ${nav('prereg')}
@@ -395,7 +408,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 6: POST /visitors/pre-register/save — Save Pre-Registration
   // ============================================================
-  app.post('/visitors/pre-register/save', requireAuth, ah(async (req, res) => {
+  app.post('/visitors/pre-register/save', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { visitor_name, email, phone, company, purpose, host_name, expected_date, expected_time } = req.body;
     if (!visitor_name || !visitor_name.trim() || !expected_date) return res.redirect('/visitors/pre-register');
@@ -412,7 +425,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 7: GET /visitors/pre-registrations — List Pre-Registrations
   // ============================================================
-  app.get('/visitors/pre-registrations', requireAuth, ah(async (req, res) => {
+  app.get('/visitors/pre-registrations', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { status } = req.query;
     let where = ['tenant_id=$1'], params = [tid], pi = 2;
@@ -463,17 +476,17 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   }));
 
   // Pre-reg actions (approve, reject, check-in from pre-reg)
-  app.post('/visitors/pre-registrations/:id/approve', requireAuth, ah(async (req, res) => {
+  app.post('/visitors/pre-registrations/:id/approve', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     await pool.query(`UPDATE pre_registrations SET status='approved' WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     res.redirect('/visitors/pre-registrations');
   }));
-  app.post('/visitors/pre-registrations/:id/reject', requireAuth, ah(async (req, res) => {
+  app.post('/visitors/pre-registrations/:id/reject', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     await pool.query(`UPDATE pre_registrations SET status='rejected' WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     res.redirect('/visitors/pre-registrations');
   }));
-  app.post('/visitors/pre-registrations/:id/checkin', requireAuth, ah(async (req, res) => {
+  app.post('/visitors/pre-registrations/:id/checkin', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const pr = (await pool.query(`SELECT * FROM pre_registrations WHERE id=$1 AND tenant_id=$2 AND status='approved'`, [req.params.id, tid])).rows[0];
     if (!pr) return res.redirect('/visitors/pre-registrations');
@@ -489,7 +502,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 8: GET /visitors/history — Visitor History
   // ============================================================
-  app.get('/visitors/history', requireAuth, ah(async (req, res) => {
+  app.get('/visitors/history', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { from, to, search } = req.query;
     let where = ['tenant_id=$1'], params = [tid], pi = 2;
@@ -533,7 +546,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 9: GET /visitors/report — Analytics
   // ============================================================
-  app.get('/visitors/report', requireAuth, ah(async (req, res) => {
+  app.get('/visitors/report', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const period = req.query.period || '30';
 
@@ -621,7 +634,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 10: DELETE /visitors/:id — Delete Visitor Record
   // ============================================================
-  app.delete('/visitors/:id', requireAuth, ah(async (req, res) => {
+  app.delete('/visitors/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, vid = req.params.id;
     await pool.query(`DELETE FROM visitors WHERE id=$1 AND tenant_id=$2`, [vid, tid]);
     console.log(`[Visitors] Deleted visitor #${vid} by ${user.email}`);
@@ -631,7 +644,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 11: GET /visitors/:id — Visitor Detail
   // ============================================================
-  app.get('/visitors/:id', requireAuth, ah(async (req, res) => {
+  app.get('/visitors/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, vid = req.params.id;
     const v = (await pool.query(`SELECT * FROM visitors WHERE id=$1 AND tenant_id=$2`, [vid, tid])).rows[0];
     if (!v) return res.send(renderPage('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2 style="color:#dc2626">Visitor record not found</h2><a href="/visitors" class="btn btn-sm" style="margin-top:12px">← Back</a></div>', user, req));
@@ -700,7 +713,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 12: GET /api/visitors/current — Currently Checked-In (JSON)
   // ============================================================
-  app.get('/api/visitors/current', requireAuth, ah(async (req, res) => {
+  app.get('/api/visitors/current', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const visitors = (await pool.query(
       `SELECT id, full_name, email, phone, company, purpose, host_name, host_department, badge_number, check_in_time, vehicle_plate
@@ -712,7 +725,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 13: GET /api/visitors/stats — Visitor Stats (JSON)
   // ============================================================
-  app.get('/api/visitors/stats', requireAuth, ah(async (req, res) => {
+  app.get('/api/visitors/stats', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const nowIn = (await pool.query(`SELECT COUNT(*)::int as cnt FROM visitors WHERE tenant_id=$1 AND status='checked_in'`, [tid])).rows[0].cnt;
     const todayTotal = (await pool.query(`SELECT COUNT(*)::int as cnt FROM visitors WHERE tenant_id=$1 AND check_in_time >= CURRENT_DATE`, [tid])).rows[0].cnt;

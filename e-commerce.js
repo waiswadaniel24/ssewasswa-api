@@ -18,6 +18,21 @@
 module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis }) => {
 
   const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.user?.role === 'super_admin') return next();
+    try {
+      const tid = req.tenant?.id || req.user?.tenant_id;
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [tid]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) {
+        return res.status(403).json({ error: 'Subscription required', min_plan: minPlan, current_plan: plan, message: `Upgrade to ${minPlan} or higher to access this feature.` });
+      }
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   const errRes = (res, code, msg) => { if (!res.headersSent) res.status(code).json({ error: msg, status: code }); };
   const pag = (req) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -26,6 +41,14 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   };
   const slugify = (s) => String(s || '').toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_]+/g, '-').replace(/^-+|-+$/g, '');
   const ORDER_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'];
+  const STATUS_FLOW = ['placed', 'confirmed', 'processing', 'shipped', 'delivered'];
+  const STATUS_META = {
+    placed: { label: 'Order Placed', icon: '📋', desc: 'Your order has been received', estimated_days: 0 },
+    confirmed: { label: 'Confirmed', icon: '✅', desc: 'Payment confirmed, preparing order', estimated_days: 1 },
+    processing: { label: 'Processing', icon: '🏭', desc: 'Your order is being prepared', estimated_days: 2 },
+    shipped: { label: 'Shipped', icon: '🚚', desc: 'Your order is on its way', estimated_days: 5 },
+    delivered: { label: 'Delivered', icon: '📦', desc: 'Your order has been delivered', estimated_days: 0 },
+  };
   const isAdmin = (u) => u && (u.role === 'admin' || u.role === 'super_admin');
 
   // Redis helpers
@@ -93,7 +116,27 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     `CREATE INDEX IF NOT EXISTS idx_ec_oi_order ON ecommerce_order_items(order_id)`,
     `CREATE INDEX IF NOT EXISTS idx_ec_coupon_code ON ecommerce_coupons(tenant_id, code)`,
     `CREATE INDEX IF NOT EXISTS idx_ec_review_prod ON ecommerce_reviews(tenant_id, product_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_ec_ship_tenant ON ecommerce_shipping_zones(tenant_id)`
+    `CREATE INDEX IF NOT EXISTS idx_ec_ship_tenant ON ecommerce_shipping_zones(tenant_id)`,
+    // ── NEW: Product Reviews (public) ──
+    `CREATE TABLE IF NOT EXISTS product_reviews (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES ecommerce_products(id) ON DELETE CASCADE,
+      user_id INTEGER, rating INTEGER NOT NULL DEFAULT 5 CHECK (rating >= 1 AND rating <= 5),
+      reviewer_name TEXT, comment TEXT NOT NULL, is_approved BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_pr_prod ON product_reviews(product_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_pr_tenant ON product_reviews(tenant_id)`,
+    // ── NEW: Order Events (tracking timeline) ──
+    `CREATE TABLE IF NOT EXISTS ecommerce_order_events (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      order_id INTEGER NOT NULL REFERENCES ecommerce_orders(id) ON DELETE CASCADE,
+      status TEXT NOT NULL, label TEXT, description TEXT, tracking_number TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_oe_order ON ecommerce_order_events(order_id)`,
+    // ── NEW: Reorder Levels per product ──
+    `CREATE TABLE IF NOT EXISTS ecommerce_reorder_levels (
+      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES ecommerce_products(id) ON DELETE CASCADE,
+      reorder_level INTEGER NOT NULL DEFAULT 5, reorder_qty INTEGER NOT NULL DEFAULT 50,
+      last_restocked TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, product_id))`
   ];
 
   (async () => {
@@ -107,7 +150,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═══════════════════════════════════════════════════════════
   // 1. STORE SETTINGS
   // ═══════════════════════════════════════════════════════════
-  app.get('/api/ecommerce/settings', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/settings', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     let s = (await pool.query('SELECT * FROM ecommerce_store_settings WHERE tenant_id=$1', [tid])).rows[0];
     if (!s) {
@@ -117,7 +160,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(s);
   }));
 
-  app.put('/api/ecommerce/settings', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/ecommerce/settings', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const { store_name, logo, currency, tax_rate, shipping_enabled, payment_methods, contact_email, contact_phone } = req.body;
     if (!store_name || !store_name.trim()) return errRes(res, 400, 'Store name is required');
@@ -139,7 +182,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json((await pool.query('SELECT * FROM ecommerce_categories WHERE tenant_id=$1 ORDER BY sort_order,name', [req.tenant.id])).rows);
   }));
 
-  app.post('/api/ecommerce/categories', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/categories', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const { name, description, image, sort_order, is_active } = req.body;
     if (!name || !name.trim()) return errRes(res, 400, 'Category name required');
@@ -149,7 +192,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.status(201).json(r.rows[0]);
   }));
 
-  app.put('/api/ecommerce/categories/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/ecommerce/categories/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const { name, description, image, sort_order, is_active } = req.body;
     const ex = (await pool.query('SELECT id FROM ecommerce_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
@@ -160,7 +203,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(r.rows[0]);
   }));
 
-  app.delete('/api/ecommerce/categories/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.delete('/api/ecommerce/categories/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const r = await pool.query('DELETE FROM ecommerce_categories WHERE id=$1 AND tenant_id=$2 RETURNING id', [req.params.id, req.tenant.id]);
     if (!r.rows.length) return errRes(res, 404, 'Category not found');
     res.json({ deleted: true });
@@ -180,8 +223,11 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     const orderMap = { newest: 'created_at DESC', price_asc: 'price ASC', price_desc: 'price DESC', name: 'name ASC', popular: 'created_at DESC' };
     const total = parseInt((await pool.query(`SELECT COUNT(*) FROM ecommerce_products WHERE ${where.join(' AND ')}`, params)).rows[0].count);
     const rows = (await pool.query(
-      `SELECT id,name,slug,description,category,price,sale_price,stock_qty,images,variants,seo_title,seo_description,is_featured,created_at
-       FROM ecommerce_products WHERE ${where.join(' AND ')} ORDER BY ${orderMap[sort] || orderMap.newest} LIMIT $${pi} OFFSET $${pi+1}`,
+      `SELECT p.id,p.name,p.slug,p.description,p.category,p.price,p.sale_price,p.stock_qty,p.images,p.variants,p.seo_title,p.seo_description,p.is_featured,p.created_at,
+        COALESCE(rs.avg_rating,0)::numeric(3,1) as avg_rating, COALESCE(rs.review_count,0) as review_count
+       FROM ecommerce_products p
+       LEFT JOIN (SELECT product_id, AVG(rating) as avg_rating, COUNT(*) as review_count FROM product_reviews WHERE is_approved=true GROUP BY product_id) rs ON rs.product_id=p.id
+       WHERE ${where.join(' AND ')} ORDER BY ${orderMap[sort] || orderMap.newest} LIMIT $${pi} OFFSET $${pi+1}`,
       [...params, limit, offset])).rows;
     res.json({ products: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   }));
@@ -197,7 +243,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(p);
   }));
 
-  app.post('/api/ecommerce/products', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/products', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const { name, description, category, price, sale_price, stock_qty, images, variants, seo_title, seo_description, is_featured, is_active } = req.body;
     if (!name || !name.trim()) return errRes(res, 400, 'Product name required');
@@ -215,7 +261,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.status(201).json(r.rows[0]);
   }));
 
-  app.put('/api/ecommerce/products/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/ecommerce/products/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, pid = req.params.id;
     if (!(await pool.query('SELECT 1 FROM ecommerce_products WHERE id=$1 AND tenant_id=$2', [pid, tid])).rows.length)
       return errRes(res, 404, 'Product not found');
@@ -233,7 +279,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(r.rows[0]);
   }));
 
-  app.delete('/api/ecommerce/products/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.delete('/api/ecommerce/products/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const r = await pool.query(
       'UPDATE ecommerce_products SET is_active=false,updated_at=NOW() WHERE id=$1 AND tenant_id=$2 RETURNING id',
       [req.params.id, req.tenant.id]);
@@ -274,11 +320,11 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     return { items, subtotal, discount, coupon: couponMsg ? { error: couponMsg } : coupon, tax, shipping: 0, total: afterD + tax };
   };
 
-  app.get('/api/ecommerce/cart', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/cart', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     res.json(await getCartTotals(req.tenant.id, req.user.id, req.query.coupon));
   }));
 
-  app.post('/api/ecommerce/cart', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/cart', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, userId = req.user.id;
     const { product_id, quantity, variant } = req.body;
     if (!product_id) return errRes(res, 400, 'Product ID required');
@@ -298,7 +344,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.status(201).json(await getCartTotals(tid, userId, null));
   }));
 
-  app.put('/api/ecommerce/cart/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/ecommerce/cart/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, userId = req.user.id;
     const qty = Math.max(1, Math.min(100, parseInt(req.body.quantity) || 1));
     const ci = (await pool.query(
@@ -311,12 +357,12 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(await getCartTotals(tid, userId, null));
   }));
 
-  app.delete('/api/ecommerce/cart/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.delete('/api/ecommerce/cart/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     await pool.query('DELETE FROM ecommerce_cart WHERE id=$1 AND tenant_id=$2 AND user_id=$3', [req.params.id, req.tenant.id, req.user.id]);
     res.json(await getCartTotals(req.tenant.id, req.user.id, null));
   }));
 
-  app.post('/api/ecommerce/cart/validate-coupon', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/cart/validate-coupon', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const { code } = req.body;
     if (!code) return errRes(res, 400, 'Coupon code required');
     const t = await getCartTotals(req.tenant.id, req.user.id, code);
@@ -328,7 +374,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═══════════════════════════════════════════════════════════
   const genOrderNum = () => 'EC-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
-  app.post('/api/ecommerce/orders', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/orders', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, userId = req.user.id;
     const { shipping_address, payment_method, coupon_code, notes } = req.body;
     if (!payment_method) return errRes(res, 400, 'Payment method required');
@@ -367,7 +413,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
   }));
 
-  app.get('/api/ecommerce/orders', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/orders', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, { page, limit, offset } = pag(req), { status } = req.query;
     let where = ['tenant_id=$1'], params = [tid], pi = 2;
     if (!isAdmin(req.user)) { where.push('user_id=$' + pi); params.push(req.user.id); pi++; }
@@ -379,7 +425,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json({ orders: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   }));
 
-  app.get('/api/ecommerce/orders/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/orders/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     let sql = 'SELECT o.* FROM ecommerce_orders o WHERE o.tenant_id=$1 AND o.id=$2', params = [tid, req.params.id];
     if (!isAdmin(req.user)) { sql += ' AND o.user_id=$3'; params.push(req.user.id); }
@@ -389,7 +435,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(order);
   }));
 
-  app.patch('/api/ecommerce/orders/:id/status', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.patch('/api/ecommerce/orders/:id/status', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const { status, tracking_number } = req.body;
@@ -406,6 +452,11 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     if (tracking_number) { sql += `,shipping_address=COALESCE(shipping_address,'{}'::jsonb)||$${pi}::jsonb`; params.push(JSON.stringify({ tracking_number })); pi++; }
     sql += ' WHERE id=$2 AND tenant_id=$3 RETURNING *';
     const r = await pool.query(sql, params);
+    // Log order event for tracking timeline
+    const meta = STATUS_META[status] || {};
+    await pool.query(
+      `INSERT INTO ecommerce_order_events (tenant_id,order_id,status,label,description,tracking_number) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [tid, req.params.id, status, meta.label || status, meta.desc || '', tracking_number || null]).catch(() => {});
     wsBroadcast(tid, { type: 'ecommerce:order_status_updated', orderId: parseInt(req.params.id), status });
     res.json(r.rows[0]);
   }));
@@ -413,7 +464,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═══════════════════════════════════════════════════════════
   // 6. PAYMENTS — MTN MoMo, Airtel Money, Card references
   // ═══════════════════════════════════════════════════════════
-  app.post('/api/ecommerce/orders/:id/pay', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/orders/:id/pay', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, userId = req.user.id;
     const { method, phone, reference } = req.body;
     if (!method) return errRes(res, 400, 'Payment method required');
@@ -446,7 +497,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═══════════════════════════════════════════════════════════
   // 7. INVENTORY SYNC — Low stock alerts, stock adjustment
   // ═══════════════════════════════════════════════════════════
-  app.get('/api/ecommerce/inventory/alerts', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/inventory/alerts', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, threshold = Math.max(1, parseInt(req.query.threshold) || 5);
     const rows = (await pool.query(
       `SELECT id,name,slug,stock_qty,price,is_active FROM ecommerce_products
@@ -455,7 +506,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json({ low_stock: rows, count: rows.length, threshold });
   }));
 
-  app.put('/api/ecommerce/products/:id/stock', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/ecommerce/products/:id/stock', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const newStock = Math.max(0, parseInt(req.body.stock_qty));
@@ -474,7 +525,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json((await pool.query('SELECT * FROM ecommerce_shipping_zones WHERE tenant_id=$1 AND is_active=true ORDER BY name', [req.tenant.id])).rows);
   }));
 
-  app.post('/api/ecommerce/shipping/zones', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/shipping/zones', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const { name, countries, rate, is_active } = req.body;
     if (!name || !name.trim()) return errRes(res, 400, 'Zone name required');
@@ -484,7 +535,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.status(201).json(r.rows[0]);
   }));
 
-  app.put('/api/ecommerce/shipping/zones/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/ecommerce/shipping/zones/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     if (!(await pool.query('SELECT 1 FROM ecommerce_shipping_zones WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows.length)
       return errRes(res, 404, 'Zone not found');
@@ -495,7 +546,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(r.rows[0]);
   }));
 
-  app.delete('/api/ecommerce/shipping/zones/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.delete('/api/ecommerce/shipping/zones/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const r = await pool.query('DELETE FROM ecommerce_shipping_zones WHERE id=$1 AND tenant_id=$2 RETURNING id', [req.params.id, req.tenant.id]);
     if (!r.rows.length) return errRes(res, 404, 'Zone not found');
     res.json({ deleted: true });
@@ -512,7 +563,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═══════════════════════════════════════════════════════════
   // 9. REVIEWS & RATINGS — Create, List, Moderate
   // ═══════════════════════════════════════════════════════════
-  app.post('/api/ecommerce/products/:id/reviews', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/products/:id/reviews', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, userId = req.user.id;
     const rating = Math.max(1, Math.min(5, parseInt(req.body.rating) || 5));
     const p = (await pool.query('SELECT id FROM ecommerce_products WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
@@ -538,7 +589,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json({ reviews: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   }));
 
-  app.patch('/api/ecommerce/reviews/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.patch('/api/ecommerce/reviews/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const r = await pool.query('UPDATE ecommerce_reviews SET is_approved=$1 WHERE id=$2 AND tenant_id=$3 RETURNING *',
       [req.body.is_approved === true, req.params.id, req.tenant.id]);
@@ -546,7 +597,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(r.rows[0]);
   }));
 
-  app.delete('/api/ecommerce/reviews/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.delete('/api/ecommerce/reviews/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const r = await pool.query('DELETE FROM ecommerce_reviews WHERE id=$1 AND tenant_id=$2 RETURNING id', [req.params.id, req.tenant.id]);
     if (!r.rows.length) return errRes(res, 404, 'Review not found');
@@ -554,13 +605,133 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   }));
 
   // ═══════════════════════════════════════════════════════════
-  // 10. COUPONS & PROMOTIONS — CRUD with validation
+  // 10. PRODUCT REVIEWS (Public) — /store/:id/reviews GET & POST
   // ═══════════════════════════════════════════════════════════
-  app.get('/api/ecommerce/coupons', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/store/:id/reviews', tenantMiddleware, ah(async (req, res) => {
+    const tid = req.tenant.id, pid = parseInt(req.params.id);
+    if (!pid || isNaN(pid)) return errRes(res, 400, 'Valid product ID required');
+    const p = (await pool.query('SELECT id,name FROM ecommerce_products WHERE id=$1 AND tenant_id=$2 AND is_active=true', [pid, tid])).rows[0];
+    if (!p) return errRes(res, 404, 'Product not found');
+    const reviews = (await pool.query(
+      `SELECT r.*,u.name as user_name FROM product_reviews r LEFT JOIN users u ON u.id=r.user_id
+       WHERE r.product_id=$1 AND r.tenant_id=$2 AND r.is_approved=true ORDER BY r.created_at DESC`, [pid, tid])).rows;
+    const stats = (await pool.query(
+      `SELECT COUNT(*) as total, COALESCE(AVG(rating),0) as avg_rating,
+       COUNT(*) FILTER (WHERE rating=5) as five, COUNT(*) FILTER (WHERE rating=4) as four,
+       COUNT(*) FILTER (WHERE rating=3) as three, COUNT(*) FILTER (WHERE rating=2) as two,
+       COUNT(*) FILTER (WHERE rating=1) as one
+       FROM product_reviews WHERE product_id=$1 AND tenant_id=$2 AND is_approved=true`, [pid, tid])).rows[0];
+    res.json({ product: { id: p.id, name: p.name }, reviews, stats: { total: parseInt(stats.total), avg_rating: parseFloat(stats.avg_rating).toFixed(1), distribution: { 5: parseInt(stats.five), 4: parseInt(stats.four), 3: parseInt(stats.three), 2: parseInt(stats.two), 1: parseInt(stats.one) } } });
+  }));
+
+  app.post('/store/:id/reviews', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const tid = req.tenant.id, pid = parseInt(req.params.id), userId = req.user.id;
+    if (!pid || isNaN(pid)) return errRes(res, 400, 'Valid product ID required');
+    const { rating, comment, reviewer_name } = req.body;
+    if (!rating || rating < 1 || rating > 5) return errRes(res, 400, 'Rating must be 1-5');
+    if (!comment || !comment.trim()) return errRes(res, 400, 'Review comment required');
+    const p = (await pool.query('SELECT id FROM ecommerce_products WHERE id=$1 AND tenant_id=$2 AND is_active=true', [pid, tid])).rows[0];
+    if (!p) return errRes(res, 404, 'Product not found');
+    const r = await pool.query(
+      `INSERT INTO product_reviews (tenant_id,product_id,user_id,rating,reviewer_name,comment) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [tid, pid, userId, Math.max(1, Math.min(5, parseInt(rating))), (reviewer_name || '').trim() || null, comment.trim()]);
+    wsBroadcast(tid, { type: 'ecommerce:review_submitted', productId: pid });
+    res.status(201).json(r.rows[0]);
+  }));
+
+  // ═══════════════════════════════════════════════════════════
+  // 10.5 ORDER TRACKING — /orders/:id/track GET
+  // ═══════════════════════════════════════════════════════════
+
+  app.get('/orders/:id/track', tenantMiddleware, ah(async (req, res) => {
+    const tid = req.tenant.id, oid = req.params.id;
+    const order = (await pool.query(
+      `SELECT o.*,sa->>'tracking_number' as tracking_number FROM ecommerce_orders o WHERE o.id=$1 AND o.tenant_id=$2`,
+      [oid, tid])).rows[0];
+    if (!order) return errRes(res, 404, 'Order not found');
+    const items = (await pool.query('SELECT product_name,quantity,price FROM ecommerce_order_items WHERE order_id=$1', [oid])).rows;
+    const events = (await pool.query(
+      `SELECT * FROM ecommerce_order_events WHERE order_id=$1 AND tenant_id=$2 ORDER BY created_at ASC`, [oid, tid])).rows;
+    // Build timeline from events or derive from status
+    const timeline = events.length > 0 ? events.map(e => ({
+      status: e.status, label: e.label || (STATUS_META[e.status] || {}).label || e.status,
+      description: e.description || (STATUS_META[e.status] || {}).desc || '',
+      timestamp: e.created_at,
+      tracking_number: e.tracking_number || null,
+    })) : deriveTimeline(order);
+    // Estimated delivery
+    const currentIdx = STATUS_FLOW.indexOf(order.status === 'cancelled' ? 'placed' : order.status);
+    const remainingDays = currentIdx >= 0 ? STATUS_META[STATUS_FLOW[Math.min(currentIdx, STATUS_FLOW.length - 1)]]?.estimated_days || 0 : 0;
+    const estDelivery = order.created_at ? new Date(new Date(order.created_at).getTime() + (remainingDays + 3) * 86400000) : null;
+    res.json({
+      order: { id: order.id, order_number: order.order_number, status: order.status, total: order.total, currency: order.currency, created_at: order.created_at, tracking_number: order.tracking_number },
+      items, timeline, estimated_delivery: estDelivery ? estDelivery.toISOString() : null,
+      progress: order.status === 'cancelled' ? -1 : Math.max(0, Math.min(100, (currentIdx / (STATUS_FLOW.length - 1)) * 100)),
+    });
+  }));
+
+  function deriveTimeline(order) {
+    const idx = STATUS_FLOW.indexOf(order.status === 'cancelled' || order.status === 'refunded' ? 'placed' : order.status);
+    const timeline = [];
+    for (let i = 0; i <= Math.max(0, idx); i++) {
+      const s = STATUS_FLOW[i];
+      const meta = STATUS_META[s] || {};
+      timeline.push({ status: s, label: meta.label || s, description: meta.desc || '', timestamp: order.updated_at || order.created_at, tracking_number: s === 'shipped' ? (order.tracking_number || null) : null });
+    }
+    return timeline;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 10.6 LOW STOCK ALERTS DASHBOARD — /store/alerts GET
+  // ═══════════════════════════════════════════════════════════
+  app.get('/store/alerts', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const tid = req.tenant.id;
+    if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
+    const threshold = Math.max(1, parseInt(req.query.threshold) || 5);
+    // Products below reorder level
+    const critical = (await pool.query(
+      `SELECT p.id,p.name,p.slug,p.stock_qty,p.price,
+        COALESCE(r.reorder_level, ${threshold}) as reorder_level,
+        CASE WHEN p.stock_qty <= 0 THEN 'out_of_stock' WHEN p.stock_qty <= ${threshold} THEN 'low_stock' ELSE 'ok' END as stock_status
+       FROM ecommerce_products p
+       LEFT JOIN ecommerce_reorder_levels r ON r.product_id = p.id AND r.tenant_id = p.tenant_id
+       WHERE p.tenant_id=$1 AND p.is_active=true AND p.stock_qty <= ${threshold}
+       ORDER BY p.stock_qty ASC`, [tid])).rows;
+    const outOfStock = critical.filter(p => p.stock_qty <= 0);
+    const lowStock = critical.filter(p => p.stock_qty > 0);
+    const totalProducts = parseInt((await pool.query('SELECT COUNT(*) FROM ecommerce_products WHERE tenant_id=$1 AND is_active=true', [tid])).rows[0].count);
+    const alertProducts = parseInt((await pool.query('SELECT COUNT(*) FROM ecommerce_products WHERE tenant_id=$1 AND is_active=true AND stock_qty<=$2', [tid, threshold])).rows[0].count);
+    res.json({
+      summary: { total_products: totalProducts, alert_count: alertProducts, out_of_stock: outOfStock.length, low_stock: lowStock.length, threshold },
+      out_of_stock: outOfStock,
+      low_stock: lowStock,
+      critical_items: critical,
+    });
+  }));
+
+  // POST /store/alerts/reorder — Quick reorder endpoint
+  app.post('/store/alerts/reorder', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
+    const tid = req.tenant.id;
+    if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
+    const { product_id, quantity } = req.body;
+    if (!product_id) return errRes(res, 400, 'Product ID required');
+    const reorderQty = Math.max(1, parseInt(quantity) || 50);
+    const p = (await pool.query('SELECT id,name,stock_qty FROM ecommerce_products WHERE id=$1 AND tenant_id=$2', [product_id, tid])).rows[0];
+    if (!p) return errRes(res, 404, 'Product not found');
+    await pool.query('UPDATE ecommerce_products SET stock_qty=stock_qty+$1,updated_at=NOW() WHERE id=$2 AND tenant_id=$3', [reorderQty, product_id, tid]);
+    const updated = (await pool.query('SELECT id,name,stock_qty FROM ecommerce_products WHERE id=$1', [product_id])).rows[0];
+    wsBroadcast(tid, { type: 'ecommerce:product_restocked', productId: p.id, productName: p.name, addedQty: reorderQty, newQty: updated.stock_qty });
+    res.json({ product_id: p.id, product_name: p.name, previous_qty: p.stock_qty, added_qty: reorderQty, new_qty: updated.stock_qty });
+  }));
+
+  // ═══════════════════════════════════════════════════════════
+  // 11. COUPONS & PROMOTIONS — CRUD with validation
+  // ═══════════════════════════════════════════════════════════
+  app.get('/api/ecommerce/coupons', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     res.json((await pool.query('SELECT * FROM ecommerce_coupons WHERE tenant_id=$1 ORDER BY created_at DESC', [req.tenant.id])).rows);
   }));
 
-  app.post('/api/ecommerce/coupons', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/ecommerce/coupons', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const { code, type, value, min_order, max_uses, starts_at, expires_at, is_active } = req.body;
@@ -578,7 +749,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.status(201).json(r.rows[0]);
   }));
 
-  app.put('/api/ecommerce/coupons/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/ecommerce/coupons/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     if (!(await pool.query('SELECT 1 FROM ecommerce_coupons WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows.length)
@@ -591,7 +762,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json(r.rows[0]);
   }));
 
-  app.delete('/api/ecommerce/coupons/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.delete('/api/ecommerce/coupons/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const r = await pool.query('DELETE FROM ecommerce_coupons WHERE id=$1 AND tenant_id=$2 RETURNING id', [req.params.id, req.tenant.id]);
     if (!r.rows.length) return errRes(res, 404, 'Coupon not found');
@@ -601,7 +772,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // ═══════════════════════════════════════════════════════════
   // 11. ANALYTICS — Sales, Revenue, Conversion, Products
   // ═══════════════════════════════════════════════════════════
-  app.get('/api/ecommerce/analytics/overview', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/analytics/overview', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const tid = req.tenant.id;
     res.json((await pool.query(
@@ -618,7 +789,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
        FROM ecommerce_orders WHERE tenant_id=$1`, [tid])).rows[0]);
   }));
 
-  app.get('/api/ecommerce/analytics/products', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/analytics/products', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const tid = req.tenant.id;
     const pf = { week: "'week'", month: "'month'", year: "'year'" }[req.query.period] || "'year'";
@@ -630,7 +801,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json({ popular_products: rows, period: req.query.period || 'all' });
   }));
 
-  app.get('/api/ecommerce/analytics/revenue', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/analytics/revenue', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const trunc = { week: 'day', month: 'month', year: 'month' }[req.query.period] || 'month';
     const rows = (await pool.query(
@@ -641,7 +812,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     res.json({ trend: rows, period: req.query.period || 'month' });
   }));
 
-  app.get('/api/ecommerce/analytics/conversion', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/ecommerce/analytics/conversion', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     if (!isAdmin(req.user)) return errRes(res, 403, 'Admin only');
     const s = (await pool.query(
       `SELECT

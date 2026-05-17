@@ -114,6 +114,19 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
 
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
+
   if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s))
     .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
@@ -213,7 +226,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 1: GET /certificates — Dashboard
   // ============================================================
-  app.get('/certificates', requireAuth, ah(async (req, res) => {
+  app.get('/certificates', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const totalIssued = (await pool.query(`SELECT COUNT(*)::int as cnt FROM certificates_issued WHERE tenant_id=$1`, [tid])).rows[0].cnt;
@@ -287,7 +300,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 2: GET /certificates/templates — Template Gallery
   // ============================================================
-  app.get('/certificates/templates', requireAuth, ah(async (req, res) => {
+  app.get('/certificates/templates', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const templates = (await pool.query(
       `SELECT ct.*, (SELECT COUNT(*)::int FROM certificates_issued ci WHERE ci.template_id = ct.id) as issued_count
@@ -328,7 +341,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 3: GET /certificates/templates/new — Create Template
   // ============================================================
-  app.get('/certificates/templates/new', requireAuth, ah(async (req, res) => {
+  app.get('/certificates/templates/new', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user;
     const html = CERT_CSS + `<div style="max-width:700px;margin:0 auto">
       ${nav('templates')}
@@ -377,7 +390,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 4: POST /certificates/templates/create — Save Template
   // ============================================================
-  app.post('/certificates/templates/create', requireAuth, ah(async (req, res) => {
+  app.post('/certificates/templates/create', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { name, description, border_color, background_color, header_text, body_template, footer_text,
             orientation, font_size, show_logo, show_signature, signature_line } = req.body;
@@ -399,7 +412,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 5: GET /certificates/issue — Issue Certificate Form
   // ============================================================
-  app.get('/certificates/issue', requireAuth, ah(async (req, res) => {
+  app.get('/certificates/issue', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const preselected = req.query.template || '';
     const templates = (await pool.query(`SELECT * FROM certificate_templates WHERE tenant_id=$1 AND is_active=true ORDER BY name`, [tid])).rows;
@@ -449,7 +462,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 6: POST /certificates/issue/save — Issue Certificate
   // ============================================================
-  app.post('/certificates/issue/save', requireAuth, ah(async (req, res) => {
+  app.post('/certificates/issue/save', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { template_id, recipient_name, recipient_email, certificate_type, course, date_issued, description, grade } = req.body;
     if (!recipient_name || !recipient_name.trim()) {
@@ -482,7 +495,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 7: POST /certificates/batch-issue — Batch Issue
   // ============================================================
-  app.post('/certificates/batch-issue', requireAuth, ah(async (req, res) => {
+  app.post('/certificates/batch-issue', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { template_id, certificate_type, course, date_issued, recipients_text } = req.body;
     if (!recipients_text || !recipients_text.trim()) {
@@ -526,7 +539,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 8: GET /certificates/:id — View Certificate (Print-Ready)
   // ============================================================
-  app.get('/certificates/:id', requireAuth, ah(async (req, res) => {
+  app.get('/certificates/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, certId = req.params.id;
     const cert = (await pool.query(
       `SELECT ci.*, ct.name as template_name, ct.border_color, ct.background_color, ct.header_text,
@@ -671,7 +684,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 10: GET /certificates/issued — List All Issued
   // ============================================================
-  app.get('/certificates/issued', requireAuth, ah(async (req, res) => {
+  app.get('/certificates/issued', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { type, search, status } = req.query;
 
@@ -740,7 +753,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 11: DELETE /certificates/:id — Revoke/Delete Certificate
   // ============================================================
-  app.delete('/certificates/:id', requireAuth, ah(async (req, res) => {
+  app.delete('/certificates/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id, certId = req.params.id;
     const cert = (await pool.query(`SELECT * FROM certificates_issued WHERE id=$1 AND tenant_id=$2`, [certId, tid])).rows[0];
     if (!cert) return res.status(404).json({ error: 'Certificate not found' });
@@ -749,7 +762,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   }));
 
   // Revoke via POST (for HTML forms)
-  app.post('/certificates/:id/revoke', requireAuth, ah(async (req, res) => {
+  app.post('/certificates/:id/revoke', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id, certId = req.params.id;
     await pool.query(`UPDATE certificates_issued SET is_verified=false WHERE id=$1 AND tenant_id=$2`, [certId, tid]);
     req.session.flash = { type: 'success', msg: 'Certificate revoked successfully' };
@@ -759,7 +772,7 @@ module.exports = function certificates(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 12: GET /certificates/report — Analytics
   // ============================================================
-  app.get('/certificates/report', requireAuth, ah(async (req, res) => {
+  app.get('/certificates/report', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     // Overall stats

@@ -16,6 +16,19 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   if (!esc) esc = (s) => String(s === null || s === undefined ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
   const requireAuth = (req, res, next) => { if (!req.session || !req.session.user) return res.redirect('/login'); next(); };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   const fmtNum = (n) => Number(n || 0).toLocaleString();
   const fmtMoney = (n) => '$' + Number(n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -149,7 +162,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 1: GET /inventory — Dashboard
   // ════════════════════════════════════════════════════════════
-  app.get('/inventory', requireAuth, ah(async (req, res) => {
+  app.get('/inventory', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { q, category, sort, status } = req.query;
 
@@ -231,7 +244,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 2: GET /inventory/new — Add Item Form
   // ════════════════════════════════════════════════════════════
-  app.get('/inventory/new', requireAuth, ah(async (req, res) => {
+  app.get('/inventory/new', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const cats = (await pool.query('SELECT * FROM inventory_categories WHERE tenant_id=$1 AND is_active ORDER BY name', [tid])).rows;
     const html = INV_CSS + `
@@ -284,7 +297,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 3: POST /inventory/create
   // ════════════════════════════════════════════════════════════
-  app.post('/inventory/create', requireAuth, ah(async (req, res) => {
+  app.post('/inventory/create', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { name, sku, barcode, category, description, unit, cost_price, selling_price,
       quantity, reorder_level, max_stock, warehouse_location, supplier, tags } = req.body;
@@ -312,7 +325,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 4: GET /inventory/:id — Item Detail
   // ════════════════════════════════════════════════════════════
-  app.get('/inventory/:id', requireAuth, ah(async (req, res) => {
+  app.get('/inventory/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const item = (await pool.query('SELECT * FROM inventory_items WHERE id=$1 AND tenant_id=$2', [id, tid])).rows[0];
     if (!item) return res.send('<div class="alert">Item not found.</div><a href="/inventory" class="btn btn-blue">Back</a>');
@@ -405,7 +418,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 5: GET /inventory/:id/edit
   // ════════════════════════════════════════════════════════════
-  app.get('/inventory/:id/edit', requireAuth, ah(async (req, res) => {
+  app.get('/inventory/:id/edit', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const item = (await pool.query('SELECT * FROM inventory_items WHERE id=$1 AND tenant_id=$2', [id, tid])).rows[0];
     if (!item) return res.send('<div class="alert">Item not found.</div><a href="/inventory" class="btn btn-blue">Back</a>');
@@ -448,7 +461,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 6: POST /inventory/:id/update
   // ════════════════════════════════════════════════════════════
-  app.post('/inventory/:id/update', requireAuth, ah(async (req, res) => {
+  app.post('/inventory/:id/update', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const { name, sku, barcode, category, description, unit, cost_price, selling_price,
       reorder_level, max_stock, warehouse_location, supplier } = req.body;
@@ -470,7 +483,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 7: DELETE /inventory/:id
   // ════════════════════════════════════════════════════════════
-  app.delete('/inventory/:id', requireAuth, ah(async (req, res) => {
+  app.delete('/inventory/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const item = (await pool.query('SELECT id, name FROM inventory_items WHERE id=$1 AND tenant_id=$2', [id, tid])).rows[0];
     if (!item) return res.json({ ok: false, error: 'Not found' });
@@ -482,7 +495,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 8: POST /inventory/:id/stock-in
   // ════════════════════════════════════════════════════════════
-  app.post('/inventory/:id/stock-in', requireAuth, ah(async (req, res) => {
+  app.post('/inventory/:id/stock-in', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const qty = parseInt(req.body.qty) || 0, ref = (req.body.ref || '').trim();
     if (qty <= 0) return res.redirect('/inventory/' + id);
@@ -501,7 +514,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 9: POST /inventory/:id/stock-out
   // ════════════════════════════════════════════════════════════
-  app.post('/inventory/:id/stock-out', requireAuth, ah(async (req, res) => {
+  app.post('/inventory/:id/stock-out', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const qty = parseInt(req.body.qty) || 0, ref = (req.body.ref || '').trim();
     if (qty <= 0) return res.redirect('/inventory/' + id);
@@ -521,7 +534,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 10: GET /inventory/stock-transfer
   // ════════════════════════════════════════════════════════════
-  app.get('/inventory/stock-transfer', requireAuth, ah(async (req, res) => {
+  app.get('/inventory/stock-transfer', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { from_id } = req.query;
     const items = (await pool.query('SELECT id, name, sku, quantity, unit FROM inventory_items WHERE tenant_id=$1 AND is_active AND quantity > 0 ORDER BY name', [tid])).rows;
@@ -559,7 +572,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 11: POST /inventory/stock-transfer/process
   // ════════════════════════════════════════════════════════════
-  app.post('/inventory/stock-transfer/process', requireAuth, ah(async (req, res) => {
+  app.post('/inventory/stock-transfer/process', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { from_id, to_id, qty, reference, notes } = req.body;
     const fId = parseInt(from_id), tId = parseInt(to_id), q = parseInt(qty);
@@ -592,7 +605,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 12: GET /inventory/categories — Category Management
   // ════════════════════════════════════════════════════════════
-  app.get('/inventory/categories', requireAuth, ah(async (req, res) => {
+  app.get('/inventory/categories', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const categories = (await pool.query(
       `SELECT c.*, p.name as parent_name, (SELECT COUNT(*) FROM inventory_items WHERE category=c.name AND tenant_id=$1 AND is_active) as item_count
@@ -656,7 +669,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 13: POST /inventory/categories/add
   // ════════════════════════════════════════════════════════════
-  app.post('/inventory/categories/add', requireAuth, ah(async (req, res) => {
+  app.post('/inventory/categories/add', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { name, parent_id, color, description } = req.body;
     if (!name || !name.trim()) return res.send('<div class="alert">Category name is required.</div><a href="/inventory/categories" class="btn btn-blue">Back</a>');
@@ -670,7 +683,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 14: GET /inventory/report — Reports Dashboard
   // ════════════════════════════════════════════════════════════
-  app.get('/inventory/report', requireAuth, ah(async (req, res) => {
+  app.get('/inventory/report', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     // Stock level distribution
@@ -779,7 +792,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 15: GET /inventory/report/export — CSV Export
   // ════════════════════════════════════════════════════════════
-  app.get('/inventory/report/export', requireAuth, ah(async (req, res) => {
+  app.get('/inventory/report/export', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const items = (await pool.query(
       `SELECT name, sku, barcode, category, unit, cost_price, selling_price, quantity,

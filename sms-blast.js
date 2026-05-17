@@ -11,6 +11,19 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
     next();
   };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   const COST = 0.0125, MAX_CH = 160, PS = 20, RP = 50;
 
   // ═══════════════════════════════════════════════════════
@@ -222,7 +235,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  1. GET /sms — Dashboard with stats
   // ═══════════════════════════════════════════════════════
-  app.get('/sms', requireAuth, ah(async (req, res) => {
+  app.get('/sms', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const s = (await pool.query(`SELECT COUNT(*)::int AS tc,COALESCE(SUM(sent_count),0)::int AS ts,
       COALESCE(SUM(failed_count),0)::int AS tf,COALESCE(SUM(cost),0)::numeric AS tcost,
@@ -258,7 +271,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  2. GET /sms/compose — Compose new SMS
   // ═══════════════════════════════════════════════════════
-  app.get('/sms/compose', requireAuth, ah(async (req, res) => {
+  app.get('/sms/compose', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id;
     const[tmpls,grps]=await Promise.all([
       pool.query(`SELECT * FROM sms_templates WHERE (tenant_id=$1 OR tenant_id=0) AND is_active=true ORDER BY name`,[tid]),
@@ -305,7 +318,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // based on message segments, creates campaign with status
   // 'completed', and bulk-inserts recipient records.
   // ═══════════════════════════════════════════════════════
-  app.post('/sms/send', requireAuth, ah(async (req, res) => {
+  app.post('/sms/send', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,uid=req.session.user.id,
       {name,message,recipient_group,template_id}=req.body;
     if(!name||!message||!recipient_group) return res.redirect('/sms/compose');
@@ -333,7 +346,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  4. GET /sms/campaigns — Campaign history
   // ═══════════════════════════════════════════════════════
-  app.get('/sms/campaigns', requireAuth, ah(async (req, res) => {
+  app.get('/sms/campaigns', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,{status,group,q,page=1}=req.query,off=(parseInt(page)-1)*PS;
     let w=['tenant_id=$1'],p=[tid],i=2;
     if(status&&status!=='all'){w.push(`status=$${i++}`);p.push(status)}
@@ -360,7 +373,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  5. GET /sms/campaigns/:id — Campaign detail
   // ═══════════════════════════════════════════════════════
-  app.get('/sms/campaigns/:id', requireAuth, ah(async (req, res) => {
+  app.get('/sms/campaigns/:id', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,cid=parseInt(req.params.id),{page=1}=req.query,off=(parseInt(page)-1)*RP;
     const camp=(await pool.query(`SELECT * FROM sms_campaigns WHERE id=$1 AND tenant_id=$2`,[cid,tid])).rows[0];
     if(!camp) return res.send(renderPage('Not Found','<div class="card" style="text-align:center;padding:40px"><h3 style="color:#ef4444;margin-bottom:12px">Campaign not found</h3><a href="/sms/campaigns" class="btn btn-sm btn-blue">Back</a></div>',req.session.user,req));
@@ -395,7 +408,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  6. GET /sms/templates — Template management
   // ═══════════════════════════════════════════════════════
-  app.get('/sms/templates', requireAuth, ah(async (req, res) => {
+  app.get('/sms/templates', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,tmpls=(await pool.query(`SELECT * FROM sms_templates WHERE (tenant_id=$1 OR tenant_id=0) ORDER BY tenant_id,name`,[tid])).rows;
     const cc={general:'#6b7280',billing:'#f59e0b',events:'#3b82f6',emergency:'#ef4444',attendance:'#8b5cf6'};
     const cH=tmpls.length===0?'<p class="muted" style="text-align:center;padding:28px">No templates</p>'
@@ -422,7 +435,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  7. POST /sms/templates/add — Add template
   // ═══════════════════════════════════════════════════════
-  app.post('/sms/templates/add', requireAuth, ah(async (req, res) => {
+  app.post('/sms/templates/add', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,{name,content,category,variables}=req.body;
     if(!name||!content) return res.redirect('/sms/templates');
     const vars=(typeof variables==='string'&&variables)?variables.split(',').map(v=>v.trim()).filter(Boolean):[];
@@ -433,7 +446,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  8. GET /sms/groups — Groups
   // ═══════════════════════════════════════════════════════
-  app.get('/sms/groups', requireAuth, ah(async (req, res) => {
+  app.get('/sms/groups', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id;
     const customGrps=(await pool.query(`SELECT * FROM sms_groups WHERE tenant_id=$1 ORDER BY name`,[tid])).rows;
     const cnts=(await pool.query(`SELECT
@@ -463,7 +476,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  9. POST /sms/groups/add — Add group
   // ═══════════════════════════════════════════════════════
-  app.post('/sms/groups/add', requireAuth, ah(async (req, res) => {
+  app.post('/sms/groups/add', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,{name,description}=req.body;
     if(!name) return res.redirect('/sms/groups');
     await pool.query(`INSERT INTO sms_groups (tenant_id,name,description,member_count) VALUES ($1,$2,$3,0)`,[tid,name,description||null]);
@@ -473,7 +486,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  10. GET /sms/report — Analytics
   // ═══════════════════════════════════════════════════════
-  app.get('/sms/report', requireAuth, ah(async (req, res) => {
+  app.get('/sms/report', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id;
     const o=(await pool.query(`SELECT COUNT(*)::int AS camp,COALESCE(SUM(recipient_count),0)::int AS tr,
       COALESCE(SUM(sent_count),0)::int AS ts,COALESCE(SUM(failed_count),0)::int AS tf,
@@ -519,7 +532,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   //  specified datetime. Recipients are inserted with no status
   //  (pending). A worker would process these at the scheduled time.
   // ═══════════════════════════════════════════════════════
-  app.post('/sms/schedule', requireAuth, ah(async (req, res) => {
+  app.post('/sms/schedule', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,uid=req.session.user.id,
       {name,message,recipient_group,scheduled_at,template_id}=req.body;
     if(!name||!message||!recipient_group||!scheduled_at) return res.redirect('/sms/compose');
@@ -546,7 +559,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   //  Only draft or scheduled campaigns can be cancelled.
   //  Sets status to 'failed' and marks all pending recipients.
   // ═══════════════════════════════════════════════════════
-  app.post('/sms/campaigns/:id/cancel', requireAuth, ah(async (req, res) => {
+  app.post('/sms/campaigns/:id/cancel', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,cid=parseInt(req.params.id);
     const r=await pool.query(`UPDATE sms_campaigns SET status='failed',failed_count=recipient_count,sent_count=0 WHERE id=$1 AND tenant_id=$2 AND status IN ('draft','scheduled') RETURNING id`,[cid,tid]);
     if(!r.rows.length) return res.status(400).json({error:'Cannot cancel'});
@@ -559,7 +572,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   //  Returns recipient count, segments, cost, and budget info.
   //  Used by the compose page for live cost estimation.
   // ═══════════════════════════════════════════════════════
-  app.get('/api/sms/balance', requireAuth, ah(async (req, res) => {
+  app.get('/api/sms/balance', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id,len=parseInt(req.query.len)||0,
       group=req.query.group||'all';
     const seg=Math.ceil(len/MAX_CH)||1,
@@ -589,7 +602,7 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   //  Comprehensive stats endpoint for dashboards and widgets.
   //  Returns aggregated campaign metrics and recent campaigns.
   // ═══════════════════════════════════════════════════════
-  app.get('/api/sms/stats', requireAuth, ah(async (req, res) => {
+  app.get('/api/sms/stats', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const tid=req.session.user.tenant_id;
     const a=(await pool.query(`SELECT COUNT(*)::int AS total_campaigns,COALESCE(SUM(recipient_count),0)::int AS total_recipients,
       COALESCE(SUM(sent_count),0)::int AS total_sent,COALESCE(SUM(failed_count),0)::int AS total_failed,
@@ -608,12 +621,12 @@ module.exports = function smsBlast(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════
   //  AUXILIARY DELETE ENDPOINTS (used by UI JavaScript)
   // ═══════════════════════════════════════════════════════
-  app.post('/sms/templates/:id/delete', requireAuth, ah(async (req, res) => {
+  app.post('/sms/templates/:id/delete', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     await pool.query(`DELETE FROM sms_templates WHERE id=$1 AND tenant_id=$2`,
       [parseInt(req.params.id),req.session.user.tenant_id]);
     res.json({ok:true});
   }));
-  app.post('/sms/groups/:id/delete', requireAuth, ah(async (req, res) => {
+  app.post('/sms/groups/:id/delete', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     await pool.query(`DELETE FROM sms_groups WHERE id=$1 AND tenant_id=$2`,
       [parseInt(req.params.id),req.session.user.tenant_id]);
     res.json({ok:true});

@@ -14,6 +14,19 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   };
   const navUrl = (action) => `/transport${action}`;
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   function fmtDate(d) { return d ? new Date(d).toISOString().split('T')[0] : '—'; }
 
   // ── Migrations ─────────────────────────────────────────────────────────────
@@ -113,7 +126,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 1 — Dashboard
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/transport', requireAuth, async (req, res) => {
+  app.get('/transport', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const [vehicles, routes, passengers, incidents] = await Promise.all([
       pool.query("SELECT COUNT(*)::int AS c FROM transport_vehicles WHERE tenant_id=$1 AND status='active'", [tid]),
@@ -199,7 +212,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 2 — Vehicle fleet list
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/transport/vehicles', requireAuth, async (req, res) => {
+  app.get('/transport/vehicles', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const sf = req.query.status || '';
     let where = 'v.tenant_id=$1', params = [tid];
@@ -247,7 +260,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 3 — Add vehicle form
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/transport/vehicles/new', requireAuth, (req, res) => {
+  app.get('/transport/vehicles/new', requireAuth, requireSubscription('basic'), (req, res) => {
     let html = nav('Vehicles');
     html += '<div class="card"><h2>Add New Vehicle</h2>';
     html += `<form method="POST" action="${navUrl('/vehicles/create')}">
@@ -275,7 +288,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 4 — Save vehicle
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/transport/vehicles/create', requireAuth, async (req, res) => {
+  app.post('/transport/vehicles/create', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { plate_number, vehicle_type, capacity, driver_name, driver_phone,
             insurance_expiry, next_service, status } = req.body;
@@ -298,7 +311,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 5 — Route management list
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/transport/routes', requireAuth, async (req, res) => {
+  app.get('/transport/routes', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const result = await pool.query(
       `SELECT r.*, v.plate_number AS vehicle_plate, v.driver_name AS driver_name,
@@ -335,7 +348,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 6 — Add route form
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/transport/routes/new', requireAuth, async (req, res) => {
+  app.get('/transport/routes/new', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const vehs = await pool.query(
       "SELECT id, plate_number, vehicle_type, driver_name FROM transport_vehicles WHERE tenant_id=$1 AND status='active' ORDER BY plate_number", [tid]);
@@ -366,7 +379,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 7 — Save route
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/transport/routes/create', requireAuth, async (req, res) => {
+  app.post('/transport/routes/create', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { name, description, stops, estimated_time, distance_km, fare, vehicle_id, is_active } = req.body;
     if (!name || !name.trim()) {
@@ -385,7 +398,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 8 — Route detail with stops and passengers
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/transport/routes/:id', requireAuth, async (req, res) => {
+  app.get('/transport/routes/:id', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const route = await pool.query(
@@ -464,7 +477,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 9 — Assign vehicle to route
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/transport/routes/:id/assign-vehicle', requireAuth, async (req, res) => {
+  app.post('/transport/routes/:id/assign-vehicle', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const { vehicle_id } = req.body;
@@ -482,7 +495,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 10 — Add passenger to route
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/transport/passengers/add', requireAuth, async (req, res) => {
+  app.post('/transport/passengers/add', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { route_id, passenger_name, passenger_id, stop_name, stop_name_custom, parent_phone } = req.body;
     if (!passenger_name || !passenger_name.trim() || !route_id) {
@@ -501,7 +514,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 11 — Remove passenger
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/transport/passengers/:id/remove', requireAuth, async (req, res) => {
+  app.post('/transport/passengers/:id/remove', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const p = await pool.query(
@@ -514,7 +527,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 12 — Incident log
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/transport/incidents', requireAuth, async (req, res) => {
+  app.get('/transport/incidents', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const flt = req.query.filter || '';
     let where = 'i.tenant_id=$1', params = [tid];
@@ -585,7 +598,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 13 — Report incident
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/transport/incidents/new', requireAuth, async (req, res) => {
+  app.post('/transport/incidents/new', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { vehicle_id, incident_type, date, description, reported_by } = req.body;
     if (!description || !description.trim()) {
@@ -601,7 +614,7 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 14 — Transport reports
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/transport/report', requireAuth, async (req, res) => {
+  app.get('/transport/report', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
 
     const [vUtil, paxRoute, stopPop, typeBreak, incSummary, routeStats] = await Promise.all([

@@ -2047,5 +2047,362 @@ module.exports = (app, pool, requireAuth, requireTenantAccess, validateTable, VA
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // DEV PORTAL: API KEY MANAGEMENT — /dev/api-keys
+  // ═══════════════════════════════════════════════════════════════════════
+
+  async function migrateDevTables() {
+    const migrations = [
+      `CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        key_hash TEXT NOT NULL,
+        key_prefix VARCHAR(8) NOT NULL,
+        name TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        last_used TIMESTAMPTZ,
+        revoked BOOLEAN DEFAULT false,
+        revoked_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ,
+        is_active BOOLEAN DEFAULT true
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
+      `CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id)`,
+      `CREATE TABLE IF NOT EXISTS webhooks (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        events TEXT[] NOT NULL DEFAULT '{}'::text[],
+        secret TEXT NOT NULL,
+        name TEXT,
+        is_active BOOLEAN DEFAULT true,
+        last_triggered TIMESTAMPTZ,
+        total_deliveries INTEGER DEFAULT 0,
+        total_failures INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_webhooks_tenant ON webhooks(tenant_id)`,
+    ];
+    for (const sql of migrations) {
+      try { await pool.query(sql); } catch (e) { logger.warn('Dev table migration warning: ' + e.message); }
+    }
+    logger.info('[API v1] Dev portal tables (api_keys, webhooks) ready');
+  }
+  migrateDevTables().catch(e => logger.error('[API v1] Dev migration failed: ' + e.message));
+
+  // ── Enhanced Rate Limiting: 100/min per API key, 1000/min per IP ──
+  const IP_RATE_LIMIT_MAX = 1000;
+  const IP_RATE_LIMIT_WINDOW = 60 * 1000;
+  const _ipRateLimits = new Map();
+
+  // Clean up IP rate limits periodically
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of _ipRateLimits) {
+      if (entry.resetAt <= now) _ipRateLimits.delete(key);
+    }
+  }, 5 * 60 * 1000);
+
+  function enhancedRateLimit(req, res, next) {
+    const now = Date.now();
+
+    // API key rate limit: 100/min
+    if (req.tokenType === 'api_key' && req.apiKeyId) {
+      let entry = _rateLimits.get('apikey:' + req.apiKeyId);
+      if (!entry || entry.resetAt <= now) {
+        entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW };
+        _rateLimits.set('apikey:' + req.apiKeyId, entry);
+      }
+      entry.count++;
+      if (entry.count > RATE_LIMIT_MAX) {
+        const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+        res.set('Retry-After', String(retryAfter));
+        res.set('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
+        res.set('X-RateLimit-Remaining', '0');
+        return res.status(429).json({ success: false, error: 'API key rate limit exceeded. Try again later.', retryAfter });
+      }
+      res.set('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
+      res.set('X-RateLimit-Remaining', String(Math.max(0, RATE_LIMIT_MAX - entry.count)));
+    }
+
+    // IP rate limit: 1000/min
+    let ipEntry = _ipRateLimits.get(req.ip);
+    if (!ipEntry || ipEntry.resetAt <= now) {
+      ipEntry = { count: 0, resetAt: now + IP_RATE_LIMIT_WINDOW };
+      _ipRateLimits.set(req.ip, ipEntry);
+    }
+    ipEntry.count++;
+    if (ipEntry.count > IP_RATE_LIMIT_MAX) {
+      const retryAfter = Math.ceil((ipEntry.resetAt - now) / 1000);
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ success: false, error: 'IP rate limit exceeded. Try again later.', retryAfter });
+    }
+
+    next();
+  }
+
+  // Apply enhanced rate limiting to all API v1 routes
+  app.use('/api/v1/', enhancedRateLimit);
+
+  // ── GET /dev/api-keys — List API keys (masked) ──
+  app.get('/dev/api-keys', ah(async (req, res) => {
+    // Auth via JWT or API key with elevated access
+    const authHeader = req.headers.authorization;
+    let tenantId = null;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const result = jwtVerify(authHeader.slice(7));
+      if (!result.valid) return fail(res, 'Invalid token', 401);
+      tenantId = result.payload.tenant_id;
+    } else if (req.headers['x-api-key']) {
+      const keyHash = hashApiKey(req.headers['x-api-key']);
+      const row = (await pool.query('SELECT tenant_id FROM api_keys WHERE key_hash = $1 AND revoked IS NOT true AND is_active = true', [keyHash])).rows[0];
+      if (!row) return fail(res, 'Invalid API key', 401);
+      tenantId = row.tenant_id;
+    } else {
+      return fail(res, 'Authentication required', 401);
+    }
+
+    const keys = (await pool.query(
+      `SELECT id, key_prefix, name, created_at, last_used, revoked, revoked_at, expires_at, is_active
+       FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC`, [tenantId])).rows;
+    const masked = keys.map(k => ({
+      ...k,
+      masked_key: k.key_prefix + '••••••••••••••••••••',
+    }));
+    success(res, masked);
+  }));
+
+  // ── POST /dev/api-keys — Generate new API key ──
+  app.post('/dev/api-keys', ah(async (req, res) => {
+    const authHeader = req.headers.authorization;
+    let tenantId = null, email = 'api-key-user';
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const result = jwtVerify(authHeader.slice(7));
+      if (!result.valid) return fail(res, 'Invalid token', 401);
+      tenantId = result.payload.tenant_id;
+      email = result.payload.email;
+    } else if (req.headers['x-api-key']) {
+      const keyHash = hashApiKey(req.headers['x-api-key']);
+      const row = (await pool.query('SELECT tenant_id FROM api_keys WHERE key_hash = $1 AND revoked IS NOT true AND is_active = true', [keyHash])).rows[0];
+      if (!row) return fail(res, 'Invalid API key', 401);
+      tenantId = row.tenant_id;
+    } else {
+      return fail(res, 'Authentication required', 401);
+    }
+
+    const { name, expires_in_days } = req.body;
+    if (!name || !name.trim()) return fail(res, 'Key name is required');
+
+    // Generate a cryptographically secure API key
+    const rawKey = 'cz_' + crypto.randomBytes(32).toString('hex');
+    const keyHash = hashApiKey(rawKey);
+    const keyPrefix = rawKey.substring(0, 8);
+    const expiresAt = expires_in_days ? new Date(Date.now() + parseInt(expires_in_days) * 86400000).toISOString() : null;
+
+    try {
+      const r = await pool.query(
+        `INSERT INTO api_keys (tenant_id, key_hash, key_prefix, name, expires_at) VALUES ($1, $2, $3, $4, $5) RETURNING id, key_prefix, name, created_at, expires_at, is_active`,
+        [tenantId, keyHash, keyPrefix, name.trim(), expiresAt]);
+
+      await audit(email, 'api_key_created', `Created API key: ${name.trim()}`);
+
+      // Show full key ONLY ONCE
+      success(res, {
+        id: r.rows[0].id,
+        key: rawKey,           // Full key — shown only this once!
+        key_prefix: keyPrefix,
+        name: name.trim(),
+        created_at: r.rows[0].created_at,
+        expires_at: r.rows[0].expires_at,
+        is_active: r.rows[0].is_active,
+        warning: 'Save this API key now. It cannot be shown again.',
+      }, 201);
+    } catch (e) {
+      logger.error('[API] POST /dev/api-keys: ' + e.message);
+      fail(res, 'Failed to create API key');
+    }
+  }));
+
+  // ── DELETE /dev/api-keys/:id — Revoke an API key ──
+  app.delete('/dev/api-keys/:id', ah(async (req, res) => {
+    const authHeader = req.headers.authorization;
+    let tenantId = null;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const result = jwtVerify(authHeader.slice(7));
+      if (!result.valid) return fail(res, 'Invalid token', 401);
+      tenantId = result.payload.tenant_id;
+    } else {
+      return fail(res, 'Authentication required', 401);
+    }
+
+    try {
+      const id = parseInt(req.params.id);
+      if (!isValidId(id)) return fail(res, 'Invalid key ID');
+
+      const result = await pool.query(
+        `UPDATE api_keys SET revoked = true, revoked_at = NOW(), is_active = false WHERE id = $1 AND tenant_id = $2 RETURNING id, name`,
+        [id, tenantId]
+      );
+
+      if (result.rows.length === 0) return fail(res, 'API key not found', 404);
+      success(res, { message: 'API key revoked', id: result.rows[0].id, name: result.rows[0].name });
+    } catch (e) {
+      logger.error('[API] DELETE /dev/api-keys/:id: ' + e.message);
+      fail(res, 'Failed to revoke API key');
+    }
+  }));
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // DEV PORTAL: WEBHOOK CONFIGURATION — /dev/webhooks
+  // ═══════════════════════════════════════════════════════════════════════
+  const VALID_WEBHOOK_EVENTS = [
+    'payment.received', 'payment.failed', 'student.enrolled', 'student.withdrawn',
+    'order.created', 'order.shipped', 'order.delivered', 'fee.paid', 'fee.overdue',
+    'user.created', 'user.deleted', 'invoice.generated', 'attendance.recorded',
+  ];
+
+  // ── GET /dev/webhooks — List webhooks ──
+  app.get('/dev/webhooks', ah(async (req, res) => {
+    const authHeader = req.headers.authorization;
+    let tenantId = null;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const result = jwtVerify(authHeader.slice(7));
+      if (!result.valid) return fail(res, 'Invalid token', 401);
+      tenantId = result.payload.tenant_id;
+    } else if (req.headers['x-api-key']) {
+      const keyHash = hashApiKey(req.headers['x-api-key']);
+      const row = (await pool.query('SELECT tenant_id FROM api_keys WHERE key_hash = $1 AND revoked IS NOT true AND is_active = true', [keyHash])).rows[0];
+      if (!row) return fail(res, 'Invalid API key', 401);
+      tenantId = row.tenant_id;
+    } else {
+      return fail(res, 'Authentication required', 401);
+    }
+
+    const webhooks = (await pool.query(
+      `SELECT id, name, url, events, is_active, last_triggered, total_deliveries, total_failures, created_at, updated_at
+       FROM webhooks WHERE tenant_id = $1 ORDER BY created_at DESC`, [tenantId])).rows;
+    success(res, webhooks);
+  }));
+
+  // ── POST /dev/webhooks — Create webhook ──
+  app.post('/dev/webhooks', ah(async (req, res) => {
+    const authHeader = req.headers.authorization;
+    let tenantId = null, email = 'api-key-user';
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const result = jwtVerify(authHeader.slice(7));
+      if (!result.valid) return fail(res, 'Invalid token', 401);
+      tenantId = result.payload.tenant_id;
+      email = result.payload.email;
+    } else if (req.headers['x-api-key']) {
+      const keyHash = hashApiKey(req.headers['x-api-key']);
+      const row = (await pool.query('SELECT tenant_id FROM api_keys WHERE key_hash = $1 AND revoked IS NOT true AND is_active = true', [keyHash])).rows[0];
+      if (!row) return fail(res, 'Invalid API key', 401);
+      tenantId = row.tenant_id;
+    } else {
+      return fail(res, 'Authentication required', 401);
+    }
+
+    const { url, events, name } = req.body;
+    if (!url || !url.trim()) return fail(res, 'Webhook URL is required');
+    try { new URL(url); } catch { return fail(res, 'Invalid URL format'); }
+    if (!Array.isArray(events) || events.length === 0) return fail(res, 'At least one event is required');
+    const invalidEvents = events.filter(e => !VALID_WEBHOOK_EVENTS.includes(e));
+    if (invalidEvents.length > 0) return fail(res, `Invalid events: ${invalidEvents.join(', ')}. Valid: ${VALID_WEBHOOK_EVENTS.join(', ')}`);
+
+    const secret = crypto.randomBytes(24).toString('hex');
+
+    try {
+      const r = await pool.query(
+        `INSERT INTO webhooks (tenant_id, url, events, secret, name) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, url, events, created_at`,
+        [tenantId, url.trim(), events, secret, (name || '').trim() || 'Untitled Webhook']);
+
+      await audit(email, 'webhook_created', `Created webhook: ${r.rows[0].name} for events: ${events.join(', ')}`);
+
+      success(res, {
+        id: r.rows[0].id,
+        name: r.rows[0].name,
+        url: r.rows[0].url,
+        events: r.rows[0].events,
+        secret,  // Show secret only on creation
+        created_at: r.rows[0].created_at,
+        warning: 'Save this signing secret. It cannot be shown again.',
+      }, 201);
+    } catch (e) {
+      logger.error('[API] POST /dev/webhooks: ' + e.message);
+      fail(res, 'Failed to create webhook');
+    }
+  }));
+
+  // ── POST /dev/webhooks/:id/test — Test webhook delivery ──
+  app.post('/dev/webhooks/:id/test', ah(async (req, res) => {
+    const authHeader = req.headers.authorization;
+    let tenantId = null;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const result = jwtVerify(authHeader.slice(7));
+      if (!result.valid) return fail(res, 'Invalid token', 401);
+      tenantId = result.payload.tenant_id;
+    } else {
+      return fail(res, 'Authentication required', 401);
+    }
+
+    const id = parseInt(req.params.id);
+    if (!isValidId(id)) return fail(res, 'Invalid webhook ID');
+
+    const webhook = (await pool.query(
+      'SELECT * FROM webhooks WHERE id = $1 AND tenant_id = $2', [id, tenantId]
+    )).rows[0];
+    if (!webhook) return fail(res, 'Webhook not found', 404);
+
+    // Send test event using http/https
+    const crypto2 = require('crypto');
+    const timestamp = Math.floor(Date.now() / 1000);
+    const payload = JSON.stringify({ event: 'test.ping', timestamp, data: { message: 'Webhook test from Comfort Platform', webhook_id: webhook.id } });
+    const signature = crypto2.createHmac('sha256', webhook.secret).update(timestamp + '.' + payload).digest('hex');
+
+    let deliveryResult = 'sent';
+    try {
+      const http = require('https');
+      const url = new URL(webhook.url);
+      const mod = url.protocol === 'https:' ? http : require('http');
+      await new Promise((resolve, reject) => {
+        const req2 = mod.request({
+          hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80),
+          path: url.pathname, method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': `t=${timestamp},s1=${signature}`, 'X-Webhook-ID': String(webhook.id), 'X-Webhook-Event': 'test.ping', 'User-Agent': 'Comfort-Platform-Webhooks/1.0' },
+          timeout: 10000,
+        }, (resp) => { let data = ''; resp.on('data', c => data += c); resp.on('end', () => resolve({ status: resp.statusCode, body: data })); });
+        req2.on('error', reject);
+        req2.write(payload);
+        req2.end();
+      });
+      await pool.query('UPDATE webhooks SET last_triggered = NOW(), total_deliveries = total_deliveries + 1 WHERE id = $1', [id]);
+    } catch (e) {
+      deliveryResult = 'failed';
+      await pool.query('UPDATE webhooks SET total_failures = total_failures + 1 WHERE id = $1', [id]).catch(() => {});
+    }
+
+    success(res, { webhook_id: id, event: 'test.ping', status: deliveryResult, timestamp });
+  }));
+
+  // ── DELETE /dev/webhooks/:id — Delete webhook ──
+  app.delete('/dev/webhooks/:id', ah(async (req, res) => {
+    const authHeader = req.headers.authorization;
+    let tenantId = null;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const result = jwtVerify(authHeader.slice(7));
+      if (!result.valid) return fail(res, 'Invalid token', 401);
+      tenantId = result.payload.tenant_id;
+    } else {
+      return fail(res, 'Authentication required', 401);
+    }
+
+    const id = parseInt(req.params.id);
+    if (!isValidId(id)) return fail(res, 'Invalid webhook ID');
+    const r = await pool.query('DELETE FROM webhooks WHERE id = $1 AND tenant_id = $2 RETURNING id, name', [id, tenantId]);
+    if (!r.rows.length) return fail(res, 'Webhook not found', 404);
+    success(res, { message: 'Webhook deleted', id: r.rows[0].id, name: r.rows[0].name });
+  }));
+
   logger.info('[API v1] Comfort Platform REST API initialized');
 };

@@ -133,6 +133,37 @@ module.exports = function securityOps(app, pool, requireAuth, logger, audit, ren
     `CREATE INDEX IF NOT EXISTS idx_backup_log_created ON backup_log(created_at)`
   ];
 
+  // ── NEW MIGRATIONS ──
+  const newMigrations = [
+    // Session management table for tracking active sessions
+    `CREATE TABLE IF NOT EXISTS user_sessions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      user_email TEXT NOT NULL,
+      session_id TEXT NOT NULL UNIQUE,
+      device_info TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      last_active TIMESTAMPTZ DEFAULT NOW(),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      is_active BOOLEAN DEFAULT true
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_usessions_email ON user_sessions(user_email)`,
+    `CREATE INDEX IF NOT EXISTS idx_usessions_session ON user_sessions(session_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_usessions_active ON user_sessions(user_email, is_active)`,
+  ];
+
+  // Run new migrations on module load
+  (async () => {
+    const client = await pool.connect().catch(() => null);
+    if (!client) return;
+    try {
+      for (const sql of newMigrations) await client.query(sql);
+      logger.info({ msg: '[SecurityOps] New migrations applied', count: newMigrations.length });
+    } catch (e) { logger.error({ msg: '[SecurityOps] New migration error', error: e.message }); }
+    finally { client.release(); }
+  })();
+
   // Run migrations on module load
   (async () => {
     const client = await pool.connect().catch(() => null);
@@ -1588,6 +1619,292 @@ module.exports = function securityOps(app, pool, requireAuth, logger, audit, ren
   // ============================================================
   // 8. RETURN UTILITIES
   // ============================================================
+
+  logger.info({ msg: '[SecurityOps] Module loaded — 2FA, Audit Logs, Backups ready' });
+
+  // ============================================================
+  // 9. AUDIT LOG — Settings Page (filterable by user, action, date)
+  // ============================================================
+  app.get('/settings/audit-log', requireAuth, ah(async (req, res) => {
+    const user = req.session.user;
+    const tenantId = user.tenant_id;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(10, parseInt(req.query.limit) || 25));
+    const offset = (page - 1) * limit;
+    const filterUser = (req.query.user || '').trim();
+    const filterAction = (req.query.action || '').trim();
+    const filterDateFrom = (req.query.date_from || '').trim();
+    const filterDateTo = (req.query.date_to || '').trim();
+
+    const conditions = ['tenant_id = $1'];
+    const params = [tenantId];
+    let pi = 2;
+    if (filterUser) { conditions.push(`user_email ILIKE $${pi++}`); params.push('%' + filterUser + '%'); }
+    if (filterAction) { conditions.push(`action ILIKE $${pi++}`); params.push('%' + filterAction + '%'); }
+    if (filterDateFrom) { conditions.push(`created_at >= $${pi++}`); params.push(filterDateFrom); }
+    if (filterDateTo) { conditions.push(`created_at <= $${pi++}`); params.push(filterDateTo + ' 23:59:59'); }
+
+    const whereClause = 'WHERE ' + conditions.join(' AND ');
+    const totalRows = parseInt((await pool.query(`SELECT COUNT(*) FROM audit_logs ${whereClause}`, params)).rows[0].count);
+    const logs = (await pool.query(
+      `SELECT * FROM audit_logs ${whereClause} ORDER BY created_at DESC LIMIT $${pi++} OFFSET $${pi++}`,
+      [...params, limit, offset])).rows;
+
+    const html = `
+    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>📝 Activity Log</h1>
+      <p style="opacity:0.9;margin-top:4px">${totalRows.toLocaleString()} events recorded for your organization</p>
+      <div style="margin-top:12px">
+        <a href="/settings/sessions" class="btn" style="background:white;color:#0284c7;display:inline-block">🖥 Active Sessions</a>
+        <a href="/settings/2fa/setup" class="btn" style="background:rgba(255,255,255,0.2);color:white;display:inline-block;margin-left:8px">🔐 2FA Settings</a>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-bottom:12px">🔍 Filter Activity</h3>
+      <form method="GET" action="/settings/audit-log" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end">
+        <div>
+          <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">User Email</label>
+          <input name="user" value="${esc(filterUser)}" placeholder="Filter by user..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">Action</label>
+          <input name="action" value="${esc(filterAction)}" placeholder="e.g. login, security..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">Date From</label>
+          <input name="date_from" type="date" value="${esc(filterDateFrom)}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">Date To</label>
+          <input name="date_to" type="date" value="${esc(filterDateTo)}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" type="submit" style="background:#0284c7;color:white">Filter</button>
+          <a href="/settings/audit-log" class="btn" style="background:#e2e8f0;color:#475569">Clear</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:2px solid #e2e8f0;text-align:left">
+              <th style="padding:10px 8px">Time</th>
+              <th style="padding:10px 8px">User</th>
+              <th style="padding:10px 8px">Action</th>
+              <th style="padding:10px 8px">Details</th>
+              <th style="padding:10px 8px">IP</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${logs.map(log => {
+              const ts = log.created_at ? new Date(log.created_at).toLocaleString() : '-';
+              const detailsPreview = (log.details || '').substring(0, 100);
+              return `<tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:8px;white-space:nowrap;font-size:12px;color:#64748b">${esc(ts)}</td>
+                <td style="padding:8px;font-weight:500">${esc(log.user_email || '-')}</td>
+                <td style="padding:8px"><span style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:11px">${esc(log.action || '-')}</span></td>
+                <td style="padding:8px;font-size:12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(log.details || '')}">${esc(detailsPreview)}</td>
+                <td style="padding:8px;font-size:11px;color:#94a3b8;font-family:monospace">${esc(log.ip_address || '-')}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${logs.length === 0 ? '<p style="color:#94a3b8;text-align:center;padding:30px">No activity logs found.</p>' : ''}
+    </div>
+
+    ${totalRows > limit ? `
+    <div style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:16px">
+      <span style="font-size:13px;color:#64748b">Page ${page} of ${Math.ceil(totalRows / limit)}</span>
+      ${page > 1 ? `<a href="/settings/audit-log?page=${page - 1}&user=${encodeURIComponent(filterUser)}&action=${encodeURIComponent(filterAction)}&date_from=${encodeURIComponent(filterDateFrom)}&date_to=${encodeURIComponent(filterDateTo)}&limit=${limit}" class="btn btn-sm" style="background:#e2e8f0;color:#475569">← Prev</a>` : ''}
+      ${page < Math.ceil(totalRows / limit) ? `<a href="/settings/audit-log?page=${page + 1}&user=${encodeURIComponent(filterUser)}&action=${encodeURIComponent(filterAction)}&date_from=${encodeURIComponent(filterDateFrom)}&date_to=${encodeURIComponent(filterDateTo)}&limit=${limit}" class="btn btn-sm" style="background:#0284c7;color:white">Next →</a>` : ''}
+    </div>` : ''}`;
+
+    res.send(renderPage('Activity Log', html, user));
+  }));
+
+  // ============================================================
+  // 10. AUTO-AUDIT MIDDLEWARE — Logs POST/DELETE/PATCH to sensitive routes
+  // ============================================================
+  app.use('/settings', requireAuth, ah(async (req, res, next) => {
+    // Auto-log after response for sensitive settings routes
+    if ((req.method === 'POST' || req.method === 'DELETE' || req.method === 'PATCH') && req.path !== '/settings/audit-log') {
+      const user = req.session?.user;
+      const tenantId = user?.tenant_id;
+      if (user && tenantId) {
+        const origEnd = res.end;
+        res.end = function(...args) {
+          origEnd.apply(res, args);
+          auditLog(tenantId, user.email, 'data_update', `${req.method} ${req.path}`, 'settings', null, req.method === 'DELETE' ? 'warning' : 'info', req);
+        };
+      }
+    }
+    next();
+  }));
+
+  // ============================================================
+  // 11. SESSION MANAGEMENT — /settings/sessions GET, POST /settings/sessions/revoke/:id
+  // ============================================================
+  app.get('/settings/sessions', requireAuth, ah(async (req, res) => {
+    const user = req.session.user;
+    const tenantId = user.tenant_id;
+    const currentSessionId = req.sessionID;
+
+    const sessions = (await pool.query(
+      `SELECT id, session_id, device_info, ip_address, user_agent, last_active, created_at, is_active
+       FROM user_sessions WHERE user_email=$1 AND tenant_id=$2 ORDER BY last_active DESC`, [user.email, tenantId])).rows;
+
+    const enriched = sessions.map(s => ({
+      ...s,
+      is_current: s.session_id === currentSessionId,
+      device: parseDeviceInfo(s.device_info || s.user_agent),
+      last_active_ago: formatTimeAgo(s.last_active),
+    }));
+
+    const html = `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
+      <h1>🖥 Active Sessions</h1>
+      <p style="opacity:0.9;margin-top:4px">${enriched.filter(s => s.is_active).length} active session${enriched.filter(s => s.is_active).length !== 1 ? 's' : ''} across your devices</p>
+    </div>
+
+    <div class="card">
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:2px solid #e2e8f0;text-align:left">
+              <th style="padding:10px 8px">Device</th>
+              <th style="padding:10px 8px">IP Address</th>
+              <th style="padding:10px 8px">Last Active</th>
+              <th style="padding:10px 8px">Login Date</th>
+              <th style="padding:10px 8px">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${enriched.map(s => `
+              <tr style="border-bottom:1px solid #f1f5f9;${s.is_current ? 'background:#f0fdf4' : ''}">
+                <td style="padding:10px 8px;font-weight:${s.is_current ? '600' : '400'}">
+                  ${s.device.icon || '💻'} ${esc(s.device.name || 'Unknown Device')}
+                  ${s.is_current ? '<span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:4px;font-size:10px;margin-left:4px">Current</span>' : ''}
+                </td>
+                <td style="padding:10px 8px;font-family:monospace;font-size:12px;color:#64748b">${esc(s.ip_address || '-')}</td>
+                <td style="padding:10px 8px;font-size:12px;color:#64748b">${esc(s.last_active_ago)}</td>
+                <td style="padding:10px 8px;font-size:12px;color:#64748b">${s.created_at ? new Date(s.created_at).toLocaleDateString() : '-'}</td>
+                <td style="padding:10px 8px">
+                  ${s.is_current ? '<span style="color:#94a3b8;font-size:11px">This device</span>' :
+                    `<form method="POST" action="/settings/sessions/revoke/${s.id}" onsubmit="return confirm('Revoke this session?')">
+                      <input type="hidden" name="_csrf" value="${esc(req.csrfToken || '')}">
+                      <button class="btn btn-sm" type="submit" style="background:#fef2f2;color:#dc2626;font-size:11px;padding:4px 10px">Revoke</button>
+                    </form>`}
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${sessions.length === 0 ? '<p style="color:#94a3b8;text-align:center;padding:30px">No sessions found.</p>' : ''}
+    </div>
+
+    <div style="margin-top:16px;display:flex;gap:8px">
+      <a href="/settings/audit-log" class="btn">📝 Activity Log</a>
+      <a href="/settings/2fa/setup" class="btn" style="margin-left:8px">🔐 2FA Settings</a>
+    </div>
+
+    <style>
+      .device-icon { font-size:16px; }
+    </style>`;
+
+    res.send(renderPage('Session Management', html, user));
+  }));
+
+  // POST /settings/sessions/revoke/:id — Revoke a specific session
+  app.post('/settings/sessions/revoke/:id', requireAuth, ah(async (req, res) => {
+    const user = req.session.user;
+    const tenantId = user.tenant_id;
+    const sid = parseInt(req.params.id);
+
+    const session = (await pool.query(
+      'SELECT id, session_id, device_info, user_email FROM user_sessions WHERE id=$1 AND tenant_id=$2 AND is_active=true',
+      [sid, tenantId])).rows[0];
+
+    if (!session) {
+      return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Session not found or already revoked.</div></div>', user));
+    }
+
+    // Don't allow revoking the current session
+    if (session.session_id === req.sessionID) {
+      return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">You cannot revoke your current session.</div></div>', user));
+    }
+
+    await pool.query('UPDATE user_sessions SET is_active=false WHERE id=$1', [sid]);
+
+    await auditLog(tenantId, user.email, 'security', `Revoked session: ${session.device_info || 'unknown'} (${session.ip_address})`, 'session', sid, 'warning', req);
+
+    // Redirect back to sessions page
+    res.redirect('/settings/sessions');
+  }));
+
+  // POST /settings/sessions/revoke-others — Revoke all other sessions
+  app.post('/settings/sessions/revoke-others', requireAuth, ah(async (req, res) => {
+    const user = req.session.user;
+    const tenantId = user.tenant_id;
+    const currentSessionId = req.sessionID;
+
+    const result = await pool.query(
+      'UPDATE user_sessions SET is_active=false WHERE user_email=$1 AND tenant_id=$2 AND is_active=true AND session_id!=$3 RETURNING id',
+      [user.email, tenantId, currentSessionId]);
+
+    await auditLog(tenantId, user.email, 'security', `Revoked ${result.rowCount} other sessions`, 'session', null, 'warning', req);
+
+    res.redirect('/settings/sessions');
+  }));
+
+  // Track session activity middleware
+  app.use('/settings', requireAuth, ah(async (req, res, next) => {
+    if (req.sessionID && req.user) {
+      try {
+        await pool.query(
+          `INSERT INTO user_sessions (tenant_id,user_email,session_id,device_info,ip_address,user_agent,last_active)
+           VALUES ($1,$2,$3,$4,$5,$6,NOW())
+           ON CONFLICT (session_id) DO UPDATE SET last_active=NOW(), is_active=true`,
+          [req.user.tenant_id, req.user.email, req.sessionID,
+            (req.headers['user-agent'] || 'unknown').substring(0, 200),
+            req.ip, (req.headers['user-agent'] || 'unknown').substring(0, 200)]
+        ).catch(() => {});
+      } catch {}
+    }
+    next();
+  }));
+
+  // ── DEVICE INFO PARSER ──
+  function parseDeviceInfo(ua) {
+    if (!ua) return { icon: '💻', name: 'Unknown' };
+    if (/iPhone/i.test(ua)) return { icon: '📱', name: 'iPhone' };
+    if (/iPad/i.test(ua)) return { icon: '📱', name: 'iPad' };
+    if (/Android/i.test(ua)) return { icon: '🤖', name: 'Android Device' };
+    if (/Macintosh|Mac OS X/i.test(ua)) return { icon: '🖥', name: 'Mac' };
+    if (/Windows/i.test(ua)) return { icon: '🖥', name: 'Windows PC' };
+    if (/Linux/i.test(ua)) return { icon: '🖥', name: 'Linux' };
+    if (/CrOS/i.test(ua)) return { icon: '💻', name: 'Chromebook' };
+    return { icon: '💻', name: ua.substring(0, 40) };
+  }
+
+  // ── TIME AGO HELPER ──
+  function formatTimeAgo(date) {
+    if (!date) return 'Never';
+    const now = new Date();
+    const d = new Date(date);
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString();
+  }
 
   logger.info({ msg: '[SecurityOps] Module loaded — 2FA, Audit Logs, Backups ready' });
 

@@ -15,6 +15,19 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   const navUrl = (action) => `/hostel${action}`;
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
+
   // ── Migrations ─────────────────────────────────────────────────────────────
   async function migrate() {
     await pool.query(`
@@ -120,7 +133,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 1 — Dashboard
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/hostel', requireAuth, async (req, res) => {
+  app.get('/hostel', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const [bldgs, rooms, allocs, maint] = await Promise.all([
       pool.query('SELECT COUNT(*)::int AS c FROM hostel_buildings WHERE tenant_id=$1 AND is_active=true', [tid]),
@@ -198,7 +211,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 2 — Buildings list
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/hostel/buildings', requireAuth, async (req, res) => {
+  app.get('/hostel/buildings', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const result = await pool.query(`
       SELECT b.*,
@@ -246,7 +259,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 3 — Add building form
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/hostel/buildings/new', requireAuth, async (req, res) => {
+  app.get('/hostel/buildings/new', requireAuth, requireSubscription('basic'), async (req, res) => {
     let html = nav('Buildings');
     html += '<div class="card"><h2>Add New Building</h2>';
     html += `<form method="POST" action="${navUrl('/buildings/create')}">`;
@@ -278,7 +291,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 4 — Save building
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/hostel/buildings/create', requireAuth, async (req, res) => {
+  app.post('/hostel/buildings/create', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { name, type, total_rooms, warden_name, warden_phone, description, is_active } = req.body;
     if (!name || !name.trim()) {
@@ -297,7 +310,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 5 — Building detail with room grid
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/hostel/buildings/:id', requireAuth, async (req, res) => {
+  app.get('/hostel/buildings/:id', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const bldg = await pool.query(
@@ -353,7 +366,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 6 — Room detail with occupants
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/hostel/rooms/:id', requireAuth, async (req, res) => {
+  app.get('/hostel/rooms/:id', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const room = await pool.query(
@@ -438,7 +451,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 7 — Allocate student
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/hostel/allocate', requireAuth, async (req, res) => {
+  app.post('/hostel/allocate', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { room_id, student_name, student_id, class: cls, bed_number, check_in_date, parent_phone, emergency_contact } = req.body;
     if (!student_name || !student_name.trim() || !room_id || !bed_number) {
@@ -481,7 +494,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 8 — Deallocate student
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/hostel/deallocate/:id', requireAuth, async (req, res) => {
+  app.post('/hostel/deallocate/:id', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const alloc = await pool.query(
@@ -501,7 +514,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 9 — Maintenance requests list
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/hostel/maintenance', requireAuth, async (req, res) => {
+  app.get('/hostel/maintenance', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const statusFilter = req.query.status || '';
 
@@ -617,7 +630,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 10 — Report new maintenance issue
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/hostel/maintenance/new', requireAuth, async (req, res) => {
+  app.post('/hostel/maintenance/new', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { building_id, room_id, issue_type, priority, description, reported_by } = req.body;
     if (!description || !description.trim()) {
@@ -634,7 +647,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 11 — Resolve maintenance issue
   // ═══════════════════════════════════════════════════════════════════════════
-  app.post('/hostel/maintenance/:id/resolve', requireAuth, async (req, res) => {
+  app.post('/hostel/maintenance/:id/resolve', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
     const result = await pool.query(
@@ -647,7 +660,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 12 — Occupancy Reports
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/hostel/report', requireAuth, async (req, res) => {
+  app.get('/hostel/report', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
 
     // Building-level stats
@@ -755,7 +768,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 13 — Find available bed spaces
   // ═══════════════════════════════════════════════════════════════════════════
-  app.get('/hostel/bed-spaces', requireAuth, async (req, res) => {
+  app.get('/hostel/bed-spaces', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const typeFilter = req.query.type || '';
 
@@ -815,7 +828,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   // ═══════════════════════════════════════════════════════════════════════════
   // ROUTE 14 — Delete building
   // ═══════════════════════════════════════════════════════════════════════════
-  app.delete('/hostel/buildings/:id', requireAuth, async (req, res) => {
+  app.delete('/hostel/buildings/:id', requireAuth, requireSubscription('basic'), async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
 
@@ -837,7 +850,7 @@ module.exports = function hostelManager(app, db, pool, renderPage, esc) {
   });
 
   // Also support POST with _method=DELETE for form-based deletion
-  app.post('/hostel/buildings/:id/delete', requireAuth, async (req, res) => {
+  app.post('/hostel/buildings/:id/delete', requireAuth, requireSubscription('basic'), async (req, res) => {
     req.method = 'DELETE';
     req.url = navUrl('/buildings/' + req.params.id);
     app._router.handle(req, res);

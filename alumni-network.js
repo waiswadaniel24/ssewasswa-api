@@ -23,6 +23,19 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
 
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
+
   if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s))
     .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
@@ -150,7 +163,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 1: GET /alumni — Alumni Directory
   // ============================================================
-  app.get('/alumni', requireAuth, ah(async (req, res) => {
+  app.get('/alumni', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const search = (req.query.search || '').trim();
     const year = req.query.year || '';
@@ -236,7 +249,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 2: GET /alumni/profile/new — Create profile form
   // ============================================================
-  app.get('/alumni/profile/new', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/profile/new', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user;
     const html = ALUMNI_CSS + `<div style="max-width:750px;margin:0 auto">
       ${nav('directory')}
@@ -294,7 +307,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 3: POST /alumni/profile/create — Save profile
   // ============================================================
-  app.post('/alumni/profile/create', requireAuth, ah(async (req, res) => {
+  app.post('/alumni/profile/create', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { full_name, email, phone, graduation_year, course, department, current_employer,
       job_title, city, country, bio, linkedin_url, twitter_url, mentor, mentor_areas } = req.body;
@@ -317,7 +330,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 4: GET /alumni/profile/:id — View alumni profile
   // ============================================================
-  app.get('/alumni/profile/:id', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/profile/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const profile = (await pool.query(`SELECT * FROM alumni_profiles WHERE id=$1 AND tenant_id=$2`, [id, tid])).rows[0];
     if (!profile) return res.send(renderPage('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2 style="color:#dc2626">Profile not found</h2><a href="/alumni" class="btn btn-sm" style="background:#0f766e;color:#fff;margin-top:12px">← Directory</a></div>', user, req));
@@ -367,7 +380,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 5: GET /alumni/profile/:id/edit — Edit profile
   // ============================================================
-  app.get('/alumni/profile/:id/edit', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/profile/:id/edit', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const profile = (await pool.query(`SELECT * FROM alumni_profiles WHERE id=$1 AND tenant_id=$2`, [id, tid])).rows[0];
     if (!profile) return res.redirect('/alumni');
@@ -437,7 +450,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 6: POST /alumni/profile/:id/update — Update profile
   // ============================================================
-  app.post('/alumni/profile/:id/update', requireAuth, ah(async (req, res) => {
+  app.post('/alumni/profile/:id/update', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const existing = (await pool.query(`SELECT id FROM alumni_profiles WHERE id=$1 AND tenant_id=$2`, [id, tid])).rows[0];
     if (!existing) return res.redirect('/alumni');
@@ -459,7 +472,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 7: GET /alumni/events — Alumni events listing
   // ============================================================
-  app.get('/alumni/events', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/events', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const events = (await pool.query(`SELECT ae.*, u.name as creator_name FROM alumni_events ae LEFT JOIN users u ON u.id=ae.created_by WHERE ae.tenant_id=$1 ORDER BY ae.event_date DESC NULLS LAST`, [tid])).rows;
     const upcoming = events.filter(e => e.event_date && new Date(e.event_date) >= new Date());
@@ -493,7 +506,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 8: GET /alumni/events/new — Create event form
   // ============================================================
-  app.get('/alumni/events/new', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/events/new', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const html = ALUMNI_CSS + `<div style="max-width:700px;margin:0 auto">
       ${nav('events')}
       <a href="/alumni/events" style="color:#64748b;font-size:14px;text-decoration:none;display:inline-block;margin-bottom:16px">← Back to Events</a>
@@ -532,7 +545,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 9: POST /alumni/events/create — Save event
   // ============================================================
-  app.post('/alumni/events/create', requireAuth, ah(async (req, res) => {
+  app.post('/alumni/events/create', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { title, description, event_date, venue, type, max_attendees } = req.body;
     if (!title || !title.trim()) return res.redirect('/alumni/events/new');
@@ -547,7 +560,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 10: GET /alumni/jobs — Job board
   // ============================================================
-  app.get('/alumni/jobs', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/jobs', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const typeFilter = req.query.type || '';
     const jobs = (await pool.query(
@@ -596,7 +609,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 11: GET /alumni/jobs/new — Post job form
   // ============================================================
-  app.get('/alumni/jobs/new', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/jobs/new', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const html = ALUMNI_CSS + `<div style="max-width:700px;margin:0 auto">
       ${nav('jobs')}
       <a href="/alumni/jobs" style="color:#64748b;font-size:14px;text-decoration:none;display:inline-block;margin-bottom:16px">← Back to Jobs</a>
@@ -636,7 +649,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 12: POST /alumni/jobs/create — Save job posting
   // ============================================================
-  app.post('/alumni/jobs/create', requireAuth, ah(async (req, res) => {
+  app.post('/alumni/jobs/create', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { title, company, description, location, type, salary_range, requirements } = req.body;
     if (!title?.trim() || !company?.trim()) return res.redirect('/alumni/jobs/new');
@@ -653,7 +666,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 13: GET /alumni/donations — Donation page
   // ============================================================
-  app.get('/alumni/donations', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/donations', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const donations = (await pool.query(
       `SELECT ad.*, ap.full_name as donor_profile_name FROM alumni_donations ad LEFT JOIN alumni_profiles ap ON ap.id=ad.donor_id WHERE ad.tenant_id=$1 ORDER BY ad.created_at DESC LIMIT 50`, [tid]
@@ -723,7 +736,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 14: POST /alumni/donate — Process donation
   // ============================================================
-  app.post('/alumni/donate', requireAuth, ah(async (req, res) => {
+  app.post('/alumni/donate', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { donor_name, amount, purpose, message, is_anonymous } = req.body;
     const amt = parseFloat(amount);
@@ -740,7 +753,7 @@ module.exports = function alumniNetwork(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 15: GET /alumni/report — Alumni statistics
   // ============================================================
-  app.get('/alumni/report', requireAuth, ah(async (req, res) => {
+  app.get('/alumni/report', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     // Summary stats

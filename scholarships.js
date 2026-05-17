@@ -18,6 +18,21 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
 
   // ── Helpers ───────────────────────────────────────────────
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.user?.role === 'super_admin') return next();
+    try {
+      const tid = req.tenant?.id || req.user?.tenant_id;
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [tid]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) {
+        return res.status(403).json({ error: 'Subscription required', min_plan: minPlan, current_plan: plan, message: `Upgrade to ${minPlan} or higher to access this feature.` });
+      }
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   const uuid = () => require('crypto').randomBytes(16).toString('hex');
   const parseNum = (v, fb = 0) => { const n = parseFloat(v); return isNaN(n) ? fb : n; };
   const err = (res, msg, code = 400) => res.status(code).json({ success: false, error: msg });
@@ -118,7 +133,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // 1. SCHOLARSHIP PROGRAMS — CRUD
   // ============================================================
 
-  app.get('/api/scholarships/programs', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/programs', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     let w = ['sp.tenant_id = $1'], p = [tid], pi = 2;
     if (req.query.type) { w.push(`sp.type = $${pi++}`); p.push(req.query.type); }
@@ -131,13 +146,13 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { programs: r.rows, count: r.rows.length });
   }));
 
-  app.get('/api/scholarships/programs/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/programs/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const r = await pool.query(`SELECT * FROM scholarship_programs WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.tenant.id]);
     if (!r.rows[0]) return err(res, 'Program not found', 404);
     ok(res, { program: r.rows[0] });
   }));
 
-  app.post('/api/scholarships/programs', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/programs', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const { name, type, description, criteria, award_amount, coverage_type, coverage_value,
       duration_months, max_recipients, min_gpa, min_attendance, deadline, is_active } = req.body;
@@ -155,7 +170,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { program: r.rows[0] }, 201);
   }));
 
-  app.put('/api/scholarships/programs/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/scholarships/programs/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const ex = await pool.query(`SELECT id FROM scholarship_programs WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     if (!ex.rows[0]) return err(res, 'Program not found', 404);
@@ -170,7 +185,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { program: r.rows[0] });
   }));
 
-  app.delete('/api/scholarships/programs/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.delete('/api/scholarships/programs/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const r = await pool.query(`UPDATE scholarship_programs SET is_active=false, updated_at=NOW() WHERE id=$1 AND tenant_id=$2 RETURNING id`, [req.params.id, req.tenant.id]);
     if (!r.rows[0]) return err(res, 'Program not found', 404);
     await notify(req.tenant.id, 'program:deactivated', { programId: +req.params.id });
@@ -181,7 +196,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // 2. APPLICATIONS — Create, submit, track, update
   // ============================================================
 
-  app.get('/api/scholarships/applications', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/applications', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     let w = ['sa.tenant_id = $1'], p = [tid], pi = 2;
     if (req.query.program_id) { w.push(`sa.program_id=$${pi++}`); p.push(req.query.program_id); }
@@ -196,7 +211,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { applications: r.rows, count: r.rows.length });
   }));
 
-  app.get('/api/scholarships/applications/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/applications/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, aid = req.params.id;
     const r = await pool.query(
       `SELECT sa.*, sp.name as program_name, sp.type as program_type, sp.award_amount, sp.min_gpa, sp.min_attendance,
@@ -210,7 +225,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { application: r.rows[0], evaluations: evals.rows });
   }));
 
-  app.post('/api/scholarships/applications', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/applications', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const { program_id, student_id, status, gpa, attendance_pct, financial_need_score,
       documents, essay, recommendation_letters } = req.body;
@@ -236,7 +251,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { application: r.rows[0] }, 201);
   }));
 
-  app.put('/api/scholarships/applications/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/scholarships/applications/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, aid = req.params.id;
     const ex = await pool.query(`SELECT id,status FROM scholarship_applications WHERE id=$1 AND tenant_id=$2`, [aid, tid]);
     if (!ex.rows[0]) return err(res, 'Application not found', 404);
@@ -254,7 +269,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { application: r.rows[0] });
   }));
 
-  app.post('/api/scholarships/applications/:id/submit', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/applications/:id/submit', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, aid = req.params.id;
     const ex = await pool.query(`SELECT id,status FROM scholarship_applications WHERE id=$1 AND tenant_id=$2`, [aid, tid]);
     if (!ex.rows[0]) return err(res, 'Not found', 404);
@@ -268,7 +283,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // 3. ELIGIBILITY CHECKING — GPA, attendance, need, capacity
   // ============================================================
 
-  app.get('/api/scholarships/check-eligibility/:programId/:studentId', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/check-eligibility/:programId/:studentId', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, { programId, studentId } = req.params;
     const prog = await pool.query(`SELECT * FROM scholarship_programs WHERE id=$1 AND tenant_id=$2 AND is_active=true`, [programId, tid]);
     if (!prog.rows[0]) return err(res, 'Program not found or inactive', 404);
@@ -328,7 +343,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { eligible, score: hardCount ? Math.round((metCount / hardCount) * 100) : 0, program: { id: p.id, name: p.name, type: p.type }, checks, gpa: sgpa, attendance: satt });
   }));
 
-  app.post('/api/scholarships/bulk-eligibility', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/bulk-eligibility', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, { program_id, student_ids } = req.body;
     if (!program_id || !Array.isArray(student_ids)) return err(res, 'program_id and student_ids array required');
     const results = [];
@@ -350,7 +365,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // 4. EVALUATION & SCORING — Committee review, shortlisting
   // ============================================================
 
-  app.post('/api/scholarships/evaluations', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/evaluations', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, { application_id, evaluator_id, scores, comments, recommendation } = req.body;
     if (!application_id || !evaluator_id) return err(res, 'application_id and evaluator_id required');
     const app = await pool.query(`SELECT id FROM scholarship_applications WHERE id=$1 AND tenant_id=$2`, [application_id, tid]);
@@ -373,7 +388,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { evaluation: r.rows[0] }, 201);
   }));
 
-  app.get('/api/scholarships/evaluations/:applicationId', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/evaluations/:applicationId', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const r = await pool.query(
       `SELECT se.*, u.name as evaluator_name FROM scholarship_evaluations se
        LEFT JOIN users u ON u.id=se.evaluator_id WHERE se.application_id=$1 AND se.tenant_id=$2 ORDER BY se.created_at DESC`,
@@ -381,7 +396,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { evaluations: r.rows });
   }));
 
-  app.post('/api/scholarships/shortlist/:programId', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/shortlist/:programId', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, pid = req.params.programId, limit = parseInt(req.body.limit) || 20;
     const prog = await pool.query(`SELECT id FROM scholarship_programs WHERE id=$1 AND tenant_id=$2`, [pid, tid]);
     if (!prog.rows[0]) return err(res, 'Program not found', 404);
@@ -398,7 +413,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // 5. AWARD MANAGEMENT — Disbursement, installments, renewal
   // ============================================================
 
-  app.get('/api/scholarships/awards', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/awards', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     let w = ['aw.tenant_id = $1'], p = [tid], pi = 2;
     if (req.query.program_id) { w.push(`aw.program_id=$${pi++}`); p.push(req.query.program_id); }
@@ -411,7 +426,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { awards: r.rows, count: r.rows.length });
   }));
 
-  app.post('/api/scholarships/awards', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/awards', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const { program_id, student_id, application_id, amount, coverage_type, start_date, end_date,
       renewal_conditions, installments } = req.body;
@@ -441,7 +456,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { award: r.rows[0] }, 201);
   }));
 
-  app.put('/api/scholarships/awards/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/scholarships/awards/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, aid = req.params.id;
     const ex = await pool.query(`SELECT id FROM scholarship_awards WHERE id=$1 AND tenant_id=$2`, [aid, tid]);
     if (!ex.rows[0]) return err(res, 'Award not found', 404);
@@ -454,7 +469,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { award: r.rows[0] });
   }));
 
-  app.post('/api/scholarships/awards/:id/renew', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/awards/:id/renew', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, aid = req.params.id;
     const aw = await pool.query(`SELECT * FROM scholarship_awards WHERE id=$1 AND tenant_id=$2 AND status='active'`, [aid, tid]);
     if (!aw.rows[0]) return err(res, 'Active award not found', 404);
@@ -470,7 +485,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { message: 'Award renewed', renewed_until: endStr });
   }));
 
-  app.post('/api/scholarships/awards/:id/revoke', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/awards/:id/revoke', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const r = await pool.query(`UPDATE scholarship_awards SET status='revoked' WHERE id=$1 AND tenant_id=$2 RETURNING id,student_id`, [req.params.id, tid]);
     if (!r.rows[0]) return err(res, 'Award not found', 404);
@@ -482,7 +497,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // 6. DONOR / SPONSOR MANAGEMENT
   // ============================================================
 
-  app.get('/api/scholarships/sponsors', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/sponsors', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     let w = ['ss.tenant_id = $1'], p = [tid], pi = 2;
     if (req.query.active !== undefined) { w.push(`ss.is_active=$${pi++}`); p.push(req.query.active === 'true'); }
@@ -491,13 +506,13 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { sponsors: r.rows, count: r.rows.length });
   }));
 
-  app.get('/api/scholarships/sponsors/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/sponsors/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const r = await pool.query(`SELECT * FROM scholarship_sponsors WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.tenant.id]);
     if (!r.rows[0]) return err(res, 'Sponsor not found', 404);
     ok(res, { sponsor: r.rows[0] });
   }));
 
-  app.post('/api/scholarships/sponsors', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/sponsors', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, { name, email, phone, company, pledge_amount, donated_amount, recognition_level } = req.body;
     if (!name) return err(res, 'Name required');
     const r = await pool.query(
@@ -508,7 +523,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { sponsor: r.rows[0] }, 201);
   }));
 
-  app.put('/api/scholarships/sponsors/:id', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.put('/api/scholarships/sponsors/:id', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, sid = req.params.id;
     const ex = await pool.query(`SELECT id FROM scholarship_sponsors WHERE id=$1 AND tenant_id=$2`, [sid, tid]);
     if (!ex.rows[0]) return err(res, 'Sponsor not found', 404);
@@ -520,7 +535,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { sponsor: r.rows[0] });
   }));
 
-  app.post('/api/scholarships/sponsors/:id/log-communication', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/sponsors/:id/log-communication', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, sid = req.params.id;
     const { method, subject, notes, date } = req.body;
     const ex = await pool.query(`SELECT id,communication_log FROM scholarship_sponsors WHERE id=$1 AND tenant_id=$2`, [sid, tid]);
@@ -531,7 +546,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { message: 'Communication logged', entries: log.length });
   }));
 
-  app.post('/api/scholarships/sponsors/:id/donate', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.post('/api/scholarships/sponsors/:id/donate', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id, sid = req.params.id, amt = parseNum(req.body.amount);
     if (amt <= 0) return err(res, 'Valid amount required');
     const r = await pool.query(
@@ -550,7 +565,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // 7. REPORTS & ANALYTICS
   // ============================================================
 
-  app.get('/api/scholarships/reports/overview', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/reports/overview', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const [programs, apps, pending, activeAwards] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int as n FROM scholarship_programs WHERE tenant_id=$1 AND is_active=true`, [tid]),
@@ -573,7 +588,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     });
   }));
 
-  app.get('/api/scholarships/reports/utilization', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/reports/utilization', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const byProgram = (await pool.query(
       `SELECT sp.id,sp.name,sp.type,sp.award_amount,sp.max_recipients,sp.coverage_type,
@@ -586,7 +601,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { byProgram, totalBudget, totalSpent, utilizationRate: totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0 });
   }));
 
-  app.get('/api/scholarships/reports/demographics', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/reports/demographics', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const [byGender, byClass, byType] = await Promise.all([
       pool.query(`SELECT COALESCE(s.gender,'unspecified') as gender, COUNT(*)::int as count FROM scholarship_awards aw LEFT JOIN students s ON s.id=aw.student_id WHERE aw.tenant_id=$1 AND aw.status='active' GROUP BY s.gender`, [tid]),
@@ -596,7 +611,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { byGender: byGender.rows, byClass: byClass.rows, byType: byType.rows });
   }));
 
-  app.get('/api/scholarships/reports/gpa-comparison', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/reports/gpa-comparison', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const schStudents = (await pool.query(
       `SELECT aw.student_id, s.first_name, s.last_name, aw.amount, sp.name as program_name
@@ -614,7 +629,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     ok(res, { comparison, scholarship_students: schStudents });
   }));
 
-  app.get('/api/scholarships/reports/retention', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/reports/retention', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     const all = (await pool.query(
       `SELECT status, COUNT(*)::int as count FROM scholarship_awards WHERE tenant_id=$1 GROUP BY status`, [tid])).rows;
@@ -628,7 +643,7 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
   // CSV EXPORT
   // ============================================================
 
-  app.get('/api/scholarships/export/applications', tenantMiddleware, requireAuth, ah(async (req, res) => {
+  app.get('/api/scholarships/export/applications', tenantMiddleware, requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.tenant.id;
     let w = ['sa.tenant_id = $1'], p = [tid], pi = 2;
     if (req.query.program_id) { w.push(`sa.program_id=$${pi++}`); p.push(req.query.program_id); }

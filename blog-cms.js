@@ -12,6 +12,19 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
     next();
   };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s))
     .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
@@ -320,7 +333,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 4: GET /blog/admin — Admin dashboard ------------------------
-  app.get('/blog/admin', requireAuth, ah(async (req, res) => {
+  app.get('/blog/admin', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const tab = req.query.tab || 'all';
     const search = (req.query.search || '').trim();
@@ -404,7 +417,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 5: GET /blog/admin/new — Create post form ------------------
-  app.get('/blog/admin/new', requireAuth, ah(async (req, res) => {
+  app.get('/blog/admin/new', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const categories = (await pool.query(`SELECT * FROM blog_categories WHERE tenant_id=$1 ORDER BY name`, [tid])).rows;
     const html = BLOG_CSS + `<div style="max-width:900px;margin:0 auto">
@@ -446,7 +459,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 6: POST /blog/admin/create — Save post ----------------------
-  app.post('/blog/admin/create', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/create', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { title, content, excerpt, category, tags, cover_image, is_featured, meta_title, meta_description, action } = req.body;
     if (!title || !title.trim() || !content || !content.trim()) return res.redirect('/blog/admin/new');
@@ -468,7 +481,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 7: GET /blog/admin/:id/edit — Edit post ---------------------
-  app.get('/blog/admin/:id/edit', requireAuth, ah(async (req, res) => {
+  app.get('/blog/admin/:id/edit', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const post = (await pool.query(`SELECT * FROM blog_posts WHERE id=$1 AND tenant_id=$2`, [id, tid])).rows[0];
     if (!post) return res.redirect('/blog/admin');
@@ -519,7 +532,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 8: POST /blog/admin/:id/update — Update post ----------------
-  app.post('/blog/admin/:id/update', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/:id/update', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const post = (await pool.query(`SELECT id FROM blog_posts WHERE id=$1 AND tenant_id=$2`, [id, tid])).rows[0];
     if (!post) return res.redirect('/blog/admin');
@@ -540,7 +553,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 9: DELETE /blog/admin/:id — Delete post ---------------------
-  app.delete('/blog/admin/:id', requireAuth, ah(async (req, res) => {
+  app.delete('/blog/admin/:id', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     await pool.query(`DELETE FROM blog_posts WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     req.session.flash = { type: 'success', msg: 'Post deleted successfully.' };
@@ -548,7 +561,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 10: POST /blog/admin/:id/publish — Publish draft -----------
-  app.post('/blog/admin/:id/publish', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/:id/publish', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const post = (await pool.query(`SELECT id FROM blog_posts WHERE id=$1 AND tenant_id=$2`, [id, tid])).rows[0];
     if (!post) return res.redirect('/blog/admin');
@@ -558,7 +571,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 11: POST /blog/admin/:id/schedule — Schedule post -----------
-  app.post('/blog/admin/:id/schedule', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/:id/schedule', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const { scheduled_at } = req.body;
     const post = (await pool.query(`SELECT id FROM blog_posts WHERE id=$1 AND tenant_id=$2`, [id, tid])).rows[0];
@@ -569,7 +582,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 12: GET /blog/admin/categories — Category management ---------
-  app.get('/blog/admin/categories', requireAuth, ah(async (req, res) => {
+  app.get('/blog/admin/categories', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const categories = (await pool.query(
       `SELECT c.*, (SELECT COUNT(*)::int FROM blog_posts p WHERE p.category = c.name AND p.tenant_id = c.tenant_id) as actual_count
@@ -615,7 +628,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 13: POST /blog/admin/categories/add — Add category -----------
-  app.post('/blog/admin/categories/add', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/categories/add', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { name, color, description } = req.body;
     if (!name || !name.trim()) { req.session.flash = { type: 'error', msg: 'Category name is required.' }; return res.redirect('/blog/admin/categories'); }
@@ -629,7 +642,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // Category delete handler
-  app.post('/blog/admin/categories/delete', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/categories/delete', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { id } = req.body;
     await pool.query(`DELETE FROM blog_categories WHERE id=$1 AND tenant_id=$2`, [id, tid]);
@@ -638,7 +651,7 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // -- ROUTE 14: GET /blog/admin/comments — Comment moderation ------------
-  app.get('/blog/admin/comments', requireAuth, ah(async (req, res) => {
+  app.get('/blog/admin/comments', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const filter = req.query.filter || 'pending';
     let where = ['c.tenant_id=$1'], params = [tid];
@@ -693,19 +706,19 @@ module.exports = function blogCms(app, db, pool, renderPage, esc) {
   }));
 
   // Comment moderation actions
-  app.post('/blog/admin/comments/:id/approve', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/comments/:id/approve', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     await pool.query(`UPDATE blog_comments SET status='approved' WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     req.session.flash = { type: 'success', msg: 'Comment approved.' };
     res.redirect('/blog/admin/comments');
   }));
-  app.post('/blog/admin/comments/:id/reject', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/comments/:id/reject', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     await pool.query(`UPDATE blog_comments SET status='rejected' WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     req.session.flash = { type: 'success', msg: 'Comment rejected.' };
     res.redirect('/blog/admin/comments');
   }));
-  app.post('/blog/admin/comments/:id/delete', requireAuth, ah(async (req, res) => {
+  app.post('/blog/admin/comments/:id/delete', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     await pool.query(`DELETE FROM blog_comments WHERE id=$1 AND tenant_id=$2`, [id, tid]);
     req.session.flash = { type: 'success', msg: 'Comment deleted.' };

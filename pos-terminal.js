@@ -23,6 +23,19 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
 
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
+
   if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s))
     .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 
@@ -264,7 +277,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 1: GET /pos — Dashboard
   // ============================================================
-  app.get('/pos', requireAuth, ah(async (req, res) => {
+  app.get('/pos', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     // Stats
@@ -362,7 +375,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 2: GET /pos/products — Product management
   // ============================================================
-  app.get('/pos/products', requireAuth, ah(async (req, res) => {
+  app.get('/pos/products', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const category = req.query.category || '';
     const search = req.query.search || '';
@@ -457,7 +470,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 3: POST /pos/products — Create product
   // ============================================================
-  app.post('/pos/products', requireAuth, ah(async (req, res) => {
+  app.post('/pos/products', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { name, sku, category, cost_price, selling_price, stock_quantity, min_stock_level, unit } = req.body;
     if (!name || !selling_price) return res.redirect('/pos/products');
@@ -470,7 +483,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
     res.redirect('/pos/products');
   }));
 
-  app.post('/pos/products/delete', requireAuth, ah(async (req, res) => {
+  app.post('/pos/products/delete', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     await pool.query(`UPDATE retail_products SET is_active=false WHERE id=$1 AND tenant_id=$2`, [req.body.id, tid]);
     res.redirect('/pos/products');
@@ -479,7 +492,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 4: GET /pos/terminal — POS interface
   // ============================================================
-  app.get('/pos/terminal', requireAuth, ah(async (req, res) => {
+  app.get('/pos/terminal', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const products = (await pool.query(
       `SELECT * FROM retail_products WHERE tenant_id=$1 AND is_active=true AND stock_quantity > 0 ORDER BY name LIMIT 200`,
@@ -614,7 +627,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 5: POST /pos/terminal/sale — Process sale
   // ============================================================
-  app.post('/pos/terminal/sale', requireAuth, ah(async (req, res) => {
+  app.post('/pos/terminal/sale', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { items, customer_name, payment_method } = req.body;
     if (!items || !items.length) return res.status(400).json({ success: false, error: 'No items in cart' });
@@ -660,7 +673,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 6: GET /pos/sales — Sales history
   // ============================================================
-  app.get('/pos/sales', requireAuth, ah(async (req, res) => {
+  app.get('/pos/sales', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const from = req.query.from || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     const to = req.query.to || today();
@@ -709,7 +722,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 7: GET /pos/sales/:id — Sale detail/receipt
   // ============================================================
-  app.get('/pos/sales/:id', requireAuth, ah(async (req, res) => {
+  app.get('/pos/sales/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const sale = (await pool.query(`SELECT * FROM retail_sales WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid])).rows[0];
     if (!sale) return res.send(renderPage('Not Found', '<div class="pos-card" style="text-align:center;padding:40px"><h2 style="color:#dc2626">Sale not found</h2></div>', user, req));
@@ -762,7 +775,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 8: GET /pos/stock — Stock management
   // ============================================================
-  app.get('/pos/stock', requireAuth, ah(async (req, res) => {
+  app.get('/pos/stock', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const category = req.query.category || '';
 
@@ -840,7 +853,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 9: POST /pos/stock/adjust — Stock adjustment
   // ============================================================
-  app.post('/pos/stock/adjust', requireAuth, ah(async (req, res) => {
+  app.post('/pos/stock/adjust', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { product_id, quantity, adjustment_type, reason } = req.body;
     if (!product_id || !quantity || Number(quantity) <= 0) return res.redirect('/pos/stock');
@@ -872,7 +885,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 10: GET /pos/reports — Sales reports
   // ============================================================
-  app.get('/pos/reports', requireAuth, ah(async (req, res) => {
+  app.get('/pos/reports', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const period = req.query.period || 'daily';
 
@@ -958,7 +971,7 @@ module.exports = function posTerminal(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 11: GET /pos/api/products — JSON API
   // ============================================================
-  app.get('/pos/api/products', requireAuth, ah(async (req, res) => {
+  app.get('/pos/api/products', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const search = req.query.search || '';
     const category = req.query.category || '';

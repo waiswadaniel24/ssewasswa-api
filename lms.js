@@ -28,6 +28,19 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
     next();
   };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   if (!esc) esc = (s) => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s))
     .replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -180,7 +193,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 1: GET /lms — LMS Dashboard
   // ============================================================
-  app.get('/lms', requireAuth, ah(async (req, res) => {
+  app.get('/lms', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const enrollments = (await pool.query(
@@ -254,7 +267,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 2: GET /lms/courses — Course Catalog
   // ============================================================
-  app.get('/lms/courses', requireAuth, ah(async (req, res) => {
+  app.get('/lms/courses', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const search = req.query.q || '';
     const category = req.query.category || '';
@@ -302,7 +315,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 3: POST /lms/courses — Create/Update Course
   // ============================================================
-  app.post('/lms/courses', requireAuth, ah(async (req, res) => {
+  app.post('/lms/courses', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { id, title, description, category } = req.body;
     if (!title || !title.trim()) return res.redirect('/lms/courses');
@@ -330,7 +343,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 4: GET /lms/courses/:id — Course Detail
   // ============================================================
-  app.get('/lms/courses/:id', requireAuth, ah(async (req, res) => {
+  app.get('/lms/courses/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, courseId = req.params.id;
     const course = (await pool.query(
       'SELECT c.*, u.name as instructor_name FROM courses c LEFT JOIN users u ON u.id = c.created_by WHERE c.id=$1 AND c.tenant_id=$2', [courseId, tid]
@@ -412,7 +425,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   }));
 
   // Enroll in course
-  app.post('/lms/courses/:id/enroll', requireAuth, ah(async (req, res) => {
+  app.post('/lms/courses/:id/enroll', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, courseId = req.params.id;
     const existing = (await pool.query(
       'SELECT id FROM lms_enrollments WHERE tenant_id=$1 AND course_id=$2 AND student_id=$3', [tid, courseId, user.id]
@@ -430,7 +443,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 5: GET /lms/courses/:id/content — Content Management
   // ============================================================
-  app.get('/lms/courses/:id/content', requireAuth, ah(async (req, res) => {
+  app.get('/lms/courses/:id/content', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, courseId = req.params.id;
     const course = (await pool.query('SELECT * FROM courses WHERE id=$1 AND tenant_id=$2', [courseId, tid])).rows[0];
     if (!course) return res.redirect('/lms/courses');
@@ -480,7 +493,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 6: POST /lms/courses/:id/content — Add Content
   // ============================================================
-  app.post('/lms/courses/:id/content', requireAuth, ah(async (req, res) => {
+  app.post('/lms/courses/:id/content', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, courseId = req.params.id;
     const { title, content_type, content, video_url, file_url, duration_minutes, order_seq, is_published } = req.body;
     if (!title || !title.trim()) return res.redirect('/lms/courses/' + courseId + '/content');
@@ -496,7 +509,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   }));
 
   // Delete content
-  app.post('/lms/courses/:id/content/delete', requireAuth, ah(async (req, res) => {
+  app.post('/lms/courses/:id/content/delete', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id, courseId = req.params.id, id = req.body.id;
     await pool.query('DELETE FROM lms_content WHERE id=$1 AND tenant_id=$2', [id, tid]);
     res.redirect('/lms/courses/' + courseId + '/content');
@@ -505,7 +518,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 7: GET /lms/assignments — Assignment Management
   // ============================================================
-  app.get('/lms/assignments', requireAuth, ah(async (req, res) => {
+  app.get('/lms/assignments', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const courses = (await pool.query('SELECT id, title FROM courses WHERE tenant_id=$1 ORDER BY title', [tid])).rows;
 
@@ -561,7 +574,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 8: POST /lms/assignments — Create Assignment
   // ============================================================
-  app.post('/lms/assignments', requireAuth, ah(async (req, res) => {
+  app.post('/lms/assignments', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { title, course_id, due_date, max_score, description } = req.body;
     if (!title || !title.trim()) return res.redirect('/lms/assignments');
@@ -579,7 +592,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 9: GET /lms/quizzes — Quiz Management
   // ============================================================
-  app.get('/lms/quizzes', requireAuth, ah(async (req, res) => {
+  app.get('/lms/quizzes', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const courses = (await pool.query('SELECT id, title FROM courses WHERE tenant_id=$1 ORDER BY title', [tid])).rows;
 
@@ -633,7 +646,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 10: POST /lms/quizzes — Create Quiz
   // ============================================================
-  app.post('/lms/quizzes', requireAuth, ah(async (req, res) => {
+  app.post('/lms/quizzes', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { title, course_id, duration_minutes, pass_mark, description } = req.body;
     if (!title || !title.trim()) return res.redirect('/lms/quizzes');
@@ -655,7 +668,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 11: GET /lms/grades — Grading & Results
   // ============================================================
-  app.get('/lms/grades', requireAuth, ah(async (req, res) => {
+  app.get('/lms/grades', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
 
     const submissions = (await pool.query(
@@ -716,7 +729,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   }));
 
   // Grade submission
-  app.post('/lms/grades', requireAuth, ah(async (req, res) => {
+  app.post('/lms/grades', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { submission_id, grade, feedback } = req.body;
     if (!submission_id) return res.redirect('/lms/grades');
@@ -731,7 +744,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 12: GET /lms/certificates — Certificates
   // ============================================================
-  app.get('/lms/certificates', requireAuth, ah(async (req, res) => {
+  app.get('/lms/certificates', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const enrollments = (await pool.query(
       `SELECT le.*, c.title as course_title, c.description as course_desc
@@ -765,7 +778,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 13: GET /lms/api/courses — JSON API
   // ============================================================
-  app.get('/lms/api/courses', requireAuth, ah(async (req, res) => {
+  app.get('/lms/api/courses', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const courses = (await pool.query(
       `SELECT c.*,
@@ -778,7 +791,7 @@ module.exports = function lms(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 14: GET /lms/api/progress/:studentId — JSON API
   // ============================================================
-  app.get('/lms/api/progress/:studentId', requireAuth, ah(async (req, res) => {
+  app.get('/lms/api/progress/:studentId', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const tid = req.session.user.tenant_id, studentId = req.params.studentId;
     const enrollments = (await pool.query(
       `SELECT le.*, c.title as course_title

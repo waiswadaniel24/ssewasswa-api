@@ -124,6 +124,19 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   const requireAuth = (req, res, next) => { if (!req.session || !req.session.user) return res.redirect('/login'); next(); };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
+
   // ============================================================
   // DATABASE MIGRATIONS
   // ============================================================
@@ -227,7 +240,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 15: GET /exams/my-results — Must be before /:id routes
   // ============================================================
-  app.get('/exams/my-results', requireAuth, ah(async (req, res) => {
+  app.get('/exams/my-results', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const attempts = (await pool.query(
       `SELECT ea.*, e.title as exam_title, e.subject, e.passing_marks, e.total_marks as exam_total,
@@ -287,7 +300,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 12: GET /exams/take/:id — Take Exam (before /:id)
   // ============================================================
-  app.get('/exams/take/:id', requireAuth, ah(async (req, res) => {
+  app.get('/exams/take/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const exam = (await pool.query(`SELECT * FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
     if (!exam || !exam.is_published) {
@@ -511,7 +524,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 14: GET /exams/results/:id — View Results for an Exam
   // ============================================================
-  app.get('/exams/results/:id', requireAuth, ah(async (req, res) => {
+  app.get('/exams/results/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const exam = (await pool.query(`SELECT * FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
     if (!exam) return res.redirect('/exams');
@@ -568,7 +581,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 13: POST /exams/submit/:id — Submit & Auto-Grade
   // ============================================================
-  app.post('/exams/submit/:id', requireAuth, ah(async (req, res) => {
+  app.post('/exams/submit/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const { attempt_id, _autosave } = req.body;
     const exam = (await pool.query(`SELECT * FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
@@ -633,7 +646,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 1: GET /exams — Exam List Dashboard
   // ============================================================
-  app.get('/exams', requireAuth, ah(async (req, res) => {
+  app.get('/exams', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { filter, subject, search } = req.query;
     let where = ['e.tenant_id=$1'], params = [tid], pi = 2;
@@ -720,7 +733,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 2: GET /exams/new — Create Exam Form
   // ============================================================
-  app.get('/exams/new', requireAuth, ah(async (req, res) => {
+  app.get('/exams/new', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user;
     const html = EX_CSS + `<div style="max-width:800px;margin:0 auto">
       ${nav('')}
@@ -769,7 +782,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 3: POST /exams/create — Save Exam
   // ============================================================
-  app.post('/exams/create', requireAuth, ah(async (req, res) => {
+  app.post('/exams/create', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { title, description, subject, duration_minutes, total_marks, passing_marks,
       instructions, shuffle_questions, show_results, allow_retry, max_attempts,
@@ -792,7 +805,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 4: GET /exams/:id — Exam Detail
   // ============================================================
-  app.get('/exams/:id', requireAuth, ah(async (req, res) => {
+  app.get('/exams/:id', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const exam = (await pool.query(`SELECT * FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
     if (!exam) return res.send(renderPage('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2 style="color:#dc2626">Exam not found</h2><a href="/exams" class="btn btn-sm" style="margin-top:12px">← Back</a></div>', user, req));
@@ -856,7 +869,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 5: GET /exams/:id/edit — Edit Exam Settings
   // ============================================================
-  app.get('/exams/:id/edit', requireAuth, ah(async (req, res) => {
+  app.get('/exams/:id/edit', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const exam = (await pool.query(`SELECT * FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
     if (!exam) return res.redirect('/exams');
@@ -910,7 +923,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 6: POST /exams/:id/update — Update Exam
   // ============================================================
-  app.post('/exams/:id/update', requireAuth, ah(async (req, res) => {
+  app.post('/exams/:id/update', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const exam = (await pool.query(`SELECT id FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
     if (!exam) return res.redirect('/exams');
@@ -935,7 +948,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 7: DELETE /exams/:id — Delete Exam
   // ============================================================
-  app.post('/exams/:id/delete', requireAuth, ah(async (req, res) => {
+  app.post('/exams/:id/delete', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const exam = (await pool.query(`SELECT title FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
     if (!exam) return res.redirect('/exams');
@@ -949,7 +962,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 8: GET /exams/:id/questions — Manage Questions
   // ============================================================
-  app.get('/exams/:id/questions', requireAuth, ah(async (req, res) => {
+  app.get('/exams/:id/questions', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const exam = (await pool.query(`SELECT * FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
     if (!exam) return res.redirect('/exams');
@@ -1033,7 +1046,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 9: POST /exams/:id/questions/add — Add Question
   // ============================================================
-  app.post('/exams/:id/questions/add', requireAuth, ah(async (req, res) => {
+  app.post('/exams/:id/questions/add', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const exam = (await pool.query(`SELECT id FROM exams WHERE id=$1 AND tenant_id=$2`, [examId, tid])).rows[0];
     if (!exam) return res.redirect('/exams');
@@ -1069,7 +1082,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 10: DELETE /exams/:id/questions/:qid — Delete Question
   // ============================================================
-  app.post('/exams/:id/questions/:qid/delete', requireAuth, ah(async (req, res) => {
+  app.post('/exams/:id/questions/:qid/delete', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const examId = req.params.id, qid = req.params.qid;
     await pool.query(`DELETE FROM exam_questions WHERE id=$1 AND exam_id=$2 AND tenant_id=$3`, [qid, examId, tid]);
@@ -1080,7 +1093,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE: POST /exams/:id/questions/reorder — Reorder Question
   // ============================================================
-  app.post('/exams/:id/questions/reorder', requireAuth, ah(async (req, res) => {
+  app.post('/exams/:id/questions/reorder', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const examId = req.params.id, { qid, direction } = req.body;
     const all = (await pool.query(`SELECT id, question_order FROM exam_questions WHERE exam_id=$1 AND tenant_id=$2 ORDER BY question_order, id`, [examId, tid])).rows;
@@ -1097,7 +1110,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
   // ============================================================
   // ROUTE 11: POST /exams/:id/publish — Publish/Unpublish
   // ============================================================
-  app.post('/exams/:id/publish', requireAuth, ah(async (req, res) => {
+  app.post('/exams/:id/publish', requireAuth, requireSubscription('basic'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, examId = req.params.id;
     const { publish } = req.body;
     const isPub = publish === 'true';

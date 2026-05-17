@@ -13,6 +13,19 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   if (!esc) esc = (s) => String(s === null || s === undefined ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
   const requireAuth = (req, res, next) => { if (!req.session || !req.session.user) return res.redirect('/login'); next(); };
   const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // -- subscription gate --------------------------------------------------
+  const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
+  const _SUB_PAGE = '<div style="max-width:600px;margin:60px auto;text-align:center"><h2>Subscription Required</h2><p>This feature requires a paid subscription.</p><a href="/billing" style="padding:12px 24px;background:#f59e0b;color:white;text-decoration:none;border-radius:8px;font-weight:700">Subscribe Now</a></div>';
+  const requireSubscription = (minPlan) => async (req, res, next) => {
+    if (req.session?.user?.role === 'super_admin') return next();
+    try {
+      const sub = await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id]);
+      const plan = sub.rows[0]?.plan || 'free';
+      if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
+    } catch (e) { /* allow through on DB error */ }
+    next();
+  };
   const fmtMoney = (n) => '$' + Number(n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '\u2014';
   const fmtDateTime = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '\u2014';
@@ -176,7 +189,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 1: GET /payroll — Dashboard
   // ════════════════════════════════════════════════════════════
-  app.get('/payroll', requireAuth, ah(async (req, res) => {
+  app.get('/payroll', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const stats = (await pool.query(`
       SELECT
@@ -254,7 +267,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 2: GET /payroll/employees — Employee List
   // ════════════════════════════════════════════════════════════
-  app.get('/payroll/employees', requireAuth, ah(async (req, res) => {
+  app.get('/payroll/employees', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { q, dept, status: fStatus } = req.query;
 
@@ -323,7 +336,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 3: GET /payroll/employees/new — Add Employee Form
   // ════════════════════════════════════════════════════════════
-  app.get('/payroll/employees/new', requireAuth, ah(async (req, res) => {
+  app.get('/payroll/employees/new', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user;
     const html = PR_CSS + `
     <div style="max-width:800px;margin:0 auto">
@@ -358,7 +371,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 4: POST /payroll/employees/create
   // ════════════════════════════════════════════════════════════
-  app.post('/payroll/employees/create', requireAuth, ah(async (req, res) => {
+  app.post('/payroll/employees/create', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { employee_name, employee_id, email, phone, department, position,
       base_salary, bank_name, bank_account, tax_id, nssf_number, start_date } = req.body;
@@ -382,7 +395,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 5: GET /payroll/employees/:id/edit — Edit Employee
   // ════════════════════════════════════════════════════════════
-  app.get('/payroll/employees/:id/edit', requireAuth, ah(async (req, res) => {
+  app.get('/payroll/employees/:id/edit', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const emp = (await pool.query('SELECT * FROM payroll_employees WHERE id=$1 AND tenant_id=$2', [id, tid])).rows[0];
     if (!emp) return res.send('<div class="alert">Employee not found.</div><a href="/payroll/employees" class="btn btn-blue">Back</a>');
@@ -424,7 +437,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 6: POST /payroll/employees/:id/update
   // ════════════════════════════════════════════════════════════
-  app.post('/payroll/employees/:id/update', requireAuth, ah(async (req, res) => {
+  app.post('/payroll/employees/:id/update', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const { employee_name, employee_id, email, phone, department, position,
       base_salary, bank_name, bank_account, tax_id, nssf_number, start_date, status } = req.body;
@@ -449,7 +462,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 7: DELETE /payroll/employees/:id
   // ════════════════════════════════════════════════════════════
-  app.delete('/payroll/employees/:id', requireAuth, ah(async (req, res) => {
+  app.delete('/payroll/employees/:id', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const emp = (await pool.query('SELECT id, employee_name FROM payroll_employees WHERE id=$1 AND tenant_id=$2', [id, tid])).rows[0];
     if (!emp) return res.json({ ok: false, error: 'Not found' });
@@ -462,7 +475,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 8: GET /payroll/run/new — New Payroll Run Wizard
   // ════════════════════════════════════════════════════════════
-  app.get('/payroll/run/new', requireAuth, ah(async (req, res) => {
+  app.get('/payroll/run/new', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const activeEmps = (await pool.query(
       'SELECT * FROM payroll_employees WHERE tenant_id=$1 AND status=\'active\' ORDER BY department, employee_name', [tid]
@@ -518,7 +531,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 9: POST /payroll/run/create — Create Payroll Run
   // ════════════════════════════════════════════════════════════
-  app.post('/payroll/run/create', requireAuth, ah(async (req, res) => {
+  app.post('/payroll/run/create', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { period_name, pay_period_start, pay_period_end, notes, emp_ids } = req.body;
     if (!period_name || !period_name.trim()) {
@@ -569,7 +582,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 10: GET /payroll/run/:id — Payroll Run Detail
   // ════════════════════════════════════════════════════════════
-  app.get('/payroll/run/:id', requireAuth, ah(async (req, res) => {
+  app.get('/payroll/run/:id', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const run = (await pool.query(
       'SELECT pr.*, u.name as processor_name FROM payroll_runs pr LEFT JOIN users u ON u.id=pr.processed_by WHERE pr.id=$1 AND pr.tenant_id=$2',
@@ -652,7 +665,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 11: POST /payroll/run/:id/entry/:eid — Update Entry
   // ════════════════════════════════════════════════════════════
-  app.post('/payroll/run/:id/entry/:eid', requireAuth, ah(async (req, res) => {
+  app.post('/payroll/run/:id/entry/:eid', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const runId = req.params.id, eid = req.params.eid;
     const run = (await pool.query('SELECT status FROM payroll_runs WHERE id=$1 AND tenant_id=$2', [runId, tid])).rows[0];
@@ -689,7 +702,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 12: POST /payroll/run/:id/process — Process Run
   // ════════════════════════════════════════════════════════════
-  app.post('/payroll/run/:id/process', requireAuth, ah(async (req, res) => {
+  app.post('/payroll/run/:id/process', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const run = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1 AND tenant_id=$2', [id, tid])).rows[0];
     if (!run) return res.send('<div class="alert">Run not found.</div>');
@@ -709,7 +722,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 13: GET /payroll/run/:id/payslips — Payslips View
   // ════════════════════════════════════════════════════════════
-  app.get('/payroll/run/:id/payslips', requireAuth, ah(async (req, res) => {
+  app.get('/payroll/run/:id/payslips', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, id = req.params.id;
     const run = (await pool.query('SELECT * FROM payroll_runs WHERE id=$1 AND tenant_id=$2', [id, tid])).rows[0];
     if (!run) return res.send('<div class="alert">Run not found.</div><a href="/payroll" class="btn btn-blue">Back</a>');
@@ -775,7 +788,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
   // ════════════════════════════════════════════════════════════
   // ROUTE 14: GET /payroll/history — Payroll History
   // ════════════════════════════════════════════════════════════
-  app.get('/payroll/history', requireAuth, ah(async (req, res) => {
+  app.get('/payroll/history', requireAuth, requireSubscription('pro'), ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const { period, status: fStatus } = req.query;
 
