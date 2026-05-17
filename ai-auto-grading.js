@@ -243,6 +243,7 @@ module.exports = function(app, pool, opts) {
 
   // ─── Database Setup ───
   (async () => {
+    try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS ai_grading_results (
         id SERIAL PRIMARY KEY,
@@ -297,6 +298,7 @@ module.exports = function(app, pool, opts) {
       CREATE INDEX IF NOT EXISTS idx_agq_subject ON ai_generated_questions(subject);
       CREATE INDEX IF NOT EXISTS idx_agq_difficulty ON ai_generated_questions(difficulty);
     `);
+    } catch(e) { /* migration error */ }
   })();
 
   // ══════════════════════════════════════════════

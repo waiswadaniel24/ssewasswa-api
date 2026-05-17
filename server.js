@@ -1,5 +1,15 @@
 require('dotenv').config();
 
+// === GLOBAL ERROR SAFETY NET ===
+// Prevent unhandled promise rejections from crashing the server
+// (migration IIFEs in modules may fail when DB is temporarily unavailable on cold start)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UnhandledRejection] Suppressed to keep server alive:', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[UncaughtException] Suppressed to keep server alive:', err?.message || err);
+});
+
 // === ENV VAR NORMALIZATION ===
 // Map Render env var names to what the app expects
 if (!process.env.GOOGLE_CLIENT_ID && process.env.ClientID) process.env.GOOGLE_CLIENT_ID = process.env.ClientID;
