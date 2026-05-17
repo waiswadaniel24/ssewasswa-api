@@ -33270,6 +33270,21 @@ loadSelfExec('global-expansion-engine', 'GlobalExpansion');
 // 12. VIRAL LOOP ENGINE (referral dashboard, reward tracking, social share OG images, push delivery, widgets, invite links, waitlist, badges, digest)
 loadSelfExec('viral-loop-engine', 'ViralLoop');
 
+// 13. REAL-TIME ENGINE (SSE notifications, live activity feed, presence, typing, collaboration, stats, event bus)
+loadSelfExec('realtime-engine', 'RealTime');
+
+// 14. MEDIA ENGINE (video hosting, podcast with RSS, live streaming with chat, media hub)
+loadSelfExec('media-engine', 'MediaEngine');
+
+// 15. MARKETPLACE VENDOR (vendor storefronts, product listings, reviews & ratings, wishlist, comparison, trust system)
+loadSelfExec('marketplace-vendor', 'MarketplaceVendor');
+
+// 16. AI CONTENT ENGINE (blog generator, social posts, bulk report comments, recommendations, auto-tag, summarizer, smart search)
+loadSelfExec('ai-content-engine', 'AIContent');
+
+// 17. ADVANCED PLATFORM (GDPR/privacy, dark mode, scheduled reports, event ticketing with QR, team challenges, mentorship, accessibility)
+loadSelfExec('advanced-platform', 'AdvancedPlatform');
+
 // Clean up scope bridge globals (app, pool, etc.)
 Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
 // KEEP cross-module functions on global — route handlers in other modules
