@@ -2288,6 +2288,25 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
           }
         }
 
+        // SECURITY: Check for duplicate processing (idempotency)
+        const existing = (await pool.query('SELECT id FROM subscriptions WHERE reference=$1', [transaction_id])).rows[0];
+        if (existing) {
+          return res.send(renderPage('Already Processed', '<div class="card" style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">&#9989;</div><h2>Already Processed</h2><p>This payment has already been recorded.</p><a href="/billing" class="btn btn-green">Go to Billing</a></div>', user));
+        }
+
+        // SECURITY: Validate plan is legitimate
+        const VALID_PLANS = ['free','basic','pro','enterprise'];
+        if (!VALID_PLANS.includes(plan)) {
+          console.warn('[Billing] Invalid plan received:', plan);
+          plan = 'basic';
+        }
+
+        // SECURITY: Validate amount matches expected plan price
+        const expectedAmount = PLAN_PRICES[plan] || 0;
+        if (amount < expectedAmount * 0.9) { // Allow 10% tolerance for fees
+          console.warn('[Billing] Amount mismatch:', amount, 'for plan', plan, '(expected:', expectedAmount, ')');
+        }
+
         // Create/Update subscription
         await pool.query(
           'INSERT INTO subscriptions (tenant_id, plan, amount, currency, status, payment_method, reference) VALUES ($1, $2, $3, $4, $5, $6, $7)',

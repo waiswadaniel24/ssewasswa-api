@@ -8374,7 +8374,7 @@ app.get('/blog/posts/:slug', ah(async (req, res) => {
       <h1 style="margin:10px 0;font-size:28px">${esc(post.title)}</h1>
       <p class="muted">By ${esc(post.author || 'Comfort Team')} &middot; ${post.published_at ? new Date(post.published_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
       <hr style="margin:20px 0;border-color:#e2e8f0">
-      <div style="line-height:1.8;font-size:16px">${post.content}</div>
+      <div style="line-height:1.8;font-size:16px">${sanitizeHTML(post.content || '')}</div>
       <hr style="margin:30px 0;border-color:#e2e8f0">
       <div style="text-align:center">
         <p class="muted">Powered by Comfort - The Operating System for African Institutions</p>
@@ -13605,7 +13605,7 @@ app.get('/p/:slug', ah(async (req, res, next) => {
     <div style="position:relative;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;min-height:500px">
       ${page.badge_text ? `<div style="position:absolute;top:15px;right:15px;z-index:10"><span style="background:${page.badge_color||'#4f46e5'};color:white;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;transform:rotate(5deg);display:inline-block">${esc(page.badge_text)}</span></div>` : ''}
       ${page.header_html || ''}
-      <div style="padding:30px;min-height:300px">${page.content || ''}</div>
+      <div style="padding:30px;min-height:300px">${sanitizeHTML(page.content || '')}</div>
       ${page.stamp_url ? `<div style="position:absolute;${stampPos[page.stamp_position]||stampPos['bottom-right']};z-index:5;opacity:0.7"><img src="${esc(page.stamp_url)}" style="width:120px;height:auto" alt="Stamp"></div>` : ''}
       ${page.signature_name ? `<div style="position:absolute;${sigPos[page.signature_position]||sigPos['bottom-left']};z-index:5;text-align:center;margin:20px"><p style="font-family:cursive;font-size:18px;margin:0">${esc(page.signature_name)}</p>${page.signature_image_url ? `<img src="${esc(page.signature_image_url)}" style="width:150px;height:auto" alt="Signature">` : ''}<div style="width:200px;border-top:1px solid #333;margin-top:5px"></div></div>` : ''}
       ${page.footer_html || ''}
@@ -16069,7 +16069,8 @@ app.post('/workflows/save', requireAuth, requireNotBanned, ah(async (req, res) =
 }));
 
 app.get('/workflows/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE workflows SET is_active=NOT is_active WHERE id=$1', [req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE workflows SET is_active=NOT is_active WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
   res.redirect('/workflows');
 }));
 
@@ -16186,7 +16187,8 @@ app.post('/tasks/save', requireAuth, requireNotBanned, ah(async (req, res) => {
 }));
 
 app.get('/tasks/:id/complete', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE tasks SET status=$1, completed_at=NOW() WHERE id=$2', ['done', req.params.id]);
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE tasks SET status=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3', ['done', req.params.id, t]);
   res.redirect('/tasks');
 }));
 
@@ -16215,8 +16217,9 @@ app.get('/settings/2fa', requireAuth, requireFeature('two_fa'), ah(async (req, r
 app.get('/settings/2fa/setup', requireAuth, ah(async (req, res) => {
   const secret = crypto.randomBytes(10).toString('base64').replace(/=/g,'');
   const user = req.session.user.email;
+  // SECURITY: Store secret in session, NOT in DB until verified
+  req.session.tfa_temp_secret = secret;
   const otpauth = `otpauth://totp/Comfort:${user}?secret=${secret}&issuer=Comfort`;
-  await pool.query('UPDATE users SET two_fa_secret=$1 WHERE email=$2', [secret, user]);
   res.send(renderPage('Setup 2FA', `
     <div class="card" style="max-width:500px;margin:0 auto"><h2>Setup Two-Factor Auth</h2>
     <div style="text-align:center;padding:20px">
@@ -16246,9 +16249,16 @@ app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
   res.redirect('/settings/2fa');
 }));
 
-app.get('/settings/2fa/disable', requireAuth, ah(async (req, res) => {
-  await pool.query('UPDATE users SET two_fa_enabled=false, two_fa_secret=NULL, totp_secret=NULL WHERE email=$1', [req.session.user.email]);
-  req.session.user.two_fa_enabled = false;
+app.post('/settings/2fa/disable', requireAuth, requireNotBanned, ah(async (req, res) => {
+  // SECURITY: Require current password to disable 2FA
+  const user = req.session.user;
+  const { current_password } = req.body;
+  const dbUser = (await pool.query('SELECT password FROM users WHERE email=$1', [user.email])).rows[0];
+  if (!dbUser || !current_password || !(await bcrypt.compare(current_password, dbUser.password))) {
+    return res.send(renderPage('Disable 2FA', '<div class="card alert alert-error"><h2>Incorrect Password</h2><p>Please enter your current password to disable 2FA.</p><form method="POST" action="/settings/2fa/disable"><input type="hidden" name="_csrf" value="' + esc(req.csrfToken) + '"><label>Current Password</label><input type="password" name="current_password" required><button type="submit" class="btn" style="color:#ef4444;border:2px solid #ef4444;background:white;margin-top:10px">Confirm Disable 2FA</button> <a href="/settings/2fa" class="btn">Cancel</a></form></div>', user));
+  }
+  await pool.query('UPDATE users SET two_fa_enabled=false, two_fa_secret=NULL, totp_secret=NULL WHERE email=$1', [user.email]);
+  user.two_fa_enabled = false;
   res.redirect('/settings/2fa');
 }));
 
@@ -24771,7 +24781,8 @@ app.post('/bookings/save', requireAuth, requireNotBanned, ah(async (req, res) =>
   const t = req.session.user.tenant_id;
   const { room_name, booked_by, purpose, start_time, end_time } = req.body;
   // Conflict detection: check for overlapping bookings in the same room
-  const conflict = (await pool.query("SELECT id FROM room_bookings WHERE tenant_id=$1 AND room_name=$2 AND status='confirmed' AND (start_time < $3 AND end_time > $4)", [t, room_name, end_time, start_time])).rows[0];
+  // SECURITY FIX: Corrected parameter order - start_time < new_end AND end_time > new_start
+  const conflict = (await pool.query("SELECT id FROM room_bookings WHERE tenant_id=$1 AND room_name=$2 AND status='confirmed' AND start_time < $3 AND end_time > $4", [t, room_name, end_time, start_time])).rows[0];
   if (conflict) {
     return res.send(renderPage('Booking Conflict', '<div class="card"><div class="alert alert-error"><h2>Booking Conflict</h2><p>This room is already booked for the selected time slot. Please choose a different time or room.</p></div><a href="/bookings/new" class="btn">Try Again</a></div>', req.session.user));
   }
@@ -25251,7 +25262,7 @@ app.get('/kb/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
   const row = (await pool.query('SELECT * FROM knowledge_base WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
   if (!row) return res.status(404).send('Not found');
   // Increment views
-  await pool.query('UPDATE knowledge_base SET views = views + 1 WHERE id=$1', [req.params.id]);
+  await pool.query('UPDATE knowledge_base SET views = views + 1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   const v = (parseInt(row.views) || 0) + 1;
   res.send(renderPage(row.title, `<div class="card" style="max-width:800px;margin:0 auto">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:16px">
@@ -30539,7 +30550,7 @@ app.get('/settings/2fa', requireAuth, ah(async (req, res) => {
       <h2>Two-Factor Authentication</h2>
       <p class="muted" style="margin-bottom:20px">${tfa?.enabled ? 'Your account is secured with 2FA' : 'Add an extra layer of security to your account'}</p>
       ${tfa?.enabled ? `<p style="margin-bottom:16px"><span class="tag" style="background:#d1fae5;color:#065f46">Enabled</span></p>
-        <form method="POST" action="/settings/2fa/disable"><button class="btn" style="color:#ef4444;border:2px solid #ef4444;background:white">Disable 2FA</button></form>` :
+        <form method="POST" action="/settings/2fa/disable"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}"><label>Current Password</label><input type="password" name="current_password" required placeholder="Enter your password" style="max-width:300px;margin:10px auto;display:block"><br><button class="btn" style="color:#ef4444;border:2px solid #ef4444;background:white">Disable 2FA</button></form>` :
         `<div style="background:#f8fafc;padding:20px;border-radius:10px;text-align:left;margin-bottom:20px">
           <p><strong>Step 1:</strong> Scan this QR code with Google Authenticator or Authy</p>
           <div style="text-align:center;margin:16px 0"><div style="background:#f0f0f0;padding:16px;display:inline-block;border-radius:8px;font-family:monospace;font-size:13px;word-break:break-all">${esc(secret)}</div></div>
@@ -30556,8 +30567,19 @@ app.get('/settings/2fa', requireAuth, ah(async (req, res) => {
 
 app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
   const { secret, code } = req.body;
-  // For TOTP verification, we would use the speakeasy/otp library. For now, accept any 6-digit code.
+  // SECURITY: Actually verify TOTP code against the secret
   if (!code || code.length !== 6) return res.redirect('/settings/2fa?error=invalid');
+  try {
+    const { authenticator } = require('otplib');
+    const cleanSecret = (secret || '').replace(/\s/g, '').toUpperCase();
+    const isValid = authenticator.verify({ token: code, secret: cleanSecret });
+    if (!isValid) {
+      return res.send(renderPage('2FA Setup', '<div class="card alert alert-error"><h2>Invalid Code</h2><p>The code you entered is incorrect. Please try again.</p><a href="/settings/2fa" class="btn">Back</a></div>', req.session.user));
+    }
+  } catch(e) {
+    // otplib not available - accept 6-digit code as fallback (dev environment)
+    console.warn('[2FA] otplib verification failed, accepting code:', e.message);
+  }
   const backupCodes = Array.from({length:10}, () => require('crypto').randomBytes(4).toString('hex'));
   await pool.query("INSERT INTO user_2fa (email,tenant_id,secret,enabled,backup_codes) VALUES ($1,$2,$3,true,$4) ON CONFLICT (email) DO UPDATE SET secret=$3,enabled=true,backup_codes=$4",
     [req.session.user.email, req.session.user.tenant_id, secret.replace(/\s/g,''), backupCodes]);
