@@ -36169,6 +36169,9 @@ try { const m = require('./gallery'); m(app, db, pool, renderPage, esc); console
   'branch_inter_requests','branch_kpis','branch_holidays','audit_logs'
 ].forEach(t => VALID_TABLES.add(t));
 
+// === DEFERRED MODULE LOADING — load heavy modules AFTER server starts ===
+// This reduces startup memory spike and prevents Render OOM kills
+const _deferModules = () => {
 try { const m = require('./e-commerce'); m(app, pool, _newModOpts); console.log('[ECommerce] E-commerce module loaded'); } catch(e) { console.warn('[ECommerce] Error:', e.message); }
 try { const m = require('./scholarships'); m(app, pool, _newModOpts); console.log('[Scholarships] Scholarships module loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
 try { const m = require('./homework'); m(app, pool, _newModOpts); console.log('[Homework] Homework module loaded'); } catch(e) { console.warn('[Homework] Error:', e.message); }
@@ -36519,7 +36522,13 @@ try { const m = require('./user-segmentation'); m(app, pool, _newModOpts); conso
 // --- Content & Moderation ---
 try { const m = require('./content-moderation'); m(app, pool, _newModOpts); console.log('[ContentMod] Content moderation loaded — routes'); } catch(e) { console.warn('[ContentMod] Error:', e.message); }
 
-console.log('[Phase4] 27 additional feature modules activated — total module count now 159+');
+console.log('[Deferred] All deferred modules loaded successfully');
+}; // end _deferModules
+
+// Schedule deferred module loading after server starts (staggered to reduce memory spike)
+setTimeout(_deferModules, 2000);
+
+console.log('[Phase4] 27 additional feature modules deferred — will load 2s after startup');
 
 // ============================================================
 // === REFERRAL & INVITE SYSTEM — Invite & Earn, Growth Loop ===
