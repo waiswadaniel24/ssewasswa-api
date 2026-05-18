@@ -359,7 +359,8 @@ const VALID_TABLES = new Set([
   'health_visits', 'health_screenings',
   'tithes_records', 'giving_campaigns', 'analytics_snapshots', 'student_submissions',
   'resolution_votes', 'committees', 'committee_members', 'finance_categories', 'event_rsvps',
-  'org_tasks', 'org_task_comments', 'org_notifications', 'board_resolutions'
+  'org_tasks', 'org_task_comments', 'org_notifications', 'board_resolutions',
+  'org_attachments', 'meeting_action_items', 'org_health_scores'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -932,6 +933,17 @@ const migrations = [
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT false`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS recurring_pattern VARCHAR(20)`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS recurring_end_date DATE`,
+  // === ORG PORTAL: FILE ATTACHMENTS ===
+  `CREATE TABLE IF NOT EXISTS org_attachments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, entity_type VARCHAR(50) NOT NULL, entity_id INTEGER NOT NULL, file_name TEXT NOT NULL, file_url TEXT NOT NULL, file_type VARCHAR(100), file_size INTEGER DEFAULT 0, uploaded_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: MEETING ACTION ITEMS ===
+  `CREATE TABLE IF NOT EXISTS meeting_action_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, meeting_id INTEGER REFERENCES meeting_minutes(id) ON DELETE CASCADE, description TEXT NOT NULL, assigned_to INTEGER REFERENCES members(id) ON DELETE SET NULL, due_date DATE, status VARCHAR(20) DEFAULT 'pending', completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: ORG HEALTH SCORE ===
+  `CREATE TABLE IF NOT EXISTS org_health_scores (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, score INTEGER DEFAULT 0, member_health INTEGER DEFAULT 0, finance_health INTEGER DEFAULT 0, task_health INTEGER DEFAULT 0, event_health INTEGER DEFAULT 0, computed_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id))`,
+  // === ORG PORTAL: MEMBER ACCESS CONTROL ===
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS can_manage_finance BOOLEAN DEFAULT false`,
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS can_manage_members BOOLEAN DEFAULT false`,
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS can_manage_events BOOLEAN DEFAULT false`,
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false`,
   // === SAFE COLUMN MIGRATIONS ===
   // tenants: all columns except id, name, type (which existed in the original table)
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
@@ -4603,13 +4615,17 @@ app.post('/school/notify/send', requireAuth, requireNotBanned, ah(async (req, re
 // === ORGANIZATION PORTAL (enhanced) ===
 app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const [members, projects, events, budget, notices, meetings] = await Promise.all([
+  const [members, projects, events, budget, notices, meetings, overdueTasks, pendingTasks, upcomingEvents, urgentTasks] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [t]),
     pool.query('SELECT COUNT(*) FROM projects WHERE tenant_id=$1', [t]),
     pool.query('SELECT COUNT(*) FROM events WHERE tenant_id=$1', [t]),
     pool.query('SELECT COALESCE(SUM(amount),0) FROM org_finance WHERE tenant_id=$1 AND type=\'income\'', [t]),
     pool.query('SELECT COUNT(*) FROM notice_board WHERE tenant_id=$1', [t]),
-    pool.query('SELECT COUNT(*) FROM meeting_minutes WHERE tenant_id=$1', [t])
+    pool.query('SELECT COUNT(*) FROM meeting_minutes WHERE tenant_id=$1', [t]),
+    pool.query("SELECT COUNT(*) FROM org_tasks WHERE tenant_id=$1 AND status!='completed' AND due_date < CURRENT_DATE"),
+    pool.query("SELECT COUNT(*) FROM org_tasks WHERE tenant_id=$1 AND status='pending'"),
+    pool.query("SELECT name, event_date FROM events WHERE tenant_id=$1 AND event_date >= CURRENT_DATE ORDER BY event_date LIMIT 3"),
+    pool.query("SELECT title, due_date FROM org_tasks WHERE tenant_id=$1 AND status!='completed' AND due_date IS NOT NULL ORDER BY due_date LIMIT 5")
   ]);
   const tenant = (await pool.query('SELECT has_fundraising FROM tenants WHERE id=$1', [t])).rows[0];
   // Auto-enable fundraising for super_admin/developer
@@ -4689,8 +4705,33 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">Activity</h3><a href="/org/activity" class="btn btn-sm">Activity Feed</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Bulk Actions</h3><a href="/org/members/bulk" class="btn btn-sm">Bulk Manage</a></div>
       <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Settings</h3><a href="/org/settings" class="btn btn-sm">Org Settings</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">My Portal</h3><a href="/my-portal" class="btn btn-sm">Self-Service</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Health</h3><a href="/org/health" class="btn btn-sm">Org Health</a></div>
+      <div class="card" style="background:#fee2e2;border:2px solid #dc2626"><h3 style="color:#dc2626">Reminders</h3><a href="/org/reminders" class="btn btn-sm">Alerts</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Export</h3><a href="/org/export" class="btn btn-sm">Data Export</a></div>
+      <div class="card" style="background:#f5f3ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Access</h3><a href="/org/roles" class="btn btn-sm">Permissions</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid for staff & visitors</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a></div>
+    </div>
+    <div class="grid" style="margin-top:15px">
+      <div class="card" style="border-left:4px solid #dc2626">
+        <h3 style="color:#dc2626">Overdue Tasks</h3>
+        <div class="stat-num" style="color:#dc2626">${overdueTasks.rows[0].count}</div>
+        ${parseInt(overdueTasks.rows[0].count) > 0 ? '<a href="/org/tasks?status=overdue" class="btn btn-sm btn-red" style="margin-top:5px">View Overdue</a>' : '<span class="muted">All on track!</span>'}
+      </div>
+      <div class="card" style="border-left:4px solid #f59e0b">
+        <h3 style="color:#f59e0b">Pending Tasks</h3>
+        <div class="stat-num" style="color:#f59e0b">${pendingTasks.rows[0].count}</div>
+        <a href="/org/tasks?status=pending" class="btn btn-sm" style="margin-top:5px">View Pending</a>
+      </div>
+      <div class="card" style="border-left:4px solid #059669">
+        <h3 style="color:#059669">Upcoming Events</h3>
+        ${upcomingEvents.rows.length ? upcomingEvents.rows.map(e => `<div style="padding:4px 0;border-bottom:1px solid #f1f5f9">${esc(e.name)} <span class="muted">${e.event_date ? new Date(e.event_date).toLocaleDateString() : ''}</span></div>`).join('') : '<span class="muted">No upcoming events</span>'}
+      </div>
+      <div class="card" style="border-left:4px solid #3b82f6">
+        <h3 style="color:#3b82f6">Urgent Tasks</h3>
+        ${urgentTasks.rows.length ? urgentTasks.rows.map(tk => `<div style="padding:4px 0;border-bottom:1px solid #f1f5f9">${esc(tk.title)} <span class="muted">${tk.due_date ? new Date(tk.due_date).toLocaleDateString() : ''}</span></div>`).join('') : '<span class="muted">No urgent tasks</span>'}
+      </div>
     </div>
     <div class="card"><h3>Finance: Income vs Expense</h3><canvas id="orgFinanceChart"></canvas></div>
     <div class="card"><h3>Member Growth</h3><canvas id="orgMemberChart"></canvas></div>
@@ -17522,6 +17563,464 @@ app.get('/org/analytics/finance-chart', requireAuth, requireNotBanned, ah(async 
   const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, type, COALESCE(SUM(amount),0) as total FROM org_finance WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '6 months' GROUP BY month, type ORDER BY MIN(created_at)", [t])).rows;
   const months = [...new Set(data.map(d=>d.month))];
   res.json({ labels: months, income: months.map(m=>parseInt(data.find(d=>d.month===m&&d.type==='income')?.total||0)), expense: months.map(m=>parseInt(data.find(d=>d.month===m&&d.type==='expense')?.total||0)) });
+}));
+
+
+// =============================================
+// ORG: FILE ATTACHMENTS
+// =============================================
+app.post('/org/attachments/upload', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { entity_type, entity_id, file_url, file_name, file_type } = req.body;
+  const VALID_ENTITIES = ['task','event','project','meeting','notice'];
+  if (!VALID_ENTITIES.includes(entity_type)) return res.status(400).send('Invalid entity type');
+  if (!file_url || !file_name) return res.status(400).send('File URL and name required');
+  await pool.query('INSERT INTO org_attachments(tenant_id,entity_type,entity_id,file_name,file_url,file_type,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, entity_type, entity_id, file_name, file_url, file_type||null, req.session.user.email]);
+  await audit(req.session.user.email, 'upload_attachment', `Attached ${file_name} to ${entity_type} ${entity_id}`);
+  res.redirect('back');
+}));
+
+app.get('/org/attachments/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const att = (await pool.query('SELECT * FROM org_attachments WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!att) return res.status(404).send('Attachment not found');
+  await pool.query('DELETE FROM org_attachments WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_attachment', `Deleted attachment ${att.file_name}`);
+  res.redirect('back');
+}));
+
+// Attachment list API for any entity
+app.get('/org/attachments/:entity_type/:entity_id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { entity_type, entity_id } = req.params;
+  const attachments = (await pool.query('SELECT * FROM org_attachments WHERE entity_type=$1 AND entity_id=$2 AND tenant_id=$3 ORDER BY created_at DESC', [entity_type, entity_id, t])).rows;
+  res.json(attachments);
+}));
+
+
+// =============================================
+// ORG: MEETING ACTION ITEMS
+// =============================================
+app.post('/org/meetings/:id/action-items/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { description, assigned_to, due_date } = req.body;
+  if (!description) return res.status(400).send('Description required');
+  await pool.query('INSERT INTO meeting_action_items(tenant_id,meeting_id,description,assigned_to,due_date) VALUES($1,$2,$3,$4,$5)', [t, req.params.id, description, assigned_to||null, due_date||null]);
+  await audit(req.session.user.email, 'create_action_item', `Created action item for meeting ${req.params.id}`);
+  res.redirect(`/org/meetings/${req.params.id}`);
+}));
+
+app.post('/org/meetings/action-items/:id/status', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { status } = req.body;
+  if (!['pending','in_progress','completed'].includes(status)) return res.status(400).send('Invalid status');
+  const completedAt = status === 'completed' ? 'NOW()' : null;
+  if (completedAt) {
+    await pool.query('UPDATE meeting_action_items SET status=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
+  } else {
+    await pool.query('UPDATE meeting_action_items SET status=$1, completed_at=NULL WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
+  }
+  await audit(req.session.user.email, 'update_action_item', `Action item ${req.params.id} -> ${status}`);
+  res.redirect('back');
+}));
+
+app.post('/org/meetings/action-items/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM meeting_action_items WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_action_item', `Deleted action item ${req.params.id}`);
+  res.redirect('back');
+}));
+
+
+// =============================================
+// ORG: SELF-SERVICE MEMBER PORTAL
+// =============================================
+app.get('/my-portal', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const userEmail = req.session.user.email;
+  // Find member by email
+  const member = (await pool.query('SELECT * FROM members WHERE email=$1 AND tenant_id=$2', [userEmail, t])).rows[0];
+  if (!member) {
+    return res.send(renderPage('My Portal', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <h2>My Portal</h2>
+        <p class="muted">Your email (${esc(userEmail)}) is not linked to a member record. Contact your organization admin to be added.</p>
+        <a href="/portal/organization" class="btn" style="margin-top:10px">Back to Dashboard</a>
+      </div>
+    `, req.session.user));
+  }
+  // Get member's tasks, RSVPs, committees, notifications
+  const [tasks, rsvps, committees, notifications] = await Promise.all([
+    pool.query("SELECT * FROM org_tasks WHERE assigned_to=$1 AND tenant_id=$2 AND status!='completed' ORDER BY due_date ASC NULLS LAST LIMIT 10", [member.id, t]),
+    pool.query("SELECT er.response, er.responded_at, e.name as event_name, e.event_date FROM event_rsvps er JOIN events e ON e.id=er.event_id WHERE er.member_id=$1 AND er.tenant_id=$2 ORDER BY er.responded_at DESC LIMIT 5", [member.id, t]),
+    pool.query("SELECT c.name, cm.role, cm.joined_at FROM committee_members cm JOIN committees c ON c.id=cm.committee_id WHERE cm.member_id=$1 AND cm.tenant_id=$2", [member.id, t]),
+    pool.query("SELECT * FROM org_notifications WHERE user_email=$1 AND tenant_id=$2 AND is_read=false ORDER BY created_at DESC LIMIT 5", [userEmail, t])
+  ]);
+  const upcomingEvents = (await pool.query("SELECT id, name, event_date, venue FROM events WHERE tenant_id=$1 AND event_date >= CURRENT_DATE ORDER BY event_date LIMIT 5", [t])).rows;
+  const recentNotices = (await pool.query("SELECT title, content, priority, created_at FROM notice_board WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5", [t])).rows;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  res.send(renderPage('My Portal', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)">
+      <h1>My Portal</h1><p>Welcome, ${esc(member.name)} | ${esc(tenant.name)}</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${tasks.rows.length}</div><div>Open Tasks</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#7c3aed">${notifications.rows.length}</div><div>Unread Alerts</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${committees.rows.length}</div><div>Committees</div></div>
+      <div class="stat-card"><div class="stat-num">${rsvps.rows.length}</div><div>RSVPs</div></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>My Tasks</h3>
+        ${tasks.rows.length ? tasks.rows.map(tk => {
+          const isOverdue = tk.status!=='completed'&&tk.due_date&&new Date(tk.due_date)<new Date();
+          const statusColors = {pending:'#f59e0b',in_progress:'#3b82f6',overdue:'#dc2626'};
+          return `<div style="padding:8px;border-left:3px solid ${isOverdue?'#dc2626':statusColors[tk.status]||'#6b7280'};margin:6px 0;background:#f8fafc;border-radius:4px">
+            <strong>${esc(tk.title)}</strong> <span class="tag" style="font-size:10px">${isOverdue?'OVERDUE':tk.status.replace('_',' ')}</span><br>
+            <span class="muted" style="font-size:12px">${tk.due_date?'Due: '+new Date(tk.due_date).toLocaleDateString():''} | Priority: ${tk.priority}</span>
+          </div>`;
+        }).join('') : '<p class="muted">No open tasks assigned to you</p>'}
+        <a href="/org/tasks" class="btn btn-sm" style="margin-top:10px">View All Tasks</a>
+      </div>
+      <div class="card">
+        <h3>Upcoming Events</h3>
+        ${upcomingEvents.length ? upcomingEvents.map(e => `<div style="padding:8px;border-left:3px solid #059669;margin:6px 0;background:#f8fafc;border-radius:4px">
+          <strong>${esc(e.name)}</strong><br><span class="muted" style="font-size:12px">${e.event_date?new Date(e.event_date).toLocaleDateString():''} ${e.venue?'@ '+esc(e.venue):''}</span>
+        </div>`).join('') : '<p class="muted">No upcoming events</p>'}
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>My Notifications</h3>
+        ${notifications.rows.length ? notifications.rows.map(n => `<div style="padding:8px;border-left:3px solid #3b82f6;margin:6px 0;background:#eff6ff;border-radius:4px">
+          <strong>${esc(n.title)}</strong><br><span class="muted" style="font-size:12px">${esc(n.message||'')} - ${getTimeAgo(new Date(n.created_at))}</span>
+        </div>`).join('') : '<p class="muted">No new notifications</p>'}
+        <a href="/org/notifications" class="btn btn-sm" style="margin-top:10px">All Notifications</a>
+      </div>
+      <div class="card">
+        <h3>My Committees</h3>
+        ${committees.rows.length ? committees.rows.map(c => `<div style="padding:8px;border-left:3px solid #0891b2;margin:6px 0;background:#f8fafc;border-radius:4px">
+          <strong>${esc(c.name)}</strong> <span class="tag" style="font-size:10px">${esc(c.role)}</span>
+        </div>`).join('') : '<p class="muted">Not in any committee</p>'}
+      </div>
+    </div>
+    <div class="card">
+      <h3>Recent Notices</h3>
+      ${recentNotices.length ? recentNotices.map(n => `<div style="padding:8px;border-left:3px solid ${n.priority==='urgent'?'#dc2626':n.priority==='high'?'#f59e0b':'#6b7280'};margin:6px 0;background:#f8fafc;border-radius:4px">
+        <strong>${esc(n.title)}</strong> ${n.priority==='urgent'?'<span class="tag" style="background:#fee2e2;color:#991b1b;font-size:10px">URGENT</span>':''}<br>
+        <span class="muted" style="font-size:12px">${esc((n.content||'').substring(0,100))}${(n.content||'').length>100?'...':''}</span>
+      </div>`).join('') : '<p class="muted">No recent notices</p>'}
+      <a href="/org/notices" class="btn btn-sm" style="margin-top:10px">All Notices</a>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: PUBLIC ORGANIZATION PAGE
+// =============================================
+app.get('/org/:subdomain/public', ah(async (req, res) => {
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.subdomain])).rows[0];
+  if (!tenant) return res.status(404).send('Organization not found');
+  const [memberCount, eventCount, projectCount] = await Promise.all([
+    pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [tenant.id]),
+    pool.query("SELECT name, event_date, venue FROM events WHERE tenant_id=$1 AND event_date >= CURRENT_DATE ORDER BY event_date LIMIT 5", [tenant.id]),
+    pool.query("SELECT name, status, description FROM projects WHERE tenant_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 5", [tenant.id])
+  ]);
+  res.send(renderPage(tenant.name, `
+    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#3b82f6);text-align:center">
+      ${tenant.logo_url ? `<img src="${esc(tenant.logo_url)}" style="width:80px;height:80px;border-radius:50%;margin-bottom:10px">` : ''}
+      <h1>${esc(tenant.name)}</h1>
+      <p>${esc(tenant.description||'Welcome to our organization')}</p>
+      ${tenant.address ? `<p class="muted">${esc(tenant.address)}</p>` : ''}
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${memberCount.rows[0].count}</div><div>Members</div></div>
+      <div class="stat-card"><div class="stat-num">${eventCount.rows.length}</div><div>Upcoming Events</div></div>
+      <div class="stat-card"><div class="stat-num">${projectCount.rows.length}</div><div>Active Projects</div></div>
+    </div>
+    ${eventCount.rows.length ? `<div class="card"><h3>Upcoming Events</h3>
+      <table><tr><th>Event</th><th>Date</th><th>Venue</th></tr>${eventCount.rows.map(e => `<tr><td>${esc(e.name)}</td><td>${e.event_date?new Date(e.event_date).toLocaleDateString():'TBD'}</td><td>${esc(e.venue||'-')}</td></tr>`).join('')}</table>
+    </div>` : ''}
+    ${projectCount.rows.length ? `<div class="card"><h3>Active Projects</h3>
+      ${projectCount.rows.map(p => `<div style="padding:10px;border-left:3px solid #059669;margin:6px 0;background:#f8fafc;border-radius:4px"><strong>${esc(p.name)}</strong>${p.description?`<br><span class="muted">${esc(p.description)}</span>`:''}</div>`).join('')}
+    </div>` : ''}
+    <div class="card" style="text-align:center;margin-top:20px">
+      <p class="muted">Powered by Comfort Platform</p>
+    </div>
+  `, { name: tenant.name, tenant_id: tenant.id, role: 'public' }));
+}));
+
+
+// =============================================
+// ORG: ORG HEALTH SCORE
+// =============================================
+app.get('/org/health', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // Compute health metrics
+  const [memberStats, financeStats, taskStats, eventStats] = await Promise.all([
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER(WHERE email IS NOT NULL) as with_email, COUNT(*) FILTER(WHERE phone IS NOT NULL) as with_phone, COUNT(*) FILTER(WHERE joined_at > NOW()-INTERVAL '3 months') as recent FROM members WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) as income, COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) as expense, COUNT(*) as transactions, COUNT(*) FILTER(WHERE created_at > NOW()-INTERVAL '3 months') as recent_transactions FROM org_finance WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER(WHERE status='completed') as completed, COUNT(*) FILTER(WHERE status!='completed' AND due_date < CURRENT_DATE) as overdue, COUNT(*) FILTER(WHERE created_at > NOW()-INTERVAL '3 months') as recent FROM org_tasks WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER(WHERE event_date >= CURRENT_DATE) as upcoming, COUNT(*) FILTER(WHERE event_date > NOW()-INTERVAL '3 months') as recent FROM events WHERE tenant_id=$1", [t])
+  ]);
+  const m = memberStats.rows[0], f = financeStats.rows[0], tk = taskStats.rows[0], ev = eventStats.rows[0];
+  // Compute sub-scores (0-100 each)
+  const memberHealth = Math.min(100, Math.round((parseInt(m.with_email)/Math.max(parseInt(m.total),1))*30 + (parseInt(m.with_phone)/Math.max(parseInt(m.total),1))*20 + Math.min(parseInt(m.recent)/5,1)*50));
+  const financeHealth = Math.min(100, Math.round((parseInt(f.recent_transactions)>0?40:0) + (parseInt(f.income)>parseInt(f.expense)?40:parseInt(f.income)>0?20:0) + Math.min(parseInt(f.transactions)/20,1)*20));
+  const taskHealth = Math.min(100, Math.round((parseInt(tk.total)>0?parseInt(tk.completed)/parseInt(tk.total)*60:50) + (parseInt(tk.overdue)===0?20:Math.max(0,20-parseInt(tk.overdue)*5)) + Math.min(parseInt(tk.recent)/5,1)*20));
+  const eventHealth = Math.min(100, Math.round((parseInt(ev.upcoming)>0?40:0) + Math.min(parseInt(ev.recent)/3,1)*40 + (parseInt(ev.total)>0?20:0)));
+  const overallScore = Math.round((memberHealth + financeHealth + taskHealth + eventHealth) / 4);
+  // Upsert health score
+  await pool.query(`INSERT INTO org_health_scores(tenant_id,score,member_health,finance_health,task_health,event_health,computed_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT (tenant_id) DO UPDATE SET score=$2,member_health=$3,finance_health=$4,task_health=$5,event_health=$6,computed_at=NOW()`, [t, overallScore, memberHealth, financeHealth, taskHealth, eventHealth]);
+  const scoreColor = (s) => s >= 70 ? '#059669' : s >= 40 ? '#f59e0b' : '#dc2626';
+  const scoreLabel = (s) => s >= 70 ? 'Healthy' : s >= 40 ? 'Needs Attention' : 'Critical';
+  res.send(renderPage('Organization Health', `
+    <div class="hero" style="background:linear-gradient(135deg,${scoreColor(overallScore)},${scoreColor(overallScore)}dd)"><h1>Organization Health</h1><p>Overall Score: ${overallScore}/100 - ${scoreLabel(overallScore)}</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:${scoreColor(overallScore)}">${overallScore}</div><div>Overall Score</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${scoreColor(memberHealth)}">${memberHealth}</div><div>Member Health</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${scoreColor(financeHealth)}">${financeHealth}</div><div>Finance Health</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${scoreColor(taskHealth)}">${taskHealth}</div><div>Task Health</div></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3 style="color:${scoreColor(memberHealth)}">Member Health: ${memberHealth}/100</h3>
+        <div style="background:#e2e8f0;height:12px;border-radius:6px;margin:10px 0"><div style="background:${scoreColor(memberHealth)};height:12px;border-radius:6px;width:${memberHealth}%"></div></div>
+        <table><tr><td>Total Members</td><td>${m.total}</td></tr><tr><td>With Email</td><td>${m.with_email} (${Math.round(parseInt(m.with_email)/Math.max(parseInt(m.total),1)*100)}%)</td></tr><tr><td>With Phone</td><td>${m.with_phone} (${Math.round(parseInt(m.with_phone)/Math.max(parseInt(m.total),1)*100)}%)</td></tr><tr><td>New (3 months)</td><td>${m.recent}</td></tr></table>
+      </div>
+      <div class="card">
+        <h3 style="color:${scoreColor(financeHealth)}">Finance Health: ${financeHealth}/100</h3>
+        <div style="background:#e2e8f0;height:12px;border-radius:6px;margin:10px 0"><div style="background:${scoreColor(financeHealth)};height:12px;border-radius:6px;width:${financeHealth}%"></div></div>
+        <table><tr><td>Total Income</td><td style="color:#059669">UGX ${parseInt(f.income).toLocaleString()}</td></tr><tr><td>Total Expense</td><td style="color:#dc2626">UGX ${parseInt(f.expense).toLocaleString()}</td></tr><tr><td>Net</td><td style="color:${parseInt(f.income)-parseInt(f.expense)>=0?'#059669':'#dc2626'}">UGX ${(parseInt(f.income)-parseInt(f.expense)).toLocaleString()}</td></tr><tr><td>Recent Activity</td><td>${f.recent_transactions} transactions</td></tr></table>
+      </div>
+      <div class="card">
+        <h3 style="color:${scoreColor(taskHealth)}">Task Health: ${taskHealth}/100</h3>
+        <div style="background:#e2e8f0;height:12px;border-radius:6px;margin:10px 0"><div style="background:${scoreColor(taskHealth)};height:12px;border-radius:6px;width:${taskHealth}%"></div></div>
+        <table><tr><td>Total Tasks</td><td>${tk.total}</td></tr><tr><td>Completed</td><td>${tk.completed} (${parseInt(tk.total)>0?Math.round(parseInt(tk.completed)/parseInt(tk.total)*100):0}%)</td></tr><tr><td>Overdue</td><td style="color:#dc2626">${tk.overdue}</td></tr><tr><td>New (3 months)</td><td>${tk.recent}</td></tr></table>
+      </div>
+      <div class="card">
+        <h3 style="color:${scoreColor(eventHealth)}">Event Health: ${eventHealth}/100</h3>
+        <div style="background:#e2e8f0;height:12px;border-radius:6px;margin:10px 0"><div style="background:${scoreColor(eventHealth)};height:12px;border-radius:6px;width:${eventHealth}%"></div></div>
+        <table><tr><td>Total Events</td><td>${ev.total}</td></tr><tr><td>Upcoming</td><td>${ev.upcoming}</td></tr><tr><td>Recent (3 months)</td><td>${ev.recent}</td></tr></table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Recommendations</h3>
+      ${memberHealth < 50 ? '<div style="padding:8px;border-left:3px solid #dc2626;margin:6px 0;background:#fee2e2;border-radius:4px"><strong>Members:</strong> Add email and phone to member profiles. Recruit new members to grow the organization.</div>' : ''}
+      ${financeHealth < 50 ? '<div style="padding:8px;border-left:3px solid #dc2626;margin:6px 0;background:#fee2e2;border-radius:4px"><strong>Finance:</strong> Record more transactions. Focus on increasing income sources and tracking expenses.</div>' : ''}
+      ${taskHealth < 50 ? '<div style="padding:8px;border-left:3px solid #dc2626;margin:6px 0;background:#fee2e2;border-radius:4px"><strong>Tasks:</strong> Complete overdue tasks. Assign tasks to members and track progress regularly.</div>' : ''}
+      ${eventHealth < 50 ? '<div style="padding:8px;border-left:3px solid #f59e0b;margin:6px 0;background:#fef3c7;border-radius:4px"><strong>Events:</strong> Schedule more events to keep members engaged. Plan regular activities.</div>' : ''}
+      ${overallScore >= 70 ? '<div style="padding:8px;border-left:3px solid #059669;margin:6px 0;background:#d1fae5;border-radius:4px"><strong>Great job!</strong> Your organization is healthy. Keep up the good work and continue engaging members.</div>' : ''}
+    </div>
+    <a href="/portal/organization" class="btn" style="margin-top:15px">Back to Dashboard</a>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: ROLE-BASED ACCESS CONTROL
+// =============================================
+app.get('/org/roles', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id, name, email, role, is_admin, can_manage_finance, can_manage_members, can_manage_events FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Access Control', `
+    <div class="hero" style="background:linear-gradient(135deg,#334155,#475569)"><h1>Access Control</h1><p>Manage member permissions and roles</p></div>
+    <div class="card">
+      <p class="muted" style="margin-bottom:15px">Grant members access to manage specific areas of the organization. Board and Staff members can be given admin privileges.</p>
+      <table><tr><th>Name</th><th>Role</th><th>Admin</th><th>Manage Finance</th><th>Manage Members</th><th>Manage Events</th></tr>
+      ${members.map(m => `<tr>
+        <td><strong>${esc(m.name)}</strong><br><span class="muted" style="font-size:11px">${esc(m.email||'')}</span></td>
+        <td><span class="tag">${esc(m.role||'Member')}</span></td>
+        <td style="text-align:center">${m.is_admin?'<span style="color:#059669">&#9989;</span>':'<span style="color:#d1d5db">&#9744;</span>'}</td>
+        <td style="text-align:center">${m.can_manage_finance?'<span style="color:#059669">&#9989;</span>':'<span style="color:#d1d5db">&#9744;</span>'}</td>
+        <td style="text-align:center">${m.can_manage_members?'<span style="color:#059669">&#9989;</span>':'<span style="color:#d1d5db">&#9744;</span>'}</td>
+        <td style="text-align:center">${m.can_manage_events?'<span style="color:#059669">&#9989;</span>':'<span style="color:#d1d5db">&#9744;</span>'}</td>
+      </tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/roles/:memberId/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { is_admin, can_manage_finance, can_manage_members, can_manage_events } = req.body;
+  const member = (await pool.query('SELECT name FROM members WHERE id=$1 AND tenant_id=$2', [req.params.memberId, t])).rows[0];
+  if (!member) return res.status(404).send('Member not found');
+  await pool.query('UPDATE members SET is_admin=$1, can_manage_finance=$2, can_manage_members=$3, can_manage_events=$4 WHERE id=$5 AND tenant_id=$6', [
+    is_admin === 'on' || is_admin === 'true', can_manage_finance === 'on' || can_manage_finance === 'true',
+    can_manage_members === 'on' || can_manage_members === 'true', can_manage_events === 'on' || can_manage_events === 'true',
+    req.params.memberId, t
+  ]);
+  await audit(req.session.user.email, 'update_member_roles', `Updated permissions for ${member.name}`);
+  res.redirect('/org/roles');
+}));
+
+app.get('/org/roles/:memberId/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const member = (await pool.query('SELECT * FROM members WHERE id=$1 AND tenant_id=$2', [req.params.memberId, t])).rows[0];
+  if (!member) return res.status(404).send('Member not found');
+  res.send(renderPage('Edit Permissions: ' + member.name, `
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <h2>Permissions for ${esc(member.name)}</h2>
+      <p class="muted">${esc(member.email||'')} | ${esc(member.role||'Member')}</p>
+      <form method="POST" action="/org/roles/${member.id}/update">
+        <div style="margin:15px 0">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px;background:#f8fafc;border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="is_admin" ${member.is_admin?'checked':''}> <strong>Organization Admin</strong> - Full access to all features
+          </label>
+        </div>
+        <div style="margin:15px 0">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px;background:#f8fafc;border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="can_manage_finance" ${member.can_manage_finance?'checked':''}> <strong>Manage Finance</strong> - Record income/expenses, manage budgets
+          </label>
+        </div>
+        <div style="margin:15px 0">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px;background:#f8fafc;border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="can_manage_members" ${member.can_manage_members?'checked':''}> <strong>Manage Members</strong> - Register, edit, delete members
+          </label>
+        </div>
+        <div style="margin:15px 0">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px;background:#f8fafc;border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="can_manage_events" ${member.can_manage_events?'checked':''}> <strong>Manage Events</strong> - Create events, manage RSVPs, ticketing
+          </label>
+        </div>
+        <button class="btn btn-green">Save Permissions</button>
+        <a href="/org/roles" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: AUTOMATED REMINDERS
+// =============================================
+app.get('/org/reminders', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // Find overdue tasks and upcoming events
+  const [overdueTasks, upcomingEvents, expiringProjects] = await Promise.all([
+    pool.query("SELECT ot.*, m.name as assignee_name, m.email as assignee_email FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 AND ot.status!='completed' AND ot.due_date < CURRENT_DATE ORDER BY ot.due_date", [t]),
+    pool.query("SELECT * FROM events WHERE tenant_id=$1 AND event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' ORDER BY event_date", [t]),
+    pool.query("SELECT * FROM projects WHERE tenant_id=$1 AND status='active' AND budget > 0 AND spent >= budget * 0.9 ORDER BY name", [t])
+  ]);
+  res.send(renderPage('Reminders & Alerts', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>Reminders & Alerts</h1><p>Items needing your attention</p></div>
+    <div class="card">
+      <h3 style="color:#dc2626">Overdue Tasks (${overdueTasks.rows.length})</h3>
+      ${overdueTasks.rows.length ? `<table><tr><th>Task</th><th>Assignee</th><th>Due Date</th><th>Days Overdue</th><th>Action</th></tr>${overdueTasks.rows.map(tk => {
+        const daysOverdue = Math.floor((new Date() - new Date(tk.due_date)) / (1000*60*60*24));
+        return `<tr><td>${esc(tk.title)}</td><td>${esc(tk.assignee_name||'Unassigned')}</td><td>${new Date(tk.due_date).toLocaleDateString()}</td><td style="color:#dc2626;font-weight:bold">${daysOverdue}d</td><td><form method="POST" action="/org/notifications/send-reminder" style="display:inline"><input type="hidden" name="email" value="${esc(tk.assignee_email||'')}"><input type="hidden" name="title" value="Overdue Task Reminder"><input type="hidden" name="message" value="Task '${esc(tk.title)}' is ${daysOverdue} days overdue. Please complete it."><input type="hidden" name="link" value="/org/tasks/${tk.id}"><button class="btn btn-sm btn-red">Send Reminder</button></form></td></tr>`;
+      }).join('')}</table>` : '<p class="muted">No overdue tasks - great work!</p>'}
+    </div>
+    <div class="card">
+      <h3 style="color:#059669">Upcoming Events (7 days) - ${upcomingEvents.rows.length}</h3>
+      ${upcomingEvents.rows.length ? `<table><tr><th>Event</th><th>Date</th><th>Venue</th></tr>${upcomingEvents.rows.map(e => `<tr><td>${esc(e.name)}</td><td>${new Date(e.event_date).toLocaleDateString()}</td><td>${esc(e.venue||'-')}</td></tr>`).join('')}</table>` : '<p class="muted">No events in the next 7 days</p>'}
+    </div>
+    <div class="card">
+      <h3 style="color:#f59e0b">Budget Near Limit (${expiringProjects.rows.length})</h3>
+      ${expiringProjects.rows.length ? `<table><tr><th>Project</th><th>Budget</th><th>Spent</th><th>% Used</th></tr>${expiringProjects.rows.map(p => `<tr><td>${esc(p.name)}</td><td>UGX ${parseInt(p.budget).toLocaleString()}</td><td>UGX ${parseInt(p.spent).toLocaleString()}</td><td style="color:#f59e0b;font-weight:bold">${Math.round(parseInt(p.spent)/parseInt(p.budget)*100)}%</td></tr>`).join('')}</table>` : '<p class="muted">All projects within budget</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/notifications/send-reminder', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { email, title, message, link } = req.body;
+  if (!email || !title) return res.status(400).send('Email and title required');
+  await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, email, title, message||'', link||'']);
+  await audit(req.session.user.email, 'send_reminder', `Sent reminder to ${email}: ${title}`);
+  res.redirect('/org/reminders');
+}));
+
+
+// =============================================
+// ORG: ADVANCED EXPORT (JSON, Excel-like CSV, Summary PDF)
+// =============================================
+app.get('/org/export/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const exportType = req.params.type;
+  const format = req.query.format || 'csv'; // csv or json
+  const dateFrom = req.query.date_from || '';
+  const dateTo = req.query.date_to || '';
+
+  let query, filename;
+  const dateFilter = dateFrom && dateTo ? ` AND created_at BETWEEN '${dateFrom}' AND '${dateTo}'` : '';
+
+  switch(exportType) {
+    case 'members':
+      query = 'SELECT name, email, phone, role, joined_at FROM members WHERE tenant_id=$1 ORDER BY name';
+      filename = 'members_export'; break;
+    case 'finance':
+      query = `SELECT amount, type, description, category, created_at FROM org_finance WHERE tenant_id=$1${dateFilter} ORDER BY created_at DESC`;
+      filename = 'finance_export'; break;
+    case 'tasks':
+      query = 'SELECT ot.title, ot.description, ot.priority, ot.status, ot.due_date, m.name as assignee, ot.created_at FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 ORDER BY ot.created_at DESC';
+      filename = 'tasks_export'; break;
+    case 'events':
+      query = 'SELECT name, event_date, venue, budget, is_recurring, recurring_pattern FROM events WHERE tenant_id=$1 ORDER BY event_date DESC';
+      filename = 'events_export'; break;
+    case 'attendance':
+      query = 'SELECT m.name, a.date, a.status FROM attendance a JOIN members m ON m.id=a.member_id WHERE a.tenant_id=$1 ORDER BY a.date DESC';
+      filename = 'attendance_export'; break;
+    case 'audit':
+      query = `SELECT user_email, action, details, created_at FROM audit_logs WHERE tenant_id=$1${dateFilter} ORDER BY created_at DESC LIMIT 5000`;
+      filename = 'audit_export'; break;
+    default:
+      return res.status(400).send('Invalid export type. Use: members, finance, tasks, events, attendance, audit');
+  }
+
+  const data = (await pool.query(query, [t])).rows;
+
+  if (format === 'json') {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.json"`);
+    res.json({ export_type: exportType, tenant_id: t, exported_at: new Date().toISOString(), record_count: data.length, data });
+  } else {
+    // CSV export
+    if (!data.length) return res.send(renderPage('Export', '<div class="card"><div class="alert">No data to export for the selected criteria.</div><a href="/org/analytics" class="btn">Back</a></div>', req.session.user));
+    const headers = Object.keys(data[0]);
+    const csvRows = [headers.join(',')];
+    for (const row of data) {
+      csvRows.push(headers.map(h => {
+        let val = row[h];
+        if (val instanceof Date) val = val.toISOString();
+        if (val === null || val === undefined) val = '';
+        val = String(val).replace(/"/g, '""');
+        return `"${val}"`;
+      }).join(','));
+    }
+    const csv = csvRows.join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
+    res.send(csv);
+  }
+}));
+
+// Export form page
+app.get('/org/export', requireAuth, requireNotBanned, ah(async (req, res) => {
+  res.send(renderPage('Export Data', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>Export Data</h1><p>Download your organization data</p></div>
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <form method="GET" action="/org/export" style="margin-bottom:20px">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Data Type</label><select name="type" required style="width:100%;padding:8px">
+            <option value="members">Members</option><option value="finance">Finance</option>
+            <option value="tasks">Tasks</option><option value="events">Events</option>
+            <option value="attendance">Attendance</option><option value="audit">Audit Logs</option>
+          </select></div>
+          <div><label>Format</label><select name="format" style="width:100%;padding:8px">
+            <option value="csv">CSV (Excel)</option><option value="json">JSON</option>
+          </select></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Date From (optional)</label><input name="date_from" type="date" style="width:100%;padding:8px"></div>
+          <div><label>Date To (optional)</label><input name="date_to" type="date" style="width:100%;padding:8px"></div>
+        </div>
+        <button class="btn btn-green" style="margin-top:15px">Download Export</button>
+      </form>
+    </div>
+  `, req.session.user));
 }));
 
 
