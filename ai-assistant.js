@@ -6,15 +6,13 @@
 module.exports = function aiAssistant(app, db, pool, renderPage, esc) {
 
   const requireAuth = (req, res, next) => {
-    if (!req.session || !req.session.user) return res.redirect('/login');
-    req.tenantId = req.session.user.tenant_id;
-    req.userId = req.session.user.id;
+    if (!req.session || !req.session.userId) return res.redirect('/login');
+    req.tenantId = req.session.tenantId;
+    req.userId = req.session.userId;
     next();
   };
 
   const ah = (fn) => (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(err => { console.error('[AI]', err); res.status(500).send('Internal error'); });
-  };
 
   // -- subscription gate --------------------------------------------------
   const _PLAN_LEVELS = { free: 0, basic: 1, pro: 2 };
@@ -27,6 +25,8 @@ module.exports = function aiAssistant(app, db, pool, renderPage, esc) {
       if ((_PLAN_LEVELS[plan] || 0) < (_PLAN_LEVELS[minPlan] || 0)) return res.send(_SUB_PAGE);
     } catch (e) { /* allow through on DB error */ }
     next();
+  };
+    Promise.resolve(fn(req, res, next)).catch(err => { console.error('[AI]', err); res.status(500).send('Internal error'); });
   };
 
   let ZAI;
@@ -311,7 +311,7 @@ async function clearChat(){if(!currentConvo)return;if(!confirm('Delete this conv
   await fetch('/ai/conversations/'+currentConvo,{method:'DELETE'});currentConvo=null;await newChat();await refreshConvos();}
 const ta=document.getElementById('msgInput');
 ta.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});
-</script>`, req.session.user, req));
+</script>`, req.user, req));
   }));
 
   /* ════════════════════════════════════════════
@@ -435,7 +435,7 @@ async function usePrompt(id){const r=await fetch('/ai/prompts/'+id+'/use',{metho
   if(d.promptText){window.location.href='/ai?prompt='+encodeURIComponent(d.promptText);}}
 async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
   await fetch('/ai/prompts/'+id,{method:'DELETE'});location.reload();}
-</script>`, req.session.user, req));
+</script>`, req.user, req));
   }));
 
   /* ════════════════════════════════════════════
@@ -473,7 +473,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
       <a href="/ai/prompts" class="btn">Cancel</a>
     </div>
   </form>
-</div>`, req.session.user, req));
+</div>`, req.user, req));
   }));
 
   /* ════════════════════════════════════════════
@@ -568,7 +568,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
       <tr><td style="padding:6px 0;color:#6b7280">Max Tokens</td><td style="text-align:right">${s.maxTokens}</td></tr>
     </table>
   </div>
-</div>`, req.session.user, req));
+</div>`, req.user, req));
   }));
 
   /* ════════════════════════════════════════════
@@ -673,7 +673,7 @@ async function deletePrompt(id){if(!confirm('Delete this prompt?'))return;
       <span>${dailyUsage[0]?.day || ''}</span><span>${dailyUsage[dailyUsage.length - 1]?.day || ''}</span>
     </div>
   </div>` : ''}
-</div>`, req.session.user, req));
+</div>`, req.user, req));
   }));
 
   /* ════════════════════════════════════════════

@@ -503,15 +503,11 @@ module.exports = function transport(app, db, pool, renderPage, esc) {
     }
     const rc = await pool.query('SELECT id FROM transport_routes WHERE id=$1 AND tenant_id=$2', [route_id, tid]);
     if (!rc.rows.length) return res.status(404).send('Route not found.');
-    const routeData = await pool.query('SELECT id, name, fare FROM transport_routes WHERE id=$1 AND tenant_id=$2', [route_id, tid]);
-    const fare = parseFloat(routeData.rows[0]?.fare || 0);
-    const routeName = routeData.rows[0]?.name || route_id;
     const finalStop = (stop_name_custom && stop_name_custom.trim()) ? stop_name_custom.trim() : (stop_name || null);
     await pool.query(
       `INSERT INTO transport_passengers (tenant_id,route_id,passenger_name,passenger_id,stop_name,parent_phone)
        VALUES ($1,$2,$3,$4,$5,$6)`,
       [tid, route_id, passenger_name.trim(), passenger_id||null, finalStop, parent_phone||null]);
-    try { await global.trackRevenue('transport_fare', fare, `Transport fare for ${passenger_name.trim()} on route ${routeName}`, `transport-${route_id}-${Date.now()}`); } catch(e) {}
     res.redirect(navUrl('/routes/' + route_id));
   });
 

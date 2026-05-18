@@ -1,12 +1,3 @@
-// === GLOBAL ERROR HANDLERS — Prevent silent crashes on Render/Heroku ===
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
-});
-process.on('uncaughtException', (err) => {
-  console.error('[FATAL] Uncaught Exception:', err);
-  // Keep process alive but log the error — Render will restart if needed
-});
-
 require('dotenv').config();
 
 // === ENV VAR NORMALIZATION ===
@@ -38,8 +29,6 @@ const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 const REQUEST_TIMEOUT_MS = 30 * 1000; // 30 seconds
 const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
-const VALID_PATIENT_TYPES = ['student', 'staff', 'patient', 'other', 'family', 'employee'];
-const VALID_CLINIC_INSTITUTION_TYPES = ['general_hospital','referral_hospital','district_hospital','health_centre_ii','health_centre_iii','health_centre_iv','private_clinic','specialist_clinic','dental_clinic','eye_clinic','mental_health','maternity','pharmacy','laboratory','radiology','rehabilitation','hospice','community_health'];
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -240,21 +229,6 @@ app.use('/dev/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
 app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20 }));
 app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
 app.use('/momo/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-// v12: Rate limit clinic mutation endpoints to prevent abuse
-app.use('/clinic/queue/save', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-app.use('/clinic/queue/checkin', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-app.use('/clinic/prescription/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/prescriptions/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/lab/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/appointments/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/consultation/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/pharmacy/inventory/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/referrals/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/insurance/claim/save', rateLimit({ windowMs: 60 * 1000, max: 15 }));
-app.use('/clinic/telehealth/schedule/save', rateLimit({ windowMs: 60 * 1000, max: 15 }));
-app.use('/sickbay/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/sick-bay/checkin', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/patient-portal', rateLimit({ windowMs: 60 * 1000, max: 30 }));
 
 // Request timeout middleware
 app.use((req, res, next) => {
@@ -519,7 +493,7 @@ const logSMS = (tenantId, phone, message, triggerType, reference) => pool.query(
 
 // Webhook delivery
 const fireWebhook = async (tenantId, event, payload) => {
-  const hooks = (await pool.query('SELECT * FROM webhooks WHERE tenant_id=$1 AND is_active=true AND $2=ANY(events)', [tenantId, event])).rows;
+  const hooks = (await pool.query('SELECT * FROM webhooks WHERE tenant_id=$1 AND active=true AND $2=ANY(events)', [tenantId, event])).rows;
   for (const hook of hooks) {
     try {
       const sig = crypto.createHmac('sha256', hook.secret || '').update(JSON.stringify(payload)).digest('hex');
@@ -1065,144 +1039,6 @@ const migrations = [
   `ALTER TABLE sibling_discounts ADD COLUMN IF NOT EXISTS sibling_count INTEGER`,
   `ALTER TABLE sibling_discounts ADD COLUMN IF NOT EXISTS discount_type TEXT DEFAULT 'fee'`,
 
-  // === DUPLICATE SCHEMA COLUMN MIGRATIONS ===
-  // For tables with multiple CREATE TABLE IF NOT EXISTS definitions using different schemas,
-  // add all missing columns so code referencing any schema version works correctly.
-  // invoices: clinic/billing invoice columns (second schema at line ~33354)
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_method TEXT`,
-  // visitors: both visitor management schemas (~16860 vs ~27289)
-  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS host_name TEXT`,
-  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS badge_number TEXT`,
-  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS id_number TEXT`,
-  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS person_to_see TEXT`,
-  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS vehicle_plate TEXT`,
-  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS gate_pass_code TEXT`,
-  `ALTER TABLE visitors ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
-  // staff_appraisals: both appraisal schemas (~16866 vs ~32373)
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS staff_name TEXT`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS appraisal_period TEXT`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS overall_score NUMERIC DEFAULT 0`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS rating TEXT DEFAULT 'satisfactory'`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS strengths TEXT`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS improvements TEXT`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS goals TEXT`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS period TEXT`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS scores JSONB`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS total_score NUMERIC DEFAULT 0`,
-  `ALTER TABLE staff_appraisals ADD COLUMN IF NOT EXISTS comments TEXT`,
-  // event_tickets v3: event management system columns (~28768)
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS title TEXT`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS description TEXT`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS category TEXT`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS venue TEXT`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS event_date DATE`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS event_time TIME`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS total_tickets INTEGER DEFAULT 100`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS tickets_sold INTEGER DEFAULT 0`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'UGX'`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS image_url TEXT`,
-  `ALTER TABLE event_tickets ADD COLUMN IF NOT EXISTS created_by TEXT`,
-  // journal_entries: double-entry accounting columns (~32372)
-  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS entry_date DATE DEFAULT CURRENT_DATE`,
-  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS account_id INTEGER`,
-  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS debit NUMERIC DEFAULT 0`,
-  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS credit NUMERIC DEFAULT 0`,
-  `ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS created_by TEXT`,
-  // leave_requests: both leave management schemas (~1481 vs ~27287)
-  `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS user_email TEXT`,
-  `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS approver_email TEXT`,
-  `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS employee_name TEXT`,
-  `ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS approved_by TEXT`,
-  // clinic_prescriptions: both clinic schemas (~28473 vs ~33352)
-  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS patient_name TEXT`,
-  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS diagnosis TEXT`,
-  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS medications JSONB DEFAULT '[]'`,
-  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS consultation_id INTEGER`,
-  `ALTER TABLE clinic_prescriptions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`,
-  // clinic_appointments: both clinic schemas (~24211 vs ~28456)
-  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS department VARCHAR(100)`,
-  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS patient_name TEXT`,
-  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS patient_type TEXT DEFAULT 'patient'`,
-  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS phone TEXT`,
-  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS created_by TEXT`,
-  `ALTER TABLE clinic_appointments ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT false`,
-  // crm_leads: both CRM schemas (~1486 vs ~28550)
-  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'new'`,
-  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium'`,
-  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS estimated_value NUMERIC DEFAULT 0`,
-  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS last_contact TIMESTAMPTZ`,
-  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
-  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS stage TEXT DEFAULT 'new'`,
-  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS value INTEGER DEFAULT 0`,
-  `ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS next_follow_up DATE`,
-  // push_subscriptions: web-push key columns (~33361)
-  `ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS p256dh_key TEXT`,
-  `ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS auth_key TEXT`,
-  // assets: both asset management schemas (~1496 vs ~27290)
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'available'`,
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS assigned_to TEXT`,
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS purchase_price NUMERIC DEFAULT 0`,
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS purchase_value INTEGER DEFAULT 0`,
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS current_value INTEGER DEFAULT 0`,
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS depreciation_rate NUMERIC DEFAULT 0`,
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS custodian TEXT`,
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS condition TEXT DEFAULT 'good'`,
-  `ALTER TABLE assets ADD COLUMN IF NOT EXISTS notes TEXT`,
-  // branches: multi-branch management columns (~28432)
-  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS code TEXT`,
-  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS manager_name TEXT`,
-  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS manager_email TEXT`,
-  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS phone TEXT`,
-  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
-  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false`,
-  `ALTER TABLE branches ADD COLUMN IF NOT EXISTS manager TEXT`,
-  // calendar_events: enhanced event calendar columns (~32338)
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS event_type TEXT DEFAULT 'event'`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS all_day BOOLEAN DEFAULT false`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS location TEXT`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '#6366f1'`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS max_attendees INTEGER DEFAULT 0`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT false`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS recurring_pattern TEXT`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS recurring_end_date DATE`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS created_by TEXT`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS source TEXT`,
-  `ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS external_id TEXT`,
-  // chart_of_accounts: enhanced accounting columns (~32371)
-  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS account_code TEXT`,
-  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS account_name TEXT`,
-  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'asset'`,
-  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS description TEXT`,
-  `ALTER TABLE chart_of_accounts ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
-  // document_templates: receipt/invoice template columns (~1896)
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS template_type TEXT DEFAULT 'receipt'`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS header_text TEXT`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS footer_text TEXT`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS background_color TEXT DEFAULT '#ffffff'`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS text_color TEXT DEFAULT '#1e293b'`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS show_logo BOOLEAN DEFAULT true`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS show_stamp BOOLEAN DEFAULT false`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS stamp_text TEXT`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS auto_number_prefix TEXT`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS next_number INTEGER DEFAULT 1`,
-  `ALTER TABLE document_templates ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false`,
-  // purchase_orders: inventory/supplier PO columns (~28526)
-  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS supplier_id INTEGER`,
-  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS po_number TEXT`,
-  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS expected_date DATE`,
-  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS total_amount NUMERIC DEFAULT 0`,
-  `ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS created_by TEXT`,
-  // scheduled_reports: report scheduler columns (~28417)
-  `ALTER TABLE scheduled_reports ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
-  `ALTER TABLE scheduled_reports ADD COLUMN IF NOT EXISTS format TEXT DEFAULT 'csv'`,
-  // sms_campaigns: enhanced campaign columns (~32367)
-  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS name TEXT`,
-  `ALTER TABLE sms_campaigns ADD COLUMN IF NOT EXISTS campaign_type TEXT DEFAULT 'sms'`,
-  // campaign_updates: tenant isolation column (~16906)
-  `ALTER TABLE campaign_updates ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
-
   // v11.0 - Billing/Subscriptions
   `CREATE TABLE IF NOT EXISTS subscriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, plan TEXT DEFAULT 'free', amount INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX', status TEXT DEFAULT 'active', started_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ, payment_method TEXT, reference TEXT)`,
   `CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, amount INTEGER NOT NULL, method TEXT, reference TEXT, status TEXT DEFAULT 'pending', description TEXT, plan TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -1221,19 +1057,6 @@ const migrations = [
   // v11.0 - Customer debts
   `ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)`,
   `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)`,
-  // v12.0 - invoices items column (JSONB for line items)
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'`,
-  // v12.0 - patient_queue completed_at column (for clinic reports avg wait time)
-  `ALTER TABLE patient_queue ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`,
-  // v12.0 - invoices invoice_number and payer columns
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_number TEXT`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payer_name TEXT`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payer_email TEXT`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax INTEGER DEFAULT 0`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_date DATE`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'`,
   // v11.0 - Purchase orders
   `CREATE TABLE IF NOT EXISTS purchase_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, po_no TEXT, supplier TEXT, items JSONB, total INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Tax reports
@@ -2767,30 +2590,27 @@ app.get('/register', (req, res) => {
         </select>
         <input name="email" type="email" placeholder="Your Email" required>
         <input name="phone" placeholder="Phone +256..." required>
-        <input name="password" type="password" placeholder="Password" required>
-        <input name="confirm_password" type="password" placeholder="Confirm Password" required>
+        <input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number">
+        <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required>
         <button class="btn" style="width:100%">Register</button>
       </form>
     </div>
   `, null, req));
 });
 
-app.post('/register', validate({ email: { required: true, email: true }, password: { required: true } }), ah(async (req, res) => {
+app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 8 }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
   const { org_name, type, email, phone, password, confirm_password } = req.body;
-  // Simple password check: must not be empty and must match confirm
-  if (!password || password.trim() === '') {
-    return res.send(renderPage('Register', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Password is required.</div><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="' + esc(org_name || '') + '" required><select name="type" required><option value="">Select Type</option><option value="school" ' + (type==='school'?'selected':'') + '>School</option><option value="health" ' + (type==='health'?'selected':'') + '>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ' + (type==='organization'?'selected':'') + '>Organization / NGO</option><option value="church" ' + (type==='church'?'selected':'') + '>Church</option><option value="business" ' + (type==='business'?'selected':'') + '>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ' + (type==='individual'?'selected':'') + '>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="' + esc(email || '') + '" required><input name="phone" placeholder="Phone +256..." value="' + esc(phone || '') + '" required><input name="password" type="password" placeholder="Password" required><input name="confirm_password" type="password" placeholder="Confirm Password" required><button class="btn" style="width:100%">Register</button></form></div>', null, req));
-  }
-  if (password !== confirm_password) {
-    return res.send(renderPage('Register', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Passwords do not match.</div><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="' + esc(org_name || '') + '" required><select name="type" required><option value="">Select Type</option><option value="school" ' + (type==='school'?'selected':'') + '>School</option><option value="health" ' + (type==='health'?'selected':'') + '>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ' + (type==='organization'?'selected':'') + '>Organization / NGO</option><option value="church" ' + (type==='church'?'selected':'') + '>Church</option><option value="business" ' + (type==='business'?'selected':'') + '>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ' + (type==='individual'?'selected':'') + '>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="' + esc(email || '') + '" required><input name="phone" placeholder="Phone +256..." value="' + esc(phone || '') + '" required><input name="password" type="password" placeholder="Password" required><input name="confirm_password" type="password" placeholder="Confirm Password" required><button class="btn" style="width:100%">Register</button></form></div>', null, req));
-  }
-  // Check duplicate email
-  const existing = (await pool.query('SELECT 1 FROM users WHERE email=$1 LIMIT 1', [email])).rows[0];
-  if (existing) {
-    return res.send(renderPage('Register', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">An account with this email already exists. <a href="/login">Login instead</a></div><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="' + esc(org_name || '') + '" required><select name="type" required><option value="">Select Type</option><option value="school" ' + (type==='school'?'selected':'') + '>School</option><option value="health" ' + (type==='health'?'selected':'') + '>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ' + (type==='organization'?'selected':'') + '>Organization / NGO</option><option value="church" ' + (type==='church'?'selected':'') + '>Church</option><option value="business" ' + (type==='business'?'selected':'') + '>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ' + (type==='individual'?'selected':'') + '>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="' + esc(email || '') + '" required><input name="phone" placeholder="Phone +256..." value="' + esc(phone || '') + '" required><input name="password" type="password" placeholder="Password" required><input name="confirm_password" type="password" placeholder="Confirm Password" required><button class="btn" style="width:100%">Register</button></form></div>', null, req));
+  // Password complexity validation (Phase 1 Security Fix)
+  const passwordErrors = [];
+  if (!password || password.length < 8) passwordErrors.push('Password must be at least 8 characters long');
+  if (password && !/[A-Z]/.test(password)) passwordErrors.push('Password must contain at least 1 uppercase letter');
+  if (password && !/[0-9]/.test(password)) passwordErrors.push('Password must contain at least 1 number');
+  if (password !== confirm_password) passwordErrors.push('Passwords do not match');
+  if (passwordErrors.length > 0) {
+    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="health" ${type==='health'?'selected':''}>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
   }
   const hash = await bcrypt.hash(password, 12);
-  const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+  const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
   const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,true) RETURNING id', [org_name, type, email, phone, subdomain]);
   // Try inserting with both password columns, fall back to just password
   try {
@@ -5609,9 +5429,6 @@ app.post('/church/donations/save', requireAuth, requireNotBanned, ah(async (req,
   const { donor_name, amount, type, method, reference } = req.body;
   await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,reference) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, donor_name, amount, type, method, reference]);
   await audit(req.session.user.email, 'add_donation', `Donation UGX ${amount} from ${donor_name}`);
-  // Track revenue for church donation
-  try { await global.trackRevenue('church_donation', parseFloat(amount||0) / 3700, (type||'donation') + ': ' + donor_name, 'church-' + Date.now()); } catch(e) {}
-  try { await global.creditDeveloperRevenue(req.session.user.tenant_id, Math.round(parseFloat(amount||0) * 0.05), 'church_donation', 'Church donation: ' + donor_name); } catch(e) {}
   res.redirect('/church/donations');
 }));
 
@@ -6457,7 +6274,7 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
 app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { health_institution_type } = req.body;
-  const validTypes = ['general_hospital','referral_hospital','health_center_4','health_center_3','health_center_2','health_center_1','clinic','drugshop','pharmacy','dental','eye_clinic','mental_health','physiotherapy','lab','imaging','maternity','veterinary','special'];
+  const validTypes = ['general_hospital','health_center_iii','health_center_iv','clinic','dental','eye_clinic','mental_health','physiotherapy','lab','imaging','maternity','pharmacy','veterinary','special'];
   if (health_institution_type && !validTypes.includes(health_institution_type)) {
     return res.status(400).send('Invalid institution type');
   }
@@ -6577,7 +6394,7 @@ app.post('/sickbay/save', requireAuth, requireNotBanned, ah(async (req, res) => 
   const t = req.session.user.tenant_id;
   const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, action, notes } = req.body;
   const complaintText = complaint + (action && action !== 'none' ? ` [Action: ${action}]` : '');
-  await pool.query('INSERT INTO sickbay_visits(tenant_id,patient_name,visit_type,seen_by,visit_date,complaint,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_name, visit_type||'first_aid', seen_by||null, visit_date||new Date().toISOString().split('T')[0], complaintText, treatment||null, notes||null]);
+  await pool.query('INSERT INTO sickbay_visits(tenant_id,patient_name,visit_type,seen_by,visit_date,complaint,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaintText, treatment||null, notes||null]);
   await audit(req.session.user.email, 'sickbay_visit', `${patient_name}: ${visit_type||'first_aid'}`);
   res.redirect('/sickbay');
 }));
@@ -6609,7 +6426,7 @@ app.get('/sickbay/visits/:id/edit', requireAuth, requireNotBanned, ah(async (req
 app.post('/sickbay/visits/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, status, notes } = req.body;
-  await pool.query('UPDATE sickbay_visits SET patient_name=$1,visit_type=$2,seen_by=$3,visit_date=$4,complaint=$5,treatment=$6,status=$7,notes=$8 WHERE tenant_id=$9 AND id=$10', [patient_name, visit_type||'first_aid', seen_by||null, visit_date||new Date().toISOString().split('T')[0], complaint, treatment||null, status||'active', notes||null, t, req.params.id]);
+  await pool.query('UPDATE sickbay_visits SET patient_name=$1,visit_type=$2,seen_by=$3,visit_date=$4,complaint=$5,treatment=$6,status=$7,notes=$8 WHERE tenant_id=$9 AND id=$10', [patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaint, treatment||null, status||'active', notes||null, t, req.params.id]);
   res.redirect('/sickbay');
 }));
 
@@ -7086,7 +6903,8 @@ app.post('/parent/login', ah(async (req, res) => {
   if (!parentUser || parentUser.role !== 'parent') {
     return res.send(renderPage('Parent Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">No parent account found for this email. Please contact the school.</div><a href="/parent/login" class="btn">Try Again</a></div>', null));
   }
-  const validPassword = await bcryptjs.compare(password, parentUser.password || parentUser.password_hash);
+  const bcrypt = require('bcrypt');
+  const validPassword = await bcrypt.compare(password, parentUser.password || parentUser.password_hash);
   if (!validPassword) {
     return res.send(renderPage('Parent Portal', '<div class="card" style="max-width:450px;margin:40px auto"><div class="alert alert-error">Invalid password.</div><a href="/parent/login" class="btn">Try Again</a></div>', null));
   }
@@ -9306,7 +9124,7 @@ app.get('/api-keys', requireAuth, ah(async (req, res) => {
     <div class="card">
       <h2>Webhooks</h2>
       <a href="/webhooks/new" class="btn btn-sm" style="margin-bottom:15px">Add Webhook</a>
-      ${hooks.rows.length ? `<table><tr><th>URL</th><th>Events</th><th>Active</th><th>Actions</th></tr>${hooks.rows.map(h=>`<tr><td>${esc(h.url)}</td><td>${(h.events||[]).map(e=>`<span class="tag">${esc(e)}</span>`).join(' ')}</td><td>${h.is_active?'Yes':'No'}</td><td><a href="/webhooks/${h.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No webhooks configured</p>'}
+      ${hooks.rows.length ? `<table><tr><th>URL</th><th>Events</th><th>Active</th><th>Actions</th></tr>${hooks.rows.map(h=>`<tr><td>${esc(h.url)}</td><td>${(h.events||[]).map(e=>`<span class="tag">${esc(e)}</span>`).join(' ')}</td><td>${h.active?'Yes':'No'}</td><td><a href="/webhooks/${h.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No webhooks configured</p>'}
     </div>
     <div class="card">
       <h2>Webhook Logs</h2>
@@ -14395,7 +14213,7 @@ const retryFailedWebhooks = async () => {
   const failedLogs = (await pool.query("SELECT * FROM webhook_logs WHERE status=0 OR status >= 500 ORDER BY created_at DESC LIMIT 20")).rows;
   for (const log of failedLogs) {
     try {
-      const hook = (await pool.query('SELECT * FROM webhooks WHERE tenant_id=$1 AND is_active=true', [log.tenant_id])).rows[0];
+      const hook = (await pool.query('SELECT * FROM webhooks WHERE tenant_id=$1 AND active=true', [log.tenant_id])).rows[0];
       if (!hook) continue;
       const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : log.payload;
       const sig = crypto.createHmac('sha256', hook.secret || '').update(JSON.stringify(payload)).digest('hex');
@@ -15036,7 +14854,7 @@ app.get('/school/health', requireAuth, requireNotBanned, requireFeature('health_
   `, req.session.user));
 }));
 
-app.get('/school/health/new', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.get('/school/health/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
   res.send(renderPage('Add Health Profile', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Student Health Profile</h2>
@@ -15052,13 +14870,13 @@ app.get('/school/health/new', requireAuth, requireNotBanned, requireFeature('hea
   `, req.session.user));
 }));
 
-app.post('/school/health/save', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.post('/school/health/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO student_health(tenant_id,student_id,blood_group,allergies,conditions,emergency_contact,emergency_phone,last_checkup,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (student_id) DO UPDATE SET blood_group=$3,allergies=$4,conditions=$5,emergency_contact=$6,emergency_phone=$7,last_checkup=$8,notes=$9', [t, req.body.student_id, req.body.blood_group, req.body.allergies, req.body.conditions, req.body.emergency_contact, req.body.emergency_phone, req.body.last_checkup||null, req.body.notes]);
   res.redirect('/school/health');
 }));
 
-app.get('/school/health/:id/edit', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.get('/school/health/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const rec = (await pool.query('SELECT sh.*,s.name as student_name FROM student_health sh JOIN students s ON s.id=sh.student_id WHERE sh.student_id=$1 AND sh.tenant_id=$2', [req.params.id, t])).rows[0];
   if (!rec) return res.status(404).send('Not found');
@@ -15075,7 +14893,7 @@ app.get('/school/health/:id/edit', requireAuth, requireNotBanned, requireFeature
   `, req.session.user));
 }));
 
-app.get('/school/health/visit/new', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.get('/school/health/visit/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
   res.send(renderPage('Clinic Visit', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Record Clinic Visit</h2>
@@ -15090,9 +14908,9 @@ app.get('/school/health/visit/new', requireAuth, requireNotBanned, requireFeatur
   `, req.session.user));
 }));
 
-app.post('/school/health/visit/save', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.post('/school/health/visit/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.visit_date||new Date().toISOString().split('T')[0], req.body.complaint, req.body.diagnosis, req.body.treatment, req.body.seen_by]);
+  await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.visit_date||'CURRENT_DATE', req.body.complaint, req.body.diagnosis, req.body.treatment, req.body.seen_by]);
   res.redirect('/school/health');
 }));
 
@@ -16985,7 +16803,6 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
 // v11 MEGA UPDATE: ADDITIONAL TABLES & FLAGS
 // =============================================
 (async () => {
-  try {
   const additionalMigrations = [
     `CREATE TABLE IF NOT EXISTS student_portal_sessions (id SERIAL PRIMARY KEY, student_id INTEGER REFERENCES students(id) ON DELETE CASCADE, token TEXT, device TEXT, last_active TIMESTAMPTZ DEFAULT NOW(), created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS admissions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, applicant_name TEXT NOT NULL, email TEXT, phone TEXT, dob DATE, gender TEXT, applied_level TEXT, applied_class TEXT, previous_school TEXT, guardian_name TEXT, guardian_phone TEXT, documents JSONB, status TEXT DEFAULT 'applied', reviewed_by TEXT, review_notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
@@ -17148,9 +16965,6 @@ function clearQueuedActions(){try{localStorage.removeItem('offline_sync_queue')}
     try { await pool.query(`INSERT INTO feature_flags (feature_key, name, description, version, category, requirements, is_active) VALUES ($1,$2,$3,$4,$5,$6,true) ON CONFLICT DO NOTHING`, [key, name, desc, ver, cat, req]); } catch(e) { console.error('[Error]', e.message); }
   }
   console.log('v11 additional tables and flags initialized');
-  } catch(err) {
-    console.error('[v11 MEGA UPDATE] Migration error:', err.message);
-  }
 })();
 
 
@@ -17261,17 +17075,7 @@ app.get('/clinic/staff/new', requireAuth, requireNotBanned, requireFeature('clin
 app.post('/clinic/staff/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { name, role, specialization, license_no, email, phone, department } = req.body;
-  if (!name || !name.trim()) return res.redirect('/clinic/staff/new');
-  // v12: Check for duplicate staff (same email or license within tenant)
-  if (email) {
-    const dupEmail = (await pool.query('SELECT id FROM clinic_staff WHERE tenant_id=$1 AND email=$2', [t, email])).rows[0];
-    if (dupEmail) return res.send(renderPage('Duplicate Staff', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Duplicate Email</h2><p>A staff member with this email already exists.</p><a href="/clinic/staff/new" class="btn">Go Back</a></div>', req.session.user));
-  }
-  if (license_no) {
-    const dupLicense = (await pool.query('SELECT id FROM clinic_staff WHERE tenant_id=$1 AND license_no=$2', [t, license_no])).rows[0];
-    if (dupLicense) return res.send(renderPage('Duplicate Staff', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Duplicate License</h2><p>A staff member with this license number already exists.</p><a href="/clinic/staff/new" class="btn">Go Back</a></div>', req.session.user));
-  }
-  await pool.query('INSERT INTO clinic_staff(tenant_id,name,role,specialization,license_no,email,phone,department) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name.trim(), role||'doctor', specialization||null, license_no||null, email||null, phone||null, department||null]);
+  await pool.query('INSERT INTO clinic_staff(tenant_id,name,role,specialization,license_no,email,phone,department) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name, role||'doctor', specialization||null, license_no||null, email||null, phone||null, department||null]);
   await audit(req.session.user.email, 'Add clinic staff', name);
   res.redirect('/clinic/staff?role='+(role||'doctor'));
 }));
@@ -17327,7 +17131,7 @@ app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_
 app.get('/clinic/queue/new', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 200', [t])).rows;
-  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE FOR UPDATE", [t])).rows[0];
+  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0];
   res.send(renderPage('Add to Queue', `
     <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Patient to Queue</h2>
     <form method="POST" action="/clinic/queue/save">
@@ -17350,7 +17154,7 @@ app.post('/clinic/queue/save', requireAuth, requireNotBanned, requireFeature('pa
   res.redirect('/clinic/queue');
 }));
 
-app.post('/clinic/queue/:id/see', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic/queue/:id/see', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const doctors = (await pool.query("SELECT id FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true LIMIT 1", [t])).rows;
   await pool.query("UPDATE patient_queue SET status='seeing', seen_by=$1 WHERE tenant_id=$2 AND id=$3", [doctors[0]?.id||null, t, req.params.id]);
@@ -17393,7 +17197,7 @@ app.post('/clinic/consultation/save', requireAuth, requireNotBanned, requireFeat
   const { queue_id, patient_name, patient_id, patient_type, doctor_id, chief_complaint, history, examination, diagnosis, treatment_plan, follow_up_date, notes, action } = req.body;
   const result = await pool.query('INSERT INTO consultations(tenant_id,patient_type,patient_id,patient_name,doctor_id,queue_id,chief_complaint,history,examination,diagnosis,treatment_plan,follow_up_date,notes,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id', [t, patient_type||'student', patient_id||null, patient_name, doctor_id, queue_id||null, chief_complaint||null, history||null, examination||null, diagnosis, treatment_plan||null, follow_up_date||null, notes||null, 'in_progress']);
   const consultationId = result.rows[0].id;
-  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1 AND tenant_id=$2', [doctor_id, t])).rows[0]?.name || '';
+  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1', [doctor_id])).rows[0]?.name || '';
   if (queue_id) await pool.query("UPDATE patient_queue SET status='consulted' WHERE tenant_id=$1 AND id=$2", [t, queue_id]);
   if (action === 'prescribe') return res.redirect(`/clinic/prescription/new?consultation=${consultationId}&doctor=${doctor_id}&patient=${encodeURIComponent(patient_name)}&diagnosis=${encodeURIComponent(diagnosis||'')}`);
   if (action === 'lab') return res.redirect(`/clinic/lab/new?consultation=${consultationId}&doctor=${doctor_id}&patient=${encodeURIComponent(patient_name)}&diagnosis=${encodeURIComponent(diagnosis||'')}`);
@@ -17477,7 +17281,7 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
       // Still allow but flag
       const allergyNote = 'ALLERGY ALERT: Patient may be allergic to: ' + matchedAllergies.join(', ');
       const existingNotes = notes || '';
-      const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, allergyNote + (existingNotes ? ' | ' + existingNotes : ''), 'pending']);
+      const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, allergyNote + (existingNotes ? ' | ' + existingNotes : '')]);
       const rxId = rx.rows[0].id;
       i = 1;
       while (req.body[`medicine_${i}`]) {
@@ -17566,7 +17370,6 @@ app.get('/clinic/prescriptions/:id/dispense', requireAuth, requireNotBanned, req
 app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { pharmacist_id, notes } = req.body;
-  const rx = (await pool.query('SELECT patient_name FROM prescriptions WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
   const items = (await pool.query("SELECT * FROM prescription_items WHERE prescription_id IN (SELECT id FROM prescriptions WHERE tenant_id=$1) AND prescription_id=$2 AND status='pending'", [t, req.params.id])).rows;
   for (const item of items) {
     const qty = parseInt(req.body[`qty_${item.id}`]) || item.quantity;
@@ -17581,16 +17384,12 @@ app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanne
     if (stock && stock.expiry_date && new Date(stock.expiry_date) < new Date()) {
       return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Drug Expired</h2><p><strong>${esc(item.medicine_name)}</strong> expired on ${new Date(stock.expiry_date).toLocaleDateString()}</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
     }
-    // Decrement pharmacy inventory stock FIRST (atomic)
-    if (stock) {
-      const result = (await pool.query('UPDATE pharmacy_inventory SET quantity = quantity - $1 WHERE medicine_name=$2 AND tenant_id=$3 AND quantity >= $1 RETURNING quantity', [qty, item.medicine_name, t])).rows[0];
-      if (!result) {
-        return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Stock Update Failed</h2><p>Insufficient <strong>${esc(item.medicine_name)}</strong> (concurrent update). Please try again.</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
-      }
-    }
-    // THEN mark as dispensed
     await pool.query('UPDATE prescription_items SET status=$1,dispensed_by=$2,dispensed_at=NOW() WHERE id=$3', ['dispensed', pharmacist_id, item.id]);
-    await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, rx.patient_name, item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
+    // Decrement pharmacy inventory stock
+    if (stock) {
+      await pool.query('UPDATE pharmacy_inventory SET quantity = quantity - $1 WHERE medicine_name=$2 AND tenant_id=$3', [qty, item.medicine_name, t]);
+    }
+    await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, (await pool.query('SELECT patient_name FROM prescriptions WHERE id=$1',[req.params.id])).rows[0]?.patient_name||'', item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
   }
   await pool.query("UPDATE prescriptions SET status='dispensed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
   await audit(req.session.user.email, 'Prescription dispensed', `Rx #${req.params.id}`);
@@ -17643,7 +17442,7 @@ app.get('/clinic/lab/new', requireAuth, requireNotBanned, requireFeature('clinic
 app.post('/clinic/lab/save', requireAuth, requireNotBanned, requireFeature('clinic_lab'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { consultation_id, patient_type, patient_id, patient_name, doctor_id, test_name, test_category, urgency, clinical_notes } = req.body;
-  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1 AND tenant_id=$2', [doctor_id, t])).rows[0]?.name || '';
+  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1', [doctor_id])).rows[0]?.name || '';
   await pool.query('INSERT INTO lab_requests(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,test_name,test_category,urgency,clinical_notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, consultation_id||null, patient_type||'student', patient_id||null, patient_name, doctor_id||null, doctorName, test_name, test_category||null, urgency||'routine', clinical_notes||null]);
   res.redirect('/clinic/lab');
 }));
@@ -18422,9 +18221,12 @@ app.post('/clinic/appointments/save', requireAuth, requireNotBanned, requireFeat
   }
   // Check for appointment conflicts (same doctor, date, time)
   if (doctor_name) {
-    const conflict = (await pool.query("SELECT id, patient_name FROM clinic_appointments WHERE tenant_id=$1 AND doctor_name=$2 AND appointment_date=$3 AND appointment_time=$4 AND status='scheduled'", [t, doctor_name, appointment_date, appointment_time])).rows[0];
+    const conflict = (await pool.query("SELECT id FROM clinic_appointments WHERE tenant_id=$1 AND doctor_name=$2 AND appointment_date=$3 AND appointment_time=$4 AND status='scheduled'", [t, doctor_name, appointment_date, appointment_time])).rows[0];
     if (conflict) {
-      return res.send(renderPage('Appointment Conflict', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#f59e0b">Time Slot Already Booked</h2><p>Dr. ${esc(doctor_name)} already has an appointment at ${esc(appointment_time)} on ${esc(appointment_date)} for patient <strong>${esc(conflict.patient_name)}</strong>.</p><p style="margin-top:10px">Please choose a different time slot.</p><a href="/clinic/appointments/new" class="btn">Choose Different Time</a></div>`, req.session.user));
+      const appts = (await pool.query('SELECT * FROM clinic_appointments WHERE id=$1', [conflict.id])).rows;
+      // Show conflict warning but still allow booking (double-booking may be intentional for urgent cases)
+      // For strict conflict prevention, uncomment the next line:
+      // return res.send(renderPage('Appointment Conflict', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#f59e0b">Time Slot Taken</h2><p>Dr. ${esc(doctor_name)} already has an appointment at ${esc(appointment_time)} on ${esc(appointment_date)}.</p><a href="/clinic/appointments/new" class="btn">Choose Different Time</a></div>`, req.session.user));
     }
   }
   await pool.query(
@@ -18448,8 +18250,8 @@ app.post('/clinic/appointments/:id/complete', requireAuth, requireNotBanned, req
   if (!appt) return res.redirect('/clinic/appointments');
   // Mark appointment completed
   await pool.query("UPDATE clinic_appointments SET status='completed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  // Create queue entry with atomic queue number
-  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE FOR UPDATE", [t])).rows[0];
+  // Create queue entry
+  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0];
   await pool.query(
     'INSERT INTO patient_queue(tenant_id,patient_type,patient_id,patient_name,complaint,priority,triage_notes,queue_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
     [t, appt.patient_type || 'patient', appt.patient_id || null, appt.patient_name, appt.reason || 'Appointment visit', 'normal', 'From appointment #' + appt.id, maxQ.next]
@@ -18499,7 +18301,7 @@ async function checkAndSendReminders() {
           if (settings.whatsapp_enabled) {
             const msg = (settings.whatsapp_template || '')
               .replace('{facility_name}', tenant.name)
-              .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
+              .replace('{date}', new Date(appt.appt_date + 'T00:00:00').toLocaleDateString())
               .replace('{time}', appt.appointment_time || '')
               .replace('{patient_name}', appt.patient_name || '')
               .replace('{doctor}', appt.doctor_name || 'TBD');
@@ -18701,8 +18503,41 @@ app.post('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFea
   res.redirect('/clinic/reminders');
 }));
 
-// GET /clinic/reminders/send-all — Redirect to POST
-app.get('/clinic/reminders/send-all', requireAuth, requireNotBanned, ah(async (req, res) => {
+// GET /clinic/reminders/send-all — Also support GET for the link button
+app.get('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  const appts = (await pool.query(
+    `SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=$2 AND status='scheduled' AND phone IS NOT NULL AND phone != ''`,
+    [t, tomorrowStr]
+  )).rows;
+
+  if (!appts.length) { req.flash('info', 'No appointments found for tomorrow'); return res.redirect('/clinic/reminders'); }
+
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  let settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [t])).rows[0];
+  if (!settings) settings = { sms_enabled: true, sms_template: 'Reminder: You have an appointment at {facility_name} on {date} at {time} with Dr. {doctor}.' };
+
+  let sent = 0;
+  for (const appt of appts) {
+    const msg = (settings.sms_template || '')
+      .replace('{facility_name}', tenant.name)
+      .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
+      .replace('{time}', appt.appointment_time || '')
+      .replace('{patient_name}', appt.patient_name || '')
+      .replace('{doctor}', appt.doctor_name || 'TBD');
+    await pool.query(
+      'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [t, appt.id, appt.patient_name, appt.phone, 'sms', msg, 'sent']
+    );
+    await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
+    sent++;
+  }
+  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr });
+  req.flash('success', `${sent} reminder(s) sent for tomorrow's appointments`);
   res.redirect('/clinic/reminders');
 }));
 
@@ -18961,15 +18796,11 @@ app.get('/clinic/pay/:invoice_id/verify', requireAuth, requireNotBanned, require
         console.warn('[Flutterwave Verify]', e.message);
       }
     }
-    // Demo mode: auto-complete ONLY in development/testing
-    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-      await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
-      await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1, status=CASE WHEN paid_amount + $1 >= total_amount THEN 'paid' ELSE 'partial' END WHERE id=$2", [tx.amount, invoice.id]);
-      await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount });
-      if (req.flash) req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed! (Demo)`);
-    } else {
-      if (req.flash) req.flash('error', 'Payment verification failed. Please contact support with reference: ' + ref);
-    }
+    // Demo: auto-complete after 2 seconds for testing
+    await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
+    await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1, status=CASE WHEN paid_amount + $1 >= total_amount THEN 'paid' ELSE 'partial' END WHERE id=$2", [tx.amount, invoice.id]);
+    await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount });
+    req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed! (Demo)`);
   }
 
   res.redirect(`/clinic/pay/${invoice.id}`);
@@ -19815,8 +19646,8 @@ const publicBookingLimiter = rateLimit({
 
 // GET /clinic/book/:tenant_subdomain — Public appointment booking
 app.get('/clinic/book/:tenant_subdomain', publicBookingLimiter, ah(async (req, res) => {
-  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.tenant_subdomain])).rows[0];
-  if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic does not exist or is not yet approved.</p></div>', null));
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
+  if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic does not exist.</p></div>', null));
   const doctors = (await pool.query("SELECT name FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [tenant.id])).rows;
   const today = new Date().toISOString().split('T')[0];
   const success = req.query.success === '1';
@@ -19857,7 +19688,7 @@ app.get('/clinic/book/:tenant_subdomain', publicBookingLimiter, ah(async (req, r
 
 // POST /clinic/book/:tenant_subdomain/save — Save public appointment
 app.post('/clinic/book/:tenant_subdomain/save', publicBookingLimiter, ah(async (req, res) => {
-  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.tenant_subdomain])).rows[0];
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
   if (!tenant) return res.status(404).send('Clinic not found');
   const { patient_name, phone, appointment_date, appointment_time, doctor_name, reason } = req.body;
   if (!patient_name || !phone || !appointment_date || !appointment_time || !reason) {
@@ -22755,9 +22586,6 @@ app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscriptio
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
     await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Public donation fee - Campaign #'+c.id]);
   }
-  // Track revenue for campaign donation
-  try { await global.trackRevenue('campaign_donation', parseFloat(amount||0) / 3700, 'Campaign donation: ' + c.title + ' by ' + displayName, donationId); } catch(e) {}
-  try { await global.creditDeveloperRevenue(c.tenant_id, fee, 'campaign_donation', 'Platform fee: Campaign #' + c.id); } catch(e) {}
 
   // Trigger post-donation processing (matching, badges, thank you, milestones, followers)
   try {
@@ -24784,8 +24612,7 @@ app.get('/pay/checkout-v2', requireAuth, ah(async (req, res) => {
 app.get('/clinic/patient/:type/:id/ehr', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { type, id } = req.params;
-  const patientType = VALID_PATIENT_TYPES.includes(type) ? type : 'patient';
-  if (!VALID_PATIENT_TYPES.includes(type)) return res.redirect('/clinic');
+  const patientType = type || 'student';
   
   // Get patient name
   let patientName = 'Unknown Patient';
@@ -26308,19 +26135,19 @@ app.get('/clinic/claims', requireAuth, requireNotBanned, requireFeature('patient
     <div class="card">
       <h2>Insurance Claims</h2>
       ${claims.length ? `<table><tr><th>Claim #</th><th>Patient</th><th>Provider</th><th>Claimed</th><th>Approved</th><th>Status</th><th>Actions</th></tr>
-        ${claims.map(c => `<tr><td>${esc(c.claim_number)}</td><td>${esc(c.patient_name)}</td><td>${esc(c.provider_name||'')}</td><td>UGX ${parseInt(c.amount_claimed).toLocaleString()}</td><td>UGX ${parseInt(c.amount_approved).toLocaleString()}</td><td><span class="tag" style="background:${c.status==='approved'?'#d1fae5;color:#065f46':c.status==='rejected'?'#fee2e2;color:#991b1b':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td>${c.status==='submitted'?`<form method="POST" action="/clinic/claims/${c.id}/approve" style="display:inline"><button class="btn btn-sm btn-green">Approve</button></form> <form method="POST" action="/clinic/claims/${c.id}/reject" style="display:inline"><button class="btn btn-sm btn-red">Reject</button></form>`:''}</td></tr>`).join('')}</table>` : '<p class="muted">No claims yet</p>'}
+        ${claims.map(c => `<tr><td>${esc(c.claim_number)}</td><td>${esc(c.patient_name)}</td><td>${esc(c.provider_name||'')}</td><td>UGX ${parseInt(c.amount_claimed).toLocaleString()}</td><td>UGX ${parseInt(c.amount_approved).toLocaleString()}</td><td><span class="tag" style="background:${c.status==='approved'?'#d1fae5;color:#065f46':c.status==='rejected'?'#fee2e2;color:#991b1b':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td>${c.status==='submitted'?`<a href="/clinic/claims/${c.id}/approve" class="btn btn-sm btn-green">Approve</a> <a href="/clinic/claims/${c.id}/reject" class="btn btn-sm btn-red">Reject</a>`:''}</td></tr>`).join('')}</table>` : '<p class="muted">No claims yet</p>'}
     </div>
   `, req.session.user));
 }));
 
-app.post('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+app.get('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const claim = (await pool.query('SELECT * FROM insurance_claims WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!claim) return res.redirect('/clinic/claims');
   await pool.query('UPDATE insurance_claims SET status=$1, amount_approved=$2, processed_at=NOW() WHERE id=$3', ['approved', claim.amount_claimed, req.params.id]);
   // Apply insurance payment to invoice
   if (claim.invoice_id) {
-    const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [claim.invoice_id, t])).rows[0];
+    const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1', [claim.invoice_id])).rows[0];
     if (inv) {
       const newPaid = Math.min(inv.paid_amount + claim.amount_claimed, inv.total_amount);
       await pool.query('UPDATE patient_invoices SET paid_amount=$1, insurance_cover=$2, status=$3 WHERE id=$4', [newPaid, claim.amount_claimed, newPaid >= inv.total_amount ? 'paid' : 'partial', claim.invoice_id]);
@@ -26330,7 +26157,7 @@ app.post('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFea
   res.redirect('/clinic/claims');
 }));
 
-app.post('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+app.get('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE insurance_claims SET status=$1, processed_at=NOW(), rejection_reason=$2 WHERE id=$3', ['rejected', 'Rejected by admin', req.params.id]);
   await audit(req.session.user.email, 'claim_rejected', { claimId: req.params.id });
@@ -26742,8 +26569,7 @@ app.post('/clinic/prescription/save-cds', requireAuth, requireNotBanned, require
   
   if (medications.length > 0 && patient_id) {
     try {
-      const baseUrl = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      const cdsResp = await fetch(`${baseUrl}/api/cds/full-check`, {
+      const cdsResp = await fetch(`http://localhost:${process.env.PORT || 3000}/api/cds/full-check`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Cookie': req.headers.cookie || '' },
         body: JSON.stringify({ patient_type, patient_id, medications, age: null, weight: null })
       });
@@ -27418,6 +27244,70 @@ try {
 } catch (e) {
   console.warn('[FundraisingPro] Failed to load fundraising pro:', e.message);
 }
+
+// === FUNDRAISING ULTIMATE (recurring donations, impact calculator, loyalty tiers, campaign grader, emergency mode, harambee, WhatsApp donate, mobile money, funeral funds, AI story writer) ===
+['recurring_donations','impact_items','campaign_impact_goals','donor_loyalty_tiers','donor_loyalty_ledger','campaign_grades','emergency_campaigns','harambee_pools','harambee_contributions','harambee_distributions','whatsapp_donate_config','whatsapp_donate_sessions','mobile_money_providers','donation_payment_attempts','funeral_funds','funeral_contributions','ai_campaign_stories'].forEach(t => VALID_TABLES.add(t));
+try {
+  const fundraisingUltimate = require('./fundraising-ultimate');
+  fundraisingUltimate(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+  console.log('[FundraisingUltimate] Ultimate fundraising features loaded — 10 features');
+} catch (e) { console.warn('[FundraisingUltimate] Failed to load:', e.message); }
+
+// === FUNDRAISING MEGA (Donor CRM, Pledges, Templates, Tipping, Stretch Goals, Segmentation, Clone, Bulk Donations, Gift Aid, Challenges) ===
+['donor_crm_contacts','donor_crm_interactions','campaign_pledges_mega','campaign_templates','donation_tips','tip_settings','campaign_stretch_goals','donor_segments','donor_segment_members','bulk_donation_batches','bulk_donation_items','gift_tax_declarations','tax_receipts','donation_challenges','challenge_participants'].forEach(t => VALID_TABLES.add(t));
+try {
+  const fundraisingMega = require('./fundraising-mega');
+  fundraisingMega(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+  console.log('[FundraisingMega] Mega fundraising features loaded — 10 features');
+} catch (e) { console.warn('[FundraisingMega] Failed to load:', e.message); }
+
+// === FUNDRAISING MEGA2 (Analytics, A/B Testing, Retention, Social Proof, Endorsements, Wishlists, Corporate Matching, Multi-Currency, QR Menu, Thank-You Videos) ===
+['campaign_ab_tests','donor_retention_metrics','social_proof_events','campaign_endorsements','donation_wishlists','wishlist_fulfillments','corporate_matchers','corporate_match_claims','currency_display_settings','thank_you_videos','thank_you_video_views'].forEach(t => VALID_TABLES.add(t));
+try {
+  const fundraisingMega2 = require('./fundraising-mega2');
+  fundraisingMega2(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
+  console.log('[FundraisingMega2] Mega2 fundraising features loaded — 10 features');
+} catch (e) { console.warn('[FundraisingMega2] Failed to load:', e.message); }
+
+// === FUNDRAISING ULTIMATE2 (Donor Intelligence & Engagement — 15 features) ===
+['donor_journeys','donor_capacity_scores','major_gift_pipeline','major_gift_activities','prospect_research','moves_management','stewardship_plans','stewardship_actions','donor_surveys','donor_survey_responses','donor_churn_scores','donor_recommendations','donor_comm_prefs','donor_relationships','donor_next_actions','donor_ltv','reengagement_campaigns','reengagement_logs','annual_giving_forecasts'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate2'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate2] Donor Intelligence loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate2] Failed:', e.message); } }, 3000);
+
+// === FUNDRAISING ULTIMATE3 (Campaign Optimization — 15 features) ===
+['campaign_schedules','scheduling_insights','campaign_co_creators','campaign_edit_history','campaign_bundles','campaign_bundle_items','campaign_health_scores','fundraising_calendar','goal_recommendations','campaign_storyboards','storyboard_sections','donation_forms','donation_form_submissions','campaign_blueprints','thank_you_templates','thank_you_log','micro_roundup_settings','micro_roundup_transactions','scheduled_donations','seasonality_profiles','amount_suggestions','amount_suggestion_settings'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate3'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate3] Campaign Optimization loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate3] Failed:', e.message); } }, 5000);
+
+// === FUNDRAISING ULTIMATE4 (Financial & Compliance — 15 features) ===
+['fund_allocations','fund_allocation_entries','fundraising_budgets','budget_line_items','reconciliation_batches','reconciliation_items','grants_ult4','grant_reports_ult4','endowments','endowment_transactions','currency_wallets','currency_transactions','receipt_batches','receipt_batch_items','donation_splits','donation_split_items','fund_categories','fund_category_assignments','donation_anonymity_settings','anonymous_donations','payment_routing_rules','payment_routing_log','financial_dashboard_config','financial_snapshots','compliance_docs','compliance_reminders','enhanced_audit_trail','audit_reports_ult4','fund_balances'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate4'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate4] Financial & Compliance loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate4] Failed:', e.message); } }, 7000);
+
+// === FUNDRAISING ULTIMATE5 (Community & Social — 15 features) ===
+['community_hub_posts','community_hub_reactions','forum_categories_pro','forum_threads_pro','forum_replies_pro','mentorship_programs','mentorship_pairs','mentorship_sessions','peer_groups','peer_group_members','peer_group_events','regional_chapters','chapter_members','chapter_activities','alumni_networks_ult5','alumni_members_ult5','alumni_events_ult5','csr_portals','csr_projects','csr_reports','ambassadors_pro','ambassador_activities','ambassador_rewards','referral_tiers_pro','referral_tracking_pro','impact_stories','impact_story_reactions','volunteer_profiles','volunteer_time_logs','giving_circles','giving_circle_members','giving_circle_nominations','giving_circle_votes','community_events_pro','community_event_registrations','donor_wall_config_pro','donor_wall_entries_pro','recognition_awards','recognition_recipients'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate5'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate5] Community & Social loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate5] Failed:', e.message); } }, 9000);
+
+// === FUNDRAISING ULTIMATE6 (Integration & Platform — 15 features) ===
+['integration_configs','integration_sync_log','crm_sync_configs','crm_sync_queue','email_marketing_configs','email_campaign_sync','accounting_sync_configs','accounting_sync_records','webhook_endpoints_pro','webhook_deliveries','api_gateway_keys_pro','api_gateway_logs','api_rate_limits_pro','data_import_jobs','data_export_jobs','import_error_rows','whitelabel_pro_config','language_configs','translations','custom_domains','sso_configs','sso_sessions','donor_2fa_configs','donor_2fa_attempts','privacy_consent_records','privacy_settings','data_retention_policies','data_retention_log','platform_plugins','plugin_marketplace'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate6'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate6] Integration & Platform loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate6] Failed:', e.message); } }, 11000);
+
+// === FUNDRAISING ULTIMATE7 (Advanced Donation Types & Events — 8 features) ===
+['crypto_wallets','crypto_donations','crypto_transactions','inkind_categories','inkind_donations','planned_giving','bequests','board_members','board_giving_pledges','ticket_tiers','ticket_purchases','auction_items','auction_bids','sponsorship_packages','sponsorship_purchases','donor_advised_funds','daf_grants'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate7'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate7] Advanced Donations & Events loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate7] Failed:', e.message); } }, 13000);
+
+// === FUNDRAISING ULTIMATE8 (Campaign Enhancement & Donor Experience — 8 features) ===
+['capital_campaigns','capital_phases','capital_pledges','tribute_donations','memorial_pages','crowdfunding_perks','perk_claims','campaign_thermometers','thermometer_views','donor_portal_preferences','donor_portal_sessions','email_templates_builder','email_campaign_builder','direct_mail_campaigns','direct_mail_recipients','donor_heatmap_data','regional_donation_stats'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate8'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate8] Campaign Enhancement loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate8] Failed:', e.message); } }, 15000);
+
+// === FUNDRAISING ULTIMATE9 (Events, Intelligence & Financial — 8 features) ===
+['virtual_events','virtual_event_attendees','fundraising_galas','gala_tables','gala_seats','wealth_screening_results','donor_wealth_indicators','grant_writing_templates','grant_proposals','donor_tax_statements','tax_statement_batches','giving_days','giving_day_challenges','giving_day_leaderboards','installment_plans','installment_payments','donor_engagement_scores','engagement_activities'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate9'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate9] Events & Intelligence loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate9] Failed:', e.message); } }, 17000);
+
+// === FUNDRAISING ULTIMATE10 (Pages, Payments & Asset Giving — 8 features) ===
+['landing_pages','landing_page_versions','payment_gateways','gateway_transactions','donor_renewal_campaigns','renewal_reminders','donor_gift_clubs','gift_club_members','campaign_videos','video_engagement','stock_donations','stock_valuations','real_estate_donations','ira_rollovers','ira_distributions'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate10'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate10] Pages & Payments loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate10] Failed:', e.message); } }, 19000);
+
+// === FUNDRAISING ULTIMATE11 (Special Assets & Platform Pro — 8 features) ===
+['vehicle_donations','vehicle_valuations','family_foundations','foundation_members','foundation_grants','mobile_experience_config','push_notifications','campaign_risk_assessments','risk_mitigation_plans','fundraising_compliance_checks','compliance_requirements','donation_impact_reports','impact_report_sections','campaign_collaboration','collaboration_tasks','communication_hub','unified_messages'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate11'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate11] Special Assets & Platform loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate11] Failed:', e.message); } }, 21000);
 
 // ============================================================
 // ROUND 3 FEATURES: Leave, Expenses, Visitors, Assets, Feedback, Notes, Announcements
@@ -31980,7 +31870,7 @@ app.post('/branches/select', requireAuth, requireNotBanned, ah(async (req, res) 
 // ============================================================
 // FEATURE 5: ENHANCED CLINIC PORTAL
 // ============================================================
-app.get('/clinic-enhanced', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patientCount = (await pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tid])).rows[0].count;
   const todayAppts = (await pool.query("SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=CURRENT_DATE", [tid])).rows[0].count;
@@ -32006,7 +31896,7 @@ app.get('/clinic-enhanced', requireAuth, requireNotBanned, requireFeature('clini
   res.send(renderPage('Clinic Dashboard', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const search = req.query.search || '';
   const rows = search
@@ -32036,7 +31926,7 @@ app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, requireFeatu
   res.send(renderPage('Patients', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>Register New Patient</h1>
   </div>
@@ -32074,7 +31964,7 @@ app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, requireF
   res.send(renderPage('Register Patient', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, full_name, date_of_birth, gender, phone, address, blood_type, allergies, emergency_contact, emergency_phone, insurance_provider, insurance_number } = req.body;
   const pid = patient_id || 'PT-' + Date.now().toString(36).toUpperCase();
@@ -32086,12 +31976,12 @@ app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, requir
   res.redirect('/clinic-enhanced/patients');
 }));
 
-app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT * FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
-  const appointments = (await pool.query('SELECT * FROM clinic_appointments WHERE patient_id=$1 AND tenant_id=$2 ORDER BY appointment_date DESC LIMIT 20', [patient.id, tid])).rows;
-  const consultations = (await pool.query('SELECT * FROM clinic_consultations WHERE patient_id=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 20', [patient.id, tid])).rows;
+  const appointments = (await pool.query('SELECT * FROM clinic_appointments WHERE patient_id=$1 ORDER BY appointment_date DESC LIMIT 20', [patient.id])).rows;
+  const consultations = (await pool.query('SELECT * FROM clinic_consultations WHERE patient_id=$1 ORDER BY created_at DESC LIMIT 20', [patient.id])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>${esc(patient.full_name)}</h1>
     <p>ID: ${esc(patient.patient_id)} | ${esc(patient.gender||'-')} | Blood: ${esc(patient.blood_type||'Unknown')}</p>
@@ -32126,7 +32016,7 @@ app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, requireF
   res.send(renderPage('Patient: ' + patient.full_name, html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const rows = (await pool.query(`
     SELECT a.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -32150,7 +32040,7 @@ app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, requireF
   res.send(renderPage('Appointments', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patients = (await pool.query('SELECT id, full_name, patient_id FROM clinic_patients WHERE tenant_id=$1 ORDER BY full_name LIMIT 200', [tid])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
@@ -32177,7 +32067,7 @@ app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, requ
   res.send(renderPage('Book Appointment', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, appointment_date, appointment_time, doctor_name, department, reason } = req.body;
   await pool.query(
@@ -32188,7 +32078,7 @@ app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, re
   res.redirect('/clinic-enhanced/appointments');
 }));
 
-app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const queue = (await pool.query(`
     SELECT a.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -32222,7 +32112,7 @@ app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, requireFeature(
   res.send(renderPage('Clinic Queue', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   for (const [key, value] of Object.entries(req.body)) {
     if (key.startsWith('status_')) {
@@ -32233,7 +32123,7 @@ app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, require
   res.redirect('/clinic-enhanced/queue');
 }));
 
-app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT id, full_name, patient_id FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.patientId, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
@@ -32260,19 +32150,19 @@ app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNot
   res.send(renderPage('New Consultation', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, appointment_id, doctor_name, chief_complaint, history, examination, diagnosis, weight, temperature, blood_pressure, notes } = req.body;
   await pool.query(
     `INSERT INTO clinic_consultations (tenant_id,patient_id,appointment_id,doctor_name,chief_complaint,history,examination,diagnosis,weight,temperature,blood_pressure,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
     [tid, parseInt(patient_id), appointment_id ? parseInt(appointment_id) : null, doctor_name, chief_complaint, history, examination, diagnosis, parseFloat(weight)||null, parseFloat(temperature)||null, blood_pressure, notes]
   );
-  if (appointment_id) { await pool.query("UPDATE clinic_appointments SET status='completed' WHERE id=$1 AND tenant_id=$2", [parseInt(appointment_id), tid]); }
+  if (appointment_id) { await pool.query("UPDATE clinic_appointments SET status='completed' WHERE id=$1", [parseInt(appointment_id)]); }
   audit(req.session.user.email, 'consultation_saved', 'Patient ID: ' + patient_id);
   res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
 
-app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const rows = (await pool.query(`
     SELECT pr.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -32291,7 +32181,7 @@ app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, require
   res.send(renderPage('Prescriptions', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { consultation_id, patient_id, prescribed_by, notes } = req.body;
   const result = await pool.query(
@@ -32313,7 +32203,7 @@ app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, r
   res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
 
-app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const totalPatients = (await pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tid])).rows[0].count;
   const totalAppts = (await pool.query('SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1', [tid])).rows[0].count;
@@ -33438,33 +33328,12 @@ loadSelfExec('revenue-quickstart', 'Revenue');
 // 10. GLOBAL VIRAL ENGINE (search, chat, QR, link shortener, contests, gallery, embeddable widgets, badges, translate)
 loadSelfExec('global-viral-engine', 'GlobalViral');
 
-// 11. GLOBAL EXPANSION ENGINE (i18n, multi-currency, timezone, OTP, social login, payment gateways, global API)
-loadSelfExec('global-expansion-engine', 'GlobalExpansion');
-
-// 12. VIRAL LOOP ENGINE (referral dashboard, reward tracking, social share OG images, push delivery, widgets, invite links, waitlist, badges, digest)
-loadSelfExec('viral-loop-engine', 'ViralLoop');
-
-// 13. REAL-TIME ENGINE (SSE notifications, live activity feed, presence, typing, collaboration, stats, event bus)
-loadSelfExec('realtime-engine', 'RealTime');
-
-// 14. MEDIA ENGINE (video hosting, podcast with RSS, live streaming with chat, media hub)
-loadSelfExec('media-engine', 'MediaEngine');
-
-// 15. MARKETPLACE VENDOR (vendor storefronts, product listings, reviews & ratings, wishlist, comparison, trust system)
-loadSelfExec('marketplace-vendor', 'MarketplaceVendor');
-
-// 16. AI CONTENT ENGINE (blog generator, social posts, bulk report comments, recommendations, auto-tag, summarizer, smart search)
-loadSelfExec('ai-content-engine', 'AIContent');
-
-// 17. ADVANCED PLATFORM (GDPR/privacy, dark mode, scheduled reports, event ticketing with QR, team challenges, mentorship, accessibility)
-loadSelfExec('advanced-platform', 'AdvancedPlatform');
-
-// Clean up scope bridge globals (app, pool, etc.)
+// Clean up globals — remove temporary bridges
 Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
-// KEEP cross-module functions on global — route handlers in other modules
-// need trackRevenue, awardPoints, creditDeveloperRevenue, queueEmail at request time.
-// Deleting them would cause ReferenceError crashes when handlers execute.
-// These are lightweight stubs or real functions, harmless to keep.
+delete global.trackRevenue;
+delete global.awardPoints;
+delete global.creditDeveloperRevenue;
+delete global.queueEmail;
 
 // ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===
@@ -33487,7 +33356,6 @@ try {
 
 // --- MIGRATIONS: New Tables ---
 (async () => {
-  try {
   const tables = [
     `CREATE TABLE IF NOT EXISTS clinic_queue (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name TEXT, patient_id INTEGER, complaint TEXT, token_number INTEGER DEFAULT 1, status TEXT DEFAULT 'waiting', priority TEXT DEFAULT 'normal', created_at TIMESTAMP DEFAULT NOW(), started_at TIMESTAMP, completed_at TIMESTAMP, doctor_id INTEGER)`,
     `CREATE TABLE IF NOT EXISTS clinic_prescriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_id INTEGER, patient_name TEXT, diagnosis TEXT, medications JSONB DEFAULT '[]', notes TEXT, prescribed_by TEXT, created_at TIMESTAMP DEFAULT NOW())`,
@@ -33498,7 +33366,7 @@ try {
     `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), name TEXT, key_hash TEXT, key_prefix TEXT(8), created_at TIMESTAMP DEFAULT NOW(), last_used TIMESTAMP, is_active BOOLEAN DEFAULT true)`,
     `CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), url TEXT NOT NULL, events TEXT[] DEFAULT '{}', secret TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS user_2fa (email TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, secret TEXT, enabled BOOLEAN DEFAULT false, backup_codes TEXT[] DEFAULT '{}')`,
-    `CREATE TABLE IF NOT EXISTS audit_logs (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email TEXT, action TEXT NOT NULL, details TEXT, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS audit_log (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email TEXT, action TEXT NOT NULL, details TEXT, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), endpoint TEXT NOT NULL, p256dh_key TEXT, auth_key TEXT, created_at TIMESTAMP DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS notification_preferences (user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), email_notifs BOOLEAN DEFAULT true, sms_notifs BOOLEAN DEFAULT true, push_notifs BOOLEAN DEFAULT true, inapp_notifs BOOLEAN DEFAULT true, categories JSONB DEFAULT '{"payments":true,"assignments":true,"events":true,"announcements":true,"emergencies":true}', PRIMARY KEY (user_email, tenant_id))`,
     // Referral Management System
@@ -33523,54 +33391,87 @@ try {
   ];
   for (const sql of claimAlters) { try { await pool.query(sql); } catch(e) { /* column may already exist */ } }
 
-  // Fix webhooks column: rename 'active' to 'is_active' if needed
-  try {
-    // Check if 'active' column exists (old schema)
-    const colCheck = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name='webhooks' AND column_name='active'");
-    if (colCheck.rows.length > 0) {
-      await pool.query("ALTER TABLE webhooks RENAME COLUMN active TO is_active");
-      console.log('[Migrations] Renamed webhooks.active → is_active');
-    }
-  } catch(e) { /* column may already be is_active */ }
-
   console.log('[Migrations] All new tables ready');
-  } catch(err) {
-    console.error('[MASSIVE FEATURE UPGRADE] Migration error:', err.message);
-  }
 })();
 
 // ============================================================
 // === 1. CLINIC QUEUE, PRESCRIPTIONS, SICK BAY ===
-// NOTE: GET /clinic/queue and GET /clinic/prescriptions are defined earlier (patient_queue table
-// and prescriptions table). The POST/action routes below use clinic_queue and clinic_prescriptions.
 // ============================================================
+app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [waiting, inConsult, completed, todayStats] = await Promise.all([
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='waiting' ORDER BY token_number, priority DESC, created_at", [t]),
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='in-consultation' ORDER BY started_at", [t]),
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='completed' AND completed_at::date=CURRENT_DATE ORDER BY completed_at DESC", [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='completed') as seen, AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60) as avg_wait FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])
+  ]);
+  const s = todayStats.rows[0] || {};
+  res.send(renderPage('Patient Queue', `
+    <div class="hero" style="background:linear-gradient(135deg,#ef4444,#f97316)"><h1>Patient Queue</h1><p>Manage patient flow efficiently</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${waiting.rows.length}</div><div>Waiting</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${inConsult.rows.length}</div><div>In Consultation</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#10b981">${s.seen||0}</div><div>Seen Today</div></div>
+      <div class="stat-card"><div class="stat-num">${Math.round(s.avg_wait||0)}m</div><div>Avg Wait</div></div>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:20px">
+      <a href="/clinic/queue" class="btn btn-green">Queue</a>
+      <a href="/clinic/prescriptions" class="btn">Prescriptions</a>
+      <a href="/clinic/sick-bay" class="btn">Sick Bay</a>
+    </div>
+    <div class="card"><h3>Waiting Patients (${waiting.rows.length})</h3>
+      <table><tr><th>Token</th><th>Patient</th><th>Complaint</th><th>Priority</th><th>Wait</th><th>Action</th></tr>
+      ${waiting.rows.map(p => {
+        const waitMin = Math.round((Date.now() - new Date(p.created_at).getTime()) / 60000);
+        return `<tr><td><span style="background:#f59e0b;color:white;padding:4px 10px;border-radius:6px;font-weight:700">#${p.token_number}</span></td><td><strong>${esc(p.patient_name)}</strong></td><td>${esc(p.complaint||'')}</td><td><span class="tag" style="background:${p.priority==='urgent'?'#fee2e2;color:#991b1b':'#f0f0f0'}">${esc(p.priority)}</span></td><td>${waitMin}m</td><td><form method="POST" action="/clinic/queue/${p.id}/call" style="display:inline"><button class="btn btn-sm" style="background:#3b82f6;color:white">Call</button></form></td></tr>`;
+      }).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px" class="muted">No patients waiting</td></tr>'}
+      </table>
+    </div>
+    ${inConsult.rows.length > 0 ? '<div class="card" style="margin-top:16px"><h3>In Consultation</h3><table><tr><th>Token</th><th>Patient</th><th>Doctor</th><th>Started</th><th>Action</th></tr>'+inConsult.rows.map(p=>'<tr><td>#'+p.token_number+'</td><td>'+esc(p.patient_name)+'</td><td class="muted">'+esc(p.doctor_id||'')+'</td><td>'+(p.started_at?new Date(p.started_at).toLocaleTimeString():'')+'</td><td><form method="POST" action="/clinic/queue/'+p.id+'/complete" style="display:inline"><button class="btn btn-sm btn-green">Complete</button></form></td></tr>').join('')+'</table></div>' : ''}
+    <div class="card" style="margin-top:16px"><h3>Check In Patient</h3>
+      <form method="POST" action="/clinic/queue/checkin" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end">
+        <div><label>Patient Name *</label><input name="patient_name" required></div>
+        <div><label>Complaint</label><input name="complaint" placeholder="Chief complaint"></div>
+        <div><label>Priority</label><select name="priority"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="emergency">Emergency</option></select></div>
+        <div><button class="btn btn-green" style="width:100%">Check In</button></div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
 
-// POST /clinic/queue/checkin — Add patient to clinic_queue
 app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { patient_name, complaint, priority } = req.body;
-  const nextToken = (await pool.query("SELECT COALESCE(MAX(token_number),0)+1 as next FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE FOR UPDATE", [t])).rows[0].next;
+  const nextToken = (await pool.query("SELECT COALESCE(MAX(token_number),0)+1 as next FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0].next;
   await pool.query("INSERT INTO clinic_queue (tenant_id,patient_name,complaint,token_number,priority) VALUES ($1,$2,$3,$4,$5)", [t, patient_name, complaint||'', nextToken||1, priority||'normal']);
-  await pool.query("INSERT INTO audit_logs (tenant_id,user_email,action,details) VALUES ($1,$2,'clinic_checkin',$3)", [t, req.session.user.email, 'Checked in: '+patient_name]);
+  await pool.query("INSERT INTO audit_log (tenant_id,user_email,action,details) VALUES ($1,$2,'clinic_checkin',$3)", [t, req.session.user.email, 'Checked in: '+patient_name]);
   res.redirect('/clinic/queue');
 }));
 
-// POST /clinic/queue/:id/call — Call next patient from clinic_queue
 app.post('/clinic/queue/:id/call', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query("UPDATE clinic_queue SET status='in-consultation',started_at=NOW(),doctor_id=$1 WHERE id=$2 AND tenant_id=$3", [req.session.user.name||'', req.params.id, t]);
   res.redirect('/clinic/queue');
 }));
 
-// POST /clinic/queue/:id/complete — Complete consultation in clinic_queue
 app.post('/clinic/queue/:id/complete', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query("UPDATE clinic_queue SET status='completed',completed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
   res.redirect('/clinic/queue');
 }));
 
-// NOTE: GET /clinic/prescriptions is defined earlier (prescriptions table).
-// The routes below use clinic_prescriptions table.
+// Prescriptions
+app.get('/clinic/prescriptions', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const rx = (await pool.query("SELECT * FROM clinic_prescriptions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
+  res.send(renderPage('Prescriptions', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Prescriptions</h1></div>
+    <div style="margin-bottom:16px"><a href="/clinic/prescriptions/new" class="btn btn-green">+ New Prescription</a> <a href="/clinic/queue" class="btn">Back to Queue</a></div>
+    <div class="card"><table><tr><th>Date</th><th>Patient</th><th>Diagnosis</th><th>By</th></tr>
+      ${rx.map(r=>'<tr><td>'+(r.created_at?new Date(r.created_at).toLocaleDateString():'')+'</td><td><strong>'+esc(r.patient_name)+'</strong></td><td>'+esc(r.diagnosis||'')+'</td><td class="muted">'+esc(r.prescribed_by||'')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">No prescriptions yet</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
 
 app.get('/clinic/prescriptions/new', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), (req, res) => {
   res.send(renderPage('New Prescription', `
@@ -33604,7 +33505,7 @@ app.post('/clinic/prescriptions/save', requireAuth, requireNotBanned, requireFea
 }));
 
 // Sick Bay
-app.get('/clinic/sick-bay', requireAuth, requireNotBanned, requireFeature('sick_bay'), ah(async (req, res) => {
+app.get('/clinic/sick-bay', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const [active, today] = await Promise.all([
     pool.query("SELECT * FROM sick_bay WHERE tenant_id=$1 AND status='in_bay' ORDER BY checked_in DESC", [t]),
@@ -33634,22 +33535,15 @@ app.get('/clinic/sick-bay', requireAuth, requireNotBanned, requireFeature('sick_
   `, req.session.user));
 }));
 
-app.post('/clinic/sick-bay/checkin', requireAuth, requireNotBanned, requireFeature('sick_bay'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { student_name, complaint, temperature, nurse_name } = req.body;
-  if (!student_name || !student_name.trim()) return res.redirect('/clinic/sick-bay');
-  const temp = parseFloat(temperature);
-  if (temperature && (isNaN(temp) || temp < 30 || temp > 45)) return res.redirect('/clinic/sick-bay');
-  await pool.query("INSERT INTO sick_bay (tenant_id,student_name,complaint,temperature,nurse_name) VALUES ($1,$2,$3,$4,$5)", [t, student_name.trim(), complaint||'', temperature||null, nurse_name||'']);
-  await audit(req.session.user.email, 'sickbay_checkin', { student_name, complaint });
+app.post('/clinic/sick-bay/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  await pool.query("INSERT INTO sick_bay (tenant_id,student_name,complaint,temperature,nurse_name) VALUES ($1,$2,$3,$4,$5)", [req.session.user.tenant_id, req.body.student_name, req.body.complaint||'', req.body.temperature||'', req.body.nurse_name||'']);
   res.redirect('/clinic/sick-bay');
 }));
 
-app.post('/clinic/sick-bay/:id/release', requireAuth, requireNotBanned, requireFeature('sick_bay'), ah(async (req, res) => {
+app.post('/clinic/sick-bay/:id/release', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { treatment } = req.body;
   await pool.query("UPDATE sick_bay SET status='released',checked_out=NOW(),treatment=$1 WHERE id=$2 AND tenant_id=$3", [treatment||'Released', req.params.id, t]);
-  await audit(req.session.user.email, 'sickbay_release', { id: req.params.id });
   res.redirect('/clinic/sick-bay');
 }));
 
@@ -33675,8 +33569,7 @@ app.get('/billing/invoices', requireAuth, requireNotBanned, ah(async (req, res) 
 }));
 
 app.get('/billing/invoices/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const inv = (await pool.query("SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2", [req.params.id, t])).rows[0];
+  const inv = (await pool.query("SELECT * FROM invoices WHERE id=$1", [req.params.id])).rows[0];
   if (!inv) return res.status(404).send('Not found');
   const tenant = (await pool.query("SELECT name,type FROM tenants WHERE id=$1", [inv.tenant_id])).rows[0];
   const items = Array.isArray(inv.items) ? inv.items : [];
@@ -33962,7 +33855,7 @@ app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
   const backupCodes = Array.from({length:10}, () => require('crypto').randomBytes(4).toString('hex'));
   await pool.query("INSERT INTO user_2fa (email,tenant_id,secret,enabled,backup_codes) VALUES ($1,$2,$3,true,$4) ON CONFLICT (email) DO UPDATE SET secret=$3,enabled=true,backup_codes=$4",
     [req.session.user.email, req.session.user.tenant_id, secret.replace(/\s/g,''), backupCodes]);
-  await pool.query("INSERT INTO audit_logs (tenant_id,user_email,action,details) VALUES ($1,$2,'2fa_enabled','Two-factor authentication enabled')", [req.session.user.tenant_id, req.session.user.email]);
+  await pool.query("INSERT INTO audit_log (tenant_id,user_email,action,details) VALUES ($1,$2,'2fa_enabled','Two-factor authentication enabled')", [req.session.user.tenant_id, req.session.user.email]);
   res.send(renderPage('2FA Enabled', `
     <div class="card" style="max-width:550px;margin:60px auto;text-align:center">
       <div style="font-size:48px;margin-bottom:16px">✅</div><h2>Two-Factor Authentication Enabled!</h2>
@@ -33987,7 +33880,7 @@ app.get('/settings/audit-log', requireAuth, requireSuperAdmin, ah(async (req, re
   if (action) { where += ` AND action ILIKE $${pNum++}`; params.push('%'+action+'%'); }
   if (from) { where += ` AND created_at >= $${pNum++}`; params.push(from); }
   if (to) { where += ` AND created_at <= $${pNum++}`; params.push(to+'T23:59:59'); }
-  const logs = (await pool.query("SELECT * FROM audit_logs "+where+" ORDER BY created_at DESC LIMIT 200", params)).rows;
+  const logs = (await pool.query("SELECT * FROM audit_log "+where+" ORDER BY created_at DESC LIMIT 200", params)).rows;
   res.send(renderPage('Audit Log', `
     <div class="hero" style="background:linear-gradient(135deg,#1e293b,#334155)"><h1>Audit Log</h1><p>Track all sensitive actions</p></div>
     <div class="card" style="margin-bottom:20px"><form method="GET" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end">
@@ -34182,849 +34075,6 @@ try {
   });
   console.log('[WS] WebSocket server initialized');
 } catch (e) { console.warn('[WS] Failed to initialize WebSocket:', e.message); }
-
-// ============================================================
-// === v12.0: MAJOR HEALTH PORTAL ENHANCEMENTS ===
-// ============================================================
-
-// --- FEATURE 1: ICD-10 DIAGNOSIS CODES ---
-const ICD10_COMMON = [
-  { code: 'A00', description: 'Cholera', category: 'Infectious' },
-  { code: 'A09', description: 'Gastroenteritis', category: 'Infectious' },
-  { code: 'B54', description: 'Unspecified malaria', category: 'Infectious' },
-  { code: 'B34.9', description: 'Viral infection, unspecified', category: 'Infectious' },
-  { code: 'E11.9', description: 'Type 2 diabetes mellitus without complications', category: 'Endocrine' },
-  { code: 'E78.5', description: 'Hyperlipidemia, unspecified', category: 'Endocrine' },
-  { code: 'I10', description: 'Essential hypertension', category: 'Circulatory' },
-  { code: 'I21.9', description: 'Acute myocardial infarction, unspecified', category: 'Circulatory' },
-  { code: 'J00', description: 'Acute nasopharyngitis (common cold)', category: 'Respiratory' },
-  { code: 'J06.9', description: 'Acute upper respiratory infection, unspecified', category: 'Respiratory' },
-  { code: 'J10.1', description: 'Influenza due to other identified influenza virus with other respiratory manifestations', category: 'Respiratory' },
-  { code: 'J11.1', description: 'Influenza with other respiratory manifestations, virus not identified', category: 'Respiratory' },
-  { code: 'J18.9', description: 'Pneumonia, unspecified organism', category: 'Respiratory' },
-  { code: 'J45.909', description: 'Unspecified asthma, uncomplicated', category: 'Respiratory' },
-  { code: 'K21.0', description: 'Gastroesophageal reflux disease with esophagitis', category: 'Digestive' },
-  { code: 'K29.7', description: 'Gastritis, unspecified', category: 'Digestive' },
-  { code: 'K52.9', description: 'Noninfective gastroenteritis and colitis, unspecified', category: 'Digestive' },
-  { code: 'L30.9', description: 'Dermatitis, unspecified', category: 'Skin' },
-  { code: 'M54.5', description: 'Low back pain', category: 'Musculoskeletal' },
-  { code: 'M79.3', description: 'Panniculitis, unspecified', category: 'Musculoskeletal' },
-  { code: 'N30.0', description: 'Acute cystitis', category: 'Genitourinary' },
-  { code: 'N39.0', description: 'Urinary tract infection, site not specified', category: 'Genitourinary' },
-  { code: 'O03.9', description: 'Spontaneous abortion, unspecified', category: 'Pregnancy' },
-  { code: 'O80', description: 'Encounter for full-term uncomplicated delivery', category: 'Pregnancy' },
-  { code: 'O10.919', description: 'Pre-existing hypertension, unspecified, first trimester', category: 'Pregnancy' },
-  { code: 'R50.9', description: 'Fever, unspecified', category: 'Symptoms' },
-  { code: 'R51', description: 'Headache', category: 'Symptoms' },
-  { code: 'R52', description: 'Pain, unspecified', category: 'Symptoms' },
-  { code: 'R56.9', description: 'Febrile convulsions, unspecified', category: 'Symptoms' },
-  { code: 'Z23', description: 'Encounter for immunization', category: 'Health' },
-  { code: 'Z34.00', description: 'Supervision of normal first pregnancy', category: 'Pregnancy' }
-];
-
-app.get('/api/health/icd10-search', requireAuth, ah(async (req, res) => {
-  const q = (req.query.q || '').toLowerCase().trim();
-  if (!q || q.length < 1) return res.json({ results: [] });
-  const results = ICD10_COMMON.filter(c => c.code.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)).slice(0, 20);
-  res.json({ results });
-}));
-
-// --- FEATURE 2: PHARMACY STOCK AUDIT TRAIL ---
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS pharmacy_stock_movements (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      drug_id INTEGER REFERENCES pharmacy_inventory(id),
-      medicine_name VARCHAR(255) NOT NULL,
-      movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('in','out','adjustment','expiry_writeoff','damaged')),
-      quantity INTEGER NOT NULL,
-      previous_quantity INTEGER,
-      new_quantity INTEGER,
-      reference_type VARCHAR(50),
-      reference_id INTEGER,
-      batch_number VARCHAR(100),
-      expiry_date DATE,
-      notes TEXT,
-      performed_by VARCHAR(255) NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_tenant ON pharmacy_stock_movements(tenant_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_drug ON pharmacy_stock_movements(drug_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_date ON pharmacy_stock_movements(created_at)');
-  } catch (e) { console.warn('[v12] pharmacy_stock_movements table:', e.message); }
-})();
-
-app.get('/clinic/pharmacy/stock-movements', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { drug_id, type, from_date, to_date, page = 1 } = req.query;
-  const limit = 50;
-  const offset = (parseInt(page) - 1) * limit;
-  let where = 'WHERE sm.tenant_id = $1';
-  const params = [t];
-  let paramIdx = 2;
-  if (drug_id) { where += ` AND sm.drug_id = $${paramIdx++}`; params.push(drug_id); }
-  if (type && type !== 'all') { where += ` AND sm.movement_type = $${paramIdx++}`; params.push(type); }
-  if (from_date) { where += ` AND sm.created_at::date >= $${paramIdx++}`; params.push(from_date); }
-  if (to_date) { where += ` AND sm.created_at::date <= $${paramIdx++}`; params.push(to_date); }
-  
-  const [movements, total] = await Promise.all([
-    pool.query(`SELECT sm.*, pi.medicine_name as inv_name FROM pharmacy_stock_movements sm LEFT JOIN pharmacy_inventory pi ON sm.drug_id=pi.id ${where} ORDER BY sm.created_at DESC LIMIT ${limit} OFFSET ${offset}`, params),
-    pool.query(`SELECT COUNT(*)::int FROM pharmacy_stock_movements sm ${where}`, params)
-  ]);
-  const totalPages = Math.ceil((total.rows[0]?.count || 0) / limit);
-  
-  res.send(renderPage('Stock Movements', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Stock Movement History</h1><p>Complete audit trail of all pharmacy stock changes</p></div>
-    <div class="card" style="margin-bottom:16px">
-      <form method="GET" style="display:flex;gap:10px;flex-wrap:wrap">
-        <select name="type"><option value="all">All Types</option><option value="in">Stock In</option><option value="out">Stock Out</option><option value="adjustment">Adjustment</option><option value="expiry_writeoff">Expiry Write-off</option><option value="damaged">Damaged</option></select>
-        <input name="from_date" type="date" placeholder="From" value="${from_date||''}">
-        <input name="to_date" type="date" placeholder="To" value="${to_date||''}">
-        <button class="btn btn-green">Filter</button>
-        <a href="/clinic/pharmacy/stock-movements" class="btn">Clear</a>
-      </form>
-    </div>
-    <div class="card"><table><tr><th>Date</th><th>Drug</th><th>Type</th><th>Qty</th><th>Before</th><th>After</th><th>Reference</th><th>By</th></tr>
-      ${movements.rows.map(m => `<tr style="${m.movement_type==='out'||m.movement_type==='expiry_writeoff'||m.movement_type==='damaged'?'background:#fef3c7':''}"><td>${new Date(m.created_at).toLocaleString()}</td><td><strong>${esc(m.medicine_name)}</strong></td><td><span class="tag" style="background:${m.movement_type==='in'?'#d1fae5;color:#065f46':m.movement_type==='out'?'#dbeafe;color:#1e40af':'#f3f4f6'}">${m.movement_type}</span></td><td style="font-weight:700;color:${m.movement_type==='in'?'#059669':'#dc2626'}">${m.movement_type==='in'?'+':'-'}${m.quantity}</td><td>${m.previous_quantity}</td><td>${m.new_quantity}</td><td class="muted">${esc(m.reference_type||'')} #${m.reference_id||''}</td><td class="muted">${esc(m.performed_by)}</td></tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px" class="muted">No stock movements recorded</td></tr>'}
-    </table>
-    ${totalPages > 1 ? `<div style="display:flex;gap:8px;justify-content:center;margin-top:16px">${Array.from({length: totalPages}, (_, i) => `<a href="?page=${i+1}&type=${type||'all'}" class="btn btn-sm ${parseInt(page)===i+1?'btn-green':''}">${i+1}</a>`).join('')}</div>` : ''}
-    </div>
-  `, req.session.user));
-}));
-
-// --- FEATURE 3: BLOOD BANK MANAGEMENT ---
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS blood_bank_inventory (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      blood_type VARCHAR(10) NOT NULL CHECK (blood_type IN ('A+','A-','B+','B-','AB+','AB-','O+','O-')),
-      component VARCHAR(50) NOT NULL CHECK (component IN ('whole_blood','packed_rbc','platelets','plasma','cryoprecipitate')),
-      units_available INTEGER NOT NULL DEFAULT 0,
-      batch_number VARCHAR(100),
-      collected_date DATE,
-      expiry_date DATE,
-      donor_id VARCHAR(100),
-      storage_location VARCHAR(100),
-      status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available','reserved','used','expired','quarantine')),
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_bank_tenant ON blood_bank_inventory(tenant_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_bank_type ON blood_bank_inventory(blood_type, component)');
-
-    await pool.query(`CREATE TABLE IF NOT EXISTS blood_transfusions (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_name VARCHAR(255) NOT NULL,
-      patient_id INTEGER,
-      patient_type VARCHAR(20),
-      blood_type VARCHAR(10) NOT NULL,
-      component VARCHAR(50) NOT NULL,
-      units_transfused INTEGER NOT NULL DEFAULT 1,
-      transfusion_date TIMESTAMPTZ DEFAULT NOW(),
-      reason TEXT,
-      crossmatch_result VARCHAR(20) DEFAULT 'compatible',
-      adverse_reactions TEXT,
-      performed_by VARCHAR(255),
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_trans_tenant ON blood_transfusions(tenant_id)');
-  } catch (e) { console.warn('[v12] blood bank tables:', e.message); }
-})();
-
-app.get('/clinic/blood-bank', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [inventory, recentTransfusions] = await Promise.all([
-    pool.query("SELECT * FROM blood_bank_inventory WHERE tenant_id=$1 AND status='available' ORDER BY blood_type, component", [t]),
-    pool.query("SELECT * FROM blood_transfusions WHERE tenant_id=$1 ORDER BY transfusion_date DESC LIMIT 20", [t])
-  ]);
-  const bloodTypes = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
-  const components = ['whole_blood','packed_rbc','platelets','plasma','cryoprecipitate'];
-  const componentLabels = { whole_blood:'Whole Blood', packed_rbc:'Packed RBC', platelets:'Platelets', plasma:'Plasma', cryoprecipitate:'Cryoprecipitate' };
-  
-  // Build summary matrix
-  const summary = {};
-  for (const bt of bloodTypes) { summary[bt] = { total: 0 }; }
-  for (const row of inventory.rows) {
-    if (!summary[row.blood_type]) summary[row.blood_type] = { total: 0 };
-    summary[row.blood_type][row.component] = row.units_available;
-    summary[row.blood_type].total += row.units_available;
-  }
-
-  res.send(renderPage('Blood Bank', `
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>Blood Bank Management</h1><p>Manage blood inventory and transfusion records</p></div>
-    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
-      <a href="/clinic/blood-bank/add" class="btn btn-green">+ Add Blood Units</a>
-      <a href="/clinic/blood-bank/transfuse" class="btn" style="background:#dc2626;color:white">+ Record Transfusion</a>
-      <a href="/clinic/blood-bank/stock" class="btn">Full Inventory</a>
-    </div>
-    <div class="card"><h3>Blood Stock Summary</h3>
-      <div style="overflow-x:auto"><table><tr><th>Blood Type</th>${components.map(c=>`<th>${componentLabels[c]}</th>`).join('')}<th style="font-weight:700">Total</th></tr>
-      ${bloodTypes.map(bt => `<tr style="${(summary[bt].total||0) < 3 ? 'background:#fee2e2' : (summary[bt].total||0) < 5 ? 'background:#fef3c7' : ''}"><td style="font-weight:700;font-size:16px;color:#dc2626">${bt}</td>${components.map(c=>`<td>${summary[bt]?.[c] || 0}</td>`).join('')}<td style="font-weight:700">${summary[bt]?.total || 0}</td></tr>`).join('')}
-      </table></div>
-    </div>
-    ${recentTransfusions.rows.length > 0 ? `<div class="card" style="margin-top:16px"><h3>Recent Transfusions</h3><table><tr><th>Date</th><th>Patient</th><th>Type</th><th>Component</th><th>Units</th><th>By</th></tr>${recentTransfusions.rows.map(r=>`<tr><td>${new Date(r.transfusion_date).toLocaleString()}</td><td>${esc(r.patient_name)}</td><td style="color:#dc2626;font-weight:700">${r.blood_type}</td><td>${componentLabels[r.component]||r.component}</td><td>${r.units_transfused}</td><td class="muted">${esc(r.performed_by||'')}</td></tr>`).join('')}</table></div>` : ''}
-  `, req.session.user));
-}));
-
-app.get('/clinic/blood-bank/add', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
-  res.send(renderPage('Add Blood Units', `
-    <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Blood Units to Inventory</h2>
-    <form method="POST" action="/clinic/blood-bank/save">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div><label>Blood Type *</label><select name="blood_type" required>${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bt=>`<option value="${bt}">${bt}</option>`).join('')}</select></div>
-        <div><label>Component *</label><select name="component" required><option value="whole_blood">Whole Blood</option><option value="packed_rbc">Packed RBC</option><option value="platelets">Platelets</option><option value="plasma">Plasma</option><option value="cryoprecipitate">Cryoprecipitate</option></select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Units *</label><input name="units_available" type="number" min="1" value="1" required></div>
-        <div><label>Batch Number</label><input name="batch_number" placeholder="e.g. BTN-2026-001"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Collected Date</label><input name="collected_date" type="date"></div>
-        <div><label>Expiry Date *</label><input name="expiry_date" type="date" required></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Donor ID</label><input name="donor_id" placeholder="Donor reference"></div>
-        <div><label>Storage Location</label><input name="storage_location" placeholder="e.g. Fridge 1, Shelf A"></div>
-      </div>
-      <div style="margin-top:12px"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-      <button class="btn btn-green" style="width:100%;margin-top:16px">Add to Inventory</button>
-    </form></div>
-  `, req.session.user));
-});
-
-app.post('/clinic/blood-bank/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { blood_type, component, units_available, batch_number, collected_date, expiry_date, donor_id, storage_location, notes } = req.body;
-  if (!blood_type || !component || !expiry_date) return res.redirect('/clinic/blood-bank/add');
-  // Check expiry
-  if (new Date(expiry_date) < new Date()) {
-    return res.send(renderPage('Error', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Expired Blood</h2><p>Cannot add blood that has already expired.</p><a href="/clinic/blood-bank/add" class="btn">Go Back</a></div>', req.session.user));
-  }
-  await pool.query('INSERT INTO blood_bank_inventory(tenant_id,blood_type,component,units_available,batch_number,collected_date,expiry_date,donor_id,storage_location,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, blood_type, component, parseInt(units_available)||1, batch_number||null, collected_date||null, expiry_date, donor_id||null, storage_location||null, notes||null]);
-  await audit(req.session.user.email, 'blood_bank_add', { blood_type, component, units: units_available });
-  res.redirect('/clinic/blood-bank');
-}));
-
-app.get('/clinic/blood-bank/transfuse', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const available = (await pool.query("SELECT * FROM blood_bank_inventory WHERE tenant_id=$1 AND status='available' AND units_available > 0 AND expiry_date > CURRENT_DATE ORDER BY blood_type", [t])).rows;
-  res.send(renderPage('Record Transfusion', `
-    <div class="card" style="max-width:600px;margin:0 auto"><h2>Record Blood Transfusion</h2>
-    <form method="POST" action="/clinic/blood-bank/transfuse/save">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div><label>Patient Name *</label><input name="patient_name" required></div>
-        <div><label>Patient Blood Type *</label><select name="blood_type" required>${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bt=>`<option value="${bt}">${bt}</option>`).join('')}</select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Component *</label><select name="component" required><option value="whole_blood">Whole Blood</option><option value="packed_rbc">Packed RBC</option><option value="platelets">Platelets</option><option value="plasma">Plasma</option></select></div>
-        <div><label>Units *</label><input name="units_transfused" type="number" min="1" value="1" required></div>
-      </div>
-      <div style="margin-top:12px"><label>Reason *</label><textarea name="reason" rows="2" required placeholder="Indication for transfusion"></textarea></div>
-      <div style="margin-top:12px"><label>Crossmatch Result</label><select name="crossmatch_result"><option value="compatible">Compatible</option><option value="incompatible">Incompatible</option><option value="not_done">Not Done</option></select></div>
-      <div style="margin-top:12px"><label>Adverse Reactions</label><textarea name="adverse_reactions" rows="2" placeholder="Any transfusion reactions observed"></textarea></div>
-      <button class="btn" style="width:100%;margin-top:16px;background:#dc2626;color:white">Record Transfusion</button>
-    </form></div>
-    ${available.length === 0 ? '<p style="text-align:center;color:#dc2626;margin-top:16px">No blood units currently available in inventory.</p>' : ''}
-  `, req.session.user));
-}));
-
-app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_name, patient_id, patient_type, blood_type, component, units_transfused, reason, crossmatch_result, adverse_reactions } = req.body;
-  if (!patient_name || !blood_type || !component || !reason) return res.redirect('/clinic/blood-bank/transfuse');
-  const units = parseInt(units_transfused) || 1;
-  // Check and reserve stock
-  const stock = (await pool.query("UPDATE blood_bank_inventory SET units_available = units_available - $1, status = CASE WHEN units_available - $1 <= 0 THEN 'used' ELSE status END, updated_at = NOW() WHERE tenant_id=$2 AND blood_type=$3 AND component=$4 AND status='available' AND units_available >= $1 RETURNING id, units_available", [units, t, blood_type, component])).rows[0];
-  if (!stock) {
-    return res.send(renderPage('Stock Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Insufficient Blood Stock</h2><p>No available ${blood_type} ${component} units. Please check inventory.</p><a href="/clinic/blood-bank" class="btn">Go Back</a></div>`, req.session.user));
-  }
-  await pool.query('INSERT INTO blood_transfusions(tenant_id,patient_name,patient_id,patient_type,blood_type,component,units_transfused,reason,crossmatch_result,adverse_reactions,performed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, patient_name, patient_id||null, patient_type||'patient', blood_type, component, units, reason, crossmatch_result||'compatible', adverse_reactions||null, req.session.user.name||req.session.user.email]);
-  await audit(req.session.user.email, 'blood_transfusion', { patient_name, blood_type, component, units });
-  res.redirect('/clinic/blood-bank');
-}));
-
-// --- FEATURE 4: MATERNAL / ANTENATAL CARE ---
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS maternal_anc_visits (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_name VARCHAR(255) NOT NULL,
-      patient_id INTEGER,
-      patient_type VARCHAR(20) DEFAULT 'patient',
-      visit_number INTEGER NOT NULL,
-      visit_date DATE NOT NULL DEFAULT CURRENT_DATE,
-      edd DATE,
-      gestational_age_weeks INTEGER,
-      blood_pressure_systolic INTEGER,
-      blood_pressure_diastolic INTEGER,
-      weight_kg DECIMAL(6,2),
-      fundal_height_cm DECIMAL(5,1),
-      fetal_heart_rate INTEGER,
-      presentation VARCHAR(50),
-      urine_protein VARCHAR(20),
-      urine_glucose VARCHAR(20),
-      hemoglobin DECIMAL(5,1),
-      tt_dose INTEGER DEFAULT 0,
-      ipt_dose INTEGER DEFAULT 0,
-      itn_given BOOLEAN DEFAULT false,
-      supplements TEXT,
-      findings TEXT,
-      plan TEXT,
-      next_visit_date DATE,
-      provider VARCHAR(255),
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_maternal_tenant ON maternal_anc_visits(tenant_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_maternal_patient ON maternal_anc_visits(patient_id)');
-
-    await pool.query(`CREATE TABLE IF NOT EXISTS maternal_deliveries (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_name VARCHAR(255) NOT NULL,
-      patient_id INTEGER,
-      delivery_date TIMESTAMPTZ DEFAULT NOW(),
-      delivery_type VARCHAR(30) CHECK (delivery_type IN ('svd','assisted','cesarean','vacuum','forceps')),
-      gestational_age_weeks INTEGER,
-      baby_sex VARCHAR(10),
-      baby_weight_grams INTEGER,
-      apgar_1min SMALLINT,
-      apgar_5min SMALLINT,
-      baby_status VARCHAR(20) DEFAULT 'alive',
-      complications TEXT,
-      provider VARCHAR(255),
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_deliveries_tenant ON maternal_deliveries(tenant_id)');
-  } catch (e) { console.warn('[v12] maternal care tables:', e.message); }
-})();
-
-app.get('/clinic/maternal-care', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [activeANC, totalDeliveries, totalANC] = await Promise.all([
-    pool.query("SELECT DISTINCT ON (patient_id) m.* FROM maternal_anc_visits m WHERE m.tenant_id=$1 ORDER BY m.patient_id, m.visit_number DESC", [t]),
-    pool.query("SELECT COUNT(*)::int FROM maternal_deliveries WHERE tenant_id=$1", [t]),
-    pool.query("SELECT COUNT(DISTINCT patient_id)::int FROM maternal_anc_visits WHERE tenant_id=$1", [t])
-  ]);
-  res.send(renderPage('Maternal Care', `
-    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#f43f5e)"><h1>Maternal Health Care</h1><p>Antenatal care, delivery tracking &amp; postnatal follow-up</p></div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num" style="color:#ec4899">${totalANC.rows[0].count}</div><div>Active ANC Patients</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#059669">${totalDeliveries.rows[0].count}</div><div>Total Deliveries</div></div>
-    </div>
-    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
-      <a href="/clinic/maternal-care/anc/new" class="btn btn-green">+ New ANC Visit</a>
-      <a href="/clinic/maternal-care/delivery/new" class="btn" style="background:#ec4899;color:white">+ Record Delivery</a>
-      <a href="/clinic/maternal-care/register" class="btn">ANC Register</a>
-    </div>
-    <div class="card"><h3>Recent ANC Visits</h3>
-    <table><tr><th>Patient</th><th>Visit #</th><th>Date</th><th>GA (weeks)</th><th>BP</th><th>Weight</th><th>FHR</th><th>Provider</th></tr>
-      ${activeANC.rows.slice(0, 15).map(v => `<tr><td><strong>${esc(v.patient_name)}</strong></td><td>${v.visit_number}</td><td>${new Date(v.visit_date).toLocaleDateString()}</td><td>${v.gestational_age_weeks||'-'}</td><td>${v.blood_pressure_systolic||'-'}/${v.blood_pressure_diastolic||'-'}</td><td>${v.weight_kg||'-'}</td><td>${v.fetal_heart_rate||'-'}</td><td class="muted">${esc(v.provider||'')}</td></tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px" class="muted">No ANC visits recorded</td></tr>'}
-    </table></div>
-  `, req.session.user));
-}));
-
-app.get('/clinic/maternal-care/anc/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
-  res.send(renderPage('New ANC Visit', `
-    <div class="card" style="max-width:700px;margin:0 auto"><h2>Record ANC Visit</h2>
-    <form method="POST" action="/clinic/maternal-care/anc/save">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-        <div><label>Patient Name *</label><input name="patient_name" required></div>
-        <div><label>Visit Number *</label><input name="visit_number" type="number" min="1" value="1" required></div>
-        <div><label>Visit Date *</label><input name="visit_date" type="date" required></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>EDD</label><input name="edd" type="date"></div>
-        <div><label>Gestational Age (weeks)</label><input name="gestational_age_weeks" type="number" min="0" max="42"></div>
-        <div><label>Weight (kg)</label><input name="weight_kg" type="number" step="0.1"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>BP Systolic</label><input name="blood_pressure_systolic" type="number" min="60" max="250"></div>
-        <div><label>BP Diastolic</label><input name="blood_pressure_diastolic" type="number" min="30" max="150"></div>
-        <div><label>Fetal Heart Rate</label><input name="fetal_heart_rate" type="number" min="60" max="220"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Fundal Height (cm)</label><input name="fundal_height_cm" type="number" step="0.1"></div>
-        <div><label>Hemoglobin (g/dL)</label><input name="hemoglobin" type="number" step="0.1"></div>
-        <div><label>Presentation</label><select name="presentation"><option value="">-</option><option value="cephalic">Cephalic</option><option value="breech">Breech</option><option value="transverse">Transverse</option><option value="oblique">Oblique</option></select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Urine Protein</label><select name="urine_protein"><option value="">-</option><option value="nil">Nil</option><option value="trace">Trace</option><option value="+1">+1</option><option value="+2">+2</option><option value="+3">+3</option></select></div>
-        <div><label>Urine Glucose</label><select name="urine_glucose"><option value="">-</option><option value="nil">Nil</option><option value="trace">Trace</option><option value="+1">+1</option><option value="+2">+2</option></select></div>
-        <div><label>Next Visit Date</label><input name="next_visit_date" type="date"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <label><input type="checkbox" name="itn_given" value="true"> ITN Given</label>
-        <div><label>TT Dose</label><input name="tt_dose" type="number" min="0" max="5" value="0"></div>
-        <div><label>IPT Dose</label><input name="ipt_dose" type="number" min="0" max="5" value="0"></div>
-      </div>
-      <div style="margin-top:12px"><label>Findings</label><textarea name="findings" rows="2"></textarea></div>
-      <div style="margin-top:12px"><label>Plan</label><textarea name="plan" rows="2"></textarea></div>
-      <button class="btn btn-green" style="width:100%;margin-top:16px">Save ANC Visit</button>
-    </form></div>
-  `, req.session.user));
-});
-
-app.post('/clinic/maternal-care/anc/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_name, patient_id, visit_number, visit_date, edd, gestational_age_weeks, weight_kg, blood_pressure_systolic, blood_pressure_diastolic, fetal_heart_rate, fundal_height_cm, hemoglobin, presentation, urine_protein, urine_glucose, next_visit_date, itn_given, tt_dose, ipt_dose, findings, plan } = req.body;
-  if (!patient_name || !visit_number || !visit_date) return res.redirect('/clinic/maternal-care/anc/new');
-  // Alert for high BP (pre-eclampsia screening)
-  const systolic = parseInt(blood_pressure_systolic);
-  const diastolic = parseInt(blood_pressure_diastolic);
-  let bpAlert = '';
-  if (systolic >= 140 || diastolic >= 90) {
-    bpAlert = ' ALERT: Elevated BP detected - screen for pre-eclampsia.';
-  }
-  await pool.query(`INSERT INTO maternal_anc_visits(tenant_id,patient_name,patient_id,patient_type,visit_number,visit_date,edd,gestational_age_weeks,blood_pressure_systolic,blood_pressure_diastolic,weight_kg,fundal_height_cm,fetal_heart_rate,presentation,urine_protein,urine_glucose,hemoglobin,tt_dose,ipt_dose,itn_given,findings,plan,next_visit_date,provider) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
-    [t, patient_name, patient_id||null, 'patient', parseInt(visit_number), visit_date, edd||null, gestational_age_weeks||null, systolic||null, diastolic||null, weight_kg||null, fundal_height_cm||null, fetal_heart_rate||null, presentation||null, urine_protein||null, urine_glucose||null, hemoglobin||null, parseInt(tt_dose)||0, parseInt(ipt_dose)||0, itn_given==='true', findings||null, plan||null, next_visit_date||null, req.session.user.name||'']);
-  await audit(req.session.user.email, 'anc_visit', { patient_name, visit_number, bpAlert: bpAlert.trim() });
-  res.redirect('/clinic/maternal-care');
-}));
-
-app.get('/clinic/maternal-care/delivery/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
-  res.send(renderPage('Record Delivery', `
-    <div class="card" style="max-width:700px;margin:0 auto"><h2>Record Delivery</h2>
-    <form method="POST" action="/clinic/maternal-care/delivery/save">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div><label>Patient Name *</label><input name="patient_name" required></div>
-        <div><label>Delivery Type *</label><select name="delivery_type" required><option value="svd">SVD (Normal)</option><option value="assisted">Assisted</option><option value="cesarean">C-Section</option><option value="vacuum">Vacuum</option><option value="forceps">Forceps</option></select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>GA at Delivery (weeks)</label><input name="gestational_age_weeks" type="number" min="20" max="44"></div>
-        <div><label>Baby Sex</label><select name="baby_sex"><option value="">-</option><option value="male">Male</option><option value="female">Female</option></select></div>
-        <div><label>Baby Weight (g)</label><input name="baby_weight_grams" type="number" min="500" max="6000"></div>
-        <div><label>Baby Status</label><select name="baby_status"><option value="alive">Alive</option><option value="stillbirth">Stillbirth</option><option value="neonatal_death">Neonatal Death</option></select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>APGAR 1 min</label><input name="apgar_1min" type="number" min="0" max="10"></div>
-        <div><label>APGAR 5 min</label><input name="apgar_5min" type="number" min="0" max="10"></div>
-      </div>
-      <div style="margin-top:12px"><label>Complications</label><textarea name="complications" rows="2"></textarea></div>
-      <div style="margin-top:12px"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-      <button class="btn" style="width:100%;margin-top:16px;background:#ec4899;color:white">Record Delivery</button>
-    </form></div>
-  `, req.session.user));
-});
-
-app.post('/clinic/maternal-care/delivery/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_name, patient_id, delivery_type, gestational_age_weeks, baby_sex, baby_weight_grams, apgar_1min, apgar_5min, baby_status, complications, notes } = req.body;
-  if (!patient_name || !delivery_type) return res.redirect('/clinic/maternal-care/delivery/new');
-  await pool.query(`INSERT INTO maternal_deliveries(tenant_id,patient_name,patient_id,delivery_date,delivery_type,gestational_age_weeks,baby_sex,baby_weight_grams,apgar_1min,apgar_5min,baby_status,complications,provider,notes) VALUES($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-    [t, patient_name, patient_id||null, delivery_type, gestational_age_weeks||null, baby_sex||null, baby_weight_grams||null, apgar_1min||null, apgar_5min||null, baby_status||'alive', complications||null, req.session.user.name||'', notes||null]);
-  await audit(req.session.user.email, 'delivery_recorded', { patient_name, delivery_type });
-  res.redirect('/clinic/maternal-care');
-}));
-
-// --- FEATURE 5: CLINIC REPORTS & ANALYTICS ---
-app.get('/clinic/reports', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { period = 'month' } = req.query;
-  const dateFilter = period === 'week' ? "created_at >= CURRENT_DATE - INTERVAL '7 days'" : period === 'month' ? "created_at >= CURRENT_DATE - INTERVAL '30 days'" : period === 'year' ? "created_at >= CURRENT_DATE - INTERVAL '1 year'" : '1=1';
-  
-  const [apptStats, rxStats, labStats, revenueStats, queueStats, topDiagnoses] = await Promise.all([
-    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='scheduled')::int as scheduled, COUNT(*) FILTER (WHERE status='completed')::int as completed, COUNT(*) FILTER (WHERE status='cancelled')::int as cancelled FROM clinic_appointments WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
-    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='dispensed')::int as dispensed, COUNT(*) FILTER (WHERE status='pending')::int as pending FROM prescriptions WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
-    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='completed')::int as completed, COUNT(*) FILTER (WHERE status='requested')::int as pending FROM lab_requests WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
-    pool.query(`SELECT COALESCE(SUM(amount),0)::bigint as total_revenue, COUNT(*)::int as paid_invoices FROM payment_transactions WHERE tenant_id=$1 AND status='successful' AND ${dateFilter}`, [t]),
-    pool.query(`SELECT COUNT(*)::int as total, COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60),0)::numeric(6,1) as avg_wait_min FROM patient_queue WHERE tenant_id=$1 AND status='completed' AND ${dateFilter}`, [t]),
-    pool.query(`SELECT diagnosis, COUNT(*)::int as count FROM prescriptions WHERE tenant_id=$1 AND diagnosis IS NOT NULL AND ${dateFilter} GROUP BY diagnosis ORDER BY count DESC LIMIT 10`, [t])
-  ]);
-  
-  const a = apptStats.rows[0] || {};
-  const r = rxStats.rows[0] || {};
-  const l = labStats.rows[0] || {};
-  const rev = revenueStats.rows[0] || {};
-  const q = queueStats.rows[0] || {};
-  
-  res.send(renderPage('Clinic Reports', `
-    <div class="hero" style="background:linear-gradient(135deg,#3b82f6,#6366f1)"><h1>Clinic Analytics &amp; Reports</h1></div>
-    <div style="display:flex;gap:8px;margin-bottom:20px"><a href="?period=week" class="btn btn-sm ${period==='week'?'btn-green':''}">Week</a><a href="?period=month" class="btn btn-sm ${period==='month'?'btn-green':''}">Month</a><a href="?period=year" class="btn btn-sm ${period==='year'?'btn-green':''}">Year</a><a href="?period=all" class="btn btn-sm ${period==='all'?'btn-green':''}">All</a></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
-      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#3b82f6,#6366f1);color:white"><div style="font-size:2rem;font-weight:700">${a.total||0}</div><div>Appointments</div></div>
-      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#059669,#10b981);color:white"><div style="font-size:2rem;font-weight:700">${r.total||0}</div><div>Prescriptions</div></div>
-      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#f59e0b,#d97706);color:white"><div style="font-size:2rem;font-weight:700">${l.total||0}</div><div>Lab Tests</div></div>
-      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#0d9488,#14b8a6);color:white"><div style="font-size:2rem;font-weight:700">UGX ${(parseInt(rev.total_revenue)||0).toLocaleString()}</div><div>Revenue</div></div>
-      <div class="card" style="padding:20px;text-align:center"><div style="font-size:2rem;font-weight:700">${q.total||0}</div><div>Patients Served</div></div>
-      <div class="card" style="padding:20px;text-align:center"><div style="font-size:2rem;font-weight:700">${q.avg_wait_min||0}</div><div>Avg Wait (min)</div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div class="card"><h3>Top Diagnoses</h3><table><tr><th>Diagnosis</th><th>Count</th></tr>${topDiagnoses.rows.map(d=>`<tr><td>${esc(d.diagnosis)}</td><td style="font-weight:700">${d.count}</td></tr>`).join('')||'<tr><td colspan="2" class="muted">No data</td></tr>'}</table></div>
-      <div class="card"><h3>Appointment Summary</h3>
-        <table><tr><th>Status</th><th>Count</th><th>%</th></tr>
-          <tr><td><span class="tag" style="background:#dbeafe">Scheduled</span></td><td>${a.scheduled||0}</td><td>${a.total?Math.round((a.scheduled||0)/a.total*100):0}%</td></tr>
-          <tr><td><span class="tag" style="background:#d1fae5">Completed</span></td><td>${a.completed||0}</td><td>${a.total?Math.round((a.completed||0)/a.total*100):0}%</td></tr>
-          <tr><td><span class="tag" style="background:#fee2e2">Cancelled</span></td><td>${a.cancelled||0}</td><td>${a.total?Math.round((a.cancelled||0)/a.total*100):0}%</td></tr>
-        </table>
-      </div>
-    </div>
-  `, req.session.user));
-}));
-
-// --- FEATURE 6: STOCK EXPIRY ALERTS ---
-app.get('/clinic/pharmacy/expiry-alerts', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [expired, expiringSoon, lowStock] = await Promise.all([
-    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND expiry_date < CURRENT_DATE AND quantity > 0 ORDER BY expiry_date", [t]),
-    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '90 days' AND quantity > 0 ORDER BY expiry_date", [t]),
-    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND quantity > 0 AND quantity <= reorder_level ORDER BY quantity ASC", [t])
-  ]);
-  res.send(renderPage('Pharmacy Alerts', `
-    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Pharmacy Alerts</h1><p>Expiry and stock level monitoring</p></div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${expired.rows.length}</div><div>Expired Drugs</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${expiringSoon.rows.length}</div><div>Expiring Soon (90d)</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${lowStock.rows.length}</div><div>Low Stock</div></div>
-    </div>
-    ${expired.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #dc2626"><h3 style="color:#dc2626">EXPIRED DRUGS (${expired.rows.length})</h3><table><tr><th>Drug</th><th>Batch</th><th>Qty</th><th>Expired</th><th>Action</th></tr>${expired.rows.map(d=>`<tr style="background:#fee2e2"><td>${esc(d.medicine_name)}</td><td>${esc(d.batch_number||'-')}</td><td>${d.quantity}</td><td>${new Date(d.expiry_date).toLocaleDateString()}</td><td><form method="POST" action="/clinic/pharmacy/inventory/${d.id}/writeoff" style="display:inline"><button class="btn btn-sm" style="background:#dc2626;color:white" onclick="return confirm('Write off this expired drug?')">Write Off</button></form></td></tr>`).join('')}</table></div>` : ''}
-    ${expiringSoon.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #f59e0b"><h3 style="color:#d97706">EXPIRING SOON (${expiringSoon.rows.length})</h3><table><tr><th>Drug</th><th>Batch</th><th>Qty</th><th>Expiry Date</th><th>Days Left</th></tr>${expiringSoon.rows.map(d=>{const days=Math.ceil((new Date(d.expiry_date)-new Date())/(1000*60*60*24));return `<tr style="background:#fef3c7"><td>${esc(d.medicine_name)}</td><td>${esc(d.batch_number||'-')}</td><td>${d.quantity}</td><td>${new Date(d.expiry_date).toLocaleDateString()}</td><td style="font-weight:700;color:${days<30?'#dc2626':'#d97706'}">${days}d</td></tr>`;}).join('')}</table></div>` : ''}
-    ${lowStock.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #3b82f6"><h3 style="color:#3b82f6">LOW STOCK (${lowStock.rows.length})</h3><table><tr><th>Drug</th><th>Current Qty</th><th>Reorder Level</th><th>Category</th></tr>${lowStock.rows.map(d=>`<tr style="background:#dbeafe"><td>${esc(d.medicine_name)}</td><td style="font-weight:700;color:#dc2626">${d.quantity}</td><td>${d.reorder_level}</td><td>${esc(d.category||'')}</td></tr>`).join('')}</table></div>` : ''}
-    ${expired.rows.length===0 && expiringSoon.rows.length===0 && lowStock.rows.length===0 ? '<div class="card" style="text-align:center;padding:40px;color:#059669"><h2>All Clear!</h2><p>No pharmacy alerts at this time.</p></div>' : ''}
-  `, req.session.user));
-}));
-
-app.post('/clinic/pharmacy/inventory/:id/writeoff', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const item = (await pool.query("SELECT * FROM pharmacy_inventory WHERE id=$1 AND tenant_id=$2", [req.params.id, t])).rows[0];
-  if (!item) return res.redirect('/clinic/pharmacy/expiry-alerts');
-  const prevQty = item.quantity;
-  await pool.query("UPDATE pharmacy_inventory SET quantity=0 WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
-  // Record in stock movements
-  await pool.query("INSERT INTO pharmacy_stock_movements(tenant_id,drug_id,medicine_name,movement_type,quantity,previous_quantity,new_quantity,reference_type,reference_id,batch_number,expiry_date,notes,performed_by) VALUES($1,$2,$3,'expiry_writeoff',$4,$5,0,'expiry',NULL,$6,$7,'Expired stock written off',$8)", [t, item.id, item.medicine_name, prevQty, prevQty, item.batch_number||null, item.expiry_date||null, req.session.user.email]);
-  await audit(req.session.user.email, 'expiry_writeoff', { drug: item.medicine_name, qty: prevQty });
-  res.redirect('/clinic/pharmacy/expiry-alerts');
-}));
-
-// --- FEATURE 7: PRESCRIPTION REFILL WORKFLOW ---
-app.get('/clinic/prescriptions/refill-requests', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const requests = (await pool.query("SELECT * FROM prescription_refills WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
-  res.send(renderPage('Refill Requests', `
-    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)"><h1>Prescription Refill Requests</h1><p>Manage patient medication refill requests</p></div>
-    ${requests.length > 0 ? `<div class="card"><table><tr><th>Date</th><th>Patient</th><th>Rx #</th><th>Medicine</th><th>Status</th><th>Actions</th></tr>${requests.map(r=>`<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${esc(r.patient_name||'')}</td><td>#${r.prescription_id}</td><td>${esc(r.medicine_name||'')}</td><td><span class="tag" style="background:${r.status==='pending'?'#f59e0b':r.status==='approved'?'#d1fae5':'#fee2e2'}">${esc(r.status)}</span></td><td>${r.status==='pending'?`<form method="POST" action="/clinic/prescriptions/refill/${r.id}/approve" style="display:inline"><button class="btn btn-sm btn-green">Approve</button></form> <form method="POST" action="/clinic/prescriptions/refill/${r.id}/reject" style="display:inline"><button class="btn btn-sm" style="background:#dc2626;color:white">Reject</button></form>`:''}</td></tr>`).join('')}</table></div>` : '<div class="card" style="text-align:center;padding:40px"><p class="muted">No refill requests at this time.</p></div>'}
-  `, req.session.user));
-}));
-
-// Ensure prescription_refills table exists
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS prescription_refills (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      prescription_id INTEGER NOT NULL,
-      item_id INTEGER,
-      patient_name VARCHAR(255),
-      medicine_name VARCHAR(255),
-      requested_by VARCHAR(255),
-      status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      reviewed_at TIMESTAMPTZ
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_rx_refills_tenant ON prescription_refills(tenant_id)');
-  } catch(e) { console.warn('[v12] prescription_refills:', e.message); }
-})();
-
-app.post('/clinic/prescriptions/refill/:id/approve', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  await pool.query("UPDATE prescription_refills SET status='approved', reviewed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'refill_approved', { refill_id: req.params.id });
-  res.redirect('/clinic/prescriptions/refill-requests');
-}));
-
-app.post('/clinic/prescriptions/refill/:id/reject', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  await pool.query("UPDATE prescription_refills SET status='rejected', reviewed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'refill_rejected', { refill_id: req.params.id });
-  res.redirect('/clinic/prescriptions/refill-requests');
-}));
-
-// --- FEATURE 8: AUTOMATED VITALS ALERTS ---
-// Flag abnormal vitals with WebSocket notification
-const VITAL_ALERTS = {
-  temp_high: 39.5, temp_low: 35.0,
-  bp_systolic_high: 180, bp_systolic_low: 80,
-  bp_diastolic_high: 120, bp_diastolic_low: 50,
-  hr_high: 150, hr_low: 40,
-  spo2_low: 90, spo2_critical: 85,
-  pain_high: 8
-};
-
-function checkVitalAlerts(tenantId, vitals) {
-  const alerts = [];
-  if (vitals.temperature) {
-    if (vitals.temperature >= VITAL_ALERTS.temp_high) alerts.push({ level: 'critical', message: `Critical temperature: ${vitals.temperature}C`, metric: 'temperature' });
-    else if (vitals.temperature > 38.0) alerts.push({ level: 'warning', message: `Fever: ${vitals.temperature}C`, metric: 'temperature' });
-    else if (vitals.temperature <= VITAL_ALERTS.temp_low) alerts.push({ level: 'critical', message: `Hypothermia: ${vitals.temperature}C`, metric: 'temperature' });
-  }
-  if (vitals.bp_systolic) {
-    if (vitals.bp_systolic >= VITAL_ALERTS.bp_systolic_high || (vitals.bp_diastolic && vitals.bp_diastolic >= VITAL_ALERTS.bp_diastolic_high))
-      alerts.push({ level: 'critical', message: `Hypertensive crisis: ${vitals.bp_systolic}/${vitals.bp_diastolic}`, metric: 'blood_pressure' });
-    else if (vitals.bp_systolic >= 140 || (vitals.bp_diastolic && vitals.bp_diastolic >= 90))
-      alerts.push({ level: 'warning', message: `High BP: ${vitals.bp_systolic}/${vitals.bp_diastolic}`, metric: 'blood_pressure' });
-  }
-  if (vitals.heart_rate) {
-    if (vitals.heart_rate >= VITAL_ALERTS.hr_high) alerts.push({ level: 'critical', message: `Tachycardia: ${vitals.heart_rate} bpm`, metric: 'heart_rate' });
-    else if (vitals.heart_rate <= VITAL_ALERTS.hr_low) alerts.push({ level: 'critical', message: `Bradycardia: ${vitals.heart_rate} bpm`, metric: 'heart_rate' });
-  }
-  if (vitals.spo2) {
-    if (vitals.spo2 <= VITAL_ALERTS.spo2_critical) alerts.push({ level: 'critical', message: `Critical SpO2: ${vitals.spo2}%`, metric: 'spo2' });
-    else if (vitals.spo2 <= VITAL_ALERTS.spo2_low) alerts.push({ level: 'warning', message: `Low SpO2: ${vitals.spo2}%`, metric: 'spo2' });
-  }
-  if (vitals.pain_score && vitals.pain_score >= VITAL_ALERTS.pain_high) alerts.push({ level: 'warning', message: `Severe pain: ${vitals.pain_score}/10`, metric: 'pain' });
-  
-  if (alerts.length > 0) {
-    wsBroadcast(tenantId, { type: 'vital_alert', patient: vitals.patient_name, alerts, timestamp: new Date().toISOString() });
-    alerts.forEach(a => console.log(`[VITAL ALERT] Tenant ${tenantId}: ${a.level} - ${a.message} (${vitals.patient_name})`));
-  }
-  return alerts;
-}
-
-// --- FEATURE 9: PRINTABLE PRESCRIPTIONS ---
-app.get('/clinic/prescriptions/:id/print', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const rx = (await pool.query('SELECT p.*, cs.name as doctor FROM prescriptions p LEFT JOIN clinic_staff cs ON p.doctor_id=cs.id WHERE p.tenant_id=$1 AND p.id=$2', [t, req.params.id])).rows[0];
-  if (!rx) return res.status(404).send('Not found');
-  const items = (await pool.query('SELECT * FROM prescription_items WHERE prescription_id=$1', [rx.id])).rows;
-  const tenant = (await pool.query('SELECT name, business_type, subdomain FROM tenants WHERE id=$1', [t])).rows[0];
-  
-  res.send(`<!DOCTYPE html><html><head><title>Prescription #${rx.id}</title>
-    <style>
-      body{font-family:Arial,sans-serif;margin:40px;color:#333}
-      .header{display:flex;justify-content:space-between;border-bottom:3px double #333;padding-bottom:15px;margin-bottom:20px}
-      .header h1{margin:0;font-size:24px;color:#1a5632}
-      .header p{margin:2px 0;color:#666;font-size:13px}
-      .rx-content{margin:20px 0}
-      .patient-info{background:#f8fafc;padding:15px;border-radius:6px;margin-bottom:20px}
-      .patient-info div{margin:4px 0}
-      table{width:100%;border-collapse:collapse;margin:15px 0}
-      th,td{border:1px solid #ddd;padding:8px;text-align:left;font-size:13px}
-      th{background:#f1f5f9;font-weight:600}
-      .footer{margin-top:60px;display:flex;justify-content:space-between}
-      .signature{width:200px;text-align:center;border-top:1px solid #333;padding-top:5px;font-size:12px}
-      @media print{body{margin:20px}.no-print{display:none}}
-    </style></head><body>
-    <div class="header"><div><h1>${esc(tenant?.name||'Health Facility')}</h1><p>${esc(tenant?.business_type||'Healthcare Facility')}</p><p>${esc(tenant?.subdomain||'')}.comfort.ug</p></div><div style="text-align:right"><h2 style="margin:0;color:#1a5632">PRESCRIPTION</h2><p>#${rx.id}</p><p>${new Date(rx.created_at).toLocaleDateString()}</p></div></div>
-    <div class="patient-info"><div><strong>Patient:</strong> ${esc(rx.patient_name)}</div><div><strong>Doctor:</strong> ${esc(rx.doctor_name||rx.doctor||'-')}</div>${rx.diagnosis?`<div><strong>Diagnosis:</strong> ${esc(rx.diagnosis)}</div>`:''}</div>
-    <table><thead><tr><th>#</th><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Qty</th><th>Instructions</th></tr></thead><tbody>${items.map((item,i)=>`<tr><td>${i+1}</td><td><strong>${esc(item.medicine_name)}</strong></td><td>${esc(item.dosage||'-')}</td><td>${esc(item.frequency||'-')}</td><td>${esc(item.duration||'-')}</td><td>${item.quantity}</td><td>${esc(item.instructions||'-')}</td></tr>`).join('')}</tbody></table>
-    ${rx.notes?`<p><strong>Notes:</strong> ${esc(rx.notes)}</p>`:''}
-    <div class="footer"><div class="signature">Prescribing Doctor<br><br>${esc(rx.doctor_name||'')}</div><div class="signature">Dispensing Pharmacist<br><br><br></div></div>
-    <div class="no-print" style="margin-top:20px;text-align:center"><button onclick="window.print()" style="padding:10px 30px;background:#059669;color:white;border:none;border-radius:6px;font-size:16px;cursor:pointer">Print Prescription</button></div>
-    </body></html>`);
-}));
-
-// --- FEATURE 10: PATIENT CONSENT MANAGEMENT ---
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS patient_consent (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER,
-      patient_type VARCHAR(20),
-      patient_name VARCHAR(255) NOT NULL,
-      consent_type VARCHAR(100) NOT NULL,
-      consent_status VARCHAR(20) DEFAULT 'signed' CHECK (consent_status IN ('signed','declined','revoked','expired')),
-      details TEXT,
-      signed_by VARCHAR(255),
-      signed_at TIMESTAMPTZ DEFAULT NOW(),
-      expires_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_consent_tenant ON patient_consent(tenant_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_consent_patient ON patient_consent(patient_id)');
-  } catch(e) { console.warn('[v12] patient_consent:', e.message); }
-})();
-
-app.get('/clinic/consent/:type/:id/new', requireAuth, requireNotBanned, requireFeature('patient_ehr'), (req, res) => {
-  const consentTypes = ['treatment', 'surgery', 'blood_transfusion', 'data_privacy', 'photography', 'research', 'telemedicine', 'discharge'];
-  const consentLabels = { treatment: 'Consent to Treatment', surgery: 'Consent to Surgery', blood_transfusion: 'Consent to Blood Transfusion', data_privacy: 'Data Privacy Consent (HIPAA)', photography: 'Photography/Recording Consent', research: 'Research Participation Consent', telemedicine: 'Telemedicine Consent', discharge: 'Discharge Against Medical Advice' };
-  res.send(renderPage('Record Patient Consent', `
-    <div class="card" style="max-width:600px;margin:0 auto"><h2>Record Patient Consent</h2>
-    <form method="POST" action="/clinic/consent/${req.params.type}/${req.params.id}/save">
-      <input type="hidden" name="patient_type" value="${req.params.type}">
-      <input type="hidden" name="patient_id" value="${req.params.id}">
-      <div><label>Consent Type *</label><select name="consent_type" required>${consentTypes.map(ct=>`<option value="${ct}">${consentLabels[ct]||ct}</option>`).join('')}</select></div>
-      <div style="margin-top:12px"><label>Status *</label><select name="consent_status"><option value="signed">Signed</option><option value="declined">Declined</option></select></div>
-      <div style="margin-top:12px"><label>Details / Notes</label><textarea name="details" rows="3"></textarea></div>
-      <button class="btn btn-green" style="width:100%;margin-top:16px">Record Consent</button>
-    </form></div>
-  `, req.session.user));
-});
-
-app.post('/clinic/consent/:type/:id/save', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { consent_type, consent_status, details } = req.body;
-  await pool.query('INSERT INTO patient_consent(tenant_id,patient_id,patient_type,patient_name,consent_type,consent_status,details,signed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, req.params.id, req.params.type, req.body.patient_name||'Patient', consent_type, consent_status||'signed', details||null, req.session.user.email]);
-  await audit(req.session.user.email, 'consent_recorded', { patient_id: req.params.id, consent_type });
-  res.redirect(`/clinic/patient/${req.params.type}/${req.params.id}/ehr`);
-}));
-
-console.log('[v12] All v12 health features loaded successfully');
-
-// === v22 MEGA MODULE LOAD: 143 Additional Modules ===
-try { const m = require('./3d-printing'); m(app, db, pool, renderPage, esc); console.log('[3DPrinting] 3DPrinting module loaded'); } catch(e) { console.warn('[3DPrinting] Error:', e.message); }
-try { const m = require('./academic-integrity'); m(app, db, pool, renderPage, esc); console.log('[AcademicIntegrity] AcademicIntegrity module loaded'); } catch(e) { console.warn('[AcademicIntegrity] Error:', e.message); }
-try { const m = require('./adaptive-learning'); m(app, db, pool, renderPage, esc); console.log('[AdaptiveLearning] AdaptiveLearning module loaded'); } catch(e) { console.warn('[AdaptiveLearning] Error:', e.message); }
-try { const m = require('./advanced-platform'); m(app, db, pool, renderPage, esc); console.log('[AdvancedPlatform] AdvancedPlatform module loaded'); } catch(e) { console.warn('[AdvancedPlatform] Error:', e.message); }
-try { const m = require('./ai-auto-grading'); m(app, db, pool, renderPage, esc); console.log('[AiAutoGrading] AiAutoGrading module loaded'); } catch(e) { console.warn('[AiAutoGrading] Error:', e.message); }
-try { const m = require('./ai-content-engine'); m(app, db, pool, renderPage, esc); console.log('[AiContentEngine] AiContentEngine module loaded'); } catch(e) { console.warn('[AiContentEngine] Error:', e.message); }
-try { const m = require('./ai-dropout-predictor'); m(app, db, pool, renderPage, esc); console.log('[AiDropoutPredictor] AiDropoutPredictor module loaded'); } catch(e) { console.warn('[AiDropoutPredictor] Error:', e.message); }
-try { const m = require('./ai-lesson-planner-v2'); m(app, db, pool, renderPage, esc); console.log('[AiLessonPlannerV2] AiLessonPlannerV2 module loaded'); } catch(e) { console.warn('[AiLessonPlannerV2] Error:', e.message); }
-try { const m = require('./ai-lesson-plans'); m(app, db, pool, renderPage, esc); console.log('[AiLessonPlans] AiLessonPlans module loaded'); } catch(e) { console.warn('[AiLessonPlans] Error:', e.message); }
-try { const m = require('./ai-resume-builder'); m(app, db, pool, renderPage, esc); console.log('[AiResumeBuilder] AiResumeBuilder module loaded'); } catch(e) { console.warn('[AiResumeBuilder] Error:', e.message); }
-try { const m = require('./ai-tutor'); m(app, db, pool, renderPage, esc); console.log('[AiTutor] AiTutor module loaded'); } catch(e) { console.warn('[AiTutor] Error:', e.message); }
-try { const m = require('./air-quality-monitor'); m(app, db, pool, renderPage, esc); console.log('[AirQualityMonitor] AirQualityMonitor module loaded'); } catch(e) { console.warn('[AirQualityMonitor] Error:', e.message); }
-try { const m = require('./alumni-mentoring'); m(app, db, pool, renderPage, esc); console.log('[AlumniMentoring] AlumniMentoring module loaded'); } catch(e) { console.warn('[AlumniMentoring] Error:', e.message); }
-try { const m = require('./analytics-engine'); m(app, db, pool, renderPage, esc); console.log('[AnalyticsEngine] AnalyticsEngine module loaded'); } catch(e) { console.warn('[AnalyticsEngine] Error:', e.message); }
-try { const m = require('./anti-bullying'); m(app, db, pool, renderPage, esc); console.log('[AntiBullying] AntiBullying module loaded'); } catch(e) { console.warn('[AntiBullying] Error:', e.message); }
-try { const m = require('./ar-campus-tour'); m(app, db, pool, renderPage, esc); console.log('[ArCampusTour] ArCampusTour module loaded'); } catch(e) { console.warn('[ArCampusTour] Error:', e.message); }
-try { const m = require('./art-gallery'); m(app, db, pool, renderPage, esc); console.log('[ArtGallery] ArtGallery module loaded'); } catch(e) { console.warn('[ArtGallery] Error:', e.message); }
-try { const m = require('./blockchain-certificates'); m(app, db, pool, renderPage, esc); console.log('[BlockchainCertificates] BlockchainCertificates module loaded'); } catch(e) { console.warn('[BlockchainCertificates] Error:', e.message); }
-try { const m = require('./blockchain-gradebook'); m(app, db, pool, renderPage, esc); console.log('[BlockchainGradebook] BlockchainGradebook module loaded'); } catch(e) { console.warn('[BlockchainGradebook] Error:', e.message); }
-try { const m = require('./bus-route-optimizer'); m(app, db, pool, renderPage, esc); console.log('[BusRouteOptimizer] BusRouteOptimizer module loaded'); } catch(e) { console.warn('[BusRouteOptimizer] Error:', e.message); }
-try { const m = require('./campus-podcast'); m(app, db, pool, renderPage, esc); console.log('[CampusPodcast] CampusPodcast module loaded'); } catch(e) { console.warn('[CampusPodcast] Error:', e.message); }
-try { const m = require('./canteen-preorder'); m(app, db, pool, renderPage, esc); console.log('[CanteenPreorder] CanteenPreorder module loaded'); } catch(e) { console.warn('[CanteenPreorder] Error:', e.message); }
-try { const m = require('./career-guidance'); m(app, db, pool, renderPage, esc); console.log('[CareerGuidance] CareerGuidance module loaded'); } catch(e) { console.warn('[CareerGuidance] Error:', e.message); }
-try { const m = require('./carpool-coordination'); m(app, db, pool, renderPage, esc); console.log('[CarpoolCoordination] CarpoolCoordination module loaded'); } catch(e) { console.warn('[CarpoolCoordination] Error:', e.message); }
-try { const m = require('./chess-club'); m(app, db, pool, renderPage, esc); console.log('[ChessClub] ChessClub module loaded'); } catch(e) { console.warn('[ChessClub] Error:', e.message); }
-try { const m = require('./code-runner'); m(app, db, pool, renderPage, esc); console.log('[CodeRunner] CodeRunner module loaded'); } catch(e) { console.warn('[CodeRunner] Error:', e.message); }
-try { const m = require('./cooking-club'); m(app, db, pool, renderPage, esc); console.log('[CookingClub] CookingClub module loaded'); } catch(e) { console.warn('[CookingClub] Error:', e.message); }
-try { const m = require('./cross-school-collab'); m(app, db, pool, renderPage, esc); console.log('[CrossSchoolCollab] CrossSchoolCollab module loaded'); } catch(e) { console.warn('[CrossSchoolCollab] Error:', e.message); }
-try { const m = require('./debate-club'); m(app, db, pool, renderPage, esc); console.log('[DebateClub] DebateClub module loaded'); } catch(e) { console.warn('[DebateClub] Error:', e.message); }
-try { const m = require('./digital-signatures'); m(app, db, pool, renderPage, esc); console.log('[DigitalSignatures] DigitalSignatures module loaded'); } catch(e) { console.warn('[DigitalSignatures] Error:', e.message); }
-try { const m = require('./drama-club'); m(app, db, pool, renderPage, esc); console.log('[DramaClub] DramaClub module loaded'); } catch(e) { console.warn('[DramaClub] Error:', e.message); }
-try { const m = require('./drone-education'); m(app, db, pool, renderPage, esc); console.log('[DroneEducation] DroneEducation module loaded'); } catch(e) { console.warn('[DroneEducation] Error:', e.message); }
-try { const m = require('./email-automation'); m(app, db, pool, renderPage, esc); console.log('[EmailAutomation] EmailAutomation module loaded'); } catch(e) { console.warn('[EmailAutomation] Error:', e.message); }
-try { const m = require('./emergency-alerts'); m(app, db, pool, renderPage, esc); console.log('[EmergencyAlerts] EmergencyAlerts module loaded'); } catch(e) { console.warn('[EmergencyAlerts] Error:', e.message); }
-try { const m = require('./emotion-analytics'); m(app, db, pool, renderPage, esc); console.log('[EmotionAnalytics] EmotionAnalytics module loaded'); } catch(e) { console.warn('[EmotionAnalytics] Error:', e.message); }
-try { const m = require('./engagement-engine'); m(app, db, pool, renderPage, esc); console.log('[EngagementEngine] EngagementEngine module loaded'); } catch(e) { console.warn('[EngagementEngine] Error:', e.message); }
-try { const m = require('./exam-seating'); m(app, db, pool, renderPage, esc); console.log('[ExamSeating] ExamSeating module loaded'); } catch(e) { console.warn('[ExamSeating] Error:', e.message); }
-try { const m = require('./eye-tracking'); m(app, db, pool, renderPage, esc); console.log('[EyeTracking] EyeTracking module loaded'); } catch(e) { console.warn('[EyeTracking] Error:', e.message); }
-try { const m = require('./facial-attendance'); m(app, db, pool, renderPage, esc); console.log('[FacialAttendance] FacialAttendance module loaded'); } catch(e) { console.warn('[FacialAttendance] Error:', e.message); }
-try { const m = require('./features-block'); m(app, db, pool, renderPage, esc); console.log('[FeaturesBlock] FeaturesBlock module loaded'); } catch(e) { console.warn('[FeaturesBlock] Error:', e.message); }
-try { const m = require('./fitness-ai'); m(app, db, pool, renderPage, esc); console.log('[FitnessAi] FitnessAi module loaded'); } catch(e) { console.warn('[FitnessAi] Error:', e.message); }
-try { const m = require('./fundraising-mega'); m(app, db, pool, renderPage, esc); console.log('[FundraisingMega] FundraisingMega module loaded'); } catch(e) { console.warn('[FundraisingMega] Error:', e.message); }
-try { const m = require('./fundraising-mega2'); m(app, db, pool, renderPage, esc); console.log('[FundraisingMega2] FundraisingMega2 module loaded'); } catch(e) { console.warn('[FundraisingMega2] Error:', e.message); }
-try { const m = require('./fundraising-ultimate'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate] FundraisingUltimate module loaded'); } catch(e) { console.warn('[FundraisingUltimate] Error:', e.message); }
-try { const m = require('./fundraising-ultimate10'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate10] FundraisingUltimate10 module loaded'); } catch(e) { console.warn('[FundraisingUltimate10] Error:', e.message); }
-try { const m = require('./fundraising-ultimate11'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate11] FundraisingUltimate11 module loaded'); } catch(e) { console.warn('[FundraisingUltimate11] Error:', e.message); }
-try { const m = require('./fundraising-ultimate2'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate2] FundraisingUltimate2 module loaded'); } catch(e) { console.warn('[FundraisingUltimate2] Error:', e.message); }
-try { const m = require('./fundraising-ultimate3'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate3] FundraisingUltimate3 module loaded'); } catch(e) { console.warn('[FundraisingUltimate3] Error:', e.message); }
-try { const m = require('./fundraising-ultimate4'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate4] FundraisingUltimate4 module loaded'); } catch(e) { console.warn('[FundraisingUltimate4] Error:', e.message); }
-try { const m = require('./fundraising-ultimate5'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate5] FundraisingUltimate5 module loaded'); } catch(e) { console.warn('[FundraisingUltimate5] Error:', e.message); }
-try { const m = require('./fundraising-ultimate6'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate6] FundraisingUltimate6 module loaded'); } catch(e) { console.warn('[FundraisingUltimate6] Error:', e.message); }
-try { const m = require('./fundraising-ultimate7'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate7] FundraisingUltimate7 module loaded'); } catch(e) { console.warn('[FundraisingUltimate7] Error:', e.message); }
-try { const m = require('./fundraising-ultimate8'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate8] FundraisingUltimate8 module loaded'); } catch(e) { console.warn('[FundraisingUltimate8] Error:', e.message); }
-try { const m = require('./fundraising-ultimate9'); m(app, db, pool, renderPage, esc); console.log('[FundraisingUltimate9] FundraisingUltimate9 module loaded'); } catch(e) { console.warn('[FundraisingUltimate9] Error:', e.message); }
-try { const m = require('./gamification-engine'); m(app, db, pool, renderPage, esc); console.log('[GamificationEngine] GamificationEngine module loaded'); } catch(e) { console.warn('[GamificationEngine] Error:', e.message); }
-try { const m = require('./gate-pass'); m(app, db, pool, renderPage, esc); console.log('[GatePass] GatePass module loaded'); } catch(e) { console.warn('[GatePass] Error:', e.message); }
-try { const m = require('./gesture-control'); m(app, db, pool, renderPage, esc); console.log('[GestureControl] GestureControl module loaded'); } catch(e) { console.warn('[GestureControl] Error:', e.message); }
-try { const m = require('./global-expansion-engine'); m(app, db, pool, renderPage, esc); console.log('[GlobalExpansionEngine] GlobalExpansionEngine module loaded'); } catch(e) { console.warn('[GlobalExpansionEngine] Error:', e.message); }
-try { const m = require('./global-viral-engine'); m(app, db, pool, renderPage, esc); console.log('[GlobalViralEngine] GlobalViralEngine module loaded'); } catch(e) { console.warn('[GlobalViralEngine] Error:', e.message); }
-try { const m = require('./green-campus'); m(app, db, pool, renderPage, esc); console.log('[GreenCampus] GreenCampus module loaded'); } catch(e) { console.warn('[GreenCampus] Error:', e.message); }
-try { const m = require('./hackathon-platform'); m(app, db, pool, renderPage, esc); console.log('[HackathonPlatform] HackathonPlatform module loaded'); } catch(e) { console.warn('[HackathonPlatform] Error:', e.message); }
-try { const m = require('./industry-partnerships'); m(app, db, pool, renderPage, esc); console.log('[IndustryPartnerships] IndustryPartnerships module loaded'); } catch(e) { console.warn('[IndustryPartnerships] Error:', e.message); }
-try { const m = require('./innovation-lab'); m(app, db, pool, renderPage, esc); console.log('[InnovationLab] InnovationLab module loaded'); } catch(e) { console.warn('[InnovationLab] Error:', e.message); }
-try { const m = require('./interactive-maps'); m(app, db, pool, renderPage, esc); console.log('[InteractiveMaps] InteractiveMaps module loaded'); } catch(e) { console.warn('[InteractiveMaps] Error:', e.message); }
-try { const m = require('./interactive-whiteboard'); m(app, db, pool, renderPage, esc); console.log('[InteractiveWhiteboard] InteractiveWhiteboard module loaded'); } catch(e) { console.warn('[InteractiveWhiteboard] Error:', e.message); }
-try { const m = require('./internship-tracker'); m(app, db, pool, renderPage, esc); console.log('[InternshipTracker] InternshipTracker module loaded'); } catch(e) { console.warn('[InternshipTracker] Error:', e.message); }
-try { const m = require('./interview-simulator'); m(app, db, pool, renderPage, esc); console.log('[InterviewSimulator] InterviewSimulator module loaded'); } catch(e) { console.warn('[InterviewSimulator] Error:', e.message); }
-try { const m = require('./iot-workshop'); m(app, db, pool, renderPage, esc); console.log('[IotWorkshop] IotWorkshop module loaded'); } catch(e) { console.warn('[IotWorkshop] Error:', e.message); }
-try { const m = require('./job-shadow'); m(app, db, pool, renderPage, esc); console.log('[JobShadow] JobShadow module loaded'); } catch(e) { console.warn('[JobShadow] Error:', e.message); }
-try { const m = require('./lab-manager'); m(app, db, pool, renderPage, esc); console.log('[LabManager] LabManager module loaded'); } catch(e) { console.warn('[LabManager] Error:', e.message); }
-try { const m = require('./language-lab'); m(app, db, pool, renderPage, esc); console.log('[LanguageLab] LanguageLab module loaded'); } catch(e) { console.warn('[LanguageLab] Error:', e.message); }
-try { const m = require('./leadership-program'); m(app, db, pool, renderPage, esc); console.log('[LeadershipProgram] LeadershipProgram module loaded'); } catch(e) { console.warn('[LeadershipProgram] Error:', e.message); }
-try { const m = require('./lost-found'); m(app, db, pool, renderPage, esc); console.log('[LostFound] LostFound module loaded'); } catch(e) { console.warn('[LostFound] Error:', e.message); }
-try { const m = require('./marketplace-vendor'); m(app, db, pool, renderPage, esc); console.log('[MarketplaceVendor] MarketplaceVendor module loaded'); } catch(e) { console.warn('[MarketplaceVendor] Error:', e.message); }
-try { const m = require('./media-engine'); m(app, db, pool, renderPage, esc); console.log('[MediaEngine] MediaEngine module loaded'); } catch(e) { console.warn('[MediaEngine] Error:', e.message); }
-try { const m = require('./mental-health'); m(app, db, pool, renderPage, esc); console.log('[MentalHealth] MentalHealth module loaded'); } catch(e) { console.warn('[MentalHealth] Error:', e.message); }
-try { const m = require('./metaverse-classroom'); m(app, db, pool, renderPage, esc); console.log('[MetaverseClassroom] MetaverseClassroom module loaded'); } catch(e) { console.warn('[MetaverseClassroom] Error:', e.message); }
-try { const m = require('./monetization-engine'); m(app, db, pool, renderPage, esc); console.log('[MonetizationEngine] MonetizationEngine module loaded'); } catch(e) { console.warn('[MonetizationEngine] Error:', e.message); }
-try { const m = require('./music-studio'); m(app, db, pool, renderPage, esc); console.log('[MusicStudio] MusicStudio module loaded'); } catch(e) { console.warn('[MusicStudio] Error:', e.message); }
-try { const m = require('./nft-student-art'); m(app, db, pool, renderPage, esc); console.log('[NftStudentArt] NftStudentArt module loaded'); } catch(e) { console.warn('[NftStudentArt] Error:', e.message); }
-try { const m = require('./noise-monitor'); m(app, db, pool, renderPage, esc); console.log('[NoiseMonitor] NoiseMonitor module loaded'); } catch(e) { console.warn('[NoiseMonitor] Error:', e.message); }
-try { const m = require('./nutrition-ai'); m(app, db, pool, renderPage, esc); console.log('[NutritionAi] NutritionAi module loaded'); } catch(e) { console.warn('[NutritionAi] Error:', e.message); }
-try { const m = require('./omr-scanner'); m(app, db, pool, renderPage, esc); console.log('[OmrScanner] OmrScanner module loaded'); } catch(e) { console.warn('[OmrScanner] Error:', e.message); }
-try { const m = require('./parent-communication'); m(app, db, pool, renderPage, esc); console.log('[ParentCommunication] ParentCommunication module loaded'); } catch(e) { console.warn('[ParentCommunication] Error:', e.message); }
-try { const m = require('./parent-teacher-chat'); m(app, db, pool, renderPage, esc); console.log('[ParentTeacherChat] ParentTeacherChat module loaded'); } catch(e) { console.warn('[ParentTeacherChat] Error:', e.message); }
-try { const m = require('./parent-workshop'); m(app, db, pool, renderPage, esc); console.log('[ParentWorkshop] ParentWorkshop module loaded'); } catch(e) { console.warn('[ParentWorkshop] Error:', e.message); }
-try { const m = require('./peer-review'); m(app, db, pool, renderPage, esc); console.log('[PeerReview] PeerReview module loaded'); } catch(e) { console.warn('[PeerReview] Error:', e.message); }
-try { const m = require('./peer-tutoring'); m(app, db, pool, renderPage, esc); console.log('[PeerTutoring] PeerTutoring module loaded'); } catch(e) { console.warn('[PeerTutoring] Error:', e.message); }
-try { const m = require('./photography-club'); m(app, db, pool, renderPage, esc); console.log('[PhotographyClub] PhotographyClub module loaded'); } catch(e) { console.warn('[PhotographyClub] Error:', e.message); }
-try { const m = require('./pocket-money'); m(app, db, pool, renderPage, esc); console.log('[PocketMoney] PocketMoney module loaded'); } catch(e) { console.warn('[PocketMoney] Error:', e.message); }
-try { const m = require('./predictive-maintenance'); m(app, db, pool, renderPage, esc); console.log('[PredictiveMaintenance] PredictiveMaintenance module loaded'); } catch(e) { console.warn('[PredictiveMaintenance] Error:', e.message); }
-try { const m = require('./quantum-computing'); m(app, db, pool, renderPage, esc); console.log('[QuantumComputing] QuantumComputing module loaded'); } catch(e) { console.warn('[QuantumComputing] Error:', e.message); }
-try { const m = require('./realtime-engine'); m(app, db, pool, renderPage, esc); console.log('[RealtimeEngine] RealtimeEngine module loaded'); } catch(e) { console.warn('[RealtimeEngine] Error:', e.message); }
-try { const m = require('./referral-rewards'); m(app, db, pool, renderPage, esc); console.log('[ReferralRewards] ReferralRewards module loaded'); } catch(e) { console.warn('[ReferralRewards] Error:', e.message); }
-try { const m = require('./resource-reservation'); m(app, db, pool, renderPage, esc); console.log('[ResourceReservation] ResourceReservation module loaded'); } catch(e) { console.warn('[ResourceReservation] Error:', e.message); }
-try { const m = require('./revenue-quickstart'); m(app, db, pool, renderPage, esc); console.log('[RevenueQuickstart] RevenueQuickstart module loaded'); } catch(e) { console.warn('[RevenueQuickstart] Error:', e.message); }
-try { const m = require('./robotics-club'); m(app, db, pool, renderPage, esc); console.log('[RoboticsClub] RoboticsClub module loaded'); } catch(e) { console.warn('[RoboticsClub] Error:', e.message); }
-try { const m = require('./school-elections'); m(app, db, pool, renderPage, esc); console.log('[SchoolElections] SchoolElections module loaded'); } catch(e) { console.warn('[SchoolElections] Error:', e.message); }
-try { const m = require('./school-health-ai'); m(app, db, pool, renderPage, esc); console.log('[SchoolHealthAi] SchoolHealthAi module loaded'); } catch(e) { console.warn('[SchoolHealthAi] Error:', e.message); }
-try { const m = require('./school-merch'); m(app, db, pool, renderPage, esc); console.log('[SchoolMerch] SchoolMerch module loaded'); } catch(e) { console.warn('[SchoolMerch] Error:', e.message); }
-try { const m = require('./school-newsletter'); m(app, db, pool, renderPage, esc); console.log('[SchoolNewsletter] SchoolNewsletter module loaded'); } catch(e) { console.warn('[SchoolNewsletter] Error:', e.message); }
-try { const m = require('./school-newspaper'); m(app, db, pool, renderPage, esc); console.log('[SchoolNewspaper] SchoolNewspaper module loaded'); } catch(e) { console.warn('[SchoolNewspaper] Error:', e.message); }
-try { const m = require('./school-radio'); m(app, db, pool, renderPage, esc); console.log('[SchoolRadio] SchoolRadio module loaded'); } catch(e) { console.warn('[SchoolRadio] Error:', e.message); }
-try { const m = require('./school-v18-b'); m(app, db, pool, renderPage, esc); console.log('[SchoolV18B] SchoolV18B module loaded'); } catch(e) { console.warn('[SchoolV18B] Error:', e.message); }
-try { const m = require('./school-v18-upgrade'); m(app, db, pool, renderPage, esc); console.log('[SchoolV18Upgrade] SchoolV18Upgrade module loaded'); } catch(e) { console.warn('[SchoolV18Upgrade] Error:', e.message); }
-try { const m = require('./science-fair'); m(app, db, pool, renderPage, esc); console.log('[ScienceFair] ScienceFair module loaded'); } catch(e) { console.warn('[ScienceFair] Error:', e.message); }
-try { const m = require('./seo-traffic-engine'); m(app, db, pool, renderPage, esc); console.log('[SeoTrafficEngine] SeoTrafficEngine module loaded'); } catch(e) { console.warn('[SeoTrafficEngine] Error:', e.message); }
-try { const m = require('./skill-assessment'); m(app, db, pool, renderPage, esc); console.log('[SkillAssessment] SkillAssessment module loaded'); } catch(e) { console.warn('[SkillAssessment] Error:', e.message); }
-try { const m = require('./sleep-tracker'); m(app, db, pool, renderPage, esc); console.log('[SleepTracker] SleepTracker module loaded'); } catch(e) { console.warn('[SleepTracker] Error:', e.message); }
-try { const m = require('./smart-classroom'); m(app, db, pool, renderPage, esc); console.log('[SmartClassroom] SmartClassroom module loaded'); } catch(e) { console.warn('[SmartClassroom] Error:', e.message); }
-try { const m = require('./smart-desk'); m(app, db, pool, renderPage, esc); console.log('[SmartDesk] SmartDesk module loaded'); } catch(e) { console.warn('[SmartDesk] Error:', e.message); }
-try { const m = require('./smart-door-lock'); m(app, db, pool, renderPage, esc); console.log('[SmartDoorLock] SmartDoorLock module loaded'); } catch(e) { console.warn('[SmartDoorLock] Error:', e.message); }
-try { const m = require('./smart-hostel'); m(app, db, pool, renderPage, esc); console.log('[SmartHostel] SmartHostel module loaded'); } catch(e) { console.warn('[SmartHostel] Error:', e.message); }
-try { const m = require('./smart-hvac'); m(app, db, pool, renderPage, esc); console.log('[SmartHvac] SmartHvac module loaded'); } catch(e) { console.warn('[SmartHvac] Error:', e.message); }
-try { const m = require('./smart-lighting'); m(app, db, pool, renderPage, esc); console.log('[SmartLighting] SmartLighting module loaded'); } catch(e) { console.warn('[SmartLighting] Error:', e.message); }
-try { const m = require('./smart-parking'); m(app, db, pool, renderPage, esc); console.log('[SmartParking] SmartParking module loaded'); } catch(e) { console.warn('[SmartParking] Error:', e.message); }
-try { const m = require('./smart-restroom'); m(app, db, pool, renderPage, esc); console.log('[SmartRestroom] SmartRestroom module loaded'); } catch(e) { console.warn('[SmartRestroom] Error:', e.message); }
-try { const m = require('./smart-security'); m(app, db, pool, renderPage, esc); console.log('[SmartSecurity] SmartSecurity module loaded'); } catch(e) { console.warn('[SmartSecurity] Error:', e.message); }
-try { const m = require('./smart-textbook'); m(app, db, pool, renderPage, esc); console.log('[SmartTextbook] SmartTextbook module loaded'); } catch(e) { console.warn('[SmartTextbook] Error:', e.message); }
-try { const m = require('./social-media-autopost'); m(app, db, pool, renderPage, esc); console.log('[SocialMediaAutopost] SocialMediaAutopost module loaded'); } catch(e) { console.warn('[SocialMediaAutopost] Error:', e.message); }
-try { const m = require('./soft-skills'); m(app, db, pool, renderPage, esc); console.log('[SoftSkills] SoftSkills module loaded'); } catch(e) { console.warn('[SoftSkills] Error:', e.message); }
-try { const m = require('./spaced-repetition'); m(app, db, pool, renderPage, esc); console.log('[SpacedRepetition] SpacedRepetition module loaded'); } catch(e) { console.warn('[SpacedRepetition] Error:', e.message); }
-try { const m = require('./staff-performance'); m(app, db, pool, renderPage, esc); console.log('[StaffPerformance] StaffPerformance module loaded'); } catch(e) { console.warn('[StaffPerformance] Error:', e.message); }
-try { const m = require('./startup-incubator'); m(app, db, pool, renderPage, esc); console.log('[StartupIncubator] StartupIncubator module loaded'); } catch(e) { console.warn('[StartupIncubator] Error:', e.message); }
-try { const m = require('./student-banking'); m(app, db, pool, renderPage, esc); console.log('[StudentBanking] StudentBanking module loaded'); } catch(e) { console.warn('[StudentBanking] Error:', e.message); }
-try { const m = require('./student-council'); m(app, db, pool, renderPage, esc); console.log('[StudentCouncil] StudentCouncil module loaded'); } catch(e) { console.warn('[StudentCouncil] Error:', e.message); }
-try { const m = require('./student-heatmap'); m(app, db, pool, renderPage, esc); console.log('[StudentHeatmap] StudentHeatmap module loaded'); } catch(e) { console.warn('[StudentHeatmap] Error:', e.message); }
-try { const m = require('./student-portfolio'); m(app, db, pool, renderPage, esc); console.log('[StudentPortfolio] StudentPortfolio module loaded'); } catch(e) { console.warn('[StudentPortfolio] Error:', e.message); }
-try { const m = require('./supply-chain-procurement'); m(app, db, pool, renderPage, esc); console.log('[SupplyChainProcurement] SupplyChainProcurement module loaded'); } catch(e) { console.warn('[SupplyChainProcurement] Error:', e.message); }
-try { const m = require('./talent-show'); m(app, db, pool, renderPage, esc); console.log('[TalentShow] TalentShow module loaded'); } catch(e) { console.warn('[TalentShow] Error:', e.message); }
-try { const m = require('./teacher-substitution'); m(app, db, pool, renderPage, esc); console.log('[TeacherSubstitution] TeacherSubstitution module loaded'); } catch(e) { console.warn('[TeacherSubstitution] Error:', e.message); }
-try { const m = require('./uniform-shop'); m(app, db, pool, renderPage, esc); console.log('[UniformShop] UniformShop module loaded'); } catch(e) { console.warn('[UniformShop] Error:', e.message); }
-try { const m = require('./university-tracker'); m(app, db, pool, renderPage, esc); console.log('[UniversityTracker] UniversityTracker module loaded'); } catch(e) { console.warn('[UniversityTracker] Error:', e.message); }
-try { const m = require('./video-conferencing'); m(app, db, pool, renderPage, esc); console.log('[VideoConferencing] VideoConferencing module loaded'); } catch(e) { console.warn('[VideoConferencing] Error:', e.message); }
-try { const m = require('./viral-content-engine'); m(app, db, pool, renderPage, esc); console.log('[ViralContentEngine] ViralContentEngine module loaded'); } catch(e) { console.warn('[ViralContentEngine] Error:', e.message); }
-try { const m = require('./viral-growth-booster'); m(app, db, pool, renderPage, esc); console.log('[ViralGrowthBooster] ViralGrowthBooster module loaded'); } catch(e) { console.warn('[ViralGrowthBooster] Error:', e.message); }
-try { const m = require('./viral-loop-engine'); m(app, db, pool, renderPage, esc); console.log('[ViralLoopEngine] ViralLoopEngine module loaded'); } catch(e) { console.warn('[ViralLoopEngine] Error:', e.message); }
-try { const m = require('./virtual-lab'); m(app, db, pool, renderPage, esc); console.log('[VirtualLab] VirtualLab module loaded'); } catch(e) { console.warn('[VirtualLab] Error:', e.message); }
-try { const m = require('./voice-assistant'); m(app, db, pool, renderPage, esc); console.log('[VoiceAssistant] VoiceAssistant module loaded'); } catch(e) { console.warn('[VoiceAssistant] Error:', e.message); }
-try { const m = require('./volunteer-hours'); m(app, db, pool, renderPage, esc); console.log('[VolunteerHours] VolunteerHours module loaded'); } catch(e) { console.warn('[VolunteerHours] Error:', e.message); }
-try { const m = require('./water-quality'); m(app, db, pool, renderPage, esc); console.log('[WaterQuality] WaterQuality module loaded'); } catch(e) { console.warn('[WaterQuality] Error:', e.message); }
-try { const m = require('./weather-station'); m(app, db, pool, renderPage, esc); console.log('[WeatherStation] WeatherStation module loaded'); } catch(e) { console.warn('[WeatherStation] Error:', e.message); }
-try { const m = require('./wellness-dashboard'); m(app, db, pool, renderPage, esc); console.log('[WellnessDashboard] WellnessDashboard module loaded'); } catch(e) { console.warn('[WellnessDashboard] Error:', e.message); }
-console.log('[v22] All 143 additional modules loaded');
-
-// === v23 ENTERTAINMENT PORTAL: 9 Entertainment Modules ===
-try { const m = require('./entertainment-videos'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Videos module loaded'); } catch(e) { console.warn('[Entertainment] Videos Error:', e.message); }
-try { const m = require('./entertainment-music'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Music module loaded'); } catch(e) { console.warn('[Entertainment] Music Error:', e.message); }
-try { const m = require('./entertainment-gaming'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Gaming module loaded'); } catch(e) { console.warn('[Entertainment] Gaming Error:', e.message); }
-try { const m = require('./entertainment-social'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Social module loaded'); } catch(e) { console.warn('[Entertainment] Social Error:', e.message); }
-try { const m = require('./entertainment-ai'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] AI module loaded'); } catch(e) { console.warn('[Entertainment] AI Error:', e.message); }
-try { const m = require('./entertainment-monetization'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Monetization module loaded'); } catch(e) { console.warn('[Entertainment] Monetization Error:', e.message); }
-try { const m = require('./entertainment-admin'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Admin module loaded'); } catch(e) { console.warn('[Entertainment] Admin Error:', e.message); }
-try { const m = require('./entertainment-shorts'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] Shorts module loaded'); } catch(e) { console.warn('[Entertainment] Shorts Error:', e.message); }
-try { const m = require('./entertainment-pwa'); m(app, db, pool, renderPage, esc); console.log('[Entertainment] PWA module loaded'); } catch(e) { console.warn('[Entertainment] PWA Error:', e.message); }
-console.log('[v23] All 9 entertainment portal modules loaded (100+ features)');
 
 server.listen(PORT, () => {
   console.log(`Comfort Platform LIVE on ${PORT}`);

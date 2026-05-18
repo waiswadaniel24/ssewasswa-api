@@ -113,8 +113,6 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
         recommendation VARCHAR(20) DEFAULT 'pending',
         created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      try { await c.query(`ALTER TABLE scholarship_applications ADD COLUMN IF NOT EXISTS program_id INTEGER`); } catch(e) {}
-      try { await c.query(`ALTER TABLE scholarship_awards ADD COLUMN IF NOT EXISTS program_id INTEGER`); } catch(e) {}
       const idxs = [
         'idx_sch_prog_t ON scholarship_programs(tenant_id)', 'idx_sch_prog_type ON scholarship_programs(tenant_id, type)',
         'idx_sch_prog_active ON scholarship_programs(tenant_id, is_active)',
@@ -560,7 +558,6 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     if (total >= 50000) level = 'platinum'; else if (total >= 20000) level = 'gold'; else if (total >= 5000) level = 'silver';
     await pool.query(`UPDATE scholarship_sponsors SET recognition_level=$1 WHERE id=$2 AND tenant_id=$3`, [level, sid, tid]);
     await notify(tid, 'sponsor:donation', { sponsorId: +sid, amount: amt, reference: req.body.reference });
-    try { await global.trackRevenue('scholarship_donation', amt / 3700, `Scholarship donation from sponsor #${sid}`, `donation-${sid}-${Date.now()}`); } catch(e) {}
     ok(res, { donated: amt, recognition_level: level, total_donated: total });
   }));
 

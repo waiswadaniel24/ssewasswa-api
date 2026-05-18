@@ -1,75 +1,223 @@
-/**
- * Fundraising Mega Module — Next Wave of Advanced Features
- * Features: Donor CRM, Pledge Management, Campaign Templates, Donation Tipping,
- * Crowdfunding Stretch Goals, Donor Segmentation, Campaign Clone, Bulk Donations,
- * Gift Aid/Tax Deductions, Donation Goals & Challenges
- */
+// ============================================================
+// FUNDRAISING MEGA MODULE
+// 10 Comprehensive Fundraising Features
+// ============================================================
+// 1. Donor CRM
+// 2. Pledge Management
+// 3. Campaign Templates
+// 4. Donation Tipping
+// 5. Crowdfunding Stretch Goals
+// 6. Donor Segmentation
+// 7. Campaign Clone
+// 8. Bulk Donations
+// 9. Gift Aid / Tax Deductions
+// 10. Donation Goals & Challenges
+// ============================================================
+
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
-  const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 
   // =============================================
   // DATABASE MIGRATIONS
   // =============================================
   const migrations = [
-    // Feature 1: Donor CRM
-    `CREATE TABLE IF NOT EXISTS donor_crm_contacts (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, full_name TEXT NOT NULL, email TEXT, phone TEXT, address TEXT, organization TEXT, notes TEXT, tags TEXT DEFAULT '[]', total_donated INTEGER DEFAULT 0, donation_count INTEGER DEFAULT 0, last_donation_at TIMESTAMPTZ, first_donation_at TIMESTAMPTZ, avg_donation INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK (status IN ('active','inactive','lapsed','major','minor')), assigned_to TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS donor_crm_interactions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, contact_id INTEGER NOT NULL REFERENCES donor_crm_contacts(id) ON DELETE CASCADE, type TEXT NOT NULL CHECK (type IN ('call','email','meeting','sms','note','thank_you')), subject TEXT, notes TEXT, follow_up_date DATE, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // 1. Donor CRM
+    `CREATE TABLE IF NOT EXISTS donor_crm_contacts (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      company TEXT,
+      notes TEXT,
+      tags_json TEXT DEFAULT '[]',
+      last_contacted TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS donor_crm_interactions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      contact_id INTEGER NOT NULL REFERENCES donor_crm_contacts(id) ON DELETE CASCADE,
+      type TEXT NOT NULL DEFAULT 'call',
+      subject TEXT NOT NULL,
+      notes TEXT,
+      interaction_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 2. Pledge Management
+    `CREATE TABLE IF NOT EXISTS campaign_pledges_mega (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      campaign_id INTEGER NOT NULL,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT,
+      amount_pledged INTEGER NOT NULL DEFAULT 0,
+      amount_fulfilled INTEGER NOT NULL DEFAULT 0,
+      due_date DATE,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','partially_fulfilled','fulfilled','overdue','cancelled')),
+      reminded_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 3. Campaign Templates
+    `CREATE TABLE IF NOT EXISTS campaign_templates (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT,
+      title_template TEXT NOT NULL,
+      story_template TEXT NOT NULL,
+      goal_suggestion INTEGER DEFAULT 0,
+      settings_json TEXT DEFAULT '{}',
+      usage_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 4. Donation Tipping
+    `CREATE TABLE IF NOT EXISTS donation_tips (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      donation_id INTEGER,
+      tip_amount INTEGER NOT NULL DEFAULT 0,
+      tip_percentage NUMERIC(5,2) DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS tip_settings (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL UNIQUE,
+      default_percentage NUMERIC(5,2) DEFAULT 10,
+      custom_percentages_json TEXT DEFAULT '[5,10,15,20]',
+      enabled BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 5. Crowdfunding Stretch Goals
+    `CREATE TABLE IF NOT EXISTS campaign_stretch_goals (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      campaign_id INTEGER NOT NULL,
+      goal_amount INTEGER NOT NULL,
+      description TEXT NOT NULL,
+      unlocked BOOLEAN DEFAULT false,
+      unlocked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 6. Donor Segmentation
+    `CREATE TABLE IF NOT EXISTS donor_segments (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      criteria_json TEXT DEFAULT '{}',
+      member_count INTEGER DEFAULT 0,
+      is_dynamic BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS donor_segment_members (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      segment_id INTEGER NOT NULL REFERENCES donor_segments(id) ON DELETE CASCADE,
+      donor_email TEXT NOT NULL,
+      donor_name TEXT,
+      added_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 8. Bulk Donations
+    `CREATE TABLE IF NOT EXISTS bulk_donation_batches (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      filename TEXT,
+      total_rows INTEGER DEFAULT 0,
+      processed INTEGER DEFAULT 0,
+      errors INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','processing','completed','failed')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS bulk_donation_items (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      batch_id INTEGER NOT NULL REFERENCES bulk_donation_batches(id) ON DELETE CASCADE,
+      donor_name TEXT,
+      donor_email TEXT,
+      amount INTEGER DEFAULT 0,
+      method TEXT DEFAULT 'cash',
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','processed','error')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 9. Gift Aid / Tax Deductions
+    `CREATE TABLE IF NOT EXISTS gift_tax_declarations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT,
+      tax_number TEXT,
+      declaration_date DATE DEFAULT CURRENT_DATE,
+      is_eligible BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS tax_receipts (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      donation_id INTEGER,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT,
+      amount INTEGER NOT NULL DEFAULT 0,
+      tax_deductible_amount INTEGER NOT NULL DEFAULT 0,
+      receipt_number TEXT UNIQUE NOT NULL,
+      issued_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 10. Donation Goals & Challenges
+    `CREATE TABLE IF NOT EXISTS donation_challenges (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      challenge_type TEXT DEFAULT 'individual' CHECK (challenge_type IN ('individual','team','community','match')),
+      target_amount INTEGER NOT NULL DEFAULT 0,
+      current_amount INTEGER NOT NULL DEFAULT 0,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS challenge_participants (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      challenge_id INTEGER NOT NULL REFERENCES donation_challenges(id) ON DELETE CASCADE,
+      donor_email TEXT NOT NULL,
+      donor_name TEXT,
+      amount_contributed INTEGER DEFAULT 0,
+      joined_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Indexes
     `CREATE INDEX IF NOT EXISTS idx_donor_crm_contacts_tenant ON donor_crm_contacts(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_donor_crm_contacts_email ON donor_crm_contacts(email)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_crm_interactions_tenant ON donor_crm_interactions(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_donor_crm_interactions_contact ON donor_crm_interactions(contact_id)`,
-
-    // Feature 2: Pledge Management
-    `CREATE TABLE IF NOT EXISTS campaign_pledges (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL, pledgor_name TEXT NOT NULL, pledgor_email TEXT, pledgor_phone TEXT, pledged_amount INTEGER NOT NULL, fulfilled_amount INTEGER DEFAULT 0, status TEXT DEFAULT 'pending' CHECK (status IN ('pending','partially_fulfilled','fulfilled','cancelled','overdue')), due_date DATE, reminder_sent BOOLEAN DEFAULT false, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_tenant ON campaign_pledges(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_campaign ON campaign_pledges(campaign_id)`,
-
-    // Feature 3: Campaign Templates
-    `CREATE TABLE IF NOT EXISTS campaign_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, category TEXT DEFAULT 'general', target_amount INTEGER, title_template TEXT, description_template TEXT, cover_image_url TEXT, is_public BOOLEAN DEFAULT false, usage_count INTEGER DEFAULT 0, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_mega_tenant ON campaign_pledges_mega(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_pledges_mega_campaign ON campaign_pledges_mega(campaign_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_templates_tenant ON campaign_templates(tenant_id)`,
-
-    // Feature 4: Donation Tipping
-    `CREATE TABLE IF NOT EXISTS donation_tips (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donation_id INTEGER, tip_percentage INTEGER DEFAULT 0, tip_amount INTEGER DEFAULT 0, platform_fee INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS tip_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, default_tip_percentage INTEGER DEFAULT 5, max_tip_percentage INTEGER DEFAULT 20, tip_label TEXT DEFAULT 'Support the platform', tip_enabled BOOLEAN DEFAULT true, platform_fee_percentage NUMERIC DEFAULT 2.5, UNIQUE(tenant_id))`,
     `CREATE INDEX IF NOT EXISTS idx_donation_tips_tenant ON donation_tips(tenant_id)`,
-
-    // Feature 5: Stretch Goals
-    `CREATE TABLE IF NOT EXISTS campaign_stretch_goals (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL, target_amount INTEGER NOT NULL, description TEXT, reward_text TEXT, is_achieved BOOLEAN DEFAULT false, achieved_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_stretch_goals_campaign ON campaign_stretch_goals(campaign_id)`,
-
-    // Feature 6: Donor Segmentation
-    `CREATE TABLE IF NOT EXISTS donor_segments (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, criteria_json TEXT DEFAULT '{}', donor_count INTEGER DEFAULT 0, is_auto BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS donor_segment_members (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, segment_id INTEGER NOT NULL REFERENCES donor_segments(id) ON DELETE CASCADE, donor_email TEXT NOT NULL, added_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(segment_id, donor_email))`,
+    `CREATE INDEX IF NOT EXISTS idx_tip_settings_tenant ON tip_settings(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_stretch_goals_tenant ON campaign_stretch_goals(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_stretch_goals_campaign ON campaign_stretch_goals(campaign_id)`,
     `CREATE INDEX IF NOT EXISTS idx_donor_segments_tenant ON donor_segments(tenant_id)`,
-
-    // Feature 7: Campaign Clone
-    // No extra table needed - uses existing fundraising_campaigns
-
-    // Feature 8: Bulk Donations
-    `CREATE TABLE IF NOT EXISTS bulk_donation_batches (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, campaign_id INTEGER, total_amount INTEGER DEFAULT 0, donation_count INTEGER DEFAULT 0, status TEXT DEFAULT 'processing' CHECK (status IN ('processing','completed','failed','partial')), notes TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS bulk_donation_items (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, batch_id INTEGER NOT NULL REFERENCES bulk_donation_batches(id) ON DELETE CASCADE, donor_name TEXT, donor_email TEXT, donor_phone TEXT, amount INTEGER NOT NULL, method TEXT DEFAULT 'cash', reference TEXT, status TEXT DEFAULT 'pending' CHECK (status IN ('pending','processed','failed','duplicate')), error_message TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_bulk_batches_tenant ON bulk_donation_batches(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_bulk_items_batch ON bulk_donation_items(batch_id)`,
-
-    // Feature 9: Gift Aid / Tax Deductions
-    `CREATE TABLE IF NOT EXISTS gift_tax_declarations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donor_email TEXT NOT NULL, donor_name TEXT, donor_address TEXT, tax_id TEXT, country TEXT DEFAULT 'UG', is_tax_exempt BOOLEAN DEFAULT false, declaration_type TEXT DEFAULT 'gift_aid' CHECK (declaration_type IN ('gift_aid','tax_deductible','charity_receipt','none')), effective_from DATE, effective_to DATE, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, donor_email))`,
-    `CREATE TABLE IF NOT EXISTS tax_receipts (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donation_id INTEGER, donor_email TEXT, donor_name TEXT, amount INTEGER, tax_deductible_amount INTEGER, receipt_number TEXT UNIQUE, tax_year INTEGER, issued_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_gift_tax_tenant ON gift_tax_declarations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_segment_members_tenant ON donor_segment_members(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_segment_members_segment ON donor_segment_members(segment_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_bulk_donation_batches_tenant ON bulk_donation_batches(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_bulk_donation_items_tenant ON bulk_donation_items(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_bulk_donation_items_batch ON bulk_donation_items(batch_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_gift_tax_declarations_tenant ON gift_tax_declarations(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_tax_receipts_tenant ON tax_receipts(tenant_id)`,
-
-    // Feature 10: Donation Goals & Challenges
-    `CREATE TABLE IF NOT EXISTS donation_challenges (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, challenge_type TEXT DEFAULT 'amount' CHECK (challenge_type IN ('amount','donors','days','streak')), target_value INTEGER NOT NULL, current_value INTEGER DEFAULT 0, start_date DATE, end_date DATE, reward_text TEXT, is_active BOOLEAN DEFAULT true, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS challenge_participants (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, challenge_id INTEGER NOT NULL REFERENCES donation_challenges(id) ON DELETE CASCADE, donor_email TEXT NOT NULL, contribution_value INTEGER DEFAULT 0, joined_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(challenge_id, donor_email))`,
-    `CREATE INDEX IF NOT EXISTS idx_challenges_tenant ON donation_challenges(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_tax_receipts_receipt ON tax_receipts(receipt_number)`,
+    `CREATE INDEX IF NOT EXISTS idx_donation_challenges_tenant ON donation_challenges(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_challenge_participants_tenant ON challenge_participants(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_challenge_participants_challenge ON challenge_participants(challenge_id)`,
-
-    // Seed default tip settings
-    `INSERT INTO tip_settings (tenant_id, default_tip_percentage, max_tip_percentage, tip_label, tip_enabled, platform_fee_percentage) SELECT t.id, 5, 20, 'Support the platform', true, 2.5 FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM tip_settings WHERE tenant_id=t.id)`,
-
-    // Seed default campaign templates
-    `INSERT INTO campaign_templates (tenant_id, name, description, category, target_amount, title_template, description_template, is_public, created_by) SELECT t.id, 'Education Fund', 'Help students access quality education', 'education', 5000000, 'Help {count} Students Get Quality Education', 'We are raising funds to support {count} students who cannot afford school fees. Your donation of {amount} can cover tuition, books, and uniforms for one student for an entire term. Together, we can make education accessible to every child in our community.', true, 'system' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM campaign_templates WHERE tenant_id=t.id AND name='Education Fund')`,
-    `INSERT INTO campaign_templates (tenant_id, name, description, category, target_amount, title_template, description_template, is_public, created_by) SELECT t.id, 'Medical Emergency', 'Urgent medical treatment and care', 'health', 3000000, 'Medical Emergency: Help {beneficiary} Get Treatment', '{beneficiary} urgently needs medical treatment. The total cost is {amount} and time is running out. Every donation, no matter how small, brings us closer to saving a life. Please donate and share this campaign.', true, 'system' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM campaign_templates WHERE tenant_id=t.id AND name='Medical Emergency')`,
-    `INSERT INTO campaign_templates (tenant_id, name, description, category, target_amount, title_template, description_template, is_public, created_by) SELECT t.id, 'Church/Community Building', 'Building or renovating a community facility', 'infrastructure', 20000000, 'Help Build Our {facility}', 'Our community needs a {facility} that will serve {count} people. This project will provide a safe, welcoming space for worship, meetings, and community events. Every brick laid is a step toward a stronger community.', true, 'system' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM campaign_templates WHERE tenant_id=t.id AND name='Church/Community Building')`,
-    `INSERT INTO campaign_templates (tenant_id, name, description, category, target_amount, title_template, description_template, is_public, created_by) SELECT t.id, 'Clean Water Project', 'Provide clean, safe drinking water', 'water', 8000000, 'Bring Clean Water to {location}', 'In {location}, families walk miles for water that isn''t safe to drink. We want to change that by drilling a borehole and installing a purification system. Your donation of {amount} can provide clean water for a family for an entire year.', true, 'system' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM campaign_templates WHERE tenant_id=t.id AND name='Clean Water Project')`,
   ];
 
   (async () => {
@@ -77,661 +225,1277 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       try { await pool.query(q); } catch(e) { /* already exists OK */ }
     }
     console.log('[FundraisingMega] Migrations complete');
+
+    // Seed campaign templates for all existing tenants
+    try {
+      const tenants = (await pool.query('SELECT id FROM tenants')).rows;
+      for (const t of tenants) {
+        const existing = (await pool.query('SELECT COUNT(*) as cnt FROM campaign_templates WHERE tenant_id=$1', [t.id])).rows[0];
+        if (parseInt(existing.cnt) === 0) {
+          const seeds = [
+            { name: 'Education Fund', category: 'Education', description: 'Help students access quality education through scholarships, school supplies, and tuition support.', title_template: 'Help [Student Name] Achieve Their Educational Dreams', story_template: 'Every child deserves access to quality education. [Student Name] dreams of becoming [aspiration] but faces financial barriers that stand in the way. With your support, we can provide tuition, books, uniforms, and the resources needed to help them succeed. Education changes everything — join us in making a difference.', goal_suggestion: 5000000, settings_json: '{"category":"education","allow_recurring":true,"show_progress_bar":true}' },
+            { name: 'Medical Emergency', category: 'Medical', description: 'Raise funds for urgent medical treatment, surgeries, and healthcare expenses.', title_template: 'Support [Patient Name]\'s Medical Treatment', story_template: '[Patient Name] is facing a serious medical condition that requires immediate treatment. The cost of [treatment type] is beyond what the family can afford alone. Time is critical — every donation, no matter the size, brings them one step closer to recovery and a healthy future. Please help save a life today.', goal_suggestion: 10000000, settings_json: '{"category":"medical","allow_recurring":false,"show_progress_bar":true,"urgent":true}' },
+            { name: 'Church & Community', category: 'Church/Community', description: 'Fund church building projects, community outreach, events, and ministry programs.', title_template: 'Build Our Community: [Project Name]', story_template: 'Our church/community has been a beacon of hope for [number] families. Now we need your help to [project description — build, renovate, expand, launch program]. Together, we can create a space that serves generations to come. Every contribution is a brick in this vision — will you be part of it?', goal_suggestion: 20000000, settings_json: '{"category":"church_community","allow_recurring":true,"show_progress_bar":true,"allow_pledges":true}' },
+            { name: 'Clean Water Initiative', category: 'Clean Water', description: 'Provide clean, safe drinking water to communities through wells, filters, and infrastructure.', title_template: 'Bring Clean Water to [Community Name]', story_template: 'In [Community Name], [number] families walk miles every day just to access water — and it is not even safe to drink. Waterborne diseases affect [percentage]% of children under five. With your help, we can drill a well, install purification systems, and transform the health of an entire community. Clean water is a right, not a privilege — let us make it happen.', goal_suggestion: 8000000, settings_json: '{"category":"clean_water","allow_recurring":true,"show_progress_bar":true,"show_impact_counter":true}' },
+          ];
+          for (const s of seeds) {
+            await pool.query('INSERT INTO campaign_templates(tenant_id,name,category,description,title_template,story_template,goal_suggestion,settings_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+              [t.id, s.name, s.category, s.description, s.title_template, s.story_template, s.goal_suggestion, s.settings_json]);
+          }
+        }
+      }
+    } catch(e) { console.warn('[FundraisingMega] Template seed error:', e.message); }
+
+    // Seed default tip settings for all tenants
+    try {
+      const tenants = (await pool.query('SELECT id FROM tenants')).rows;
+      for (const t of tenants) {
+        const existing = (await pool.query('SELECT COUNT(*) as cnt FROM tip_settings WHERE tenant_id=$1', [t.id])).rows[0];
+        if (parseInt(existing.cnt) === 0) {
+          await pool.query('INSERT INTO tip_settings(tenant_id,default_percentage,custom_percentages_json,enabled) VALUES($1,$2,$3,$4)',
+            [t.id, 10, '[5,10,15,20]', true]);
+        }
+      }
+    } catch(e) { console.warn('[FundraisingMega] Tip settings seed error:', e.message); }
+
+    console.log('[FundraisingMega] Seeds complete');
   })();
 
   // =============================================
-  // HELPERS
+  // HELPER: Generate receipt number
   // =============================================
-  function formatUGX(amount) { return 'UGX ' + (parseInt(amount)||0).toLocaleString(); }
-
-  // =============================================
-  // FEATURE 1: DONOR CRM
-  // =============================================
-  app.get('/api/donor-crm', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { search, status, tag, sort, limit, offset } = req.query;
-    let q = 'SELECT * FROM donor_crm_contacts WHERE tenant_id=$1';
-    const params = [tid];
-    let idx = 2;
-    if (search) { q += ` AND (full_name ILIKE $${idx} OR email ILIKE $${idx} OR phone ILIKE $${idx})`; params.push('%'+search+'%'); idx++; }
-    if (status) { q += ` AND status=$${idx}`; params.push(status); idx++; }
-    q += ` ORDER BY ${sort==='donated'?'total_donated DESC':'updated_at DESC'} LIMIT $${idx} OFFSET $${idx+1}`;
-    params.push(parseInt(limit)||50, parseInt(offset)||0);
-    const contacts = await pool.query(q, params);
-    const total = (await pool.query('SELECT COUNT(*) FROM donor_crm_contacts WHERE tenant_id=$1', [tid])).rows[0].count;
-    res.json({ contacts: contacts.rows, total: parseInt(total) });
-  }));
-
-  app.post('/api/donor-crm', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { full_name, email, phone, address, organization, notes, tags, status, assigned_to } = req.body;
-    if (!full_name) return res.status(400).json({ error: 'full_name required' });
-    const result = await pool.query('INSERT INTO donor_crm_contacts(tenant_id,full_name,email,phone,address,organization,notes,tags,status,assigned_to) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-      [tid, full_name, email, phone, address, organization, notes, JSON.stringify(tags||[]), status||'active', assigned_to]);
-    if(audit) audit(req, 'crm_contact_created', { id: result.rows[0].id });
-    res.json({ success: true, contact: result.rows[0] });
-  }));
-
-  app.put('/api/donor-crm/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const fields = ['full_name','email','phone','address','organization','notes','tags','status','assigned_to'];
-    const sets = []; const vals = []; let idx = 1;
-    for (const f of fields) {
-      if (req.body[f] !== undefined) { sets.push(`${f}=$${idx}`); vals.push(f==='tags'?JSON.stringify(req.body[f]):req.body[f]); idx++; }
-    }
-    if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
-    sets.push(`updated_at=NOW()`);
-    vals.push(req.params.id, tid);
-    const result = await pool.query(`UPDATE donor_crm_contacts SET ${sets.join(',')} WHERE id=$${idx} AND tenant_id=$${idx+1} RETURNING *`, vals);
-    if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
-    res.json({ success: true, contact: result.rows[0] });
-  }));
-
-  app.delete('/api/donor-crm/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    if (req.session.user.role !== 'admin' && req.session.user.role !== 'superadmin') return res.status(403).json({ error: 'Admin only' });
-    await pool.query('DELETE FROM donor_crm_contacts WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
-    res.json({ success: true });
-  }));
-
-  // CRM Interactions
-  app.post('/api/donor-crm/:id/interactions', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { type, subject, notes, follow_up_date } = req.body;
-    if (!type) return res.status(400).json({ error: 'type required' });
-    const result = await pool.query('INSERT INTO donor_crm_interactions(tenant_id,contact_id,type,subject,notes,follow_up_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [tid, req.params.id, type, subject, notes, follow_up_date, req.session.user.email]);
-    res.json({ success: true, interaction: result.rows[0] });
-  }));
-
-  app.get('/api/donor-crm/:id/interactions', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('SELECT * FROM donor_crm_interactions WHERE contact_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [req.params.id, tid]);
-    res.json({ interactions: result.rows });
-  }));
-
-  // Sync CRM from donation data
-  app.post('/api/donor-crm/sync', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const donors = await pool.query("SELECT donor_email, donor_name, donor_phone, SUM(amount) as total, COUNT(*) as cnt, MAX(created_at) as last_don, MIN(created_at) as first_don FROM campaign_donations WHERE tenant_id=$1 AND donor_email IS NOT NULL AND refunded=false GROUP BY donor_email, donor_name, donor_phone", [tid]);
-    let synced = 0;
-    for (const d of donors.rows) {
-      if (!d.donor_email) continue;
-      const existing = await pool.query('SELECT id FROM donor_crm_contacts WHERE tenant_id=$1 AND email=$2', [tid, d.donor_email]);
-      if (existing.rows.length) {
-        await pool.query('UPDATE donor_crm_contacts SET total_donated=$1, donation_count=$2, last_donation_at=$3, first_donation_at=COALESCE(first_donation_at,$4), avg_donation=$1/GREATEST(donation_count,1), updated_at=NOW() WHERE id=$5',
-          [parseInt(d.total), parseInt(d.cnt), d.last_don, d.first_don, existing.rows[0].id]);
-      } else {
-        await pool.query('INSERT INTO donor_crm_contacts(tenant_id,full_name,email,phone,total_donated,donation_count,last_donation_at,first_donation_at,avg_donation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-          [tid, d.donor_name||d.donor_email, d.donor_email, d.donor_phone, parseInt(d.total), parseInt(d.cnt), d.last_don, d.first_don, Math.round(parseInt(d.total)/Math.max(parseInt(d.cnt),1))]);
-        synced++;
-      }
-    }
-    if(audit) audit(req, 'crm_synced', { donors_processed: donors.rows.length, new_contacts: synced });
-    res.json({ success: true, processed: donors.rows.length, new_contacts: synced });
-  }));
-
-  app.get('/donor-crm', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const contacts = (await pool.query('SELECT * FROM donor_crm_contacts WHERE tenant_id=$1 ORDER BY total_donated DESC LIMIT 50', [tid])).rows;
-    const stats = (await pool.query('SELECT COUNT(*) as total, COALESCE(SUM(total_donated),0) as total_value, COALESCE(AVG(total_donated),0) as avg_value FROM donor_crm_contacts WHERE tenant_id=$1', [tid])).rows[0];
-    const html = `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-          <h2>Donor CRM</h2>
-          <div><button onclick="syncCRM()" class="btn" style="background:#3b82f6;color:white;margin-right:8px">Sync from Donations</button>
-          <button onclick="document.getElementById('newContactForm').style.display='block'" class="btn" style="background:#059669;color:white">+ Add Contact</button></div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
-          <div style="padding:20px;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0"><div style="font-size:14px;color:#666">Total Contacts</div><div style="font-size:28px;font-weight:700;color:#059669">${stats.total}</div></div>
-          <div style="padding:20px;border-radius:12px;background:#fef3c7;border:1px solid #fde68a"><div style="font-size:14px;color:#666">Total Value</div><div style="font-size:28px;font-weight:700;color:#d97706">${formatUGX(stats.total_value)}</div></div>
-          <div style="padding:20px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe"><div style="font-size:14px;color:#666">Avg per Donor</div><div style="font-size:28px;font-weight:700;color:#2563eb">${formatUGX(Math.round(parseFloat(stats.avg_value)))}</div></div>
-        </div>
-        <div id="newContactForm" style="display:none;padding:20px;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:24px;background:#f9fafb">
-          <h3>Add Contact</h3>
-          <form method="POST" action="/api/donor-crm">
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-              <div><label>Full Name *</label><input type="text" name="full_name" required style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div><label>Email</label><input type="email" name="email" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div><label>Phone</label><input type="text" name="phone" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div><label>Organization</label><input type="text" name="organization" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div><label>Status</label><select name="status" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"><option value="active">Active</option><option value="lapsed">Lapsed</option><option value="major">Major Donor</option><option value="minor">Minor</option></select></div>
-              <div><label>Notes</label><input type="text" name="notes" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-            </div>
-            <button type="submit" class="btn" style="background:#059669;color:white;margin-top:12px">Add Contact</button>
-          </form>
-        </div>
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="background:#f1f5f9"><th style="padding:10px;text-align:left">Name</th><th style="padding:10px;text-align:left">Email</th><th style="padding:10px;text-align:right">Total Donated</th><th style="padding:10px;text-align:center">Donations</th><th style="padding:10px;text-align:center">Status</th><th style="padding:10px;text-align:left">Last Donation</th></tr></thead>
-          <tbody>${contacts.map(c => `<tr style="border-bottom:1px solid #e2e8f0">
-            <td style="padding:10px;font-weight:600">${esc(c.full_name)}</td>
-            <td style="padding:10px">${esc(c.email||'-')}</td>
-            <td style="padding:10px;text-align:right;font-weight:700;color:#059669">${formatUGX(c.total_donated)}</td>
-            <td style="padding:10px;text-align:center">${c.donation_count}</td>
-            <td style="padding:10px;text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;color:#fff;background:${c.status==='active'?'#059669':c.status==='lapsed'?'#ef4444':c.status==='major'?'#7c3aed':'#999'}">${esc(c.status)}</span></td>
-            <td style="padding:10px">${c.last_donation_at?new Date(c.last_donation_at).toLocaleDateString():'Never'}</td>
-          </tr>`).join('')}</tbody>
-        </table>
-        <script>async function syncCRM(){const r=await fetch('/api/donor-crm/sync',{method:'POST'});const d=await r.json();if(d.success)alert('Synced! '+d.new_contacts+' new contacts, '+d.processed+' total processed');location.reload();}</script>
-      </div>`;
-    res.send(renderPage('Donor CRM', html, req.session.user));
-  }));
+  function generateReceiptNumber() {
+    const ts = Date.now().toString(36).toUpperCase();
+    const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return 'TXR-' + ts + '-' + rand;
+  }
 
   // =============================================
-  // FEATURE 2: PLEDGE MANAGEMENT
+  // HELPER: Check and unlock stretch goals
   // =============================================
-  app.post('/api/campaigns/:id/pledges', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { pledgor_name, pledgor_email, pledgor_phone, pledged_amount, due_date, notes } = req.body;
-    if (!pledgor_name || !pledged_amount) return res.status(400).json({ error: 'pledgor_name and pledged_amount required' });
-    const result = await pool.query('INSERT INTO campaign_pledges(tenant_id,campaign_id,pledgor_name,pledgor_email,pledgor_phone,pledged_amount,due_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-      [tid, req.params.id, pledgor_name, pledgor_email, pledgor_phone, parseInt(pledged_amount), due_date||null, notes]);
-    if(audit) audit(req, 'pledge_created', { campaign_id: req.params.id, amount: pledged_amount });
-    res.json({ success: true, pledge: result.rows[0] });
-  }));
-
-  app.get('/api/campaigns/:id/pledges', ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('SELECT * FROM campaign_pledges WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [req.params.id, tid]);
-    res.json({ pledges: result.rows });
-  }));
-
-  app.put('/api/pledges/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { fulfilled_amount, status, notes } = req.body;
-    const result = await pool.query(`UPDATE campaign_pledges SET fulfilled_amount=COALESCE($1,fulfilled_amount), status=COALESCE($2,status), notes=COALESCE($3,notes), updated_at=NOW() WHERE id=$4 AND tenant_id=$5 RETURNING *`,
-      [fulfilled_amount?parseInt(fulfilled_amount):null, status, notes, req.params.id, tid]);
-    if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
-    // Auto-update status
-    const p = result.rows[0];
-    if (parseInt(p.fulfilled_amount) >= parseInt(p.pledged_amount)) {
-      await pool.query("UPDATE campaign_pledges SET status='fulfilled', updated_at=NOW() WHERE id=$1", [p.id]);
-    } else if (parseInt(p.fulfilled_amount) > 0) {
-      await pool.query("UPDATE campaign_pledges SET status='partially_fulfilled', updated_at=NOW() WHERE id=$1", [p.id]);
-    }
-    res.json({ success: true, pledge: result.rows[0] });
-  }));
-
-  app.delete('/api/pledges/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    await pool.query("UPDATE campaign_pledges SET status='cancelled', updated_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, tid]);
-    res.json({ success: true });
-  }));
-
-  app.post('/api/pledges/:id/remind', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const pledge = (await pool.query('SELECT * FROM campaign_pledges WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
-    if (!pledge) return res.status(404).json({ error: 'Not found' });
-    if (pledge.pledgor_email && sendEmail) {
-      await sendEmail(pledge.pledgor_email, 'Pledge Reminder: Your Support is Needed',
-        `<p>Dear ${esc(pledge.pledgor_name)},</p><p>You pledged ${formatUGX(pledge.pledged_amount)} for our campaign. ${pledge.fulfilled_amount>0?`So far, ${formatUGX(pledge.fulfilled_amount)} has been fulfilled.`:'Your pledge is still pending.'}</p><p>Please consider fulfilling your pledge today. <a href="${BASE_URL}/fundraising">View Campaign</a></p>`);
-      await pool.query('UPDATE campaign_pledges SET reminder_sent=true WHERE id=$1', [pledge.id]);
-    }
-    res.json({ success: true, message: 'Reminder sent' });
-  }));
-
-  app.get('/pledges', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const pledges = (await pool.query('SELECT cp.*, fc.title as campaign_title FROM campaign_pledges cp LEFT JOIN fundraising_campaigns fc ON cp.campaign_id=fc.id WHERE cp.tenant_id=$1 ORDER BY cp.created_at DESC', [tid])).rows;
-    const totalPledged = pledges.reduce((s,p)=>s+parseInt(p.pledged_amount||0),0);
-    const totalFulfilled = pledges.reduce((s,p)=>s+parseInt(p.fulfilled_amount||0),0);
-    const html = `
-      <div class="card">
-        <h2>Pledge Management</h2>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
-          <div style="padding:20px;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0"><div style="font-size:14px;color:#666">Total Pledged</div><div style="font-size:28px;font-weight:700;color:#059669">${formatUGX(totalPledged)}</div></div>
-          <div style="padding:20px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe"><div style="font-size:14px;color:#666">Fulfilled</div><div style="font-size:28px;font-weight:700;color:#2563eb">${formatUGX(totalFulfilled)}</div></div>
-          <div style="padding:20px;border-radius:12px;background:#fef3c7;border:1px solid #fde68a"><div style="font-size:14px;color:#666">Outstanding</div><div style="font-size:28px;font-weight:700;color:#d97706">${formatUGX(totalPledged-totalFulfilled)}</div></div>
-        </div>
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="background:#f1f5f9"><th style="padding:10px;text-align:left">Pledgor</th><th style="padding:10px;text-align:left">Campaign</th><th style="padding:10px;text-align:right">Pledged</th><th style="padding:10px;text-align:right">Fulfilled</th><th style="padding:10px;text-align:center">Status</th><th style="padding:10px;text-align:center">Due Date</th><th style="padding:10px;text-align:center">Actions</th></tr></thead>
-          <tbody>${pledges.map(p => `<tr style="border-bottom:1px solid #e2e8f0">
-            <td style="padding:10px;font-weight:600">${esc(p.pledgor_name)}</td>
-            <td style="padding:10px">${esc(p.campaign_title||'#'+p.campaign_id)}</td>
-            <td style="padding:10px;text-align:right">${formatUGX(p.pledged_amount)}</td>
-            <td style="padding:10px;text-align:right">${formatUGX(p.fulfilled_amount)}</td>
-            <td style="padding:10px;text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;color:#fff;background:${p.status==='fulfilled'?'#059669':p.status==='pending'?'#f59e0b':p.status==='overdue'?'#dc2626':'#999'}">${esc(p.status)}</span></td>
-            <td style="padding:10px;text-align:center">${p.due_date||'N/A'}</td>
-            <td style="padding:10px;text-align:center"><button onclick="fetch('/api/pledges/${p.id}/remind',{method:'POST'}).then(r=>r.json()).then(d=>alert(d.message||'Sent!'))" style="padding:2px 8px;background:#3b82f6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px">Remind</button></td>
-          </tr>`).join('')}</tbody>
-        </table>
-      </div>`;
-    res.send(renderPage('Pledge Management', html, req.session.user));
-  }));
-
-  // =============================================
-  // FEATURE 3: CAMPAIGN TEMPLATES
-  // =============================================
-  app.get('/api/campaign-templates', ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query("SELECT * FROM campaign_templates WHERE tenant_id=$1 OR is_public=true ORDER BY usage_count DESC", [tid]);
-    res.json({ templates: result.rows });
-  }));
-
-  app.post('/api/campaign-templates', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, description, category, target_amount, title_template, description_template, is_public } = req.body;
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const result = await pool.query('INSERT INTO campaign_templates(tenant_id,name,description,category,target_amount,title_template,description_template,is_public,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-      [tid, name, description, category||'general', target_amount?parseInt(target_amount):null, title_template, description_template, is_public||false, req.session.user.email]);
-    res.json({ success: true, template: result.rows[0] });
-  }));
-
-  app.post('/api/campaign-templates/:id/use', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const tmpl = (await pool.query('SELECT * FROM campaign_templates WHERE id=$1 AND (tenant_id=$2 OR is_public=true)', [req.params.id, tid])).rows[0];
-    if (!tmpl) return res.status(404).json({ error: 'Template not found' });
-    const { variables } = req.body;
-    let title = tmpl.title_template || tmpl.name;
-    let desc = tmpl.description_template || tmpl.description || '';
-    if (variables) {
-      Object.entries(variables).forEach(([k,v]) => { title = title.replace(new RegExp('{'+k+'}','g'), v); desc = desc.replace(new RegExp('{'+k+'}','g'), v); });
-    }
-    await pool.query('UPDATE campaign_templates SET usage_count=usage_count+1 WHERE id=$1', [tmpl.id]);
-    res.json({ success: true, campaign: { title, description: desc, target: tmpl.target_amount, category: tmpl.category } });
-  }));
-
-  app.delete('/api/campaign-templates/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM campaign_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
-    res.json({ success: true });
-  }));
-
-  app.get('/campaign-templates', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const templates = (await pool.query("SELECT * FROM campaign_templates WHERE tenant_id=$1 OR is_public=true ORDER BY usage_count DESC", [tid])).rows;
-    const html = `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-          <h2>Campaign Templates</h2>
-          <button onclick="document.getElementById('newTemplateForm').style.display='block'" class="btn" style="background:#059669;color:white">+ Create Template</button>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
-          ${templates.map(t => `<div style="padding:20px;border:1px solid #e2e8f0;border-radius:12px;background:white">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <span style="padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;color:#fff;background:#059669">${esc(t.category)}</span>
-              <span style="font-size:12px;color:#888">Used ${t.usage_count}x</span>
-            </div>
-            <h3 style="margin:0 0 4px">${esc(t.name)}</h3>
-            <p style="color:#666;font-size:14px;margin:0 0 12px">${esc(t.description||'')}</p>
-            ${t.target_amount?`<div style="font-size:14px;color:#059669;font-weight:600">Target: ${formatUGX(t.target_amount)}</div>`:''}
-          </div>`).join('')}
-        </div>
-      </div>`;
-    res.send(renderPage('Campaign Templates', html, req.session.user));
-  }));
-
-  // =============================================
-  // FEATURE 4: DONATION TIPPING
-  // =============================================
-  app.get('/api/tip-settings', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('SELECT * FROM tip_settings WHERE tenant_id=$1', [tid]);
-    res.json({ settings: result.rows[0] || null });
-  }));
-
-  app.put('/api/tip-settings', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    if (req.session.user.role !== 'admin' && req.session.user.role !== 'superadmin') return res.status(403).json({ error: 'Admin only' });
-    const { default_tip_percentage, max_tip_percentage, tip_label, tip_enabled, platform_fee_percentage } = req.body;
-    const result = await pool.query(`UPDATE tip_settings SET default_tip_percentage=COALESCE($1,default_tip_percentage), max_tip_percentage=COALESCE($2,max_tip_percentage), tip_label=COALESCE($3,tip_label), tip_enabled=COALESCE($4,tip_enabled), platform_fee_percentage=COALESCE($5,platform_fee_percentage) WHERE tenant_id=$6 RETURNING *`,
-      [default_tip_percentage, max_tip_percentage, tip_label, tip_enabled, platform_fee_percentage, tid]);
-    if (!result.rows.length) return res.status(404).json({ error: 'Settings not found' });
-    res.json({ success: true, settings: result.rows[0] });
-  }));
-
-  app.post('/api/donation-tip', ah(async (req, res) => {
-    const tid = req.body.tenant_id || 1;
-    const { donation_id, tip_percentage, donation_amount } = req.body;
-    const settings = (await pool.query('SELECT * FROM tip_settings WHERE tenant_id=$1 AND tip_enabled=true', [tid])).rows[0];
-    if (!settings) return res.json({ tip_amount: 0, platform_fee: 0 });
-    const pct = Math.min(parseInt(tip_percentage)||settings.default_tip_percentage, settings.max_tip_percentage);
-    const tipAmount = Math.round((parseInt(donation_amount)||0) * pct / 100);
-    const platformFee = Math.round((parseInt(donation_amount)||0) * parseFloat(settings.platform_fee_percentage) / 100);
-    const result = await pool.query('INSERT INTO donation_tips(tenant_id,donation_id,tip_percentage,tip_amount,platform_fee) VALUES($1,$2,$3,$4,$5) RETURNING *',
-      [tid, donation_id, pct, tipAmount, platformFee]);
-    res.json({ success: true, tip: result.rows[0], total_charge: parseInt(donation_amount) + tipAmount + platformFee });
-  }));
-
-  app.get('/api/tip-summary', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('SELECT COALESCE(SUM(tip_amount),0) as total_tips, COALESCE(SUM(platform_fee),0) as total_fees, COUNT(*) as tip_count FROM donation_tips WHERE tenant_id=$1', [tid]);
-    res.json({ summary: result.rows[0] });
-  }));
-
-  // =============================================
-  // FEATURE 5: STRETCH GOALS
-  // =============================================
-  app.post('/api/campaigns/:id/stretch-goals', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { target_amount, description, reward_text } = req.body;
-    if (!target_amount) return res.status(400).json({ error: 'target_amount required' });
-    const result = await pool.query('INSERT INTO campaign_stretch_goals(tenant_id,campaign_id,target_amount,description,reward_text) VALUES($1,$2,$3,$4,$5) RETURNING *',
-      [tid, req.params.id, parseInt(target_amount), description, reward_text]);
-    if(audit) audit(req, 'stretch_goal_added', { campaign_id: req.params.id, target: target_amount });
-    res.json({ success: true, stretch_goal: result.rows[0] });
-  }));
-
-  app.get('/api/campaigns/:id/stretch-goals', ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const goals = (await pool.query('SELECT * FROM campaign_stretch_goals WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY target_amount', [req.params.id, tid])).rows;
-    const camp = (await pool.query('SELECT (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fundraising_campaigns.id AND tenant_id=$1) as raised FROM fundraising_campaigns WHERE id=$2 AND tenant_id=$1', [tid, req.params.id])).rows[0];
-    const raised = parseInt(camp?.raised)||0;
-    const enriched = goals.map(g => ({ ...g, progress_pct: Math.min(100, Math.round((raised/parseInt(g.target_amount))*100)), is_achieved: raised >= parseInt(g.target_amount) }));
-    res.json({ stretch_goals: enriched, raised });
-  }));
-
-  app.delete('/api/stretch-goals/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM campaign_stretch_goals WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
-    res.json({ success: true });
-  }));
-
-  // =============================================
-  // FEATURE 6: DONOR SEGMENTATION
-  // =============================================
-  app.get('/api/donor-segments', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('SELECT * FROM donor_segments WHERE tenant_id=$1 ORDER BY created_at DESC', [tid]);
-    for (const seg of result.rows) {
-      seg.donor_count = (await pool.query('SELECT COUNT(*) FROM donor_segment_members WHERE segment_id=$1', [seg.id])).rows[0].count;
-    }
-    res.json({ segments: result.rows });
-  }));
-
-  app.post('/api/donor-segments', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, description, criteria_json, is_auto } = req.body;
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const result = await pool.query('INSERT INTO donor_segments(tenant_id,name,description,criteria_json,is_auto) VALUES($1,$2,$3,$4,$5) RETURNING *',
-      [tid, name, description, JSON.stringify(criteria_json||{}), is_auto||false]);
-    res.json({ success: true, segment: result.rows[0] });
-  }));
-
-  app.post('/api/donor-segments/:id/populate', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const seg = (await pool.query('SELECT * FROM donor_segments WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
-    if (!seg) return res.status(404).json({ error: 'Segment not found' });
-    const criteria = typeof seg.criteria_json === 'string' ? JSON.parse(seg.criteria_json) : seg.criteria_json || {};
-    let q = 'SELECT DISTINCT donor_email FROM campaign_donations WHERE tenant_id=$1 AND donor_email IS NOT NULL';
-    const params = [tid]; let idx = 2;
-    if (criteria.min_amount) { q += ` AND donor_email IN (SELECT donor_email FROM campaign_donations WHERE tenant_id=$1 GROUP BY donor_email HAVING SUM(amount) >= $${idx})`; params.push(parseInt(criteria.min_amount)); idx++; }
-    if (criteria.min_donations) { q += ` AND donor_email IN (SELECT donor_email FROM campaign_donations WHERE tenant_id=$1 GROUP BY donor_email HAVING COUNT(*) >= $${idx})`; params.push(parseInt(criteria.min_donations)); idx++; }
-    if (criteria.recent_days) { q += ` AND created_at > NOW() - INTERVAL '${parseInt(criteria.recent_days)} days'`; }
-    const donors = await pool.query(q, params);
-    // Clear and re-add
-    await pool.query('DELETE FROM donor_segment_members WHERE segment_id=$1', [seg.id]);
-    let added = 0;
-    for (const d of donors.rows) {
-      if (d.donor_email) {
-        await pool.query('INSERT INTO donor_segment_members(tenant_id,segment_id,donor_email) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [tid, seg.id, d.donor_email]);
-        added++;
-      }
-    }
-    await pool.query('UPDATE donor_segments SET donor_count=$1 WHERE id=$2', [added, seg.id]);
-    res.json({ success: true, added });
-  }));
-
-  app.delete('/api/donor-segments/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM donor_segments WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
-    res.json({ success: true });
-  }));
-
-  // =============================================
-  // FEATURE 7: CAMPAIGN CLONE
-  // =============================================
-  app.post('/api/campaigns/:id/clone', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const orig = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
-    if (!orig) return res.status(404).json({ error: 'Campaign not found' });
-    const { title } = req.body;
-    const newTitle = title || orig.title + ' (Copy)';
-    const result = await pool.query('INSERT INTO fundraising_campaigns(tenant_id,title,description,target,status,category,image_url,user_email,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-      [tid, newTitle, orig.description, orig.target, 'active', orig.category, orig.image_url, orig.user_email, req.session.user.email]);
-    // Clone stretch goals
-    await pool.query('INSERT INTO campaign_stretch_goals(tenant_id,campaign_id,target_amount,description,reward_text) SELECT tenant_id,$1,target_amount,description,reward_text FROM campaign_stretch_goals WHERE campaign_id=$2 AND tenant_id=$3',
-      [result.rows[0].id, req.params.id, tid]);
-    if(audit) audit(req, 'campaign_cloned', { from: req.params.id, to: result.rows[0].id });
-    res.json({ success: true, campaign: result.rows[0] });
-  }));
-
-  // =============================================
-  // FEATURE 8: BULK DONATIONS
-  // =============================================
-  app.post('/api/bulk-donations', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { title, campaign_id, donations } = req.body;
-    if (!title || !donations || !Array.isArray(donations)) return res.status(400).json({ error: 'title and donations array required' });
-    const batch = await pool.query('INSERT INTO bulk_donation_batches(tenant_id,title,campaign_id,created_by) VALUES($1,$2,$3,$4) RETURNING *',
-      [tid, title, campaign_id||null, req.session.user.email]);
-    let processed = 0, failed = 0, totalAmt = 0;
-    for (const d of donations) {
-      try {
-        if (!d.donor_name || !d.amount) { failed++; continue; }
-        await pool.query('INSERT INTO bulk_donation_items(tenant_id,batch_id,donor_name,donor_email,donor_phone,amount,method,reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
-          [tid, batch.rows[0].id, d.donor_name, d.donor_email, d.donor_phone, parseInt(d.amount), d.method||'cash', d.reference]);
-        if (campaign_id) {
-          await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,donor_email,donor_phone,amount,method,message) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
-            [tid, campaign_id, d.donor_name, d.donor_email, d.donor_phone, parseInt(d.amount), d.method||'cash', 'Bulk import: '+title]);
+  async function checkStretchGoals(campaignId, tenantId) {
+    try {
+      const camp = (await pool.query('SELECT target FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [campaignId, tenantId])).rows[0];
+      if (!camp) return;
+      const raised = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE campaign_id=$1', [campaignId])).rows[0]?.total || 0;
+      const totalRaised = parseInt(raised);
+      const goals = (await pool.query('SELECT * FROM campaign_stretch_goals WHERE campaign_id=$1 AND tenant_id=$2 AND unlocked=false ORDER BY goal_amount ASC', [campaignId, tenantId])).rows;
+      for (const g of goals) {
+        if (totalRaised >= parseInt(g.goal_amount)) {
+          await pool.query('UPDATE campaign_stretch_goals SET unlocked=true, unlocked_at=NOW() WHERE id=$1', [g.id]);
+          // Notify
+          const admins = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('admin','super_admin')", [tenantId])).rows;
+          for (const a of admins) {
+            notify(tenantId, a.email, 'Stretch Goal Unlocked!', 'The stretch goal "' + esc(g.description) + '" (UGX ' + parseInt(g.goal_amount).toLocaleString() + ') has been unlocked!', 'fundraising');
+          }
         }
-        totalAmt += parseInt(d.amount);
-        processed++;
-      } catch(e) { failed++; console.warn('[BulkDonation] Item error:', e.message); }
+      }
+    } catch(e) { console.warn('[StretchGoals Check]', e.message); }
+  }
+
+  // ===========================================================
+  // FEATURE 1: DONOR CRM
+  // ===========================================================
+
+  // GET all contacts
+  app.get('/api/donor-crm', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const search = req.query.search || '';
+    let q, params;
+    if (search) {
+      q = `SELECT * FROM donor_crm_contacts WHERE tenant_id=$1 AND (name ILIKE $2 OR email ILIKE $2 OR company ILIKE $2) ORDER BY created_at DESC`;
+      params = [t, '%' + search + '%'];
+    } else {
+      q = `SELECT * FROM donor_crm_contacts WHERE tenant_id=$1 ORDER BY created_at DESC`;
+      params = [t];
     }
-    await pool.query('UPDATE bulk_donation_batches SET total_amount=$1, donation_count=$2, status=$3 WHERE id=$4',
-      [totalAmt, processed, failed===0?'completed':processed>0?'partial':'failed', batch.rows[0].id]);
-    if(audit) audit(req, 'bulk_donation_imported', { batch_id: batch.rows[0].id, processed, failed, total: totalAmt });
-    res.json({ success: true, batch_id: batch.rows[0].id, processed, failed, total_amount: totalAmt });
+    const contacts = (await pool.query(q, params)).rows;
+    res.json(contacts);
   }));
 
-  app.get('/api/bulk-donations', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('SELECT * FROM bulk_donation_batches WHERE tenant_id=$1 ORDER BY created_at DESC', [tid]);
-    res.json({ batches: result.rows });
+  // POST create contact
+  app.post('/api/donor-crm', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, email, phone, address, company, notes, tags_json } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+    const result = await pool.query(
+      'INSERT INTO donor_crm_contacts(tenant_id,name,email,phone,address,company,notes,tags_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [t, esc(name), esc(email || ''), esc(phone || ''), esc(address || ''), esc(company || ''), esc(notes || ''), tags_json || '[]']
+    );
+    await audit(req.session.user.email, 'donor_crm_contact_created', 'Created CRM contact: ' + name, t);
+    res.json(result.rows[0]);
   }));
 
-  app.get('/api/bulk-donations/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const batch = (await pool.query('SELECT * FROM bulk_donation_batches WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
-    if (!batch) return res.status(404).json({ error: 'Not found' });
-    const items = (await pool.query('SELECT * FROM bulk_donation_items WHERE batch_id=$1 AND tenant_id=$2', [req.params.id, tid])).rows;
-    res.json({ batch, items });
+  // PUT update contact
+  app.put('/api/donor-crm', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, name, email, phone, address, company, notes, tags_json } = req.body;
+    if (!id) return res.status(400).json({ error: 'Contact ID is required' });
+    const existing = (await pool.query('SELECT * FROM donor_crm_contacts WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Contact not found' });
+    const result = await pool.query(
+      'UPDATE donor_crm_contacts SET name=$1,email=$2,phone=$3,address=$4,company=$5,notes=$6,tags_json=$7 WHERE id=$8 AND tenant_id=$9 RETURNING *',
+      [esc(name || existing.name), esc(email !== undefined ? email : existing.email), esc(phone !== undefined ? phone : existing.phone),
+       esc(address !== undefined ? address : existing.address), esc(company !== undefined ? company : existing.company),
+       esc(notes !== undefined ? notes : existing.notes), tags_json !== undefined ? tags_json : existing.tags_json, id, t]
+    );
+    await audit(req.session.user.email, 'donor_crm_contact_updated', 'Updated CRM contact: ' + (name || existing.name), t);
+    res.json(result.rows[0]);
   }));
 
-  app.get('/bulk-donations', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const batches = (await pool.query('SELECT * FROM bulk_donation_batches WHERE tenant_id=$1 ORDER BY created_at DESC', [tid])).rows;
-    const html = `
-      <div class="card">
-        <h2>Bulk Donation Import</h2>
-        <p style="color:#666;margin-bottom:20px">Import multiple donations at once from offline collections, events, or spreadsheets.</p>
-        <div style="padding:20px;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:24px;background:#f9fafb">
-          <h3>New Bulk Import</h3>
-          <p style="font-size:13px;color:#888">POST to /api/bulk-donations with JSON: { title, campaign_id, donations: [{donor_name, donor_email, amount, method}] }</p>
-        </div>
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="background:#f1f5f9"><th style="padding:10px;text-align:left">Batch</th><th style="padding:10px;text-align:right">Total</th><th style="padding:10px;text-align:center">Count</th><th style="padding:10px;text-align:center">Status</th><th style="padding:10px;text-align:left">Date</th></tr></thead>
-          <tbody>${batches.map(b => `<tr style="border-bottom:1px solid #e2e8f0">
-            <td style="padding:10px;font-weight:600">${esc(b.title)}</td>
-            <td style="padding:10px;text-align:right">${formatUGX(b.total_amount)}</td>
-            <td style="padding:10px;text-align:center">${b.donation_count}</td>
-            <td style="padding:10px;text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;color:#fff;background:${b.status==='completed'?'#059669':b.status==='failed'?'#dc2626':'#f59e0b'}">${esc(b.status)}</span></td>
-            <td style="padding:10px">${new Date(b.created_at).toLocaleDateString()}</td>
-          </tr>`).join('')}</tbody>
-        </table>
-      </div>`;
-    res.send(renderPage('Bulk Donations', html, req.session.user));
-  }));
-
-  // =============================================
-  // FEATURE 9: GIFT AID / TAX DEDUCTIONS
-  // =============================================
-  app.post('/api/gift-aid-declaration', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donor_email, donor_name, donor_address, tax_id, country, is_tax_exempt, declaration_type, effective_from, effective_to } = req.body;
-    if (!donor_email) return res.status(400).json({ error: 'donor_email required' });
-    const result = await pool.query(`INSERT INTO gift_tax_declarations(tenant_id,donor_email,donor_name,donor_address,tax_id,country,is_tax_exempt,declaration_type,effective_from,effective_to) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (tenant_id,donor_email) DO UPDATE SET donor_name=COALESCE($3,gift_tax_declarations.donor_name),donor_address=COALESCE($4,gift_tax_declarations.donor_address),tax_id=COALESCE($5,gift_tax_declarations.tax_id),is_tax_exempt=COALESCE($7,gift_tax_declarations.is_tax_exempt),declaration_type=COALESCE($8,gift_tax_declarations.declaration_type),effective_from=COALESCE($9,gift_tax_declarations.effective_from),effective_to=COALESCE($10,gift_tax_declarations.effective_to) RETURNING *`,
-      [tid, donor_email, donor_name, donor_address, tax_id, country||'UG', is_tax_exempt||false, declaration_type||'gift_aid', effective_from||null, effective_to||null]);
-    res.json({ success: true, declaration: result.rows[0] });
-  }));
-
-  app.get('/api/gift-aid-declaration/:email', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('SELECT * FROM gift_tax_declarations WHERE tenant_id=$1 AND donor_email=$2', [tid, req.params.email]);
-    res.json({ declaration: result.rows[0] || null });
-  }));
-
-  app.post('/api/generate-tax-receipt/:donationId', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const donation = (await pool.query('SELECT * FROM campaign_donations WHERE id=$1 AND tenant_id=$2', [req.params.donationId, tid])).rows[0];
-    if (!donation) return res.status(404).json({ error: 'Donation not found' });
-    const decl = (await pool.query('SELECT * FROM gift_tax_declarations WHERE tenant_id=$1 AND donor_email=$2', [tid, donation.donor_email])).rows[0];
-    if (!decl || decl.declaration_type === 'none') return res.status(400).json({ error: 'No tax declaration on file' });
-    const taxDeductible = decl.is_tax_exempt ? parseInt(donation.amount) : Math.round(parseInt(donation.amount) * 0.25); // Gift Aid: 25% top-up equivalent
-    const receiptNum = 'TXR-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2,5).toUpperCase();
-    const year = new Date().getFullYear();
-    const result = await pool.query('INSERT INTO tax_receipts(tenant_id,donation_id,donor_email,donor_name,amount,tax_deductible_amount,receipt_number,tax_year) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-      [tid, req.params.donationId, donation.donor_email, donation.donor_name, parseInt(donation.amount), taxDeductible, receiptNum, year]);
-    res.json({ success: true, receipt: result.rows[0] });
-  }));
-
-  app.get('/api/tax-receipts', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { tax_year, donor_email } = req.query;
-    let q = 'SELECT * FROM tax_receipts WHERE tenant_id=$1'; const params = [tid]; let idx = 2;
-    if (tax_year) { q += ` AND tax_year=$${idx}`; params.push(parseInt(tax_year)); idx++; }
-    if (donor_email) { q += ` AND donor_email=$${idx}`; params.push(donor_email); idx++; }
-    q += ' ORDER BY issued_at DESC';
-    const result = await pool.query(q, params);
-    res.json({ receipts: result.rows });
-  }));
-
-  app.get('/gift-aid', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const declarations = (await pool.query('SELECT * FROM gift_tax_declarations WHERE tenant_id=$1 ORDER BY created_at DESC', [tid])).rows;
-    const receipts = (await pool.query('SELECT * FROM tax_receipts WHERE tenant_id=$1 ORDER BY issued_at DESC LIMIT 20', [tid])).rows;
-    const html = `
-      <div class="card">
-        <h2>Gift Aid & Tax Deductions</h2>
-        <p style="color:#666;margin-bottom:20px">Manage tax declarations and generate receipts for donors.</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
-          <div>
-            <h3>Declarations</h3>
-            <table style="width:100%;border-collapse:collapse">
-              <thead><tr style="background:#f1f5f9"><th style="padding:8px;text-align:left">Donor</th><th style="padding:8px;text-align:left">Type</th><th style="padding:8px;text-align:center">Tax Exempt</th></tr></thead>
-              <tbody>${declarations.map(d => `<tr style="border-bottom:1px solid #e2e8f0">
-                <td style="padding:8px">${esc(d.donor_name||d.donor_email)}</td>
-                <td style="padding:8px">${esc(d.declaration_type)}</td>
-                <td style="padding:8px;text-align:center">${d.is_tax_exempt?'Yes':'No'}</td>
-              </tr>`).join('')}</tbody>
-            </table>
-          </div>
-          <div>
-            <h3>Recent Tax Receipts</h3>
-            <table style="width:100%;border-collapse:collapse">
-              <thead><tr style="background:#f1f5f9"><th style="padding:8px;text-align:left">Receipt #</th><th style="padding:8px;text-align:left">Donor</th><th style="padding:8px;text-align:right">Amount</th><th style="padding:8px;text-align:right">Tax Ded.</th></tr></thead>
-              <tbody>${receipts.map(r => `<tr style="border-bottom:1px solid #e2e8f0">
-                <td style="padding:8px;font-family:monospace;font-size:12px">${esc(r.receipt_number)}</td>
-                <td style="padding:8px">${esc(r.donor_name||r.donor_email)}</td>
-                <td style="padding:8px;text-align:right">${formatUGX(r.amount)}</td>
-                <td style="padding:8px;text-align:right;font-weight:600;color:#059669">${formatUGX(r.tax_deductible_amount)}</td>
-              </tr>`).join('')}</tbody>
-            </table>
-          </div>
-        </div>
-      </div>`;
-    res.send(renderPage('Gift Aid & Tax', html, req.session.user));
-  }));
-
-  // =============================================
-  // FEATURE 10: DONATION GOALS & CHALLENGES
-  // =============================================
-  app.get('/api/donation-challenges', ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('SELECT * FROM donation_challenges WHERE tenant_id=$1 AND is_active=true ORDER BY created_at DESC', [tid]);
-    for (const ch of result.rows) {
-      ch.participant_count = (await pool.query('SELECT COUNT(*) FROM challenge_participants WHERE challenge_id=$1', [ch.id])).rows[0].count;
-      ch.progress_pct = ch.target_value > 0 ? Math.min(100, Math.round((parseInt(ch.current_value)/parseInt(ch.target_value))*100)) : 0;
-    }
-    res.json({ challenges: result.rows });
-  }));
-
-  app.post('/api/donation-challenges', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { title, description, challenge_type, target_value, start_date, end_date, reward_text } = req.body;
-    if (!title || !target_value) return res.status(400).json({ error: 'title and target_value required' });
-    const result = await pool.query('INSERT INTO donation_challenges(tenant_id,title,description,challenge_type,target_value,start_date,end_date,reward_text,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-      [tid, title, description, challenge_type||'amount', parseInt(target_value), start_date||null, end_date||null, reward_text, req.session.user.email]);
-    if(audit) audit(req, 'challenge_created', { id: result.rows[0].id });
-    res.json({ success: true, challenge: result.rows[0] });
-  }));
-
-  app.post('/api/donation-challenges/:id/join', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const result = await pool.query('INSERT INTO challenge_participants(tenant_id,challenge_id,donor_email) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING *',
-      [tid, req.params.id, req.session.user.email]);
-    res.json({ success: true, joined: !!result.rows.length });
-  }));
-
-  app.put('/api/donation-challenges/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { current_value, is_active } = req.body;
-    const result = await pool.query(`UPDATE donation_challenges SET current_value=COALESCE($1,current_value), is_active=COALESCE($2,is_active) WHERE id=$3 AND tenant_id=$4 RETURNING *`,
-      [current_value?parseInt(current_value):null, is_active, req.params.id, tid]);
-    if (!result.rows.length) return res.status(404).json({ error: 'Not found' });
-    res.json({ success: true, challenge: result.rows[0] });
-  }));
-
-  app.delete('/api/donation-challenges/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    await pool.query('UPDATE donation_challenges SET is_active=false WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
+  // DELETE contact
+  app.delete('/api/donor-crm', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Contact ID is required' });
+    const existing = (await pool.query('SELECT * FROM donor_crm_contacts WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Contact not found' });
+    await pool.query('DELETE FROM donor_crm_contacts WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'donor_crm_contact_deleted', 'Deleted CRM contact: ' + existing.name, t);
     res.json({ success: true });
   }));
 
-  app.get('/donation-challenges', ah(async (req, res) => {
-    const tid = req.session?.user?.tenant_id || 1;
-    const challenges = (await pool.query('SELECT * FROM donation_challenges WHERE tenant_id=$1 AND is_active=true ORDER BY created_at DESC', [tid])).rows;
-    const html = `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-          <h2>Donation Challenges</h2>
-          ${req.session?.user?`<button onclick="document.getElementById('newChallengeForm').style.display='block'" class="btn" style="background:#059669;color:white">+ Create Challenge</button>`:''}
-        </div>
-        <div id="newChallengeForm" style="display:none;padding:20px;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:24px;background:#f9fafb">
-          <h3>New Challenge</h3>
-          <form method="POST" action="/api/donation-challenges">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-              <div><label>Title *</label><input type="text" name="title" required style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div><label>Type</label><select name="challenge_type" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"><option value="amount">Total Amount</option><option value="donors">Number of Donors</option><option value="days">Days Streak</option></select></div>
-              <div><label>Target Value *</label><input type="number" name="target_value" required style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div><label>Reward</label><input type="text" name="reward_text" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div><label>Start Date</label><input type="date" name="start_date" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div><label>End Date</label><input type="date" name="end_date" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px"></div>
-              <div style="grid-column:span 2"><label>Description</label><textarea name="description" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;min-height:60px"></textarea></div>
-            </div>
-            <button type="submit" class="btn" style="background:#059669;color:white;margin-top:12px">Create Challenge</button>
-          </form>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px">
-          ${challenges.map(ch => {
-            const pct = ch.target_value > 0 ? Math.min(100, Math.round((parseInt(ch.current_value)/parseInt(ch.target_value))*100)) : 0;
-            return `<div style="padding:20px;border:1px solid #e2e8f0;border-radius:12px;background:white">
-              <h3 style="margin:0 0 8px">${esc(ch.title)}</h3>
-              <p style="color:#666;font-size:14px;margin:0 0 12px">${esc(ch.description||'')}</p>
-              <div style="background:#e2e8f0;border-radius:8px;height:12px;margin-bottom:8px"><div style="background:linear-gradient(90deg,#059669,#10b981);border-radius:8px;height:12px;width:${pct}%"></div></div>
-              <div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-weight:700;color:#059669">${pct}%</span><span style="color:#888">${parseInt(ch.current_value).toLocaleString()} / ${parseInt(ch.target_value).toLocaleString()} ${esc(ch.challenge_type)}</span></div>
-              ${ch.reward_text?`<div style="margin-top:8px;padding:8px;background:#fef3c7;border-radius:6px;font-size:13px">Reward: ${esc(ch.reward_text)}</div>`:''}
-              ${req.session?.user?`<button onclick="fetch('/api/donation-challenges/${ch.id}/join',{method:'POST'}).then(()=>alert('Joined!'))" style="margin-top:8px;padding:4px 12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer">Join Challenge</button>`:''}
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
-    res.send(renderPage('Donation Challenges', html, req.session?.user||null));
+  // POST add interaction
+  app.post('/api/donor-crm/:id/interactions', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const contactId = req.params.id;
+    const contact = (await pool.query('SELECT * FROM donor_crm_contacts WHERE id=$1 AND tenant_id=$2', [contactId, t])).rows[0];
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    const { type, subject, notes, interaction_date } = req.body;
+    if (!subject || !subject.trim()) return res.status(400).json({ error: 'Subject is required' });
+    const result = await pool.query(
+      'INSERT INTO donor_crm_interactions(tenant_id,contact_id,type,subject,notes,interaction_date) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, contactId, esc(type || 'call'), esc(subject), esc(notes || ''), interaction_date || 'CURRENT_DATE']
+    );
+    // Update last_contacted
+    await pool.query('UPDATE donor_crm_contacts SET last_contacted=NOW() WHERE id=$1', [contactId]);
+    await audit(req.session.user.email, 'donor_crm_interaction_added', 'Added interaction for contact: ' + contact.name, t);
+    res.json(result.rows[0]);
   }));
 
-  // =============================================
-  // STARTUP LOG
-  // =============================================
-  console.log('[FundraisingMega] Module loaded — 10 features, 50+ routes');
+  // GET interactions for contact
+  app.get('/api/donor-crm/:id/interactions', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const contactId = req.params.id;
+    const contact = (await pool.query('SELECT * FROM donor_crm_contacts WHERE id=$1 AND tenant_id=$2', [contactId, t])).rows[0];
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    const interactions = (await pool.query('SELECT * FROM donor_crm_interactions WHERE contact_id=$1 AND tenant_id=$2 ORDER BY interaction_date DESC, created_at DESC', [contactId, t])).rows;
+    res.json(interactions);
+  }));
+
+  // POST sync CRM from existing donors
+  app.post('/api/donor-crm/sync', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    let synced = 0;
+    // Sync from campaign_donations donors
+    try {
+      const donors = (await pool.query(`SELECT DISTINCT donor_name, donor_email FROM campaign_donations WHERE tenant_id=$1 AND donor_name IS NOT NULL AND donor_name != 'Anonymous'`, [t])).rows;
+      for (const d of donors) {
+        const exists = (await pool.query('SELECT id FROM donor_crm_contacts WHERE tenant_id=$1 AND email=$2', [t, d.donor_email || ''])).rows[0];
+        if (!exists) {
+          await pool.query('INSERT INTO donor_crm_contacts(tenant_id,name,email,tags_json) VALUES($1,$2,$3,$4)',
+            [t, esc(d.donor_name), esc(d.donor_email || ''), '["donor"]']);
+          synced++;
+        }
+      }
+    } catch(e) { /* campaign_donations may not exist */ }
+    // Sync from pledge donors
+    try {
+      const pledgers = (await pool.query('SELECT DISTINCT donor_name, donor_email FROM campaign_pledges_mega WHERE tenant_id=$1 AND donor_email IS NOT NULL', [t])).rows;
+      for (const p of pledgers) {
+        const exists = (await pool.query('SELECT id FROM donor_crm_contacts WHERE tenant_id=$1 AND email=$2', [t, p.donor_email || ''])).rows[0];
+        if (!exists) {
+          await pool.query('INSERT INTO donor_crm_contacts(tenant_id,name,email,tags_json) VALUES($1,$2,$3,$4)',
+            [t, esc(p.donor_name), esc(p.donor_email || ''), '["pledger"]']);
+          synced++;
+        }
+      }
+    } catch(e) { /* ignore */ }
+    await audit(req.session.user.email, 'donor_crm_synced', 'Synced ' + synced + ' contacts from existing data', t);
+    res.json({ synced });
+  }));
+
+  // Donor CRM UI
+  app.get('/donor-crm', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const search = req.query.search || '';
+    let q, params;
+    if (search) {
+      q = `SELECT * FROM donor_crm_contacts WHERE tenant_id=$1 AND (name ILIKE $2 OR email ILIKE $2 OR company ILIKE $2) ORDER BY created_at DESC`;
+      params = [t, '%' + search + '%'];
+    } else {
+      q = `SELECT * FROM donor_crm_contacts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200`;
+      params = [t];
+    }
+    const contacts = (await pool.query(q, params)).rows;
+    const totalContacts = contacts.length;
+
+    res.send(renderPage('Donor CRM', `
+      <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)">
+        <h1>Donor CRM</h1>
+        <p>Manage your donor relationships and interactions</p>
+      </div>
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num" style="color:#059669">${totalContacts}</div><div>Total Contacts</div></div>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
+        <form method="GET" action="/donor-crm" style="display:flex;gap:8px;flex:1;min-width:200px">
+          <input name="search" value="${esc(search)}" placeholder="Search contacts..." style="flex:1;padding:10px 14px;border-radius:8px;border:1px solid #e2e8f0">
+          <button class="btn btn-sm" type="submit">Search</button>
+        </form>
+        <button class="btn btn-green" onclick="document.getElementById('addContactModal').style.display='flex'">+ Add Contact</button>
+        <form method="POST" action="/api/donor-crm/sync" style="display:inline"><button type="submit" class="btn btn-sm">Sync from Donations</button></form>
+      </div>
+      <div class="card">
+        ${contacts.length ? '<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Company</th><th>Tags</th><th>Last Contacted</th><th>Actions</th></tr>' +
+          contacts.map(c => '<tr><td><strong>' + esc(c.name) + '</strong></td><td>' + esc(c.email || '-') + '</td><td>' + esc(c.phone || '-') + '</td><td>' + esc(c.company || '-') + '</td><td>' + (c.tags_json ? JSON.parse(c.tags_json).map(tg => '<span class="tag">' + esc(tg) + '</span>').join(' ') : '-') + '</td><td>' + (c.last_contacted ? new Date(c.last_contacted).toLocaleDateString() : 'Never') + '</td><td><a href="/donor-crm/' + c.id + '" class="btn btn-sm">View</a></td></tr>').join('') + '</table>' : '<p class="muted" style="text-align:center;padding:40px">No contacts yet. Add your first donor contact or sync from existing donations.</p>'}
+      </div>
+      <div id="addContactModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center">
+        <div class="card" style="max-width:500px;width:90%;margin:0 auto;max-height:90vh;overflow-y:auto">
+          <h2>Add Contact</h2>
+          <form id="addContactForm">
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Name *</label><input name="name" required style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Email</label><input name="email" type="email" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Phone</label><input name="phone" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Address</label><input name="address" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Company</label><input name="company" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Notes</label><textarea name="notes" rows="3" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></textarea></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Tags (comma-separated)</label><input name="tags" placeholder="donor, major, corporate" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <button type="submit" class="btn btn-green" style="flex:1">Save Contact</button>
+              <button type="button" class="btn btn-sm" onclick="document.getElementById('addContactModal').style.display='none'" style="flex:1">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <script>
+        document.getElementById('addContactForm').addEventListener('submit', async function(e) {
+          e.preventDefault();
+          const fd = new FormData(this);
+          const tags = fd.get('tags') ? fd.get('tags').split(',').map(t=>t.trim()).filter(Boolean) : [];
+          const res = await fetch('/api/donor-crm', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:fd.get('name'),email:fd.get('email'),phone:fd.get('phone'),address:fd.get('address'),company:fd.get('company'),notes:fd.get('notes'),tags_json:JSON.stringify(tags)})});
+          if(res.ok) location.reload(); else { const d=await res.json(); alert(d.error||'Error saving contact'); }
+        });
+      </script>
+    `, req.session.user));
+  }));
+
+  // Donor CRM Contact Detail UI
+  app.get('/donor-crm/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const contact = (await pool.query('SELECT * FROM donor_crm_contacts WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!contact) return res.status(404).send('Contact not found');
+    const interactions = (await pool.query('SELECT * FROM donor_crm_interactions WHERE contact_id=$1 AND tenant_id=$2 ORDER BY interaction_date DESC, created_at DESC', [req.params.id, t])).rows;
+
+    // Get related donations
+    let relatedDonations = [];
+    try {
+      if (contact.email) {
+        relatedDonations = (await pool.query('SELECT cd.*, fc.title as campaign_title FROM campaign_donations cd LEFT JOIN fundraising_campaigns fc ON cd.campaign_id=fc.id WHERE cd.tenant_id=$1 AND (cd.donor_email=$2 OR cd.donor_name=$3) ORDER BY cd.donated_at DESC LIMIT 20', [t, contact.email, contact.name])).rows;
+      }
+    } catch(e) { /* campaign_donations may not exist */ }
+
+    const totalDonated = relatedDonations.reduce((s, d) => s + (parseInt(d.amount) || 0), 0);
+
+    res.send(renderPage(esc(contact.name) + ' - Donor CRM', `
+      <div style="display:flex;gap:12px;margin-bottom:20px">
+        <a href="/donor-crm" class="btn btn-sm">&larr; Back to CRM</a>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div class="card">
+          <h2>${esc(contact.name)}</h2>
+          ${contact.email ? '<p><strong>Email:</strong> ' + esc(contact.email) + '</p>' : ''}
+          ${contact.phone ? '<p><strong>Phone:</strong> ' + esc(contact.phone) + '</p>' : ''}
+          ${contact.address ? '<p><strong>Address:</strong> ' + esc(contact.address) + '</p>' : ''}
+          ${contact.company ? '<p><strong>Company:</strong> ' + esc(contact.company) + '</p>' : ''}
+          ${contact.notes ? '<p><strong>Notes:</strong> ' + esc(contact.notes) + '</p>' : ''}
+          ${contact.tags_json ? '<p><strong>Tags:</strong> ' + JSON.parse(contact.tags_json).map(tg => '<span class="tag">' + esc(tg) + '</span>').join(' ') + '</p>' : ''}
+          <p class="muted">Last contacted: ${contact.last_contacted ? new Date(contact.last_contacted).toLocaleDateString() : 'Never'}</p>
+        </div>
+        <div class="card">
+          <h3>Donation Summary</h3>
+          <div class="stats" style="grid-template-columns:1fr 1fr">
+            <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalDonated.toLocaleString()}</div><div>Total Donated</div></div>
+            <div class="stat-card"><div class="stat-num">${relatedDonations.length}</div><div>Donations</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:20px">
+        <h2>Interactions <button class="btn btn-sm btn-green" onclick="document.getElementById('addInteractionForm').style.display='block'" style="margin-left:10px">+ Log Interaction</button></h2>
+        <div id="addInteractionForm" style="display:none;margin-bottom:20px;padding:16px;background:#f8fafc;border-radius:8px">
+          <form id="interactionForm">
+            <div style="margin-bottom:10px"><label style="font-weight:600;display:block;margin-bottom:4px">Type</label><select name="type" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"><option value="call">Phone Call</option><option value="email">Email</option><option value="meeting">Meeting</option><option value="note">Note</option><option value="donation">Donation</option></select></div>
+            <div style="margin-bottom:10px"><label style="font-weight:600;display:block;margin-bottom:4px">Subject *</label><input name="subject" required style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="margin-bottom:10px"><label style="font-weight:600;display:block;margin-bottom:4px">Notes</label><textarea name="notes" rows="3" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></textarea></div>
+            <div style="margin-bottom:10px"><label style="font-weight:600;display:block;margin-bottom:4px">Date</label><input name="interaction_date" type="date" value="${new Date().toISOString().split('T')[0]}" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <button type="submit" class="btn btn-green">Save Interaction</button>
+          </form>
+        </div>
+        ${interactions.length ? '<table><tr><th>Type</th><th>Subject</th><th>Notes</th><th>Date</th></tr>' +
+          interactions.map(i => '<tr><td><span class="tag">' + esc(i.type) + '</span></td><td><strong>' + esc(i.subject) + '</strong></td><td class="muted">' + esc((i.notes || '').substring(0, 80)) + '</td><td>' + new Date(i.interaction_date).toLocaleDateString() + '</td></tr>').join('') + '</table>' : '<p class="muted" style="text-align:center;padding:20px">No interactions logged yet.</p>'}
+      </div>
+      ${relatedDonations.length > 0 ? '<div class="card" style="margin-top:20px"><h2>Related Donations</h2><table><tr><th>Campaign</th><th>Amount</th><th>Date</th></tr>' +
+        relatedDonations.map(d => '<tr><td>' + esc(d.campaign_title || 'Campaign #' + d.campaign_id) + '</td><td style="color:#059669;font-weight:700">UGX ' + (parseInt(d.amount)||0).toLocaleString() + '</td><td>' + (d.donated_at ? new Date(d.donated_at).toLocaleDateString() : '-') + '</td></tr>').join('') + '</table></div>' : ''}
+      <script>
+        document.getElementById('interactionForm').addEventListener('submit', async function(e) {
+          e.preventDefault();
+          const fd = new FormData(this);
+          const res = await fetch('/api/donor-crm/${req.params.id}/interactions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:fd.get('type'),subject:fd.get('subject'),notes:fd.get('notes'),interaction_date:fd.get('interaction_date')})});
+          if(res.ok) location.reload(); else { const d=await res.json(); alert(d.error||'Error saving interaction'); }
+        });
+      </script>
+    `, req.session.user));
+  }));
+
+  // ===========================================================
+  // FEATURE 2: PLEDGE MANAGEMENT
+  // ===========================================================
+
+  // POST create pledge
+  app.post('/api/campaigns/:id/pledges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = req.params.id;
+    const { donor_name, donor_email, amount_pledged, due_date, status } = req.body;
+    if (!donor_name || !donor_name.trim()) return res.status(400).json({ error: 'Donor name is required' });
+    if (!amount_pledged || parseInt(amount_pledged) <= 0) return res.status(400).json({ error: 'Pledge amount must be greater than zero' });
+    const result = await pool.query(
+      'INSERT INTO campaign_pledges_mega(tenant_id,campaign_id,donor_name,donor_email,amount_pledged,due_date,status) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [t, campaignId, esc(donor_name), esc(donor_email || ''), parseInt(amount_pledged), due_date || null, status || 'pending']
+    );
+    await audit(req.session.user.email, 'pledge_created', 'Created pledge of UGX ' + parseInt(amount_pledged).toLocaleString() + ' by ' + donor_name, t);
+    res.json(result.rows[0]);
+  }));
+
+  // GET pledges for campaign
+  app.get('/api/campaigns/:id/pledges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = req.params.id;
+    const pledges = (await pool.query('SELECT * FROM campaign_pledges_mega WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [campaignId, t])).rows;
+    res.json(pledges);
+  }));
+
+  // PUT update pledge
+  app.put('/api/campaigns/:id/pledges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = req.params.id;
+    const { pledge_id, donor_name, donor_email, amount_pledged, amount_fulfilled, due_date, status } = req.body;
+    if (!pledge_id) return res.status(400).json({ error: 'Pledge ID is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_pledges_mega WHERE id=$1 AND campaign_id=$2 AND tenant_id=$3', [pledge_id, campaignId, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Pledge not found' });
+    const result = await pool.query(
+      'UPDATE campaign_pledges_mega SET donor_name=$1,donor_email=$2,amount_pledged=$3,amount_fulfilled=$4,due_date=$5,status=$6 WHERE id=$7 AND tenant_id=$8 RETURNING *',
+      [esc(donor_name || existing.donor_name), esc(donor_email !== undefined ? donor_email : existing.donor_email),
+       amount_pledged !== undefined ? parseInt(amount_pledged) : existing.amount_pledged,
+       amount_fulfilled !== undefined ? parseInt(amount_fulfilled) : existing.amount_fulfilled,
+       due_date !== undefined ? due_date : existing.due_date,
+       status || existing.status, pledge_id, t]
+    );
+    // Auto-update status if fulfilled matches pledged
+    if (parseInt(result.rows[0].amount_fulfilled) >= parseInt(result.rows[0].amount_pledged)) {
+      await pool.query("UPDATE campaign_pledges_mega SET status='fulfilled' WHERE id=$1", [pledge_id]);
+      result.rows[0].status = 'fulfilled';
+    }
+    await audit(req.session.user.email, 'pledge_updated', 'Updated pledge #' + pledge_id, t);
+    res.json(result.rows[0]);
+  }));
+
+  // DELETE pledge
+  app.delete('/api/campaigns/:id/pledges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = req.params.id;
+    const { pledge_id } = req.body;
+    if (!pledge_id) return res.status(400).json({ error: 'Pledge ID is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_pledges_mega WHERE id=$1 AND campaign_id=$2 AND tenant_id=$3', [pledge_id, campaignId, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Pledge not found' });
+    await pool.query('DELETE FROM campaign_pledges_mega WHERE id=$1 AND tenant_id=$2', [pledge_id, t]);
+    await audit(req.session.user.email, 'pledge_deleted', 'Deleted pledge #' + pledge_id + ' by ' + existing.donor_name, t);
+    res.json({ success: true });
+  }));
+
+  // POST remind pledge donor
+  app.post('/api/pledges/:id/remind', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const pledge = (await pool.query('SELECT * FROM campaign_pledges_mega WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!pledge) return res.status(404).json({ error: 'Pledge not found' });
+    const remaining = parseInt(pledge.amount_pledged) - parseInt(pledge.amount_fulfilled);
+    // Update reminded_at
+    await pool.query('UPDATE campaign_pledges_mega SET reminded_at=NOW() WHERE id=$1', [pledge.id]);
+    // Send email if available
+    if (pledge.donor_email && sendEmail) {
+      let campaignTitle = 'our campaign';
+      try {
+        const camp = (await pool.query('SELECT title FROM fundraising_campaigns WHERE id=$1', [pledge.campaign_id])).rows[0];
+        if (camp) campaignTitle = camp.title;
+      } catch(e) {}
+      try {
+        await sendEmail(pledge.donor_email, 'Pledge Reminder - ' + campaignTitle,
+          '<div style="font-family:Arial;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#059669">Pledge Reminder</h2><p>Dear ' + esc(pledge.donor_name) + ',</p><p>This is a friendly reminder about your pledge of <strong>UGX ' + parseInt(pledge.amount_pledged).toLocaleString() + '</strong> to <strong>' + esc(campaignTitle) + '</strong>.</p><p>Remaining amount: <strong>UGX ' + remaining.toLocaleString() + '</strong></p>' +
+          (pledge.due_date ? '<p>Due date: <strong>' + new Date(pledge.due_date).toLocaleDateString() + '</strong></p>' : '') +
+          '<p>Thank you for your generous support!</p></div>');
+      } catch(e) { console.warn('[PledgeReminder Email]', e.message); }
+    }
+    // Send SMS if phone available
+    try {
+      const contact = (await pool.query('SELECT phone FROM donor_crm_contacts WHERE tenant_id=$1 AND email=$2 LIMIT 1', [t, pledge.donor_email])).rows[0];
+      if (contact && contact.phone && sendSMS) {
+        await sendSMS(contact.phone, 'Hi ' + pledge.donor_name + ', this is a reminder about your pledge of UGX ' + parseInt(pledge.amount_pledged).toLocaleString() + '. Remaining: UGX ' + remaining.toLocaleString() + '. Thank you for your support!');
+      }
+    } catch(e) {}
+    // Notify in-app
+    if (pledge.donor_email) {
+      notify(t, pledge.donor_email, 'Pledge Reminder', 'This is a reminder about your pledge of UGX ' + parseInt(pledge.amount_pledged).toLocaleString() + '. Remaining: UGX ' + remaining.toLocaleString(), 'fundraising');
+    }
+    await audit(req.session.user.email, 'pledge_reminded', 'Sent reminder for pledge #' + pledge.id + ' to ' + pledge.donor_name, t);
+    res.json({ success: true, reminded_at: new Date().toISOString() });
+  }));
+
+  // Pledges UI
+  app.get('/pledges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = req.query.campaign || '';
+    let pledges, campaigns = [];
+    try {
+      campaigns = (await pool.query('SELECT id, title FROM fundraising_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+    } catch(e) {}
+    if (campaignId) {
+      pledges = (await pool.query('SELECT pm.*, fc.title as campaign_title FROM campaign_pledges_mega pm LEFT JOIN fundraising_campaigns fc ON pm.campaign_id=fc.id WHERE pm.campaign_id=$1 AND pm.tenant_id=$2 ORDER BY pm.created_at DESC', [campaignId, t])).rows;
+    } else {
+      pledges = (await pool.query('SELECT pm.*, fc.title as campaign_title FROM campaign_pledges_mega pm LEFT JOIN fundraising_campaigns fc ON pm.campaign_id=fc.id WHERE pm.tenant_id=$1 ORDER BY pm.created_at DESC LIMIT 200', [t])).rows;
+    }
+    const totalPledged = pledges.reduce((s, p) => s + parseInt(p.amount_pledged || 0), 0);
+    const totalFulfilled = pledges.reduce((s, p) => s + parseInt(p.amount_fulfilled || 0), 0);
+    const overduePledges = pledges.filter(p => p.due_date && new Date(p.due_date) < new Date() && p.status !== 'fulfilled' && p.status !== 'cancelled').length;
+
+    res.send(renderPage('Pledge Management', `
+      <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#a78bfa)">
+        <h1>Pledge Management</h1>
+        <p>Track and manage donor pledges</p>
+      </div>
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num" style="color:#7c3aed">UGX ${totalPledged.toLocaleString()}</div><div>Total Pledged</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalFulfilled.toLocaleString()}</div><div>Fulfilled</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b">UGX ${(totalPledged - totalFulfilled).toLocaleString()}</div><div>Outstanding</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#dc2626">${overduePledges}</div><div>Overdue</div></div>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
+        <select id="campaignFilter" onchange="location.href='/pledges?campaign='+this.value" style="padding:10px 14px;border-radius:8px;border:1px solid #e2e8f0">
+          <option value="">All Campaigns</option>
+          ${campaigns.map(c => '<option value="' + c.id + '"' + (campaignId == c.id ? ' selected' : '') + '>' + esc(c.title) + '</option>').join('')}
+        </select>
+      </div>
+      <div class="card">
+        ${pledges.length ? '<table><tr><th>Donor</th><th>Campaign</th><th>Pledged</th><th>Fulfilled</th><th>Remaining</th><th>Due Date</th><th>Status</th><th>Actions</th></tr>' +
+          pledges.map(p => {
+            const remaining = parseInt(p.amount_pledged) - parseInt(p.amount_fulfilled);
+            const statusColors = { pending: '#fef3c7;color:#92400e', fulfilled: '#d1fae5;color:#065f46', partially_fulfilled: '#dbeafe;color:#1e40af', overdue: '#fee2e2;color:#991b1b', cancelled: '#f1f5f9;color:#64748b' };
+            return '<tr><td><strong>' + esc(p.donor_name) + '</strong>' + (p.donor_email ? '<br><span class="muted">' + esc(p.donor_email) + '</span>' : '') + '</td><td>' + esc(p.campaign_title || 'Campaign #' + p.campaign_id) + '</td><td style="font-weight:700">UGX ' + parseInt(p.amount_pledged).toLocaleString() + '</td><td style="color:#059669">UGX ' + parseInt(p.amount_fulfilled).toLocaleString() + '</td><td>' + (remaining > 0 ? 'UGX ' + remaining.toLocaleString() : '-') + '</td><td>' + (p.due_date ? new Date(p.due_date).toLocaleDateString() : '-') + '</td><td><span class="tag" style="background:' + (statusColors[p.status] || statusColors.pending) + '">' + esc(p.status) + '</span></td><td><button class="btn btn-sm" onclick="remindPledge(' + p.id + ')">Remind</button></td></tr>';
+          }).join('') + '</table>' : '<p class="muted" style="text-align:center;padding:40px">No pledges yet.</p>'}
+      </div>
+      <script>
+        async function remindPledge(id) {
+          const res = await fetch('/api/pledges/'+id+'/remind', {method:'POST',headers:{'Content-Type':'application/json'}});
+          if(res.ok) { alert('Reminder sent!'); location.reload(); } else { const d=await res.json(); alert(d.error||'Error sending reminder'); }
+        }
+      </script>
+    `, req.session.user));
+  }));
+
+  // ===========================================================
+  // FEATURE 3: CAMPAIGN TEMPLATES
+  // ===========================================================
+
+  // GET all templates
+  app.get('/api/campaign-templates', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const category = req.query.category || '';
+    let q, params;
+    if (category) {
+      q = 'SELECT * FROM campaign_templates WHERE tenant_id=$1 AND category=$2 ORDER BY usage_count DESC, created_at DESC';
+      params = [t, category];
+    } else {
+      q = 'SELECT * FROM campaign_templates WHERE tenant_id=$1 ORDER BY usage_count DESC, created_at DESC';
+      params = [t];
+    }
+    const templates = (await pool.query(q, params)).rows;
+    res.json(templates);
+  }));
+
+  // POST create template
+  app.post('/api/campaign-templates', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, category, description, title_template, story_template, goal_suggestion, settings_json } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+    if (!title_template || !title_template.trim()) return res.status(400).json({ error: 'Title template is required' });
+    if (!story_template || !story_template.trim()) return res.status(400).json({ error: 'Story template is required' });
+    const result = await pool.query(
+      'INSERT INTO campaign_templates(tenant_id,name,category,description,title_template,story_template,goal_suggestion,settings_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [t, esc(name), esc(category || 'General'), esc(description || ''), esc(title_template), esc(story_template), parseInt(goal_suggestion) || 0, settings_json || '{}']
+    );
+    await audit(req.session.user.email, 'campaign_template_created', 'Created template: ' + name, t);
+    res.json(result.rows[0]);
+  }));
+
+  // DELETE template
+  app.delete('/api/campaign-templates', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Template ID is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_templates WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    await pool.query('DELETE FROM campaign_templates WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'campaign_template_deleted', 'Deleted template: ' + existing.name, t);
+    res.json({ success: true });
+  }));
+
+  // POST use template (creates campaign from template)
+  app.post('/api/campaign-templates/:id/use', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const template = (await pool.query('SELECT * FROM campaign_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+    // Increment usage count
+    await pool.query('UPDATE campaign_templates SET usage_count=usage_count+1 WHERE id=$1', [template.id]);
+    // Return the template data so the client can use it to create a campaign
+    const { title, story, customizations } = req.body;
+    const finalTitle = title || template.title_template;
+    const finalStory = story || template.story_template;
+    res.json({
+      template_id: template.id,
+      category: template.category,
+      title: finalTitle,
+      story: finalStory,
+      target: template.goal_suggestion,
+      settings: template.settings_json,
+      customizations: customizations || {}
+    });
+  }));
+
+  // Campaign Templates UI
+  app.get('/campaign-templates', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const templates = (await pool.query('SELECT * FROM campaign_templates WHERE tenant_id=$1 ORDER BY category, usage_count DESC', [t])).rows;
+    const categories = [...new Set(templates.map(tp => tp.category))];
+
+    res.send(renderPage('Campaign Templates', `
+      <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#38bdf8)">
+        <h1>Campaign Templates</h1>
+        <p>Start your campaign with a proven template</p>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <button class="btn btn-green" onclick="document.getElementById('addTemplateModal').style.display='flex'">+ Create Template</button>
+        ${categories.map(c => '<a href="/campaign-templates?category=' + encodeURIComponent(c) + '" class="btn btn-sm">' + esc(c) + '</a>').join('')}
+      </div>
+      <div class="grid">
+        ${templates.map(tp => `
+          <div class="card" style="display:flex;flex-direction:column">
+            <div style="padding:4px 10px;background:#f0fdf4;color:#059669;border-radius:6px;display:inline-block;font-size:12px;margin-bottom:8px;width:fit-content">${esc(tp.category)}</div>
+            <h3 style="margin:0 0 8px">${esc(tp.name)}</h3>
+            <p class="muted" style="font-size:13px;flex:1">${esc((tp.description || '').substring(0, 120))}${(tp.description || '').length > 120 ? '...' : ''}</p>
+            <div style="margin-top:12px;font-size:13px"><strong>Goal Suggestion:</strong> UGX ${parseInt(tp.goal_suggestion || 0).toLocaleString()}</div>
+            <div style="margin-top:4px;font-size:13px" class="muted">Used ${tp.usage_count} time${tp.usage_count !== 1 ? 's' : ''}</div>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn btn-green btn-sm" onclick="useTemplate(${tp.id})" style="flex:1">Use Template</button>
+              <button class="btn btn-sm" onclick="previewTemplate(${tp.id})" style="flex:1">Preview</button>
+              <button class="btn btn-sm" onclick="deleteTemplate(${tp.id})" style="color:#dc2626">Delete</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      ${templates.length === 0 ? '<div class="card"><p class="muted" style="text-align:center;padding:40px">No templates yet. Create your first campaign template or use the seeded templates.</p></div>' : ''}
+      <div id="addTemplateModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center">
+        <div class="card" style="max-width:600px;width:90%;margin:0 auto;max-height:90vh;overflow-y:auto">
+          <h2>Create Campaign Template</h2>
+          <form id="templateForm">
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Template Name *</label><input name="name" required style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Category *</label><select name="category" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"><option value="Education">Education</option><option value="Medical">Medical</option><option value="Church/Community">Church/Community</option><option value="Clean Water">Clean Water</option><option value="General">General</option><option value="Environment">Environment</option><option value="Disaster Relief">Disaster Relief</option></select></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Description</label><textarea name="description" rows="2" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></textarea></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Title Template *</label><input name="title_template" required placeholder="e.g. Help [Name] Achieve Their Dreams" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Story Template *</label><textarea name="story_template" required rows="5" placeholder="Write your story template here. Use [placeholders] for variable content." style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></textarea></div>
+            <div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:4px">Goal Suggestion (UGX)</label><input name="goal_suggestion" type="number" placeholder="5000000" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0"></div>
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <button type="submit" class="btn btn-green" style="flex:1">Save Template</button>
+              <button type="button" class="btn btn-sm" onclick="document.getElementById('addTemplateModal').style.display='none'" style="flex:1">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div id="previewModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center">
+        <div class="card" style="max-width:700px;width:90%;margin:0 auto;max-height:90vh;overflow-y:auto">
+          <h2 id="previewTitle"></h2>
+          <div id="previewBody" style="white-space:pre-wrap;line-height:1.8"></div>
+          <button class="btn btn-sm" onclick="document.getElementById('previewModal').style.display='none'" style="margin-top:16px">Close</button>
+        </div>
+      </div>
+      <script>
+        document.getElementById('templateForm').addEventListener('submit', async function(e) {
+          e.preventDefault();
+          const fd = new FormData(this);
+          const res = await fetch('/api/campaign-templates', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:fd.get('name'),category:fd.get('category'),description:fd.get('description'),title_template:fd.get('title_template'),story_template:fd.get('story_template'),goal_suggestion:fd.get('goal_suggestion')})});
+          if(res.ok) location.reload(); else { const d=await res.json(); alert(d.error||'Error saving template'); }
+        });
+        async function useTemplate(id) {
+          const title = prompt('Enter a title for your new campaign:');
+          if(!title) return;
+          const res = await fetch('/api/campaign-templates/'+id+'/use', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:title})});
+          if(res.ok) { const d=await res.json(); alert('Template loaded! Use this data to create your campaign:\\nTitle: '+d.title+'\\nGoal: UGX '+d.target.toLocaleString()); location.reload(); }
+          else { const d=await res.json(); alert(d.error||'Error using template'); }
+        }
+        const templateData = ${JSON.stringify(templates)};
+        async function previewTemplate(id) {
+          const tp = templateData.find(t=>t.id===id);
+          if(!tp) return;
+          document.getElementById('previewTitle').textContent = tp.name;
+          document.getElementById('previewBody').innerHTML = '<h3>Title:</h3><p>'+tp.title_template+'</p><h3>Story:</h3><p>'+tp.story_template+'</p><h3>Goal:</h3><p>UGX '+(parseInt(tp.goal_suggestion)||0).toLocaleString()+'</p>';
+          document.getElementById('previewModal').style.display = 'flex';
+        }
+        async function deleteTemplate(id) {
+          if(!confirm('Are you sure you want to delete this template?')) return;
+          const res = await fetch('/api/campaign-templates', {method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+          if(res.ok) location.reload(); else alert('Error deleting template');
+        }
+      </script>
+    `, req.session.user));
+  }));
+
+  // ===========================================================
+  // FEATURE 4: DONATION TIPPING
+  // ===========================================================
+
+  // GET tip settings
+  app.get('/api/tip-settings', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    let settings = (await pool.query('SELECT * FROM tip_settings WHERE tenant_id=$1', [t])).rows[0];
+    if (!settings) {
+      // Auto-create default
+      await pool.query('INSERT INTO tip_settings(tenant_id,default_percentage,custom_percentages_json,enabled) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id) DO NOTHING', [t, 10, '[5,10,15,20]', true]);
+      settings = (await pool.query('SELECT * FROM tip_settings WHERE tenant_id=$1', [t])).rows[0];
+    }
+    res.json(settings);
+  }));
+
+  // PUT update tip settings
+  app.put('/api/tip-settings', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { default_percentage, custom_percentages_json, enabled } = req.body;
+    const result = await pool.query(
+      `INSERT INTO tip_settings(tenant_id,default_percentage,custom_percentages_json,enabled) VALUES($1,$2,$3,$4)
+       ON CONFLICT (tenant_id) DO UPDATE SET default_percentage=$2,custom_percentages_json=$3,enabled=$4
+       RETURNING *`,
+      [t, parseFloat(default_percentage) || 10, custom_percentages_json || '[5,10,15,20]', enabled !== undefined ? !!enabled : true]
+    );
+    await audit(req.session.user.email, 'tip_settings_updated', 'Updated tip settings', t);
+    res.json(result.rows[0]);
+  }));
+
+  // POST record a donation tip
+  app.post('/api/donation-tip', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { donation_id, tip_amount, tip_percentage } = req.body;
+    if (!tip_amount || parseInt(tip_amount) <= 0) return res.status(400).json({ error: 'Tip amount must be greater than zero' });
+    const result = await pool.query(
+      'INSERT INTO donation_tips(tenant_id,donation_id,tip_amount,tip_percentage) VALUES($1,$2,$3,$4) RETURNING *',
+      [t, donation_id || null, parseInt(tip_amount), parseFloat(tip_percentage) || 0]
+    );
+    await audit(req.session.user.email, 'donation_tip_recorded', 'Recorded tip of UGX ' + parseInt(tip_amount).toLocaleString(), t);
+    res.json(result.rows[0]);
+  }));
+
+  // GET tip summary
+  app.get('/api/tip-summary', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const totalTips = (await pool.query('SELECT COALESCE(SUM(tip_amount),0) as total FROM donation_tips WHERE tenant_id=$1', [t])).rows[0]?.total || 0;
+    const tipCount = (await pool.query('SELECT COUNT(*) as cnt FROM donation_tips WHERE tenant_id=$1', [t])).rows[0]?.cnt || 0;
+    const avgPercentage = (await pool.query('SELECT COALESCE(AVG(tip_percentage),0) as avg FROM donation_tips WHERE tenant_id=$1 AND tip_percentage > 0', [t])).rows[0]?.avg || 0;
+    const recentTips = (await pool.query('SELECT * FROM donation_tips WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t])).rows;
+    res.json({
+      total_tips: parseInt(totalTips),
+      tip_count: parseInt(tipCount),
+      average_percentage: parseFloat(avgPercentage).toFixed(1),
+      recent_tips: recentTips
+    });
+  }));
+
+  // ===========================================================
+  // FEATURE 5: CROWDFUNDING STRETCH GOALS
+  // ===========================================================
+
+  // POST create stretch goal
+  app.post('/api/campaigns/:id/stretch-goals', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = req.params.id;
+    const { goal_amount, description } = req.body;
+    if (!goal_amount || parseInt(goal_amount) <= 0) return res.status(400).json({ error: 'Goal amount must be greater than zero' });
+    if (!description || !description.trim()) return res.status(400).json({ error: 'Description is required' });
+    const result = await pool.query(
+      'INSERT INTO campaign_stretch_goals(tenant_id,campaign_id,goal_amount,description) VALUES($1,$2,$3,$4) RETURNING *',
+      [t, campaignId, parseInt(goal_amount), esc(description)]
+    );
+    await audit(req.session.user.email, 'stretch_goal_created', 'Created stretch goal UGX ' + parseInt(goal_amount).toLocaleString() + ' for campaign #' + campaignId, t);
+    res.json(result.rows[0]);
+  }));
+
+  // GET stretch goals for campaign
+  app.get('/api/campaigns/:id/stretch-goals', ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = req.params.id;
+    const goals = (await pool.query('SELECT * FROM campaign_stretch_goals WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY goal_amount ASC', [campaignId, t])).rows;
+    // Include current raised amount
+    let raised = 0;
+    try {
+      const raisedResult = (await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE campaign_id=$1', [campaignId])).rows[0];
+      raised = parseInt(raisedResult.total);
+    } catch(e) {}
+    res.json({ raised, goals });
+  }));
+
+  // DELETE stretch goal
+  app.delete('/api/campaigns/:id/stretch-goals', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { goal_id } = req.body;
+    if (!goal_id) return res.status(400).json({ error: 'Goal ID is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_stretch_goals WHERE id=$1 AND campaign_id=$2 AND tenant_id=$3', [goal_id, req.params.id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Stretch goal not found' });
+    await pool.query('DELETE FROM campaign_stretch_goals WHERE id=$1 AND tenant_id=$2', [goal_id, t]);
+    await audit(req.session.user.email, 'stretch_goal_deleted', 'Deleted stretch goal: ' + existing.description, t);
+    res.json({ success: true });
+  }));
+
+  // ===========================================================
+  // FEATURE 6: DONOR SEGMENTATION
+  // ===========================================================
+
+  // GET all segments
+  app.get('/api/donor-segments', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const segments = (await pool.query('SELECT * FROM donor_segments WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+    // Attach member count
+    for (const seg of segments) {
+      const count = (await pool.query('SELECT COUNT(*) as cnt FROM donor_segment_members WHERE segment_id=$1 AND tenant_id=$2', [seg.id, t])).rows[0]?.cnt || 0;
+      seg.live_member_count = parseInt(count);
+    }
+    res.json(segments);
+  }));
+
+  // POST create segment
+  app.post('/api/donor-segments', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, description, criteria_json, is_dynamic, members } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Segment name is required' });
+    const result = await pool.query(
+      'INSERT INTO donor_segments(tenant_id,name,description,criteria_json,is_dynamic) VALUES($1,$2,$3,$4,$5) RETURNING *',
+      [t, esc(name), esc(description || ''), criteria_json || '{}', !!is_dynamic]
+    );
+    const segment = result.rows[0];
+    // Add initial members if provided
+    if (members && Array.isArray(members) && members.length > 0) {
+      for (const m of members) {
+        if (m.donor_email) {
+          await pool.query('INSERT INTO donor_segment_members(tenant_id,segment_id,donor_email,donor_name) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',
+            [t, segment.id, esc(m.donor_email), esc(m.donor_name || '')]);
+        }
+      }
+      await pool.query('UPDATE donor_segments SET member_count=$1 WHERE id=$2', [members.length, segment.id]);
+    }
+    await audit(req.session.user.email, 'donor_segment_created', 'Created segment: ' + name, t);
+    res.json(segment);
+  }));
+
+  // PUT update segment
+  app.put('/api/donor-segments', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, name, description, criteria_json, is_dynamic } = req.body;
+    if (!id) return res.status(400).json({ error: 'Segment ID is required' });
+    const existing = (await pool.query('SELECT * FROM donor_segments WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Segment not found' });
+    const result = await pool.query(
+      'UPDATE donor_segments SET name=$1,description=$2,criteria_json=$3,is_dynamic=$4 WHERE id=$5 AND tenant_id=$6 RETURNING *',
+      [esc(name || existing.name), esc(description !== undefined ? description : existing.description),
+       criteria_json !== undefined ? criteria_json : existing.criteria_json,
+       is_dynamic !== undefined ? !!is_dynamic : existing.is_dynamic, id, t]
+    );
+    await audit(req.session.user.email, 'donor_segment_updated', 'Updated segment: ' + (name || existing.name), t);
+    res.json(result.rows[0]);
+  }));
+
+  // DELETE segment
+  app.delete('/api/donor-segments', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Segment ID is required' });
+    const existing = (await pool.query('SELECT * FROM donor_segments WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Segment not found' });
+    await pool.query('DELETE FROM donor_segments WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'donor_segment_deleted', 'Deleted segment: ' + existing.name, t);
+    res.json({ success: true });
+  }));
+
+  // POST refresh dynamic segment
+  app.post('/api/donor-segments/:id/refresh', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const segment = (await pool.query('SELECT * FROM donor_segments WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!segment) return res.status(404).json({ error: 'Segment not found' });
+    if (!segment.is_dynamic) return res.status(400).json({ error: 'Segment is not dynamic. Only dynamic segments can be refreshed.' });
+
+    let criteria = {};
+    try { criteria = JSON.parse(segment.criteria_json); } catch(e) {}
+
+    // Clear existing members
+    await pool.query('DELETE FROM donor_segment_members WHERE segment_id=$1 AND tenant_id=$2', [segment.id, t]);
+
+    let addedCount = 0;
+
+    // Refresh based on criteria
+    if (criteria.min_donations || criteria.min_total || criteria.donor_type) {
+      try {
+        let donorQ = `SELECT donor_email, donor_name, SUM(amount) as total, COUNT(*) as count FROM campaign_donations WHERE tenant_id=$1 AND donor_email IS NOT NULL AND donor_email != '' AND donor_name != 'Anonymous' GROUP BY donor_email, donor_name`;
+        const donors = (await pool.query(donorQ, [t])).rows;
+
+        for (const d of donors) {
+          const total = parseInt(d.total) || 0;
+          const count = parseInt(d.count) || 0;
+          let matches = true;
+          if (criteria.min_donations && count < parseInt(criteria.min_donations)) matches = false;
+          if (criteria.min_total && total < parseInt(criteria.min_total)) matches = false;
+          if (matches) {
+            await pool.query('INSERT INTO donor_segment_members(tenant_id,segment_id,donor_email,donor_name) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',
+              [t, segment.id, esc(d.donor_email), esc(d.donor_name)]);
+            addedCount++;
+          }
+        }
+      } catch(e) { /* campaign_donations may not exist */ }
+    }
+
+    // Also try from CRM contacts if criteria has tags
+    if (criteria.tags && Array.isArray(criteria.tags) && criteria.tags.length > 0) {
+      try {
+        const contacts = (await pool.query('SELECT * FROM donor_crm_contacts WHERE tenant_id=$1', [t])).rows;
+        for (const c of contacts) {
+          let contactTags = [];
+          try { contactTags = JSON.parse(c.tags_json || '[]'); } catch(e) {}
+          if (criteria.tags.some(tag => contactTags.includes(tag))) {
+            if (c.email) {
+              await pool.query('INSERT INTO donor_segment_members(tenant_id,segment_id,donor_email,donor_name) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',
+                [t, segment.id, esc(c.email), esc(c.name)]);
+              addedCount++;
+            }
+          }
+        }
+      } catch(e) {}
+    }
+
+    // Update member count
+    await pool.query('UPDATE donor_segments SET member_count=$1 WHERE id=$2', [addedCount, segment.id]);
+    await audit(req.session.user.email, 'donor_segment_refreshed', 'Refreshed segment: ' + segment.name + ' (' + addedCount + ' members)', t);
+    res.json({ success: true, member_count: addedCount });
+  }));
+
+  // ===========================================================
+  // FEATURE 7: CAMPAIGN CLONE
+  // ===========================================================
+
+  app.post('/api/campaigns/:id/clone', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = req.params.id;
+    const { title } = req.body;
+
+    // Fetch original campaign
+    const original = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [campaignId, t])).rows[0];
+    if (!original) return res.status(404).json({ error: 'Campaign not found' });
+
+    const newTitle = title || 'Copy of ' + original.title;
+
+    // Deep copy the campaign
+    const cloned = await pool.query(
+      `INSERT INTO fundraising_campaigns(tenant_id, title, story, category, target, image_url, is_public, deadline, status, created_by)
+       VALUES($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9) RETURNING *`,
+      [t, esc(newTitle), original.story || '', original.category || '', original.target || 0, original.image_url || '', original.is_public !== false, original.deadline || null, req.session.user.email]
+    );
+
+    // Clone stretch goals if any
+    const stretchGoals = (await pool.query('SELECT * FROM campaign_stretch_goals WHERE campaign_id=$1 AND tenant_id=$2', [campaignId, t])).rows;
+    for (const sg of stretchGoals) {
+      await pool.query('INSERT INTO campaign_stretch_goals(tenant_id,campaign_id,goal_amount,description) VALUES($1,$2,$3,$4)',
+        [t, cloned.rows[0].id, sg.goal_amount, sg.description]);
+    }
+
+    // Clone reward tiers if they exist
+    try {
+      const tiers = (await pool.query('SELECT * FROM campaign_reward_tiers WHERE campaign_id=$1 AND tenant_id=$2', [campaignId, t])).rows;
+      for (const tr of tiers) {
+        await pool.query('INSERT INTO campaign_reward_tiers(tenant_id,campaign_id,title,description,min_amount,max_amount,reward_type,reward_details,image_url,estimated_delivery,quantity_available,is_active,sort_order) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+          [t, cloned.rows[0].id, tr.title, tr.description, tr.min_amount, tr.max_amount, tr.reward_type, tr.reward_details, tr.image_url, tr.estimated_delivery, tr.quantity_available, tr.is_active, tr.sort_order]);
+      }
+    } catch(e) { /* campaign_reward_tiers may not exist */ }
+
+    await audit(req.session.user.email, 'campaign_cloned', 'Cloned campaign #' + campaignId + ' as "' + newTitle + '"', t);
+    res.json({ success: true, original_id: campaignId, new_campaign: cloned.rows[0] });
+  }));
+
+  // ===========================================================
+  // FEATURE 8: BULK DONATIONS
+  // ===========================================================
+
+  // POST create bulk donation batch
+  app.post('/api/bulk-donations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { filename, items } = req.body;
+
+    // Create batch
+    const batchResult = await pool.query(
+      'INSERT INTO bulk_donation_batches(tenant_id,filename,total_rows,status) VALUES($1,$2,$3,$4) RETURNING *',
+      [t, esc(filename || 'manual-upload'), (items || []).length, 'pending']
+    );
+    const batch = batchResult.rows[0];
+
+    // Insert items
+    let validCount = 0;
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        if (item.donor_name && item.amount && parseInt(item.amount) > 0) {
+          await pool.query(
+            'INSERT INTO bulk_donation_items(tenant_id,batch_id,donor_name,donor_email,amount,method,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+            [t, batch.id, esc(item.donor_name), esc(item.donor_email || ''), parseInt(item.amount), esc(item.method || 'cash'), 'pending']
+          );
+          validCount++;
+        }
+      }
+    }
+
+    // Update batch total
+    await pool.query('UPDATE bulk_donation_batches SET total_rows=$1 WHERE id=$2', [validCount, batch.id]);
+
+    await audit(req.session.user.email, 'bulk_donation_created', 'Created bulk donation batch #' + batch.id + ' (' + validCount + ' items)', t);
+    res.json({ batch_id: batch.id, total_items: validCount });
+  }));
+
+  // GET bulk donation batches
+  app.get('/api/bulk-donations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const batches = (await pool.query('SELECT * FROM bulk_donation_batches WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+    // Attach items for each batch
+    for (const b of batches) {
+      b.items = (await pool.query('SELECT * FROM bulk_donation_items WHERE batch_id=$1 AND tenant_id=$2 ORDER BY created_at', [b.id, t])).rows;
+    }
+    res.json(batches);
+  }));
+
+  // POST process a bulk donation batch
+  app.post('/api/bulk-donations/:id/process', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const batchId = req.params.id;
+
+    const batch = (await pool.query('SELECT * FROM bulk_donation_batches WHERE id=$1 AND tenant_id=$2', [batchId, t])).rows[0];
+    if (!batch) return res.status(404).json({ error: 'Batch not found' });
+    if (batch.status === 'completed') return res.status(400).json({ error: 'Batch already processed' });
+
+    // Mark as processing
+    await pool.query("UPDATE bulk_donation_batches SET status='processing' WHERE id=$1", [batchId]);
+
+    const items = (await pool.query('SELECT * FROM bulk_donation_items WHERE batch_id=$1 AND tenant_id=$2 AND status=$3', [batchId, t, 'pending'])).rows;
+    let processed = 0;
+    let errors = 0;
+
+    for (const item of items) {
+      try {
+        // Create individual donations for each item
+        // Find or use the first active campaign for this tenant
+        let campaignId = req.body.campaign_id;
+        if (!campaignId) {
+          try {
+            const campaign = (await pool.query("SELECT id FROM fundraising_campaigns WHERE tenant_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1", [t])).rows[0];
+            campaignId = campaign ? campaign.id : null;
+          } catch(e) {}
+        }
+        if (!campaignId) {
+          await pool.query("UPDATE bulk_donation_items SET status='error' WHERE id=$1", [item.id]);
+          errors++;
+          continue;
+        }
+
+        // Insert the donation
+        await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)',
+          [t, campaignId, item.donor_name, item.amount, item.method || 'cash', 'Bulk import - Batch #' + batchId]);
+
+        await pool.query("UPDATE bulk_donation_items SET status='processed' WHERE id=$1", [item.id]);
+        processed++;
+      } catch(e) {
+        await pool.query("UPDATE bulk_donation_items SET status='error' WHERE id=$1", [item.id]);
+        errors++;
+      }
+    }
+
+    // Update batch status
+    const finalStatus = errors === 0 ? 'completed' : (processed > 0 ? 'completed' : 'failed');
+    await pool.query('UPDATE bulk_donation_batches SET processed=$1,errors=$2,status=$3 WHERE id=$4',
+      [processed, errors, finalStatus, batchId]);
+
+    await audit(req.session.user.email, 'bulk_donation_processed', 'Processed batch #' + batchId + ': ' + processed + ' processed, ' + errors + ' errors', t);
+    res.json({ batch_id: batchId, processed, errors, status: finalStatus });
+  }));
+
+  // ===========================================================
+  // FEATURE 9: GIFT AID / TAX DEDUCTIONS
+  // ===========================================================
+
+  // GET all declarations
+  app.get('/api/gift-tax-declarations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const declarations = (await pool.query('SELECT * FROM gift_tax_declarations WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+    res.json(declarations);
+  }));
+
+  // POST create declaration
+  app.post('/api/gift-tax-declarations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { donor_name, donor_email, tax_number, declaration_date, is_eligible } = req.body;
+    if (!donor_name || !donor_name.trim()) return res.status(400).json({ error: 'Donor name is required' });
+    const result = await pool.query(
+      'INSERT INTO gift_tax_declarations(tenant_id,donor_name,donor_email,tax_number,declaration_date,is_eligible) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, esc(donor_name), esc(donor_email || ''), esc(tax_number || ''), declaration_date || 'CURRENT_DATE', !!is_eligible]
+    );
+    await audit(req.session.user.email, 'tax_declaration_created', 'Created tax declaration for: ' + donor_name, t);
+    res.json(result.rows[0]);
+  }));
+
+  // PUT update declaration
+  app.put('/api/gift-tax-declarations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, donor_name, donor_email, tax_number, declaration_date, is_eligible } = req.body;
+    if (!id) return res.status(400).json({ error: 'Declaration ID is required' });
+    const existing = (await pool.query('SELECT * FROM gift_tax_declarations WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Declaration not found' });
+    const result = await pool.query(
+      'UPDATE gift_tax_declarations SET donor_name=$1,donor_email=$2,tax_number=$3,declaration_date=$4,is_eligible=$5 WHERE id=$6 AND tenant_id=$7 RETURNING *',
+      [esc(donor_name || existing.donor_name), esc(donor_email !== undefined ? donor_email : existing.donor_email),
+       esc(tax_number !== undefined ? tax_number : existing.tax_number),
+       declaration_date || existing.declaration_date,
+       is_eligible !== undefined ? !!is_eligible : existing.is_eligible, id, t]
+    );
+    await audit(req.session.user.email, 'tax_declaration_updated', 'Updated tax declaration #' + id, t);
+    res.json(result.rows[0]);
+  }));
+
+  // GET tax receipts
+  app.get('/api/tax-receipts', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const donor_email = req.query.donor_email || '';
+    let q, params;
+    if (donor_email) {
+      q = 'SELECT * FROM tax_receipts WHERE tenant_id=$1 AND donor_email=$2 ORDER BY issued_at DESC';
+      params = [t, donor_email];
+    } else {
+      q = 'SELECT * FROM tax_receipts WHERE tenant_id=$1 ORDER BY issued_at DESC LIMIT 100';
+      params = [t];
+    }
+    const receipts = (await pool.query(q, params)).rows;
+    res.json(receipts);
+  }));
+
+  // POST issue tax receipt
+  app.post('/api/tax-receipts', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { donation_id, donor_name, donor_email, amount, tax_deductible_amount } = req.body;
+    if (!donor_name || !donor_name.trim()) return res.status(400).json({ error: 'Donor name is required' });
+    if (!amount || parseInt(amount) <= 0) return res.status(400).json({ error: 'Amount must be greater than zero' });
+
+    const receiptNumber = generateReceiptNumber();
+    const deductible = tax_deductible_amount !== undefined ? parseInt(tax_deductible_amount) : parseInt(amount);
+
+    const result = await pool.query(
+      'INSERT INTO tax_receipts(tenant_id,donation_id,donor_name,donor_email,amount,tax_deductible_amount,receipt_number) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [t, donation_id || null, esc(donor_name), esc(donor_email || ''), parseInt(amount), deductible, receiptNumber]
+    );
+
+    // Send email if available
+    if (donor_email && sendEmail) {
+      try {
+        await sendEmail(donor_email, 'Tax Receipt - ' + receiptNumber,
+          '<div style="font-family:Arial;max-width:600px;margin:0 auto;padding:20px"><div style="background:linear-gradient(135deg,#059669,#10b981);padding:30px;border-radius:12px 12px 0 0;text-align:center"><h1 style="color:white;margin:0">Tax Receipt</h1></div><div style="background:white;padding:30px;border:1px solid #e2e8f0;border-radius:0 0 12px 12px"><p>Dear ' + esc(donor_name) + ',</p><p>Thank you for your donation. Here is your tax receipt:</p><table style="width:100%;border-collapse:collapse;margin:16px 0"><tr style="background:#f8fafc"><td style="padding:10px;border:1px solid #e2e8f0"><strong>Receipt Number</strong></td><td style="padding:10px;border:1px solid #e2e8f0">' + receiptNumber + '</td></tr><tr><td style="padding:10px;border:1px solid #e2e8f0"><strong>Donation Amount</strong></td><td style="padding:10px;border:1px solid #e2e8f0">UGX ' + parseInt(amount).toLocaleString() + '</td></tr><tr style="background:#f0fdf4"><td style="padding:10px;border:1px solid #e2e8f0"><strong>Tax Deductible Amount</strong></td><td style="padding:10px;border:1px solid #e2e8f0;color:#059669;font-weight:700">UGX ' + deductible.toLocaleString() + '</td></tr><tr><td style="padding:10px;border:1px solid #e2e8f0"><strong>Date Issued</strong></td><td style="padding:10px;border:1px solid #e2e8f0">' + new Date().toLocaleDateString() + '</td></tr></table><p style="color:#64748b;font-size:13px">Please retain this receipt for your tax records.</p></div></div>');
+      } catch(e) { console.warn('[TaxReceipt Email]', e.message); }
+    }
+
+    await audit(req.session.user.email, 'tax_receipt_issued', 'Issued tax receipt ' + receiptNumber + ' for ' + donor_name, t);
+    res.json(result.rows[0]);
+  }));
+
+  // ===========================================================
+  // FEATURE 10: DONATION GOALS & CHALLENGES
+  // ===========================================================
+
+  // GET all challenges
+  app.get('/api/donation-challenges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const activeOnly = req.query.active === 'true';
+    let q, params;
+    if (activeOnly) {
+      q = 'SELECT * FROM donation_challenges WHERE tenant_id=$1 AND is_active=true ORDER BY created_at DESC';
+      params = [t];
+    } else {
+      q = 'SELECT * FROM donation_challenges WHERE tenant_id=$1 ORDER BY created_at DESC';
+      params = [t];
+    }
+    const challenges = (await pool.query(q, params)).rows;
+    // Attach participant count
+    for (const ch of challenges) {
+      const pcount = (await pool.query('SELECT COUNT(*) as cnt, COALESCE(SUM(amount_contributed),0) as total FROM challenge_participants WHERE challenge_id=$1 AND tenant_id=$2', [ch.id, t])).rows[0];
+      ch.participant_count = parseInt(pcount.cnt);
+      ch.participants_total = parseInt(pcount.total);
+    }
+    res.json(challenges);
+  }));
+
+  // POST create challenge
+  app.post('/api/donation-challenges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, description, challenge_type, target_amount, start_date, end_date } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Challenge name is required' });
+    if (!target_amount || parseInt(target_amount) <= 0) return res.status(400).json({ error: 'Target amount must be greater than zero' });
+    if (!start_date) return res.status(400).json({ error: 'Start date is required' });
+    if (!end_date) return res.status(400).json({ error: 'End date is required' });
+
+    const result = await pool.query(
+      'INSERT INTO donation_challenges(tenant_id,name,description,challenge_type,target_amount,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [t, esc(name), esc(description || ''), esc(challenge_type || 'individual'), parseInt(target_amount), start_date, end_date]
+    );
+    await audit(req.session.user.email, 'donation_challenge_created', 'Created challenge: ' + name, t);
+    res.json(result.rows[0]);
+  }));
+
+  // PUT update challenge
+  app.put('/api/donation-challenges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, name, description, challenge_type, target_amount, start_date, end_date, is_active, current_amount } = req.body;
+    if (!id) return res.status(400).json({ error: 'Challenge ID is required' });
+    const existing = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Challenge not found' });
+
+    const result = await pool.query(
+      `UPDATE donation_challenges SET name=$1,description=$2,challenge_type=$3,target_amount=$4,start_date=$5,end_date=$6,is_active=$7,current_amount=$8 WHERE id=$9 AND tenant_id=$10 RETURNING *`,
+      [esc(name || existing.name), esc(description !== undefined ? description : existing.description),
+       esc(challenge_type || existing.challenge_type),
+       target_amount !== undefined ? parseInt(target_amount) : existing.target_amount,
+       start_date || existing.start_date, end_date || existing.end_date,
+       is_active !== undefined ? !!is_active : existing.is_active,
+       current_amount !== undefined ? parseInt(current_amount) : existing.current_amount, id, t]
+    );
+    await audit(req.session.user.email, 'donation_challenge_updated', 'Updated challenge: ' + (name || existing.name), t);
+    res.json(result.rows[0]);
+  }));
+
+  // DELETE challenge
+  app.delete('/api/donation-challenges', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Challenge ID is required' });
+    const existing = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Challenge not found' });
+    await pool.query('DELETE FROM donation_challenges WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'donation_challenge_deleted', 'Deleted challenge: ' + existing.name, t);
+    res.json({ success: true });
+  }));
+
+  // POST join a challenge
+  app.post('/api/challenges/:id/join', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const challengeId = req.params.id;
+    const { donor_email, donor_name, amount_contributed } = req.body;
+
+    const challenge = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1 AND tenant_id=$2 AND is_active=true', [challengeId, t])).rows[0];
+    if (!challenge) return res.status(404).json({ error: 'Challenge not found or not active' });
+
+    // Check if challenge is within date range
+    const now = new Date();
+    if (now < new Date(challenge.start_date) || now > new Date(challenge.end_date)) {
+      return res.status(400).json({ error: 'Challenge is not currently active (outside date range)' });
+    }
+
+    const email = donor_email || req.session.user.email;
+    const name = donor_name || req.session.user.name || '';
+
+    // Check if already joined
+    const existing = (await pool.query('SELECT * FROM challenge_participants WHERE challenge_id=$1 AND donor_email=$2 AND tenant_id=$3', [challengeId, email, t])).rows[0];
+    if (existing) {
+      // Update contribution instead
+      const contrib = parseInt(amount_contributed) || 0;
+      if (contrib > 0) {
+        await pool.query('UPDATE challenge_participants SET amount_contributed=amount_contributed+$1 WHERE id=$2', [contrib, existing.id]);
+        await pool.query('UPDATE donation_challenges SET current_amount=current_amount+$1 WHERE id=$2', [contrib, challengeId]);
+        // Check if challenge target reached
+        const updated = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1', [challengeId])).rows[0];
+        if (parseInt(updated.current_amount) >= parseInt(updated.target_amount)) {
+          notify(t, email, 'Challenge Target Reached!', 'The challenge "' + updated.name + '" has reached its target of UGX ' + parseInt(updated.target_amount).toLocaleString() + '!', 'fundraising');
+        }
+      }
+      await audit(req.session.user.email, 'challenge_contribution_updated', 'Updated contribution to challenge: ' + challenge.name, t);
+      return res.json({ success: true, message: 'Contribution updated' });
+    }
+
+    const contrib = parseInt(amount_contributed) || 0;
+    const result = await pool.query(
+      'INSERT INTO challenge_participants(tenant_id,challenge_id,donor_email,donor_name,amount_contributed) VALUES($1,$2,$3,$4,$5) RETURNING *',
+      [t, challengeId, esc(email), esc(name), contrib]
+    );
+
+    // Update challenge current_amount
+    if (contrib > 0) {
+      await pool.query('UPDATE donation_challenges SET current_amount=current_amount+$1 WHERE id=$2', [contrib, challengeId]);
+    }
+
+    // Check if challenge target reached
+    const updatedChallenge = (await pool.query('SELECT * FROM donation_challenges WHERE id=$1', [challengeId])).rows[0];
+    if (parseInt(updatedChallenge.current_amount) >= parseInt(updatedChallenge.target_amount)) {
+      // Notify all participants
+      const participants = (await pool.query('SELECT donor_email FROM challenge_participants WHERE challenge_id=$1 AND tenant_id=$2', [challengeId, t])).rows;
+      for (const p of participants) {
+        notify(t, p.donor_email, 'Challenge Target Reached!', 'The challenge "' + updatedChallenge.name + '" has reached its target of UGX ' + parseInt(updatedChallenge.target_amount).toLocaleString() + '!', 'fundraising');
+      }
+    }
+
+    await audit(req.session.user.email, 'challenge_joined', 'Joined challenge: ' + challenge.name, t);
+    res.json(result.rows[0]);
+  }));
+
+  // ===========================================================
+  // PUBLIC-FACING API ROUTES (no auth required)
+  // These provide data for the frontend widgets/pages
+  // ===========================================================
+
+  // Public: Get stretch goals for a campaign
+  app.get('/api/public/campaigns/:id/stretch-goals', ah(async (req, res) => {
+    const campaignId = req.params.id;
+    const goals = (await pool.query('SELECT sg.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=$1) as raised FROM campaign_stretch_goals sg WHERE sg.campaign_id=$1 ORDER BY sg.goal_amount ASC', [campaignId])).rows;
+    res.json(goals.map(g => ({
+      id: g.id,
+      goal_amount: parseInt(g.goal_amount),
+      description: g.description,
+      unlocked: g.unlocked,
+      unlocked_at: g.unlocked_at,
+      raised: parseInt(g.raised),
+      progress: Math.min(100, Math.round(parseInt(g.raised) / parseInt(g.goal_amount) * 100))
+    })));
+  }));
+
+  // Public: Get active challenges
+  app.get('/api/public/challenges', ah(async (req, res) => {
+    const tenantId = req.query.tenant_id;
+    if (!tenantId) return res.json([]);
+    const challenges = (await pool.query("SELECT id, name, description, challenge_type, target_amount, current_amount, start_date, end_date FROM donation_challenges WHERE tenant_id=$1 AND is_active=true AND end_date >= CURRENT_DATE ORDER BY created_at DESC", [tenantId])).rows;
+    res.json(challenges);
+  }));
+
+  // Public: Get tip settings for donation form
+  app.get('/api/public/tip-settings', ah(async (req, res) => {
+    const tenantId = req.query.tenant_id;
+    if (!tenantId) return res.json({ enabled: false, default_percentage: 10, custom_percentages: [5, 10, 15, 20] });
+    const settings = (await pool.query('SELECT * FROM tip_settings WHERE tenant_id=$1', [tenantId])).rows[0];
+    if (!settings) return res.json({ enabled: false, default_percentage: 10, custom_percentages: [5, 10, 15, 20] });
+    let customPercentages = [5, 10, 15, 20];
+    try { customPercentages = JSON.parse(settings.custom_percentages_json); } catch(e) {}
+    res.json({
+      enabled: settings.enabled,
+      default_percentage: parseFloat(settings.default_percentage),
+      custom_percentages: customPercentages
+    });
+  }));
+
+  console.log('[FundraisingMega] All 10 features loaded');
 };

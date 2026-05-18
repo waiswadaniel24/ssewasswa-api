@@ -491,8 +491,6 @@ module.exports = (app, pool, { tenantMiddleware, requireAuth, wsBroadcast, redis
     await pool.query('UPDATE ecommerce_orders SET payment_status=$1,status=$2,paid_at=$3,updated_at=NOW() WHERE id=$4',
       [paid ? 'paid' : 'failed', paid ? 'confirmed' : 'pending', paid ? new Date() : null, order.id]);
     if (paid) wsBroadcast(order.tenant_id, { type: 'ecommerce:payment_confirmed', orderId: order.id, order_number, amount, reference, provider });
-    // Track revenue for platform earnings
-    if (paid) { try { await global.trackRevenue('ecommerce_sale', Number(order.total) / 3700, `E-commerce order: ${order_number}`, order_number); } catch(e) {} }
     res.json({ received: true, order_number, payment_status: paid ? 'paid' : 'failed' });
   }));
 

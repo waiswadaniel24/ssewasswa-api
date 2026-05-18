@@ -4,12 +4,6 @@
 // ============================================================
 module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger) {
 
-  // === RATE LIMITING ===
-  const rateLimit = require('express-rate-limit');
-  const contactLimiter = rateLimit({ windowMs: 15*60*1000, max: 5, message: 'Too many messages. Please try again later.', standardHeaders: true, legacyHeaders: false });
-  const registerLimiter = rateLimit({ windowMs: 60*60*1000, max: 3, message: 'Too many registration attempts. Please try again later.', standardHeaders: true, legacyHeaders: false });
-  const portalLimiter = rateLimit({ windowMs: 60*1000, max: 30, message: 'Too many requests. Please slow down.', standardHeaders: true, legacyHeaders: false });
-
   // === MIGRATIONS ===
   const migrations = [
     `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sub_type VARCHAR(100)`,
@@ -523,30 +517,16 @@ input:focus,textarea:focus{outline:none;border-color:#4f46e5}textarea{min-height
 </div></body></html>`);
   });
 
-  app.post('/contact', contactLimiter, ah(async (req, res) => {
+  app.post('/contact', ah(async (req, res) => {
     const { name, email, phone, subject, message } = req.body;
     // Validate inputs
     if (!name || !email || !message || name.length > 255 || email.length > 255 || (subject && subject.length > 255) || message.length > 5000) {
       return res.status(400).send('Invalid input. Please check your entries.');
     }
-    // Email format validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).send('Invalid email format.');
-    }
-    // Phone validation (optional, but if provided must be reasonable)
-    if (phone && phone.length > 20) {
-      return res.status(400).send('Invalid phone number.');
-    }
     // Sanitize subject to prevent email header injection
     const safeSubject = (subject || 'Contact Form Inquiry').replace(/[\r\n]/g, '').substring(0, 255);
-    try {
-      await pool.query('INSERT INTO contact_messages(name,email,phone,subject,message) VALUES($1,$2,$3,$4,$5)', [name, email, phone, safeSubject, message]);
-    } catch (e) {
-      if (logger) logger.error('Contact form DB insert failed', e);
-      return res.status(500).send('Something went wrong. Please try again.');
-    }
-    try { sendEmail('hello@comfort.ug', 'Contact: ' + safeSubject, '<p><strong>' + esc(name) + '</strong> (' + esc(email) + ')</p><p>' + esc(message) + '</p>'); } catch (e) { if (logger) logger.warn('Contact email send failed', e); }
+    await pool.query('INSERT INTO contact_messages(name,email,phone,subject,message) VALUES($1,$2,$3,$4,$5)', [name, email, phone, safeSubject, message]);
+    sendEmail('hello@comfort.ug', 'Contact: ' + safeSubject, '<p><strong>' + esc(name) + '</strong> (' + esc(email) + ')</p><p>' + esc(message) + '</p>');
     res.send('<div style="text-align:center;padding:60px"><div style="font-size:48px;margin-bottom:16px">✅</div><h1>Message Sent!</h1><p style="color:#64748b">We\'ll get back to you within 24 hours.</p><a href="/" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#4f46e5;color:white;border-radius:10px;text-decoration:none;font-weight:600">Back to Home</a></div>');
   }));
 
@@ -599,10 +579,8 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
   });
 
   // Tenant public profile (public-only, must not intercept authenticated portal routes)
-  app.get('/portal/:subdomain', portalLimiter, ah(async (req, res, next) => {
+  app.get('/portal/:subdomain', ah(async (req, res, next) => {
     const subdomain = req.params.subdomain;
-    // Security: validate subdomain format to prevent injection attacks
-    if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(subdomain)) return res.status(400).send('Invalid subdomain');
     // If user is authenticated, let the authenticated portal routes handle it
     if (req.session && req.session.user) return next();
     // Skip reserved system routes — redirect to the actual page
@@ -612,7 +590,7 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
     const portalTypes = ['school','clinic','health','church','organization','business','individual','hotel','restaurant','retail','salon','pharmacy','gym','hardware','supermarket','transport','electronics'];
     if (portalTypes.includes(subdomain)) return next();
     // Look up tenant by subdomain for the public profile page
-    const tenant = (await pool.query('SELECT id, name, type, subdomain, logo_url, description, address, phone, email, approved, business_type, health_institution_type, working_hours FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.subdomain])).rows[0];
+    const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.subdomain])).rows[0];
     if (!tenant) return res.status(404).send('<div style="text-align:center;padding:60px"><h1>Institution Not Found</h1><p style="color:#64748b">This institution does not exist or is not approved.</p><a href="/">Go to Comfort Home</a></div>');
     const typeLabels = {school:'School',clinic:'Clinic',health:'Health Center',church:'Church',hotel:'Hotel/Lodge',restaurant:'Restaurant',retail:'Retail Shop',salon:'Salon/Spa',pharmacy:'Pharmacy',gym:'Gym/Fitness',hardware:'Hardware Store',supermarket:'Supermarket',transport:'Transport',electronics:'Electronics Shop',business:'Business',individual:'Individual',organization:'Organization'};
     const healthTypeLabels = {general_hospital:'General Hospital',health_center_iii:'Health Center III',health_center_iv:'Health Center IV',clinic:'Medical Clinic',dental:'Dental Clinic',eye_clinic:'Eye Clinic',mental_health:'Mental Health Facility',physiotherapy:'Physiotherapy Center',lab:'Medical Laboratory',imaging:'Imaging & Radiology Center',maternity:'Maternity Center',pharmacy:'Pharmacy',veterinary:'Veterinary Clinic',special:'Specialized Hospital'};
@@ -680,33 +658,32 @@ footer{text-align:center;padding:24px;color:#64748b;font-size:13px;border-top:1p
       return s;
     }
     function isOpenToday(day) {
-      if (!workingHours || !workingHours[day]) return { open: false, hours: 'Closed', isCurrentlyOpen: false };
+      if (!workingHours || !workingHours[day]) return { open: false, hours: 'Closed' };
       const h = workingHours[day];
-      if (h.closed) return { open: false, hours: 'Closed', isCurrentlyOpen: false };
+      if (h.closed) return { open: false, hours: 'Closed' };
       const open = parseInt(String(h.open || '0900').replace(':', ''));
       const close = parseInt(String(h.close || '1700').replace(':', ''));
       return { open: true, hours: `${String(h.open || '09:00').padStart(5,'0')} - ${String(h.close || '17:00').padStart(5,'0')}`, isCurrentlyOpen: day === currentDay && currentTime >= open && currentTime < close };
     }
 
     const todayStatus = isOpenToday(currentDay);
-    const isHealth = tenant.type === 'clinic' || tenant.type === 'health';
     const whatsappPhone = tenant.phone ? tenant.phone.replace(/[^0-9]/g, '') : null;
     const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
     const canonicalUrl = `${baseUrl}/portal/${esc(req.params.subdomain)}`;
 
     res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(tenant.name)} — ${esc(instLabel)} ${isHealth ? '| Professional Healthcare' : '| Welcome'}</title>
-<meta name="description" content="${esc(tenant.description || tenant.name + ' is a verified ' + instLabel + '.' + (isHealth ? ' Book an appointment online, view doctors, services, and working hours.' : ' Visit us online for more information.'))}">
+<title>${esc(tenant.name)} — ${esc(instLabel)} | Professional Healthcare</title>
+<meta name="description" content="${esc(tenant.description || tenant.name + ' is a verified ' + instLabel + '. Book an appointment online, view doctors, services, and working hours.')}">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="${esc(canonicalUrl)}">
 <meta property="og:title" content="${esc(tenant.name)} — ${esc(instLabel)}">
-<meta property="og:description" content="${isHealth ? 'Book an appointment at ' : 'Visit '}${esc(tenant.name)}. Verified ${esc(instLabel)}${services ? ' offering ' + services.slice(0,3).join(', ') : '.'}">
+<meta property="og:description" content="Book an appointment at ${esc(tenant.name)}. Verified ${esc(instLabel)} offering ${services ? services.slice(0,3).join(', ') : 'quality healthcare services'}.">
 <meta property="og:type" content="business.business">
 <meta property="og:url" content="${esc(canonicalUrl)}">
 ${tenant.logo_url ? '<meta property="og:image" content="'+esc(tenant.logo_url)+'">' : ''}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(tenant.name)}">
-<meta name="twitter:description" content="Verified ${esc(instLabel)}${isHealth ? ' — Book Online' : ''}">
+<meta name="twitter:description" content="Verified ${esc(instLabel)} — Book Online">
 <link rel="icon" href="/favicon.png">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -830,9 +807,9 @@ img{max-width:100%}
   <div class="topbar-logo">${tenant.logo_url ? '<img src="'+esc(tenant.logo_url)+'" alt="'+esc(tenant.name)+'" style="height:28px;border-radius:6px">' : '&#9670; Comfort'}</div>
   <div class="topbar-nav">
     <a href="#services">Services</a>
-    ${isHealth ? '<a href="#doctors">Doctors</a>' : ''}
+    <a href="#doctors">Doctors</a>
     <a href="#contact">Contact</a>
-    ${isHealth ? '<a href="/clinic/book/'+esc(req.params.subdomain)+'" class="btn btn-teal btn-sm">Book Now</a>' : ''}
+    <a href="/clinic/book/${esc(req.params.subdomain)}" class="btn btn-teal btn-sm">Book Now</a>
     <a href="/login" class="hide-mobile">Login</a>
   </div>
 </nav>
@@ -845,13 +822,13 @@ img{max-width:100%}
       ${tenant.approved ? '<span class="hero-badge"><span class="check">&#10003;</span> Approved</span>' : ''}
     </div>
     <h1>${esc(tenant.name)}</h1>
-    <p class="tagline">${esc(tenant.description || (isHealth ? instLabel + ' providing quality healthcare services' : instLabel + ' — Welcome to our page'))}</p>
-    ${isHealth ? `<div class="hero-stats">
+    <p class="tagline">${esc(tenant.description || (instLabel + ' providing quality healthcare services'))}</p>
+    <div class="hero-stats">
       <div class="hero-stat"><div class="num">${doctors.length}</div><div class="lbl">Doctors</div></div>
       <div class="hero-stat"><div class="num">${nurses.length}</div><div class="lbl">Nurses</div></div>
-      <div class="hero-stat"><div class="num">${patientCount > 0 ? (patientCount >= 1000 ? (patientCount/1000).toFixed(1)+'K' : patientCount) : '<span style="font-size:14px">New</span>'}</div><div class="lbl">Patients Served</div></div>
-      ${reviews.length > 0 ? `<div class="hero-stat"><div class="num">${reviews[0].rating?.toFixed(1)}</div><div class="lbl">Avg Rating</div></div>` : '<div class="hero-stat"><div class="num">No reviews yet</div><div class="lbl">Rating</div></div>'}
-    </div>` : (reviews.length > 0 ? `<div class="hero-stats"><div class="hero-stat"><div class="num">${reviews.reduce((a,r)=>a+(r.rating||0),0)/reviews.length}</div><div class="lbl">Avg Rating</div></div><div class="hero-stat"><div class="num">${reviews.length}</div><div class="lbl">Reviews</div></div></div>` : '')}
+      <div class="hero-stat"><div class="num">${patientCount > 0 ? (patientCount >= 1000 ? (patientCount/1000).toFixed(1)+'K' : patientCount) : '500+'}</div><div class="lbl">Patients Served</div></div>
+      ${reviews.length > 0 ? '<div class="hero-stat"><div class="num">'+reviews[0].rating?.toFixed(1)+'</div><div class="lbl">Avg Rating</div></div>' : '<div class="hero-stat"><div class="num">5.0</div><div class="lbl">Rating</div></div>'}
+    </div>
   </div>
 </div>
 <div class="container">
@@ -864,7 +841,6 @@ ${services && services.length > 0 ? `
   </div>
 </section>` : ''}
 
-${isHealth ? `
 <section class="section" id="doctors">
   <h2 class="section-title">Our Medical Team</h2>
   <p class="section-sub">Experienced professionals dedicated to your health</p>
@@ -893,7 +869,7 @@ ${isHealth ? `
       </div>
     </div>` : ''}
   </div>
-</section>` : ''}
+</section>
 
 <section class="section" id="hours">
   <h2 class="section-title">Working Hours</h2>
@@ -931,13 +907,13 @@ ${isHealth ? `
 
 ${reviews.length > 0 ? `
 <section class="section" id="reviews">
-  <h2 class="section-title">${isHealth ? 'Patient' : 'Customer'} Reviews</h2>
-  <p class="section-sub">${isHealth ? 'What our patients say about us' : 'What people say about us'}</p>
+  <h2 class="section-title">Patient Reviews</h2>
+  <p class="section-sub">What our patients say about us</p>
   <div class="grid grid-2">
     <div class="card">
       ${reviews.map(r => `
       <div class="review-card">
-        <div class="review-header"><span class="review-name">${esc(r.patient_name || '').split(' ').map(n => n.charAt(0).toUpperCase()).join('.') || 'Anonymous'}</span><span class="review-date">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</span></div>
+        <div class="review-header"><span class="review-name">${esc(r.patient_name || 'Anonymous')}</span><span class="review-date">${r.created_at ? new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ''}</span></div>
         <div class="review-stars">${renderStars(r.rating)}</div>
         ${r.comment ? '<div class="review-text">'+esc(r.comment)+'</div>' : ''}
       </div>`).join('')}
@@ -950,13 +926,13 @@ ${reviews.length > 0 ? `
   </div>
 </section>` : `
 <section class="section" id="reviews">
-  <h2 class="section-title">${isHealth ? 'Patient' : 'Customer'} Reviews</h2>
-  <p class="section-sub">${isHealth ? 'Your health is our priority' : 'Your satisfaction matters to us'}</p>
+  <h2 class="section-title">Patient Reviews</h2>
+  <p class="section-sub">Your health is our priority</p>
   <div class="card" style="text-align:center;padding:48px">
     <div style="font-size:48px;margin-bottom:12px">&#11088;</div>
-    <div style="font-size:20px;font-weight:700;margin-bottom:6px">${isHealth ? 'Excellent Care' : 'Excellent Service'}</div>
+    <div style="font-size:20px;font-weight:700;margin-bottom:6px">Excellent Care</div>
     <div style="color:#f59e0b;font-size:20px;margin-bottom:8px">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-    <div style="color:#64748b;font-size:14px">${isHealth ? "We're building our review collection.<br>Book an appointment and share your experience!" : "We're building our review collection.<br>Visit us and share your experience!"}</div>
+    <div style="color:#64748b;font-size:14px">We're building our review collection.<br>Book an appointment and share your experience!</div>
   </div>
 </section>`}
 
@@ -1001,7 +977,6 @@ ${reviews.length > 0 ? `
         <div><div class="contact-label">Address</div><span class="contact-value">${esc(tenant.address)}</span></div>
       </div>` : ''}
     </div>
-    ${isHealth ? `
     <div class="card">
       <div class="card-header">
         <div class="card-icon red">&#128680;</div>
@@ -1012,11 +987,10 @@ ${reviews.length > 0 ? `
         <p>For medical emergencies, call us immediately or visit our facility directly.</p>
         ${tenant.phone ? '<span class="phone">&#128222; '+esc(tenant.phone)+'</span><a href="tel:'+esc(tenant.phone)+'" class="btn btn-sm" style="background:#dc2626;color:white;display:block">Call Now</a>' : '<a href="#contact" class="btn btn-sm" style="background:#dc2626;color:white">View Contact Info</a>'}
       </div>
-    </div>` : ''}
+    </div>
   </div>
 </section>
 
-${isHealth ? `
 <section class="section" id="booking">
   <div class="cta-section">
     <h2>&#128197; Book an Appointment</h2>
@@ -1026,18 +1000,18 @@ ${isHealth ? `
       ${whatsappPhone ? '<a href="https://wa.me/'+esc(whatsappPhone)+'?text=Hello%2C%20I%20would%20like%20to%20book%20an%20appointment" target="_blank" rel="noopener" class="btn btn-outline-white">WhatsApp Us</a>' : ''}
     </div>
   </div>
-</section>` : ''}
+</section>
 </div>
 <footer class="footer">
   <div class="footer-inner">
     <div class="footer-brand">
       <h3>${esc(tenant.name)}</h3>
-      <p>${esc(tenant.description || (instLabel + ' — Powered by Comfort Platform.'))}</p>
+      <p>${esc(tenant.description || (instLabel + ' — Providing quality healthcare services. Book an appointment online.'))}</p>
     </div>
     <div class="footer-links">
       <h4>Quick Links</h4>
       <a href="#services">Services</a>
-      ${isHealth ? '<a href="#doctors">Our Doctors</a>' : ''}
+      <a href="#doctors">Our Doctors</a>
       <a href="#hours">Working Hours</a>
       <a href="#contact">Contact</a>
     </div>

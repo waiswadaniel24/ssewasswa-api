@@ -1,1197 +1,1989 @@
 /**
- * Fundraising Ultimate10 Module — Advanced Giving & Payment Infrastructure
- * Features: Campaign Landing Page Builder, Payment Gateway Hub, Donor Renewal Automation,
- * Donor Gift Club Management, Campaign Video Integration, Stock/Securities Donations,
- * Real Estate Donations, IRA Charitable Rollovers
+ * Fundraising Ultimate10 — Digital Presence & Alternative Assets
+ * 8 Features: Landing Page Builder, Payment Gateway Hub, Donor Renewal,
+ * Gift Clubs, Video Integration, Stock/Securities, Real Estate, IRA Rollovers
  */
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
-  const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 
+  // ================================================================
+  // INLINE MIGRATIONS
+  // ================================================================
   const migrations = [
-    // Feature 1: Campaign Landing Page Builder
-    `CREATE TABLE IF NOT EXISTS landing_pages (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, title TEXT NOT NULL, slug TEXT NOT NULL, headline TEXT, subheadline TEXT, hero_image_url TEXT, body_html TEXT, cta_text TEXT DEFAULT 'Donate Now', cta_link TEXT, meta_title TEXT, meta_description TEXT, is_published BOOLEAN DEFAULT false, published_at TIMESTAMPTZ, view_count INTEGER DEFAULT 0, conversion_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, slug))`,
-    `CREATE TABLE IF NOT EXISTS landing_page_versions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, landing_page_id INTEGER NOT NULL REFERENCES landing_pages(id) ON DELETE CASCADE, version_number INTEGER NOT NULL, content_json TEXT DEFAULT '{}', created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // F1: Landing Page Builder
+    `CREATE TABLE IF NOT EXISTS landing_pages (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      body_html TEXT DEFAULT '',
+      meta_description TEXT DEFAULT '',
+      hero_image_url TEXT DEFAULT '',
+      theme TEXT DEFAULT 'default',
+      cta_text TEXT DEFAULT 'Donate Now',
+      cta_url TEXT DEFAULT '',
+      is_published BOOLEAN DEFAULT false,
+      view_count INTEGER DEFAULT 0,
+      conversion_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS landing_page_versions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      page_id INTEGER REFERENCES landing_pages(id) ON DELETE CASCADE,
+      version_number INTEGER DEFAULT 1,
+      body_html TEXT DEFAULT '',
+      saved_by TEXT DEFAULT '',
+      saved_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS landing_page_sections (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      page_id INTEGER REFERENCES landing_pages(id) ON DELETE CASCADE,
+      section_type TEXT DEFAULT 'text',
+      section_order INTEGER DEFAULT 0,
+      title TEXT DEFAULT '',
+      content TEXT DEFAULT '',
+      image_url TEXT DEFAULT '',
+      settings_json TEXT DEFAULT '{}',
+      is_visible BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_landing_pages_tenant ON landing_pages(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_landing_pages_slug ON landing_pages(slug)`,
-    `CREATE INDEX IF NOT EXISTS idx_landing_page_versions_page ON landing_page_versions(landing_page_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_landing_page_versions_tenant ON landing_page_versions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_landing_page_sections_tenant ON landing_page_sections(tenant_id)`,
 
-    // Feature 2: Payment Gateway Hub
-    `CREATE TABLE IF NOT EXISTS payment_gateways (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, gateway_type TEXT NOT NULL CHECK (gateway_type IN ('stripe','paypal','flutterwave','paystack','manual')), name TEXT NOT NULL, api_key_encrypted TEXT, api_secret_encrypted TEXT, webhook_url TEXT, is_primary BOOLEAN DEFAULT false, is_active BOOLEAN DEFAULT true, config_json TEXT DEFAULT '{}', created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS gateway_transactions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, gateway_id INTEGER NOT NULL REFERENCES payment_gateways(id) ON DELETE CASCADE, donation_id INTEGER, external_tx_id TEXT, amount NUMERIC DEFAULT 0, fee NUMERIC DEFAULT 0, net_amount NUMERIC DEFAULT 0, currency TEXT DEFAULT 'UGX', status TEXT DEFAULT 'pending' CHECK (status IN ('pending','completed','failed','refunded')), processed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // F2: Payment Gateway Hub
+    `CREATE TABLE IF NOT EXISTS payment_gateways (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      gateway_name TEXT NOT NULL,
+      gateway_type TEXT DEFAULT 'manual',
+      api_key TEXT DEFAULT '',
+      api_secret TEXT DEFAULT '',
+      webhook_url TEXT DEFAULT '',
+      merchant_id TEXT DEFAULT '',
+      sandbox_mode BOOLEAN DEFAULT true,
+      fee_percentage NUMERIC DEFAULT 0,
+      flat_fee NUMERIC DEFAULT 0,
+      currency TEXT DEFAULT 'UGX',
+      is_active BOOLEAN DEFAULT true,
+      is_default BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS gateway_transactions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      gateway_id INTEGER REFERENCES payment_gateways(id),
+      campaign_id INTEGER,
+      external_tx_id TEXT DEFAULT '',
+      donor_name TEXT DEFAULT '',
+      donor_email TEXT DEFAULT '',
+      amount NUMERIC DEFAULT 0,
+      fee_amount NUMERIC DEFAULT 0,
+      net_amount NUMERIC DEFAULT 0,
+      currency TEXT DEFAULT 'UGX',
+      payment_method TEXT DEFAULT 'card',
+      status TEXT DEFAULT 'pending',
+      metadata_json TEXT DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS gateway_payouts (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      gateway_id INTEGER REFERENCES payment_gateways(id),
+      amount NUMERIC DEFAULT 0,
+      fee_deducted NUMERIC DEFAULT 0,
+      payout_method TEXT DEFAULT 'bank_transfer',
+      reference TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      requested_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_payment_gateways_tenant ON payment_gateways(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_gateway_transactions_gateway ON gateway_transactions(gateway_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_gateway_transactions_tenant ON gateway_transactions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_gateway_payouts_tenant ON gateway_payouts(tenant_id)`,
 
-    // Feature 3: Donor Renewal Automation
-    `CREATE TABLE IF NOT EXISTS donor_renewal_campaigns (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, target_segment TEXT, trigger_days_before INTEGER DEFAULT 30, email_template TEXT, sms_template TEXT, max_reminders INTEGER DEFAULT 3, status TEXT DEFAULT 'draft' CHECK (status IN ('draft','active','paused','completed')), total_targeted INTEGER DEFAULT 0, total_renewed INTEGER DEFAULT 0, total_raised NUMERIC DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS renewal_reminders (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL REFERENCES donor_renewal_campaigns(id) ON DELETE CASCADE, donor_email TEXT NOT NULL, donor_name TEXT, reminder_number INTEGER DEFAULT 1, sent_at TIMESTAMPTZ, opened BOOLEAN DEFAULT false, clicked BOOLEAN DEFAULT false, renewed BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_renewal_campaigns_tenant ON donor_renewal_campaigns(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_renewal_reminders_campaign ON renewal_reminders(campaign_id)`,
+    // F3: Donor Renewal
+    `CREATE TABLE IF NOT EXISTS donor_renewal_campaigns (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      target_segment TEXT DEFAULT 'lapsed',
+      start_date DATE,
+      end_date DATE,
+      goal_amount NUMERIC DEFAULT 0,
+      raised_amount NUMERIC DEFAULT 0,
+      renewal_count INTEGER DEFAULT 0,
+      target_count INTEGER DEFAULT 0,
+      email_template TEXT DEFAULT '',
+      sms_template TEXT DEFAULT '',
+      auto_remind BOOLEAN DEFAULT false,
+      remind_interval_days INTEGER DEFAULT 14,
+      status TEXT DEFAULT 'draft',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS renewal_reminders (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES donor_renewal_campaigns(id) ON DELETE CASCADE,
+      donor_email TEXT NOT NULL,
+      donor_name TEXT DEFAULT '',
+      donor_phone TEXT DEFAULT '',
+      reminder_type TEXT DEFAULT 'email',
+      message TEXT DEFAULT '',
+      sent_at TIMESTAMPTZ,
+      opened_at TIMESTAMPTZ,
+      clicked_at TIMESTAMPTZ,
+      responded BOOLEAN DEFAULT false,
+      response_amount NUMERIC DEFAULT 0,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS donor_renewal_segments (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      segment_name TEXT NOT NULL,
+      criteria_json TEXT DEFAULT '{}',
+      donor_count INTEGER DEFAULT 0,
+      avg_gift NUMERIC DEFAULT 0,
+      last_calculated TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_renewal_tenant ON donor_renewal_campaigns(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_renewal_reminders_tenant ON renewal_reminders(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_renewal_segments_tenant ON donor_renewal_segments(tenant_id)`,
 
-    // Feature 4: Donor Gift Club Management
-    `CREATE TABLE IF NOT EXISTS donor_gift_clubs (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, min_annual_amount NUMERIC DEFAULT 0, max_annual_amount NUMERIC, benefits_json TEXT DEFAULT '[]', badge_icon TEXT, member_count INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS gift_club_members (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, club_id INTEGER NOT NULL REFERENCES donor_gift_clubs(id) ON DELETE CASCADE, donor_email TEXT NOT NULL, donor_name TEXT, joined_at TIMESTAMPTZ DEFAULT NOW(), annual_total NUMERIC DEFAULT 0, status TEXT DEFAULT 'active' CHECK (status IN ('active','expired','removed')), created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_gift_clubs_tenant ON donor_gift_clubs(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_gift_club_members_club ON gift_club_members(club_id)`,
+    // F4: Gift Clubs
+    `CREATE TABLE IF NOT EXISTS donor_gift_clubs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      club_name TEXT NOT NULL,
+      min_amount NUMERIC DEFAULT 0,
+      max_amount NUMERIC,
+      description TEXT DEFAULT '',
+      benefits TEXT DEFAULT '',
+      color TEXT DEFAULT '#10b981',
+      icon TEXT DEFAULT 'award',
+      welcome_email_subject TEXT DEFAULT '',
+      welcome_email_body TEXT DEFAULT '',
+      annual_event TEXT DEFAULT '',
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS gift_club_members (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      club_id INTEGER REFERENCES donor_gift_clubs(id) ON DELETE CASCADE,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT DEFAULT '',
+      donor_phone TEXT DEFAULT '',
+      total_donated NUMERIC DEFAULT 0,
+      membership_start_date DATE DEFAULT CURRENT_DATE,
+      last_gift_date DATE,
+      last_gift_amount NUMERIC DEFAULT 0,
+      welcome_sent BOOLEAN DEFAULT false,
+      is_active BOOLEAN DEFAULT true,
+      joined_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS gift_club_events (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      club_id INTEGER REFERENCES donor_gift_clubs(id),
+      event_name TEXT NOT NULL,
+      event_date DATE,
+      venue TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      attendee_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_donor_gift_clubs_tenant ON donor_gift_clubs(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_gift_club_members_tenant ON gift_club_members(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_gift_club_events_tenant ON gift_club_events(tenant_id)`,
 
-    // Feature 5: Campaign Video Integration
-    `CREATE TABLE IF NOT EXISTS campaign_videos (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, video_type TEXT DEFAULT 'youtube' CHECK (video_type IN ('youtube','vimeo','livestream','uploaded')), video_url TEXT NOT NULL, title TEXT, description TEXT, thumbnail_url TEXT, duration_seconds INTEGER DEFAULT 0, view_count INTEGER DEFAULT 0, is_featured BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS video_engagement (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, video_id INTEGER NOT NULL REFERENCES campaign_videos(id) ON DELETE CASCADE, viewer_email TEXT, watched_seconds INTEGER DEFAULT 0, completed BOOLEAN DEFAULT false, watched_at TIMESTAMPTZ DEFAULT NOW())`,
+    // F5: Video Integration
+    `CREATE TABLE IF NOT EXISTS campaign_videos (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER,
+      title TEXT NOT NULL,
+      video_url TEXT NOT NULL,
+      video_type TEXT DEFAULT 'youtube',
+      thumbnail_url TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      duration_seconds INTEGER DEFAULT 0,
+      is_live BOOLEAN DEFAULT false,
+      is_featured BOOLEAN DEFAULT false,
+      scheduled_at TIMESTAMPTZ,
+      view_count INTEGER DEFAULT 0,
+      like_count INTEGER DEFAULT 0,
+      share_count INTEGER DEFAULT 0,
+      transcript_url TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS video_engagement (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      video_id INTEGER REFERENCES campaign_videos(id) ON DELETE CASCADE,
+      viewer_email TEXT DEFAULT '',
+      viewer_ip TEXT DEFAULT '',
+      watch_time_seconds INTEGER DEFAULT 0,
+      completed BOOLEAN DEFAULT false,
+      liked BOOLEAN DEFAULT false,
+      shared BOOLEAN DEFAULT false,
+      source TEXT DEFAULT 'direct',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS video_playlists (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      video_ids_json TEXT DEFAULT '[]',
+      is_public BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_videos_tenant ON campaign_videos(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_video_engagement_video ON video_engagement(video_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_video_engagement_tenant ON video_engagement(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_video_playlists_tenant ON video_playlists(tenant_id)`,
 
-    // Feature 6: Stock / Securities Donations
-    `CREATE TABLE IF NOT EXISTS stock_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, donor_name TEXT NOT NULL, donor_email TEXT, stock_symbol TEXT NOT NULL, stock_name TEXT, shares NUMERIC NOT NULL, price_per_share_at_donation NUMERIC NOT NULL, total_value NUMERIC NOT NULL, brokerage_name TEXT, transfer_date DATE, status TEXT DEFAULT 'pending' CHECK (status IN ('pending','received','sold','completed','cancelled')), acknowledged BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS stock_valuations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, stock_donation_id INTEGER NOT NULL REFERENCES stock_donations(id) ON DELETE CASCADE, valuation_date DATE DEFAULT CURRENT_DATE, price_per_share NUMERIC NOT NULL, total_value NUMERIC NOT NULL, valued_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // F6: Stock/Securities
+    `CREATE TABLE IF NOT EXISTS stock_donations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT DEFAULT '',
+      donor_phone TEXT DEFAULT '',
+      company_name TEXT NOT NULL,
+      ticker_symbol TEXT DEFAULT '',
+      number_of_shares NUMERIC DEFAULT 0,
+      share_price NUMERIC DEFAULT 0,
+      total_value NUMERIC DEFAULT 0,
+      brokerage_name TEXT DEFAULT '',
+      brokerage_contact TEXT DEFAULT '',
+      dtc_number TEXT DEFAULT '',
+      transfer_date DATE,
+      transfer_method TEXT DEFAULT 'dwtc',
+      mean_price_on_date NUMERIC DEFAULT 0,
+      acknowledged BOOLEAN DEFAULT false,
+      acknowledgment_sent_at TIMESTAMPTZ,
+      tax_letter_sent BOOLEAN DEFAULT false,
+      status TEXT DEFAULT 'pending',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS stock_valuations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      stock_donation_id INTEGER REFERENCES stock_donations(id),
+      valuation_date DATE NOT NULL,
+      share_price NUMERIC DEFAULT 0,
+      total_value NUMERIC DEFAULT 0,
+      high_price NUMERIC DEFAULT 0,
+      low_price NUMERIC DEFAULT 0,
+      appraiser TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS stock_transfer_docs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      stock_donation_id INTEGER REFERENCES stock_donations(id),
+      doc_type TEXT DEFAULT 'transfer_form',
+      doc_name TEXT DEFAULT '',
+      doc_url TEXT DEFAULT '',
+      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_stock_donations_tenant ON stock_donations(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_stock_valuations_donation ON stock_valuations(stock_donation_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_stock_valuations_tenant ON stock_valuations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_stock_transfer_docs_tenant ON stock_transfer_docs(tenant_id)`,
 
-    // Feature 7: Real Estate Donations
-    `CREATE TABLE IF NOT EXISTS real_estate_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, donor_name TEXT NOT NULL, donor_email TEXT, property_type TEXT DEFAULT 'residential' CHECK (property_type IN ('residential','commercial','land','other')), address TEXT, city TEXT, region TEXT, country TEXT DEFAULT 'Uganda', area_sqft NUMERIC, appraised_value NUMERIC, donation_date DATE, status TEXT DEFAULT 'submitted' CHECK (status IN ('submitted','under_review','appraised','legal_review','completed','rejected')), appraisal_document_url TEXT, legal_review_status TEXT DEFAULT 'pending' CHECK (legal_review_status IN ('pending','approved','rejected')), acknowledged BOOLEAN DEFAULT false, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // F7: Real Estate
+    `CREATE TABLE IF NOT EXISTS real_estate_donations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT DEFAULT '',
+      donor_phone TEXT DEFAULT '',
+      property_name TEXT NOT NULL,
+      property_address TEXT DEFAULT '',
+      property_type TEXT DEFAULT 'residential',
+      square_footage NUMERIC DEFAULT 0,
+      lot_size NUMERIC DEFAULT 0,
+      year_built INTEGER,
+      appraised_value NUMERIC DEFAULT 0,
+      appraised_by TEXT DEFAULT '',
+      appraisal_date DATE,
+      legal_description TEXT DEFAULT '',
+      deed_number TEXT DEFAULT '',
+      title_search_status TEXT DEFAULT 'pending',
+      environmental_status TEXT DEFAULT 'pending',
+      tax_lien_check TEXT DEFAULT 'pending',
+      insurance_status TEXT DEFAULT 'pending',
+      status TEXT DEFAULT 'pending',
+      appraisal_status TEXT DEFAULT 'pending',
+      legal_review_status TEXT DEFAULT 'pending',
+      acceptance_date DATE,
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS real_estate_documents (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      property_id INTEGER REFERENCES real_estate_donations(id),
+      doc_type TEXT DEFAULT 'deed',
+      doc_name TEXT DEFAULT '',
+      doc_url TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS real_estate_appraisals (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      property_id INTEGER REFERENCES real_estate_donations(id),
+      appraiser_name TEXT DEFAULT '',
+      appraiser_license TEXT DEFAULT '',
+      appraised_value NUMERIC DEFAULT 0,
+      appraisal_date DATE,
+      market_value NUMERIC DEFAULT 0,
+      condition TEXT DEFAULT 'fair',
+      methodology TEXT DEFAULT '',
+      report_url TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_real_estate_donations_tenant ON real_estate_donations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_real_estate_documents_tenant ON real_estate_documents(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_real_estate_appraisals_tenant ON real_estate_appraisals(tenant_id)`,
 
-    // Feature 8: IRA Charitable Rollovers
-    `CREATE TABLE IF NOT EXISTS ira_rollovers (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, donor_name TEXT NOT NULL, donor_email TEXT, donor_age INTEGER, ira_custodian TEXT, rollover_amount NUMERIC NOT NULL, transfer_date DATE, tax_year INTEGER, confirmation_number TEXT, status TEXT DEFAULT 'initiated' CHECK (status IN ('initiated','confirmed','received','completed','cancelled')), acknowledged BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS ira_distributions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, rollover_id INTEGER NOT NULL REFERENCES ira_rollovers(id) ON DELETE CASCADE, distribution_date DATE DEFAULT CURRENT_DATE, amount NUMERIC NOT NULL, tax_form_sent BOOLEAN DEFAULT false, tax_form_date DATE, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // F8: IRA Rollovers
+    `CREATE TABLE IF NOT EXISTS ira_rollovers (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      donor_name TEXT NOT NULL,
+      donor_email TEXT DEFAULT '',
+      donor_phone TEXT DEFAULT '',
+      donor_ssn_last4 TEXT DEFAULT '',
+      ira_type TEXT DEFAULT 'traditional',
+      custodian_name TEXT DEFAULT '',
+      custodian_account TEXT DEFAULT '',
+      custodian_phone TEXT DEFAULT '',
+      distribution_amount NUMERIC DEFAULT 0,
+      distribution_date DATE,
+      transfer_method TEXT DEFAULT 'direct',
+      is_qcd BOOLEAN DEFAULT false,
+      qcd_age_verified BOOLEAN DEFAULT false,
+      tax_form_sent BOOLEAN DEFAULT false,
+      tax_form_sent_at TIMESTAMPTZ,
+      acknowledgment_sent BOOLEAN DEFAULT false,
+      acknowledged_at TIMESTAMPTZ,
+      confirmed BOOLEAN DEFAULT false,
+      confirmed_at TIMESTAMPTZ,
+      confirmed_by TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ira_distributions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      ira_rollover_id INTEGER REFERENCES ira_rollovers(id),
+      distribution_amount NUMERIC DEFAULT 0,
+      distribution_date DATE,
+      check_number TEXT DEFAULT '',
+      wire_reference TEXT DEFAULT '',
+      received_date DATE,
+      deposit_date DATE,
+      deposit_account TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS ira_tax_documents (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      ira_rollover_id INTEGER REFERENCES ira_rollovers(id),
+      doc_type TEXT DEFAULT 'acknowledgment',
+      doc_name TEXT DEFAULT '',
+      doc_url TEXT DEFAULT '',
+      tax_year INTEGER,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_ira_rollovers_tenant ON ira_rollovers(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_ira_distributions_rollover ON ira_distributions(rollover_id)`,
-
-    // Seed: 1 manual gateway per tenant
-    `INSERT INTO payment_gateways (tenant_id, gateway_type, name, is_primary, is_active, config_json) SELECT t.id, 'manual', 'Manual / Cash Collection', true, true, '{}' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM payment_gateways WHERE tenant_id=t.id AND gateway_type='manual')`,
-
-    // Seed: 4 donor gift clubs per tenant (UGX tiers)
-    `INSERT INTO donor_gift_clubs (tenant_id, name, description, min_annual_amount, max_annual_amount, benefits_json, badge_icon, is_active) SELECT t.id, 'Bronze Circle', 'Donors contributing up to UGX 500,000 annually', 0, 500000, '["Recognition on donor wall","Quarterly newsletter","Annual report"]', '🥉', true FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM donor_gift_clubs WHERE tenant_id=t.id AND name='Bronze Circle')`,
-    `INSERT INTO donor_gift_clubs (tenant_id, name, description, min_annual_amount, max_annual_amount, benefits_json, badge_icon, is_active) SELECT t.id, 'Silver Society', 'Donors contributing UGX 500,000 - 2,000,000 annually', 500000, 2000000, '["All Bronze benefits","Exclusive events","Personal thank-you calls","Priority updates"]', '🥈', true FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM donor_gift_clubs WHERE tenant_id=t.id AND name='Silver Society')`,
-    `INSERT INTO donor_gift_clubs (tenant_id, name, description, min_annual_amount, max_annual_amount, benefits_json, badge_icon, is_active) SELECT t.id, 'Gold League', 'Donors contributing UGX 2,000,000 - 10,000,000 annually', 2000000, 10000000, '["All Silver benefits","VIP gala invitations","Named giving opportunities","Dedicated liaison"]', '🥇', true FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM donor_gift_clubs WHERE tenant_id=t.id AND name='Gold League')`,
-    `INSERT INTO donor_gift_clubs (tenant_id, name, description, min_annual_amount, max_annual_amount, benefits_json, badge_icon, is_active) SELECT t.id, 'Platinum Patrons', 'Donors contributing over UGX 10,000,000 annually', 10000000, NULL, '["All Gold benefits","Board meeting attendance","Strategic input opportunities","Legacy naming rights","Private dinners"]', '💎', true FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM donor_gift_clubs WHERE tenant_id=t.id AND name='Platinum Patrons')`,
+    `CREATE INDEX IF NOT EXISTS idx_ira_distributions_tenant ON ira_distributions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_ira_tax_documents_tenant ON ira_tax_documents(tenant_id)`,
   ];
 
+  // Run migrations + seed per tenant
   (async () => {
     for (const q of migrations) {
       try { await pool.query(q); } catch(e) {}
     }
-    console.log('[FundraisingUltimate10] Migrations complete — 8 features');
+    console.log('[FundraisingUltimate10] Migrations complete');
+    try {
+      const tenants = (await pool.query('SELECT id FROM tenants')).rows;
+      for (const t of tenants) {
+        // Seed: default manual payment gateway
+        await pool.query(
+          `INSERT INTO payment_gateways (tenant_id, gateway_name, gateway_type, is_active, is_default)
+           SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS (SELECT 1 FROM payment_gateways WHERE tenant_id=$1 AND gateway_type=$3)`,
+          [t.id, 'Manual/Offline', 'manual', true, true]
+        );
+        // Seed: 4 gift clubs per tenant
+        const clubs = [
+          { club_name: 'Bronze Circle', min_amount: 0, max_amount: 500000, description: 'Donors contributing up to UGX 500,000', benefits: 'Certificate of appreciation, Newsletter', color: '#cd7f32', icon: 'award', welcome_email_subject: 'Welcome to the Bronze Circle!', welcome_email_body: 'Thank you for joining our Bronze Circle. Your generosity makes a difference.' },
+          { club_name: 'Silver Circle', min_amount: 500000, max_amount: 2000000, description: 'Donors contributing UGX 500K - 2M', benefits: 'Bronze benefits + Annual report, Event invitations', color: '#c0c0c0', icon: 'award', welcome_email_subject: 'Welcome to the Silver Circle!', welcome_email_body: 'We are delighted to welcome you to our Silver Circle. Enjoy exclusive event invitations and reports.' },
+          { club_name: 'Gold Circle', min_amount: 2000000, max_amount: 10000000, description: 'Donors contributing UGX 2M - 10M', benefits: 'Silver benefits + Dedicated contact, VIP events', color: '#ffd700', icon: 'crown', welcome_email_subject: 'Welcome to the Gold Circle!', welcome_email_body: 'Congratulations on joining the Gold Circle. You now have a dedicated contact and VIP event access.' },
+          { club_name: 'Platinum Circle', min_amount: 10000000, max_amount: null, description: 'Donors contributing over UGX 10M', benefits: 'Gold benefits + Board meeting access, Named opportunities', color: '#e5e4e2', icon: 'gem', welcome_email_subject: 'Welcome to the Platinum Circle!', welcome_email_body: 'As a Platinum Circle member, you are among our most valued supporters. Enjoy board access and naming opportunities.' }
+        ];
+        for (const c of clubs) {
+          await pool.query(
+            `INSERT INTO donor_gift_clubs (tenant_id,club_name,min_amount,max_amount,description,benefits,color,icon,welcome_email_subject,welcome_email_body)
+             SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10 WHERE NOT EXISTS (SELECT 1 FROM donor_gift_clubs WHERE tenant_id=$1 AND club_name=$2)`,
+            [t.id, c.club_name, c.min_amount, c.max_amount, c.description, c.benefits, c.color, c.icon, c.welcome_email_subject, c.welcome_email_body]
+          );
+        }
+        // Seed: default donor segments
+        const segments = [
+          { segment_name: 'Lapsed Donors', criteria_json: '{"last_gift":"12m+"}' },
+          { segment_name: 'Active Donors', criteria_json: '{"last_gift":"6m"}' },
+          { segment_name: 'Major Donors', criteria_json: '{"total_given":"10000000+"}' },
+          { segment_name: 'First-Time Donors', criteria_json: '{"gift_count":1}' }
+        ];
+        for (const s of segments) {
+          await pool.query(
+            `INSERT INTO donor_renewal_segments (tenant_id, segment_name, criteria_json)
+             SELECT $1,$2,$3 WHERE NOT EXISTS (SELECT 1 FROM donor_renewal_segments WHERE tenant_id=$1 AND segment_name=$2)`,
+            [t.id, s.segment_name, s.criteria_json]
+          );
+        }
+      }
+      console.log('[FundraisingUltimate10] Seed data complete');
+    } catch(e) {
+      console.warn('[FundraisingUltimate10] Seed error:', e.message);
+    }
   })();
 
-  // =============================================
-  // FEATURE 1: CAMPAIGN LANDING PAGE BUILDER
-  // =============================================
+  // ================================================================
+  // FEATURE 1: LANDING PAGE BUILDER
+  // ================================================================
 
-  // List landing pages
+  // List all landing pages
   app.get('/api/landing-pages', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM landing_pages WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
+    const r = await pool.query(
+      'SELECT id, tenant_id, title, slug, meta_description, hero_image_url, theme, cta_text, is_published, view_count, conversion_count, created_at, updated_at FROM landing_pages WHERE tenant_id=$1 ORDER BY created_at DESC',
+      [req.session.user.tenant_id]
+    );
     res.json(r.rows);
-  }));
-
-  // Create landing page
-  app.post('/api/landing-pages', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { campaign_id, title, slug, headline, subheadline, hero_image_url, body_html, cta_text, cta_link, meta_title, meta_description } = req.body;
-    if (!title || !slug) return res.status(400).json({ error: 'title and slug required' });
-    const existing = await pool.query(`SELECT id FROM landing_pages WHERE tenant_id=$1 AND slug=$2`, [tid, esc(slug)]);
-    if (existing.rows.length) return res.status(409).json({ error: 'Slug already exists' });
-    const r = await pool.query(`INSERT INTO landing_pages (tenant_id, campaign_id, title, slug, headline, subheadline, hero_image_url, body_html, cta_text, cta_link, meta_title, meta_description) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [tid, campaign_id||null, esc(title), esc(slug), esc(headline||''), esc(subheadline||''), esc(hero_image_url||''), esc(body_html||''), esc(cta_text||'Donate Now'), esc(cta_link||''), esc(meta_title||''), esc(meta_description||'')]);
-    await audit(req, 'create', 'landing_pages', r.rows[0].id);
-    // Save initial version
-    const contentJson = JSON.stringify({ headline, subheadline, hero_image_url, body_html, cta_text, cta_link });
-    await pool.query(`INSERT INTO landing_page_versions (tenant_id, landing_page_id, version_number, content_json, created_by) VALUES ($1,$2,1,$3,$4)`, [tid, r.rows[0].id, contentJson, req.session.user.email]);
-    res.json(r.rows[0]);
   }));
 
   // Get single landing page
   app.get('/api/landing-pages/:id', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM landing_pages WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('SELECT * FROM landing_pages WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Landing page not found' });
+    res.json(r.rows[0]);
+  }));
+
+  // Create landing page
+  app.post('/api/landing-pages', requireAuth, ah(async (req, res) => {
+    const { title, slug, body_html, meta_description, hero_image_url, theme, cta_text, cta_url } = req.body;
+    if (!title || !slug) return res.status(400).json({ error: 'title and slug required' });
+    const r = await pool.query(
+      'INSERT INTO landing_pages (tenant_id,title,slug,body_html,meta_description,hero_image_url,theme,cta_text,cta_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.session.user.tenant_id, esc(title), esc(slug), esc(body_html||''), esc(meta_description||''), esc(hero_image_url||''), esc(theme||'default'), esc(cta_text||'Donate Now'), esc(cta_url||'')]
+    );
+    await pool.query(
+      'INSERT INTO landing_page_versions (tenant_id,page_id,version_number,body_html,saved_by) VALUES ($1,$2,1,$3,$4)',
+      [req.session.user.tenant_id, r.rows[0].id, esc(body_html||''), esc(req.session.user.name||'')]
+    );
+    await audit(req, 'create', 'landing_pages', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
   // Update landing page
   app.put('/api/landing-pages/:id', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { title, headline, subheadline, hero_image_url, body_html, cta_text, cta_link, meta_title, meta_description, campaign_id } = req.body;
-    const existing = await pool.query(`SELECT * FROM landing_pages WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
-    if (!existing.rows.length) return res.status(404).json({ error: 'Landing page not found' });
-    const r = await pool.query(`UPDATE landing_pages SET title=COALESCE($1,title), headline=COALESCE($2,headline), subheadline=COALESCE($3,subheadline), hero_image_url=COALESCE($4,hero_image_url), body_html=COALESCE($5,body_html), cta_text=COALESCE($6,cta_text), cta_link=COALESCE($7,cta_link), meta_title=COALESCE($8,meta_title), meta_description=COALESCE($9,meta_description), campaign_id=COALESCE($10,campaign_id) WHERE tenant_id=$11 AND id=$12 RETURNING *`,
-      [title?esc(title):null, headline!=null?esc(headline):null, subheadline!=null?esc(subheadline):null, hero_image_url!=null?esc(hero_image_url):null, body_html!=null?esc(body_html):null, cta_text!=null?esc(cta_text):null, cta_link!=null?esc(cta_link):null, meta_title!=null?esc(meta_title):null, meta_description!=null?esc(meta_description):null, campaign_id||null, tid, req.params.id]);
-    // Save new version
-    const maxVer = await pool.query(`SELECT MAX(version_number) as max_v FROM landing_page_versions WHERE landing_page_id=$1`, [req.params.id]);
-    const nextVer = (maxVer.rows[0]?.max_v || 0) + 1;
-    const contentJson = JSON.stringify({ headline: r.rows[0].headline, subheadline: r.rows[0].subheadline, hero_image_url: r.rows[0].hero_image_url, body_html: r.rows[0].body_html, cta_text: r.rows[0].cta_text, cta_link: r.rows[0].cta_link });
-    await pool.query(`INSERT INTO landing_page_versions (tenant_id, landing_page_id, version_number, content_json, created_by) VALUES ($1,$2,$3,$4,$5)`, [tid, req.params.id, nextVer, contentJson, req.session.user.email]);
+    const { title, body_html, meta_description, hero_image_url, theme, cta_text, cta_url } = req.body;
+    const r = await pool.query(
+      `UPDATE landing_pages SET title=COALESCE($1,title), body_html=COALESCE($2,body_html),
+       meta_description=COALESCE($3,meta_description), hero_image_url=COALESCE($4,hero_image_url),
+       theme=COALESCE($5,theme), cta_text=COALESCE($6,cta_text), cta_url=COALESCE($7,cta_url),
+       updated_at=NOW() WHERE tenant_id=$8 AND id=$9 RETURNING *`,
+      [title?esc(title):null, body_html?esc(body_html):null, meta_description?esc(meta_description):null,
+       hero_image_url?esc(hero_image_url):null, theme?esc(theme):null, cta_text?esc(cta_text):null,
+       cta_url?esc(cta_url):null, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Landing page not found' });
+    if (body_html) {
+      const maxVer = await pool.query('SELECT MAX(version_number) as v FROM landing_page_versions WHERE page_id=$1', [req.params.id]);
+      const nextVer = (maxVer.rows[0]?.v || 0) + 1;
+      await pool.query(
+        'INSERT INTO landing_page_versions (tenant_id,page_id,version_number,body_html,saved_by) VALUES ($1,$2,$3,$4,$5)',
+        [req.session.user.tenant_id, req.params.id, nextVer, esc(body_html), esc(req.session.user.name||'')]
+      );
+    }
     await audit(req, 'update', 'landing_pages', req.params.id);
     res.json(r.rows[0]);
   }));
 
   // Delete landing page
   app.delete('/api/landing-pages/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM landing_pages WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('DELETE FROM landing_pages WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Landing page not found' });
     await audit(req, 'delete', 'landing_pages', req.params.id);
     res.json({ ok: true });
   }));
 
-  // Public page by slug (NO auth required)
-  app.get('/api/landing-pages/slug/:slug', ah(async (req, res) => {
-    const r = await pool.query(`SELECT id, title, slug, headline, subheadline, hero_image_url, body_html, cta_text, cta_link, meta_title, meta_description, is_published, view_count, conversion_count FROM landing_pages WHERE slug=$1 AND is_published=true`, [req.params.slug]);
-    if (!r.rows.length) return res.status(404).json({ error: 'Page not found or not published' });
-    res.json(r.rows[0]);
-  }));
-
   // Publish landing page
   app.post('/api/landing-pages/:id/publish', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`UPDATE landing_pages SET is_published=true, published_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('UPDATE landing_pages SET is_published=true, updated_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Landing page not found' });
-    await audit(req, 'publish', 'landing_pages', req.params.id);
+    await audit(req, 'update', 'landing_pages', req.params.id);
     res.json(r.rows[0]);
   }));
 
   // Unpublish landing page
   app.post('/api/landing-pages/:id/unpublish', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`UPDATE landing_pages SET is_published=false WHERE tenant_id=$1 AND id=$2 RETURNING *`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('UPDATE landing_pages SET is_published=false, updated_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Landing page not found' });
-    await audit(req, 'unpublish', 'landing_pages', req.params.id);
+    await audit(req, 'update', 'landing_pages', req.params.id);
     res.json(r.rows[0]);
   }));
 
   // Duplicate landing page
   app.post('/api/landing-pages/:id/duplicate', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const orig = await pool.query(`SELECT * FROM landing_pages WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
+    const orig = await pool.query('SELECT * FROM landing_pages WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!orig.rows.length) return res.status(404).json({ error: 'Landing page not found' });
     const o = orig.rows[0];
-    const newSlug = o.slug + '-copy';
-    const existingCopy = await pool.query(`SELECT id FROM landing_pages WHERE tenant_id=$1 AND slug=$2`, [tid, newSlug]);
-    const finalSlug = existingCopy.rows.length ? newSlug + '-' + Date.now() : newSlug;
-    const r = await pool.query(`INSERT INTO landing_pages (tenant_id, campaign_id, title, slug, headline, subheadline, hero_image_url, body_html, cta_text, cta_link, meta_title, meta_description) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [tid, o.campaign_id, esc(o.title + ' (Copy)'), esc(finalSlug), o.headline, o.subheadline, o.hero_image_url, o.body_html, o.cta_text, o.cta_link, o.meta_title, o.meta_description]);
-    await audit(req, 'duplicate', 'landing_pages', r.rows[0].id);
+    const r = await pool.query(
+      'INSERT INTO landing_pages (tenant_id,title,slug,body_html,meta_description,hero_image_url,theme,cta_text,cta_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.session.user.tenant_id, esc(o.title + ' (Copy)'), esc(o.slug + '-copy-' + Date.now()), esc(o.body_html||''), esc(o.meta_description||''), esc(o.hero_image_url||''), esc(o.theme||'default'), esc(o.cta_text||'Donate Now'), esc(o.cta_url||'')]
+    );
+    await audit(req, 'create', 'landing_pages', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
-  // Get landing page versions
-  app.get('/api/landing-pages/:id/versions', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM landing_page_versions WHERE tenant_id=$1 AND landing_page_id=$2 ORDER BY version_number DESC`, [req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows);
-  }));
-
-  // Track view
+  // Track view (public, no auth)
   app.post('/api/landing-pages/:id/track-view', ah(async (req, res) => {
-    await pool.query(`UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1`, [req.params.id]);
+    await pool.query('UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1', [req.params.id]);
     res.json({ ok: true });
   }));
 
-  // Track conversion
+  // Track conversion (public, no auth)
   app.post('/api/landing-pages/:id/track-conversion', ah(async (req, res) => {
-    await pool.query(`UPDATE landing_pages SET conversion_count=conversion_count+1 WHERE id=$1`, [req.params.id]);
+    await pool.query('UPDATE landing_pages SET conversion_count=conversion_count+1 WHERE id=$1', [req.params.id]);
     res.json({ ok: true });
   }));
 
-  // =============================================
-  // FEATURE 2: PAYMENT GATEWAY HUB
-  // =============================================
+  // Get page by slug (public)
+  app.get('/api/landing-pages/slug/:slug', ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM landing_pages WHERE slug=$1 AND is_published=true', [req.params.slug]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Page not found' });
+    await pool.query('UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1', [r.rows[0].id]);
+    res.json(r.rows[0]);
+  }));
 
-  // List gateways
-  app.get('/api/payment-gateways', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT id, tenant_id, gateway_type, name, webhook_url, is_primary, is_active, config_json, created_at FROM payment_gateways WHERE tenant_id=$1 ORDER BY is_primary DESC, created_at`, [req.session.user.tenant_id]);
+  // Get page versions
+  app.get('/api/landing-pages/:id/versions', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM landing_page_versions WHERE tenant_id=$1 AND page_id=$2 ORDER BY version_number DESC', [req.session.user.tenant_id, req.params.id]);
     res.json(r.rows);
+  }));
+
+  // Restore a version
+  app.post('/api/landing-pages/:id/restore-version/:versionId', requireAuth, ah(async (req, res) => {
+    const ver = await pool.query('SELECT * FROM landing_page_versions WHERE tenant_id=$1 AND page_id=$2 AND id=$3', [req.session.user.tenant_id, req.params.id, req.params.versionId]);
+    if (!ver.rows.length) return res.status(404).json({ error: 'Version not found' });
+    const maxVer = await pool.query('SELECT MAX(version_number) as v FROM landing_page_versions WHERE page_id=$1', [req.params.id]);
+    const nextVer = (maxVer.rows[0]?.v || 0) + 1;
+    await pool.query(
+      'INSERT INTO landing_page_versions (tenant_id,page_id,version_number,body_html,saved_by) VALUES ($1,$2,$3,$4,$5)',
+      [req.session.user.tenant_id, req.params.id, nextVer, ver.rows[0].body_html, esc(req.session.user.name||'')]
+    );
+    const r = await pool.query('UPDATE landing_pages SET body_html=$1, updated_at=NOW() WHERE tenant_id=$2 AND id=$3 RETURNING *', [ver.rows[0].body_html, req.session.user.tenant_id, req.params.id]);
+    await audit(req, 'update', 'landing_pages', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Section CRUD
+  app.get('/api/landing-pages/:id/sections', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM landing_page_sections WHERE tenant_id=$1 AND page_id=$2 ORDER BY section_order', [req.session.user.tenant_id, req.params.id]);
+    res.json(r.rows);
+  }));
+
+  app.post('/api/landing-pages/:id/sections', requireAuth, ah(async (req, res) => {
+    const { section_type, section_order, title, content, image_url, settings_json, is_visible } = req.body;
+    const r = await pool.query(
+      'INSERT INTO landing_page_sections (tenant_id,page_id,section_type,section_order,title,content,image_url,settings_json,is_visible) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, esc(section_type||'text'), section_order||0, esc(title||''), esc(content||''), esc(image_url||''), JSON.stringify(settings_json||{}), is_visible!==undefined?is_visible:true]
+    );
+    await audit(req, 'create', 'landing_page_sections', r.rows[0].id);
+    res.json(r.rows[0]);
+  }));
+
+  app.put('/api/landing-page-sections/:sectionId', requireAuth, ah(async (req, res) => {
+    const { section_type, section_order, title, content, image_url, settings_json, is_visible } = req.body;
+    const r = await pool.query(
+      `UPDATE landing_page_sections SET section_type=COALESCE($1,section_type), section_order=COALESCE($2,section_order),
+       title=COALESCE($3,title), content=COALESCE($4,content), image_url=COALESCE($5,image_url),
+       settings_json=COALESCE($6,settings_json), is_visible=COALESCE($7,is_visible)
+       WHERE tenant_id=$8 AND id=$9 RETURNING *`,
+      [section_type?esc(section_type):null, section_order, title?esc(title):null, content?esc(content):null,
+       image_url?esc(image_url):null, settings_json?JSON.stringify(settings_json):null, is_visible,
+       req.session.user.tenant_id, req.params.sectionId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Section not found' });
+    await audit(req, 'update', 'landing_page_sections', req.params.sectionId);
+    res.json(r.rows[0]);
+  }));
+
+  app.delete('/api/landing-page-sections/:sectionId', requireAuth, ah(async (req, res) => {
+    await pool.query('DELETE FROM landing_page_sections WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.sectionId]);
+    await audit(req, 'delete', 'landing_page_sections', req.params.sectionId);
+    res.json({ ok: true });
+  }));
+
+  // Landing page analytics
+  app.get('/api/landing-pages/analytics/summary', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      'SELECT COUNT(*) as total_pages, COUNT(CASE WHEN is_published THEN 1 END) as published, COALESCE(SUM(view_count),0) as total_views, COALESCE(SUM(conversion_count),0) as total_conversions FROM landing_pages WHERE tenant_id=$1',
+      [req.session.user.tenant_id]
+    );
+    res.json(r.rows[0]);
+  }));
+
+  // Page route
+  app.get('/landing-pages', requireAuth, ah(async (req, res) => {
+    const pages = await pool.query('SELECT * FROM landing_pages WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+    const stats = await pool.query('SELECT COUNT(*) as total, COALESCE(SUM(view_count),0) as views, COALESCE(SUM(conversion_count),0) as conversions FROM landing_pages WHERE tenant_id=$1', [req.session.user.tenant_id]);
+    renderPage(req, res, 'Landing Pages', `<div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-bold mb-6">Landing Page Builder</h1>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-emerald-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Pages</p><p class="text-2xl font-bold text-emerald-700">${stats.rows[0]?.total||0}</p></div>
+        <div class="bg-emerald-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Views</p><p class="text-2xl font-bold text-emerald-700">${stats.rows[0]?.views||0}</p></div>
+        <div class="bg-emerald-50 rounded-lg p-4"><p class="text-sm text-gray-600">Conversions</p><p class="text-2xl font-bold text-emerald-700">${stats.rows[0]?.conversions||0}</p></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${pages.rows.map(p => `<div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold">${esc(p.title)}</h3>
+        <p class="text-sm text-gray-500">/${esc(p.slug)} | Views: ${p.view_count} | Conversions: ${p.conversion_count} | ${p.is_published?'<span class="text-emerald-600">Published</span>':'<span class="text-gray-400">Draft</span>'}</p>
+      </div>`).join('')}</div>
+    </div>`);
+  }));
+
+  // ================================================================
+  // FEATURE 2: PAYMENT GATEWAY HUB
+  // ================================================================
+
+  // List gateways (never expose api_key/api_secret in list)
+  app.get('/api/payment-gateways', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      'SELECT id, tenant_id, gateway_name, gateway_type, webhook_url, merchant_id, sandbox_mode, fee_percentage, flat_fee, currency, is_active, is_default, created_at FROM payment_gateways WHERE tenant_id=$1 ORDER BY created_at',
+      [req.session.user.tenant_id]
+    );
+    res.json(r.rows);
+  }));
+
+  // Get single gateway
+  app.get('/api/payment-gateways/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      'SELECT id, tenant_id, gateway_name, gateway_type, webhook_url, merchant_id, sandbox_mode, fee_percentage, flat_fee, currency, is_active, is_default, created_at FROM payment_gateways WHERE tenant_id=$1 AND id=$2',
+      [req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Gateway not found' });
+    res.json(r.rows[0]);
   }));
 
   // Create gateway
   app.post('/api/payment-gateways', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { gateway_type, name, api_key, api_secret, webhook_url, is_primary, config } = req.body;
-    if (!gateway_type || !name) return res.status(400).json({ error: 'gateway_type and name required' });
-    if (is_primary) {
-      await pool.query(`UPDATE payment_gateways SET is_primary=false WHERE tenant_id=$1`, [tid]);
-    }
-    const r = await pool.query(`INSERT INTO payment_gateways (tenant_id, gateway_type, name, api_key_encrypted, api_secret_encrypted, webhook_url, is_primary, is_active, config_json) VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8) RETURNING *`,
-      [tid, gateway_type, esc(name), esc(api_key||''), esc(api_secret||''), esc(webhook_url||''), is_primary||false, JSON.stringify(config||{})]);
+    const { gateway_name, gateway_type, api_key, api_secret, webhook_url, merchant_id, sandbox_mode, fee_percentage, flat_fee, currency, is_active, is_default } = req.body;
+    if (!gateway_name || !gateway_type) return res.status(400).json({ error: 'gateway_name and gateway_type required' });
+    const r = await pool.query(
+      `INSERT INTO payment_gateways (tenant_id,gateway_name,gateway_type,api_key,api_secret,webhook_url,merchant_id,sandbox_mode,fee_percentage,flat_fee,currency,is_active,is_default)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, tenant_id, gateway_name, gateway_type, webhook_url, merchant_id, sandbox_mode, fee_percentage, flat_fee, currency, is_active, is_default`,
+      [req.session.user.tenant_id, esc(gateway_name), esc(gateway_type), esc(api_key||''), esc(api_secret||''), esc(webhook_url||''), esc(merchant_id||''), sandbox_mode!==undefined?sandbox_mode:true, fee_percentage||0, flat_fee||0, esc(currency||'UGX'), is_active!==undefined?is_active:true, is_default||false]
+    );
+    if (is_default) await pool.query('UPDATE payment_gateways SET is_default=false WHERE tenant_id=$1 AND id!=$2', [req.session.user.tenant_id, r.rows[0].id]);
     await audit(req, 'create', 'payment_gateways', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
   // Update gateway
   app.put('/api/payment-gateways/:id', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, api_key, api_secret, webhook_url, is_primary, is_active, config } = req.body;
-    if (is_primary) {
-      await pool.query(`UPDATE payment_gateways SET is_primary=false WHERE tenant_id=$1`, [tid]);
-    }
-    const r = await pool.query(`UPDATE payment_gateways SET name=COALESCE($1,name), api_key_encrypted=COALESCE($2,api_key_encrypted), api_secret_encrypted=COALESCE($3,api_secret_encrypted), webhook_url=COALESCE($4,webhook_url), is_primary=COALESCE($5,is_primary), is_active=COALESCE($6,is_active), config_json=COALESCE($7,config_json) WHERE tenant_id=$8 AND id=$9 RETURNING *`,
-      [name?esc(name):null, api_key?esc(api_key):null, api_secret?esc(api_secret):null, webhook_url?esc(webhook_url):null, is_primary, is_active, config?JSON.stringify(config):null, tid, req.params.id]);
+    const { gateway_name, api_key, api_secret, webhook_url, merchant_id, sandbox_mode, fee_percentage, flat_fee, currency, is_active, is_default } = req.body;
+    const r = await pool.query(
+      `UPDATE payment_gateways SET gateway_name=COALESCE($1,gateway_name), api_key=COALESCE($2,api_key), api_secret=COALESCE($3,api_secret),
+       webhook_url=COALESCE($4,webhook_url), merchant_id=COALESCE($5,merchant_id), sandbox_mode=COALESCE($6,sandbox_mode),
+       fee_percentage=COALESCE($7,fee_percentage), flat_fee=COALESCE($8,flat_fee), currency=COALESCE($9,currency),
+       is_active=COALESCE($10,is_active), is_default=COALESCE($11,is_default)
+       WHERE tenant_id=$12 AND id=$13 RETURNING id, tenant_id, gateway_name, gateway_type, is_active, is_default`,
+      [gateway_name?esc(gateway_name):null, api_key?esc(api_key):null, api_secret?esc(api_secret):null,
+       webhook_url?esc(webhook_url):null, merchant_id?esc(merchant_id):null, sandbox_mode,
+       fee_percentage, flat_fee, currency?esc(currency):null, is_active, is_default,
+       req.session.user.tenant_id, req.params.id]
+    );
     if (!r.rows.length) return res.status(404).json({ error: 'Gateway not found' });
+    if (is_default) await pool.query('UPDATE payment_gateways SET is_default=false WHERE tenant_id=$1 AND id!=$2', [req.session.user.tenant_id, req.params.id]);
     await audit(req, 'update', 'payment_gateways', req.params.id);
     res.json(r.rows[0]);
   }));
 
   // Delete gateway
   app.delete('/api/payment-gateways/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM payment_gateways WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('DELETE FROM payment_gateways WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Gateway not found' });
     await audit(req, 'delete', 'payment_gateways', req.params.id);
     res.json({ ok: true });
   }));
 
   // Test gateway connection
   app.post('/api/payment-gateways/:id/test', requireAuth, ah(async (req, res) => {
-    const gw = await pool.query(`SELECT * FROM payment_gateways WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
+    const gw = await pool.query('SELECT * FROM payment_gateways WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!gw.rows.length) return res.status(404).json({ error: 'Gateway not found' });
     const g = gw.rows[0];
-    // Simulate connection test based on gateway type
-    let testResult = { success: true, message: `${g.name} (${g.gateway_type}) connection test successful`, latency_ms: Math.floor(Math.random() * 200) + 50 };
-    if (g.gateway_type === 'manual') {
-      testResult = { success: true, message: 'Manual gateway — no connection test needed', latency_ms: 0 };
-    } else if (!g.api_key_encrypted) {
-      testResult = { success: false, message: 'API key not configured', latency_ms: 0 };
-    }
-    res.json(testResult);
+    // Simulated test — real integrations would ping the API
+    const hasCredentials = g.api_key && g.api_secret;
+    res.json({
+      ok: hasCredentials,
+      gateway: g.gateway_name,
+      type: g.gateway_type,
+      status: hasCredentials ? 'credentials_configured' : 'credentials_missing',
+      sandbox: g.sandbox_mode,
+      test_time: new Date().toISOString()
+    });
   }));
 
-  // Get gateway transactions
-  app.get('/api/payment-gateways/:id/transactions', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM gateway_transactions WHERE tenant_id=$1 AND gateway_id=$2 ORDER BY created_at DESC LIMIT 50`, [req.session.user.tenant_id, req.params.id]);
+  // Webhook (public, no auth)
+  app.post('/api/payment-gateways/webhook/:gatewayId', ah(async (req, res) => {
+    const gw = await pool.query('SELECT * FROM payment_gateways WHERE id=$1 AND is_active=true', [req.params.gatewayId]);
+    if (!gw.rows.length) return res.status(404).json({ error: 'Gateway not found' });
+    const { external_tx_id, donor_name, donor_email, amount, currency, status, payment_method, metadata, campaign_id } = req.body;
+    const feePct = parseFloat(gw.rows[0].fee_percentage) || 0;
+    const flatFee = parseFloat(gw.rows[0].flat_fee) || 0;
+    const amt = parseFloat(amount) || 0;
+    const feeAmt = (amt * feePct / 100) + flatFee;
+    const r = await pool.query(
+      `INSERT INTO gateway_transactions (tenant_id,gateway_id,campaign_id,external_tx_id,donor_name,donor_email,amount,fee_amount,net_amount,currency,payment_method,status,metadata_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [gw.rows[0].tenant_id, req.params.gatewayId, campaign_id||null, esc(external_tx_id||''), esc(donor_name||''), esc(donor_email||''), amt, feeAmt, amt-feeAmt, esc(currency||gw.rows[0].currency||'UGX'), esc(payment_method||'card'), esc(status||'pending'), JSON.stringify(metadata||{})]
+    );
+    res.json({ ok: true, transaction_id: r.rows[0].id });
+  }));
+
+  // Gateway balance summary
+  app.get('/api/payment-gateways/:id/balance', requireAuth, ah(async (req, res) => {
+    const txs = await pool.query(
+      `SELECT COUNT(*) as total_tx, COALESCE(SUM(amount),0) as total_amount,
+       COUNT(CASE WHEN status='completed' THEN 1 END) as completed_tx,
+       COALESCE(SUM(CASE WHEN status='completed' THEN amount ELSE 0 END),0) as completed_amount,
+       COALESCE(SUM(fee_amount),0) as total_fees,
+       COALESCE(SUM(net_amount),0) as net_amount
+       FROM gateway_transactions WHERE tenant_id=$1 AND gateway_id=$2`,
+      [req.session.user.tenant_id, req.params.id]
+    );
+    res.json(txs.rows[0]);
+  }));
+
+  // List transactions with filters
+  app.get('/api/gateway-transactions', requireAuth, ah(async (req, res) => {
+    const { gateway_id, campaign_id, status, payment_method } = req.query;
+    let q = 'SELECT gt.*, pg.gateway_name FROM gateway_transactions gt JOIN payment_gateways pg ON gt.gateway_id=pg.id WHERE gt.tenant_id=$1';
+    const params = [req.session.user.tenant_id];
+    let idx = 2;
+    if (gateway_id) { q += ' AND gt.gateway_id=$' + idx; params.push(gateway_id); idx++; }
+    if (campaign_id) { q += ' AND gt.campaign_id=$' + idx; params.push(campaign_id); idx++; }
+    if (status) { q += ' AND gt.status=$' + idx; params.push(esc(status)); idx++; }
+    if (payment_method) { q += ' AND gt.payment_method=$' + idx; params.push(esc(payment_method)); idx++; }
+    q += ' ORDER BY gt.created_at DESC LIMIT 100';
+    const r = await pool.query(q, params);
     res.json(r.rows);
   }));
 
-  // Webhook endpoint (NO auth)
-  app.post('/api/payment-gateways/:id/webhook', ah(async (req, res) => {
-    const gw = await pool.query(`SELECT * FROM payment_gateways WHERE id=$1 AND is_active=true`, [req.params.id]);
-    if (!gw.rows.length) return res.status(404).json({ error: 'Gateway not found' });
-    const { event, data } = req.body;
-    const g = gw.rows[0];
-    // Log the webhook as a transaction
-    const amount = data?.amount || 0;
-    const fee = data?.fee || 0;
-    await pool.query(`INSERT INTO gateway_transactions (tenant_id, gateway_id, donation_id, external_tx_id, amount, fee, net_amount, currency, status, processed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())`,
-      [g.tenant_id, g.id, data?.donation_id||null, esc(data?.external_tx_id||event||'webhook'), amount, fee, amount - fee, esc(data?.currency||'UGX'), data?.status||'completed']);
-    res.json({ received: true });
-  }));
-
-  // Get gateway balance
-  app.get('/api/payment-gateways/:id/balance', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT COALESCE(SUM(amount),0) as total_processed, COALESCE(SUM(fee),0) as total_fees, COALESCE(SUM(net_amount),0) as net, COUNT(*) as transaction_count FROM gateway_transactions WHERE tenant_id=$1 AND gateway_id=$2 AND status='completed'`, [req.session.user.tenant_id, req.params.id]);
+  // Update transaction status
+  app.put('/api/gateway-transactions/:id/status', requireAuth, ah(async (req, res) => {
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ error: 'status required' });
+    const r = await pool.query('UPDATE gateway_transactions SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', [esc(status), req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Transaction not found' });
+    await audit(req, 'update', 'gateway_transactions', req.params.id);
     res.json(r.rows[0]);
   }));
 
-  // Gateway stats
-  app.get('/api/payment-gateways/stats', requireAuth, ah(async (req, res) => {
-    const byGateway = await pool.query(`SELECT g.id, g.name, g.gateway_type, g.is_primary, g.is_active, COALESCE(SUM(gt.amount),0) as total_amount, COALESCE(SUM(gt.fee),0) as total_fees, COUNT(gt.id) as transaction_count FROM payment_gateways g LEFT JOIN gateway_transactions gt ON g.id=gt.gateway_id AND gt.status='completed' WHERE g.tenant_id=$1 GROUP BY g.id ORDER BY total_amount DESC`, [req.session.user.tenant_id]);
-    const byStatus = await pool.query(`SELECT status, COUNT(*) as count, COALESCE(SUM(amount),0) as total FROM gateway_transactions WHERE tenant_id=$1 GROUP BY status`, [req.session.user.tenant_id]);
-    res.json({ by_gateway: byGateway.rows, by_status: byStatus.rows });
+  // Request payout
+  app.post('/api/payment-gateways/:id/payout', requireAuth, ah(async (req, res) => {
+    const { amount, payout_method, reference } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'positive amount required' });
+    const r = await pool.query(
+      'INSERT INTO gateway_payouts (tenant_id,gateway_id,amount,payout_method,reference,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, amount, esc(payout_method||'bank_transfer'), esc(reference||''), 'pending']
+    );
+    await audit(req, 'create', 'gateway_payouts', r.rows[0].id);
+    res.json(r.rows[0]);
   }));
 
-  // =============================================
-  // FEATURE 3: DONOR RENEWAL AUTOMATION
-  // =============================================
-
-  // List renewal campaigns
-  app.get('/api/renewal-campaigns', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
+  // List payouts
+  app.get('/api/payment-gateways/:id/payouts', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM gateway_payouts WHERE tenant_id=$1 AND gateway_id=$2 ORDER BY requested_at DESC', [req.session.user.tenant_id, req.params.id]);
     res.json(r.rows);
   }));
 
-  // Create renewal campaign
+  // Page route
+  app.get('/payment-gateways', requireAuth, ah(async (req, res) => {
+    const gateways = await pool.query('SELECT * FROM payment_gateways WHERE tenant_id=$1', [req.session.user.tenant_id]);
+    const txStats = await pool.query('SELECT COUNT(*) as total_tx, COALESCE(SUM(CASE WHEN status=$1 THEN amount ELSE 0 END),0) as completed_total FROM gateway_transactions WHERE tenant_id=$2', ['completed', req.session.user.tenant_id]);
+    renderPage(req, res, 'Payment Gateways', `<div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-bold mb-6">Payment Gateway Hub</h1>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="bg-emerald-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Processed</p><p class="text-2xl font-bold text-emerald-700">UGX ${txStats.rows[0]?.completed_total||0}</p></div>
+        <div class="bg-emerald-50 rounded-lg p-4"><p class="text-sm text-gray-600">Transactions</p><p class="text-2xl font-bold text-emerald-700">${txStats.rows[0]?.total_tx||0}</p></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${gateways.rows.map(g => `<div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold">${esc(g.gateway_name)}</h3>
+        <p class="text-sm text-gray-500">Type: ${esc(g.gateway_type)} | ${g.is_active?'<span class="text-emerald-600">Active</span>':'<span class="text-red-500">Inactive</span>'} ${g.is_default?'| <span class="text-blue-600">Default</span>':''}</p>
+        <p class="text-sm text-gray-500">Fee: ${g.fee_percentage}% + UGX ${g.flat_fee} | ${g.sandbox_mode?'Sandbox':'Live'}</p>
+      </div>`).join('')}</div>
+    </div>`);
+  }));
+
+  // ================================================================
+  // FEATURE 3: DONOR RENEWAL
+  // ================================================================
+
+  // List campaigns
+  app.get('/api/renewal-campaigns', requireAuth, ah(async (req, res) => {
+    const { status } = req.query;
+    let q = 'SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1';
+    const params = [req.session.user.tenant_id];
+    if (status) { q += ' AND status=$2'; params.push(esc(status)); }
+    q += ' ORDER BY created_at DESC';
+    const r = await pool.query(q, params);
+    res.json(r.rows);
+  }));
+
+  // Get single campaign
+  app.get('/api/renewal-campaigns/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
+    res.json(r.rows[0]);
+  }));
+
+  // Create campaign
   app.post('/api/renewal-campaigns', requireAuth, ah(async (req, res) => {
-    const { name, description, target_segment, trigger_days_before, email_template, sms_template, max_reminders } = req.body;
+    const { name, description, target_segment, start_date, end_date, goal_amount, target_count, email_template, sms_template, auto_remind, remind_interval_days } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
-    const r = await pool.query(`INSERT INTO donor_renewal_campaigns (tenant_id, name, description, target_segment, trigger_days_before, email_template, sms_template, max_reminders) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [req.session.user.tenant_id, esc(name), esc(description||''), esc(target_segment||''), trigger_days_before||30, esc(email_template||''), esc(sms_template||''), max_reminders||3]);
+    const r = await pool.query(
+      `INSERT INTO donor_renewal_campaigns (tenant_id,name,description,target_segment,start_date,end_date,goal_amount,target_count,email_template,sms_template,auto_remind,remind_interval_days)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [req.session.user.tenant_id, esc(name), esc(description||''), esc(target_segment||'lapsed'), start_date||null, end_date||null, goal_amount||0, target_count||0, esc(email_template||''), esc(sms_template||''), auto_remind||false, remind_interval_days||14]
+    );
     await audit(req, 'create', 'donor_renewal_campaigns', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
-  // Update renewal campaign
+  // Update campaign
   app.put('/api/renewal-campaigns/:id', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, description, target_segment, trigger_days_before, email_template, sms_template, max_reminders } = req.body;
-    const r = await pool.query(`UPDATE donor_renewal_campaigns SET name=COALESCE($1,name), description=COALESCE($2,description), target_segment=COALESCE($3,target_segment), trigger_days_before=COALESCE($4,trigger_days_before), email_template=COALESCE($5,email_template), sms_template=COALESCE($6,sms_template), max_reminders=COALESCE($7,max_reminders) WHERE tenant_id=$8 AND id=$9 RETURNING *`,
-      [name?esc(name):null, description?esc(description):null, target_segment?esc(target_segment):null, trigger_days_before, email_template?esc(email_template):null, sms_template?esc(sms_template):null, max_reminders, tid, req.params.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'Renewal campaign not found' });
+    const { name, description, target_segment, start_date, end_date, goal_amount, email_template, sms_template, auto_remind, remind_interval_days, status } = req.body;
+    const r = await pool.query(
+      `UPDATE donor_renewal_campaigns SET name=COALESCE($1,name), description=COALESCE($2,description), target_segment=COALESCE($3,target_segment),
+       start_date=COALESCE($4,start_date), end_date=COALESCE($5,end_date), goal_amount=COALESCE($6,goal_amount),
+       email_template=COALESCE($7,email_template), sms_template=COALESCE($8,sms_template),
+       auto_remind=COALESCE($9,auto_remind), remind_interval_days=COALESCE($10,remind_interval_days),
+       status=COALESCE($11,status) WHERE tenant_id=$12 AND id=$13 RETURNING *`,
+      [name?esc(name):null, description?esc(description):null, target_segment?esc(target_segment):null, start_date||null, end_date||null, goal_amount,
+       email_template?esc(email_template):null, sms_template?esc(sms_template):null, auto_remind, remind_interval_days, status||null,
+       req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
     await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
     res.json(r.rows[0]);
   }));
 
-  // Start renewal campaign
-  app.post('/api/renewal-campaigns/:id/start', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const campaign = await pool.query(`SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
-    if (!campaign.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    if (campaign.rows[0].status === 'active') return res.status(400).json({ error: 'Campaign already active' });
-    // Find donors needing renewal (donated in past but not in last N days)
-    const daysBack = campaign.rows[0].trigger_days_before || 30;
-    const donors = await pool.query(`SELECT DISTINCT donor_email, MAX(donor_name) as donor_name FROM donations WHERE tenant_id=$1 AND donor_email IS NOT NULL AND created_at < NOW() - ($2 || ' days')::interval GROUP BY donor_email LIMIT 100`, [tid, daysBack]);
-    let targeted = 0;
-    for (const d of donors.rows) {
-      try {
-        await pool.query(`INSERT INTO renewal_reminders (tenant_id, campaign_id, donor_email, donor_name, reminder_number) VALUES ($1,$2,$3,$4,1)`, [tid, req.params.id, esc(d.donor_email), esc(d.donor_name||'')]);
-        targeted++;
-      } catch(e) {}
-    }
-    const r = await pool.query(`UPDATE donor_renewal_campaigns SET status='active', total_targeted=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *`, [targeted, tid, req.params.id]);
-    await audit(req, 'start', 'donor_renewal_campaigns', req.params.id);
-    res.json({ ...r.rows[0], donors_found: targeted });
+  // Delete campaign
+  app.delete('/api/renewal-campaigns/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('DELETE FROM donor_renewal_campaigns WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
+    await audit(req, 'delete', 'donor_renewal_campaigns', req.params.id);
+    res.json({ ok: true });
   }));
 
-  // Pause renewal campaign
-  app.post('/api/renewal-campaigns/:id/pause', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`UPDATE donor_renewal_campaigns SET status='paused' WHERE tenant_id=$1 AND id=$2 AND status='active' RETURNING *`, [req.session.user.tenant_id, req.params.id]);
-    if (!r.rows.length) return res.status(400).json({ error: 'Campaign not found or not active' });
-    await audit(req, 'pause', 'donor_renewal_campaigns', req.params.id);
+  // Start campaign
+  app.post('/api/renewal-campaigns/:id/start', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('UPDATE donor_renewal_campaigns SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['active', req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
+    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
     res.json(r.rows[0]);
   }));
 
-  // Get reminders for campaign
+  // Pause campaign
+  app.post('/api/renewal-campaigns/:id/pause', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('UPDATE donor_renewal_campaigns SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['paused', req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
+    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Complete campaign
+  app.post('/api/renewal-campaigns/:id/complete', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('UPDATE donor_renewal_campaigns SET status=$1, end_date=COALESCE(end_date,CURRENT_DATE) WHERE tenant_id=$2 AND id=$3 RETURNING *', ['completed', req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
+    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Send reminder
+  app.post('/api/renewal-campaigns/:id/send-reminder', requireAuth, ah(async (req, res) => {
+    const { donor_email, donor_name, donor_phone, reminder_type, message } = req.body;
+    if (!donor_email) return res.status(400).json({ error: 'donor_email required' });
+    const r = await pool.query(
+      'INSERT INTO renewal_reminders (tenant_id,campaign_id,donor_email,donor_name,donor_phone,reminder_type,message,sent_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, esc(donor_email), esc(donor_name||''), esc(donor_phone||''), esc(reminder_type||'email'), esc(message||'')]
+    );
+    await pool.query('UPDATE renewal_reminders SET status=$1 WHERE id=$2', ['sent', r.rows[0].id]);
+    // Try sending via email or SMS
+    if (reminder_type === 'email' && donor_email) {
+      try { await sendEmail(donor_email, 'Renew Your Support', message || 'We miss your support! Please consider renewing your gift.'); } catch(e) {}
+    } else if (reminder_type === 'sms' && donor_phone) {
+      try { await sendSMS(donor_phone, message || 'We miss your support! Please consider renewing your gift.'); } catch(e) {}
+    }
+    await audit(req, 'create', 'renewal_reminders', r.rows[0].id);
+    res.json(r.rows[0]);
+  }));
+
+  // Bulk send reminders
+  app.post('/api/renewal-campaigns/:id/bulk-remind', requireAuth, ah(async (req, res) => {
+    const { reminder_type, message } = req.body;
+    const campaign = await pool.query('SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    if (!campaign.rows.length) return res.status(404).json({ error: 'Campaign not found' });
+    // Find lapsed donors from donations table
+    const donors = await pool.query(
+      `SELECT donor_email, donor_name, MAX(created_at) as last_gift FROM donations WHERE tenant_id=$1 AND donor_email IS NOT NULL GROUP BY donor_email, donor_name HAVING MAX(created_at) < NOW() - INTERVAL '6 months' LIMIT 100`,
+      [req.session.user.tenant_id]
+    );
+    let sent = 0;
+    for (const d of donors.rows) {
+      const msg = message || `We miss your support! Your last gift was on ${d.last_gift?.toISOString?.()?.split('T')?.[0] || 'recently'}. Please consider renewing.`;
+      await pool.query(
+        'INSERT INTO renewal_reminders (tenant_id,campaign_id,donor_email,donor_name,reminder_type,message,sent_at,status) VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7)',
+        [req.session.user.tenant_id, req.params.id, esc(d.donor_email), esc(d.donor_name||''), esc(reminder_type||'email'), esc(msg), 'sent']
+      );
+      if (reminder_type === 'email') {
+        try { await sendEmail(d.donor_email, 'Renew Your Support', msg); } catch(e) {}
+      }
+      sent++;
+    }
+    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
+    res.json({ ok: true, sent });
+  }));
+
+  // Get reminders for a campaign
   app.get('/api/renewal-campaigns/:id/reminders', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM renewal_reminders WHERE tenant_id=$1 AND campaign_id=$2 ORDER BY created_at DESC LIMIT 100`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('SELECT * FROM renewal_reminders WHERE tenant_id=$1 AND campaign_id=$2 ORDER BY created_at DESC', [req.session.user.tenant_id, req.params.id]);
     res.json(r.rows);
   }));
 
-  // Send a reminder
-  app.post('/api/renewal-campaigns/:id/send-reminder', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const campaign = await pool.query(`SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1 AND id=$2 AND status='active'`, [tid, req.params.id]);
-    if (!campaign.rows.length) return res.status(400).json({ error: 'Campaign not active' });
-    const { reminder_id } = req.body;
-    const reminder = await pool.query(`SELECT * FROM renewal_reminders WHERE tenant_id=$1 AND campaign_id=$2 AND id=$3 AND sent_at IS NULL`, [tid, req.params.id, reminder_id]);
-    if (!reminder.rows.length) return res.status(404).json({ error: 'Pending reminder not found' });
-    const r = reminder.rows[0];
-    // Send email if template exists
-    if (campaign.rows[0].email_template && r.donor_email) {
-      try {
-        await sendEmail(r.donor_email, `Renewal Reminder: ${campaign.rows[0].name}`, campaign.rows[0].email_template.replace('{name}', r.donor_name||'Donor'));
-      } catch(e) {}
+  // Record response to reminder
+  app.post('/api/renewal-reminders/:id/respond', requireAuth, ah(async (req, res) => {
+    const { response_amount } = req.body;
+    const r = await pool.query('UPDATE renewal_reminders SET responded=true, response_amount=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', [response_amount||0, req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Reminder not found' });
+    // Update campaign counters
+    if (r.rows[0].campaign_id) {
+      await pool.query('UPDATE donor_renewal_campaigns SET renewal_count=renewal_count+1, raised_amount=raised_amount+$1 WHERE id=$2 AND tenant_id=$3', [response_amount||0, r.rows[0].campaign_id, req.session.user.tenant_id]);
     }
-    // Send SMS if template exists
-    if (campaign.rows[0].sms_template && r.donor_email) {
-      try {
-        await sendSMS(r.donor_email, campaign.rows[0].sms_template.replace('{name}', r.donor_name||'Donor'));
-      } catch(e) {}
-    }
-    await pool.query(`UPDATE renewal_reminders SET sent_at=NOW() WHERE id=$1`, [r.id]);
-    await audit(req, 'send_reminder', 'renewal_reminders', r.id);
-    res.json({ ok: true, message: 'Reminder sent' });
+    await audit(req, 'update', 'renewal_reminders', req.params.id);
+    res.json(r.rows[0]);
   }));
 
   // Campaign stats
   app.get('/api/renewal-campaigns/:id/stats', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const stats = await pool.query(`SELECT COUNT(*) as total_reminders, COUNT(CASE WHEN sent_at IS NOT NULL THEN 1 END) as sent, COUNT(CASE WHEN opened THEN 1 END) as opened, COUNT(CASE WHEN clicked THEN 1 END) as clicked, COUNT(CASE WHEN renewed THEN 1 END) as renewed FROM renewal_reminders WHERE tenant_id=$1 AND campaign_id=$2`, [tid, req.params.id]);
-    const raised = await pool.query(`SELECT COALESCE(total_raised,0) as total_raised FROM donor_renewal_campaigns WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
-    res.json({ ...stats.rows[0], total_raised: raised.rows[0]?.total_raised || 0 });
+    const campaign = await pool.query('SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    if (!campaign.rows.length) return res.status(404).json({ error: 'Campaign not found' });
+    const reminders = await pool.query(
+      `SELECT COUNT(*) as total, COUNT(CASE WHEN status='sent' THEN 1 END) as sent_count,
+       COUNT(CASE WHEN responded THEN 1 END) as responded_count,
+       COALESCE(SUM(response_amount),0) as total_response_amount,
+       COUNT(CASE WHEN opened_at IS NOT NULL THEN 1 END) as opened_count
+       FROM renewal_reminders WHERE tenant_id=$1 AND campaign_id=$2`,
+      [req.session.user.tenant_id, req.params.id]
+    );
+    res.json({ campaign: campaign.rows[0], reminders: reminders.rows[0] });
   }));
 
-  // Donors needing renewal
-  app.get('/api/renewal/upcoming', requireAuth, ah(async (req, res) => {
-    const { days } = req.query;
-    const daysVal = parseInt(days) || 30;
-    const r = await pool.query(`SELECT donor_email, MAX(donor_name) as donor_name, MAX(created_at) as last_donation, SUM(amount) as total_given FROM donations WHERE tenant_id=$1 AND donor_email IS NOT NULL AND created_at < NOW() - ($2 || ' days')::interval GROUP BY donor_email ORDER BY total_given DESC LIMIT 50`, [req.session.user.tenant_id, daysVal]);
+  // Segments
+  app.get('/api/donor-segments', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM donor_renewal_segments WHERE tenant_id=$1 ORDER BY segment_name', [req.session.user.tenant_id]);
     res.json(r.rows);
   }));
 
-  // =============================================
-  // FEATURE 4: DONOR GIFT CLUB MANAGEMENT
-  // =============================================
+  // Page route
+  app.get('/donor-renewal', requireAuth, ah(async (req, res) => {
+    const campaigns = await pool.query('SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+    const stats = await pool.query('SELECT COUNT(*) as total, COALESCE(SUM(renewal_count),0) as total_renewals, COALESCE(SUM(raised_amount),0) as total_raised FROM donor_renewal_campaigns WHERE tenant_id=$1', [req.session.user.tenant_id]);
+    renderPage(req, res, 'Donor Renewal', `<div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-bold mb-6">Donor Renewal</h1>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-amber-50 rounded-lg p-4"><p class="text-sm text-gray-600">Campaigns</p><p class="text-2xl font-bold text-amber-700">${stats.rows[0]?.total||0}</p></div>
+        <div class="bg-amber-50 rounded-lg p-4"><p class="text-sm text-gray-600">Renewals</p><p class="text-2xl font-bold text-amber-700">${stats.rows[0]?.total_renewals||0}</p></div>
+        <div class="bg-amber-50 rounded-lg p-4"><p class="text-sm text-gray-600">Raised</p><p class="text-2xl font-bold text-amber-700">UGX ${stats.rows[0]?.total_raised||0}</p></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${campaigns.rows.map(c => `<div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold">${esc(c.name)}</h3>
+        <p class="text-sm text-gray-500">Target: ${esc(c.target_segment)} | Renewals: ${c.renewal_count}/${c.target_count||'?'} | UGX ${c.raised_amount} | ${c.status}</p>
+      </div>`).join('')}</div>
+    </div>`);
+  }));
 
-  // List gift clubs
+  // ================================================================
+  // FEATURE 4: GIFT CLUBS
+  // ================================================================
+
+  // List clubs with member counts
   app.get('/api/gift-clubs', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM donor_gift_clubs WHERE tenant_id=$1 ORDER BY min_annual_amount`, [req.session.user.tenant_id]);
+    const r = await pool.query(
+      'SELECT gc.*, (SELECT COUNT(*) FROM gift_club_members WHERE club_id=gc.id AND is_active=true) as active_member_count FROM donor_gift_clubs gc WHERE gc.tenant_id=$1 ORDER BY min_amount',
+      [req.session.user.tenant_id]
+    );
     res.json(r.rows);
   }));
 
-  // Create gift club
+  // Get single club
+  app.get('/api/gift-clubs/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM donor_gift_clubs WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Gift club not found' });
+    res.json(r.rows[0]);
+  }));
+
+  // Create club
   app.post('/api/gift-clubs', requireAuth, ah(async (req, res) => {
-    const { name, description, min_annual_amount, max_annual_amount, benefits, badge_icon, is_active } = req.body;
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const r = await pool.query(`INSERT INTO donor_gift_clubs (tenant_id, name, description, min_annual_amount, max_annual_amount, benefits_json, badge_icon, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [req.session.user.tenant_id, esc(name), esc(description||''), min_annual_amount||0, max_annual_amount||null, JSON.stringify(benefits||[]), esc(badge_icon||''), is_active!==false]);
+    const { club_name, min_amount, max_amount, description, benefits, color, icon, welcome_email_subject, welcome_email_body, annual_event } = req.body;
+    if (!club_name) return res.status(400).json({ error: 'club_name required' });
+    const r = await pool.query(
+      `INSERT INTO donor_gift_clubs (tenant_id,club_name,min_amount,max_amount,description,benefits,color,icon,welcome_email_subject,welcome_email_body,annual_event)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [req.session.user.tenant_id, esc(club_name), min_amount||0, max_amount||null, esc(description||''), esc(benefits||''), esc(color||'#10b981'), esc(icon||'award'), esc(welcome_email_subject||''), esc(welcome_email_body||''), esc(annual_event||'')]
+    );
     await audit(req, 'create', 'donor_gift_clubs', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
-  // Update gift club
+  // Update club
   app.put('/api/gift-clubs/:id', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, description, min_annual_amount, max_annual_amount, benefits, badge_icon, is_active } = req.body;
-    const r = await pool.query(`UPDATE donor_gift_clubs SET name=COALESCE($1,name), description=COALESCE($2,description), min_annual_amount=COALESCE($3,min_annual_amount), max_annual_amount=COALESCE($4,max_annual_amount), benefits_json=COALESCE($5,benefits_json), badge_icon=COALESCE($6,badge_icon), is_active=COALESCE($7,is_active) WHERE tenant_id=$8 AND id=$9 RETURNING *`,
-      [name?esc(name):null, description?esc(description):null, min_annual_amount, max_annual_amount, benefits?JSON.stringify(benefits):null, badge_icon?esc(badge_icon):null, is_active, tid, req.params.id]);
+    const { club_name, min_amount, max_amount, description, benefits, color, icon, welcome_email_subject, welcome_email_body, annual_event, is_active } = req.body;
+    const r = await pool.query(
+      `UPDATE donor_gift_clubs SET club_name=COALESCE($1,club_name), min_amount=COALESCE($2,min_amount), max_amount=COALESCE($3,max_amount),
+       description=COALESCE($4,description), benefits=COALESCE($5,benefits), color=COALESCE($6,color), icon=COALESCE($7,icon),
+       welcome_email_subject=COALESCE($8,welcome_email_subject), welcome_email_body=COALESCE($9,welcome_email_body),
+       annual_event=COALESCE($10,annual_event), is_active=COALESCE($11,is_active)
+       WHERE tenant_id=$12 AND id=$13 RETURNING *`,
+      [club_name?esc(club_name):null, min_amount, max_amount, description?esc(description):null, benefits?esc(benefits):null,
+       color?esc(color):null, icon?esc(icon):null, welcome_email_subject?esc(welcome_email_subject):null, welcome_email_body?esc(welcome_email_body):null,
+       annual_event?esc(annual_event):null, is_active, req.session.user.tenant_id, req.params.id]
+    );
     if (!r.rows.length) return res.status(404).json({ error: 'Gift club not found' });
     await audit(req, 'update', 'donor_gift_clubs', req.params.id);
     res.json(r.rows[0]);
   }));
 
-  // Delete gift club
+  // Delete club
   app.delete('/api/gift-clubs/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM donor_gift_clubs WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('DELETE FROM donor_gift_clubs WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Gift club not found' });
     await audit(req, 'delete', 'donor_gift_clubs', req.params.id);
     res.json({ ok: true });
   }));
 
-  // Get club members
-  app.get('/api/gift-clubs/:id/members', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM gift_club_members WHERE tenant_id=$1 AND club_id=$2 ORDER BY joined_at DESC`, [req.session.user.tenant_id, req.params.id]);
+  // Auto-assign donors to clubs based on giving
+  app.post('/api/gift-clubs/auto-assign', requireAuth, ah(async (req, res) => {
+    const clubs = await pool.query('SELECT * FROM donor_gift_clubs WHERE tenant_id=$1 AND is_active=true ORDER BY min_amount DESC', [req.session.user.tenant_id]);
+    const donors = await pool.query(
+      "SELECT donor_email, donor_name, SUM(amount) as total FROM donations WHERE tenant_id=$1 AND status='completed' GROUP BY donor_email, donor_name",
+      [req.session.user.tenant_id]
+    );
+    let assigned = 0, promoted = 0;
+    for (const d of donors.rows) {
+      if (!d.donor_email) continue;
+      const total = parseFloat(d.total || 0);
+      for (const c of clubs.rows) {
+        const minOk = total >= parseFloat(c.min_amount);
+        const maxOk = !c.max_amount || total < parseFloat(c.max_amount);
+        if (minOk && maxOk) {
+          const existing = await pool.query('SELECT * FROM gift_club_members WHERE tenant_id=$1 AND donor_email=$2', [req.session.user.tenant_id, esc(d.donor_email)]);
+          if (!existing.rows.length) {
+            await pool.query(
+              'INSERT INTO gift_club_members (tenant_id,club_id,donor_name,donor_email,total_donated,membership_start_date,last_gift_date,last_gift_amount) VALUES ($1,$2,$3,$4,$5,CURRENT_DATE,CURRENT_DATE,$6)',
+              [req.session.user.tenant_id, c.id, esc(d.donor_name||''), esc(d.donor_email), total, total]
+            );
+            assigned++;
+            // Send welcome email if configured
+            if (c.welcome_email_subject && c.welcome_email_body) {
+              try { await sendEmail(d.donor_email, c.welcome_email_subject, c.welcome_email_body); } catch(e) {}
+            }
+          } else if (existing.rows[0].club_id !== c.id) {
+            // Promote to new tier
+            await pool.query('UPDATE gift_club_members SET club_id=$1, total_donated=$2 WHERE id=$3', [c.id, total, existing.rows[0].id]);
+            promoted++;
+          }
+          break;
+        }
+      }
+    }
+    await audit(req, 'update', 'gift_club_members', 0);
+    res.json({ ok: true, assigned, promoted });
+  }));
+
+  // My club (current user)
+  app.get('/api/gift-clubs/my-club', requireAuth, ah(async (req, res) => {
+    const email = req.session.user.email;
+    const r = await pool.query(
+      'SELECT gcm.*, gc.club_name, gc.benefits, gc.color, gc.icon FROM gift_club_members gcm JOIN donor_gift_clubs gc ON gcm.club_id=gc.id WHERE gcm.tenant_id=$1 AND gcm.donor_email=$2 AND gcm.is_active=true',
+      [req.session.user.tenant_id, esc(email)]
+    );
     res.json(r.rows);
   }));
 
-  // Auto-assign based on giving
-  app.post('/api/gift-clubs/:id/auto-assign', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const club = await pool.query(`SELECT * FROM donor_gift_clubs WHERE tenant_id=$1 AND id=$2 AND is_active=true`, [tid, req.params.id]);
-    if (!club.rows.length) return res.status(404).json({ error: 'Gift club not found or inactive' });
-    const c = club.rows[0];
-    // Get donors with annual giving in this club's range
-    const donors = await pool.query(`SELECT donor_email, MAX(donor_name) as donor_name, SUM(amount) as annual_total FROM donations WHERE tenant_id=$1 AND donor_email IS NOT NULL AND created_at >= NOW() - INTERVAL '1 year' GROUP BY donor_email HAVING SUM(amount) >= $2 AND ($3::numeric IS NULL OR SUM(amount) <= $3)`, [tid, c.min_annual_amount, c.max_annual_amount]);
-    let assigned = 0;
-    for (const d of donors.rows) {
-      // Check if already in this club
-      const existing = await pool.query(`SELECT id FROM gift_club_members WHERE tenant_id=$1 AND club_id=$2 AND donor_email=$3 AND status='active'`, [tid, req.params.id, esc(d.donor_email)]);
-      if (!existing.rows.length) {
-        await pool.query(`INSERT INTO gift_club_members (tenant_id, club_id, donor_email, donor_name, annual_total) VALUES ($1,$2,$3,$4,$5)`, [tid, req.params.id, esc(d.donor_email), esc(d.donor_name||''), d.annual_total]);
-        assigned++;
-      }
-    }
-    // Update member count
-    await pool.query(`UPDATE donor_gift_clubs SET member_count=(SELECT COUNT(*) FROM gift_club_members WHERE club_id=$1 AND status='active') WHERE id=$1`, [req.params.id]);
-    await audit(req, 'auto_assign', 'donor_gift_clubs', req.params.id);
-    res.json({ assigned, total_eligible: donors.rows.length });
+  // Members of a club
+  app.get('/api/gift-clubs/:id/members', requireAuth, ah(async (req, res) => {
+    const { is_active } = req.query;
+    let q = 'SELECT * FROM gift_club_members WHERE tenant_id=$1 AND club_id=$2';
+    const params = [req.session.user.tenant_id, req.params.id];
+    if (is_active !== undefined) { q += ' AND is_active=$3'; params.push(is_active === 'true'); }
+    q += ' ORDER BY total_donated DESC';
+    const r = await pool.query(q, params);
+    res.json(r.rows);
   }));
 
-  // Remove member
-  app.post('/api/gift-clubs/:id/remove-member/:memberId', requireAuth, ah(async (req, res) => {
-    const member = await pool.query(`UPDATE gift_club_members SET status='removed' WHERE tenant_id=$1 AND club_id=$2 AND id=$3 RETURNING *`, [req.session.user.tenant_id, req.params.id, req.params.memberId]);
-    if (!member.rows.length) return res.status(404).json({ error: 'Member not found' });
-    await pool.query(`UPDATE donor_gift_clubs SET member_count=GREATEST(0,member_count-1) WHERE id=$1`, [req.params.id]);
-    await audit(req, 'remove_member', 'gift_club_members', req.params.memberId);
-    res.json({ ok: true });
-  }));
-
-  // Current user's club
-  app.get('/api/gift-clubs/my-club', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT gc.*, m.annual_total, m.joined_at, m.status as member_status FROM gift_club_members m JOIN donor_gift_clubs gc ON m.club_id=gc.id WHERE m.tenant_id=$1 AND m.donor_email=$2 AND m.status='active' ORDER BY gc.min_annual_amount DESC LIMIT 1`, [req.session.user.tenant_id, req.session.user.email]);
-    if (!r.rows.length) return res.json({ club: null, message: 'Not a member of any gift club' });
+  // Add member manually
+  app.post('/api/gift-clubs/:id/members', requireAuth, ah(async (req, res) => {
+    const { donor_name, donor_email, donor_phone, total_donated } = req.body;
+    if (!donor_name || !donor_email) return res.status(400).json({ error: 'donor_name and donor_email required' });
+    const r = await pool.query(
+      'INSERT INTO gift_club_members (tenant_id,club_id,donor_name,donor_email,donor_phone,total_donated,membership_start_date) VALUES ($1,$2,$3,$4,$5,$6,CURRENT_DATE) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, esc(donor_name), esc(donor_email), esc(donor_phone||''), total_donated||0]
+    );
+    await audit(req, 'create', 'gift_club_members', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
-  // Gift club stats
-  app.get('/api/gift-clubs/stats', requireAuth, ah(async (req, res) => {
-    const byClub = await pool.query(`SELECT gc.id, gc.name, gc.badge_icon, gc.min_annual_amount, gc.max_annual_amount, gc.member_count, COALESCE(SUM(m.annual_total),0) as total_annual_giving FROM donor_gift_clubs gc LEFT JOIN gift_club_members m ON gc.id=m.club_id AND m.status='active' WHERE gc.tenant_id=$1 GROUP BY gc.id ORDER BY gc.min_annual_amount`, [req.session.user.tenant_id]);
-    const totalMembers = await pool.query(`SELECT COUNT(DISTINCT donor_email) as total FROM gift_club_members WHERE tenant_id=$1 AND status='active'`, [req.session.user.tenant_id]);
-    res.json({ by_club: byClub.rows, total_members: totalMembers.rows[0]?.total || 0 });
+  // Remove member from club
+  app.delete('/api/gift-clubs/:clubId/members/:memberId', requireAuth, ah(async (req, res) => {
+    await pool.query('UPDATE gift_club_members SET is_active=false WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.memberId]);
+    await audit(req, 'update', 'gift_club_members', req.params.memberId);
+    res.json({ ok: true });
   }));
 
-  // =============================================
-  // FEATURE 5: CAMPAIGN VIDEO INTEGRATION
-  // =============================================
+  // Send welcome to club member
+  app.post('/api/gift-clubs/members/:memberId/send-welcome', requireAuth, ah(async (req, res) => {
+    const member = await pool.query(
+      'SELECT gcm.*, gc.welcome_email_subject, gc.welcome_email_body, gc.club_name FROM gift_club_members gcm JOIN donor_gift_clubs gc ON gcm.club_id=gc.id WHERE gcm.tenant_id=$1 AND gcm.id=$2',
+      [req.session.user.tenant_id, req.params.memberId]
+    );
+    if (!member.rows.length) return res.status(404).json({ error: 'Member not found' });
+    const m = member.rows[0];
+    if (m.welcome_email_subject && m.welcome_email_body && m.donor_email) {
+      try { await sendEmail(m.donor_email, m.welcome_email_subject, m.welcome_email_body.replace('{name}', m.donor_name).replace('{club}', m.club_name)); } catch(e) {}
+    }
+    await pool.query('UPDATE gift_club_members SET welcome_sent=true WHERE id=$1', [m.id]);
+    await audit(req, 'update', 'gift_club_members', m.id);
+    res.json({ ok: true, sent: true });
+  }));
 
-  // List videos for campaign
-  app.get('/api/campaigns/:id/videos', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM campaign_videos WHERE tenant_id=$1 AND campaign_id=$2 ORDER BY is_featured DESC, created_at DESC`, [req.session.user.tenant_id, req.params.id]);
+  // Club events
+  app.get('/api/gift-clubs/:id/events', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM gift_club_events WHERE tenant_id=$1 AND club_id=$2 ORDER BY event_date DESC', [req.session.user.tenant_id, req.params.id]);
     res.json(r.rows);
   }));
 
-  // Add video to campaign
-  app.post('/api/campaigns/:id/videos', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { video_type, video_url, title, description, thumbnail_url, duration_seconds, is_featured } = req.body;
-    if (!video_url) return res.status(400).json({ error: 'video_url required' });
-    // If featured, unfeature others
-    if (is_featured) {
-      await pool.query(`UPDATE campaign_videos SET is_featured=false WHERE tenant_id=$1 AND campaign_id=$2`, [tid, req.params.id]);
-    }
-    const r = await pool.query(`INSERT INTO campaign_videos (tenant_id, campaign_id, video_type, video_url, title, description, thumbnail_url, duration_seconds, is_featured) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [tid, req.params.id, video_type||'youtube', esc(video_url), esc(title||''), esc(description||''), esc(thumbnail_url||''), duration_seconds||0, is_featured||false]);
+  app.post('/api/gift-clubs/:id/events', requireAuth, ah(async (req, res) => {
+    const { event_name, event_date, venue, description } = req.body;
+    if (!event_name) return res.status(400).json({ error: 'event_name required' });
+    const r = await pool.query(
+      'INSERT INTO gift_club_events (tenant_id,club_id,event_name,event_date,venue,description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, esc(event_name), event_date||null, esc(venue||''), esc(description||'')]
+    );
+    await audit(req, 'create', 'gift_club_events', r.rows[0].id);
+    res.json(r.rows[0]);
+  }));
+
+  // Club stats
+  app.get('/api/gift-clubs/stats/summary', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      'SELECT gc.club_name, gc.min_amount, gc.color, (SELECT COUNT(*) FROM gift_club_members WHERE club_id=gc.id AND is_active=true) as member_count, (SELECT COALESCE(SUM(total_donated),0) FROM gift_club_members WHERE club_id=gc.id AND is_active=true) as total_donated FROM donor_gift_clubs gc WHERE gc.tenant_id=$1 ORDER BY min_amount',
+      [req.session.user.tenant_id]
+    );
+    res.json(r.rows);
+  }));
+
+  // Page route
+  app.get('/gift-clubs', requireAuth, ah(async (req, res) => {
+    const clubs = await pool.query('SELECT * FROM donor_gift_clubs WHERE tenant_id=$1 ORDER BY min_amount', [req.session.user.tenant_id]);
+    const totalMembers = await pool.query('SELECT COUNT(*) as total FROM gift_club_members WHERE tenant_id=$1 AND is_active=true', [req.session.user.tenant_id]);
+    renderPage(req, res, 'Gift Clubs', `<div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-bold mb-6">Gift Clubs</h1>
+      <div class="bg-amber-50 rounded-lg p-4 mb-6"><p class="text-sm text-gray-600">Total Active Members</p><p class="text-2xl font-bold text-amber-700">${totalMembers.rows[0]?.total||0}</p></div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">${clubs.rows.map(c => `<div class="bg-white rounded-lg shadow p-4 border-t-4" style="border-color:${c.color}">
+        <h3 class="font-semibold">${esc(c.club_name)}</h3>
+        <p class="text-sm">UGX ${c.min_amount}${c.max_amount?' - '+c.max_amount:'+'}</p>
+        <p class="text-xs text-gray-500 mt-1">${esc(c.benefits||'')}</p>
+      </div>`).join('')}</div>
+    </div>`);
+  }));
+
+  // ================================================================
+  // FEATURE 5: VIDEO INTEGRATION
+  // ================================================================
+
+  // List videos
+  app.get('/api/campaign-videos', requireAuth, ah(async (req, res) => {
+    const { campaign_id, is_live, is_featured } = req.query;
+    let q = 'SELECT * FROM campaign_videos WHERE tenant_id=$1';
+    const params = [req.session.user.tenant_id];
+    let idx = 2;
+    if (campaign_id) { q += ' AND campaign_id=$' + idx; params.push(campaign_id); idx++; }
+    if (is_live !== undefined) { q += ' AND is_live=$' + idx; params.push(is_live === 'true'); idx++; }
+    if (is_featured !== undefined) { q += ' AND is_featured=$' + idx; params.push(is_featured === 'true'); idx++; }
+    q += ' ORDER BY created_at DESC';
+    const r = await pool.query(q, params);
+    res.json(r.rows);
+  }));
+
+  // Get single video
+  app.get('/api/campaign-videos/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM campaign_videos WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
+    res.json(r.rows[0]);
+  }));
+
+  // Create video
+  app.post('/api/campaign-videos', requireAuth, ah(async (req, res) => {
+    const { campaign_id, title, video_url, video_type, thumbnail_url, description, duration_seconds, is_featured, scheduled_at, transcript_url } = req.body;
+    if (!title || !video_url) return res.status(400).json({ error: 'title and video_url required' });
+    const r = await pool.query(
+      `INSERT INTO campaign_videos (tenant_id,campaign_id,title,video_url,video_type,thumbnail_url,description,duration_seconds,is_featured,scheduled_at,transcript_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [req.session.user.tenant_id, campaign_id||null, esc(title), esc(video_url), esc(video_type||'youtube'), esc(thumbnail_url||''), esc(description||''), duration_seconds||0, is_featured||false, scheduled_at||null, esc(transcript_url||'')]
+    );
     await audit(req, 'create', 'campaign_videos', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
   // Update video
-  app.put('/api/campaigns/:id/videos/:videoId', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { video_type, video_url, title, description, thumbnail_url, duration_seconds, is_featured } = req.body;
-    if (is_featured) {
-      await pool.query(`UPDATE campaign_videos SET is_featured=false WHERE tenant_id=$1 AND campaign_id=$2`, [tid, req.params.id]);
-    }
-    const r = await pool.query(`UPDATE campaign_videos SET video_type=COALESCE($1,video_type), video_url=COALESCE($2,video_url), title=COALESCE($3,title), description=COALESCE($4,description), thumbnail_url=COALESCE($5,thumbnail_url), duration_seconds=COALESCE($6,duration_seconds), is_featured=COALESCE($7,is_featured) WHERE tenant_id=$8 AND id=$9 RETURNING *`,
-      [video_type, video_url?esc(video_url):null, title?esc(title):null, description?esc(description):null, thumbnail_url?esc(thumbnail_url):null, duration_seconds, is_featured, tid, req.params.videoId]);
+  app.put('/api/campaign-videos/:id', requireAuth, ah(async (req, res) => {
+    const { title, video_url, video_type, thumbnail_url, description, duration_seconds, is_live, is_featured, scheduled_at, transcript_url } = req.body;
+    const r = await pool.query(
+      `UPDATE campaign_videos SET title=COALESCE($1,title), video_url=COALESCE($2,video_url), video_type=COALESCE($3,video_type),
+       thumbnail_url=COALESCE($4,thumbnail_url), description=COALESCE($5,description), duration_seconds=COALESCE($6,duration_seconds),
+       is_live=COALESCE($7,is_live), is_featured=COALESCE($8,is_featured), scheduled_at=COALESCE($9,scheduled_at),
+       transcript_url=COALESCE($10,transcript_url) WHERE tenant_id=$11 AND id=$12 RETURNING *`,
+      [title?esc(title):null, video_url?esc(video_url):null, video_type?esc(video_type):null, thumbnail_url?esc(thumbnail_url):null,
+       description?esc(description):null, duration_seconds, is_live, is_featured, scheduled_at||null, transcript_url?esc(transcript_url):null,
+       req.session.user.tenant_id, req.params.id]
+    );
     if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
-    await audit(req, 'update', 'campaign_videos', req.params.videoId);
+    await audit(req, 'update', 'campaign_videos', req.params.id);
     res.json(r.rows[0]);
   }));
 
   // Delete video
-  app.delete('/api/campaigns/:id/videos/:videoId', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM campaign_videos WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.videoId]);
-    await audit(req, 'delete', 'campaign_videos', req.params.videoId);
+  app.delete('/api/campaign-videos/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('DELETE FROM campaign_videos WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
+    await audit(req, 'delete', 'campaign_videos', req.params.id);
     res.json({ ok: true });
   }));
 
-  // Track engagement
-  app.post('/api/videos/:id/track', requireAuth, ah(async (req, res) => {
-    const { watched_seconds, completed } = req.body;
-    const video = await pool.query(`SELECT * FROM campaign_videos WHERE id=$1`, [req.params.id]);
-    if (!video.rows.length) return res.status(404).json({ error: 'Video not found' });
-    await pool.query(`INSERT INTO video_engagement (tenant_id, video_id, viewer_email, watched_seconds, completed) VALUES ($1,$2,$3,$4,$5)`,
-      [video.rows[0].tenant_id, req.params.id, req.session.user.email, watched_seconds||0, completed||false]);
-    await pool.query(`UPDATE campaign_videos SET view_count=view_count+1 WHERE id=$1`, [req.params.id]);
-    res.json({ ok: true });
-  }));
-
-  // Video stats
-  app.get('/api/videos/:id/stats', requireAuth, ah(async (req, res) => {
-    const video = await pool.query(`SELECT * FROM campaign_videos WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    if (!video.rows.length) return res.status(404).json({ error: 'Video not found' });
-    const engagement = await pool.query(`SELECT COUNT(*) as total_views, AVG(watched_seconds) as avg_watch_time, COUNT(CASE WHEN completed THEN 1 END) as completions, COUNT(DISTINCT viewer_email) as unique_viewers FROM video_engagement WHERE video_id=$1`, [req.params.id]);
-    res.json({ video: video.rows[0], engagement: engagement.rows[0] });
-  }));
-
-  // Video analytics
-  app.get('/api/videos/:id/analytics', requireAuth, ah(async (req, res) => {
-    const video = await pool.query(`SELECT * FROM campaign_videos WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    if (!video.rows.length) return res.status(404).json({ error: 'Video not found' });
-    const timeline = await pool.query(`SELECT DATE(watched_at) as date, COUNT(*) as views, AVG(watched_seconds) as avg_seconds, COUNT(CASE WHEN completed THEN 1 END) as completions FROM video_engagement WHERE video_id=$1 GROUP BY DATE(watched_at) ORDER BY date DESC LIMIT 30`, [req.params.id]);
-    const retention = await pool.query(`SELECT CASE WHEN watched_seconds < 10 THEN '0-10s' WHEN watched_seconds < 30 THEN '10-30s' WHEN watched_seconds < 60 THEN '30-60s' WHEN watched_seconds < 120 THEN '1-2min' WHEN watched_seconds < 300 THEN '2-5min' ELSE '5min+' END as bucket, COUNT(*) as viewers FROM video_engagement WHERE video_id=$1 GROUP BY bucket ORDER BY MIN(watched_seconds)`, [req.params.id]);
-    res.json({ timeline: timeline.rows, retention: retention.rows });
-  }));
-
-  // Go live (start livestream)
-  app.post('/api/campaigns/:id/go-live', requireAuth, ah(async (req, res) => {
-    const { title, description, video_url } = req.body;
-    if (!video_url) return res.status(400).json({ error: 'video_url required for livestream' });
-    // Unfeature any existing featured
-    await pool.query(`UPDATE campaign_videos SET is_featured=false WHERE tenant_id=$1 AND campaign_id=$2`, [req.session.user.tenant_id, req.params.id]);
-    const r = await pool.query(`INSERT INTO campaign_videos (tenant_id, campaign_id, video_type, video_url, title, description, is_featured) VALUES ($1,$2,'livestream',$3,$4,$5,true) RETURNING *`,
-      [req.session.user.tenant_id, req.params.id, esc(video_url), esc(title||'Live Stream'), esc(description||'')]);
-    await audit(req, 'go_live', 'campaign_videos', r.rows[0].id);
-    // Notify followers
-    try {
-      await notify(req.session.user.tenant_id, 'livestream_started', `Live stream started: ${title||'Live Stream'}`, { campaign_id: req.params.id, video_id: r.rows[0].id });
-    } catch(e) {}
+  // Go live
+  app.post('/api/campaign-videos/:id/go-live', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('UPDATE campaign_videos SET is_live=true, scheduled_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
+    await audit(req, 'update', 'campaign_videos', req.params.id);
     res.json(r.rows[0]);
   }));
 
-  // =============================================
-  // FEATURE 6: STOCK / SECURITIES DONATIONS
-  // =============================================
+  // End live
+  app.post('/api/campaign-videos/:id/end-live', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('UPDATE campaign_videos SET is_live=false WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
+    await audit(req, 'update', 'campaign_videos', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Toggle featured
+  app.post('/api/campaign-videos/:id/toggle-featured', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('UPDATE campaign_videos SET is_featured=NOT is_featured WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
+    await audit(req, 'update', 'campaign_videos', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Track engagement (public)
+  app.post('/api/campaign-videos/:id/track', ah(async (req, res) => {
+    const { viewer_email, viewer_ip, watch_time_seconds, completed, liked, shared, source } = req.body;
+    const tenantId = req.session?.user?.tenant_id || 0;
+    // Look up tenant from the video itself
+    const vid = await pool.query('SELECT tenant_id FROM campaign_videos WHERE id=$1', [req.params.id]);
+    const tid = vid.rows.length ? vid.rows[0].tenant_id : tenantId;
+    await pool.query(
+      'INSERT INTO video_engagement (tenant_id,video_id,viewer_email,viewer_ip,watch_time_seconds,completed,liked,shared,source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [tid, req.params.id, esc(viewer_email||''), esc(viewer_ip||''), watch_time_seconds||0, completed||false, liked||false, shared||false, esc(source||'direct')]
+    );
+    await pool.query('UPDATE campaign_videos SET view_count=view_count+1 WHERE id=$1', [req.params.id]);
+    if (liked) await pool.query('UPDATE campaign_videos SET like_count=like_count+1 WHERE id=$1', [req.params.id]);
+    if (shared) await pool.query('UPDATE campaign_videos SET share_count=share_count+1 WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  }));
+
+  // Video engagement stats
+  app.get('/api/campaign-videos/:id/engagement', requireAuth, ah(async (req, res) => {
+    const stats = await pool.query(
+      `SELECT COUNT(*) as total_views, COALESCE(SUM(watch_time_seconds),0) as total_watch_time,
+       COUNT(CASE WHEN completed THEN 1 END) as completed_views,
+       AVG(watch_time_seconds) as avg_watch_time,
+       COUNT(CASE WHEN liked THEN 1 END) as total_likes,
+       COUNT(CASE WHEN shared THEN 1 END) as total_shares
+       FROM video_engagement WHERE tenant_id=$1 AND video_id=$2`,
+      [req.session.user.tenant_id, req.params.id]
+    );
+    res.json(stats.rows[0]);
+  }));
+
+  // Playlists
+  app.get('/api/video-playlists', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM video_playlists WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+    res.json(r.rows);
+  }));
+
+  app.post('/api/video-playlists', requireAuth, ah(async (req, res) => {
+    const { name, description, video_ids, is_public } = req.body;
+    if (!name) return res.status(400).json({ error: 'name required' });
+    const r = await pool.query(
+      'INSERT INTO video_playlists (tenant_id,name,description,video_ids_json,is_public) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [req.session.user.tenant_id, esc(name), esc(description||''), JSON.stringify(video_ids||[]), is_public!==undefined?is_public:true]
+    );
+    await audit(req, 'create', 'video_playlists', r.rows[0].id);
+    res.json(r.rows[0]);
+  }));
+
+  app.put('/api/video-playlists/:id', requireAuth, ah(async (req, res) => {
+    const { name, description, video_ids, is_public } = req.body;
+    const r = await pool.query(
+      `UPDATE video_playlists SET name=COALESCE($1,name), description=COALESCE($2,description), video_ids_json=COALESCE($3,video_ids_json), is_public=COALESCE($4,is_public) WHERE tenant_id=$5 AND id=$6 RETURNING *`,
+      [name?esc(name):null, description?esc(description):null, video_ids?JSON.stringify(video_ids):null, is_public, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Playlist not found' });
+    await audit(req, 'update', 'video_playlists', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  app.delete('/api/video-playlists/:id', requireAuth, ah(async (req, res) => {
+    await pool.query('DELETE FROM video_playlists WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    await audit(req, 'delete', 'video_playlists', req.params.id);
+    res.json({ ok: true });
+  }));
+
+  // Page route
+  app.get('/campaign-videos', requireAuth, ah(async (req, res) => {
+    const videos = await pool.query('SELECT * FROM campaign_videos WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+    const stats = await pool.query('SELECT COUNT(*) as total, COALESCE(SUM(view_count),0) as total_views, COALESCE(SUM(like_count),0) as total_likes FROM campaign_videos WHERE tenant_id=$1', [req.session.user.tenant_id]);
+    renderPage(req, res, 'Campaign Videos', `<div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-bold mb-6">Video Integration</h1>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-purple-50 rounded-lg p-4"><p class="text-sm text-gray-600">Videos</p><p class="text-2xl font-bold text-purple-700">${stats.rows[0]?.total||0}</p></div>
+        <div class="bg-purple-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Views</p><p class="text-2xl font-bold text-purple-700">${stats.rows[0]?.total_views||0}</p></div>
+        <div class="bg-purple-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Likes</p><p class="text-2xl font-bold text-purple-700">${stats.rows[0]?.total_likes||0}</p></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${videos.rows.map(v => `<div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold">${esc(v.title)}</h3>
+        <p class="text-sm text-gray-500">Views: ${v.view_count} | Likes: ${v.like_count} | ${v.is_live?'<span class="text-red-600">Live</span>':'<span class="text-gray-400">Offline</span>'} ${v.is_featured?'| ⭐ Featured':''}</p>
+      </div>`).join('')}</div>
+    </div>`);
+  }));
+
+  // ================================================================
+  // FEATURE 6: STOCK / SECURITIES
+  // ================================================================
 
   // List stock donations
   app.get('/api/stock-donations', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM stock_donations WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
+    const { status } = req.query;
+    let q = 'SELECT * FROM stock_donations WHERE tenant_id=$1';
+    const params = [req.session.user.tenant_id];
+    if (status) { q += ' AND status=$2'; params.push(esc(status)); }
+    q += ' ORDER BY created_at DESC';
+    const r = await pool.query(q, params);
     res.json(r.rows);
+  }));
+
+  // Get single
+  app.get('/api/stock-donations/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM stock_donations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Stock donation not found' });
+    res.json(r.rows[0]);
   }));
 
   // Create stock donation
   app.post('/api/stock-donations', requireAuth, ah(async (req, res) => {
-    const { campaign_id, donor_name, donor_email, stock_symbol, stock_name, shares, price_per_share_at_donation, brokerage_name, transfer_date } = req.body;
-    if (!donor_name || !stock_symbol || !shares || !price_per_share_at_donation) return res.status(400).json({ error: 'donor_name, stock_symbol, shares, and price_per_share_at_donation required' });
-    const totalValue = parseFloat(shares) * parseFloat(price_per_share_at_donation);
-    const r = await pool.query(`INSERT INTO stock_donations (tenant_id, campaign_id, donor_name, donor_email, stock_symbol, stock_name, shares, price_per_share_at_donation, total_value, brokerage_name, transfer_date, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending') RETURNING *`,
-      [req.session.user.tenant_id, campaign_id||null, esc(donor_name), esc(donor_email||''), esc(stock_symbol), esc(stock_name||''), shares, price_per_share_at_donation, totalValue, esc(brokerage_name||''), transfer_date||null]);
+    const { donor_name, donor_email, donor_phone, company_name, ticker_symbol, number_of_shares, share_price, brokerage_name, brokerage_contact, dtc_number, transfer_date, transfer_method, mean_price_on_date, notes } = req.body;
+    if (!donor_name || !company_name) return res.status(400).json({ error: 'donor_name and company_name required' });
+    const total_value = (number_of_shares || 0) * (share_price || 0);
+    const r = await pool.query(
+      `INSERT INTO stock_donations (tenant_id,donor_name,donor_email,donor_phone,company_name,ticker_symbol,number_of_shares,share_price,total_value,brokerage_name,brokerage_contact,dtc_number,transfer_date,transfer_method,mean_price_on_date,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [req.session.user.tenant_id, esc(donor_name), esc(donor_email||''), esc(donor_phone||''), esc(company_name), esc(ticker_symbol||''), number_of_shares||0, share_price||0, total_value, esc(brokerage_name||''), esc(brokerage_contact||''), esc(dtc_number||''), transfer_date||null, esc(transfer_method||'dwtc'), mean_price_on_date||0, esc(notes||'')]
+    );
     await audit(req, 'create', 'stock_donations', r.rows[0].id);
-    try { await notify(req.session.user.tenant_id, 'stock_donation_received', `Stock donation received: ${stock_symbol} from ${donor_name}`, { id: r.rows[0].id }); } catch(e) {}
     res.json(r.rows[0]);
   }));
 
   // Update stock donation
   app.put('/api/stock-donations/:id', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donor_name, donor_email, stock_symbol, stock_name, shares, price_per_share_at_donation, brokerage_name, transfer_date, status, notes } = req.body;
-    const totalValue = shares && price_per_share_at_donation ? parseFloat(shares) * parseFloat(price_per_share_at_donation) : null;
-    const r = await pool.query(`UPDATE stock_donations SET donor_name=COALESCE($1,donor_name), donor_email=COALESCE($2,donor_email), stock_symbol=COALESCE($3,stock_symbol), stock_name=COALESCE($4,stock_name), shares=COALESCE($5,shares), price_per_share_at_donation=COALESCE($6,price_per_share_at_donation), total_value=COALESCE($7,total_value), brokerage_name=COALESCE($8,brokerage_name), transfer_date=COALESCE($9,transfer_date), status=COALESCE($10,status) WHERE tenant_id=$11 AND id=$12 RETURNING *`,
-      [donor_name?esc(donor_name):null, donor_email?esc(donor_email):null, stock_symbol?esc(stock_symbol):null, stock_name?esc(stock_name):null, shares, price_per_share_at_donation, totalValue, brokerage_name?esc(brokerage_name):null, transfer_date||null, status||null, tid, req.params.id]);
+    const { number_of_shares, share_price, status, acknowledged, notes, transfer_date } = req.body;
+    const total_value = (number_of_shares || 0) * (share_price || 0);
+    const r = await pool.query(
+      `UPDATE stock_donations SET number_of_shares=COALESCE($1,number_of_shares), share_price=COALESCE($2,share_price),
+       total_value=CASE WHEN $1 IS NOT NULL OR $2 IS NOT NULL THEN $3 ELSE total_value END,
+       status=COALESCE($4,status), acknowledged=COALESCE($5,acknowledged), notes=COALESCE($6,notes),
+       transfer_date=COALESCE($7,transfer_date) WHERE tenant_id=$8 AND id=$9 RETURNING *`,
+      [number_of_shares, share_price, total_value, status?esc(status):null, acknowledged, notes?esc(notes):null, transfer_date||null, req.session.user.tenant_id, req.params.id]
+    );
     if (!r.rows.length) return res.status(404).json({ error: 'Stock donation not found' });
     await audit(req, 'update', 'stock_donations', req.params.id);
     res.json(r.rows[0]);
   }));
 
+  // Delete stock donation
+  app.delete('/api/stock-donations/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('DELETE FROM stock_donations WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Stock donation not found' });
+    await audit(req, 'delete', 'stock_donations', req.params.id);
+    res.json({ ok: true });
+  }));
+
   // Acknowledge stock donation
   app.post('/api/stock-donations/:id/acknowledge', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`UPDATE stock_donations SET acknowledged=true WHERE tenant_id=$1 AND id=$2 RETURNING *`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('UPDATE stock_donations SET acknowledged=true, acknowledgment_sent_at=NOW(), status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['acknowledged', req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Stock donation not found' });
-    await audit(req, 'acknowledge', 'stock_donations', req.params.id);
     // Send acknowledgment email
     if (r.rows[0].donor_email) {
-      try {
-        await sendEmail(r.rows[0].donor_email, 'Stock Donation Acknowledged', `Dear ${r.rows[0].donor_name},\n\nThank you for your generous stock donation of ${r.rows[0].shares} shares of ${r.rows[0].stock_symbol}. We have received and acknowledged your contribution.\n\nSincerely,\nThe Fundraising Team`);
-      } catch(e) {}
+      try { await sendEmail(r.rows[0].donor_email, 'Stock Donation Acknowledged', `Dear ${r.rows[0].donor_name}, your donation of ${r.rows[0].number_of_shares} shares of ${r.rows[0].company_name} has been acknowledged. Thank you for your generosity.`); } catch(e) {}
     }
+    await audit(req, 'update', 'stock_donations', req.params.id);
     res.json(r.rows[0]);
   }));
 
-  // Get/Create valuations
+  // Send tax letter
+  app.post('/api/stock-donations/:id/send-tax-letter', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('UPDATE stock_donations SET tax_letter_sent=true WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Stock donation not found' });
+    if (r.rows[0].donor_email) {
+      try { await sendEmail(r.rows[0].donor_email, 'Tax Letter for Stock Donation', `Dear ${r.rows[0].donor_name}, attached is your tax letter for the donation of ${r.rows[0].number_of_shares} shares of ${r.rows[0].company_name}. Valued at UGX ${r.rows[0].total_value}.`); } catch(e) {}
+    }
+    await audit(req, 'update', 'stock_donations', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Valuations CRUD
   app.get('/api/stock-donations/:id/valuations', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM stock_valuations WHERE tenant_id=$1 AND stock_donation_id=$2 ORDER BY valuation_date DESC`, [req.session.user.tenant_id, req.params.id]);
+    const r = await pool.query('SELECT * FROM stock_valuations WHERE tenant_id=$1 AND stock_donation_id=$2 ORDER BY valuation_date DESC', [req.session.user.tenant_id, req.params.id]);
     res.json(r.rows);
   }));
 
   app.post('/api/stock-donations/:id/valuations', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const stock = await pool.query(`SELECT * FROM stock_donations WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
+    const { valuation_date, share_price, high_price, low_price, appraiser, notes } = req.body;
+    const stock = await pool.query('SELECT number_of_shares FROM stock_donations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!stock.rows.length) return res.status(404).json({ error: 'Stock donation not found' });
-    const { valuation_date, price_per_share, valued_by } = req.body;
-    if (!price_per_share) return res.status(400).json({ error: 'price_per_share required' });
-    const totalValue = parseFloat(stock.rows[0].shares) * parseFloat(price_per_share);
-    const r = await pool.query(`INSERT INTO stock_valuations (tenant_id, stock_donation_id, valuation_date, price_per_share, total_value, valued_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [tid, req.params.id, valuation_date||'CURRENT_DATE', price_per_share, totalValue, esc(valued_by||req.session.user.email)]);
+    const shares = parseFloat(stock.rows[0].number_of_shares) || 0;
+    const total = shares * (share_price || 0);
+    const r = await pool.query(
+      'INSERT INTO stock_valuations (tenant_id,stock_donation_id,valuation_date,share_price,total_value,high_price,low_price,appraiser,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, valuation_date||'NOW()', share_price||0, total, high_price||0, low_price||0, esc(appraiser||''), esc(notes||'')]
+    );
     await audit(req, 'create', 'stock_valuations', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
-  // Stock donation stats
-  app.get('/api/stock-donations/stats', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const overview = await pool.query(`SELECT COUNT(*) as total_donations, COALESCE(SUM(total_value),0) as total_value, COUNT(DISTINCT donor_email) as unique_donors, COUNT(CASE WHEN status='pending' THEN 1 END) as pending, COUNT(CASE WHEN acknowledged=false THEN 1 END) as unacknowledged FROM stock_donations WHERE tenant_id=$1`, [tid]);
-    const bySymbol = await pool.query(`SELECT stock_symbol, stock_name, COUNT(*) as count, SUM(shares) as total_shares, SUM(total_value) as total_value FROM stock_donations WHERE tenant_id=$1 GROUP BY stock_symbol, stock_name ORDER BY total_value DESC`, [tid]);
-    res.json({ overview: overview.rows[0], by_symbol: bySymbol.rows });
-  }));
-
-  // Pending stock donations
-  app.get('/api/stock-donations/pending', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM stock_donations WHERE tenant_id=$1 AND status IN ('pending','received') ORDER BY created_at ASC`, [req.session.user.tenant_id]);
+  // Transfer documents
+  app.get('/api/stock-donations/:id/documents', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM stock_transfer_docs WHERE tenant_id=$1 AND stock_donation_id=$2 ORDER BY uploaded_at DESC', [req.session.user.tenant_id, req.params.id]);
     res.json(r.rows);
   }));
 
-  // =============================================
-  // FEATURE 7: REAL ESTATE DONATIONS
-  // =============================================
+  app.post('/api/stock-donations/:id/documents', requireAuth, ah(async (req, res) => {
+    const { doc_type, doc_name, doc_url } = req.body;
+    if (!doc_name) return res.status(400).json({ error: 'doc_name required' });
+    const r = await pool.query(
+      'INSERT INTO stock_transfer_docs (tenant_id,stock_donation_id,doc_type,doc_name,doc_url) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, esc(doc_type||'transfer_form'), esc(doc_name), esc(doc_url||'')]
+    );
+    await audit(req, 'create', 'stock_transfer_docs', r.rows[0].id);
+    res.json(r.rows[0]);
+  }));
+
+  // Stock donation stats
+  app.get('/api/stock-donations/stats/summary', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      `SELECT COUNT(*) as total_donations, COALESCE(SUM(total_value),0) as total_value,
+       COUNT(CASE WHEN acknowledged THEN 1 END) as acknowledged_count,
+       COUNT(CASE WHEN status='pending' THEN 1 END) as pending_count,
+       COUNT(DISTINCT company_name) as unique_companies
+       FROM stock_donations WHERE tenant_id=$1`,
+      [req.session.user.tenant_id]
+    );
+    res.json(r.rows[0]);
+  }));
+
+  // Page route
+  app.get('/stock-donations', requireAuth, ah(async (req, res) => {
+    const stocks = await pool.query('SELECT * FROM stock_donations WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+    const stats = await pool.query('SELECT COUNT(*) as total, COALESCE(SUM(total_value),0) as total_value FROM stock_donations WHERE tenant_id=$1', [req.session.user.tenant_id]);
+    renderPage(req, res, 'Stock & Securities', `<div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-bold mb-6">Stock & Securities</h1>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="bg-teal-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Donations</p><p class="text-2xl font-bold text-teal-700">${stats.rows[0]?.total||0}</p></div>
+        <div class="bg-teal-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Value</p><p class="text-2xl font-bold text-teal-700">UGX ${stats.rows[0]?.total_value||0}</p></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${stocks.rows.map(s => `<div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold">${esc(s.company_name)}${s.ticker_symbol?' ('+esc(s.ticker_symbol)+')':''}</h3>
+        <p class="text-sm text-gray-500">Donor: ${esc(s.donor_name)} | Shares: ${s.number_of_shares} | Value: UGX ${s.total_value} | ${s.status} ${s.acknowledged?'✓':''}</p>
+      </div>`).join('')}</div>
+    </div>`);
+  }));
+
+  // ================================================================
+  // FEATURE 7: REAL ESTATE
+  // ================================================================
 
   // List real estate donations
   app.get('/api/real-estate-donations', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM real_estate_donations WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
+    const { status, property_type } = req.query;
+    let q = 'SELECT * FROM real_estate_donations WHERE tenant_id=$1';
+    const params = [req.session.user.tenant_id];
+    let idx = 2;
+    if (status) { q += ' AND status=$' + idx; params.push(esc(status)); idx++; }
+    if (property_type) { q += ' AND property_type=$' + idx; params.push(esc(property_type)); idx++; }
+    q += ' ORDER BY created_at DESC';
+    const r = await pool.query(q, params);
     res.json(r.rows);
+  }));
+
+  // Get single
+  app.get('/api/real-estate-donations/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM real_estate_donations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    res.json(r.rows[0]);
   }));
 
   // Create real estate donation
   app.post('/api/real-estate-donations', requireAuth, ah(async (req, res) => {
-    const { campaign_id, donor_name, donor_email, property_type, address, city, region, country, area_sqft, appraised_value, donation_date, appraisal_document_url, notes } = req.body;
-    if (!donor_name) return res.status(400).json({ error: 'donor_name required' });
-    const r = await pool.query(`INSERT INTO real_estate_donations (tenant_id, campaign_id, donor_name, donor_email, property_type, address, city, region, country, area_sqft, appraised_value, donation_date, appraisal_document_url, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
-      [req.session.user.tenant_id, campaign_id||null, esc(donor_name), esc(donor_email||''), property_type||'residential', esc(address||''), esc(city||''), esc(region||''), esc(country||'Uganda'), area_sqft||null, appraised_value||null, donation_date||null, esc(appraisal_document_url||''), esc(notes||'')]);
+    const { donor_name, donor_email, donor_phone, property_name, property_address, property_type, square_footage, lot_size, year_built, appraised_value, legal_description, deed_number, notes } = req.body;
+    if (!donor_name || !property_name) return res.status(400).json({ error: 'donor_name and property_name required' });
+    const r = await pool.query(
+      `INSERT INTO real_estate_donations (tenant_id,donor_name,donor_email,donor_phone,property_name,property_address,property_type,square_footage,lot_size,year_built,appraised_value,legal_description,deed_number,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [req.session.user.tenant_id, esc(donor_name), esc(donor_email||''), esc(donor_phone||''), esc(property_name), esc(property_address||''), esc(property_type||'residential'), square_footage||0, lot_size||0, year_built||null, appraised_value||0, esc(legal_description||''), esc(deed_number||''), esc(notes||'')]
+    );
     await audit(req, 'create', 'real_estate_donations', r.rows[0].id);
-    try { await notify(req.session.user.tenant_id, 'real_estate_donation', `Real estate donation submitted by ${donor_name}`, { id: r.rows[0].id }); } catch(e) {}
     res.json(r.rows[0]);
   }));
 
   // Update real estate donation
   app.put('/api/real-estate-donations/:id', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donor_name, donor_email, property_type, address, city, region, country, area_sqft, appraised_value, donation_date, appraisal_document_url, legal_review_status, notes, status } = req.body;
-    const r = await pool.query(`UPDATE real_estate_donations SET donor_name=COALESCE($1,donor_name), donor_email=COALESCE($2,donor_email), property_type=COALESCE($3,property_type), address=COALESCE($4,address), city=COALESCE($5,city), region=COALESCE($6,region), country=COALESCE($7,country), area_sqft=COALESCE($8,area_sqft), appraised_value=COALESCE($9,appraised_value), donation_date=COALESCE($10,donation_date), appraisal_document_url=COALESCE($11,appraisal_document_url), legal_review_status=COALESCE($12,legal_review_status), notes=COALESCE($13,notes), status=COALESCE($14,status) WHERE tenant_id=$15 AND id=$16 RETURNING *`,
-      [donor_name?esc(donor_name):null, donor_email?esc(donor_email):null, property_type, address?esc(address):null, city?esc(city):null, region?esc(region):null, country?esc(country):null, area_sqft, appraised_value, donation_date||null, appraisal_document_url?esc(appraisal_document_url):null, legal_review_status, notes?esc(notes):null, status, tid, req.params.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'Real estate donation not found' });
+    const { property_name, property_address, property_type, square_footage, appraised_value, status, notes } = req.body;
+    const r = await pool.query(
+      `UPDATE real_estate_donations SET property_name=COALESCE($1,property_name), property_address=COALESCE($2,property_address),
+       property_type=COALESCE($3,property_type), square_footage=COALESCE($4,square_footage),
+       appraised_value=COALESCE($5,appraised_value), status=COALESCE($6,status), notes=COALESCE($7,notes)
+       WHERE tenant_id=$8 AND id=$9 RETURNING *`,
+      [property_name?esc(property_name):null, property_address?esc(property_address):null, property_type?esc(property_type):null,
+       square_footage, appraised_value, status?esc(status):null, notes?esc(notes):null, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
     await audit(req, 'update', 'real_estate_donations', req.params.id);
     res.json(r.rows[0]);
   }));
 
-  // Appraise real estate donation
+  // Delete real estate donation
+  app.delete('/api/real-estate-donations/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('DELETE FROM real_estate_donations WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    await audit(req, 'delete', 'real_estate_donations', req.params.id);
+    res.json({ ok: true });
+  }));
+
+  // Appraise property
   app.post('/api/real-estate-donations/:id/appraise', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { appraised_value, appraisal_document_url } = req.body;
-    if (!appraised_value) return res.status(400).json({ error: 'appraised_value required' });
-    const r = await pool.query(`UPDATE real_estate_donations SET appraised_value=$1, appraisal_document_url=COALESCE($2,appraisal_document_url), status='appraised' WHERE tenant_id=$3 AND id=$4 AND status IN ('submitted','under_review') RETURNING *`,
-      [appraised_value, esc(appraisal_document_url||''), tid, req.params.id]);
-    if (!r.rows.length) return res.status(400).json({ error: 'Donation not found or not in appraisable status' });
-    await audit(req, 'appraise', 'real_estate_donations', req.params.id);
+    const { appraised_value, appraised_by, appraisal_date } = req.body;
+    const r = await pool.query(
+      'UPDATE real_estate_donations SET appraised_value=COALESCE($1,appraised_value), appraised_by=COALESCE($2,appraised_by), appraisal_date=COALESCE($3,appraisal_date), appraisal_status=$4 WHERE tenant_id=$5 AND id=$6 RETURNING *',
+      [appraised_value||null, appraised_by?esc(appraised_by):null, appraisal_date||null, 'completed', req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    await audit(req, 'update', 'real_estate_donations', req.params.id);
     res.json(r.rows[0]);
   }));
 
   // Legal review
   app.post('/api/real-estate-donations/:id/legal-review', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { approved, notes } = req.body;
-    if (approved === undefined) return res.status(400).json({ error: 'approved (boolean) required' });
-    const legalStatus = approved ? 'approved' : 'rejected';
-    const newStatus = approved ? 'legal_review' : 'rejected';
-    const r = await pool.query(`UPDATE real_estate_donations SET legal_review_status=$1, status=$2, notes=COALESCE($3,notes) WHERE tenant_id=$4 AND id=$5 AND status IN ('appraised','legal_review') RETURNING *`,
-      [legalStatus, newStatus, notes?esc(notes):null, tid, req.params.id]);
-    if (!r.rows.length) return res.status(400).json({ error: 'Donation not found or not in reviewable status' });
-    await audit(req, 'legal_review', 'real_estate_donations', req.params.id);
-    if (approved && r.rows[0].donor_email) {
-      try {
-        await sendEmail(r.rows[0].donor_email, 'Real Estate Donation — Legal Review Approved', `Dear ${r.rows[0].donor_name},\n\nThe legal review of your property donation has been approved. We will proceed with the transfer process.\n\nThank you,\nThe Fundraising Team`);
-      } catch(e) {}
-    }
+    const { status: reviewStatus, notes } = req.body;
+    const r = await pool.query(
+      'UPDATE real_estate_donations SET legal_review_status=COALESCE($1,legal_review_status), notes=COALESCE($2,notes) WHERE tenant_id=$3 AND id=$4 RETURNING *',
+      [reviewStatus?esc(reviewStatus):null, notes?esc(notes):null, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    await audit(req, 'update', 'real_estate_donations', req.params.id);
     res.json(r.rows[0]);
   }));
 
-  // Acknowledge
-  app.post('/api/real-estate-donations/:id/acknowledge', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`UPDATE real_estate_donations SET acknowledged=true WHERE tenant_id=$1 AND id=$2 RETURNING *`, [req.session.user.tenant_id, req.params.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'Real estate donation not found' });
-    await audit(req, 'acknowledge', 'real_estate_donations', req.params.id);
+  // Title search
+  app.post('/api/real-estate-donations/:id/title-search', requireAuth, ah(async (req, res) => {
+    const { title_search_status } = req.body;
+    const r = await pool.query(
+      'UPDATE real_estate_donations SET title_search_status=COALESCE($1,title_search_status) WHERE tenant_id=$2 AND id=$3 RETURNING *',
+      [title_search_status?esc(title_search_status):null, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Environmental check
+  app.post('/api/real-estate-donations/:id/environmental-check', requireAuth, ah(async (req, res) => {
+    const { environmental_status } = req.body;
+    const r = await pool.query(
+      'UPDATE real_estate_donations SET environmental_status=COALESCE($1,environmental_status) WHERE tenant_id=$2 AND id=$3 RETURNING *',
+      [environmental_status?esc(environmental_status):null, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Tax lien check
+  app.post('/api/real-estate-donations/:id/tax-lien-check', requireAuth, ah(async (req, res) => {
+    const { tax_lien_check } = req.body;
+    const r = await pool.query(
+      'UPDATE real_estate_donations SET tax_lien_check=COALESCE($1,tax_lien_check) WHERE tenant_id=$2 AND id=$3 RETURNING *',
+      [tax_lien_check?esc(tax_lien_check):null, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Insurance status
+  app.post('/api/real-estate-donations/:id/insurance', requireAuth, ah(async (req, res) => {
+    const { insurance_status } = req.body;
+    const r = await pool.query(
+      'UPDATE real_estate_donations SET insurance_status=COALESCE($1,insurance_status) WHERE tenant_id=$2 AND id=$3 RETURNING *',
+      [insurance_status?esc(insurance_status):null, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Accept property
+  app.post('/api/real-estate-donations/:id/accept', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      'UPDATE real_estate_donations SET status=$1, acceptance_date=CURRENT_DATE WHERE tenant_id=$2 AND id=$3 RETURNING *',
+      ['accepted', req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    // Notify donor
     if (r.rows[0].donor_email) {
-      try {
-        await sendEmail(r.rows[0].donor_email, 'Real Estate Donation Acknowledged', `Dear ${r.rows[0].donor_name},\n\nThank you for your generous real estate donation. Your contribution has been acknowledged.\n\nSincerely,\nThe Fundraising Team`);
-      } catch(e) {}
+      try { await sendEmail(r.rows[0].donor_email, 'Property Donation Accepted', `Dear ${r.rows[0].donor_name}, your donation of "${r.rows[0].property_name}" has been accepted. Thank you for your generosity.`); } catch(e) {}
     }
+    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Reject property
+  app.post('/api/real-estate-donations/:id/reject', requireAuth, ah(async (req, res) => {
+    const { reason } = req.body;
+    const r = await pool.query(
+      'UPDATE real_estate_donations SET status=$1, notes=COALESCE($2,notes) WHERE tenant_id=$3 AND id=$4 RETURNING *',
+      ['rejected', reason?esc(reason):null, req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
+    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Appraisals CRUD
+  app.get('/api/real-estate-donations/:id/appraisals', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM real_estate_appraisals WHERE tenant_id=$1 AND property_id=$2 ORDER BY appraisal_date DESC', [req.session.user.tenant_id, req.params.id]);
+    res.json(r.rows);
+  }));
+
+  app.post('/api/real-estate-donations/:id/appraisals', requireAuth, ah(async (req, res) => {
+    const { appraiser_name, appraiser_license, appraised_value, appraisal_date, market_value, condition, methodology, report_url, notes } = req.body;
+    const r = await pool.query(
+      `INSERT INTO real_estate_appraisals (tenant_id,property_id,appraiser_name,appraiser_license,appraised_value,appraisal_date,market_value,condition,methodology,report_url,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [req.session.user.tenant_id, req.params.id, esc(appraiser_name||''), esc(appraiser_license||''), appraised_value||0, appraisal_date||null, market_value||0, esc(condition||'fair'), esc(methodology||''), esc(report_url||''), esc(notes||'')]
+    );
+    // Update the main property with the latest appraised value
+    await pool.query('UPDATE real_estate_donations SET appraised_value=$1, appraisal_status=$2 WHERE id=$3 AND tenant_id=$4', [appraised_value||0, 'completed', req.params.id, req.session.user.tenant_id]);
+    await audit(req, 'create', 'real_estate_appraisals', r.rows[0].id);
+    res.json(r.rows[0]);
+  }));
+
+  // Documents
+  app.get('/api/real-estate-donations/:id/documents', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM real_estate_documents WHERE tenant_id=$1 AND property_id=$2 ORDER BY uploaded_at DESC', [req.session.user.tenant_id, req.params.id]);
+    res.json(r.rows);
+  }));
+
+  app.post('/api/real-estate-donations/:id/documents', requireAuth, ah(async (req, res) => {
+    const { doc_type, doc_name, doc_url, description } = req.body;
+    if (!doc_name) return res.status(400).json({ error: 'doc_name required' });
+    const r = await pool.query(
+      'INSERT INTO real_estate_documents (tenant_id,property_id,doc_type,doc_name,doc_url,description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, esc(doc_type||'deed'), esc(doc_name), esc(doc_url||''), esc(description||'')]
+    );
+    await audit(req, 'create', 'real_estate_documents', r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
   // Real estate stats
-  app.get('/api/real-estate-donations/stats', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const overview = await pool.query(`SELECT COUNT(*) as total_donations, COALESCE(SUM(appraised_value),0) as total_value, COUNT(DISTINCT donor_email) as unique_donors, COUNT(CASE WHEN status='submitted' THEN 1 END) as submitted, COUNT(CASE WHEN acknowledged=false THEN 1 END) as unacknowledged FROM real_estate_donations WHERE tenant_id=$1`, [tid]);
-    const byType = await pool.query(`SELECT property_type, COUNT(*) as count, COALESCE(SUM(appraised_value),0) as total_value FROM real_estate_donations WHERE tenant_id=$1 GROUP BY property_type ORDER BY total_value DESC`, [tid]);
-    res.json({ overview: overview.rows[0], by_type: byType.rows });
+  app.get('/api/real-estate-donations/stats/summary', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      `SELECT COUNT(*) as total_properties, COALESCE(SUM(appraised_value),0) as total_value,
+       COUNT(CASE WHEN status='accepted' THEN 1 END) as accepted_count,
+       COUNT(CASE WHEN status='pending' THEN 1 END) as pending_count,
+       COUNT(CASE WHEN appraisal_status='completed' THEN 1 END) as appraised_count,
+       COUNT(CASE WHEN legal_review_status='completed' THEN 1 END) as legal_completed_count
+       FROM real_estate_donations WHERE tenant_id=$1`,
+      [req.session.user.tenant_id]
+    );
+    res.json(r.rows[0]);
   }));
 
-  // Pending review
-  app.get('/api/real-estate-donations/pending-review', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM real_estate_donations WHERE tenant_id=$1 AND status IN ('submitted','under_review','appraised') AND legal_review_status='pending' ORDER BY created_at ASC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+  // Page route
+  app.get('/real-estate-donations', requireAuth, ah(async (req, res) => {
+    const properties = await pool.query('SELECT * FROM real_estate_donations WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+    const stats = await pool.query('SELECT COUNT(*) as total, COALESCE(SUM(appraised_value),0) as total_value FROM real_estate_donations WHERE tenant_id=$1', [req.session.user.tenant_id]);
+    renderPage(req, res, 'Real Estate Donations', `<div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-bold mb-6">Real Estate Donations</h1>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="bg-orange-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Properties</p><p class="text-2xl font-bold text-orange-700">${stats.rows[0]?.total||0}</p></div>
+        <div class="bg-orange-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Value</p><p class="text-2xl font-bold text-orange-700">UGX ${stats.rows[0]?.total_value||0}</p></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${properties.rows.map(p => `<div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold">${esc(p.property_name)}</h3>
+        <p class="text-sm text-gray-500">${esc(p.property_type)} | Value: UGX ${p.appraised_value}</p>
+        <p class="text-sm text-gray-500">Appraisal: ${p.appraisal_status} | Legal: ${p.legal_review_status} | ${p.status}</p>
+      </div>`).join('')}</div>
+    </div>`);
   }));
 
-  // =============================================
-  // FEATURE 8: IRA CHARITABLE ROLLOVERS
-  // =============================================
+  // ================================================================
+  // FEATURE 8: IRA ROLLOVERS
+  // ================================================================
 
   // List IRA rollovers
   app.get('/api/ira-rollovers', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM ira_rollovers WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
+    const { status, ira_type, is_qcd } = req.query;
+    let q = 'SELECT * FROM ira_rollovers WHERE tenant_id=$1';
+    const params = [req.session.user.tenant_id];
+    let idx = 2;
+    if (status) { q += ' AND status=$' + idx; params.push(esc(status)); idx++; }
+    if (ira_type) { q += ' AND ira_type=$' + idx; params.push(esc(ira_type)); idx++; }
+    if (is_qcd !== undefined) { q += ' AND is_qcd=$' + idx; params.push(is_qcd === 'true'); idx++; }
+    q += ' ORDER BY created_at DESC';
+    const r = await pool.query(q, params);
     res.json(r.rows);
+  }));
+
+  // Get single
+  app.get('/api/ira-rollovers/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM ira_rollovers WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
+    res.json(r.rows[0]);
   }));
 
   // Create IRA rollover
   app.post('/api/ira-rollovers', requireAuth, ah(async (req, res) => {
-    const { campaign_id, donor_name, donor_email, donor_age, ira_custodian, rollover_amount, transfer_date, tax_year, confirmation_number } = req.body;
-    if (!donor_name || !rollover_amount) return res.status(400).json({ error: 'donor_name and rollover_amount required' });
-    if (donor_age && parseInt(donor_age) < 70) return res.status(400).json({ error: 'IRA charitable rollovers require donor to be 70.5 or older' });
-    const r = await pool.query(`INSERT INTO ira_rollovers (tenant_id, campaign_id, donor_name, donor_email, donor_age, ira_custodian, rollover_amount, transfer_date, tax_year, confirmation_number, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'initiated') RETURNING *`,
-      [req.session.user.tenant_id, campaign_id||null, esc(donor_name), esc(donor_email||''), donor_age||null, esc(ira_custodian||''), rollover_amount, transfer_date||null, tax_year||new Date().getFullYear(), esc(confirmation_number||'')]);
+    const { donor_name, donor_email, donor_phone, donor_ssn_last4, ira_type, custodian_name, custodian_account, custodian_phone, distribution_amount, distribution_date, transfer_method, is_qcd, qcd_age_verified, notes } = req.body;
+    if (!donor_name) return res.status(400).json({ error: 'donor_name required' });
+    const r = await pool.query(
+      `INSERT INTO ira_rollovers (tenant_id,donor_name,donor_email,donor_phone,donor_ssn_last4,ira_type,custodian_name,custodian_account,custodian_phone,distribution_amount,distribution_date,transfer_method,is_qcd,qcd_age_verified,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      [req.session.user.tenant_id, esc(donor_name), esc(donor_email||''), esc(donor_phone||''), esc(donor_ssn_last4||''), esc(ira_type||'traditional'), esc(custodian_name||''), esc(custodian_account||''), esc(custodian_phone||''), distribution_amount||0, distribution_date||null, esc(transfer_method||'direct'), is_qcd||false, qcd_age_verified||false, esc(notes||'')]
+    );
     await audit(req, 'create', 'ira_rollovers', r.rows[0].id);
-    try { await notify(req.session.user.tenant_id, 'ira_rollover', `IRA rollover initiated by ${donor_name}`, { id: r.rows[0].id }); } catch(e) {}
     res.json(r.rows[0]);
   }));
 
   // Update IRA rollover
   app.put('/api/ira-rollovers/:id', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donor_name, donor_email, donor_age, ira_custodian, rollover_amount, transfer_date, tax_year, confirmation_number, status } = req.body;
-    const r = await pool.query(`UPDATE ira_rollovers SET donor_name=COALESCE($1,donor_name), donor_email=COALESCE($2,donor_email), donor_age=COALESCE($3,donor_age), ira_custodian=COALESCE($4,ira_custodian), rollover_amount=COALESCE($5,rollover_amount), transfer_date=COALESCE($6,transfer_date), tax_year=COALESCE($7,tax_year), confirmation_number=COALESCE($8,confirmation_number), status=COALESCE($9,status) WHERE tenant_id=$10 AND id=$11 RETURNING *`,
-      [donor_name?esc(donor_name):null, donor_email?esc(donor_email):null, donor_age, ira_custodian?esc(ira_custodian):null, rollover_amount, transfer_date||null, tax_year, confirmation_number?esc(confirmation_number):null, status||null, tid, req.params.id]);
+    const { donor_name, donor_email, ira_type, custodian_name, custodian_account, distribution_amount, distribution_date, transfer_method, is_qcd, qcd_age_verified, status, notes } = req.body;
+    const r = await pool.query(
+      `UPDATE ira_rollovers SET donor_name=COALESCE($1,donor_name), donor_email=COALESCE($2,donor_email),
+       ira_type=COALESCE($3,ira_type), custodian_name=COALESCE($4,custodian_name), custodian_account=COALESCE($5,custodian_account),
+       distribution_amount=COALESCE($6,distribution_amount), distribution_date=COALESCE($7,distribution_date),
+       transfer_method=COALESCE($8,transfer_method), is_qcd=COALESCE($9,is_qcd), qcd_age_verified=COALESCE($10,qcd_age_verified),
+       status=COALESCE($11,status), notes=COALESCE($12,notes) WHERE tenant_id=$13 AND id=$14 RETURNING *`,
+      [donor_name?esc(donor_name):null, donor_email?esc(donor_email):null, ira_type?esc(ira_type):null, custodian_name?esc(custodian_name):null,
+       custodian_account?esc(custodian_account):null, distribution_amount, distribution_date||null, transfer_method?esc(transfer_method):null,
+       is_qcd, qcd_age_verified, status?esc(status):null, notes?esc(notes):null, req.session.user.tenant_id, req.params.id]
+    );
     if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
     await audit(req, 'update', 'ira_rollovers', req.params.id);
     res.json(r.rows[0]);
   }));
 
+  // Delete IRA rollover
+  app.delete('/api/ira-rollovers/:id', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('DELETE FROM ira_rollovers WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
+    await audit(req, 'delete', 'ira_rollovers', req.params.id);
+    res.json({ ok: true });
+  }));
+
   // Confirm IRA rollover
   app.post('/api/ira-rollovers/:id/confirm', requireAuth, ah(async (req, res) => {
-    const { confirmation_number } = req.body;
-    const r = await pool.query(`UPDATE ira_rollovers SET status='confirmed', confirmation_number=COALESCE($1,confirmation_number) WHERE tenant_id=$2 AND id=$3 AND status IN ('initiated','confirmed') RETURNING *`,
-      [confirmation_number?esc(confirmation_number):null, req.session.user.tenant_id, req.params.id]);
-    if (!r.rows.length) return res.status(400).json({ error: 'Rollover not found or not in confirmable status' });
-    await audit(req, 'confirm', 'ira_rollovers', req.params.id);
+    const r = await pool.query(
+      'UPDATE ira_rollovers SET confirmed=true, confirmed_at=NOW(), confirmed_by=$1, status=$2 WHERE tenant_id=$3 AND id=$4 RETURNING *',
+      [esc(req.session.user.name||''), 'confirmed', req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
+    // Notify donor
     if (r.rows[0].donor_email) {
-      try {
-        await sendEmail(r.rows[0].donor_email, 'IRA Rollover Confirmed', `Dear ${r.rows[0].donor_name},\n\nYour IRA charitable rollover of UGX ${r.rows[0].rollover_amount} has been confirmed. Confirmation #: ${r.rows[0].confirmation_number}.\n\nThank you,\nThe Fundraising Team`);
-      } catch(e) {}
+      try { await sendEmail(r.rows[0].donor_email, 'IRA Rollover Confirmed', `Dear ${r.rows[0].donor_name}, your IRA rollover of UGX ${r.rows[0].distribution_amount} has been confirmed. Thank you for your generosity.`); } catch(e) {}
     }
-    res.json(r.rows[0]);
-  }));
-
-  // Get/Create distributions
-  app.get('/api/ira-rollovers/:id/distributions', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM ira_distributions WHERE tenant_id=$1 AND rollover_id=$2 ORDER BY distribution_date DESC`, [req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/ira-rollovers/:id/distributions', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const rollover = await pool.query(`SELECT * FROM ira_rollovers WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
-    if (!rollover.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
-    const { distribution_date, amount } = req.body;
-    if (!amount) return res.status(400).json({ error: 'amount required' });
-    const r = await pool.query(`INSERT INTO ira_distributions (tenant_id, rollover_id, distribution_date, amount) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [tid, req.params.id, distribution_date||'CURRENT_DATE', amount]);
-    await audit(req, 'create', 'ira_distributions', r.rows[0].id);
+    await audit(req, 'update', 'ira_rollovers', req.params.id);
     res.json(r.rows[0]);
   }));
 
   // Send tax form
   app.post('/api/ira-rollovers/:id/send-tax-form', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const rollover = await pool.query(`SELECT * FROM ira_rollovers WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
-    if (!rollover.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
-    const today = new Date().toISOString().split('T')[0];
-    // Mark all distributions as tax form sent
-    await pool.query(`UPDATE ira_distributions SET tax_form_sent=true, tax_form_date=$1 WHERE tenant_id=$2 AND rollover_id=$3`, [today, tid, req.params.id]);
-    await pool.query(`UPDATE ira_rollovers SET acknowledged=true WHERE id=$1`, [req.params.id]);
-    await audit(req, 'send_tax_form', 'ira_rollovers', req.params.id);
-    if (rollover.rows[0].donor_email) {
-      try {
-        await sendEmail(rollover.rows[0].donor_email, `IRA Tax Form — Tax Year ${rollover.rows[0].tax_year}`, `Dear ${rollover.rows[0].donor_name},\n\nYour IRA charitable rollover tax documentation for tax year ${rollover.rows[0].tax_year} has been prepared and sent. Please retain this for your tax records.\n\nRollover Amount: UGX ${rollover.rows[0].rollover_amount}\nCustodian: ${rollover.rows[0].ira_custodian}\n\nSincerely,\nThe Fundraising Team`);
-      } catch(e) {}
+    const { tax_year } = req.body;
+    const year = tax_year || new Date().getFullYear();
+    const r = await pool.query(
+      'UPDATE ira_rollovers SET tax_form_sent=true, tax_form_sent_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *',
+      [req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
+    // Create tax document record
+    await pool.query(
+      'INSERT INTO ira_tax_documents (tenant_id,ira_rollover_id,doc_type,doc_name,tax_year,sent_at) VALUES ($1,$2,$3,$4,$5,NOW())',
+      [req.session.user.tenant_id, req.params.id, 'tax_receipt', esc('IRA Tax Receipt ' + year), year]
+    );
+    // Send email
+    if (r.rows[0].donor_email) {
+      try { await sendEmail(r.rows[0].donor_email, `IRA Tax Receipt - ${year}`, `Dear ${r.rows[0].donor_name}, your IRA distribution tax receipt for ${year} is attached. Amount: UGX ${r.rows[0].distribution_amount}. ${r.rows[0].is_qcd?'This qualifies as a Qualified Charitable Distribution (QCD).':''}`); } catch(e) {}
     }
-    res.json({ ok: true, message: 'Tax form sent', date: today });
+    await audit(req, 'update', 'ira_rollovers', req.params.id);
+    res.json(r.rows[0]);
   }));
 
-  // IRA rollover stats
-  app.get('/api/ira-rollovers/stats', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const overview = await pool.query(`SELECT COUNT(*) as total_rollovers, COALESCE(SUM(rollover_amount),0) as total_amount, COUNT(DISTINCT donor_email) as unique_donors, COUNT(CASE WHEN status='initiated' THEN 1 END) as initiated, COUNT(CASE WHEN status='confirmed' THEN 1 END) as confirmed, COUNT(CASE WHEN status='completed' THEN 1 END) as completed, COUNT(CASE WHEN acknowledged=false THEN 1 END) as unacknowledged FROM ira_rollovers WHERE tenant_id=$1`, [tid]);
-    const byTaxYear = await pool.query(`SELECT tax_year, COUNT(*) as count, SUM(rollover_amount) as total FROM ira_rollovers WHERE tenant_id=$1 GROUP BY tax_year ORDER BY tax_year DESC`, [tid]);
-    res.json({ overview: overview.rows[0], by_tax_year: byTaxYear.rows });
+  // Send acknowledgment
+  app.post('/api/ira-rollovers/:id/acknowledge', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      'UPDATE ira_rollovers SET acknowledgment_sent=true, acknowledged_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *',
+      [req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
+    if (r.rows[0].donor_email) {
+      try { await sendEmail(r.rows[0].donor_email, 'IRA Rollover Acknowledgment', `Dear ${r.rows[0].donor_name}, we acknowledge receipt of your IRA rollover donation of UGX ${r.rows[0].distribution_amount}. Thank you!`); } catch(e) {}
+    }
+    await audit(req, 'update', 'ira_rollovers', req.params.id);
+    res.json(r.rows[0]);
   }));
 
-  // By tax year
-  app.get('/api/ira-rollovers/tax-year/:year', requireAuth, ah(async (req, res) => {
-    const year = parseInt(req.params.year);
-    if (isNaN(year)) return res.status(400).json({ error: 'Invalid year' });
-    const r = await pool.query(`SELECT * FROM ira_rollovers WHERE tenant_id=$1 AND tax_year=$2 ORDER BY created_at DESC`, [req.session.user.tenant_id, year]);
+  // Verify QCD age
+  app.post('/api/ira-rollovers/:id/verify-qcd-age', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      'UPDATE ira_rollovers SET qcd_age_verified=true WHERE tenant_id=$1 AND id=$2 AND is_qcd=true RETURNING *',
+      [req.session.user.tenant_id, req.params.id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found or not a QCD' });
+    await audit(req, 'update', 'ira_rollovers', req.params.id);
+    res.json(r.rows[0]);
+  }));
+
+  // Distributions CRUD
+  app.get('/api/ira-rollovers/:id/distributions', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM ira_distributions WHERE tenant_id=$1 AND ira_rollover_id=$2 ORDER BY distribution_date DESC', [req.session.user.tenant_id, req.params.id]);
     res.json(r.rows);
   }));
 
-  // =============================================
-  // UI PAGES
-  // =============================================
-
-  // Landing Pages UI
-  app.get('/landing-pages', requireAuth, ah(async (req, res) => {
-    const pages = await pool.query(`SELECT lp.*, c.title as campaign_title FROM landing_pages lp LEFT JOIN campaigns c ON lp.campaign_id=c.id WHERE lp.tenant_id=$1 ORDER BY lp.created_at DESC`, [req.session.user.tenant_id]);
-    const stats = await pool.query(`SELECT COUNT(*) as total, COUNT(CASE WHEN is_published THEN 1 END) as published, COALESCE(SUM(view_count),0) as total_views, COALESCE(SUM(conversion_count),0) as total_conversions FROM landing_pages WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Landing Page Builder', `
-      <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-bold">Landing Page Builder</h2>
-          <button onclick="document.getElementById('newPageForm').classList.toggle('hidden')" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">+ New Page</button>
-        </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-emerald-600">${stats.rows[0]?.total||0}</div><div class="text-sm text-gray-500">Total Pages</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-green-600">${stats.rows[0]?.published||0}</div><div class="text-sm text-gray-500">Published</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-blue-600">${stats.rows[0]?.total_views||0}</div><div class="text-sm text-gray-500">Total Views</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-purple-600">${stats.rows[0]?.total_conversions||0}</div><div class="text-sm text-gray-500">Conversions</div></div>
-        </div>
-        <div id="newPageForm" class="hidden bg-white p-6 rounded-lg shadow mb-6">
-          <h3 class="font-bold mb-4">Create Landing Page</h3>
-          <form method="POST" action="/api/landing-pages" class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <input name="title" placeholder="Page Title *" class="border p-2 rounded w-full" required>
-              <input name="slug" placeholder="URL Slug *" class="border p-2 rounded w-full" required>
-            </div>
-            <input name="headline" placeholder="Headline" class="border p-2 rounded w-full">
-            <input name="subheadline" placeholder="Subheadline" class="border p-2 rounded w-full">
-            <input name="hero_image_url" placeholder="Hero Image URL" class="border p-2 rounded w-full">
-            <textarea name="body_html" placeholder="Body HTML content" rows="4" class="border p-2 rounded w-full"></textarea>
-            <div class="grid grid-cols-2 gap-3">
-              <input name="cta_text" placeholder="CTA Text" value="Donate Now" class="border p-2 rounded w-full">
-              <input name="cta_link" placeholder="CTA Link" class="border p-2 rounded w-full">
-            </div>
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700">Create Page</button>
-          </form>
-        </div>
-        <div class="bg-white rounded-lg shadow overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr><th class="p-3 text-left">Title</th><th class="p-3 text-left">Slug</th><th class="p-3 text-left">Status</th><th class="p-3 text-left">Views</th><th class="p-3 text-left">Conversions</th><th class="p-3 text-left">Actions</th></tr></thead>
-            <tbody>${pages.rows.map(p => `<tr class="border-t"><td class="p-3">${esc(p.title)}</td><td class="p-3 text-gray-500">/${esc(p.slug)}</td><td class="p-3"><span class="px-2 py-1 rounded text-xs ${p.is_published?'bg-green-100 text-green-700':'bg-gray-100 text-gray-600'}">${p.is_published?'Published':'Draft'}</span></td><td class="p-3">${p.view_count}</td><td class="p-3">${p.conversion_count}</td><td class="p-3 space-x-1"><a href="/api/landing-pages/slug/${esc(p.slug)}" class="text-blue-600 hover:underline" target="_blank">View</a><a href="/api/landing-pages/${p.id}/publish" class="text-emerald-600 hover:underline" onclick="fetch(this.href,{method:'POST'});return false;">Publish</a><a href="/api/landing-pages/${p.id}/duplicate" class="text-purple-600 hover:underline" onclick="fetch(this.href,{method:'POST'});return false;">Duplicate</a></td></tr>`).join('')}</tbody>
-          </table>
-        </div>
-      </div>`);
+  app.post('/api/ira-rollovers/:id/distributions', requireAuth, ah(async (req, res) => {
+    const { distribution_amount, distribution_date, check_number, wire_reference, received_date, deposit_date, deposit_account, notes } = req.body;
+    if (!distribution_amount || distribution_amount <= 0) return res.status(400).json({ error: 'positive distribution_amount required' });
+    const r = await pool.query(
+      `INSERT INTO ira_distributions (tenant_id,ira_rollover_id,distribution_amount,distribution_date,check_number,wire_reference,received_date,deposit_date,deposit_account,notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [req.session.user.tenant_id, req.params.id, distribution_amount, distribution_date||null, esc(check_number||''), esc(wire_reference||''), received_date||null, deposit_date||null, esc(deposit_account||''), esc(notes||'')]
+    );
+    await audit(req, 'create', 'ira_distributions', r.rows[0].id);
+    res.json(r.rows[0]);
   }));
 
-  // Payment Gateways UI
-  app.get('/payment-gateways', requireAuth, ah(async (req, res) => {
-    const gateways = await pool.query(`SELECT * FROM payment_gateways WHERE tenant_id=$1 ORDER BY is_primary DESC, created_at`, [req.session.user.tenant_id]);
-    const stats = await pool.query(`SELECT g.gateway_type, g.name, COALESCE(SUM(gt.amount),0) as total, COUNT(gt.id) as tx_count FROM payment_gateways g LEFT JOIN gateway_transactions gt ON g.id=gt.gateway_id AND gt.status='completed' WHERE g.tenant_id=$1 GROUP BY g.id ORDER BY total DESC`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Payment Gateway Hub', `
-      <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-bold">Payment Gateway Hub</h2>
-          <button onclick="document.getElementById('newGatewayForm').classList.toggle('hidden')" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">+ Add Gateway</button>
-        </div>
-        <div id="newGatewayForm" class="hidden bg-white p-6 rounded-lg shadow mb-6">
-          <h3 class="font-bold mb-4">Add Payment Gateway</h3>
-          <form method="POST" action="/api/payment-gateways" class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <select name="gateway_type" class="border p-2 rounded w-full"><option value="stripe">Stripe</option><option value="paypal">PayPal</option><option value="flutterwave">Flutterwave</option><option value="paystack">Paystack</option><option value="manual">Manual</option></select>
-              <input name="name" placeholder="Gateway Name *" class="border p-2 rounded w-full" required>
-            </div>
-            <input name="api_key" placeholder="API Key" class="border p-2 rounded w-full">
-            <input name="api_secret" placeholder="API Secret" class="border p-2 rounded w-full">
-            <input name="webhook_url" placeholder="Webhook URL" class="border p-2 rounded w-full">
-            <label class="flex items-center gap-2"><input type="checkbox" name="is_primary"> Set as primary gateway</label>
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700">Add Gateway</button>
-          </form>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          ${gateways.rows.map(g => `
-            <div class="bg-white p-4 rounded-lg shadow ${g.is_primary?'border-l-4 border-emerald-500':''}">
-              <div class="flex justify-between items-start">
-                <div>
-                  <h3 class="font-bold">${esc(g.name)}</h3>
-                  <span class="text-sm text-gray-500">${g.gateway_type.toUpperCase()}</span>
-                  <div class="flex gap-2 mt-1">
-                    ${g.is_primary?'<span class="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs rounded">Primary</span>':''}
-                    <span class="px-2 py-0.5 ${g.is_active?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} text-xs rounded">${g.is_active?'Active':'Inactive'}</span>
-                  </div>
-                </div>
-                <div class="flex gap-1">
-                  <a href="/api/payment-gateways/${g.id}/test" class="text-blue-600 text-sm hover:underline" onclick="fetch(this.href,{method:'POST'}).then(r=>r.json()).then(d=>alert(d.message||'Test complete'));return false;">Test</a>
-                </div>
-              </div>
-            </div>`).join('')}
-        </div>
-      </div>`);
+  app.put('/api/ira-distributions/:distId', requireAuth, ah(async (req, res) => {
+    const { distribution_amount, received_date, deposit_date, notes } = req.body;
+    const r = await pool.query(
+      `UPDATE ira_distributions SET distribution_amount=COALESCE($1,distribution_amount), received_date=COALESCE($2,received_date),
+       deposit_date=COALESCE($3,deposit_date), notes=COALESCE($4,notes) WHERE tenant_id=$5 AND id=$6 RETURNING *`,
+      [distribution_amount, received_date||null, deposit_date||null, notes?esc(notes):null, req.session.user.tenant_id, req.params.distId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Distribution not found' });
+    await audit(req, 'update', 'ira_distributions', req.params.distId);
+    res.json(r.rows[0]);
   }));
 
-  // Renewal Campaigns UI
-  app.get('/renewal-campaigns', requireAuth, ah(async (req, res) => {
-    const campaigns = await pool.query(`SELECT * FROM donor_renewal_campaigns WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    const upcoming = await pool.query(`SELECT donor_email, MAX(donor_name) as donor_name, MAX(created_at) as last_donation FROM donations WHERE tenant_id=$1 AND donor_email IS NOT NULL AND created_at < NOW() - INTERVAL '30 days' GROUP BY donor_email ORDER BY MAX(created_at) DESC LIMIT 10`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Donor Renewal Automation', `
-      <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-bold">Donor Renewal Automation</h2>
-          <button onclick="document.getElementById('newCampaignForm').classList.toggle('hidden')" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">+ New Campaign</button>
-        </div>
-        <div id="newCampaignForm" class="hidden bg-white p-6 rounded-lg shadow mb-6">
-          <h3 class="font-bold mb-4">Create Renewal Campaign</h3>
-          <form method="POST" action="/api/renewal-campaigns" class="space-y-3">
-            <input name="name" placeholder="Campaign Name *" class="border p-2 rounded w-full" required>
-            <textarea name="description" placeholder="Description" rows="2" class="border p-2 rounded w-full"></textarea>
-            <input name="target_segment" placeholder="Target Segment" class="border p-2 rounded w-full">
-            <div class="grid grid-cols-2 gap-3">
-              <input name="trigger_days_before" type="number" placeholder="Days Before Expiry" value="30" class="border p-2 rounded w-full">
-              <input name="max_reminders" type="number" placeholder="Max Reminders" value="3" class="border p-2 rounded w-full">
-            </div>
-            <textarea name="email_template" placeholder="Email Template (use {name} for donor name)" rows="3" class="border p-2 rounded w-full"></textarea>
-            <textarea name="sms_template" placeholder="SMS Template (use {name} for donor name)" rows="2" class="border p-2 rounded w-full"></textarea>
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700">Create Campaign</button>
-          </form>
-        </div>
-        <div class="bg-white rounded-lg shadow overflow-x-auto mb-6">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr><th class="p-3 text-left">Name</th><th class="p-3 text-left">Status</th><th class="p-3 text-left">Targeted</th><th class="p-3 text-left">Renewed</th><th class="p-3 text-left">Raised</th><th class="p-3 text-left">Actions</th></tr></thead>
-            <tbody>${campaigns.rows.map(c => `<tr class="border-t"><td class="p-3 font-medium">${esc(c.name)}</td><td class="p-3"><span class="px-2 py-1 rounded text-xs ${c.status==='active'?'bg-green-100 text-green-700':c.status==='paused'?'bg-yellow-100 text-yellow-700':'bg-gray-100 text-gray-600'}">${c.status}</span></td><td class="p-3">${c.total_targeted}</td><td class="p-3">${c.total_renewed}</td><td class="p-3">UGX ${Number(c.total_raised).toLocaleString()}</td><td class="p-3 space-x-1">${c.status==='draft'||c.status==='paused'?`<a href="/api/renewal-campaigns/${c.id}/start" class="text-emerald-600 hover:underline" onclick="fetch(this.href,{method:'POST'}).then(()=>location.reload());return false;">Start</a>`:''}${c.status==='active'?`<a href="/api/renewal-campaigns/${c.id}/pause" class="text-yellow-600 hover:underline" onclick="fetch(this.href,{method:'POST'}).then(()=>location.reload());return false;">Pause</a>`:''}</td></tr>`).join('')}</tbody>
-          </table>
-        </div>
-        <div class="bg-white p-4 rounded-lg shadow">
-          <h3 class="font-bold mb-3">Donors Needing Renewal (30+ days)</h3>
-          <div class="text-sm text-gray-600">${upcoming.rows.length?upcoming.rows.map(d => `<div class="py-1 border-b last:border-0">${esc(d.donor_name||d.donor_email)} — Last: ${new Date(d.last_donation).toLocaleDateString()}</div>`).join(''):'<p>No donors currently needing renewal</p>'}</div>
-        </div>
-      </div>`);
+  app.delete('/api/ira-distributions/:distId', requireAuth, ah(async (req, res) => {
+    await pool.query('DELETE FROM ira_distributions WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.distId]);
+    await audit(req, 'delete', 'ira_distributions', req.params.distId);
+    res.json({ ok: true });
   }));
 
-  // Gift Clubs UI
-  app.get('/gift-clubs', requireAuth, ah(async (req, res) => {
-    const clubs = await pool.query(`SELECT * FROM donor_gift_clubs WHERE tenant_id=$1 ORDER BY min_annual_amount`, [req.session.user.tenant_id]);
-    const stats = await pool.query(`SELECT COUNT(DISTINCT donor_email) as total_members FROM gift_club_members WHERE tenant_id=$1 AND status='active'`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Donor Gift Clubs', `
-      <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-bold">Donor Gift Clubs</h2>
-          <button onclick="document.getElementById('newClubForm').classList.toggle('hidden')" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">+ New Club</button>
-        </div>
-        <div id="newClubForm" class="hidden bg-white p-6 rounded-lg shadow mb-6">
-          <h3 class="font-bold mb-4">Create Gift Club</h3>
-          <form method="POST" action="/api/gift-clubs" class="space-y-3">
-            <input name="name" placeholder="Club Name *" class="border p-2 rounded w-full" required>
-            <textarea name="description" placeholder="Description" rows="2" class="border p-2 rounded w-full"></textarea>
-            <div class="grid grid-cols-2 gap-3">
-              <input name="min_annual_amount" type="number" placeholder="Min Annual Amount (UGX)" class="border p-2 rounded w-full">
-              <input name="max_annual_amount" type="number" placeholder="Max Annual Amount (UGX, blank=unlimited)" class="border p-2 rounded w-full">
-            </div>
-            <input name="badge_icon" placeholder="Badge Icon (emoji)" class="border p-2 rounded w-full">
-            <textarea name="benefits" placeholder="Benefits (one per line)" rows="3" class="border p-2 rounded w-full"></textarea>
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700">Create Club</button>
-          </form>
-        </div>
-        <div class="mb-4 bg-emerald-50 p-4 rounded-lg"><span class="font-bold text-emerald-700">Total Active Members:</span> ${stats.rows[0]?.total_members||0}</div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          ${clubs.rows.map(c => `
-            <div class="bg-white p-4 rounded-lg shadow ${c.is_active?'':'opacity-60'}">
-              <div class="flex items-center gap-3 mb-2">
-                <span class="text-3xl">${c.badge_icon||'🏆'}</span>
-                <div>
-                  <h3 class="font-bold text-lg">${esc(c.name)}</h3>
-                  <p class="text-sm text-gray-500">UGX ${Number(c.min_annual_amount).toLocaleString()}${c.max_annual_amount?' — '+Number(c.max_annual_amount).toLocaleString():'+'}</p>
-                </div>
-              </div>
-              <p class="text-sm text-gray-600 mb-2">${esc(c.description||'')}</p>
-              <div class="flex justify-between items-center">
-                <span class="text-sm font-medium">${c.member_count} members</span>
-                <a href="/api/gift-clubs/${c.id}/auto-assign" class="text-emerald-600 text-sm hover:underline" onclick="fetch(this.href,{method:'POST'}).then(r=>r.json()).then(d=>alert(d.assigned+' donors assigned'));return false;">Auto-Assign</a>
-              </div>
-              ${c.benefits_json?`<div class="mt-2 text-xs text-gray-500">${JSON.parse(c.benefits_json).map(b => `<span class="inline-block bg-gray-100 rounded px-2 py-0.5 mr-1 mb-1">${esc(b)}</span>`).join('')}</div>`:''}
-            </div>`).join('')}
-        </div>
-      </div>`);
+  // Tax documents
+  app.get('/api/ira-rollovers/:id/tax-documents', requireAuth, ah(async (req, res) => {
+    const r = await pool.query('SELECT * FROM ira_tax_documents WHERE tenant_id=$1 AND ira_rollover_id=$2 ORDER BY created_at DESC', [req.session.user.tenant_id, req.params.id]);
+    res.json(r.rows);
   }));
 
-  // Campaign Videos UI
-  app.get('/campaign-videos', requireAuth, ah(async (req, res) => {
-    const videos = await pool.query(`SELECT cv.*, c.title as campaign_title FROM campaign_videos cv LEFT JOIN campaigns c ON cv.campaign_id=c.id WHERE cv.tenant_id=$1 ORDER BY cv.created_at DESC`, [req.session.user.tenant_id]);
-    const stats = await pool.query(`SELECT COUNT(*) as total_videos, COALESCE(SUM(view_count),0) as total_views, COUNT(CASE WHEN is_featured THEN 1 END) as featured FROM campaign_videos WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Campaign Videos', `
-      <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-bold">Campaign Videos</h2>
-          <button onclick="document.getElementById('newVideoForm').classList.toggle('hidden')" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">+ Add Video</button>
-        </div>
-        <div class="grid grid-cols-3 gap-4 mb-6">
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-emerald-600">${stats.rows[0]?.total_videos||0}</div><div class="text-sm text-gray-500">Videos</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-blue-600">${stats.rows[0]?.total_views||0}</div><div class="text-sm text-gray-500">Total Views</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-purple-600">${stats.rows[0]?.featured||0}</div><div class="text-sm text-gray-500">Featured</div></div>
-        </div>
-        <div id="newVideoForm" class="hidden bg-white p-6 rounded-lg shadow mb-6">
-          <h3 class="font-bold mb-4">Add Video</h3>
-          <form method="POST" action="/api/campaigns/0/videos" class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <select name="video_type" class="border p-2 rounded w-full"><option value="youtube">YouTube</option><option value="vimeo">Vimeo</option><option value="livestream">Livestream</option><option value="uploaded">Uploaded</option></select>
-              <input name="campaign_id" type="number" placeholder="Campaign ID" class="border p-2 rounded w-full">
-            </div>
-            <input name="video_url" placeholder="Video URL *" class="border p-2 rounded w-full" required>
-            <input name="title" placeholder="Title" class="border p-2 rounded w-full">
-            <textarea name="description" placeholder="Description" rows="2" class="border p-2 rounded w-full"></textarea>
-            <input name="thumbnail_url" placeholder="Thumbnail URL" class="border p-2 rounded w-full">
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700">Add Video</button>
-          </form>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          ${videos.rows.map(v => `
-            <div class="bg-white rounded-lg shadow overflow-hidden ${v.is_featured?'ring-2 ring-emerald-500':''}">
-              ${v.thumbnail_url?`<img src="${esc(v.thumbnail_url)}" alt="${esc(v.title||'Video')}" class="w-full h-40 object-cover">`:`<div class="w-full h-40 bg-gray-200 flex items-center justify-center text-4xl">${v.video_type==='youtube'?'▶️':v.video_type==='livestream'?'🔴':'🎬'}</div>`}
-              <div class="p-3">
-                <div class="flex justify-between items-start">
-                  <h3 class="font-medium text-sm">${esc(v.title||'Untitled')}</h3>
-                  <span class="text-xs bg-gray-100 rounded px-1">${v.video_type}</span>
-                </div>
-                <div class="text-xs text-gray-500 mt-1">${v.view_count} views · ${v.campaign_title||'No campaign'}</div>
-                ${v.is_featured?'<span class="inline-block mt-1 text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">Featured</span>':''}
-              </div>
-            </div>`).join('')}
-        </div>
-      </div>`);
+  app.post('/api/ira-rollovers/:id/tax-documents', requireAuth, ah(async (req, res) => {
+    const { doc_type, doc_name, doc_url, tax_year } = req.body;
+    if (!doc_name) return res.status(400).json({ error: 'doc_name required' });
+    const r = await pool.query(
+      'INSERT INTO ira_tax_documents (tenant_id,ira_rollover_id,doc_type,doc_name,doc_url,tax_year) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.session.user.tenant_id, req.params.id, esc(doc_type||'acknowledgment'), esc(doc_name), esc(doc_url||''), tax_year||new Date().getFullYear()]
+    );
+    await audit(req, 'create', 'ira_tax_documents', r.rows[0].id);
+    res.json(r.rows[0]);
   }));
 
-  // Stock Donations UI
-  app.get('/stock-donations', requireAuth, ah(async (req, res) => {
-    const donations = await pool.query(`SELECT * FROM stock_donations WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    const stats = await pool.query(`SELECT COUNT(*) as total, COALESCE(SUM(total_value),0) as total_value, COUNT(CASE WHEN status='pending' THEN 1 END) as pending, COUNT(CASE WHEN acknowledged=false THEN 1 END) as unacknowledged FROM stock_donations WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Stock Donations', `
-      <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-bold">Stock / Securities Donations</h2>
-          <button onclick="document.getElementById('newStockForm').classList.toggle('hidden')" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">+ New Donation</button>
-        </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-emerald-600">${stats.rows[0]?.total||0}</div><div class="text-sm text-gray-500">Total</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-blue-600">UGX ${Number(stats.rows[0]?.total_value||0).toLocaleString()}</div><div class="text-sm text-gray-500">Total Value</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-yellow-600">${stats.rows[0]?.pending||0}</div><div class="text-sm text-gray-500">Pending</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-red-600">${stats.rows[0]?.unacknowledged||0}</div><div class="text-sm text-gray-500">Unacknowledged</div></div>
-        </div>
-        <div id="newStockForm" class="hidden bg-white p-6 rounded-lg shadow mb-6">
-          <h3 class="font-bold mb-4">Record Stock Donation</h3>
-          <form method="POST" action="/api/stock-donations" class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <input name="donor_name" placeholder="Donor Name *" class="border p-2 rounded w-full" required>
-              <input name="donor_email" placeholder="Donor Email" class="border p-2 rounded w-full">
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <input name="stock_symbol" placeholder="Stock Symbol *" class="border p-2 rounded w-full" required>
-              <input name="stock_name" placeholder="Stock Name" class="border p-2 rounded w-full">
-            </div>
-            <div class="grid grid-cols-3 gap-3">
-              <input name="shares" type="number" step="0.01" placeholder="Shares *" class="border p-2 rounded w-full" required>
-              <input name="price_per_share_at_donation" type="number" step="0.01" placeholder="Price/Share *" class="border p-2 rounded w-full" required>
-              <input name="brokerage_name" placeholder="Brokerage" class="border p-2 rounded w-full">
-            </div>
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700">Record Donation</button>
-          </form>
-        </div>
-        <div class="bg-white rounded-lg shadow overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr><th class="p-3 text-left">Donor</th><th class="p-3 text-left">Stock</th><th class="p-3 text-left">Shares</th><th class="p-3 text-left">Value</th><th class="p-3 text-left">Status</th><th class="p-3 text-left">Actions</th></tr></thead>
-            <tbody>${donations.rows.map(d => `<tr class="border-t"><td class="p-3">${esc(d.donor_name)}</td><td class="p-3 font-mono">${esc(d.stock_symbol)}</td><td class="p-3">${d.shares}</td><td class="p-3">UGX ${Number(d.total_value).toLocaleString()}</td><td class="p-3"><span class="px-2 py-1 rounded text-xs ${d.status==='completed'?'bg-green-100 text-green-700':d.status==='pending'?'bg-yellow-100 text-yellow-700':'bg-gray-100 text-gray-600'}">${d.status}</span>${!d.acknowledged?'<span class="ml-1 px-2 py-1 rounded text-xs bg-red-100 text-red-700">Unack</span>':''}</td><td class="p-3">${!d.acknowledged?`<a href="/api/stock-donations/${d.id}/acknowledge" class="text-emerald-600 hover:underline" onclick="fetch(this.href,{method:'POST'}).then(()=>location.reload());return false;">Acknowledge</a>`:''}</td></tr>`).join('')}</tbody>
-          </table>
-        </div>
-      </div>`);
+  // IRA stats
+  app.get('/api/ira-rollovers/stats/summary', requireAuth, ah(async (req, res) => {
+    const r = await pool.query(
+      `SELECT COUNT(*) as total_rollovers, COALESCE(SUM(distribution_amount),0) as total_amount,
+       COUNT(CASE WHEN confirmed THEN 1 END) as confirmed_count,
+       COUNT(CASE WHEN is_qcd THEN 1 END) as qcd_count,
+       COUNT(CASE WHEN tax_form_sent THEN 1 END) as tax_forms_sent,
+       COUNT(CASE WHEN status='pending' THEN 1 END) as pending_count,
+       COUNT(DISTINCT ira_type) as ira_types
+       FROM ira_rollovers WHERE tenant_id=$1`,
+      [req.session.user.tenant_id]
+    );
+    res.json(r.rows[0]);
   }));
 
-  // Real Estate Donations UI
-  app.get('/real-estate-donations', requireAuth, ah(async (req, res) => {
-    const donations = await pool.query(`SELECT * FROM real_estate_donations WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    const stats = await pool.query(`SELECT COUNT(*) as total, COALESCE(SUM(appraised_value),0) as total_value, COUNT(CASE WHEN status='submitted' THEN 1 END) as submitted, COUNT(CASE WHEN legal_review_status='pending' THEN 1 END) as pending_legal FROM real_estate_donations WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Real Estate Donations', `
-      <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-bold">Real Estate Donations</h2>
-          <button onclick="document.getElementById('newPropertyForm').classList.toggle('hidden')" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">+ New Donation</button>
-        </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-emerald-600">${stats.rows[0]?.total||0}</div><div class="text-sm text-gray-500">Total</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-blue-600">UGX ${Number(stats.rows[0]?.total_value||0).toLocaleString()}</div><div class="text-sm text-gray-500">Appraised Value</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-yellow-600">${stats.rows[0]?.submitted||0}</div><div class="text-sm text-gray-500">Submitted</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-purple-600">${stats.rows[0]?.pending_legal||0}</div><div class="text-sm text-gray-500">Pending Legal</div></div>
-        </div>
-        <div id="newPropertyForm" class="hidden bg-white p-6 rounded-lg shadow mb-6">
-          <h3 class="font-bold mb-4">Record Real Estate Donation</h3>
-          <form method="POST" action="/api/real-estate-donations" class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <input name="donor_name" placeholder="Donor Name *" class="border p-2 rounded w-full" required>
-              <input name="donor_email" placeholder="Donor Email" class="border p-2 rounded w-full">
-            </div>
-            <select name="property_type" class="border p-2 rounded w-full"><option value="residential">Residential</option><option value="commercial">Commercial</option><option value="land">Land</option><option value="other">Other</option></select>
-            <input name="address" placeholder="Address" class="border p-2 rounded w-full">
-            <div class="grid grid-cols-3 gap-3">
-              <input name="city" placeholder="City" class="border p-2 rounded w-full">
-              <input name="region" placeholder="Region" class="border p-2 rounded w-full">
-              <input name="country" placeholder="Country" value="Uganda" class="border p-2 rounded w-full">
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <input name="area_sqft" type="number" placeholder="Area (sq ft)" class="border p-2 rounded w-full">
-              <input name="appraised_value" type="number" placeholder="Appraised Value (UGX)" class="border p-2 rounded w-full">
-            </div>
-            <textarea name="notes" placeholder="Notes" rows="2" class="border p-2 rounded w-full"></textarea>
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700">Submit Donation</button>
-          </form>
-        </div>
-        <div class="bg-white rounded-lg shadow overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr><th class="p-3 text-left">Donor</th><th class="p-3 text-left">Type</th><th class="p-3 text-left">Location</th><th class="p-3 text-left">Value</th><th class="p-3 text-left">Status</th><th class="p-3 text-left">Legal</th><th class="p-3 text-left">Actions</th></tr></thead>
-            <tbody>${donations.rows.map(d => `<tr class="border-t"><td class="p-3">${esc(d.donor_name)}</td><td class="p-3">${d.property_type}</td><td class="p-3 text-xs">${esc(d.city||'')}${d.region?', '+esc(d.region):''}</td><td class="p-3">UGX ${Number(d.appraised_value||0).toLocaleString()}</td><td class="p-3"><span class="px-2 py-1 rounded text-xs ${d.status==='completed'?'bg-green-100 text-green-700':d.status==='rejected'?'bg-red-100 text-red-700':'bg-yellow-100 text-yellow-700'}">${d.status}</span></td><td class="p-3"><span class="px-2 py-1 rounded text-xs ${d.legal_review_status==='approved'?'bg-green-100 text-green-700':d.legal_review_status==='rejected'?'bg-red-100 text-red-700':'bg-gray-100 text-gray-600'}">${d.legal_review_status}</span></td><td class="p-3 space-x-1">${!d.acknowledged?`<a href="/api/real-estate-donations/${d.id}/acknowledge" class="text-emerald-600 hover:underline text-xs" onclick="fetch(this.href,{method:'POST'}).then(()=>location.reload());return false;">Acknowledge</a>`:''}${d.status==='submitted'||d.status==='under_review'?`<a href="/api/real-estate-donations/${d.id}/appraise" class="text-blue-600 hover:underline text-xs" onclick="fetch(this.href,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appraised_value:prompt('Enter appraised value:')})}).then(()=>location.reload());return false;">Appraise</a>`:''}</td></tr>`).join('')}</tbody>
-          </table>
-        </div>
-      </div>`);
-  }));
-
-  // IRA Rollovers UI
+  // Page route
   app.get('/ira-rollovers', requireAuth, ah(async (req, res) => {
-    const rollovers = await pool.query(`SELECT * FROM ira_rollovers WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    const stats = await pool.query(`SELECT COUNT(*) as total, COALESCE(SUM(rollover_amount),0) as total_amount, COUNT(CASE WHEN status='completed' THEN 1 END) as completed, COUNT(CASE WHEN acknowledged=false THEN 1 END) as unacknowledged FROM ira_rollovers WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'IRA Charitable Rollovers', `
-      <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-bold">IRA Charitable Rollovers</h2>
-          <button onclick="document.getElementById('newRolloverForm').classList.toggle('hidden')" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">+ New Rollover</button>
-        </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-emerald-600">${stats.rows[0]?.total||0}</div><div class="text-sm text-gray-500">Total Rollovers</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-blue-600">UGX ${Number(stats.rows[0]?.total_amount||0).toLocaleString()}</div><div class="text-sm text-gray-500">Total Amount</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-green-600">${stats.rows[0]?.completed||0}</div><div class="text-sm text-gray-500">Completed</div></div>
-          <div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-red-600">${stats.rows[0]?.unacknowledged||0}</div><div class="text-sm text-gray-500">Unacknowledged</div></div>
-        </div>
-        <div id="newRolloverForm" class="hidden bg-white p-6 rounded-lg shadow mb-6">
-          <h3 class="font-bold mb-4">Record IRA Rollover</h3>
-          <form method="POST" action="/api/ira-rollovers" class="space-y-3">
-            <div class="grid grid-cols-2 gap-3">
-              <input name="donor_name" placeholder="Donor Name *" class="border p-2 rounded w-full" required>
-              <input name="donor_email" placeholder="Donor Email" class="border p-2 rounded w-full">
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <input name="donor_age" type="number" placeholder="Donor Age (must be 70+)" class="border p-2 rounded w-full">
-              <input name="ira_custodian" placeholder="IRA Custodian" class="border p-2 rounded w-full">
-            </div>
-            <div class="grid grid-cols-3 gap-3">
-              <input name="rollover_amount" type="number" step="0.01" placeholder="Rollover Amount (UGX) *" class="border p-2 rounded w-full" required>
-              <input name="transfer_date" type="date" class="border p-2 rounded w-full">
-              <input name="tax_year" type="number" placeholder="Tax Year" value="${new Date().getFullYear()}" class="border p-2 rounded w-full">
-            </div>
-            <input name="confirmation_number" placeholder="Confirmation Number" class="border p-2 rounded w-full">
-            <button type="submit" class="bg-emerald-600 text-white px-6 py-2 rounded hover:bg-emerald-700">Record Rollover</button>
-          </form>
-        </div>
-        <div class="bg-white rounded-lg shadow overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr><th class="p-3 text-left">Donor</th><th class="p-3 text-left">Custodian</th><th class="p-3 text-left">Amount</th><th class="p-3 text-left">Tax Year</th><th class="p-3 text-left">Status</th><th class="p-3 text-left">Actions</th></tr></thead>
-            <tbody>${rollovers.rows.map(r => `<tr class="border-t"><td class="p-3">${esc(r.donor_name)}${r.donor_age?' (age '+r.donor_age+')':''}</td><td class="p-3">${esc(r.ira_custodian||'—')}</td><td class="p-3">UGX ${Number(r.rollover_amount).toLocaleString()}</td><td class="p-3">${r.tax_year}</td><td class="p-3"><span class="px-2 py-1 rounded text-xs ${r.status==='completed'?'bg-green-100 text-green-700':r.status==='cancelled'?'bg-red-100 text-red-700':'bg-yellow-100 text-yellow-700'}">${r.status}</span></td><td class="p-3 space-x-1">${r.status==='initiated'?`<a href="/api/ira-rollovers/${r.id}/confirm" class="text-emerald-600 hover:underline text-xs" onclick="fetch(this.href,{method:'POST'}).then(()=>location.reload());return false;">Confirm</a>`:''}${!r.acknowledged?`<a href="/api/ira-rollovers/${r.id}/send-tax-form" class="text-blue-600 hover:underline text-xs" onclick="fetch(this.href,{method:'POST'}).then(()=>location.reload());return false;">Send Tax Form</a>`:''}</td></tr>`).join('')}</tbody>
-          </table>
-        </div>
-      </div>`);
+    const iras = await pool.query('SELECT * FROM ira_rollovers WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
+    const stats = await pool.query('SELECT COUNT(*) as total, COALESCE(SUM(distribution_amount),0) as total_amount, COUNT(CASE WHEN is_qcd THEN 1 END) as qcd_total FROM ira_rollovers WHERE tenant_id=$1', [req.session.user.tenant_id]);
+    renderPage(req, res, 'IRA Rollovers', `<div class="max-w-6xl mx-auto p-6">
+      <h1 class="text-2xl font-bold mb-6">IRA Rollovers</h1>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-indigo-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Rollovers</p><p class="text-2xl font-bold text-indigo-700">${stats.rows[0]?.total||0}</p></div>
+        <div class="bg-indigo-50 rounded-lg p-4"><p class="text-sm text-gray-600">Total Amount</p><p class="text-2xl font-bold text-indigo-700">UGX ${stats.rows[0]?.total_amount||0}</p></div>
+        <div class="bg-indigo-50 rounded-lg p-4"><p class="text-sm text-gray-600">QCDs</p><p class="text-2xl font-bold text-indigo-700">${stats.rows[0]?.qcd_total||0}</p></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${iras.rows.map(i => `<div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold">${esc(i.donor_name)}</h3>
+        <p class="text-sm text-gray-500">${esc(i.ira_type)} | UGX ${i.distribution_amount} | ${esc(i.transfer_method)} | ${i.confirmed?'<span class="text-emerald-600">Confirmed</span>':'<span class="text-amber-600">Pending</span>'} ${i.is_qcd?'| QCD':''}</p>
+      </div>`).join('')}</div>
+    </div>`);
   }));
+
+  console.log('[FundraisingUltimate10] 8 features registered — Landing Pages, Payment Gateways, Donor Renewal, Gift Clubs, Video Integration, Stock/Securities, Real Estate, IRA Rollovers');
 };

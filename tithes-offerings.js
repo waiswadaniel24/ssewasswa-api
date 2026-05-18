@@ -335,9 +335,6 @@ module.exports = function tithesOfferings(app, db, pool, renderPage, esc) {
       `INSERT INTO tithes_records (tenant_id, member_id, member_name, type, amount, payment_method, reference, date, notes, campaign_id, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [tid, member_id || null, (member_name || '').trim(), type || 'tithe', parseFloat(amount) || 0, payment_method || 'cash', (reference || '').trim(), date, (notes || '').trim(), campaign_id || null, user.id]
     );
-    // Track revenue for tithe/offering
-    try { await global.trackRevenue('tithe_offering', parseFloat(amount||0) / 3700, (type||'tithe') + ': ' + (member_name||'Member'), 'tithe-' + Date.now()); } catch(e) {}
-    try { await global.creditDeveloperRevenue(tid, Math.round(parseFloat(amount||0) * 0.02), 'tithe_offering', 'Tithe/offering: ' + member_name); } catch(e) {}
     req.session.flash = { type: 'success', msg: 'Giving record saved successfully!' };
     res.redirect('/tithes/record');
   }));
