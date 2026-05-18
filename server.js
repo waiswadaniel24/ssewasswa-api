@@ -13990,6 +13990,186 @@ app.get('/dev/subscription-access/bulk', requireAuth, requireSuperAdmin, ah(asyn
   res.redirect('/dev/subscription-access');
 }));
 
+// === MISSING DEV ROUTES (linked from /dev/master nav but had no handlers) ===
+
+app.get('/dev/api-health', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const startTime = Date.now();
+  let dbOk = false, dbLatency = 0;
+  try {
+    const t0 = Date.now();
+    await pool.query('SELECT 1');
+    dbLatency = Date.now() - t0;
+    dbOk = true;
+  } catch (e) { /* db not ok */ }
+  const pageMs = Date.now() - startTime;
+  const statusColor = (ok) => ok ? '#059669' : '#dc2626';
+  res.send(renderPage('API Health', `
+    <div class="hero" style="background:linear-gradient(135deg,#10b981,#059669)"><h1>API Health Monitor</h1><p>Real-time system status</p></div>
+    <div class="grid">
+      <div class="card" style="border-left:4px solid ${statusColor(dbOk)}">
+        <h3>Database</h3>
+        <p style="color:${statusColor(dbOk)};font-size:28px;font-weight:900">${dbOk ? 'Connected' : 'Disconnected'}</p>
+        <p class="muted">Latency: ${dbLatency}ms</p>
+      </div>
+      <div class="card" style="border-left:4px solid #059669">
+        <h3>Server</h3>
+        <p style="color:#059669;font-size:28px;font-weight:900">Running</p>
+        <p class="muted">Page render: ${pageMs}ms</p>
+      </div>
+      <div class="card" style="border-left:4px solid #059669">
+        <h3>Session Store</h3>
+        <p style="color:#059669;font-size:28px;font-weight:900">${pgSessionStore ? 'PostgreSQL' : 'Memory'}</p>
+        <p class="muted">${pgSessionStore ? 'Persistent across instances' : 'Local memory only'}</p>
+      </div>
+      <div class="card" style="border-left:4px solid #059669">
+        <h3>Environment</h3>
+        <p style="font-size:16px;font-weight:700">${process.env.NODE_ENV || 'development'}</p>
+        <p class="muted">Port: ${process.env.PORT || 9999}</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h3>Endpoint Checks</h3>
+      <div id="checks"></div>
+    </div>
+    <script>
+    (async function(){
+      var checks = ['/ping', '/health'];
+      var el = document.getElementById('checks');
+      var html = '<table><tr><th>Endpoint</th><th>Status</th><th>Latency</th></tr>';
+      for (var i = 0; i < checks.length; i++) {
+        try {
+          var t0 = Date.now();
+          var r = await fetch(checks[i]);
+          var ms = Date.now() - t0;
+          html += '<tr><td><code>' + checks[i] + '</code></td><td style="color:' + (r.ok ? '#059669' : '#dc2626') + '">' + r.status + '</td><td>' + ms + 'ms</td></tr>';
+        } catch(e) {
+          html += '<tr><td><code>' + checks[i] + '</code></td><td style="color:#dc2626">Error</td><td>-</td></tr>';
+        }
+      }
+      html += '</table>';
+      el.innerHTML = html;
+    })();
+    </script>
+  `, req.session.user));
+}));
+
+app.get('/dev/api-analytics', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [totalRequests, totalUsers, totalTenants, activeSubs] = await Promise.all([
+    pool.query('SELECT COUNT(*) FROM audit_logs WHERE created_at > NOW() - INTERVAL \'24 hours\'').catch(() => ({rows:[{count:0}]})),
+    pool.query('SELECT COUNT(*) FROM users').catch(() => ({rows:[{count:0}]})),
+    pool.query('SELECT COUNT(*) FROM tenants').catch(() => ({rows:[{count:0}]})),
+    pool.query('SELECT COUNT(*) FROM subscriptions WHERE status=\'active\'').catch(() => ({rows:[{count:0}]}))
+  ]);
+  const recentLogs = (await pool.query('SELECT action, details, user_email, created_at FROM audit_logs ORDER BY id DESC LIMIT 50').catch(() => ({rows:[]}))).rows;
+  res.send(renderPage('API Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)"><h1>API Analytics</h1><p>Usage statistics and metrics</p></div>
+    <div class="grid">
+      <div class="card" style="text-align:center"><div style="font-size:32px;font-weight:900;color:#4f46e5">${totalRequests.rows[0].count}</div><div class="muted">Requests (24h)</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:32px;font-weight:900;color:#059669">${totalUsers.rows[0].count}</div><div class="muted">Total Users</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:32px;font-weight:900;color:#f59e0b">${totalTenants.rows[0].count}</div><div class="muted">Tenants</div></div>
+      <div class="card" style="text-align:center"><div style="font-size:32px;font-weight:900;color:#ec4899">${activeSubs.rows[0].count}</div><div class="muted">Active Subscriptions</div></div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <h3>Recent Activity</h3>
+      ${recentLogs.length ? `<table><tr><th>Time</th><th>User</th><th>Action</th><th>Details</th></tr>
+      ${recentLogs.map(l => '<tr><td style="font-size:12px">' + new Date(l.created_at).toLocaleString() + '</td><td>' + esc(l.user_email) + '</td><td><span class="tag">' + esc(l.action) + '</span></td><td style="font-size:12px" class="muted">' + esc(String(l.details || '').substring(0, 100)) + '</td></tr>').join('')}
+      </table>` : '<p class="muted">No activity logged yet</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/dev/api-playground', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  res.send(renderPage('API Playground', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)"><h1>API Playground</h1><p>Test your API endpoints interactively</p></div>
+    <div class="card">
+      <h3>Quick API Test</h3>
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <select id="method" style="padding:8px;border-radius:8px;border:1px solid #e2e8f0">
+          <option value="GET">GET</option><option value="POST">POST</option><option value="PUT">PUT</option><option value="DELETE">DELETE</option>
+        </select>
+        <input id="url" placeholder="/api/endpoint" style="flex:1;padding:8px;border-radius:8px;border:1px solid #e2e8f0" value="/ping">
+        <button class="btn" onclick="sendReq()">Send</button>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:16px">
+        <div style="flex:1"><label>Headers (JSON)</label><textarea id="headers" rows="3" style="width:100%;padding:8px;border-radius:8px;border:1px solid #e2e8f0;font-family:monospace">{"Content-Type": "application/json"}</textarea></div>
+        <div style="flex:1"><label>Body (JSON)</label><textarea id="body" rows="3" style="width:100%;padding:8px;border-radius:8px;border:1px solid #e2e8f0;font-family:monospace">{}</textarea></div>
+      </div>
+      <div style="background:#1e293b;border-radius:8px;padding:16px;color:#e2e8f0;font-family:monospace;min-height:200px;overflow:auto" id="result">
+        <span style="color:#64748b">// Response will appear here</span>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Common Endpoints</h3>
+      <table>
+        <tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+        <tr><td><span class="tag">GET</span></td><td>/ping</td><td>Health check</td></tr>
+        <tr><td><span class="tag">GET</span></td><td>/health</td><td>Detailed health</td></tr>
+        <tr><td><span class="tag">POST</span></td><td>/login</td><td>User login</td></tr>
+        <tr><td><span class="tag">GET</span></td><td>/api/stats</td><td>Platform stats</td></tr>
+      </table>
+    </div>
+    <script>
+    async function sendReq(){
+      var method = document.getElementById('method').value;
+      var url = document.getElementById('url').value;
+      var headers = {}; var body = null;
+      try { headers = JSON.parse(document.getElementById('headers').value); } catch(e){}
+      try { var b = document.getElementById('body').value; if(b && method !== 'GET') body = b; } catch(e){}
+      var el = document.getElementById('result');
+      el.innerHTML = '<span style="color:#f59e0b">Loading...</span>';
+      try {
+        var t0 = Date.now();
+        var opts = { method: method, headers: headers };
+        if (body) opts.body = body;
+        var r = await fetch(url, opts);
+        var ms = Date.now() - t0;
+        var text = await r.text();
+        try { var json = JSON.parse(text); text = JSON.stringify(json, null, 2); } catch(e){}
+        el.innerHTML = '<div style="margin-bottom:8px"><span style="color:' + (r.ok ? '#059669' : '#dc2626') + ';font-weight:700">' + r.status + ' ' + r.statusText + '</span> <span style="color:#64748b">(' + ms + 'ms)</span></div><pre style="white-space:pre-wrap;word-break:break-all">' + text.replace(/</g,'&lt;') + '</pre>';
+      } catch(e) {
+        el.innerHTML = '<span style="color:#dc2626">Error: ' + e.message + '</span>';
+      }
+    }
+    </script>
+  `, req.session.user));
+}));
+
+app.get('/dev/onboarding', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const [userCount, tenantCount, logCount] = await Promise.all([
+    pool.query('SELECT COUNT(*) FROM users').catch(() => ({rows:[{count:0}]})),
+    pool.query('SELECT COUNT(*) FROM tenants').catch(() => ({rows:[{count:0}]})),
+    pool.query('SELECT COUNT(*) FROM audit_logs').catch(() => ({rows:[{count:0}]}))
+  ]);
+  const steps = [
+    {title: 'Set Environment Variables', desc: 'Configure GMAIL_USER, GMAIL_PASS, SESSION_SECRET, AT_API_KEY for full functionality', done: !!(process.env.GMAIL_USER && process.env.SESSION_SECRET)},
+    {title: 'Configure Payment Providers', desc: 'Set up MTN MoMo, Airtel Money, or Flutterwave for online payments', done: !!(process.env.MTN_COLLECTION_API_KEY || process.env.FLW_SECRET_KEY)},
+    {title: 'Customize Platform Settings', desc: 'Update platform name, logo, colors, and contact info in /dev/settings', done: false},
+    {title: 'Create First Tenant', desc: 'Register your school/organization as the first tenant on the platform', done: parseInt(tenantCount.rows[0].count) > 0},
+    {title: 'Explore Modules', desc: 'Browse the 159+ feature modules available across School, Church, Health, Business portals', done: parseInt(userCount.rows[0].count) > 1},
+  ];
+  res.send(renderPage('Developer Onboarding', `
+    <div class="hero" style="background:linear-gradient(135deg,#22c55e,#059669)"><h1>Developer Onboarding</h1><p>Get started with the Comfort Zone platform</p></div>
+    <div class="card" style="margin-bottom:20px">
+      <h3>Platform Stats</h3>
+      <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+        <div style="text-align:center"><div style="font-size:24px;font-weight:900;color:#4f46e5">${userCount.rows[0].count}</div><div class="muted">Users</div></div>
+        <div style="text-align:center"><div style="font-size:24px;font-weight:900;color:#059669">${tenantCount.rows[0].count}</div><div class="muted">Tenants</div></div>
+        <div style="text-align:center"><div style="font-size:24px;font-weight:900;color:#f59e0b">${logCount.rows[0].count}</div><div class="muted">Audit Logs</div></div>
+      </div>
+    </div>
+    <h2>Setup Checklist</h2>
+    ${steps.map((s, i) => `
+      <div class="card" style="margin-bottom:12px;border-left:4px solid ${s.done ? '#059669' : '#f59e0b'}">
+        <h3>${s.done ? '&#9989;' : '&#9744;'} ${esc(s.title)}</h3>
+        <p class="muted">${esc(s.desc)}</p>
+        ${i === 0 ? '<a href="/dev/settings" class="btn btn-sm" style="margin-top:8px">Go to Settings</a>' : ''}
+        ${i === 2 ? '<a href="/dev/settings" class="btn btn-sm" style="margin-top:8px">Configure</a>' : ''}
+        ${i === 4 ? '<a href="/dev/portals" class="btn btn-sm" style="margin-top:8px">Switch to Tenant</a>' : ''}
+      </div>
+    `).join('')}
+  `, req.session.user));
+}));
+
 // =============================================
 // PAGE EDITOR (User-editable pages with stamps/headers/footers/badges/signatures)
 // =============================================
