@@ -197,7 +197,7 @@ app.get('/sw.js', (req, res) => {
   if (fs.existsSync(swPath)) {
     res.sendFile(swPath);
   } else {
-    res.send(`const CACHE_NAME='comfort-v7.0';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/login','/offline'])).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});`);
+    res.send(`const CACHE_NAME='comfort-v8.0';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/login','/offline'])).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});`);
   }
 });
 app.use(express.static('public'));
@@ -8161,7 +8161,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
     <style>.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.nav-wrap{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}</style>
 
     <!-- Impersonation Banner -->
-    ${impersonating ? `<div style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:12px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><span>You are viewing as: <strong>${esc(req.session.user.tenant_name || 'Unknown')}</strong></span><div style="display:flex;gap:8px"><a href="/dev/exit-tenant" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Exit Impersonation</a><a href="/dev/portals" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Switch Portal</a></div></div>` : ''}
+    ${impersonating ? `<div style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:12px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><span>You are viewing as: <strong>${esc(req.session.user.tenant_name || 'Unknown')}</strong></span><div style="display:flex;gap:8px"><a href="/dev/exit-tenant" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Exit Impersonation</a><a href="/switch-portal" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Switch Portal</a></div></div>` : ''}
     ${flashHtml}
 
     <!-- Hero -->
@@ -8192,7 +8192,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <h3 style="margin:0 0 12px;font-size:14px;color:#64748b;text-transform:uppercase;letter-spacing:1px">Quick Navigation</h3>
       <div class="nav-wrap">
         <!-- Portal -->
-        ${navItem('/dev/portals', 'Portal Switcher', '&#127760;', 'linear-gradient(135deg,#6366f1,#8b5cf6)')}
+        ${navItem('/switch-portal', 'Portal Switcher', '&#127760;', 'linear-gradient(135deg,#6366f1,#8b5cf6)')}
         ${navItem('/dev/settings', 'Settings', '&#9881;', '#475569')}
         ${navItem('/dev/api-health', 'System Health', '&#128737;', '#059669')}
         ${navItem('/dev/api-analytics', 'Analytics', '&#128200;', '#0ea5e9')}
@@ -8238,7 +8238,7 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
         ${actionCard('/status/admin', '&#128994;', '#fce7f3', 'Platform Status', 'Service incidents')}
         ${actionCard('/dev/cleanup', '&#9888;', '#fee2e2', 'Database Cleanup', 'Erase test data')}
         ${actionCard('/fundraising', '&#127873;', '#dcfce7', 'Fundraising', 'Campaigns & donations')}
-        ${actionCard('/dev/portals', '&#127760;', '#eef2ff', 'Switch Portal', 'Preview any tenant portal')}
+        ${actionCard('/switch-portal', '&#127760;', '#eef2ff', 'Switch Portal', 'Change your portal type')}
         ${actionCard('/dev/api-health', '&#128737;', '#ecfdf5', 'System Health', 'Database & server status')}
         ${actionCard('/dev/api-playground', '&#128736;', '#f5f3ff', 'API Playground', 'Test endpoints')}
       </div>
@@ -14195,7 +14195,7 @@ app.get('/dev/subscription-access', requireAuth, requireSuperAdmin, ah(async (re
       '</tr>').join('') +
       '</table></div>'
     ).join('')}
-    <div style="margin-top:20px"><a href="/dev/features" class="btn">Back to Feature Manager</a> <a href="/dev/portals" class="btn btn-gold" style="margin-left:8px">Portal Switcher</a></div>
+    <div style="margin-top:20px"><a href="/dev/features" class="btn">Back to Feature Manager</a> <a href="/switch-portal" class="btn btn-gold" style="margin-left:8px">Portal Switcher</a></div>
   `, req.session.user));
 }));
 
@@ -14396,7 +14396,7 @@ app.get('/dev/onboarding', requireAuth, requireSuperAdmin, ah(async (req, res) =
         <p class="muted">${esc(s.desc)}</p>
         ${i === 0 ? '<a href="/dev/settings" class="btn btn-sm" style="margin-top:8px">Go to Settings</a>' : ''}
         ${i === 2 ? '<a href="/dev/settings" class="btn btn-sm" style="margin-top:8px">Configure</a>' : ''}
-        ${i === 4 ? '<a href="/dev/portals" class="btn btn-sm" style="margin-top:8px">Switch to Tenant</a>' : ''}
+        ${i === 4 ? '<a href="/switch-portal" class="btn btn-sm" style="margin-top:8px">Switch to Tenant</a>' : ''}
       </div>
     `).join('')}
   `, req.session.user));
@@ -33009,7 +33009,7 @@ app.get('/portal/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
       <h3 style="margin-bottom:8px">More features coming soon!</h3>
       <p class="muted">This portal type is in development. Use the links above to access available modules, or switch portals from the navigation.</p>
       <div style="margin-top:16px">
-        <a href="/dev/portals" class="btn btn-gold" style="margin:4px">Switch Portal</a>
+        <a href="/switch-portal" class="btn btn-gold" style="margin:4px">Switch Portal</a>
         <a href="/switch-portal" class="btn" style="margin:4px">Change Type</a>
       </div>
     </div>
@@ -34884,7 +34884,7 @@ app.use(requireAuth, (req, res, next) => {
         const bar = `<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:linear-gradient(135deg,#dc2626,#ef4444);color:white;padding:8px 16px;font-size:13px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 10px rgba(0,0,0,0.3)">
           <span><strong>DEV MODE</strong> — Impersonating: ${esc(req.session.user.tenant_name || '')} (${esc(req.session.user.tenant_type || '')}) | Original: ${esc(orig.name)} (${esc(orig.type)})</span>
           <div style="display:flex;gap:8px">
-            <a href="/dev/portals" style="color:white;text-decoration:none;padding:4px 12px;background:rgba(255,255,255,0.2);border-radius:6px;font-weight:600">Switch Portal</a>
+            <a href="/switch-portal" style="color:white;text-decoration:none;padding:4px 12px;background:rgba(255,255,255,0.2);border-radius:6px;font-weight:600">Switch Portal</a>
             <a href="/dev/restore-session" style="color:white;text-decoration:none;padding:4px 12px;background:rgba(255,255,255,0.3);border-radius:6px;font-weight:600">Exit Dev Mode</a>
           </div>
         </div><div style="height:36px"></div>`;
