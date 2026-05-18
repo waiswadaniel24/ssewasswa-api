@@ -144,7 +144,7 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
     <a href="/login" class="btn btn-outline">Login</a>
     <a href="/register" class="btn btn-primary">Start Free</a>
   </div>
-  <button class="hamburger" onclick="document.getElementById('mobileMenu').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+  <button class="hamburger" id="hamburgerBtn" aria-label="Toggle menu">☰</button>
   <div class="mobile-menu" id="mobileMenu">
     <a href="/#features">Features</a>
     <a href="/#pricing">Pricing</a>
@@ -292,14 +292,14 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
   <div class="container" style="max-width:800px">
     <h2 class="section-title">Frequently Asked Questions</h2>
     <p class="section-sub">Everything you need to know about Comfort.</p>
-    <div class="faq-item" onclick="this.classList.toggle('open')"><h4>Is Comfort really free to start?</h4><p>Yes! The Free plan lets you manage up to 100 records with up to 3 users, forever. No credit card required. When you're ready to scale, upgrade to a paid plan.</p></div>
-    <div class="faq-item" onclick="this.classList.toggle('open')"><h4>Does it work offline?</h4><p>Absolutely. Comfort is a Progressive Web App (PWA) that works offline. You can add data, take attendance, record sales, and more — everything syncs when you're back online.</p></div>
-    <div class="faq-item" onclick="this.classList.toggle('open')"><h4>Is my data secure?</h4><p>Yes. All data is encrypted in transit (SSL/TLS) and at rest. We use role-based access control, audit logging, and two-factor authentication. Your data belongs to you.</p></div>
-    <div class="faq-item" onclick="this.classList.toggle('open')"><h4>Can I customize it for my business?</h4><p>Yes! Each business type (hotel, restaurant, salon, pharmacy, etc.) gets a specialized dashboard with features built specifically for that industry. You can also customize branding, colors, and logos.</p></div>
-    <div class="faq-item" onclick="this.classList.toggle('open')"><h4>What payment methods do you accept?</h4><p>We accept MTN Mobile Money, Airtel Money, bank transfers, and Flutterwave for card payments. All prices are in Uganda Shillings (UGX).</p></div>
-    <div class="faq-item" onclick="this.classList.toggle('open')"><h4>How long does setup take?</h4><p>Most institutions are up and running in under 10 minutes. Just register, pick your institution type, and start adding data. Our team can help with data migration for larger setups.</p></div>
-    <div class="faq-item" onclick="this.classList.toggle('open')"><h4>Can I switch between business types?</h4><p>Yes! If you start as a retail shop and later add a restaurant, you can enable multiple specializations. Each gets its own dedicated dashboard and features.</p></div>
-    <div class="faq-item" onclick="this.classList.toggle('open')"><h4>Do you offer support?</h4><p>Yes — Free plan gets email support (24-48hr response). Basic and above get priority support via email, WhatsApp, and phone. Enterprise gets a dedicated account manager.</p></div>
+    <div class="faq-item"><h4>Is Comfort really free to start?</h4><p>Yes! The Free plan lets you manage up to 100 records with up to 3 users, forever. No credit card required. When you're ready to scale, upgrade to a paid plan.</p></div>
+    <div class="faq-item"><h4>Does it work offline?</h4><p>Absolutely. Comfort is a Progressive Web App (PWA) that works offline. You can add data, take attendance, record sales, and more — everything syncs when you're back online.</p></div>
+    <div class="faq-item"><h4>Is my data secure?</h4><p>Yes. All data is encrypted in transit (SSL/TLS) and at rest. We use role-based access control, audit logging, and two-factor authentication. Your data belongs to you.</p></div>
+    <div class="faq-item"><h4>Can I customize it for my business?</h4><p>Yes! Each business type (hotel, restaurant, salon, pharmacy, etc.) gets a specialized dashboard with features built specifically for that industry. You can also customize branding, colors, and logos.</p></div>
+    <div class="faq-item"><h4>What payment methods do you accept?</h4><p>We accept MTN Mobile Money, Airtel Money, bank transfers, and Flutterwave for card payments. All prices are in Uganda Shillings (UGX).</p></div>
+    <div class="faq-item"><h4>How long does setup take?</h4><p>Most institutions are up and running in under 10 minutes. Just register, pick your institution type, and start adding data. Our team can help with data migration for larger setups.</p></div>
+    <div class="faq-item"><h4>Can I switch between business types?</h4><p>Yes! If you start as a retail shop and later add a restaurant, you can enable multiple specializations. Each gets its own dedicated dashboard and features.</p></div>
+    <div class="faq-item"><h4>Do you offer support?</h4><p>Yes — Free plan gets email support (24-48hr response). Basic and above get priority support via email, WhatsApp, and phone. Enterprise gets a dedicated account manager.</p></div>
   </div>
 </section>
 
@@ -313,12 +313,12 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
 </section>
 
 <a href="https://wa.me/256700000000" class="whatsapp-float" target="_blank" rel="noopener" aria-label="Chat on WhatsApp">💬</a>
-<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Back to top">↑</button>
+<button class="back-to-top" id="backToTop" aria-label="Back to top">↑</button>
 <div class="cookie-banner" id="cookieBanner">
   <span>We use cookies to improve your experience. By continuing, you agree to our <a href="/privacy">Privacy Policy</a>.</span>
   <div style="display:flex;gap:8px">
-    <button class="cookie-accept" onclick="acceptCookies()">Accept</button>
-    <button class="cookie-dismiss" onclick="dismissCookies()">Dismiss</button>
+    <button class="cookie-accept">Accept</button>
+    <button class="cookie-dismiss">Dismiss</button>
   </div>
 </div>
 
@@ -332,69 +332,78 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
   <div class="footer-bottom">© ${new Date().getFullYear()} Comfort Platform. Built with ♥ in Uganda. All rights reserved.</div>
 </footer>
 <script>
-// Smooth scroll
-document.querySelectorAll('a[href^="#"]').forEach(a => {
-  a.addEventListener('click', e => { e.preventDefault(); const t = document.querySelector(a.getAttribute('href')); if(t) t.scrollIntoView({behavior:'smooth'}); });
-});
-// Register service worker
-if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
+document.addEventListener('DOMContentLoaded', function(){
+  // Smooth scroll for anchor links
+  try { document.querySelectorAll('a[href^="#"]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); var t=document.querySelector(a.getAttribute('href')); if(t) t.scrollIntoView({behavior:'smooth'}); }); }); } catch(err){}
 
-// === Hamburger menu: close on link click ===
-document.querySelectorAll('#mobileMenu a').forEach(a => {
-  a.addEventListener('click', () => document.getElementById('mobileMenu').classList.remove('open'));
-});
+  // Register service worker
+  if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 
-// === Animated counters (IntersectionObserver) ===
-(function(){
-  var counters = document.querySelectorAll('.counter-num[data-target]');
-  var animated = false;
-  function animateCounters(){
-    if(animated) return;
-    animated = true;
-    counters.forEach(function(el){
-      var target = parseInt(el.getAttribute('data-target'));
-      var duration = 2000;
-      var start = 0;
-      var startTime = null;
-      function step(ts){
-        if(!startTime) startTime = ts;
-        var progress = Math.min((ts - startTime) / duration, 1);
-        var eased = 1 - Math.pow(1 - progress, 3);
-        el.textContent = Math.floor(eased * target) + (target >= 99 && target <= 100 ? '%' : '+');
-        if(progress < 1) requestAnimationFrame(step);
-        else el.textContent = target + (target >= 99 && target <= 100 ? '%' : '+');
-      }
-      requestAnimationFrame(step);
+  // Hamburger menu toggle
+  var hamburger = document.getElementById('hamburgerBtn');
+  var mobileMenu = document.getElementById('mobileMenu');
+  if(hamburger && mobileMenu){
+    hamburger.addEventListener('click', function(){ mobileMenu.classList.toggle('open'); });
+    mobileMenu.querySelectorAll('a').forEach(function(a){ a.addEventListener('click', function(){ mobileMenu.classList.remove('open'); }); });
+  }
+
+  // FAQ toggle
+  document.querySelectorAll('.faq-item').forEach(function(item){ item.addEventListener('click', function(){ item.classList.toggle('open'); }); });
+
+  // Animated counters
+  (function(){
+    var counters = document.querySelectorAll('.counter-num[data-target]');
+    var animated = false;
+    function animateCounters(){
+      if(animated) return;
+      animated = true;
+      counters.forEach(function(el){
+        var target = parseInt(el.getAttribute('data-target'));
+        var duration = 2000;
+        var startTime = null;
+        function step(ts){
+          if(!startTime) startTime = ts;
+          var progress = Math.min((ts - startTime) / duration, 1);
+          var eased = 1 - Math.pow(1 - progress, 3);
+          el.textContent = Math.floor(eased * target) + (target >= 99 && target <= 100 ? '%' : '+');
+          if(progress < 1) requestAnimationFrame(step);
+          else el.textContent = target + (target >= 99 && target <= 100 ? '%' : '+');
+        }
+        requestAnimationFrame(step);
+      });
+    }
+    if(counters.length > 0 && 'IntersectionObserver' in window){
+      var obs = new IntersectionObserver(function(entries){
+        entries.forEach(function(e){if(e.isIntersecting){animateCounters();obs.disconnect();}});
+      }, {threshold: 0.3});
+      obs.observe(document.getElementById('counters'));
+    }
+  })();
+
+  // Back to top button
+  (function(){
+    var btn = document.getElementById('backToTop');
+    if(!btn) return;
+    btn.addEventListener('click', function(){ window.scrollTo({top:0,behavior:'smooth'}); });
+    window.addEventListener('scroll', function(){
+      if(window.scrollY > 600) btn.classList.add('visible');
+      else btn.classList.remove('visible');
     });
-  }
-  if(counters.length > 0 && 'IntersectionObserver' in window){
-    var obs = new IntersectionObserver(function(entries){
-      entries.forEach(function(e){if(e.isIntersecting){animateCounters();obs.disconnect();}});
-    }, {threshold: 0.3});
-    obs.observe(document.getElementById('counters'));
-  }
-})();
+  })();
 
-// === Back to top button ===
-(function(){
-  var btn = document.getElementById('backToTop');
-  if(!btn) return;
-  window.addEventListener('scroll', function(){
-    if(window.scrollY > 600) btn.classList.add('visible');
-    else btn.classList.remove('visible');
-  });
-})();
-
-// === Cookie consent ===
-(function(){
-  var banner = document.getElementById('cookieBanner');
-  if(!banner) return;
-  if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){
-    banner.style.display = 'none';
-  }
-})();
-function acceptCookies(){ localStorage.setItem('cookieAccepted','1'); var b=document.getElementById('cookieBanner'); if(b) b.style.display='none'; }
-function dismissCookies(){ localStorage.setItem('cookieDismissed','1'); var b=document.getElementById('cookieBanner'); if(b) b.style.display='none'; }
+  // Cookie consent
+  (function(){
+    var banner = document.getElementById('cookieBanner');
+    if(!banner) return;
+    if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){
+      banner.style.display = 'none';
+    }
+    var acceptBtn = banner.querySelector('.cookie-accept');
+    var dismissBtn = banner.querySelector('.cookie-dismiss');
+    if(acceptBtn) acceptBtn.addEventListener('click', function(){ localStorage.setItem('cookieAccepted','1'); banner.style.display='none'; });
+    if(dismissBtn) dismissBtn.addEventListener('click', function(){ localStorage.setItem('cookieDismissed','1'); banner.style.display='none'; });
+  })();
+});
 </script>
 </body></html>`;
     res.send(html);
