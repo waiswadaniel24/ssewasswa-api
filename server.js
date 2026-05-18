@@ -1140,6 +1140,9 @@ const migrations = [
   // Fees payment method tracking
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS payment_method TEXT`,
   `ALTER TABLE fees ADD COLUMN IF NOT EXISTS receipt_no TEXT`,
+  // users table - add name column for signup
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`,
   // v2 column migrations for tables with duplicate CREATE TABLE definitions
   // sermons v2 columns
   `ALTER TABLE sermons ADD COLUMN IF NOT EXISTS date DATE DEFAULT CURRENT_DATE`,
@@ -2790,6 +2793,7 @@ app.get('/register', (req, res) => {
     <div class="card" style="max-width:450px;margin:40px auto">
       <h2 style="text-align:center;margin-bottom:20px">Create Account</h2>
       <form method="POST" action="/register">
+        <input name="name" placeholder="Your Full Name" required>
         <input name="org_name" placeholder="Organization/School/Business Name" required>
         <select name="type" required>
           <option value="">Select Type</option>
@@ -2810,24 +2814,24 @@ app.get('/register', (req, res) => {
   `, null, req));
 });
 
-app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 4 }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
-  const { org_name, type, email, phone, password, confirm_password } = req.body;
+app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 4 }, name: { required: true, maxLength: 100 }, org_name: { required: true, maxLength: 200 }, type: { required: true } }), ah(async (req, res) => {
+  const { name, org_name, type, email, phone, password, confirm_password } = req.body;
   // Basic password validation
   const passwordErrors = [];
   if (!password || password.length < 4) passwordErrors.push('Password must be at least 4 characters long');
   if (password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) {
-    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="health" ${type==='health'?'selected':''}>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Choose a Password (min 4 chars)" minlength="4" required><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="4" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
+    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="name" placeholder="Your Full Name" value="${esc(name)}" required><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="health" ${type==='health'?'selected':''}>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Choose a Password (min 4 chars)" minlength="4" required><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="4" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
   }
   const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
   const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,true) RETURNING id', [org_name, type, email, phone, subdomain]);
   // Try inserting with both password columns, fall back to just password
   try {
-    await pool.query('INSERT INTO users(tenant_id,email,password,password_hash,role,approved) VALUES($1,$2,$3,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
+    await pool.query('INSERT INTO users(tenant_id,email,name,password,password_hash,role,approved) VALUES($1,$2,$3,$4,$4,$5,true)', [tenant.rows[0].id, email, name, hash, type]);
   } catch (e) {
     if (e.message.includes('password_hash')) {
-      await pool.query('INSERT INTO users(tenant_id,email,password,role,approved) VALUES($1,$2,$3,$4,true)', [tenant.rows[0].id, email, hash, type]);
+      await pool.query('INSERT INTO users(tenant_id,email,name,password,role,approved) VALUES($1,$2,$3,$4,$5,true)', [tenant.rows[0].id, email, name, hash, type]);
     } else throw e;
   }
   await audit(email, 'register', `New ${type} account: ${org_name}`);
@@ -2838,7 +2842,7 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
     <p style="color:rgba(255,255,255,0.9);font-size:16px;margin-top:8px">Your all-in-one management platform is ready</p>
   </div>
   <div style="padding:30px">
-    <p style="font-size:16px;color:#1e293b">Hi <strong>${esc(email.split('@')[0])}</strong>,</p>
+    <p style="font-size:16px;color:#1e293b">Hi <strong>${esc(name || email.split('@')[0])}</strong>,</p>
     <p style="font-size:15px;color:#475569;line-height:1.7">Your <strong>${esc(org_name)}</strong> account has been created successfully! Here is what you can do now:</p>
     <div style="margin:24px 0;display:grid;gap:12px">
       <div style="display:flex;align-items:center;gap:12px;padding:14px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0"><span style="font-size:24px">&#9989;</span><span style="font-size:14px;color:#166534">Complete your profile setup</span></div>
