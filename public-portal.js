@@ -327,6 +327,7 @@ ul { list-style: none; }
       <a href="/contact">Contact</a>
     </div>
     <div class="nav-actions">
+      <a href="/install" id="nav-install-btn" style="display:none;font-size:13px;color:#10b981;font-weight:600;background:rgba(16,185,129,0.1);padding:8px 14px;border-radius:8px;text-decoration:none;align-items:center;gap:4px">&#128241; Install</a>
       <a href="/login" class="btn btn-ghost">Login</a>
       <a href="/register" class="btn btn-primary">Start Free</a>
     </div>
@@ -344,6 +345,7 @@ ul { list-style: none; }
   <a href="/blog">Blog</a>
   <a href="/help-center">Help Center</a>
   <div class="mobile-actions">
+    <a href="/install" id="mobile-install-btn" style="display:none;background:linear-gradient(135deg,#059669,#10b981);color:white;font-weight:600;padding:14px;border-radius:8px;text-align:center;text-decoration:none">&#128241; Install App</a>
     <a href="/login" class="btn btn-outline">Login</a>
     <a href="/register" class="btn btn-primary">Start Free</a>
   </div>
@@ -589,6 +591,11 @@ ul { list-style: none; }
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </button>
 
+<div id="float-install-btn" style="display:none;position:fixed;bottom:92px;right:28px;z-index:89;flex-direction:column;align-items:center;gap:4px">
+  <a href="/install" onclick="_pwaInstall();return false" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:12px 20px;border-radius:50px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(5,150,105,0.4);font-family:sans-serif;animation:pulse-glow 2s ease-in-out infinite">&#128241; Install App</a>
+  <style>@keyframes pulse-glow{0%,100%{box-shadow:0 4px 20px rgba(5,150,105,0.4)}50%{box-shadow:0 4px 30px rgba(5,150,105,0.7)}}</style>
+</div>
+
 <div class="cookie-banner" id="cookieBanner">
   <span>We use cookies to improve your experience. By continuing, you agree to our <a href="/privacy">Privacy Policy</a>.</span>
   <div class="cookie-actions">
@@ -619,6 +626,26 @@ try {
 } catch(e) {}
 
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js?v=3').catch(function(){});}
+// === PWA INSTALL LOGIC ===
+var _pwaPrompt=null;
+var _isStandalone=window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone===true;
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_pwaPrompt=e;
+var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='flex';
+var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='inline-flex';
+var mb=document.getElementById('mobile-install-btn');if(mb)mb.style.display='block';
+});
+function _pwaInstall(){
+if(_pwaPrompt){_pwaPrompt.prompt();_pwaPrompt.userChoice.then(function(c){if(c.outcome==='accepted'){console.log('[PWA] App installed');} _pwaPrompt=null;_hidePwaBtns();});}
+else{window.location.href='/install';}
+}
+function _hidePwaBtns(){
+_pwaPrompt=null;
+var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='none';
+var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='none';
+var mb=document.getElementById('mobile-install-btn');if(mb)mb.style.display='none';
+}
+window.addEventListener('appinstalled',function(){_hidePwaBtns();});
+if(!_isStandalone){setTimeout(function(){if(_pwaPrompt){var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='flex';var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='inline-flex';var mb=document.getElementById('mobile-install-btn');if(mb)mb.style.display='block';}},2500);}
 (function(){
   var navbar = document.getElementById('navbar');
   if(!navbar) return;
