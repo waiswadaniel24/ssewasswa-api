@@ -36257,6 +36257,7 @@ setTimeout(() => {
   try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
   try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
   try { const m = require('./student-portal'); m(app, db, pool, renderPage, esc); console.log('[StudentPortal] Student portal module loaded'); } catch(e) { console.warn('[StudentPortal] Error:', e.message); }
+  try { const m = require('./individual-portal'); m(app, pool, renderPage, esc); console.log('[IndividualPortal] Individual portal extension loaded — 35 features'); } catch(e) { console.warn('[IndividualPortal] Error:', e.message); }
 }, 14000);
 
 // Batch 9 — 16s delay (table allowlists registered synchronously; module loading deferred)
