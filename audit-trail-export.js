@@ -403,7 +403,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Audit Trail Export', html, { dark: true });
+      res.send(opts.renderPage('Audit Trail Export', html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -516,7 +516,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Create Export', html, { dark: true });
+      res.send(opts.renderPage('Create Export', html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -707,7 +707,7 @@ ${h(typeof ex.filters === 'string' ? JSON.stringify(JSON.parse(ex.filters), null
           ` : ''}
         </div>
       `;
-      opts.renderPage(req, res, `Export #${id}`, html, { dark: true });
+      res.send(opts.renderPage(`Export #${id}`, html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -922,7 +922,7 @@ ${h(typeof ex.filters === 'string' ? JSON.stringify(JSON.parse(ex.filters), null
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Preview Audit Data', html, { dark: true });
+      res.send(opts.renderPage('Preview Audit Data', html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1063,7 +1063,7 @@ ${h(typeof ex.filters === 'string' ? JSON.stringify(JSON.parse(ex.filters), null
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Scheduled Exports', html, { dark: true });
+      res.send(opts.renderPage('Scheduled Exports', html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1227,7 +1227,7 @@ ${h(typeof ex.filters === 'string' ? JSON.stringify(JSON.parse(ex.filters), null
           </script>
         </div>
       `;
-      opts.renderPage(req, res, 'Export Templates', html, { dark: true });
+      res.send(opts.renderPage('Export Templates', html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1391,7 +1391,7 @@ ${h(typeof ex.filters === 'string' ? JSON.stringify(JSON.parse(ex.filters), null
           </script>
         </div>
       `;
-      opts.renderPage(req, res, 'Export Settings', html, { dark: true });
+      res.send(opts.renderPage('Export Settings', html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

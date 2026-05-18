@@ -436,7 +436,7 @@ module.exports = function(app, pool, opts) {
         </div>
       </div>
     </div>`;
-    res.send(renderPage('Live Chat Configuration', html, user, req));
+    res.send(renderPage('Live Chat Configuration', html, user));
   }));
 
   // ============================================================
@@ -636,7 +636,7 @@ module.exports = function(app, pool, opts) {
         ` : `<div class="lc-alert lc-alert-info">Auto-reply bot is currently disabled. Enable it in widget settings.</div>`}
       </div>
     </div>`;
-    res.send(renderPage('Widget Preview', html, user, req));
+    res.send(renderPage('Widget Preview', html, user));
   }));
 
   // ============================================================
@@ -751,7 +751,7 @@ module.exports = function(app, pool, opts) {
         }
       </div>
     </div>`;
-    res.send(renderPage('Canned Responses', html, user, req));
+    res.send(renderPage('Canned Responses', html, user));
   }));
 
   // ============================================================
@@ -944,7 +944,7 @@ module.exports = function(app, pool, opts) {
         }
       </div>
     </div>`;
-    res.send(renderPage('Chat Departments', html, user, req));
+    res.send(renderPage('Chat Departments', html, user));
   }));
 
   // ============================================================
@@ -1230,7 +1230,7 @@ module.exports = function(app, pool, opts) {
         </div>
       </div>
     </div>`;
-    res.send(renderPage('Chat Analytics', html, user, req));
+    res.send(renderPage('Chat Analytics', html, user));
   }));
 
   // ============================================================
@@ -1412,6 +1412,6 @@ export default LiveChatWidget;`;
         </div>
       </div>
     </div>`;
-    res.send(renderPage('Embed Code', html, user, req));
+    res.send(renderPage('Embed Code', html, user));
   }));
 };

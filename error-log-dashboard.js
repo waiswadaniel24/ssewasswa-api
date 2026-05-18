@@ -7,6 +7,34 @@
 module.exports = function(app, pool, opts) {
   const esc = opts.esc;
 
+  // Auto-create tables
+  (async () => {
+    try {
+      await pool.query(`CREATE TABLE IF NOT EXISTS error_logs (
+        id SERIAL PRIMARY KEY, level TEXT DEFAULT 'error', message TEXT NOT NULL,
+        stack_trace TEXT, source TEXT, path TEXT, method TEXT, status_code INT,
+        user_id INT, ip_address TEXT, user_agent TEXT,
+        request_body JSONB, request_headers JSONB,
+        resolved BOOLEAN DEFAULT false, resolved_by INT,
+        resolved_at TIMESTAMPTZ, resolution_notes TEXT,
+        occurrence_count INT DEFAULT 1,
+        first_seen TIMESTAMPTZ DEFAULT NOW(), last_seen TIMESTAMPTZ,
+        school_id INT DEFAULT 1
+      )`);
+      await pool.query(`CREATE TABLE IF NOT EXISTS error_aggregates (
+        id SERIAL PRIMARY KEY, error_hash TEXT UNIQUE, level TEXT,
+        message TEXT, source TEXT, total_count INT DEFAULT 1,
+        last_occurrence TIMESTAMPTZ, is_resolved BOOLEAN DEFAULT false,
+        school_id INT DEFAULT 1
+      )`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_el_school ON error_logs(school_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_el_level ON error_logs(level)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_el_resolved ON error_logs(resolved)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_el_created ON error_logs(first_seen)`);
+      console.log('[ErrorLogs] Tables ready');
+    } catch(e) { console.warn('[ErrorLogs] Migration:', e.message); }
+  })();
+
   // ─── Helper: build severity color ────────────────────────────────────────
   function severityColor(level) {
     const colors = {
@@ -471,7 +499,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Error Log Dashboard', html, { dark: true });
+      res.send(opts.renderPage('Error Log Dashboard', html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -614,7 +642,7 @@ module.exports = function(app, pool, opts) {
           ` : ''}
         </div>
       `;
-      opts.renderPage(req, res, `Error #${id}`, html, { dark: true });
+      res.send(opts.renderPage(`Error #${id}`, html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -804,7 +832,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Error Statistics', html, { dark: true });
+      res.send(opts.renderPage('Error Statistics', html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -857,7 +885,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Error Aggregates', html, { dark: true });
+      res.send(opts.renderPage('Error Aggregates', html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -926,7 +954,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, `Source: ${decodedSource}`, html, { dark: true });
+      res.send(opts.renderPage(`Source: ${decodedSource}`, html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1123,7 +1151,7 @@ module.exports = function(app, pool, opts) {
           </script>
         </div>
       `;
-      opts.renderPage(req, res, 'Error Log Settings', html, { dark: true });
+      res.send(opts.renderPage('Error Log Settings', html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1292,7 +1320,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Error Trends', html, { dark: true });
+      res.send(opts.renderPage('Error Trends', html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1372,7 +1400,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Critical Errors', html, { dark: true });
+      res.send(opts.renderPage('Critical Errors', html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1498,7 +1526,7 @@ module.exports = function(app, pool, opts) {
           </script>
         </div>
       `;
-      opts.renderPage(req, res, 'Unresolved Errors', html, { dark: true });
+      res.send(opts.renderPage('Unresolved Errors', html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1662,7 +1690,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(req, res, 'Error Frequency', html, { dark: true });
+      res.send(opts.renderPage('Error Frequency', html, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

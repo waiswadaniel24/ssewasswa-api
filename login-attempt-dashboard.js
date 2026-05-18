@@ -14,6 +14,30 @@
 module.exports = function (app, pool, opts) {
   const esc = opts.esc;
 
+  /* Auto-create tables */
+  (async () => {
+    try {
+      await pool.query(`CREATE TABLE IF NOT EXISTS login_attempts (
+        id SERIAL PRIMARY KEY, username TEXT, email TEXT, ip_address TEXT,
+        user_agent TEXT, success BOOLEAN DEFAULT false, fail_reason TEXT,
+        user_id INT, locked BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(), school_id INT DEFAULT 1
+      )`);
+      await pool.query(`CREATE TABLE IF NOT EXISTS account_lockouts (
+        id SERIAL PRIMARY KEY, user_id INT, username TEXT, email TEXT,
+        ip_address TEXT, lockout_reason TEXT,
+        locked_at TIMESTAMPTZ DEFAULT NOW(), unlocked_at TIMESTAMPTZ,
+        unlocked_by INT, is_active BOOLEAN DEFAULT true,
+        failed_attempts INT DEFAULT 0, school_id INT DEFAULT 1
+      )`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_la_school ON login_attempts(school_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_la_created ON login_attempts(created_at)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_al_school ON account_lockouts(school_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_al_active ON account_lockouts(is_active)`);
+      console.log('[LoginSecurity] Tables ready');
+    } catch(e) { console.warn('[LoginSecurity] Migration:', e.message); }
+  })();
+
   /* ------------------------------------------------------------------ */
   /*  Helper – default security settings stored in a simple JS object   */
   /* ------------------------------------------------------------------ */
@@ -93,7 +117,7 @@ module.exports = function (app, pool, opts) {
           GROUP BY ip_address ORDER BY cnt DESC LIMIT 5`
       );
 
-      const html = opts.renderPage('Login Attempt Dashboard', `
+      res.send(opts.renderPage('Login Attempt Dashboard', `
         <style>
           .ls-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
           .ls-kpi{background:linear-gradient(135deg,#1e293b,#0f172a);border:1px solid #334155;border-radius:16px;padding:28px;text-align:center;transition:transform .2s,box-shadow .2s}
@@ -243,8 +267,7 @@ module.exports = function (app, pool, opts) {
             if(r.ok) alert('IP '+ip+' blocked'); else alert('Failed to block IP');
           }
         </script>
-      `);
-      res.send(html);
+      `, req.session.user));
     } catch (err) {
       console.error('[login-security dashboard]', err);
       res.status(500).send('Dashboard error');
@@ -296,7 +319,7 @@ module.exports = function (app, pool, opts) {
           ORDER BY al.locked_at DESC LIMIT 200`
       );
 
-      const html = opts.renderPage('Account Lockouts', `
+      res.send(opts.renderPage('Account Lockouts', `
         <style>
           .ls-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
           .ls-table{width:100%;border-collapse:collapse;color:#cbd5e1}
@@ -378,8 +401,7 @@ module.exports = function (app, pool, opts) {
             if(r.ok) location.reload(); else alert('Bulk unlock failed');
           }
         </script>
-      `);
-      res.send(html);
+      `, req.session.user));
     } catch (err) {
       console.error('[login-security lockouts]', err);
       res.status(500).send('Lockouts error');
@@ -491,7 +513,7 @@ module.exports = function (app, pool, opts) {
 
       const blockedList = Array.from(blockedIPs);
 
-      const html = opts.renderPage('Suspicious Activity', `
+      res.send(opts.renderPage('Suspicious Activity', `
         <style>
           .ls-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
           .ls-table{width:100%;border-collapse:collapse;color:#cbd5e1}
@@ -578,8 +600,7 @@ module.exports = function (app, pool, opts) {
             if(r.ok) location.reload(); else alert('Failed to block IP');
           }
         </script>
-      `);
-      res.send(html);
+      `, req.session.user));
     } catch (err) {
       console.error('[login-security suspicious]', err);
       res.status(500).send('Suspicious activity error');
@@ -642,7 +663,7 @@ module.exports = function (app, pool, opts) {
           WHERE school_id = ${esc(schoolId)} AND success = true AND created_at > NOW() - INTERVAL '30 days'`
       );
 
-      const html = opts.renderPage('Login Statistics', `
+      res.send(opts.renderPage('Login Statistics', `
         <style>
           .ls-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
           .ls-kpi{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;text-align:center}
@@ -757,8 +778,7 @@ module.exports = function (app, pool, opts) {
             svg.innerHTML = html;
           })();
         </script>
-      `);
-      res.send(html);
+      `, req.session.user));
     } catch (err) {
       console.error('[login-security stats]', err);
       res.status(500).send('Stats error');
@@ -854,7 +874,7 @@ module.exports = function (app, pool, opts) {
   /*  10. GET /admin/login-security/settings – Security settings         */
   /* ------------------------------------------------------------------ */
   app.get('/admin/login-security/settings', async (req, res) => {
-    const html = opts.renderPage('Security Settings', `
+    res.send(opts.renderPage('Security Settings', `
       <style>
         .ls-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:28px;margin-bottom:20px}
         .ls-section-title{font-size:1.15rem;font-weight:600;color:#e2e8f0;margin-bottom:20px}
@@ -984,8 +1004,7 @@ module.exports = function (app, pool, opts) {
           setTimeout(()=>t.style.display='none', 3500);
         }
       </script>
-    `);
-    res.send(html);
+    `, req.session.user));
   });
 
   /* ------------------------------------------------------------------ */
@@ -1114,7 +1133,7 @@ module.exports = function (app, pool, opts) {
 
       const targetUser = username || email || `User #${user_id}`;
 
-      const html = opts.renderPage(`Login Timeline: ${targetUser}`, `
+      res.send(opts.renderPage(`Login Timeline: ${targetUser}`, `
         <style>
           .ls-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
           .ls-table{width:100%;border-collapse:collapse;color:#cbd5e1}
@@ -1210,8 +1229,7 @@ module.exports = function (app, pool, opts) {
             if(r.ok) location.reload(); else alert('Failed');
           }
         </script>
-      `);
-      res.send(html);
+      `, req.session.user));
     } catch (err) {
       console.error('[login-security timeline]', err);
       res.status(500).send('Timeline error');
@@ -1261,7 +1279,7 @@ module.exports = function (app, pool, opts) {
       const isBlocked = blockedIPs.has(ipAddress);
       const isSuspicious = summary.failures > securitySettings.max_failed_attempts;
 
-      const html = opts.renderPage(`IP Activity: ${ipAddress}`, `
+      res.send(opts.renderPage(`IP Activity: ${ipAddress}`, `
         <style>
           .ls-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
           .ls-table{width:100%;border-collapse:collapse;color:#cbd5e1}
@@ -1361,8 +1379,7 @@ module.exports = function (app, pool, opts) {
             if(r.ok) location.reload(); else alert('Failed to block');
           }
         </script>
-      `);
-      res.send(html);
+      `, req.session.user));
     } catch (err) {
       console.error('[login-security by-ip]', err);
       res.status(500).send('IP lookup error');
@@ -1430,7 +1447,7 @@ module.exports = function (app, pool, opts) {
         else severityCounts.medium++;
       });
 
-      const html = opts.renderPage('Brute Force Alerts', `
+      res.send(opts.renderPage('Brute Force Alerts', `
         <style>
           .ls-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:20px}
           .ls-table{width:100%;border-collapse:collapse;color:#cbd5e1}
@@ -1589,8 +1606,7 @@ module.exports = function (app, pool, opts) {
             if(r.ok) location.reload(); else alert('Failed');
           }
         </script>
-      `);
-      res.send(html);
+      `, req.session.user));
     } catch (err) {
       console.error('[login-security brute-force]', err);
       res.status(500).send('Brute force alerts error');

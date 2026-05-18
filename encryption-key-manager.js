@@ -23,7 +23,7 @@ module.exports = function (app, pool, opts) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;'));
 
-  const renderPage = opts.renderPage || ((_, __, body) => body);
+  const renderPage = opts.renderPage || ((title, content, user) => content);
   const ah = opts.ah || ((fn) => fn);
   const requireAuth = opts.requireAuth || ((_, __, fn) => fn);
   const audit = opts.audit || (() => {});
@@ -374,7 +374,7 @@ module.exports = function (app, pool, opts) {
         '</div>' +
       '</div>' +
     '</div>';
-    res.send(renderPage(req, res, body));
+    res.send(renderPage('Encryption Key Manager', body, req.session?.user));
   })));
 
   // ---------- 2. GET /data — JSON keys list (also HTML view) ----------
@@ -462,7 +462,7 @@ module.exports = function (app, pool, opts) {
       '</table></div></div>' +
       (totalPages > 1 ? '<div class="ekm-flex" style="margin-top:16px">' + paginationHtml(page, totalPages, '/admin/encryption-keys/data') + '</div>' : '') +
     '</div>';
-    res.send(renderPage(req, res, body));
+    res.send(renderPage('Encryption Keys', body, req.session?.user));
   })));
 
   // ---------- 3. POST /create — Generate new key ----------
@@ -599,7 +599,7 @@ module.exports = function (app, pool, opts) {
 
     const key = keyRow.rows[0];
     if (!key) {
-      return res.send(renderPage(req, res, '<div class="ekm-container"><div class="ekm-alert ekm-alert-danger">Key not found.</div><a href="/admin/encryption-keys/data" class="ekm-btn ekm-btn-outline">← Back</a></div>'));
+      return res.send(renderPage('Key Not Found', '<div class="ekm-container"><div class="ekm-alert ekm-alert-danger">Key not found.</div><a href="/admin/encryption-keys/data" class="ekm-btn ekm-btn-outline">← Back</a></div>', req.session?.user));
     }
 
     const total = countR.rows[0].n;
@@ -638,7 +638,7 @@ module.exports = function (app, pool, opts) {
       '</table></div></div>' +
       (totalPages > 1 ? '<div class="ekm-flex" style="margin-top:16px">' + paginationHtml(page, totalPages, '/admin/encryption-keys/' + keyId + '/usage') + '</div>' : '') +
     '</div>';
-    res.send(renderPage(req, res, body));
+    res.send(renderPage('Key Usage', body, req.session?.user));
   })));
 
   // ---------- 9. GET /audit — All key operations audit ----------
@@ -718,7 +718,7 @@ module.exports = function (app, pool, opts) {
       '</table></div></div>' +
       (totalPages > 1 ? '<div class="ekm-flex" style="margin-top:16px">' + paginationHtml(page, totalPages, '/admin/encryption-keys/audit') + '</div>' : '') +
     '</div>';
-    res.send(renderPage(req, res, body));
+    res.send(renderPage('Key Audit Log', body, req.session?.user));
   })));
 
   // ---------- 10. POST /bulk-rotate — Rotate multiple keys ----------
@@ -819,7 +819,7 @@ module.exports = function (app, pool, opts) {
         '<tbody>' + rowsHtml + '</tbody>' +
       '</table></div></div>' +
     '</div>';
-    res.send(renderPage(req, res, body));
+    res.send(renderPage('Encryption Overview', body, req.session?.user));
   })));
 
   // ---------- 12. GET /settings — Encryption settings ----------
@@ -942,6 +942,6 @@ module.exports = function (app, pool, opts) {
         '</div>' +
       '</div>' +
     '</div>';
-    res.send(renderPage(req, res, body));
+    res.send(renderPage('Encryption Settings', body, req.session?.user));
   })));
 };

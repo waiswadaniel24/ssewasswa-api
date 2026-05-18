@@ -1,6 +1,30 @@
 module.exports = function(app, pool, opts) {
   const esc = opts.esc;
 
+  // Auto-create tables
+  (async () => {
+    try {
+      await pool.query(`CREATE TABLE IF NOT EXISTS accessibility_scans (
+        id SERIAL PRIMARY KEY, page_url TEXT, page_title TEXT,
+        scan_type TEXT DEFAULT 'full', wcag_level TEXT DEFAULT '2.1aa',
+        total_issues INT DEFAULT 0, critical_issues INT DEFAULT 0,
+        serious_issues INT DEFAULT 0, moderate_issues INT DEFAULT 0,
+        minor_issues INT DEFAULT 0, score INT DEFAULT 0,
+        scanned_at TIMESTAMPTZ DEFAULT NOW(), school_id INT DEFAULT 1
+      )`);
+      await pool.query(`CREATE TABLE IF NOT EXISTS accessibility_issues (
+        id SERIAL PRIMARY KEY, scan_id INT REFERENCES accessibility_scans(id) ON DELETE CASCADE,
+        rule_id TEXT, description TEXT, impact TEXT DEFAULT 'serious',
+        element TEXT, help_url TEXT, is_fixed BOOLEAN DEFAULT false,
+        fixed_at TIMESTAMPTZ, fixed_by INT, school_id INT DEFAULT 1
+      )`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_as_school ON accessibility_scans(school_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_scan ON accessibility_issues(scan_id)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_fixed ON accessibility_issues(is_fixed)`);
+      console.log('[A11y] Tables ready');
+    } catch(e) { console.warn('[A11y] Migration:', e.message); }
+  })();
+
   // ============================================================
   // WCAG Quick Reference Data
   // ============================================================
@@ -336,7 +360,7 @@ module.exports = function(app, pool, opts) {
         });
       </script>`;
 
-      opts.renderPage(req, res, { title: 'Accessibility Checker', body });
+      res.send(opts.renderPage('Accessibility Checker', body, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -504,7 +528,7 @@ module.exports = function(app, pool, opts) {
         }
       </script>`;
 
-      opts.renderPage(req, res, { title: `Scan #${id} - Accessibility`, body });
+      res.send(opts.renderPage(`Scan #${id} - Accessibility`, body, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -603,7 +627,7 @@ module.exports = function(app, pool, opts) {
         }
       </script>`;
 
-      opts.renderPage(req, res, { title: 'All Accessibility Issues', body });
+      res.send(opts.renderPage('All Accessibility Issues', body, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -851,7 +875,7 @@ module.exports = function(app, pool, opts) {
       </div>
     </div>`;
 
-    opts.renderPage(req, res, { title: 'WCAG Reference', body });
+    res.send(opts.renderPage('WCAG Reference', body, req.session.user));
   });
 
   // ============================================================
@@ -947,7 +971,7 @@ module.exports = function(app, pool, opts) {
       }
     </script>`;
 
-    opts.renderPage(req, res, { title: 'Scanner Settings', body });
+    res.send(opts.renderPage('Scanner Settings', body, req.session.user));
   });
 
   // ============================================================
@@ -1071,7 +1095,7 @@ module.exports = function(app, pool, opts) {
         }
       </script>`;
 
-      opts.renderPage(req, res, { title: 'Pages Management', body });
+      res.send(opts.renderPage('Pages Management', body, req.session.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

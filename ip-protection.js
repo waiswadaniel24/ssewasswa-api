@@ -9,7 +9,7 @@
 module.exports = function(app, pool, opts) {
   /* ── Helpers ────────────────────────────────────────────────── */
   const esc = opts.esc || (s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'));
-  const renderPage = opts.renderPage || ((t,c,u) => c);
+  const renderPage = opts.renderPage || ((title, content, user) => content);
   const ah = opts.ah || ((fn) => async (req,res,next) => { try { await fn(req,res,next); } catch(e) { res.status(500).send('Error: '+e.message); }});
   const requireAuth = opts.requireAuth || ((req,res,next) => { if(!req.session?.user) return res.redirect('/login'); next(); });
   const audit = opts.audit || (() => {});
@@ -166,7 +166,7 @@ module.exports = function(app, pool, opts) {
 
   /* ── Utility Helpers ────────────────────────────────────────── */
   function wrapHTML(title, body, req) {
-    return renderPage(title, `<style>${CSS}</style><div class="ip-root">${body}</div>`, req.session?.user, req);
+    return renderPage(title, `<style>${CSS}</style><div class="ip-root">${body}</div>`, req.session?.user);
   }
 
   function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '\u2014'; }
@@ -283,7 +283,7 @@ module.exports = function(app, pool, opts) {
             <p style="color:${C.textMuted};font-size:.8rem">Reason: ${esc(matchedRule.reason || 'No reason specified')}</p>
             <p style="color:${C.textMuted};font-size:.75rem;margin-top:12px">If you believe this is an error, contact your system administrator.</p>
           </div>`,
-          req.session?.user, req
+          req.session?.user
         ));
       }
 

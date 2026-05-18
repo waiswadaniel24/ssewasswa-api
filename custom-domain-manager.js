@@ -374,7 +374,7 @@ module.exports = function(app, pool, opts) {
           }
         </script>
       `;
-      opts.renderPage(res, 'Custom Domain Manager', html);
+      res.send(opts.renderPage('Custom Domain Manager', html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -638,7 +638,7 @@ module.exports = function(app, pool, opts) {
           }
         </script>
       `;
-      opts.renderPage(res, 'DNS Configuration - ' + domain.domain, html);
+      res.send(opts.renderPage('DNS Configuration - ' + domain.domain, html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -806,7 +806,7 @@ module.exports = function(app, pool, opts) {
           }
         </script>
       `;
-      opts.renderPage(res, 'Redirect Rules - ' + domain.domain, html);
+      res.send(opts.renderPage('Redirect Rules - ' + domain.domain, html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1031,7 +1031,7 @@ module.exports = function(app, pool, opts) {
           </div>
         </div>
       `;
-      opts.renderPage(res, 'Domain Settings', html);
+      res.send(opts.renderPage('Domain Settings', html, req.session?.user));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

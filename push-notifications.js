@@ -9,7 +9,7 @@
 'use strict';
 module.exports = function pushNotifications(app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
-  const renderPage = opts.renderPage || ((t, b) => b);
+  const renderPage = opts.renderPage || ((title, content, user) => content);
   const ah = opts.ah || ((fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next));
   const requireAuth = opts.requireAuth || ((req, res, next) => { if (!req.session?.user) return res.redirect('/login'); next(); });
   const audit = opts.audit || (async () => {});
@@ -436,7 +436,7 @@ module.exports = function pushNotifications(app, pool, opts) {
           <a href="/admin/push-notifications/campaigns" class="pn-btn pn-btn-sm pn-btn-secondary">View All</a>
         </div>
         <div class="pn-grid">${recentHtml}</div>
-      </div>`, req.session?.user, req));
+      </div>`, req.session?.user));
   }));
 
   // ═══════════════════════════════════════════════════════
@@ -570,7 +570,7 @@ module.exports = function pushNotifications(app, pool, opts) {
       function openCreateModal(){document.getElementById('createModal').style.display='flex'}
       function closeCreateModal(){document.getElementById('createModal').style.display='none'}
       function applyFilter(){var p=new URLSearchParams(),q=document.getElementById('fQ').value,s=document.getElementById('fS').value;if(q)p.set('q',q);if(s!=='all')p.set('status',s);location.href='/admin/push-notifications/campaigns?'+p.toString()}
-      </script>`, req.session?.user, req));
+      </script>`, req.session?.user));
   }));
 
   // ═══════════════════════════════════════════════════════
@@ -781,7 +781,7 @@ module.exports = function pushNotifications(app, pool, opts) {
       </div>
       <script>
       function applySubFilter(){var p=new URLSearchParams(),q=document.getElementById('fQ').value,pl=document.getElementById('fP').value,st=document.getElementById('fSt').value;if(q)p.set('q',q);if(pl!=='all')p.set('platform',pl);if(st!=='all')p.set('status',st);location.href='/admin/push-notifications/subscribers?'+p.toString()}
-      </script>`, req.session?.user, req));
+      </script>`, req.session?.user));
   }));
 
   // ═══════════════════════════════════════════════════════
@@ -854,7 +854,7 @@ module.exports = function pushNotifications(app, pool, opts) {
           <thead><tr><th>Platform</th><th>Total</th><th>Active</th><th>Inactive</th><th>Active Rate</th></tr></thead>
           <tbody>${platTable}</tbody>
         </table>
-      </div>`, req.session?.user, req));
+      </div>`, req.session?.user));
   }));
 
   // ═══════════════════════════════════════════════════════
@@ -928,7 +928,7 @@ module.exports = function pushNotifications(app, pool, opts) {
           <thead><tr><th>Title</th><th>Sent</th><th>Delivered</th><th>Open Rate</th><th>Click Rate</th></tr></thead>
           <tbody>${topTable}</tbody>
         </table>
-      </div>`, req.session?.user, req));
+      </div>`, req.session?.user));
   }));
 
   // ═══════════════════════════════════════════════════════
@@ -995,7 +995,7 @@ module.exports = function pushNotifications(app, pool, opts) {
           <a href="/admin/push-notifications" class="pn-btn pn-btn-secondary">Back to Dashboard</a>
         </div>
         <div class="pn-tip">Credentials are stored securely. FCM Server Key is used for legacy API; for HTTP v2, use a service account JSON instead.</div>
-      </form>`, req.session?.user, req));
+      </form>`, req.session?.user));
   }));
 
   // ═══════════════════════════════════════════════════════
@@ -1075,7 +1075,7 @@ module.exports = function pushNotifications(app, pool, opts) {
           </div>
           <p style="font-size:12px;color:${MUTED}">Provider: ${esc(cfg?.provider || 'fcm')} | Active subscribers: ${F(subCount)}</p>
         </form>
-      </div>`, req.session?.user, req));
+      </div>`, req.session?.user));
   }));
 
   // ═══════════════════════════════════════════════════════

@@ -261,7 +261,7 @@ module.exports = function(app, pool, opts) {
         </table></div>
       </div>
     </div>`;
-    res.send(renderPage('Form Builder Dashboard', html, req.session?.user, req));
+    res.send(renderPage('Form Builder Dashboard', html, req.session?.user));
   }));
 
   // ─── 2. GET /data - JSON forms list ───
@@ -540,7 +540,7 @@ module.exports = function(app, pool, opts) {
         document.getElementById('formMaxSubs').disabled = !this.checked;
       });
     </script>`;
-    res.send(renderPage('Edit Form: ' + form.title, html, req.session?.user, req));
+    res.send(renderPage('Edit Form: ' + form.title, html, req.session?.user));
   }));
 
   function renderFieldCard(f, i) {
@@ -771,7 +771,7 @@ module.exports = function(app, pool, opts) {
       function closeModal() { document.getElementById('submissionModal').style.display = 'none'; }
       document.getElementById('submissionModal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
     </script>`;
-    res.send(renderPage('Submissions: ' + form.title, html, req.session?.user, req));
+    res.send(renderPage('Submissions: ' + form.title, html, req.session?.user));
   }));
 
   // ─── 10. GET /:id/submissions/export - Export submissions CSV ───
@@ -871,7 +871,7 @@ module.exports = function(app, pool, opts) {
         </div>
       </div>
     </div>`;
-    res.send(renderPage('Analytics: ' + form.title, html, req.session?.user, req));
+    res.send(renderPage('Analytics: ' + form.title, html, req.session?.user));
   }));
 
   // ─── 12. POST /preview - Preview form ───
@@ -886,7 +886,7 @@ module.exports = function(app, pool, opts) {
         <div style="margin-top:20px;padding:12px;background:rgba(245,158,11,0.1);border-radius:10px;text-align:center;color:#fbbf24;font-size:13px;font-weight:600">⚠️ This is a preview only. Submissions will not be saved.</div>
       </div>
     </div>`;
-    res.send(renderPage('Preview: ' + (title || 'Form'), html, req.session?.user, req));
+    res.send(renderPage('Preview: ' + (title || 'Form'), html, req.session?.user));
   }));
 
   function renderPublicField(f) {
@@ -952,7 +952,7 @@ module.exports = function(app, pool, opts) {
       </div>
       <p style="text-align:center;font-size:11px;color:#6b7280;margin-top:16px">Powered by Advanced Form Builder</p>
     </div>`;
-    res.send(renderPage(form.title, html, null, req));
+    res.send(renderPage(form.title, html, null));
   }));
 
   function renderActivePublicField(f) {
@@ -1038,7 +1038,7 @@ module.exports = function(app, pool, opts) {
         <p style="color:#9ca3af;font-size:15px">${esc(msg)}</p>
       </div>
     </div>`;
-    res.send(renderPage('Success', html, null, req));
+    res.send(renderPage('Success', html, null));
   }));
 
   // ─── 15. GET /templates - Form templates ───
@@ -1067,7 +1067,7 @@ module.exports = function(app, pool, opts) {
       </div>
       <div class="fb-grid fb-grid-3">${cardsHtml}</div>
     </div>`;
-    res.send(renderPage('Form Templates', html, req.session?.user, req));
+    res.send(renderPage('Form Templates', html, req.session?.user));
   }));
 
   // Use template handler
@@ -1170,7 +1170,7 @@ module.exports = function(app, pool, opts) {
         </div>
       </div>
     </div>`;
-    res.send(renderPage('Field Types Reference', html, req.session?.user, req));
+    res.send(renderPage('Field Types Reference', html, req.session?.user));
   }));
 
   function getFieldTypeDescription(type) {
@@ -1236,7 +1236,7 @@ module.exports = function(app, pool, opts) {
         </form>
       </div>
     </div>`;
-    res.send(renderPage('Create Form', html, req.session?.user, req));
+    res.send(renderPage('Create Form', html, req.session?.user));
   }));
 
   // ─── JSON API: Get single submission (used by modal) ───

@@ -13,7 +13,7 @@
 
 module.exports = function themeBuilder(app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
-  const renderPage = opts.renderPage || ((t, c) => c);
+  const renderPage = opts.renderPage || ((title, content, user) => content);
   const ah = opts.ah || ((fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next));
   const requireAuth = opts.requireAuth || ((req, res, next) => { if (!req.session?.user) return res.redirect('/login'); next(); });
   const audit = opts.audit || (() => {});
@@ -497,7 +497,7 @@ module.exports = function themeBuilder(app, pool, opts) {
     }
     </script>`;
 
-    res.send(renderPage('Theme Builder', html, req.session.user, req));
+    res.send(renderPage('Theme Builder', html, req.session.user));
   }));
 
   // ============================================================
@@ -912,7 +912,7 @@ module.exports = function themeBuilder(app, pool, opts) {
     })();
     </script>`;
 
-    res.send(renderPage('Theme Editor — ' + t.name, html, req.session.user, req));
+    res.send(renderPage('Theme Editor — ' + t.name, html, req.session.user));
   }));
 
   // ============================================================
@@ -1094,7 +1094,7 @@ module.exports = function themeBuilder(app, pool, opts) {
       </div>
     </div>`;
 
-    res.send(renderPage('Preview — ' + t.name, html, req.session.user, req));
+    res.send(renderPage('Preview — ' + t.name, html, req.session.user));
   }));
 
   // ============================================================
@@ -1254,7 +1254,7 @@ module.exports = function themeBuilder(app, pool, opts) {
       <div style="display:flex;gap:10px">
         <a href="${PREFIX}/editor/${t.id}" class="btn" style="padding:8px 16px;border-radius:10px;border:1px solid #334155;background:transparent;color:#94a3b8;text-decoration:none;font-size:13px">&larr; Back to Editor</a>
       </div>`;
-      res.send(renderPage('Export — ' + t.name, html, req.session.user, req));
+      res.send(renderPage('Export — ' + t.name, html, req.session.user));
     }
   }));
 
@@ -1319,7 +1319,7 @@ module.exports = function themeBuilder(app, pool, opts) {
       ${compCards}
     </div>`;
 
-    res.send(renderPage('Components — ' + t.name, html, req.session.user, req));
+    res.send(renderPage('Components — ' + t.name, html, req.session.user));
   }));
 
   // ============================================================
@@ -1466,7 +1466,7 @@ module.exports = function themeBuilder(app, pool, opts) {
     }
     </script>`;
 
-    res.send(renderPage('Component Editor — ' + ctInfo.label, html, req.session.user, req));
+    res.send(renderPage('Component Editor — ' + ctInfo.label, html, req.session.user));
   }));
 
   // Handle component deletion
@@ -1568,7 +1568,7 @@ module.exports = function themeBuilder(app, pool, opts) {
       ${templateCards}
     </div>`;
 
-    res.send(renderPage('Theme Templates', html, req.session.user, req));
+    res.send(renderPage('Theme Templates', html, req.session.user));
   }));
 
   // ============================================================
@@ -1722,7 +1722,7 @@ module.exports = function themeBuilder(app, pool, opts) {
       </div>
     </div>`;
 
-    res.send(renderPage('Theme Builder Settings', html, req.session.user, req));
+    res.send(renderPage('Theme Builder Settings', html, req.session.user));
   }));
 
   console.log('[ThemeBuilder] Module loaded with prefix: ' + PREFIX);

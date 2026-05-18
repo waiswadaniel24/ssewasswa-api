@@ -93,7 +93,7 @@ module.exports = function (app, pool, opts) {
       .ca-good{background:#14532d;color:#4ade80}.ca-warn{background:#713f12;color:#facc15}.ca-bad{background:#7f1d1d;color:#fca5a5}
     `;
     const head = `<style>${css}</style>${extraHead || ''}`;
-    renderPage(req, res, title, `<div class="ca-wrap" style="background:#0f172a;min-height:100vh;padding:24px">${body}</div>`, head);
+    res.send(renderPage(title, head + `<div class="ca-wrap" style="background:#0f172a;min-height:100vh;padding:24px">${body}</div>`, req.session?.user));
   }
 
   // ── SVG Chart Builders ────────────────────────────────────────

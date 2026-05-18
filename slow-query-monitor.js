@@ -13,7 +13,7 @@
 
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
-  const renderPage = opts.renderPage || ((req, res, title, html) => res.send(html));
+  const renderPage = opts.renderPage || ((title, content, user) => content);
   const ah = opts.ah || ((fn) => async (req, res, next) => { try { await fn(req, res, next); } catch (e) { res.status(500).send('Error: ' + e.message); } });
   const requireAuth = opts.requireAuth || ((req, res, next) => { if (!req.session?.user) return res.redirect('/login'); next(); });
   const audit = opts.audit || (() => {});
@@ -397,7 +397,7 @@ module.exports = function (app, pool, opts) {
         </table></div>` : `<div class="sqm-empty"><p>No slow queries recorded yet.</p></div>`}
       </div>
     `);
-    renderPage(req, res, 'admin/slow-queries', { title: 'Slow Query Monitor', html });
+    res.send(renderPage('Slow Query Monitor', html, req.session.user));
   }));
 
   // ================================================================
@@ -470,7 +470,7 @@ module.exports = function (app, pool, opts) {
           </div>
         </div>
       `);
-      renderPage(req, res, 'admin/slow-queries', { title: 'Query Not Found', html });
+      res.send(renderPage('Query Not Found', html, req.session.user));
       return;
     }
 
@@ -537,7 +537,7 @@ module.exports = function (app, pool, opts) {
         </form>` : ''}
       </div>
     `);
-    renderPage(req, res, 'admin/slow-queries', { title: `Slow Query #${queryId}`, html });
+    res.send(renderPage(`Slow Query #${queryId}`, html, req.session.user));
   }));
 
   // ================================================================
@@ -708,7 +708,7 @@ module.exports = function (app, pool, opts) {
       });
       </script>
     `);
-    renderPage(req, res, 'admin/slow-queries', { title: 'Optimization Rules', html });
+    res.send(renderPage('Optimization Rules', html, req.session.user));
   }));
 
   // ================================================================
@@ -851,7 +851,7 @@ module.exports = function (app, pool, opts) {
         </div>
       </div>
     `);
-    renderPage(req, res, 'admin/slow-queries', { title: 'Slow Query Statistics', html });
+    res.send(renderPage('Slow Query Statistics', html, req.session.user));
   }));
 
   // ================================================================
@@ -907,7 +907,7 @@ module.exports = function (app, pool, opts) {
         </table></div>` : `<div class="sqm-empty"><p>🎉 No active slow queries found! Your database is running smoothly.</p></div>`}
       </div>
     `);
-    renderPage(req, res, 'admin/slow-queries', { title: 'Top 10 Worst Queries', html });
+    res.send(renderPage('Top 10 Worst Queries', html, req.session.user));
   }));
 
   // ================================================================
@@ -1184,7 +1184,7 @@ module.exports = function (app, pool, opts) {
       }
       </script>
     `);
-    renderPage(req, res, 'admin/slow-queries', { title: 'Slow Query Settings', html });
+    res.send(renderPage('Slow Query Settings', html, req.session.user));
   }));
 
   // ================================================================

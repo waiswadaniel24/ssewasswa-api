@@ -219,7 +219,7 @@ module.exports = function(app, pool, opts) {
   // ── Shared Page Shell ────────────────────────────────────────────────────
   function buildPage(title, bodyHtml, req) {
     const pageContent = buildDashboardHTML(title, bodyHtml, req);
-    opts.renderPage(req, null, 'admin/scheduled-tasks', { title: 'Scheduled Tasks — ' + title, body: pageContent });
+    res.send(opts.renderPage('Scheduled Tasks — ' + title, pageContent, req.session.user));
   }
 
   function pageWrap(title, inner) {
@@ -463,7 +463,7 @@ function showCreateModal(){
 function toggleTask(id){fetch('/admin/scheduled-tasks/'+id+'/toggle',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>location.reload())}
 function runTaskNow(id){if(!confirm('Run this task now?'))return;fetch('/admin/scheduled-tasks/'+id+'/run',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>{alert(d.message||'Triggered');location.reload()})}
 </script>`);
-    opts.renderPage(req, res, 'admin/scheduled-tasks', { title: 'Scheduled Tasks Dashboard', body: html });
+    res.send(opts.renderPage('Scheduled Tasks Dashboard', html, req.session.user));
   }));
 
   // ── 2. GET /data — JSON tasks list with filters ─────────────────────────
@@ -719,7 +719,7 @@ function runTaskNow(id){if(!confirm('Run this task now?'))return;fetch('/admin/s
 <script>
 function runTaskNow(id){if(!confirm('Run this task now?'))return;fetch('/admin/scheduled-tasks/'+id+'/run',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>{alert(d.message||'Triggered');location.reload()})}
 </script>`);
-    opts.renderPage(req, res, 'admin/scheduled-tasks', { title: `Logs — ${t.name}`, body: html });
+    res.send(opts.renderPage(`Logs — ${t.name}`, html, req.session.user));
   }));
 
   // ── 9. GET /logs — All execution logs with filters ───────────────────────
@@ -806,7 +806,7 @@ function runTaskNow(id){if(!confirm('Run this task now?'))return;fetch('/admin/s
     </table></div>` : '<div class="empty-state"><div class="icon">📭</div><p>No logs match the current filters.</p></div>'}
   </div>
 </div>`);
-    opts.renderPage(req, res, 'admin/scheduled-tasks', { title: 'All Execution Logs', body: html });
+    res.send(opts.renderPage('All Execution Logs', html, req.session.user));
   }));
 
   // ── 10. GET /stats — Execution statistics ───────────────────────────────
@@ -908,7 +908,7 @@ function runTaskNow(id){if(!confirm('Run this task now?'))return;fetch('/admin/s
     </table></div>
   </div>
 </div>`);
-    opts.renderPage(req, res, 'admin/scheduled-tasks', { title: 'Execution Statistics', body: html });
+    res.send(opts.renderPage('Execution Statistics', html, req.session.user));
   }));
 
   // ── 11. POST /bulk-toggle — Enable/disable multiple tasks ────────────────
@@ -1000,7 +1000,7 @@ function runTaskNow(id){if(!confirm('Run this task now?'))return;fetch('/admin/s
     </table></div>
   </div>
 </div>`);
-    opts.renderPage(req, res, 'admin/scheduled-tasks', { title: 'Cron Help', body: html });
+    res.send(opts.renderPage('Cron Help', html, req.session.user));
   }));
 
   // ── 13. POST /validate-cron — Validate a cron expression ─────────────────
@@ -1276,7 +1276,7 @@ function bulkToggle(){
   });
 }
 </script>`);
-    opts.renderPage(req, res, 'admin/scheduled-tasks', { title: 'Task Runner Settings', body: html });
+    res.send(opts.renderPage('Task Runner Settings', html, req.session.user));
   }));
 
   // ── Internal: buildDashboardHTML for renderPage integration ──────────────

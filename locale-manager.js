@@ -13,7 +13,7 @@
 
 module.exports = function localeManager(app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
-  const renderPage = opts.renderPage || ((t, c) => c);
+  const renderPage = opts.renderPage || ((title, content, user) => content);
   const ah = opts.ah || ((fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next));
   const requireAuth = opts.requireAuth || ((req, res, next) => { if (!req.session?.user) return res.redirect('/login'); next(); });
   const audit = opts.audit || (() => {});
@@ -282,7 +282,7 @@ module.exports = function localeManager(app, pool, opts) {
     </div>
     <!-- Locale list -->
     <div style="display:flex;flex-direction:column;gap:10px">${cards}</div>`;
-    res.send(renderPage('Locale Manager', html, req.session.user, req));
+    res.send(renderPage('Locale Manager', html, req.session.user));
   }));
 
   // ============================================================
@@ -540,7 +540,7 @@ module.exports = function localeManager(app, pool, opts) {
         <button type="submit" class="btn" style="background:#3b82f6">&#128190; Save All Translations</button>
       </div>` : ''}
     </form>`;
-    res.send(renderPage('Translation Editor — ' + locale.name, html, req.session.user, req));
+    res.send(renderPage('Translation Editor — ' + locale.name, html, req.session.user));
   }));
 
   // ============================================================
@@ -832,7 +832,7 @@ module.exports = function localeManager(app, pool, opts) {
     </form>
     <!-- Key list -->
     ${keyRows || '<div style="text-align:center;padding:40px;color:#64748b">No translation keys found</div>'}`;
-    res.send(renderPage('Translation Keys', html, req.session.user, req));
+    res.send(renderPage('Translation Keys', html, req.session.user));
   }));
 
   // ============================================================
@@ -977,7 +977,7 @@ module.exports = function localeManager(app, pool, opts) {
     </div>
     <!-- Missing keys list -->
     ${missingRows || '<div style="text-align:center;padding:40px;color:#22c55e;font-size:16px">&#10003; All translations are complete!</div>'}`;
-    res.send(renderPage('Missing Translations — ' + locale.name, html, req.session.user, req));
+    res.send(renderPage('Missing Translations — ' + locale.name, html, req.session.user));
   }));
 
   // ============================================================
@@ -1053,7 +1053,7 @@ module.exports = function localeManager(app, pool, opts) {
         <button type="submit" class="btn" style="background:#3b82f6">Add Missing Preset Locales</button>
       </form>
     </div>`;
-    res.send(renderPage('Import / Export', html, req.session.user, req));
+    res.send(renderPage('Import / Export', html, req.session.user));
   }));
 
   // ============================================================
@@ -1110,7 +1110,7 @@ module.exports = function localeManager(app, pool, opts) {
     </div>
     ${localeNav('/missing')}
     <div style="display:flex;flex-direction:column;gap:10px">${localeCards}</div>`;
-    res.send(renderPage('Missing Translations', html, req.session.user, req));
+    res.send(renderPage('Missing Translations', html, req.session.user));
   }));
 
   // ============================================================
@@ -1145,7 +1145,7 @@ module.exports = function localeManager(app, pool, opts) {
     </div>
     ${localeNav('/editor')}
     <div style="display:flex;flex-direction:column;gap:10px">${localeCards}</div>`;
-    res.send(renderPage('Translation Editor', html, req.session.user, req));
+    res.send(renderPage('Translation Editor', html, req.session.user));
   }));
 
   // ============================================================
