@@ -13399,6 +13399,37 @@ function toggleNotifPanel(){
 function markRead(id){fetch('/notifications/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
 function markAllRead(){fetch('/notifications/mark-all-read',{method:'POST'}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
 </script>` : ''}
+<script>
+// PWA Service Worker Registration + Install Prompt (V3)
+(function(){
+  var _dp=null,_isStandalone=window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone===true;
+  window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_dp=e;console.log('[PWA] beforeinstallprompt captured');});
+  function _installApp(){
+    if(_dp){_dp.prompt();_dp.userChoice.then(function(c){if(c.outcome==='accepted'){console.log('[PWA] Installed');_hideAll();}_dp=null}).catch(function(){_dp=null;});}
+    else{window.location.href='/install';}
+  }
+  function _hideAll(){
+    _dp=null;
+    var ids=['nav-install-btn','float-install-btn','install-btn'];
+    ids.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});
+  }
+  window._installApp=_installApp;
+  window._hideInstallBtns=_hideAll;
+  window.addEventListener('appinstalled',function(){_hideAll();});
+  if(_isStandalone)_hideAll();
+  // Show install buttons
+  if(!_isStandalone){
+    var ib=document.getElementById('install-btn');if(ib)ib.style.display='inline-flex';
+  }
+  // Register service worker
+  if('serviceWorker'in navigator){
+    navigator.serviceWorker.register('/sw.js',{scope:'/'}).then(function(reg){
+      console.log('[PWA] SW registered:',reg.scope);
+      reg.update();
+    }).catch(function(err){console.warn('[PWA] SW registration failed:',err);});
+  }
+})();
+</script>
 </body></html>`;
 };
 

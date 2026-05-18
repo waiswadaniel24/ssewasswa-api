@@ -645,7 +645,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
     const content = `
       ${loggedIn ? `<div style="background:linear-gradient(135deg,#059669,#0d9488);padding:12px 20px;text-align:center;color:white;font-size:14px;display:flex;justify-content:center;align-items:center;gap:16px;flex-wrap:wrap">
-        <span>You are logged in as <strong>${esc(req.session.user.email)}</strong> (Current Portal: <strong>${esc(currentType.charAt(0).toUpperCase()+currentType.slice(1)}</strong>)</span>
+        <span>You are logged in as <strong>${esc(req.session.user.email)}</strong> (Current Portal: <strong>${esc(currentType.charAt(0).toUpperCase()+currentType.slice(1))}</strong>)</span>
         <a href="/portal/${currentType}" style="background:white;color:#059669;padding:6px 16px;border-radius:8px;font-weight:700;text-decoration:none;font-size:13px">My Dashboard</a>
         <a href="/switch-portal" style="background:rgba(255,255,255,0.2);color:white;padding:6px 16px;border-radius:8px;font-weight:600;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,0.4)">Switch Portal</a>
         <a href="/logout" style="background:rgba(255,255,255,0.2);color:white;padding:6px 16px;border-radius:8px;font-weight:600;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,0.4)">Logout</a>
@@ -952,466 +952,122 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         </div>
       </div>
 
-      <!-- COMPARISON TABLE -->
-      <div style="background:#f1f5f9;padding:60px 20px">
-        <div style="max-width:900px;margin:0 auto">
-          <h2 style="text-align:center;font-size:32px;font-weight:800;margin-bottom:12px;color:#1e293b">Why Comfort?</h2>
-          <p style="text-align:center;color:#64748b;margin-bottom:36px">See how we compare to using multiple separate tools.</p>
-          <div style="overflow-x:auto">
-            <table style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.06)">
-              <thead>
-                <tr style="background:linear-gradient(135deg,#059669,#0891b2)">
-                  <th style="padding:16px;text-align:left;color:white;font-weight:700">Feature</th>
-                  <th style="padding:16px;text-align:center;color:white;font-weight:700">Comfort</th>
-                  <th style="padding:16px;text-align:center;color:white;font-weight:700">Others</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:14px 16px;font-weight:600">All-in-One</td><td style="padding:14px;text-align:center;color:#059669;font-weight:700">&#10003;</td><td style="padding:14px;text-align:center;color:#ef4444">&#10007;</td></tr>
-                <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc"><td style="padding:14px 16px;font-weight:600">Built for Uganda</td><td style="padding:14px;text-align:center;color:#059669;font-weight:700">&#10003;</td><td style="padding:14px;text-align:center;color:#ef4444">&#10007;</td></tr>
-                <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:14px 16px;font-weight:600">Offline Mode</td><td style="padding:14px;text-align:center;color:#059669;font-weight:700">&#10003;</td><td style="padding:14px;text-align:center;color:#ef4444">&#10007;</td></tr>
-                <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc"><td style="padding:14px 16px;font-weight:600">SMS Built-In</td><td style="padding:14px;text-align:center;color:#059669;font-weight:700">&#10003;</td><td style="padding:14px;text-align:center;color:#f59e0b">&#126;</td></tr>
-                <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:14px 16px;font-weight:600">White-Label</td><td style="padding:14px;text-align:center;color:#059669;font-weight:700">&#10003;</td><td style="padding:14px;text-align:center;color:#ef4444">&#10007;</td></tr>
-                <tr style="border-bottom:1px solid #e2e8f0;background:#f8fafc"><td style="padding:14px 16px;font-weight:600">Price</td><td style="padding:14px;text-align:center;color:#059669;font-weight:700">UGX 100K+</td><td style="padding:14px;text-align:center;color:#ef4444">$50+/mo</td></tr>
-                <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:14px 16px;font-weight:600">Support</td><td style="padding:14px;text-align:center;color:#059669;font-weight:700">24/7 Local</td><td style="padding:14px;text-align:center;color:#f59e0b">Email Only</td></tr>
-                <tr><td style="padding:14px 16px;font-weight:600">Mobile App</td><td style="padding:14px;text-align:center;color:#059669;font-weight:700">&#10003; PWA</td><td style="padding:14px;text-align:center;color:#f59e0b">Sometimes</td></tr>
-              </tbody>
-            </table>
+      <!-- SETUP IN 10 MINUTES -->
+      <div style="background:linear-gradient(135deg,#059669,#0891b2);padding:50px 20px;margin-top:40px">
+        <div style="max-width:800px;margin:0 auto;text-align:center">
+          <h2 style="font-size:28px;font-weight:800;color:white;margin-bottom:12px">Setup in 10 Minutes</h2>
+          <p style="color:#d1fae5;margin-bottom:36px;font-size:16px">From sign-up to fully operational. No technical skills needed.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px">
+            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
+              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">1</div>
+              <div style="color:white;font-weight:700;font-size:13px">Sign Up</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
+              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">2</div>
+              <div style="color:white;font-weight:700;font-size:13px">Pick Portal</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
+              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">3</div>
+              <div style="color:white;font-weight:700;font-size:13px">Activate</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
+              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">4</div>
+              <div style="color:white;font-weight:700;font-size:13px">Import Data</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
+              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">5</div>
+              <div style="color:white;font-weight:700;font-size:13px">Invite Team</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
+              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">6</div>
+              <div style="color:white;font-weight:700;font-size:13px">Go Live!</div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- PRICING SECTION -->
-      <div style="padding:60px 20px;max-width:1200px;margin:0 auto">
+      <!-- PRICING -->
+      <div style="padding:50px 20px;max-width:1100px;margin:0 auto" id="pricing">
         <h2 style="text-align:center;font-size:32px;font-weight:800;margin-bottom:12px;color:#1e293b">Simple, Transparent Pricing</h2>
-        <p style="text-align:center;color:#64748b;margin-bottom:48px;font-size:18px">No hidden fees. No surprises. Start free, upgrade when ready.</p>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px">
-          <!-- FREE -->
-          <div style="background:white;border-radius:20px;padding:32px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:2px solid #e2e8f0">
-            <div style="font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#64748b;margin-bottom:8px">Free</div>
-            <div style="font-size:42px;font-weight:900;color:#1e293b">UGX 0</div>
-            <div style="font-size:14px;color:#94a3b8;margin-bottom:20px">/month</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;text-align:left;line-height:2.2;margin-bottom:24px">
-              <li>&#10003; Up to 50 records</li>
-              <li>&#10003; 1 User</li>
-              <li>&#10003; Basic reports</li>
-              <li>&#10003; SMS (5/day)</li>
-              <li>&#10003; Community support</li>
+        <p style="text-align:center;color:#64748b;margin-bottom:40px;font-size:16px">No hidden fees. Start free, upgrade when ready.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:20px">
+          <div style="background:white;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:2px solid #e2e8f0">
+            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#64748b;margin-bottom:6px">Free</div>
+            <div style="font-size:38px;font-weight:900;color:#1e293b">UGX 0</div>
+            <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">/month</div>
+            <ul style="list-style:none;padding:0;font-size:13px;color:#475569;text-align:left;line-height:2.2;margin-bottom:20px">
+              <li>&#10003; Up to 50 records</li><li>&#10003; 1 User</li><li>&#10003; Basic reports</li><li>&#10003; SMS (5/day)</li>
             </ul>
             <a href="/register?plan=free" style="display:block;padding:12px;background:#e2e8f0;color:#475569;border-radius:10px;font-weight:700;text-decoration:none">Get Started</a>
           </div>
-          <!-- BASIC -->
-          <div style="background:white;border-radius:20px;padding:32px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:2px solid #059669;position:relative">
-            <div style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:#059669;color:white;padding:4px 20px;border-radius:20px;font-size:12px;font-weight:700">POPULAR</div>
-            <div style="font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#059669;margin-bottom:8px">Basic</div>
-            <div style="font-size:42px;font-weight:900;color:#1e293b">UGX 100K</div>
-            <div style="font-size:14px;color:#94a3b8;margin-bottom:20px">/month</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;text-align:left;line-height:2.2;margin-bottom:24px">
-              <li>&#10003; Up to 500 records</li>
-              <li>&#10003; 5 Users</li>
-              <li>&#10003; Advanced reports</li>
-              <li>&#10003; SMS (50/day)</li>
-              <li>&#10003; Email support</li>
-              <li>&#10003; Custom branding</li>
+          <div style="background:white;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:2px solid #059669;position:relative">
+            <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:#059669;color:white;padding:3px 16px;border-radius:16px;font-size:11px;font-weight:700">POPULAR</div>
+            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#059669;margin-bottom:6px">Basic</div>
+            <div style="font-size:38px;font-weight:900;color:#1e293b">UGX 100K</div>
+            <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">/month</div>
+            <ul style="list-style:none;padding:0;font-size:13px;color:#475569;text-align:left;line-height:2.2;margin-bottom:20px">
+              <li>&#10003; Up to 500 records</li><li>&#10003; 5 Users</li><li>&#10003; Advanced reports</li><li>&#10003; SMS (50/day)</li><li>&#10003; Custom branding</li>
             </ul>
             <a href="/register?plan=basic" style="display:block;padding:12px;background:#059669;color:white;border-radius:10px;font-weight:700;text-decoration:none">Choose Basic</a>
           </div>
-          <!-- PRO -->
-          <div style="background:white;border-radius:20px;padding:32px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:2px solid #7c3aed">
-            <div style="font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#7c3aed;margin-bottom:8px">Pro</div>
-            <div style="font-size:42px;font-weight:900;color:#1e293b">UGX 200K</div>
-            <div style="font-size:14px;color:#94a3b8;margin-bottom:20px">/month</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;text-align:left;line-height:2.2;margin-bottom:24px">
-              <li>&#10003; Up to 50,000 records</li>
-              <li>&#10003; Unlimited Users</li>
-              <li>&#10003; Full analytics</li>
-              <li>&#10003; SMS (500/day)</li>
-              <li>&#10003; Priority support</li>
-              <li>&#10003; API access</li>
-              <li>&#10003; White-label</li>
+          <div style="background:white;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:2px solid #7c3aed">
+            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#7c3aed;margin-bottom:6px">Pro</div>
+            <div style="font-size:38px;font-weight:900;color:#1e293b">UGX 200K</div>
+            <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">/month</div>
+            <ul style="list-style:none;padding:0;font-size:13px;color:#475569;text-align:left;line-height:2.2;margin-bottom:20px">
+              <li>&#10003; Up to 50,000 records</li><li>&#10003; Unlimited Users</li><li>&#10003; Full analytics</li><li>&#10003; API access</li><li>&#10003; Priority support</li>
             </ul>
             <a href="/register?plan=pro" style="display:block;padding:12px;background:#7c3aed;color:white;border-radius:10px;font-weight:700;text-decoration:none">Choose Pro</a>
           </div>
-          <!-- ENTERPRISE -->
-          <div style="background:white;border-radius:20px;padding:32px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:2px solid #d97706">
-            <div style="font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#d97706;margin-bottom:8px">Enterprise</div>
-            <div style="font-size:42px;font-weight:900;color:#1e293b">Custom</div>
-            <div style="font-size:14px;color:#94a3b8;margin-bottom:20px">tailored for you</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;text-align:left;line-height:2.2;margin-bottom:24px">
-              <li>&#10003; Unlimited records</li>
-              <li>&#10003; Unlimited Users</li>
-              <li>&#10003; Custom integrations</li>
-              <li>&#10003; Unlimited SMS</li>
-              <li>&#10003; Dedicated support</li>
-              <li>&#10003; On-premise option</li>
-              <li>&#10003; SLA guarantee</li>
-              <li>&#10003; Training included</li>
+          <div style="background:white;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:2px solid #d97706">
+            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#d97706;margin-bottom:6px">Enterprise</div>
+            <div style="font-size:38px;font-weight:900;color:#1e293b">Custom</div>
+            <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">tailored for you</div>
+            <ul style="list-style:none;padding:0;font-size:13px;color:#475569;text-align:left;line-height:2.2;margin-bottom:20px">
+              <li>&#10003; Unlimited everything</li><li>&#10003; Dedicated support</li><li>&#10003; Custom integrations</li><li>&#10003; On-premise option</li><li>&#10003; SLA guarantee</li>
             </ul>
             <a href="/register?plan=enterprise" style="display:block;padding:12px;background:#d97706;color:white;border-radius:10px;font-weight:700;text-decoration:none">Contact Sales</a>
           </div>
         </div>
       </div>
 
-      <!-- SETUP IN 10 MINUTES -->
-      <div style="background:linear-gradient(135deg,#059669,#0891b2);padding:60px 20px">
-        <div style="max-width:900px;margin:0 auto;text-align:center">
-          <h2 style="font-size:32px;font-weight:800;color:white;margin-bottom:12px">Setup in 10 Minutes</h2>
-          <p style="color:#d1fae5;margin-bottom:40px;font-size:18px">From sign-up to fully operational. No technical skills needed.</p>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:16px">
-            <div style="background:rgba(255,255,255,0.15);border-radius:16px;padding:24px 16px">
-              <div style="width:48px;height:48px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-weight:800;color:#059669;font-size:20px">1</div>
-              <div style="color:white;font-weight:700;font-size:14px">Sign Up</div>
-              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:4px">Create account</div>
-            </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:16px;padding:24px 16px">
-              <div style="width:48px;height:48px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-weight:800;color:#059669;font-size:20px">2</div>
-              <div style="color:white;font-weight:700;font-size:14px">Pick Type</div>
-              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:4px">School, Church, etc.</div>
-            </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:16px;padding:24px 16px">
-              <div style="width:48px;height:48px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-weight:800;color:#059669;font-size:20px">3</div>
-              <div style="color:white;font-weight:700;font-size:14px">Activate</div>
-              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:4px">Turn on features</div>
-            </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:16px;padding:24px 16px">
-              <div style="width:48px;height:48px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-weight:800;color:#059669;font-size:20px">4</div>
-              <div style="color:white;font-weight:700;font-size:14px">Import Data</div>
-              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:4px">Upload CSV/Excel</div>
-            </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:16px;padding:24px 16px">
-              <div style="width:48px;height:48px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-weight:800;color:#059669;font-size:20px">5</div>
-              <div style="color:white;font-weight:700;font-size:14px">Invite Team</div>
-              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:4px">Add your staff</div>
-            </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:16px;padding:24px 16px">
-              <div style="width:48px;height:48px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-weight:800;color:#059669;font-size:20px">6</div>
-              <div style="color:white;font-weight:700;font-size:14px">Go Live!</div>
-              <div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:4px">You're running</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FAQ SECTION -->
-      <div style="padding:60px 20px;max-width:800px;margin:0 auto">
-        <h2 style="text-align:center;font-size:32px;font-weight:800;margin-bottom:36px;color:#1e293b">Frequently Asked Questions</h2>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Is Comfort really free to start?</summary>
-            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Yes! Our Free plan includes up to 50 records, 1 user, basic reports, and 5 SMS per day. No credit card required. Upgrade when you need more capacity.</p>
+      <!-- FAQ -->
+      <div style="padding:50px 20px;max-width:750px;margin:0 auto" id="faq">
+        <h2 style="text-align:center;font-size:28px;font-weight:800;margin-bottom:30px;color:#1e293b">Frequently Asked Questions</h2>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
+            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">Is Comfort really free to start?</summary>
+            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">Yes! Our Free plan includes up to 50 records, 1 user, and basic reports. No credit card required. Upgrade when you need more.</p>
           </details>
-          <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Does it work without internet?</summary>
-            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Yes! Comfort has offline mode built in. You can enter data when disconnected, and everything syncs automatically when your connection returns. Perfect for areas with intermittent internet.</p>
+          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
+            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">Does it work without internet?</summary>
+            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">Yes! Comfort has offline mode. Enter data offline, and it syncs automatically when your connection returns.</p>
           </details>
-          <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Can I migrate from my current system?</summary>
-            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Absolutely. We support CSV and Excel imports. Our team can also help with data migration from other systems. Most institutions are fully set up within a day.</p>
+          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
+            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">How do I pay?</summary>
+            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">We accept MTN MoMo, Airtel Money, bank transfers, and card payments via Flutterwave. All prices in Uganda Shillings.</p>
           </details>
-          <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">How do I pay?</summary>
-            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">We accept Mobile Money (MTN MoMo, Airtel Money), bank transfers, and Flutterwave for card payments. All prices are in Uganda Shillings with no hidden fees.</p>
+          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
+            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">Can I install it on my phone?</summary>
+            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">Yes! Comfort is a Progressive Web App. Tap the Install button on any browser to add it to your home screen like a native app.</p>
           </details>
-          <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Is my data secure?</summary>
-            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Your data is encrypted, backed up daily, and stored securely. Each institution's data is completely isolated. We comply with Uganda's data protection regulations.</p>
-          </details>
-          <details style="background:white;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:16px">Can I use Comfort on my phone?</summary>
-            <p style="margin-top:12px;color:#475569;font-size:15px;line-height:1.7">Yes! Comfort is a Progressive Web App (PWA). Install it directly from your browser on any phone or tablet - no app store needed. Works on Android, iOS, and desktop.</p>
+          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
+            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">Is my data secure?</summary>
+            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">Your data is encrypted, backed up daily, and stored securely. Each institution's data is completely isolated.</p>
           </details>
         </div>
-      </div>
-
-      <!-- TRUSTED BY AFRICAN INSTITUTIONS - TESTIMONIALS -->
-      <div style="background:linear-gradient(135deg,#f0f9ff,#e0f2fe);padding:50px 0;margin:40px 0">
-        <div class="container">
-          <h2 style="text-align:center;margin-bottom:30px">Trusted by African Institutions</h2>
-          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
-            <!-- 3 testimonial cards -->
-            <div class="card" style="border-left:4px solid #059669">
-              <p class="muted" style="font-style:italic">"Comfort transformed how we manage fees. Parents can now pay via mobile money and track their children's progress in real time."</p>
-              <div style="margin-top:15px"><strong>Grace Nakamya</strong><br><span class="muted">Head Teacher, Sunrise Primary School - Kampala</span></div>
-            </div>
-            <div class="card" style="border-left:4px solid #4f46e5">
-              <p class="muted" style="font-style:italic">"Our church membership grew 40% after digitizing. The tithe tracking and member portal saved us hours every week."</p>
-              <div style="margin-top:15px"><strong>Pastor James Okello</strong><br><span class="muted">Senior Pastor, Grace Community Church - Gulu</span></div>
-            </div>
-            <div class="card" style="border-left:4px solid #f59e0b">
-              <p class="muted" style="font-style:italic">"The POS and inventory system paid for itself in the first month. We finally have accurate stock levels across all branches."</p>
-              <div style="margin-top:15px"><strong>Amina Mohamed</strong><br><span class="muted">Owner, Al-Baraka General Stores - Jinja</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- PRICING TABLE -->
-      <div style="padding:50px 0" id="pricing">
-        <div class="container">
-          <h2 style="text-align:center;margin-bottom:10px">Simple, Transparent Pricing</h2>
-          <p style="text-align:center;margin-bottom:30px" class="muted">Start free, upgrade when you're ready</p>
-          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px">
-            <!-- Free Plan -->
-            <div class="card" style="text-align:center;padding:30px;border:2px solid #e2e8f0">
-              <h3>Free</h3>
-              <div style="font-size:36px;font-weight:800;margin:15px 0"><span style="font-size:16px">UGX </span>0</div>
-              <p class="muted">Forever free for small institutions</p>
-              <hr style="margin:20px 0;border-color:#e2e8f0">
-              <ul style="text-align:left;list-style:none;padding:0">
-                <li style="padding:8px 0">✅ Up to 50 students/members</li>
-                <li style="padding:8px 0">✅ Basic fee tracking</li>
-                <li style="padding:8px 0">✅ Attendance management</li>
-                <li style="padding:8px 0">✅ Mobile app access</li>
-                <li style="padding:8px 0;color:#94a3b8">❌ Advanced reports</li>
-                <li style="padding:8px 0;color:#94a3b8">❌ Multi-branch</li>
-              </ul>
-              <a href="/register" class="btn" style="margin-top:20px;width:100%;display:block">Get Started</a>
-            </div>
-            <!-- Basic Plan -->
-            <div class="card" style="text-align:center;padding:30px;border:2px solid #4f46e5;transform:scale(1.05)">
-              <div style="background:#4f46e5;color:white;display:inline-block;padding:4px 16px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:10px">POPULAR</div>
-              <h3>Basic</h3>
-              <div style="font-size:36px;font-weight:800;margin:15px 0"><span style="font-size:16px">UGX </span>50,000</div>
-              <p class="muted">Per month</p>
-              <hr style="margin:20px 0;border-color:#e2e8f0">
-              <ul style="text-align:left;list-style:none;padding:0">
-                <li style="padding:8px 0">✅ Up to 500 students/members</li>
-                <li style="padding:8px 0">✅ Full fee management</li>
-                <li style="padding:8px 0">✅ Report card generation</li>
-                <li style="padding:8px 0">✅ SMS notifications</li>
-                <li style="padding:8px 0">✅ Mobile money payments</li>
-                <li style="padding:8px 0;color:#94a3b8">❌ Multi-branch</li>
-              </ul>
-              <a href="/register" class="btn" style="margin-top:20px;width:100%;display:block;background:#4f46e5">Start Free Trial</a>
-            </div>
-            <!-- Pro Plan -->
-            <div class="card" style="text-align:center;padding:30px;border:2px solid #e2e8f0">
-              <h3>Professional</h3>
-              <div style="font-size:36px;font-weight:800;margin:15px 0"><span style="font-size:16px">UGX </span>150,000</div>
-              <p class="muted">Per month</p>
-              <hr style="margin:20px 0;border-color:#e2e8f0">
-              <ul style="text-align:left;list-style:none;padding:0">
-                <li style="padding:8px 0">✅ Unlimited students/members</li>
-                <li style="padding:8px 0">✅ All Basic features</li>
-                <li style="padding:8px 0">✅ Payroll & HR</li>
-                <li style="padding:8px 0">✅ Multi-branch support</li>
-                <li style="padding:8px 0">✅ Advanced analytics</li>
-                <li style="padding:8px 0">✅ Priority support</li>
-              </ul>
-              <a href="/register" class="btn" style="margin-top:20px;width:100%;display:block">Start Free Trial</a>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FAQ SECTION -->
-      <div style="background:#f8fafc;padding:50px 0" id="faq">
-        <div class="container">
-          <h2 style="text-align:center;margin-bottom:30px">Frequently Asked Questions</h2>
-          <div style="max-width:700px;margin:0 auto">
-            <div class="card" style="margin-bottom:12px">
-              <h3 style="font-size:16px">Is Comfort really free?</h3>
-              <p class="muted">Yes! Our Free plan supports up to 50 students or members with core features. No credit card required. Upgrade anytime as your institution grows.</p>
-            </div>
-            <div class="card" style="margin-bottom:12px">
-              <h3 style="font-size:16px">Does it work on mobile phones?</h3>
-              <p class="muted">Absolutely. Comfort is a Progressive Web App (PWA) — it works beautifully on any device with a browser. You can even install it on your phone like a native app.</p>
-            </div>
-            <div class="card" style="margin-bottom:12px">
-              <h3 style="font-size:16px">Can parents pay fees via mobile money?</h3>
-              <p class="muted">Yes! We support MTN MoMo and Airtel Money payments. Parents receive instant receipts and fee balances update automatically.</p>
-            </div>
-            <div class="card" style="margin-bottom:12px">
-              <h3 style="font-size:16px">Is my data secure?</h3>
-              <p class="muted">Your data is encrypted in transit and at rest. We use industry-standard security practices including HTTPS, session management, and regular backups.</p>
-            </div>
-            <div class="card" style="margin-bottom:12px">
-              <h3 style="font-size:16px">Do I need internet to use it?</h3>
-              <p class="muted">Comfort works offline! Teachers can mark attendance and enter marks without internet. Data syncs automatically when you're back online.</p>
-            </div>
-            <div class="card" style="margin-bottom:12px">
-              <h3 style="font-size:16px">Can I use it for multiple schools or branches?</h3>
-              <p class="muted">Yes, our Professional plan supports multi-branch operations. Manage inventory, staff, and reports across all locations from one dashboard.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ENTERTAINMENT / EVENTS ROTATION -->
-      ${entertainment.length > 0 ? `
-      <div style="background:#f1f5f9;padding:40px 20px">
-        <div style="max-width:1200px;margin:0 auto">
-          <h2 style="font-size:24px;font-weight:800;margin-bottom:20px;color:#1e293b">&#127911; Entertainment &amp; Events</h2>
-          <div style="display:flex;gap:16px;overflow-x:auto;padding-bottom:12px">
-            ${entHTML}
-          </div>
-          <div style="text-align:center;margin-top:20px">
-            <a href="/p/entertainment" style="color:#059669;font-weight:700;text-decoration:none;font-size:15px">See All Entertainment &rarr;</a>
-          </div>
-        </div>
-      </div>
-      ` : ''}
-
-      <!-- ADVERT CARDS SECTION -->
-      ${adverts.length > 0 ? `
-      <div style="background:white;padding:40px 20px">
-        <div style="max-width:1200px;margin:0 auto">
-          <h2 style="font-size:24px;font-weight:800;margin-bottom:20px;color:#1e293b">&#128227; Featured</h2>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px">
-            ${adverts.slice(0, 3).map(a => `
-              <div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:2px solid #f59e0b;position:relative">
-                <span style="position:absolute;top:10px;right:10px;background:#f59e0b;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">AD</span>
-                ${a.image_url ? `<img src="${esc(a.image_url)}" style="width:100%;max-height:200px;object-fit:cover" alt="${esc(a.title)}">` : ''}
-                <div style="padding:16px">
-                  <h3 style="margin:0 0 8px;font-size:18px;font-weight:700;color:#1e293b">${esc(a.title)}</h3>
-                  <p style="color:#64748b;font-size:14px;margin:0 0 12px">${esc(a.content || a.description || '')}</p>
-                  ${a.link_url ? `<a href="${esc(a.link_url)}" target="_blank" style="display:inline-block;padding:8px 20px;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border-radius:8px;font-weight:600;text-decoration:none;font-size:14px">Learn More</a>` : ''}
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>
-      ` : ''}
-
-      <!-- WHATSAPP SHARE SECTION -->
-      <div style="background:linear-gradient(135deg,#25D366,#128C7E);padding:50px 20px;text-align:center">
-        <h2 style="font-size:clamp(22px,4vw,36px);font-weight:900;color:white;margin-bottom:12px">Share Comfort on WhatsApp</h2>
-        <p style="color:rgba(255,255,255,0.9);font-size:17px;margin-bottom:28px;max-width:550px;margin-left:auto;margin-right:auto">Know someone who needs this? Spread the word and help transform more institutions across Africa.</p>
-        <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out Comfort - The All-in-One Management Platform for Schools, Clinics, Churches & Businesses in Africa! Start free: ' + BASE_URL)}" target="blank" rel="noopener" style="display:inline-flex;align-items:center;gap:10px;padding:16px 40px;background:white;color:#25D366;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;box-shadow:0 8px 30px rgba(0,0,0,0.2)">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-          Share on WhatsApp
-        </a>
       </div>
 
       <!-- FINAL CTA -->
-      <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:80px 20px;text-align:center">
-        <h2 style="font-size:clamp(24px,4vw,42px);font-weight:900;color:white;margin-bottom:12px">Ready to Transform Your Institution?</h2>
-        <p style="color:#94a3b8;font-size:18px;margin-bottom:36px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics, and businesses already using Comfort.</p>
-        <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
-          <a href="/register" style="display:inline-block;padding:16px 40px;background:linear-gradient(135deg,#059669,#0891b2);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none">Start Free Now</a>
-          <a href="/blog" style="display:inline-block;padding:16px 40px;background:rgba(255,255,255,0.1);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;border:2px solid rgba(255,255,255,0.3)">Read Our Blog</a>
+      <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:60px 20px;text-align:center;margin-top:40px">
+        <h2 style="font-size:clamp(22px,4vw,36px);font-weight:900;color:white;margin-bottom:12px">Ready to Transform Your Institution?</h2>
+        <p style="color:#94a3b8;font-size:16px;margin-bottom:28px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics, and businesses already using Comfort.</p>
+        <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+          <a href="/register" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#059669,#0891b2);color:white;border-radius:12px;font-weight:700;font-size:16px;text-decoration:none">Start Free Now</a>
+          <a href="https://wa.me/${WHATSAPP_NUMBER}" target="_blank" style="display:inline-block;padding:14px 36px;background:rgba(255,255,255,0.1);color:white;border-radius:12px;font-weight:700;font-size:16px;text-decoration:none;border:2px solid rgba(255,255,255,0.3)">WhatsApp Us</a>
         </div>
       </div>
 
-      <!-- CTA BANNER -->
-      <div style="background:linear-gradient(135deg,#059669,#10b981);padding:60px 20px;border-radius:20px;margin:40px 0;text-align:center">
-        <h2 style="color:white;font-size:32px;font-weight:900;margin-bottom:12px">Ready to Transform Your Institution?</h2>
-        <p style="color:#d1fae5;font-size:18px;margin-bottom:24px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics and businesses already using Comfort.</p>
-        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-          <a href="/register" style="display:inline-block;padding:16px 36px;background:white;color:#059669;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px;box-shadow:0 4px 20px rgba(0,0,0,0.15)">Get Started Free</a>
-          <a href="/help" style="display:inline-block;padding:16px 36px;background:transparent;color:white;border:2px solid white;border-radius:12px;font-weight:700;text-decoration:none;font-size:16px">Learn More</a>
-        </div>
-      </div>
-
-      <!-- FOOTER -->
-      <footer style="background:#0f172a;padding:40px 20px 20px;color:#94a3b8;font-size:14px">
-        <div style="max-width:1200px;margin:0 auto">
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:24px;margin-bottom:30px">
-            <div>
-              <div style="font-size:20px;font-weight:800;color:white;margin-bottom:12px">Comfort</div>
-              <p style="line-height:1.7">The Operating System for Schools, Clinics, Churches &amp; Businesses in Africa.</p>
-            </div>
-            <div>
-              <div style="font-weight:700;color:white;margin-bottom:12px">Product</div>
-              <div style="display:flex;flex-direction:column;gap:6px">
-                <a href="/register" style="color:#94a3b8;text-decoration:none">Register</a>
-                <a href="/login" style="color:#94a3b8;text-decoration:none">Login</a>
-                <a href="/blog" style="color:#94a3b8;text-decoration:none">Blog</a>
-                <a href="/p/entertainment" style="color:#94a3b8;text-decoration:none">Entertainment</a>
-                <a href="/p/fundraising" style="color:#94a3b8;text-decoration:none">Fundraising</a>
-              </div>
-            </div>
-            <div>
-              <div style="font-weight:700;color:white;margin-bottom:12px">Solutions</div>
-              <div style="display:flex;flex-direction:column;gap:6px">
-                <a href="/register?type=school" style="color:#94a3b8;text-decoration:none">Schools</a>
-                <a href="/register?type=clinic" style="color:#94a3b8;text-decoration:none">Clinics</a>
-                <a href="/register?type=church" style="color:#94a3b8;text-decoration:none">Churches</a>
-                <a href="/register?type=business" style="color:#94a3b8;text-decoration:none">Businesses</a>
-              </div>
-            </div>
-            <div>
-              <div style="font-weight:700;color:white;margin-bottom:12px">Resources</div>
-              <div style="display:flex;flex-direction:column;gap:6px">
-                <a href="/blog" style="color:#94a3b8;text-decoration:none">Blog &amp; News</a>
-                <a href="/directory" style="color:#94a3b8;text-decoration:none">Find Institutions</a>
-                <a href="/links" style="color:#94a3b8;text-decoration:none">Useful Links</a>
-                <a href="/p/entertainment" style="color:#94a3b8;text-decoration:none">Entertainment</a>
-                <a href="/p/fundraising" style="color:#94a3b8;text-decoration:none">Campaigns</a>
-                <a href="/privacy" style="color:#94a3b8;text-decoration:none">Privacy Policy</a>
-                <a href="/terms" style="color:#94a3b8;text-decoration:none">Terms of Service</a>
-              </div>
-            </div>
-            <div>
-              <div style="font-weight:700;color:white;margin-bottom:12px">Portals</div>
-              <div style="display:flex;flex-direction:column;gap:6px">
-                <a href="/login" style="color:#94a3b8;text-decoration:none">Admin Login</a>
-                <a href="/worker/login" style="color:#94a3b8;text-decoration:none">Worker Login</a>
-                <a href="/register" style="color:#94a3b8;text-decoration:none">Create Account</a>
-              </div>
-            </div>
-            <div>
-              <div style="font-weight:700;color:white;margin-bottom:12px">Contact &amp; Help</div>
-              <div style="display:flex;flex-direction:column;gap:6px">
-                <a href="mailto:support@ssewasswa.onrender.com" style="color:#94a3b8;text-decoration:none">Email Support</a>
-                <a href="https://wa.me/${WHATSAPP_NUMBER}" target="_blank" style="color:#94a3b8;text-decoration:none">WhatsApp Chat</a>
-                <a href="/guide" style="color:#94a3b8;text-decoration:none">User Guide</a>
-                <span style="color:#64748b;font-size:12px;margin-top:8px">Response time: within 24 hours</span>
-              </div>
-            </div>
-          </div>
-          <div style="border-top:1px solid #1e293b;padding-top:16px;text-align:center">
-            &copy; ${new Date().getFullYear()} Comfort Platform. All rights reserved. Built with &#10084; in Uganda.
-          </div>
-        </div>
-      </footer>
-
-      <!-- FLOATING WHATSAPP BUTTON -->
-      <a href="https://api.whatsapp.com/send?text=${encodeURIComponent('Check out Comfort - The All-in-One Platform for Schools, Clinics, Churches & Businesses! ' + BASE_URL)}" target="_blank" rel="noopener" style="position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:50%;background:#25D366;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(37,211,102,0.4);z-index:9999;transition:transform 0.3s" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" title="Share on WhatsApp">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-      </a>
-
-      <!-- MOBILE RESPONSIVE STYLES -->
-      <style>
-      @media(max-width:768px){
-        #menuBtn{display:block!important}
-        .nav-links{display:none!important;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:#1e293b;padding:20px;gap:12px}
-        .nav-links.open{display:flex!important}
-        .hero h1{font-size:28px!important}
-        .hero p{font-size:16px!important}
-      }
-      </style>
-      <script>
-      document.getElementById('menuBtn').addEventListener('click',function(){
-        document.querySelector('.nav-links').classList.toggle('open');
-      });
-      </script>
-
-      <!-- PWA INSTALL SCRIPT -->
-      <script>
-      (function(){
-        let deferredPrompt = null;
-        window.addEventListener('beforeinstallprompt', function(e){
-          e.preventDefault();
-          deferredPrompt = e;
-          var btn = document.getElementById('install-btn');
-          if(btn) btn.style.display = 'inline-block';
-        });
-        var installBtn = document.getElementById('install-btn');
-        if(installBtn){
-          installBtn.addEventListener('click', function(){
-            if(!deferredPrompt) return;
-            deferredPrompt.prompt();
-            deferredPrompt.userChoice.then(function(choice){
-              if(choice.outcome === 'accepted') console.log('PWA installed');
-              deferredPrompt = null;
-              installBtn.style.display = 'none';
-            });
-          });
-        }
-      })();
-      </script>
       ${getStructuredData()}
     `;
 
