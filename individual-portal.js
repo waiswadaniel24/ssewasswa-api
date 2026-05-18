@@ -18,6 +18,117 @@ const ipAuth = (req, res, next) => {
 const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(e => { console.error('[IP] Error:', e.message); res.status(500).send('Error: ' + esc(e.message)); });
 
 // ============================================================
+// SUBSCRIPTION-BASED FEATURE GATING
+// ============================================================
+const PLAN_HIERARCHY = ['free', 'basic', 'pro', 'enterprise'];
+
+const INDIVIDUAL_FEATURE_MAP = {
+  // GROUP 1: Personal Finance & Wealth Management
+  'individual.investments':      { minPlan: 'basic',  group: 'Finance',  name: 'Investment Portfolio',  icon: '📈' },
+  'individual.savings':          { minPlan: 'basic',  group: 'Finance',  name: 'Savings Goals',         icon: '🏦' },
+  'individual.loans':            { minPlan: 'basic',  group: 'Finance',  name: 'Loan Tracker',          icon: '💳' },
+  'individual.expenses':         { minPlan: 'free',   group: 'Finance',  name: 'Expense Tracker',       icon: '📉' },
+  'individual.networth':         { minPlan: 'pro',    group: 'Finance',  name: 'Net Worth Calculator',  icon: '💎' },
+  'individual.recurring':        { minPlan: 'basic',  group: 'Finance',  name: 'Recurring Transactions',icon: '🔄' },
+  'individual.finance-report':   { minPlan: 'pro',    group: 'Finance',  name: 'Financial Reports',     icon: '📊' },
+  'individual.currency':         { minPlan: 'free',   group: 'Finance',  name: 'Currency Converter',    icon: '💱' },
+  // GROUP 2: Personal Productivity & Time Management
+  'individual.habits':           { minPlan: 'free',   group: 'Productivity', name: 'Habit Tracker',     icon: '🔄' },
+  'individual.tasks':            { minPlan: 'free',   group: 'Productivity', name: 'Task Manager',      icon: '✅' },
+  'individual.timelog':          { minPlan: 'basic',  group: 'Productivity', name: 'Time Logger',       icon: '⏱️' },
+  'individual.pomodoro':         { minPlan: 'basic',  group: 'Productivity', name: 'Pomodoro Timer',    icon: '🍅' },
+  'individual.calendar':         { minPlan: 'free',   group: 'Productivity', name: 'Calendar & Events', icon: '📅' },
+  'individual.journal':          { minPlan: 'free',   group: 'Productivity', name: 'Daily Journal',     icon: '📔' },
+  'individual.focus':            { minPlan: 'pro',    group: 'Productivity', name: 'Focus Mode',        icon: '🎯' },
+  // GROUP 3: Health & Wellness
+  'individual.health':           { minPlan: 'basic',  group: 'Health',   name: 'Health Metrics',        icon: '❤️' },
+  'individual.medications':      { minPlan: 'pro',    group: 'Health',   name: 'Medication Tracker',    icon: '💊' },
+  'individual.workouts':         { minPlan: 'basic',  group: 'Health',   name: 'Workout Logger',        icon: '🏋️' },
+  'individual.water':            { minPlan: 'free',   group: 'Health',   name: 'Water Intake',          icon: '💧' },
+  'individual.sleep':            { minPlan: 'basic',  group: 'Health',   name: 'Sleep Tracker',         icon: '😴' },
+  'individual.wellness':         { minPlan: 'pro',    group: 'Health',   name: 'Mental Wellness',       icon: '🧘' },
+  // GROUP 4: Personal Knowledge & Learning
+  'individual.books':            { minPlan: 'free',   group: 'Knowledge', name: 'Book Library',         icon: '📚' },
+  'individual.skills':           { minPlan: 'basic',  group: 'Knowledge', name: 'Skill Tracker',        icon: '🎯' },
+  'individual.courses':          { minPlan: 'pro',    group: 'Knowledge', name: 'Course Tracker',        icon: '🎓' },
+  'individual.bookmarks':        { minPlan: 'basic',  group: 'Knowledge', name: 'Bookmark Manager',     icon: '🔖' },
+  'individual.flashcards':       { minPlan: 'pro',    group: 'Knowledge', name: 'Flashcards',           icon: '🃏' },
+  'individual.contacts':         { minPlan: 'free',   group: 'Knowledge', name: 'Contact Book',         icon: '👤' },
+  'individual.wiki':             { minPlan: 'pro',    group: 'Knowledge', name: 'Personal Wiki',        icon: '📝' },
+  // GROUP 5: Lifestyle & Social
+  'individual.travel':           { minPlan: 'pro',    group: 'Lifestyle', name: 'Travel Planner',       icon: '✈️' },
+  'individual.recipes':          { minPlan: 'pro',    group: 'Lifestyle', name: 'Recipe Book',          icon: '🍳' },
+  'individual.wishlist':         { minPlan: 'basic',  group: 'Lifestyle', name: 'Wishlist',             icon: '🎁' },
+  'individual.subscriptions':    { minPlan: 'basic',  group: 'Lifestyle', name: 'Subscription Manager',  icon: '📺' },
+  'individual.gifts':            { minPlan: 'pro',    group: 'Lifestyle', name: 'Gift Tracker',         icon: '🎀' },
+  'individual.bucketlist':       { minPlan: 'free',   group: 'Lifestyle', name: 'Bucket List',          icon: '🏆' },
+  'individual.qrcode':           { minPlan: 'free',   group: 'Lifestyle', name: 'QR Code Generator',    icon: '📱' },
+};
+
+// Cache tenant plans in memory for 5 minutes
+const planCache = new Map();
+const PLAN_CACHE_TTL = 5 * 60 * 1000;
+
+const getTenantPlan = async (tenantId) => {
+  const cached = planCache.get(tenantId);
+  if (cached && Date.now() - cached.ts < PLAN_CACHE_TTL) return cached.plan;
+  try {
+    const r = await pool.query('SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status=\'active\' ORDER BY created_at DESC LIMIT 1', [tenantId]);
+    const plan = r.rows[0]?.plan || 'free';
+    // Normalize 'professional' -> 'pro' for consistency
+    const normalized = plan === 'professional' ? 'pro' : plan;
+    planCache.set(tenantId, { plan: normalized, ts: Date.now() });
+    return normalized;
+  } catch(e) { return 'free'; }
+};
+
+const planLevel = (plan) => PLAN_HIERARCHY.indexOf(plan === 'professional' ? 'pro' : plan);
+const hasAccess = (userPlan, requiredPlan) => planLevel(userPlan) >= planLevel(requiredPlan);
+
+// Feature gate middleware — checks if user's plan allows access to a feature
+const requireFeaturePlan = (featureKey) => {
+  const feature = INDIVIDUAL_FEATURE_MAP[featureKey];
+  if (!feature) return (req, res, next) => next(); // Unknown feature = allow
+  return async (req, res, next) => {
+    if (!req.session.user) return res.redirect('/login');
+    // Super admins bypass all gates
+    if (req.session.user.role === 'super_admin') return next();
+    const plan = await getTenantPlan(req.session.user.tenant_id);
+    if (hasAccess(plan, feature.minPlan)) return next();
+    // Blocked — show upgrade page
+    const nextPlan = PLAN_HIERARCHY[planLevel(feature.minPlan)];
+    const planPrices = { free: 0, basic: 50000, pro: 150000, enterprise: 500000 };
+    const planNames = { free: 'Free', basic: 'Basic', pro: 'Professional', enterprise: 'Enterprise' };
+    res.status(403).send(renderPage('Upgrade Required', `
+      <div style="max-width:500px;margin:60px auto;text-align:center">
+        <div style="font-size:64px;margin-bottom:16px">🔒</div>
+        <h1 style="font-size:24px;color:#1e293b;margin-bottom:8px">${feature.icon} ${esc(feature.name)}</h1>
+        <p style="color:#64748b;font-size:16px;margin-bottom:24px">This feature requires the <strong style="color:#ec4899">${planNames[nextPlan] || nextPlan}</strong> plan or higher.</p>
+        <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:14px;padding:20px;margin-bottom:24px">
+          <p style="color:#9f1239;font-size:14px;margin-bottom:4px">Your current plan</p>
+          <p style="font-size:20px;font-weight:800;color:#be185d">${planNames[plan] || plan}</p>
+          ${planPrices[plan] ? `<p style="color:#64748b;font-size:13px">UGX ${planPrices[plan].toLocaleString()}/month</p>` : ''}
+        </div>
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:20px;margin-bottom:24px">
+          <p style="color:#166534;font-size:14px;margin-bottom:4px">Upgrade to</p>
+          <p style="font-size:20px;font-weight:800;color:#059669">${planNames[nextPlan] || nextPlan}</p>
+          ${planPrices[nextPlan] ? `<p style="color:#166534;font-size:13px">UGX ${planPrices[nextPlan].toLocaleString()}/month</p>` : ''}
+        </div>
+        <a href="/billing" class="ip-btn ip-btn-primary" style="font-size:16px;padding:14px 32px">Upgrade Now</a>
+        <a href="/portal/individual" class="ip-btn ip-btn-secondary" style="margin-top:8px">Back to Dashboard</a>
+      </div>
+    `, req.session.user));
+  };
+};
+
+// Helper: get feature list with access status for a given plan
+const getFeatureAccessList = (plan) => {
+  return Object.entries(INDIVIDUAL_FEATURE_MAP).map(([key, f]) => ({
+    key, ...f, locked: !hasAccess(plan, f.minPlan)
+  }));
+};
+
+// ============================================================
 // MIGRATIONS — All 38 tables
 // ============================================================
 (async () => {
@@ -103,17 +214,12 @@ const ipCSS = `<style>
 
 const ipNav = (active) => `<div class="ip-nav">
 <a href="/portal/individual" class="${active==='dash'?'active':''}">Dashboard</a>
-<a href="/individual/investments" class="${active==='invest'?'active':''}">Investments</a>
-<a href="/individual/savings" class="${active==='savings'?'active':''}">Savings</a>
-<a href="/individual/loans" class="${active==='loans'?'active':''}">Loans</a>
 <a href="/individual/expenses" class="${active==='expenses'?'active':''}">Expenses</a>
-<a href="/individual/networth" class="${active==='networth'?'active':''}">Net Worth</a>
-<a href="/individual/recurring" class="${active==='recurring'?'active':''}">Recurring</a>
 <a href="/individual/habits" class="${active==='habits'?'active':''}">Habits</a>
 <a href="/individual/tasks" class="${active==='tasks'?'active':''}">Tasks</a>
-<a href="/individual/timelog" class="${active==='timelog'?'active':''}">Time Log</a>
-<a href="/individual/health" class="${active==='health'?'active':''}">Health</a>
+<a href="/individual/calendar" class="${active==='calendar'?'active':''}">Calendar</a>
 <a href="/individual/journal" class="${active==='journal'?'active':''}">Journal</a>
+<a href="/individual/health" class="${active==='health'?'active':''}">Health</a>
 <a href="/individual/books" class="${active==='books'?'active':''}">Books</a>
 <a href="/individual/contacts" class="${active==='contacts'?'active':''}">Contacts</a>
 <a href="/individual/wishlist" class="${active==='wishlist'?'active':''}">Wishlist</a>
@@ -129,37 +235,71 @@ const uem = (req) => req.session.user.email;
 // ============================================================
 app.get('/portal/individual', ipAuth, ah(async (req, res) => {
   const t = tid(req), u = uem(req);
-  const [inv, sav, exp, hab, tsk, bks, loan, med] = await Promise.all([
-    pool.query('SELECT COUNT(*) as c, COALESCE(SUM(current_value),0) as v FROM ind_investments WHERE tenant_id=$1 AND user_email=$2', [t, u]),
-    pool.query('SELECT COUNT(*) as c, COALESCE(SUM(current_amount),0) as v FROM ind_savings_goals WHERE tenant_id=$1 AND user_email=$2', [t, u]),
-    pool.query('SELECT COUNT(*) as c, COALESCE(SUM(amount),0) as v FROM ind_expenses WHERE tenant_id=$1 AND user_email=$2', [t, u]),
-    pool.query('SELECT COUNT(*) as c FROM ind_habits WHERE tenant_id=$1 AND user_email=$2', [t, u]),
-    pool.query('SELECT COUNT(*) as c FROM ind_tasks WHERE tenant_id=$1 AND user_email=$2 AND status!=\'done\'', [t, u]),
-    pool.query('SELECT COUNT(*) as c FROM ind_books WHERE tenant_id=$1 AND user_email=$2', [t, u]),
-    pool.query('SELECT COUNT(*) as c, COALESCE(SUM(outstanding),0) as v FROM ind_loans WHERE tenant_id=$1 AND user_email=$2 AND status=\'active\'', [t, u]),
-    pool.query('SELECT COUNT(*) as c FROM ind_medications WHERE tenant_id=$1 AND user_email=$2 AND is_active=true', [t, u]),
-  ]);
-  const sec = (title, icon, items) => `<div class="ip-card"><h3 style="margin-bottom:12px">${icon} ${title}</h3><div style="display:flex;flex-wrap:wrap;gap:8px">${items.map(i=>`<a href="${i[1]}" class="ip-btn ip-btn-secondary" style="font-size:12px">${i[0]}</a>`).join('')}</div></div>`;
+  const plan = await getTenantPlan(t);
+  const planNames = { free: 'Free', basic: 'Basic', pro: 'Professional', enterprise: 'Enterprise' };
+  const planPrices = { free: 0, basic: 50000, pro: 150000, enterprise: 500000 };
+  const planColors = { free: '#94a3b8', basic: '#3b82f6', pro: '#ec4899', enterprise: '#f59e0b' };
+  const features = getFeatureAccessList(plan);
+  const unlocked = features.filter(f => !f.locked).length;
+  const total = features.length;
+
+  // Only query stats for unlocked features
+  const statQueries = [];
+  if (hasAccess(plan, 'basic')) statQueries.push(pool.query('SELECT COUNT(*) as c, COALESCE(SUM(current_value),0) as v FROM ind_investments WHERE tenant_id=$1 AND user_email=$2', [t, u]));
+  else statQueries.push(Promise.resolve({rows:[{c:0,v:0}]}));
+  if (hasAccess(plan, 'basic')) statQueries.push(pool.query('SELECT COUNT(*) as c, COALESCE(SUM(current_amount),0) as v FROM ind_savings_goals WHERE tenant_id=$1 AND user_email=$2', [t, u]));
+  else statQueries.push(Promise.resolve({rows:[{c:0,v:0}]}));
+  statQueries.push(pool.query('SELECT COUNT(*) as c, COALESCE(SUM(amount),0) as v FROM ind_expenses WHERE tenant_id=$1 AND user_email=$2', [t, u]));
+  statQueries.push(pool.query('SELECT COUNT(*) as c FROM ind_habits WHERE tenant_id=$1 AND user_email=$2', [t, u]));
+  const [inv, sav, exp, hab] = await Promise.all(statQueries);
+
+  // Build feature sections with lock indicators
+  const sec = (title, icon, groupFeatures) => {
+    const items = groupFeatures.map(f => {
+      if (f.locked) {
+        const minPlan = f.minPlan;
+        return `<a href="/billing" class="ip-btn ip-btn-secondary" style="font-size:12px;opacity:.6;border:1px dashed #cbd5e1;cursor:pointer" title="Requires ${planNames[minPlan]} plan">${f.icon} ${f.name} 🔒</a>`;
+      }
+      return `<a href="/individual/${f.key.replace('individual.','')}" class="ip-btn ip-btn-secondary" style="font-size:12px">${f.icon} ${f.name}</a>`;
+    }).join('');
+    return `<div class="ip-card"><h3 style="margin-bottom:12px">${icon} ${title}</h3><div style="display:flex;flex-wrap:wrap;gap:8px">${items}</div></div>`;
+  };
+
+  const financeFeatures = features.filter(f => f.group === 'Finance');
+  const productivityFeatures = features.filter(f => f.group === 'Productivity');
+  const healthFeatures = features.filter(f => f.group === 'Health');
+  const knowledgeFeatures = features.filter(f => f.group === 'Knowledge');
+  const lifestyleFeatures = features.filter(f => f.group === 'Lifestyle');
+
   res.send(renderPage('Individual Portal', `${ipCSS}${ipNav('dash')}
-    <div style="text-align:center;margin-bottom:24px"><h1 style="font-size:24px;color:#ec4899">My Personal Hub</h1><p style="color:#64748b">Your life, organized in one place</p></div>
-    <div class="ip-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
+    <div style="text-align:center;margin-bottom:24px">
+      <h1 style="font-size:24px;color:#ec4899">My Personal Hub</h1>
+      <p style="color:#64748b">Your life, organized in one place</p>
+      <div style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:6px 16px;background:${planColors[plan]||'#94a3b8'}20;border-radius:20px;border:1px solid ${planColors[plan]||'#94a3b8'}40">
+        <span style="font-size:12px;font-weight:700;color:${planColors[plan]||'#94a3b8'}">${planNames[plan]||'Free'} Plan</span>
+        <span style="font-size:11px;color:#64748b">${unlocked}/${total} features</span>
+        ${plan !== 'enterprise' ? `<a href="/billing" style="font-size:11px;color:#ec4899;font-weight:600;text-decoration:none">Upgrade →</a>` : ''}
+      </div>
+    </div>
+    <div class="ip-progress" style="max-width:400px;margin:0 auto 24px"><div class="ip-progress-bar" style="width:${Math.round(unlocked/total*100)}%"></div></div>
+    ${hasAccess(plan, 'basic') ? `<div class="ip-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
       <div class="ip-stat"><div class="num">${inv.rows[0].v}</div><div class="lbl">Investments</div></div>
       <div class="ip-stat"><div class="num">${sav.rows[0].v}</div><div class="lbl">Savings</div></div>
       <div class="ip-stat"><div class="num">${exp.rows[0].v}</div><div class="lbl">Expenses</div></div>
-      <div class="ip-stat"><div class="num">${loan.rows[0].v}</div><div class="lbl">Loans</div></div>
-    </div>
-    ${sec('Finance','💰',[['Budget','/individual/budget'],['Goals','/individual/goals'],['Investments','/individual/investments'],['Savings','/individual/savings'],['Loans','/individual/loans'],['Expenses','/individual/expenses'],['Net Worth','/individual/networth'],['Recurring','/individual/recurring'],['Reports','/individual/finance-report'],['Currency','/individual/currency']])}
-    ${sec('Productivity','⚡',[['Habits','/individual/habits'],['Tasks','/individual/tasks'],['Time Log','/individual/timelog'],['Pomodoro','/individual/pomodoro'],['Calendar','/individual/calendar'],['Journal','/individual/journal'],['Focus','/individual/focus']])}
-    ${sec('Health','❤️',[['Health Metrics','/individual/health'],['Medications','/individual/medications'],['Workouts','/individual/workouts'],['Water','/individual/water'],['Sleep','/individual/sleep'],['Wellness','/individual/wellness']])}
-    ${sec('Knowledge','📚',[['Books','/individual/books'],['Skills','/individual/skills'],['Courses','/individual/courses'],['Bookmarks','/individual/bookmarks'],['Flashcards','/individual/flashcards'],['Contacts','/individual/contacts'],['Wiki','/individual/wiki']])}
-    ${sec('Lifestyle','🌟',[['Travel','/individual/travel'],['Recipes','/individual/recipes'],['Wishlist','/individual/wishlist'],['Subscriptions','/individual/subscriptions'],['Gifts','/individual/gifts'],['Bucket List','/individual/bucketlist'],['QR Code','/individual/qrcode']])}
+      <div class="ip-stat"><div class="num">${hab.rows[0].c}</div><div class="lbl">Active Habits</div></div>
+    </div>` : ''}
+    ${sec('Finance','💰', financeFeatures)}
+    ${sec('Productivity','⚡', productivityFeatures)}
+    ${sec('Health','❤️', healthFeatures)}
+    ${sec('Knowledge','📚', knowledgeFeatures)}
+    ${sec('Lifestyle','🌟', lifestyleFeatures)}
   `, req.session.user));
 }));
 
 // ============================================================
 // FEATURE 1: INVESTMENT PORTFOLIO
 // ============================================================
-app.get('/individual/investments', ipAuth, ah(async (req, res) => {
+app.get('/individual/investments', ipAuth, requireFeaturePlan('individual.investments'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_investments WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC', [tid(req), uem(req)])).rows;
   const total = rows.reduce((s,r) => s + Number(r.current_value||0), 0);
   const cost = rows.reduce((s,r) => s + Number(r.buy_price||0) * Number(r.quantity||1), 0);
@@ -175,7 +315,7 @@ app.get('/individual/investments', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/investments/new', ipAuth, (req, res) => {
+app.get('/individual/investments/new', ipAuth, requireFeaturePlan('individual.investments'), (req, res) => {
   res.send(renderPage('Add Investment', `${ipCSS}${ipNav('invest')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Investment</h2>
     <form method="POST" action="/individual/investments" class="ip-form">
@@ -192,13 +332,13 @@ app.get('/individual/investments/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/investments', ipAuth, ah(async (req, res) => {
+app.post('/individual/investments', ipAuth, requireFeaturePlan('individual.investments'), ah(async (req, res) => {
   const {name, type, buy_price, current_value, quantity, purchase_date, notes} = req.body;
   await pool.query('INSERT INTO ind_investments(tenant_id,user_email,name,type,buy_price,current_value,quantity,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [tid(req),uem(req),name,type,buy_price||0,current_value||0,quantity||1,purchase_date||null,notes||'']);
   res.redirect('/individual/investments');
 }));
 
-app.get('/individual/investments/:id', ipAuth, ah(async (req, res) => {
+app.get('/individual/investments/:id', ipAuth, requireFeaturePlan('individual.investments'), ah(async (req, res) => {
   const inv = (await pool.query('SELECT * FROM ind_investments WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!inv) return res.redirect('/individual/investments');
   const ret = inv.buy_price > 0 ? ((Number(inv.current_value) - Number(inv.buy_price)) / Number(inv.buy_price) * 100).toFixed(1) : 0;
@@ -222,13 +362,13 @@ app.get('/individual/investments/:id', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/investments/:id/update', ipAuth, ah(async (req, res) => {
+app.post('/individual/investments/:id/update', ipAuth, requireFeaturePlan('individual.investments'), ah(async (req, res) => {
   const {name, type, buy_price, current_value, quantity, purchase_date, notes} = req.body;
   await pool.query('UPDATE ind_investments SET name=$1,type=$2,buy_price=$3,current_value=$4,quantity=$5,purchase_date=$6,notes=$7 WHERE id=$8 AND tenant_id=$9 AND user_email=$10', [name,type,buy_price||0,current_value||0,quantity||1,purchase_date||null,notes||'',req.params.id,tid(req),uem(req)]);
   res.redirect('/individual/investments');
 }));
 
-app.get('/individual/investments/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/investments/:id/delete', ipAuth, requireFeaturePlan('individual.investments'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_investments WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/investments');
 }));
@@ -236,7 +376,7 @@ app.get('/individual/investments/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 2: SAVINGS GOALS
 // ============================================================
-app.get('/individual/savings', ipAuth, ah(async (req, res) => {
+app.get('/individual/savings', ipAuth, requireFeaturePlan('individual.savings'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT *, CASE WHEN target_amount>0 THEN ROUND(current_amount/target_amount*100,1) ELSE 0 END as pct FROM ind_savings_goals WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC', [tid(req), uem(req)])).rows;
   res.send(renderPage('Savings Goals', `${ipCSS}${ipNav('savings')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Savings Goals</h2><a href="/individual/savings/new" class="ip-btn ip-btn-primary">+ New Goal</a></div>
@@ -244,7 +384,7 @@ app.get('/individual/savings', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/savings/new', ipAuth, (req, res) => {
+app.get('/individual/savings/new', ipAuth, requireFeaturePlan('individual.savings'), (req, res) => {
   res.send(renderPage('New Savings Goal', `${ipCSS}${ipNav('savings')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>New Savings Goal</h2>
     <form method="POST" action="/individual/savings/save" class="ip-form">
@@ -259,13 +399,13 @@ app.get('/individual/savings/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/savings/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/savings/save', ipAuth, requireFeaturePlan('individual.savings'), ah(async (req, res) => {
   const {name, target_amount, current_amount, deadline, notes} = req.body;
   await pool.query('INSERT INTO ind_savings_goals(tenant_id,user_email,name,target_amount,current_amount,deadline,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid(req),uem(req),name,target_amount,current_amount||0,deadline||null,notes||'']);
   res.redirect('/individual/savings');
 }));
 
-app.get('/individual/savings/:id/deposit', ipAuth, (req, res) => {
+app.get('/individual/savings/:id/deposit', ipAuth, requireFeaturePlan('individual.savings'), (req, res) => {
   res.send(renderPage('Add Deposit', `${ipCSS}${ipNav('savings')}
     <div class="ip-card" style="max-width:400px;margin:0 auto"><h2>Add Deposit</h2>
     <form method="POST" action="/individual/savings/${req.params.id}/deposit" class="ip-form">
@@ -277,14 +417,14 @@ app.get('/individual/savings/:id/deposit', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/savings/:id/deposit', ipAuth, ah(async (req, res) => {
+app.post('/individual/savings/:id/deposit', ipAuth, requireFeaturePlan('individual.savings'), ah(async (req, res) => {
   const {amount, note} = req.body;
   await pool.query('UPDATE ind_savings_goals SET current_amount=current_amount+$1 WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [amount, req.params.id, tid(req), uem(req)]);
   await pool.query('INSERT INTO ind_savings_deposits(tenant_id,goal_id,amount,note) VALUES($1,$2,$3,$4)', [tid(req), req.params.id, amount, note||'']);
   res.redirect('/individual/savings');
 }));
 
-app.get('/individual/savings/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/savings/:id/delete', ipAuth, requireFeaturePlan('individual.savings'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_savings_goals WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/savings');
 }));
@@ -292,7 +432,7 @@ app.get('/individual/savings/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 3: LOAN TRACKER
 // ============================================================
-app.get('/individual/loans', ipAuth, ah(async (req, res) => {
+app.get('/individual/loans', ipAuth, requireFeaturePlan('individual.loans'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_loans WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC', [tid(req), uem(req)])).rows;
   const totalOut = rows.reduce((s,r) => s + Number(r.outstanding||0), 0);
   res.send(renderPage('Loans', `${ipCSS}${ipNav('loans')}
@@ -302,7 +442,7 @@ app.get('/individual/loans', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/loans/new', ipAuth, (req, res) => {
+app.get('/individual/loans/new', ipAuth, requireFeaturePlan('individual.loans'), (req, res) => {
   res.send(renderPage('Add Loan', `${ipCSS}${ipNav('loans')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Loan</h2>
     <form method="POST" action="/individual/loans/save" class="ip-form">
@@ -321,13 +461,13 @@ app.get('/individual/loans/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/loans/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/loans/save', ipAuth, requireFeaturePlan('individual.loans'), ah(async (req, res) => {
   const {name,lender,principal,interest_rate,outstanding,emi_amount,start_date,end_date,notes} = req.body;
   await pool.query('INSERT INTO ind_loans(tenant_id,user_email,name,lender,principal,interest_rate,outstanding,emi_amount,start_date,end_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [tid(req),uem(req),name,lender||'',principal,interest_rate||0,outstanding,emi_amount||0,start_date||null,end_date||null,notes||'']);
   res.redirect('/individual/loans');
 }));
 
-app.get('/individual/loans/:id/payment', ipAuth, (req, res) => {
+app.get('/individual/loans/:id/payment', ipAuth, requireFeaturePlan('individual.loans'), (req, res) => {
   res.send(renderPage('Loan Payment', `${ipCSS}${ipNav('loans')}
     <div class="ip-card" style="max-width:400px;margin:0 auto"><h2>Record Payment</h2>
     <form method="POST" action="/individual/loans/${req.params.id}/payment" class="ip-form">
@@ -339,7 +479,7 @@ app.get('/individual/loans/:id/payment', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/loans/:id/payment', ipAuth, ah(async (req, res) => {
+app.post('/individual/loans/:id/payment', ipAuth, requireFeaturePlan('individual.loans'), ah(async (req, res) => {
   const {amount, note} = req.body;
   await pool.query('UPDATE ind_loans SET outstanding=GREATEST(0,outstanding-$1) WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [amount, req.params.id, tid(req), uem(req)]);
   await pool.query('UPDATE ind_loans SET status=CASE WHEN outstanding<=0 THEN \'paid\' ELSE status END WHERE id=$1', [req.params.id]);
@@ -347,7 +487,7 @@ app.post('/individual/loans/:id/payment', ipAuth, ah(async (req, res) => {
   res.redirect('/individual/loans');
 }));
 
-app.get('/individual/loans/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/loans/:id/delete', ipAuth, requireFeaturePlan('individual.loans'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_loans WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/loans');
 }));
@@ -355,7 +495,7 @@ app.get('/individual/loans/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 4: EXPENSE ANALYTICS
 // ============================================================
-app.get('/individual/expenses', ipAuth, ah(async (req, res) => {
+app.get('/individual/expenses', ipAuth, requireFeaturePlan('individual.expenses'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_expenses WHERE tenant_id=$1 AND user_email=$2 ORDER BY expense_date DESC LIMIT 50', [tid(req), uem(req)])).rows;
   const total = rows.reduce((s,r) => s + Number(r.amount||0), 0);
   res.send(renderPage('Expenses', `${ipCSS}${ipNav('expenses')}
@@ -379,18 +519,18 @@ app.get('/individual/expenses/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/expenses/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/expenses/save', ipAuth, requireFeaturePlan('individual.expenses'), ah(async (req, res) => {
   const {category, amount, description, expense_date} = req.body;
   await pool.query('INSERT INTO ind_expenses(tenant_id,user_email,category,amount,description,expense_date) VALUES($1,$2,$3,$4,$5,$6)', [tid(req),uem(req),category||'Other',amount,description||'',expense_date||null]);
   res.redirect('/individual/expenses');
 }));
 
-app.get('/individual/expenses/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/expenses/:id/delete', ipAuth, requireFeaturePlan('individual.expenses'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_expenses WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/expenses');
 }));
 
-app.get('/individual/expenses/chart-data', ipAuth, ah(async (req, res) => {
+app.get('/individual/expenses/chart-data', ipAuth, requireFeaturePlan('individual.expenses'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT category, SUM(amount) as total FROM ind_expenses WHERE tenant_id=$1 AND user_email=$2 GROUP BY category ORDER BY total DESC', [tid(req), uem(req)])).rows;
   res.json({labels: rows.map(r=>r.category), data: rows.map(r=>Number(r.total))});
 }));
@@ -398,7 +538,7 @@ app.get('/individual/expenses/chart-data', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 5: NET WORTH CALCULATOR
 // ============================================================
-app.get('/individual/networth', ipAuth, ah(async (req, res) => {
+app.get('/individual/networth', ipAuth, requireFeaturePlan('individual.networth'), ah(async (req, res) => {
   const snap = (await pool.query('SELECT * FROM ind_networth_snapshots WHERE tenant_id=$1 AND user_email=$2 ORDER BY snapshot_date DESC LIMIT 10', [tid(req), uem(req)])).rows;
   res.send(renderPage('Net Worth', `${ipCSS}${ipNav('networth')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Net Worth Calculator</h2></div>
@@ -413,14 +553,14 @@ app.get('/individual/networth', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/networth/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/networth/save', ipAuth, requireFeaturePlan('individual.networth'), ah(async (req, res) => {
   const {total_assets, total_liabilities, notes} = req.body;
   const nw = Number(total_assets) - Number(total_liabilities);
   await pool.query('INSERT INTO ind_networth_snapshots(tenant_id,user_email,total_assets,total_liabilities,net_worth,notes) VALUES($1,$2,$3,$4,$5,$6)', [tid(req),uem(req),total_assets,total_liabilities,nw,notes||'']);
   res.redirect('/individual/networth');
 }));
 
-app.get('/individual/networth/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/networth/:id/delete', ipAuth, requireFeaturePlan('individual.networth'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_networth_snapshots WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/networth');
 }));
@@ -428,7 +568,7 @@ app.get('/individual/networth/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 6: RECURRING TRANSACTIONS
 // ============================================================
-app.get('/individual/recurring', ipAuth, ah(async (req, res) => {
+app.get('/individual/recurring', ipAuth, requireFeaturePlan('individual.recurring'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_recurring_txns WHERE tenant_id=$1 AND user_email=$2 ORDER BY next_due NULLS LAST', [tid(req), uem(req)])).rows;
   const monthly = rows.filter(r=>r.is_active).reduce((s,r)=>s+Number(r.amount||0),0);
   res.send(renderPage('Recurring', `${ipCSS}${ipNav('recurring')}
@@ -438,7 +578,7 @@ app.get('/individual/recurring', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/recurring/new', ipAuth, (req, res) => {
+app.get('/individual/recurring/new', ipAuth, requireFeaturePlan('individual.recurring'), (req, res) => {
   res.send(renderPage('Add Recurring', `${ipCSS}${ipNav('recurring')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Recurring Transaction</h2>
     <form method="POST" action="/individual/recurring/save" class="ip-form">
@@ -454,18 +594,18 @@ app.get('/individual/recurring/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/recurring/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/recurring/save', ipAuth, requireFeaturePlan('individual.recurring'), ah(async (req, res) => {
   const {name,amount,type,category,frequency,next_due} = req.body;
   await pool.query('INSERT INTO ind_recurring_txns(tenant_id,user_email,name,amount,type,category,frequency,next_due) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),uem(req),name,amount,type,category||'',frequency,next_due||null]);
   res.redirect('/individual/recurring');
 }));
 
-app.get('/individual/recurring/:id/toggle', ipAuth, ah(async (req, res) => {
+app.get('/individual/recurring/:id/toggle', ipAuth, requireFeaturePlan('individual.recurring'), ah(async (req, res) => {
   await pool.query('UPDATE ind_recurring_txns SET is_active=NOT is_active WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/recurring');
 }));
 
-app.get('/individual/recurring/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/recurring/:id/delete', ipAuth, requireFeaturePlan('individual.recurring'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_recurring_txns WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/recurring');
 }));
@@ -473,7 +613,7 @@ app.get('/individual/recurring/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 7: FINANCIAL REPORTS
 // ============================================================
-app.get('/individual/finance-report', ipAuth, ah(async (req, res) => {
+app.get('/individual/finance-report', ipAuth, requireFeaturePlan('individual.finance-report'), ah(async (req, res) => {
   const period = req.query.period || 'month';
   const exp = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM ind_expenses WHERE tenant_id=$1 AND user_email=$2', [tid(req), uem(req)])).rows[0].t;
   const inv = (await pool.query('SELECT COALESCE(SUM(current_value),0) as t FROM ind_investments WHERE tenant_id=$1 AND user_email=$2', [tid(req), uem(req)])).rows[0].t;
@@ -525,7 +665,7 @@ app.post('/individual/currency/convert', ipAuth, (req, res) => {
 // ============================================================
 // FEATURE 9: HABIT TRACKER
 // ============================================================
-app.get('/individual/habits', ipAuth, ah(async (req, res) => {
+app.get('/individual/habits', ipAuth, requireFeaturePlan('individual.habits'), ah(async (req, res) => {
   const habits = (await pool.query('SELECT h.*, (SELECT COUNT(*) FROM ind_habit_checkins WHERE habit_id=h.id AND checkin_date=CURRENT_DATE) as today_done FROM ind_habits h WHERE h.tenant_id=$1 AND h.user_email=$2 ORDER BY h.created_at DESC', [tid(req), uem(req)])).rows;
   res.send(renderPage('Habits', `${ipCSS}${ipNav('habits')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Habit Tracker</h2><a href="/individual/habits/new" class="ip-btn ip-btn-primary">+ New Habit</a></div>
@@ -548,18 +688,18 @@ app.get('/individual/habits/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/habits/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/habits/save', ipAuth, requireFeaturePlan('individual.habits'), ah(async (req, res) => {
   const {name,frequency,color,target_count,notes} = req.body;
   await pool.query('INSERT INTO ind_habits(tenant_id,user_email,name,frequency,color,target_count,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid(req),uem(req),name,frequency,color||'#ec4899',target_count||1,notes||'']);
   res.redirect('/individual/habits');
 }));
 
-app.get('/individual/habits/:id/checkin', ipAuth, ah(async (req, res) => {
+app.get('/individual/habits/:id/checkin', ipAuth, requireFeaturePlan('individual.habits'), ah(async (req, res) => {
   await pool.query('INSERT INTO ind_habit_checkins(tenant_id,habit_id,checkin_date) VALUES($1,$2,CURRENT_DATE) ON CONFLICT (habit_id,checkin_date) DO NOTHING', [tid(req), req.params.id]);
   res.redirect('/individual/habits');
 }));
 
-app.get('/individual/habits/:id/streak', ipAuth, ah(async (req, res) => {
+app.get('/individual/habits/:id/streak', ipAuth, requireFeaturePlan('individual.habits'), ah(async (req, res) => {
   const habit = (await pool.query('SELECT * FROM ind_habits WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!habit) return res.redirect('/individual/habits');
   const checkins = (await pool.query('SELECT checkin_date FROM ind_habit_checkins WHERE habit_id=$1 AND tenant_id=$2 ORDER BY checkin_date DESC', [req.params.id, tid(req)])).rows;
@@ -588,7 +728,7 @@ app.get('/individual/habits/:id/streak', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/habits/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/habits/:id/delete', ipAuth, requireFeaturePlan('individual.habits'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_habits WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/habits');
 }));
@@ -596,7 +736,7 @@ app.get('/individual/habits/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 10: TASK MANAGER (KANBAN)
 // ============================================================
-app.get('/individual/tasks', ipAuth, ah(async (req, res) => {
+app.get('/individual/tasks', ipAuth, requireFeaturePlan('individual.tasks'), ah(async (req, res) => {
   const tasks = (await pool.query('SELECT * FROM ind_tasks WHERE tenant_id=$1 AND user_email=$2 ORDER BY CASE priority WHEN \'high\' THEN 1 WHEN \'medium\' THEN 2 ELSE 3 END, due_date NULLS LAST', [tid(req), uem(req)])).rows;
   const todo = tasks.filter(t=>t.status==='todo');
   const prog = tasks.filter(t=>t.status==='in_progress');
@@ -623,18 +763,18 @@ app.get('/individual/tasks/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/tasks/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/tasks/save', ipAuth, requireFeaturePlan('individual.tasks'), ah(async (req, res) => {
   const {title,description,priority,category,due_date} = req.body;
   await pool.query('INSERT INTO ind_tasks(tenant_id,user_email,title,description,priority,category,due_date) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid(req),uem(req),title,description||'',priority||'medium',category||'',due_date||null]);
   res.redirect('/individual/tasks');
 }));
 
-app.get('/individual/tasks/:id/move', ipAuth, ah(async (req, res) => {
+app.get('/individual/tasks/:id/move', ipAuth, requireFeaturePlan('individual.tasks'), ah(async (req, res) => {
   await pool.query('UPDATE ind_tasks SET status=$1 WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [req.query.to||'todo', req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/tasks');
 }));
 
-app.get('/individual/tasks/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/tasks/:id/delete', ipAuth, requireFeaturePlan('individual.tasks'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_tasks WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/tasks');
 }));
@@ -643,7 +783,7 @@ app.get('/individual/tasks/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 11: TIME LOGGER
 // ============================================================
-app.get('/individual/timelog', ipAuth, ah(async (req, res) => {
+app.get('/individual/timelog', ipAuth, requireFeaturePlan('individual.timelog'), ah(async (req, res) => {
   const logs = (await pool.query('SELECT * FROM ind_time_logs WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC LIMIT 30', [tid(req), uem(req)])).rows;
   const totalMin = logs.reduce((s,r)=>s+Number(r.duration_minutes||0),0);
   res.send(renderPage('Time Log', `${ipCSS}${ipNav('timelog')}
@@ -653,7 +793,7 @@ app.get('/individual/timelog', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/timelog/start', ipAuth, (req, res) => {
+app.get('/individual/timelog/start', ipAuth, requireFeaturePlan('individual.timelog'), (req, res) => {
   res.send(renderPage('Start Timer', `${ipCSS}${ipNav('timelog')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Start Timer</h2>
     <form method="POST" action="/individual/timelog/stop" class="ip-form">
@@ -667,18 +807,18 @@ app.get('/individual/timelog/start', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/timelog/stop', ipAuth, ah(async (req, res) => {
+app.post('/individual/timelog/stop', ipAuth, requireFeaturePlan('individual.timelog'), ah(async (req, res) => {
   const {project, activity, duration, note} = req.body;
   await pool.query('INSERT INTO ind_time_logs(tenant_id,user_email,project,activity,start_time,duration_minutes,note) VALUES($1,$2,$3,$4,NOW(),$5,$6)', [tid(req),uem(req),project||'',activity||'',duration||0,note||'']);
   res.redirect('/individual/timelog');
 }));
 
-app.get('/individual/timelog/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/timelog/:id/delete', ipAuth, requireFeaturePlan('individual.timelog'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_time_logs WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/timelog');
 }));
 
-app.get('/individual/timelog/summary', ipAuth, ah(async (req, res) => {
+app.get('/individual/timelog/summary', ipAuth, requireFeaturePlan('individual.timelog'), ah(async (req, res) => {
   const summary = (await pool.query('SELECT project, COUNT(*) as entries, SUM(duration_minutes) as total_min, MIN(start_time) as first_entry, MAX(start_time) as last_entry FROM ind_time_logs WHERE tenant_id=$1 AND user_email=$2 GROUP BY project ORDER BY total_min DESC NULLS LAST', [tid(req), uem(req)])).rows;
   const totalHours = summary.reduce((s,r)=>s+Number(r.total_min||0),0);
   res.send(renderPage('Time Summary', `${ipCSS}${ipNav('timelog')}
@@ -692,7 +832,7 @@ app.get('/individual/timelog/summary', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 12: POMODORO TIMER
 // ============================================================
-app.get('/individual/pomodoro', ipAuth, ah(async (req, res) => {
+app.get('/individual/pomodoro', ipAuth, requireFeaturePlan('individual.pomodoro'), ah(async (req, res) => {
   const today = (await pool.query('SELECT COUNT(*) as c, COALESCE(SUM(duration_minutes),0) as t FROM ind_pomodoro_sessions WHERE tenant_id=$1 AND user_email=$2 AND started_at::date=CURRENT_DATE', [tid(req), uem(req)])).rows[0];
   res.send(renderPage('Pomodoro', `${ipCSS}${ipNav('pomodoro')}
     <div style="text-align:center;max-width:400px;margin:0 auto">
@@ -713,7 +853,7 @@ app.get('/individual/pomodoro', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/pomodoro/session', ipAuth, ah(async (req, res) => {
+app.post('/individual/pomodoro/session', ipAuth, requireFeaturePlan('individual.pomodoro'), ah(async (req, res) => {
   const {task, duration_minutes} = req.body;
   await pool.query('INSERT INTO ind_pomodoro_sessions(tenant_id,user_email,task,duration_minutes,type) VALUES($1,$2,$3,$4,$5)', [tid(req),uem(req),task||'',duration_minutes||25,'focus']);
   res.redirect('/individual/pomodoro');
@@ -722,7 +862,7 @@ app.post('/individual/pomodoro/session', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 13: CALENDAR & EVENTS
 // ============================================================
-app.get('/individual/calendar', ipAuth, ah(async (req, res) => {
+app.get('/individual/calendar', ipAuth, requireFeaturePlan('individual.calendar'), ah(async (req, res) => {
   const events = (await pool.query('SELECT * FROM ind_calendar_events WHERE tenant_id=$1 AND user_email=$2 ORDER BY event_date, event_time NULLS LAST', [tid(req), uem(req)])).rows;
   res.send(renderPage('Calendar', `${ipCSS}${ipNav('calendar')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Calendar & Events</h2><a href="/individual/calendar/new" class="ip-btn ip-btn-primary">+ New Event</a></div>
@@ -746,13 +886,13 @@ app.get('/individual/calendar/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/calendar/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/calendar/save', ipAuth, requireFeaturePlan('individual.calendar'), ah(async (req, res) => {
   const {title,event_date,event_time,category,location,description} = req.body;
   await pool.query('INSERT INTO ind_calendar_events(tenant_id,user_email,title,description,event_date,event_time,category,location) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),uem(req),title,description||'',event_date,event_time||null,category||'personal',location||'']);
   res.redirect('/individual/calendar');
 }));
 
-app.get('/individual/calendar/:id/edit', ipAuth, ah(async (req, res) => {
+app.get('/individual/calendar/:id/edit', ipAuth, requireFeaturePlan('individual.calendar'), ah(async (req, res) => {
   const e = (await pool.query('SELECT * FROM ind_calendar_events WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!e) return res.redirect('/individual/calendar');
   res.send(renderPage('Edit Event', `${ipCSS}${ipNav('calendar')}
@@ -770,13 +910,13 @@ app.get('/individual/calendar/:id/edit', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/calendar/:id/update', ipAuth, ah(async (req, res) => {
+app.post('/individual/calendar/:id/update', ipAuth, requireFeaturePlan('individual.calendar'), ah(async (req, res) => {
   const {title,event_date,event_time,category,location,description} = req.body;
   await pool.query('UPDATE ind_calendar_events SET title=$1,description=$2,event_date=$3,event_time=$4,category=$5,location=$6 WHERE id=$7 AND tenant_id=$8 AND user_email=$9', [title,description||'',event_date,event_time||null,category||'personal',location||'',req.params.id,tid(req),uem(req)]);
   res.redirect('/individual/calendar');
 }));
 
-app.get('/individual/calendar/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/calendar/:id/delete', ipAuth, requireFeaturePlan('individual.calendar'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_calendar_events WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/calendar');
 }));
@@ -784,7 +924,7 @@ app.get('/individual/calendar/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 14: DAILY JOURNAL
 // ============================================================
-app.get('/individual/journal', ipAuth, ah(async (req, res) => {
+app.get('/individual/journal', ipAuth, requireFeaturePlan('individual.journal'), ah(async (req, res) => {
   const entries = (await pool.query('SELECT * FROM ind_journal_entries WHERE tenant_id=$1 AND user_email=$2 ORDER BY entry_date DESC, created_at DESC LIMIT 30', [tid(req), uem(req)])).rows;
   const moods = {great:'😊',good:'🙂',okay:'😐',bad:'😞',terrible:'😢'};
   res.send(renderPage('Journal', `${ipCSS}${ipNav('journal')}
@@ -807,13 +947,13 @@ app.get('/individual/journal/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/journal/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/journal/save', ipAuth, requireFeaturePlan('individual.journal'), ah(async (req, res) => {
   const {title,mood,tags,content} = req.body;
   await pool.query('INSERT INTO ind_journal_entries(tenant_id,user_email,title,content,mood,tags) VALUES($1,$2,$3,$4,$5,$6)', [tid(req),uem(req),title||'',content,mood||'okay',tags||'']);
   res.redirect('/individual/journal');
 }));
 
-app.get('/individual/journal/:id', ipAuth, ah(async (req, res) => {
+app.get('/individual/journal/:id', ipAuth, requireFeaturePlan('individual.journal'), ah(async (req, res) => {
   const e = (await pool.query('SELECT * FROM ind_journal_entries WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!e) return res.redirect('/individual/journal');
   const moods = {great:'😊',good:'🙂',okay:'😐',bad:'😞',terrible:'😢'};
@@ -825,7 +965,7 @@ app.get('/individual/journal/:id', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/journal/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/journal/:id/delete', ipAuth, requireFeaturePlan('individual.journal'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_journal_entries WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/journal');
 }));
@@ -833,7 +973,7 @@ app.get('/individual/journal/:id/delete', ipAuth, ah(async (req, res) => {
 // ============================================================
 // FEATURE 15: FOCUS MODE
 // ============================================================
-app.get('/individual/focus', ipAuth, ah(async (req, res) => {
+app.get('/individual/focus', ipAuth, requireFeaturePlan('individual.focus'), ah(async (req, res) => {
   const sessions = (await pool.query('SELECT * FROM ind_focus_sessions WHERE tenant_id=$1 AND user_email=$2 ORDER BY started_at DESC LIMIT 20', [tid(req), uem(req)])).rows;
   const active = sessions.find(s=>!s.ended_at);
   const totalMin = sessions.filter(s=>s.completed).reduce((s,r)=>s+Number(r.duration_minutes||0),0);
@@ -845,12 +985,12 @@ app.get('/individual/focus', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/focus/start', ipAuth, ah(async (req, res) => {
+app.post('/individual/focus/start', ipAuth, requireFeaturePlan('individual.focus'), ah(async (req, res) => {
   await pool.query('INSERT INTO ind_focus_sessions(tenant_id,user_email,goal,started_at) VALUES($1,$2,$3,NOW())', [tid(req),uem(req),req.body.goal]);
   res.redirect('/individual/focus');
 }));
 
-app.get('/individual/focus/end', ipAuth, ah(async (req, res) => {
+app.get('/individual/focus/end', ipAuth, requireFeaturePlan('individual.focus'), ah(async (req, res) => {
   const active = (await pool.query('SELECT id, started_at FROM ind_focus_sessions WHERE tenant_id=$1 AND user_email=$2 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1', [tid(req), uem(req)])).rows[0];
   if (active) {
     const mins = Math.round((Date.now() - new Date(active.started_at).getTime()) / 60000);
@@ -863,7 +1003,7 @@ app.get('/individual/focus/end', ipAuth, ah(async (req, res) => {
 // FEATURES 16-21: HEALTH & WELLNESS
 // ============================================================
 // FEATURE 16: Health Metrics
-app.get('/individual/health', ipAuth, ah(async (req, res) => {
+app.get('/individual/health', ipAuth, requireFeaturePlan('individual.health'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_health_metrics WHERE tenant_id=$1 AND user_email=$2 ORDER BY recorded_date DESC LIMIT 30', [tid(req), uem(req)])).rows;
   res.send(renderPage('Health Metrics', `${ipCSS}${ipNav('health')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Health Metrics</h2><a href="/individual/health/new" class="ip-btn ip-btn-primary">+ Record</a></div>
@@ -871,7 +1011,7 @@ app.get('/individual/health', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/health/new', ipAuth, (req, res) => {
+app.get('/individual/health/new', ipAuth, requireFeaturePlan('individual.health'), (req, res) => {
   res.send(renderPage('Record Health', `${ipCSS}${ipNav('health')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Record Health Metric</h2>
     <form method="POST" action="/individual/health/save" class="ip-form">
@@ -886,25 +1026,25 @@ app.get('/individual/health/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/health/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/health/save', ipAuth, requireFeaturePlan('individual.health'), ah(async (req, res) => {
   const {metric_type,value,unit,recorded_date,notes} = req.body;
   await pool.query('INSERT INTO ind_health_metrics(tenant_id,user_email,metric_type,value,unit,recorded_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid(req),uem(req),metric_type,value,unit||'',recorded_date||null,notes||'']);
   res.redirect('/individual/health');
 }));
 
-app.get('/individual/health/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/health/:id/delete', ipAuth, requireFeaturePlan('individual.health'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_health_metrics WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/health');
 }));
 
-app.get('/individual/health/chart-data', ipAuth, ah(async (req, res) => {
+app.get('/individual/health/chart-data', ipAuth, requireFeaturePlan('individual.health'), ah(async (req, res) => {
   const {type='weight'} = req.query;
   const rows = (await pool.query('SELECT recorded_date as date, value FROM ind_health_metrics WHERE tenant_id=$1 AND user_email=$2 AND metric_type=$3 ORDER BY recorded_date', [tid(req), uem(req), type])).rows;
   res.json({labels:rows.map(r=>r.date), data:rows.map(r=>Number(r.value))});
 }));
 
 // FEATURE 17: Medication Tracker
-app.get('/individual/medications', ipAuth, ah(async (req, res) => {
+app.get('/individual/medications', ipAuth, requireFeaturePlan('individual.medications'), ah(async (req, res) => {
   const meds = (await pool.query('SELECT * FROM ind_medications WHERE tenant_id=$1 AND user_email=$2 ORDER BY is_active DESC, created_at DESC', [tid(req), uem(req)])).rows;
   res.send(renderPage('Medications', `${ipCSS}${ipNav('health')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Medication Tracker</h2><a href="/individual/medications/new" class="ip-btn ip-btn-primary">+ Add</a></div>
@@ -912,7 +1052,7 @@ app.get('/individual/medications', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/medications/new', ipAuth, (req, res) => {
+app.get('/individual/medications/new', ipAuth, requireFeaturePlan('individual.medications'), (req, res) => {
   res.send(renderPage('Add Medication', `${ipCSS}${ipNav('health')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Medication</h2>
     <form method="POST" action="/individual/medications/save" class="ip-form">
@@ -928,24 +1068,24 @@ app.get('/individual/medications/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/medications/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/medications/save', ipAuth, requireFeaturePlan('individual.medications'), ah(async (req, res) => {
   const {name,dosage,frequency,start_date,end_date,notes} = req.body;
   await pool.query('INSERT INTO ind_medications(tenant_id,user_email,name,dosage,frequency,start_date,end_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),uem(req),name,dosage||'',frequency||'',start_date||null,end_date||null,notes||'']);
   res.redirect('/individual/medications');
 }));
 
-app.get('/individual/medications/:id/taken', ipAuth, ah(async (req, res) => {
+app.get('/individual/medications/:id/taken', ipAuth, requireFeaturePlan('individual.medications'), ah(async (req, res) => {
   await pool.query('INSERT INTO ind_medication_log(tenant_id,medication_id) VALUES($1,$2)', [tid(req), req.params.id]);
   res.redirect('/individual/medications');
 }));
 
-app.get('/individual/medications/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/medications/:id/delete', ipAuth, requireFeaturePlan('individual.medications'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_medications WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/medications');
 }));
 
 // FEATURE 18: Workout Logger
-app.get('/individual/workouts', ipAuth, ah(async (req, res) => {
+app.get('/individual/workouts', ipAuth, requireFeaturePlan('individual.workouts'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_workouts WHERE tenant_id=$1 AND user_email=$2 ORDER BY workout_date DESC LIMIT 30', [tid(req), uem(req)])).rows;
   res.send(renderPage('Workouts', `${ipCSS}${ipNav('health')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Workout Logger</h2><a href="/individual/workouts/new" class="ip-btn ip-btn-primary">+ Log Workout</a></div>
@@ -953,7 +1093,7 @@ app.get('/individual/workouts', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/workouts/new', ipAuth, (req, res) => {
+app.get('/individual/workouts/new', ipAuth, requireFeaturePlan('individual.workouts'), (req, res) => {
   res.send(renderPage('Log Workout', `${ipCSS}${ipNav('health')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Log Workout</h2>
     <form method="POST" action="/individual/workouts/save" class="ip-form">
@@ -969,19 +1109,19 @@ app.get('/individual/workouts/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/workouts/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/workouts/save', ipAuth, requireFeaturePlan('individual.workouts'), ah(async (req, res) => {
   const {type,duration_minutes,calories,sets,reps,notes} = req.body;
   await pool.query('INSERT INTO ind_workouts(tenant_id,user_email,type,duration_minutes,calories,sets,reps,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),uem(req),type||'Other',duration_minutes||0,calories||0,sets||0,reps||0,notes||'']);
   res.redirect('/individual/workouts');
 }));
 
-app.get('/individual/workouts/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/workouts/:id/delete', ipAuth, requireFeaturePlan('individual.workouts'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_workouts WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/workouts');
 }));
 
 // FEATURE 19: Water Intake Tracker
-app.get('/individual/water', ipAuth, ah(async (req, res) => {
+app.get('/individual/water', ipAuth, requireFeaturePlan('individual.water'), ah(async (req, res) => {
   const today = (await pool.query('SELECT * FROM ind_water_intake WHERE tenant_id=$1 AND user_email=$2 AND intake_date=CURRENT_DATE', [tid(req), uem(req)])).rows[0] || {glasses:0, goal:8};
   const pct = Math.min(100, Math.round(Number(today.glasses)/Number(today.goal)*100));
   res.send(renderPage('Water Intake', `${ipCSS}${ipNav('health')}
@@ -1000,18 +1140,18 @@ app.get('/individual/water', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/water/add', ipAuth, ah(async (req, res) => {
+app.get('/individual/water/add', ipAuth, requireFeaturePlan('individual.water'), ah(async (req, res) => {
   await pool.query('INSERT INTO ind_water_intake(tenant_id,user_email,glasses,goal,intake_date) VALUES($1,$2,1,8,CURRENT_DATE) ON CONFLICT (tenant_id,user_email,intake_date) DO UPDATE SET glasses=ind_water_intake.glasses+1', [tid(req), uem(req)]);
   res.redirect('/individual/water');
 }));
 
-app.get('/individual/water/reset', ipAuth, ah(async (req, res) => {
+app.get('/individual/water/reset', ipAuth, requireFeaturePlan('individual.water'), ah(async (req, res) => {
   await pool.query('UPDATE ind_water_intake SET glasses=0 WHERE tenant_id=$1 AND user_email=$2 AND intake_date=CURRENT_DATE', [tid(req), uem(req)]);
   res.redirect('/individual/water');
 }));
 
 // FEATURE 20: Sleep Tracker
-app.get('/individual/sleep', ipAuth, ah(async (req, res) => {
+app.get('/individual/sleep', ipAuth, requireFeaturePlan('individual.sleep'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_sleep_log WHERE tenant_id=$1 AND user_email=$2 ORDER BY sleep_date DESC LIMIT 14', [tid(req), uem(req)])).rows;
   res.send(renderPage('Sleep Tracker', `${ipCSS}${ipNav('health')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Sleep Tracker</h2><a href="/individual/sleep/new" class="ip-btn ip-btn-primary">+ Log Sleep</a></div>
@@ -1019,7 +1159,7 @@ app.get('/individual/sleep', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/sleep/new', ipAuth, (req, res) => {
+app.get('/individual/sleep/new', ipAuth, requireFeaturePlan('individual.sleep'), (req, res) => {
   res.send(renderPage('Log Sleep', `${ipCSS}${ipNav('health')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Log Sleep</h2>
     <form method="POST" action="/individual/sleep/save" class="ip-form">
@@ -1034,19 +1174,19 @@ app.get('/individual/sleep/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/sleep/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/sleep/save', ipAuth, requireFeaturePlan('individual.sleep'), ah(async (req, res) => {
   const {bedtime,wake_time,quality,sleep_date,notes} = req.body;
   await pool.query('INSERT INTO ind_sleep_log(tenant_id,user_email,bedtime,wake_time,quality,sleep_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid(req),uem(req),bedtime||null,wake_time||null,quality||5,sleep_date||null,notes||'']);
   res.redirect('/individual/sleep');
 }));
 
-app.get('/individual/sleep/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/sleep/:id/delete', ipAuth, requireFeaturePlan('individual.sleep'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_sleep_log WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/sleep');
 }));
 
 // FEATURE 21: Mental Wellness Check
-app.get('/individual/wellness', ipAuth, ah(async (req, res) => {
+app.get('/individual/wellness', ipAuth, requireFeaturePlan('individual.wellness'), ah(async (req, res) => {
   const recent = (await pool.query('SELECT * FROM ind_wellness_checkins WHERE tenant_id=$1 AND user_email=$2 ORDER BY checkin_date DESC LIMIT 14', [tid(req), uem(req)])).rows;
   const moods = {great:'😊',good:'🙂',okay:'😐',low:'😞',bad:'😢'};
   res.send(renderPage('Wellness', `${ipCSS}${ipNav('health')}
@@ -1063,13 +1203,13 @@ app.get('/individual/wellness', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/wellness/checkin', ipAuth, ah(async (req, res) => {
+app.post('/individual/wellness/checkin', ipAuth, requireFeaturePlan('individual.wellness'), ah(async (req, res) => {
   const {mood,stress_level,energy_level,gratitude} = req.body;
   await pool.query('INSERT INTO ind_wellness_checkins(tenant_id,user_email,mood,stress_level,energy_level,gratitude) VALUES($1,$2,$3,$4,$5,$6)', [tid(req),uem(req),mood||'okay',stress_level||5,energy_level||5,gratitude||'']);
   res.redirect('/individual/wellness');
 }));
 
-app.get('/individual/wellness/history', ipAuth, ah(async (req, res) => {
+app.get('/individual/wellness/history', ipAuth, requireFeaturePlan('individual.wellness'), ah(async (req, res) => {
   const checkins = (await pool.query('SELECT * FROM ind_wellness_checkins WHERE tenant_id=$1 AND user_email=$2 ORDER BY checkin_date DESC LIMIT 90', [tid(req), uem(req)])).rows;
   const moods = {great:'😊',good:'🙂',okay:'😐',low:'😞',bad:'😢'};
   const moodCounts = {};
@@ -1094,7 +1234,7 @@ app.get('/individual/wellness/history', ipAuth, ah(async (req, res) => {
 // FEATURES 22-28: KNOWLEDGE & LEARNING
 // ============================================================
 // FEATURE 22: Book Library
-app.get('/individual/books', ipAuth, ah(async (req, res) => {
+app.get('/individual/books', ipAuth, requireFeaturePlan('individual.books'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_books WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC', [tid(req), uem(req)])).rows;
   const statusIcon = {want:'📋',reading:'📖',done:'✅'};
   res.send(renderPage('Books', `${ipCSS}${ipNav('books')}
@@ -1119,24 +1259,24 @@ app.get('/individual/books/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/books/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/books/save', ipAuth, requireFeaturePlan('individual.books'), ah(async (req, res) => {
   const {title,author,genre,status,rating,notes} = req.body;
   await pool.query('INSERT INTO ind_books(tenant_id,user_email,title,author,genre,status,rating,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),uem(req),title,author||'',genre||'',status||'want',rating||null,notes||'']);
   res.redirect('/individual/books');
 }));
 
-app.get('/individual/books/:id/status', ipAuth, ah(async (req, res) => {
+app.get('/individual/books/:id/status', ipAuth, requireFeaturePlan('individual.books'), ah(async (req, res) => {
   await pool.query('UPDATE ind_books SET status=$1 WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [req.query.status||'want', req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/books');
 }));
 
-app.get('/individual/books/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/books/:id/delete', ipAuth, requireFeaturePlan('individual.books'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_books WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/books');
 }));
 
 // FEATURE 23: Skill Tracker
-app.get('/individual/skills', ipAuth, ah(async (req, res) => {
+app.get('/individual/skills', ipAuth, requireFeaturePlan('individual.skills'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_skills WHERE tenant_id=$1 AND user_email=$2 ORDER BY progress DESC', [tid(req), uem(req)])).rows;
   const lvlColor = {beginner:'ip-badge-gray',intermediate:'ip-badge-blue',advanced:'ip-badge-yellow',expert:'ip-badge-green'};
   res.send(renderPage('Skills', `${ipCSS}${ipNav('books')}
@@ -1145,7 +1285,7 @@ app.get('/individual/skills', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/skills/new', ipAuth, (req, res) => {
+app.get('/individual/skills/new', ipAuth, requireFeaturePlan('individual.skills'), (req, res) => {
   res.send(renderPage('Add Skill', `${ipCSS}${ipNav('books')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Skill</h2>
     <form method="POST" action="/individual/skills/save" class="ip-form">
@@ -1159,25 +1299,25 @@ app.get('/individual/skills/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/skills/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/skills/save', ipAuth, requireFeaturePlan('individual.skills'), ah(async (req, res) => {
   const {name,category,level,progress} = req.body;
   await pool.query('INSERT INTO ind_skills(tenant_id,user_email,name,category,level,progress) VALUES($1,$2,$3,$4,$5,$6)', [tid(req),uem(req),name,category||'',level||'beginner',Math.min(100,progress||0)]);
   res.redirect('/individual/skills');
 }));
 
-app.get('/individual/skills/:id/progress', ipAuth, ah(async (req, res) => {
+app.get('/individual/skills/:id/progress', ipAuth, requireFeaturePlan('individual.skills'), ah(async (req, res) => {
   const add = Number(req.query.add || 10);
   await pool.query('UPDATE ind_skills SET progress=LEAST(100,progress+$1) WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [add, req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/skills');
 }));
 
-app.get('/individual/skills/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/skills/:id/delete', ipAuth, requireFeaturePlan('individual.skills'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_skills WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/skills');
 }));
 
 // FEATURE 24: Course Tracker
-app.get('/individual/courses', ipAuth, ah(async (req, res) => {
+app.get('/individual/courses', ipAuth, requireFeaturePlan('individual.courses'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_courses WHERE tenant_id=$1 AND user_email=$2 ORDER BY progress DESC', [tid(req), uem(req)])).rows;
   res.send(renderPage('Courses', `${ipCSS}${ipNav('books')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Course Tracker</h2><a href="/individual/courses/new" class="ip-btn ip-btn-primary">+ Add Course</a></div>
@@ -1185,7 +1325,7 @@ app.get('/individual/courses', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/courses/new', ipAuth, (req, res) => {
+app.get('/individual/courses/new', ipAuth, requireFeaturePlan('individual.courses'), (req, res) => {
   res.send(renderPage('Add Course', `${ipCSS}${ipNav('books')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Course</h2>
     <form method="POST" action="/individual/courses/save" class="ip-form">
@@ -1200,26 +1340,26 @@ app.get('/individual/courses/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/courses/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/courses/save', ipAuth, requireFeaturePlan('individual.courses'), ah(async (req, res) => {
   const {title,provider,category,progress,deadline} = req.body;
   const status = Number(progress) >= 100 ? 'completed' : 'in_progress';
   await pool.query('INSERT INTO ind_courses(tenant_id,user_email,title,provider,category,progress,status,deadline) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),uem(req),title,provider||'',category||'',Math.min(100,progress||0),status,deadline||null]);
   res.redirect('/individual/courses');
 }));
 
-app.get('/individual/courses/:id/progress', ipAuth, ah(async (req, res) => {
+app.get('/individual/courses/:id/progress', ipAuth, requireFeaturePlan('individual.courses'), ah(async (req, res) => {
   const add = Number(req.query.add || 10);
   await pool.query('UPDATE ind_courses SET progress=LEAST(100,progress+$1), status=CASE WHEN progress+$1>=100 THEN \'completed\' ELSE status END WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [add, req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/courses');
 }));
 
-app.get('/individual/courses/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/courses/:id/delete', ipAuth, requireFeaturePlan('individual.courses'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_courses WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/courses');
 }));
 
 // FEATURE 25: Bookmark Manager
-app.get('/individual/bookmarks', ipAuth, ah(async (req, res) => {
+app.get('/individual/bookmarks', ipAuth, requireFeaturePlan('individual.bookmarks'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_bookmarks WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC', [tid(req), uem(req)])).rows;
   res.send(renderPage('Bookmarks', `${ipCSS}${ipNav('books')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Bookmark Manager</h2><a href="/individual/bookmarks/new" class="ip-btn ip-btn-primary">+ Add</a></div>
@@ -1227,7 +1367,7 @@ app.get('/individual/bookmarks', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/bookmarks/new', ipAuth, (req, res) => {
+app.get('/individual/bookmarks/new', ipAuth, requireFeaturePlan('individual.bookmarks'), (req, res) => {
   res.send(renderPage('Add Bookmark', `${ipCSS}${ipNav('books')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Bookmark</h2>
     <form method="POST" action="/individual/bookmarks/save" class="ip-form">
@@ -1242,19 +1382,19 @@ app.get('/individual/bookmarks/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/bookmarks/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/bookmarks/save', ipAuth, requireFeaturePlan('individual.bookmarks'), ah(async (req, res) => {
   const {title,url,category,tags,notes} = req.body;
   await pool.query('INSERT INTO ind_bookmarks(tenant_id,user_email,title,url,category,tags,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid(req),uem(req),title,url||'',category||'',tags||'',notes||'']);
   res.redirect('/individual/bookmarks');
 }));
 
-app.get('/individual/bookmarks/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/bookmarks/:id/delete', ipAuth, requireFeaturePlan('individual.bookmarks'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_bookmarks WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/bookmarks');
 }));
 
 // FEATURE 26: Flashcards
-app.get('/individual/flashcards', ipAuth, ah(async (req, res) => {
+app.get('/individual/flashcards', ipAuth, requireFeaturePlan('individual.flashcards'), ah(async (req, res) => {
   const decks = (await pool.query('SELECT d.*, (SELECT COUNT(*) FROM ind_flashcards WHERE deck_id=d.id) as card_count FROM ind_flashcard_decks d WHERE d.tenant_id=$1 AND d.user_email=$2 ORDER BY d.created_at DESC', [tid(req), uem(req)])).rows;
   res.send(renderPage('Flashcards', `${ipCSS}${ipNav('books')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Flashcard Decks</h2><a href="/individual/flashcards/new" class="ip-btn ip-btn-primary">+ New Deck</a></div>
@@ -1262,7 +1402,7 @@ app.get('/individual/flashcards', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/flashcards/new', ipAuth, (req, res) => {
+app.get('/individual/flashcards/new', ipAuth, requireFeaturePlan('individual.flashcards'), (req, res) => {
   res.send(renderPage('New Deck', `${ipCSS}${ipNav('books')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Create Flashcard Deck</h2>
     <form method="POST" action="/individual/flashcards/save" class="ip-form">
@@ -1279,7 +1419,7 @@ app.get('/individual/flashcards/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/flashcards/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/flashcards/save', ipAuth, requireFeaturePlan('individual.flashcards'), ah(async (req, res) => {
   const {name, description, category} = req.body;
   const deck = await pool.query('INSERT INTO ind_flashcard_decks(tenant_id,user_email,name,description,category) VALUES($1,$2,$3,$4,$5) RETURNING id', [tid(req),uem(req),name,description||'',category||'']);
   const deckId = deck.rows[0].id;
@@ -1296,7 +1436,7 @@ app.post('/individual/flashcards/save', ipAuth, ah(async (req, res) => {
   res.redirect('/individual/flashcards');
 }));
 
-app.get('/individual/flashcards/deck/:id', ipAuth, ah(async (req, res) => {
+app.get('/individual/flashcards/deck/:id', ipAuth, requireFeaturePlan('individual.flashcards'), ah(async (req, res) => {
   const deck = (await pool.query('SELECT * FROM ind_flashcard_decks WHERE id=$1 AND tenant_id=$2', [req.params.id, tid(req)])).rows[0];
   const cards = (await pool.query('SELECT * FROM ind_flashcards WHERE deck_id=$1 AND tenant_id=$2', [req.params.id, tid(req)])).rows;
   if (!deck) return res.redirect('/individual/flashcards');
@@ -1316,19 +1456,19 @@ app.get('/individual/flashcards/deck/:id', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/flashcards/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/flashcards/:id/delete', ipAuth, requireFeaturePlan('individual.flashcards'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_flashcard_decks WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/flashcards');
 }));
 
-app.post('/individual/flashcards/:id/study', ipAuth, ah(async (req, res) => {
+app.post('/individual/flashcards/:id/study', ipAuth, requireFeaturePlan('individual.flashcards'), ah(async (req, res) => {
   const {confidence} = req.body;
   await pool.query('UPDATE ind_flashcards SET last_studied=NOW(), confidence=$1 WHERE id=$2 AND tenant_id=$3', [confidence||0, req.params.id, tid(req)]);
   res.redirect('back');
 }));
 
 // FEATURE 27: Contact Book
-app.get('/individual/contacts', ipAuth, ah(async (req, res) => {
+app.get('/individual/contacts', ipAuth, requireFeaturePlan('individual.contacts'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_contacts WHERE tenant_id=$1 AND user_email=$2 ORDER BY name', [tid(req), uem(req)])).rows;
   res.send(renderPage('Contacts', `${ipCSS}${ipNav('contacts')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Contact Book</h2><a href="/individual/contacts/new" class="ip-btn ip-btn-primary">+ Add Contact</a></div>
@@ -1353,13 +1493,13 @@ app.get('/individual/contacts/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/contacts/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/contacts/save', ipAuth, requireFeaturePlan('individual.contacts'), ah(async (req, res) => {
   const {name,phone,email,company,category,address,notes} = req.body;
   await pool.query('INSERT INTO ind_contacts(tenant_id,user_email,name,phone,email,company,category,address,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [tid(req),uem(req),name,phone||'',email||'',company||'',category||'',address||'',notes||'']);
   res.redirect('/individual/contacts');
 }));
 
-app.get('/individual/contacts/:id/edit', ipAuth, ah(async (req, res) => {
+app.get('/individual/contacts/:id/edit', ipAuth, requireFeaturePlan('individual.contacts'), ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM ind_contacts WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!c) return res.redirect('/individual/contacts');
   res.send(renderPage('Edit Contact', `${ipCSS}${ipNav('contacts')}
@@ -1378,19 +1518,19 @@ app.get('/individual/contacts/:id/edit', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/contacts/:id/update', ipAuth, ah(async (req, res) => {
+app.post('/individual/contacts/:id/update', ipAuth, requireFeaturePlan('individual.contacts'), ah(async (req, res) => {
   const {name,phone,email,company,category,address,notes} = req.body;
   await pool.query('UPDATE ind_contacts SET name=$1,phone=$2,email=$3,company=$4,category=$5,address=$6,notes=$7 WHERE id=$8 AND tenant_id=$9 AND user_email=$10', [name,phone||'',email||'',company||'',category||'',address||'',notes||'',req.params.id,tid(req),uem(req)]);
   res.redirect('/individual/contacts');
 }));
 
-app.get('/individual/contacts/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/contacts/:id/delete', ipAuth, requireFeaturePlan('individual.contacts'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_contacts WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/contacts');
 }));
 
 // FEATURE 28: Personal Wiki
-app.get('/individual/wiki', ipAuth, ah(async (req, res) => {
+app.get('/individual/wiki', ipAuth, requireFeaturePlan('individual.wiki'), ah(async (req, res) => {
   const pages = (await pool.query('SELECT * FROM ind_wiki_pages WHERE tenant_id=$1 AND user_email=$2 ORDER BY category, title', [tid(req), uem(req)])).rows;
   res.send(renderPage('Wiki', `${ipCSS}${ipNav('books')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Personal Wiki</h2><a href="/individual/wiki/new" class="ip-btn ip-btn-primary">+ New Page</a></div>
@@ -1398,7 +1538,7 @@ app.get('/individual/wiki', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/wiki/new', ipAuth, (req, res) => {
+app.get('/individual/wiki/new', ipAuth, requireFeaturePlan('individual.wiki'), (req, res) => {
   res.send(renderPage('New Wiki Page', `${ipCSS}${ipNav('books')}
     <div class="ip-card" style="max-width:600px;margin:0 auto"><h2>New Wiki Page</h2>
     <form method="POST" action="/individual/wiki/save" class="ip-form">
@@ -1411,13 +1551,13 @@ app.get('/individual/wiki/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/wiki/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/wiki/save', ipAuth, requireFeaturePlan('individual.wiki'), ah(async (req, res) => {
   const {title,category,content} = req.body;
   await pool.query('INSERT INTO ind_wiki_pages(tenant_id,user_email,title,content,category) VALUES($1,$2,$3,$4,$5)', [tid(req),uem(req),title,content||'',category||'']);
   res.redirect('/individual/wiki');
 }));
 
-app.get('/individual/wiki/:id', ipAuth, ah(async (req, res) => {
+app.get('/individual/wiki/:id', ipAuth, requireFeaturePlan('individual.wiki'), ah(async (req, res) => {
   const p = (await pool.query('SELECT * FROM ind_wiki_pages WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!p) return res.redirect('/individual/wiki');
   res.send(renderPage(p.title, `${ipCSS}${ipNav('books')}
@@ -1426,7 +1566,7 @@ app.get('/individual/wiki/:id', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/wiki/:id/edit', ipAuth, ah(async (req, res) => {
+app.get('/individual/wiki/:id/edit', ipAuth, requireFeaturePlan('individual.wiki'), ah(async (req, res) => {
   const p = (await pool.query('SELECT * FROM ind_wiki_pages WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!p) return res.redirect('/individual/wiki');
   res.send(renderPage('Edit Wiki', `${ipCSS}${ipNav('books')}
@@ -1441,13 +1581,13 @@ app.get('/individual/wiki/:id/edit', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/wiki/:id/update', ipAuth, ah(async (req, res) => {
+app.post('/individual/wiki/:id/update', ipAuth, requireFeaturePlan('individual.wiki'), ah(async (req, res) => {
   const {title,category,content} = req.body;
   await pool.query('UPDATE ind_wiki_pages SET title=$1,category=$2,content=$3,updated_at=NOW() WHERE id=$4 AND tenant_id=$5 AND user_email=$6', [title,category||'',content||'',req.params.id,tid(req),uem(req)]);
   res.redirect('/individual/wiki/'+req.params.id);
 }));
 
-app.get('/individual/wiki/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/wiki/:id/delete', ipAuth, requireFeaturePlan('individual.wiki'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_wiki_pages WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/wiki');
 }));
@@ -1457,7 +1597,7 @@ app.get('/individual/wiki/:id/delete', ipAuth, ah(async (req, res) => {
 // FEATURES 29-35: LIFESTYLE & SOCIAL
 // ============================================================
 // FEATURE 29: Travel Planner
-app.get('/individual/travel', ipAuth, ah(async (req, res) => {
+app.get('/individual/travel', ipAuth, requireFeaturePlan('individual.travel'), ah(async (req, res) => {
   const trips = (await pool.query('SELECT * FROM ind_trips WHERE tenant_id=$1 AND user_email=$2 ORDER BY start_date DESC', [tid(req), uem(req)])).rows;
   res.send(renderPage('Travel', `${ipCSS}${ipNav('travel')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Travel Planner</h2><a href="/individual/travel/new" class="ip-btn ip-btn-primary">+ New Trip</a></div>
@@ -1465,7 +1605,7 @@ app.get('/individual/travel', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/travel/new', ipAuth, (req, res) => {
+app.get('/individual/travel/new', ipAuth, requireFeaturePlan('individual.travel'), (req, res) => {
   res.send(renderPage('New Trip', `${ipCSS}${ipNav('travel')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Plan New Trip</h2>
     <form method="POST" action="/individual/travel/save" class="ip-form">
@@ -1481,13 +1621,13 @@ app.get('/individual/travel/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/travel/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/travel/save', ipAuth, requireFeaturePlan('individual.travel'), ah(async (req, res) => {
   const {name,destination,start_date,end_date,budget,notes} = req.body;
   await pool.query('INSERT INTO ind_trips(tenant_id,user_email,name,destination,start_date,end_date,budget,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),uem(req),name,destination||'',start_date||null,end_date||null,budget||0,notes||'']);
   res.redirect('/individual/travel');
 }));
 
-app.get('/individual/travel/:id', ipAuth, ah(async (req, res) => {
+app.get('/individual/travel/:id', ipAuth, requireFeaturePlan('individual.travel'), ah(async (req, res) => {
   const trip = (await pool.query('SELECT * FROM ind_trips WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!trip) return res.redirect('/individual/travel');
   const items = (await pool.query('SELECT * FROM ind_trip_items WHERE trip_id=$1 AND tenant_id=$2 ORDER BY date, time', [req.params.id, tid(req)])).rows;
@@ -1506,19 +1646,19 @@ app.get('/individual/travel/:id', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.post('/individual/travel/:id/add-item', ipAuth, ah(async (req, res) => {
+app.post('/individual/travel/:id/add-item', ipAuth, requireFeaturePlan('individual.travel'), ah(async (req, res) => {
   const {item_type,name,date,time,cost,notes} = req.body;
   await pool.query('INSERT INTO ind_trip_items(tenant_id,trip_id,item_type,name,date,time,cost,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),req.params.id,item_type||'Activity',name,date||null,time||null,cost||0,notes||'']);
   res.redirect('/individual/travel/'+req.params.id);
 }));
 
-app.get('/individual/travel/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/travel/:id/delete', ipAuth, requireFeaturePlan('individual.travel'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_trips WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/travel');
 }));
 
 // FEATURE 30: Recipe Book
-app.get('/individual/recipes', ipAuth, ah(async (req, res) => {
+app.get('/individual/recipes', ipAuth, requireFeaturePlan('individual.recipes'), ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_recipes WHERE tenant_id=$1 AND user_email=$2 ORDER BY title', [tid(req), uem(req)])).rows;
   res.send(renderPage('Recipes', `${ipCSS}${ipNav('travel')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Recipe Book</h2><a href="/individual/recipes/new" class="ip-btn ip-btn-primary">+ Add Recipe</a></div>
@@ -1526,7 +1666,7 @@ app.get('/individual/recipes', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/recipes/new', ipAuth, (req, res) => {
+app.get('/individual/recipes/new', ipAuth, requireFeaturePlan('individual.recipes'), (req, res) => {
   res.send(renderPage('Add Recipe', `${ipCSS}${ipNav('travel')}
     <div class="ip-card" style="max-width:600px;margin:0 auto"><h2>Add Recipe</h2>
     <form method="POST" action="/individual/recipes/save" class="ip-form">
@@ -1543,13 +1683,13 @@ app.get('/individual/recipes/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/recipes/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/recipes/save', ipAuth, requireFeaturePlan('individual.recipes'), ah(async (req, res) => {
   const {title,category,cook_time,servings,ingredients,steps,notes} = req.body;
   await pool.query('INSERT INTO ind_recipes(tenant_id,user_email,title,ingredients,steps,cook_time,servings,category,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [tid(req),uem(req),title,ingredients||'',steps||'',cook_time||0,servings||0,category||'',notes||'']);
   res.redirect('/individual/recipes');
 }));
 
-app.get('/individual/recipes/:id', ipAuth, ah(async (req, res) => {
+app.get('/individual/recipes/:id', ipAuth, requireFeaturePlan('individual.recipes'), ah(async (req, res) => {
   const r = (await pool.query('SELECT * FROM ind_recipes WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
   if (!r) return res.redirect('/individual/recipes');
   res.send(renderPage(r.title, `${ipCSS}${ipNav('travel')}
@@ -1561,13 +1701,13 @@ app.get('/individual/recipes/:id', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/recipes/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/recipes/:id/delete', ipAuth, requireFeaturePlan('individual.recipes'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_recipes WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/recipes');
 }));
 
 // FEATURE 31: Wishlist
-app.get('/individual/wishlist', ipAuth, ah(async (req, res) => {
+app.get('/individual/wishlist', ipAuth, requireFeaturePlan('individual.wishlist'), ah(async (req, res) => {
   const items = (await pool.query('SELECT * FROM ind_wishlist_items WHERE tenant_id=$1 AND user_email=$2 ORDER BY purchased, priority DESC', [tid(req), uem(req)])).rows;
   const total = items.filter(i=>!i.purchased).reduce((s,i)=>s+Number(i.estimated_cost||0),0);
   res.send(renderPage('Wishlist', `${ipCSS}${ipNav('wishlist')}
@@ -1577,7 +1717,7 @@ app.get('/individual/wishlist', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/wishlist/new', ipAuth, (req, res) => {
+app.get('/individual/wishlist/new', ipAuth, requireFeaturePlan('individual.wishlist'), (req, res) => {
   res.send(renderPage('Add to Wishlist', `${ipCSS}${ipNav('wishlist')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add to Wishlist</h2>
     <form method="POST" action="/individual/wishlist/save" class="ip-form">
@@ -1592,24 +1732,24 @@ app.get('/individual/wishlist/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/wishlist/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/wishlist/save', ipAuth, requireFeaturePlan('individual.wishlist'), ah(async (req, res) => {
   const {name,estimated_cost,priority,url,notes} = req.body;
   await pool.query('INSERT INTO ind_wishlist_items(tenant_id,user_email,name,estimated_cost,priority,url,notes) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid(req),uem(req),name,estimated_cost||0,priority||'medium',url||'',notes||'']);
   res.redirect('/individual/wishlist');
 }));
 
-app.get('/individual/wishlist/:id/purchase', ipAuth, ah(async (req, res) => {
+app.get('/individual/wishlist/:id/purchase', ipAuth, requireFeaturePlan('individual.wishlist'), ah(async (req, res) => {
   await pool.query('UPDATE ind_wishlist_items SET purchased=true WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/wishlist');
 }));
 
-app.get('/individual/wishlist/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/wishlist/:id/delete', ipAuth, requireFeaturePlan('individual.wishlist'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_wishlist_items WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/wishlist');
 }));
 
 // FEATURE 32: Subscription Manager
-app.get('/individual/subscriptions', ipAuth, ah(async (req, res) => {
+app.get('/individual/subscriptions', ipAuth, requireFeaturePlan('individual.subscriptions'), ah(async (req, res) => {
   const subs = (await pool.query('SELECT * FROM ind_subscriptions WHERE tenant_id=$1 AND user_email=$2 ORDER BY is_active DESC, next_billing', [tid(req), uem(req)])).rows;
   const monthly = subs.filter(s=>s.is_active).reduce((s,r)=>s+Number(r.cost||0),0);
   res.send(renderPage('Subscriptions', `${ipCSS}${ipNav('wishlist')}
@@ -1619,7 +1759,7 @@ app.get('/individual/subscriptions', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/subscriptions/new', ipAuth, (req, res) => {
+app.get('/individual/subscriptions/new', ipAuth, requireFeaturePlan('individual.subscriptions'), (req, res) => {
   res.send(renderPage('Add Subscription', `${ipCSS}${ipNav('wishlist')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Subscription</h2>
     <form method="POST" action="/individual/subscriptions/save" class="ip-form">
@@ -1634,24 +1774,24 @@ app.get('/individual/subscriptions/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/subscriptions/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/subscriptions/save', ipAuth, requireFeaturePlan('individual.subscriptions'), ah(async (req, res) => {
   const {name,cost,billing_cycle,next_billing,category} = req.body;
   await pool.query('INSERT INTO ind_subscriptions(tenant_id,user_email,name,cost,billing_cycle,next_billing,category) VALUES($1,$2,$3,$4,$5,$6,$7)', [tid(req),uem(req),name,cost,billing_cycle||'monthly',next_billing||null,category||'']);
   res.redirect('/individual/subscriptions');
 }));
 
-app.get('/individual/subscriptions/:id/toggle', ipAuth, ah(async (req, res) => {
+app.get('/individual/subscriptions/:id/toggle', ipAuth, requireFeaturePlan('individual.subscriptions'), ah(async (req, res) => {
   await pool.query('UPDATE ind_subscriptions SET is_active=NOT is_active WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/subscriptions');
 }));
 
-app.get('/individual/subscriptions/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/subscriptions/:id/delete', ipAuth, requireFeaturePlan('individual.subscriptions'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_subscriptions WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/subscriptions');
 }));
 
 // FEATURE 33: Gift Tracker
-app.get('/individual/gifts', ipAuth, ah(async (req, res) => {
+app.get('/individual/gifts', ipAuth, requireFeaturePlan('individual.gifts'), ah(async (req, res) => {
   const gifts = (await pool.query('SELECT * FROM ind_gifts WHERE tenant_id=$1 AND user_email=$2 ORDER BY date_given DESC', [tid(req), uem(req)])).rows;
   const totalSpent = gifts.filter(g=>g.direction==='given').reduce((s,g)=>s+Number(g.cost||0),0);
   res.send(renderPage('Gifts', `${ipCSS}${ipNav('wishlist')}
@@ -1661,7 +1801,7 @@ app.get('/individual/gifts', ipAuth, ah(async (req, res) => {
   `, req.session.user));
 }));
 
-app.get('/individual/gifts/new', ipAuth, (req, res) => {
+app.get('/individual/gifts/new', ipAuth, requireFeaturePlan('individual.gifts'), (req, res) => {
   res.send(renderPage('Add Gift', `${ipCSS}${ipNav('wishlist')}
     <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Add Gift</h2>
     <form method="POST" action="/individual/gifts/save" class="ip-form">
@@ -1678,19 +1818,19 @@ app.get('/individual/gifts/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/gifts/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/gifts/save', ipAuth, requireFeaturePlan('individual.gifts'), ah(async (req, res) => {
   const {name,recipient,occasion,direction,cost,date_given,notes} = req.body;
   await pool.query('INSERT INTO ind_gifts(tenant_id,user_email,name,recipient,occasion,direction,cost,date_given,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [tid(req),uem(req),name,recipient||'',occasion||'',direction||'given',cost||0,date_given||null,notes||'']);
   res.redirect('/individual/gifts');
 }));
 
-app.get('/individual/gifts/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/gifts/:id/delete', ipAuth, requireFeaturePlan('individual.gifts'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_gifts WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/gifts');
 }));
 
 // FEATURE 34: Bucket List
-app.get('/individual/bucketlist', ipAuth, ah(async (req, res) => {
+app.get('/individual/bucketlist', ipAuth, requireFeaturePlan('individual.bucketlist'), ah(async (req, res) => {
   const items = (await pool.query('SELECT * FROM ind_bucket_list WHERE tenant_id=$1 AND user_email=$2 ORDER BY completed, created_at DESC', [tid(req), uem(req)])).rows;
   const done = items.filter(i=>i.completed).length;
   res.send(renderPage('Bucket List', `${ipCSS}${ipNav('bucketlist')}
@@ -1713,18 +1853,18 @@ app.get('/individual/bucketlist/new', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/bucketlist/save', ipAuth, ah(async (req, res) => {
+app.post('/individual/bucketlist/save', ipAuth, requireFeaturePlan('individual.bucketlist'), ah(async (req, res) => {
   const {name,category,notes} = req.body;
   await pool.query('INSERT INTO ind_bucket_list(tenant_id,user_email,name,category,notes) VALUES($1,$2,$3,$4,$5)', [tid(req),uem(req),name,category||'personal',notes||'']);
   res.redirect('/individual/bucketlist');
 }));
 
-app.get('/individual/bucketlist/:id/complete', ipAuth, ah(async (req, res) => {
+app.get('/individual/bucketlist/:id/complete', ipAuth, requireFeaturePlan('individual.bucketlist'), ah(async (req, res) => {
   await pool.query('UPDATE ind_bucket_list SET completed=true, completed_at=CURRENT_DATE WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/bucketlist');
 }));
 
-app.get('/individual/bucketlist/:id/delete', ipAuth, ah(async (req, res) => {
+app.get('/individual/bucketlist/:id/delete', ipAuth, requireFeaturePlan('individual.bucketlist'), ah(async (req, res) => {
   await pool.query('DELETE FROM ind_bucket_list WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/bucketlist');
 }));
@@ -1760,7 +1900,7 @@ app.get('/individual/qrcode', ipAuth, (req, res) => {
   `, req.session.user));
 });
 
-app.post('/individual/qrcode/generate', ipAuth, ah(async (req, res) => {
+app.post('/individual/qrcode/generate', ipAuth, requireFeaturePlan('individual.qrcode'), ah(async (req, res) => {
   const {type, url, text, vc_name, vc_phone, vc_email, wf_ssid, wf_pass, wf_sec} = req.body;
   let qrData = '';
   if (type === 'url') qrData = url || '';
