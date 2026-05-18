@@ -9471,36 +9471,24 @@ app.get('/api-keys/:id/revoke', requireAuth, ah(async (req, res) => {
   res.redirect('/api-keys');
 }));
 
-app.get('/webhooks/new', requireAuth, (req, res) => {
-  res.send(renderPage('Add Webhook', `
-    <div class="card" style="max-width:600px;margin:40px auto">
-      <h2>Add Webhook</h2>
-      <form method="POST" action="/webhooks/save">
-        <input name="url" type="url" placeholder="https://your-server.com/webhook" required>
-        <label style="display:block;margin:10px 0"><input type="checkbox" name="events" value="payment" checked> Payment Events</label>
-        <label style="display:block;margin:10px 0"><input type="checkbox" name="events" value="student"> Student Events</label>
-        <label style="display:block;margin:10px 0"><input type="checkbox" name="events" value="invoice"> Invoice Events</label>
-        <label style="display:block;margin:10px 0"><input type="checkbox" name="events" value="member"> Member Events</label>
-        <button class="btn" style="width:100%">Add Webhook</button>
-      </form>
-    </div>
-  `, req.session.user));
-});
+// [FIXED] Old webhook /new redirect — now handled by enhanced webhook system at /webhooks
+app.get('/webhooks/new', requireAuth, requireNotBanned, (req, res) => { res.redirect('/webhooks#add'); });
 
-app.post('/webhooks/save', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { url, events } = req.body;
-  const eventArr = Array.isArray(events) ? events : (events ? [events] : ['payment']);
-  const secret = crypto.randomBytes(16).toString('hex');
-  await pool.query('INSERT INTO webhooks(tenant_id,url,events,secret) VALUES($1,$2,$3,$4)', [t, url, eventArr, secret]);
-  await audit(req.session.user.email, 'webhook_created', `Webhook: ${url}`);
-  res.redirect('/api-keys');
+// [FIXED] Old webhook save/delete now uses webhook_endpoints table
+app.post('/webhooks/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const tid = req.session.user.tenant_id;
+  const { url, events, secret } = req.body;
+  const eventList = (events || '').split(',').map(e => e.trim()).filter(Boolean);
+  await pool.query('INSERT INTO webhook_endpoints (tenant_id,url,events,secret) VALUES ($1,$2,$3,$4)', [tid, url, JSON.stringify(eventList), secret || null]);
+  audit(req.session.user.email, 'webhook_created', url);
+  res.redirect('/webhooks');
 }));
 
-app.get('/webhooks/:id/delete', requireAuth, ah(async (req, res) => {
-  await pool.query('DELETE FROM webhooks WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-  res.redirect('/api-keys');
+app.get('/webhooks/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  await pool.query('DELETE FROM webhook_endpoints WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  res.redirect('/webhooks');
 }));
+
 
 // === CHURCH MEMBER ATTENDANCE ===
 app.get('/church/attendance', requireAuth, requireNotBanned, ah(async (req, res) => {
@@ -11728,17 +11716,6 @@ app.get('/compliance/export', requireAuth, requireNotBanned, ah(async (req, res)
 }));
 
 // ============================================================
-// v5.0: PWA MANIFEST
-// ============================================================
-app.get('/manifest.json', (req, res) => {
-  res.json({
-    name: 'Comfort Platform', short_name: 'Comfort', start_url: '/', display: 'standalone',
-    background_color: '#4f46e5', theme_color: '#4f46e5',
-    icons: [{ src: '/favicon.ico', sizes: '48x48', type: 'image/x-icon' }]
-  });
-});
-
-// ============================================================
 // ENHANCED STATUS PAGE (v9.0) with incident management
 // ============================================================
 app.get('/status/admin', requireAuth, requireSuperAdmin, ah(async (req, res) => {
@@ -13136,7 +13113,13 @@ ${googleVerification ? `<meta name="google-site-verification" content="${esc(goo
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ComfortZone">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#4f46e5">
+<meta name="application-name" content="ComfortZone">
 <title>${esc(title)} | Comfort</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -15117,29 +15100,6 @@ app.get('/api/features', ah(async (req, res) => {
   features.forEach(f => { featureMap[f.feature_key] = { active: f.is_active, name: f.name, description: f.description, version: f.version, category: f.category }; });
   res.json(featureMap);
 }));
-
-// Enhanced PWA manifest with more icons
-app.get('/manifest.json', (req, res) => {
-  res.json({
-    name: 'Comfort',
-    short_name: 'Comfort',
-    description: 'All-in-One Management Platform for Schools, Churches, Businesses & Organizations',
-    start_url: '/',
-    display: 'standalone',
-    background_color: '#4f46e5',
-    theme_color: '#4f46e5',
-    orientation: 'any',
-    icons: [
-      { src: 'https://res.cloudinary.com/ssewasswa/image/upload/v1/ssewasswa/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { src: 'https://res.cloudinary.com/ssewasswa/image/upload/v1/ssewasswa/icon-512.png', sizes: '512x512', type: 'image/png' }
-    ],
-    categories: ['business', 'education', 'finance'],
-    screenshots: [],
-    prefer_related_applications: false
-  });
-});
-
-// Enhanced Service Worker
 
 // =============================================
 // SCHOOL: TRANSPORT / BUS ROUTES
@@ -36949,20 +36909,41 @@ app.get('/pricing', ah(async (req, res) => {
 // ============================================================
 app.get('/manifest.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(JSON.stringify({
     name: "Comfort Zone - All-in-One Management Platform",
     short_name: "ComfortZone",
-    description: "School, church, clinic, business & organization management",
+    description: "The Operating System for African Institutions. Manage schools, churches, clinics, businesses & organizations — all in one place.",
     start_url: "/",
+    scope: "/",
     display: "standalone",
     background_color: "#ffffff",
-    theme_color: "#059669",
+    theme_color: "#4f46e5",
     orientation: "any",
-    categories: ["business", "education", "health", "productivity"],
+    dir: "ltr",
+    lang: "en",
+    categories: ["business", "education", "health", "finance", "productivity", "medical"],
+    prefer_related_applications: false,
     icons: [
-      { src: "/favicon.ico", sizes: "64x64 32x32 24x24 16x16", type: "image/x-icon" },
-      { src: "/public/icons/icon_general.png", sizes: "192x192", type: "image/png" },
-      { src: "/public/icons/icon_general.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
+      { src: "/icon-16.png", sizes: "16x16", type: "image/png" },
+      { src: "/icon-32.png", sizes: "32x32", type: "image/png" },
+      { src: "/icon-48.png", sizes: "48x48", type: "image/png" },
+      { src: "/icon-72.png", sizes: "72x72", type: "image/png" },
+      { src: "/icon-96.png", sizes: "96x96", type: "image/png" },
+      { src: "/icon-120.png", sizes: "120x120", type: "image/png" },
+      { src: "/icon-152.png", sizes: "152x152", type: "image/png" },
+      { src: "/icon-167.png", sizes: "167x167", type: "image/png" },
+      { src: "/icon-180.png", sizes: "180x180", type: "image/png" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { src: "/icon-512-sized.png", sizes: "512x512", type: "image/png" },
+      { src: "/icon-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: "/icon.png", sizes: "1024x1024", type: "image/png" }
+    ],
+    screenshots: [],
+    shortcuts: [
+      { name: "Dashboard", url: "/dashboard", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
+      { name: "Students", url: "/school/students", icons: [{ src: "/icon-96.png", sizes: "96x96" }] },
+      { name: "Messages", url: "/messages", icons: [{ src: "/icon-96.png", sizes: "96x96" }] }
     ]
   }));
 });
