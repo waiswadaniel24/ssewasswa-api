@@ -360,7 +360,10 @@ const VALID_TABLES = new Set([
   'tithes_records', 'giving_campaigns', 'analytics_snapshots', 'student_submissions',
   'resolution_votes', 'committees', 'committee_members', 'finance_categories', 'event_rsvps',
   'org_tasks', 'org_task_comments', 'org_notifications', 'board_resolutions',
-  'org_attachments', 'meeting_action_items', 'org_health_scores'
+  'org_attachments', 'meeting_action_items', 'org_health_scores',
+  'org_meeting_minutes', 'org_surveys', 'org_survey_responses',
+  'org_discussions', 'org_discussion_replies', 'org_email_templates',
+  'org_broadcasts', 'org_data_backups'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -939,6 +942,20 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS meeting_action_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, meeting_id INTEGER REFERENCES meeting_minutes(id) ON DELETE CASCADE, description TEXT NOT NULL, assigned_to INTEGER REFERENCES members(id) ON DELETE SET NULL, due_date DATE, status VARCHAR(20) DEFAULT 'pending', completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // === ORG PORTAL: ORG HEALTH SCORE ===
   `CREATE TABLE IF NOT EXISTS org_health_scores (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, score INTEGER DEFAULT 0, member_health INTEGER DEFAULT 0, finance_health INTEGER DEFAULT 0, task_health INTEGER DEFAULT 0, event_health INTEGER DEFAULT 0, computed_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id))`,
+  // === ORG PORTAL V6: MEETING MINUTES ===
+  `CREATE TABLE IF NOT EXISTS org_meeting_minutes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, meeting_date DATE NOT NULL, meeting_type VARCHAR(20) DEFAULT 'General', venue TEXT DEFAULT '', agenda TEXT DEFAULT '', content TEXT NOT NULL, decisions TEXT DEFAULT '', action_items TEXT DEFAULT '', attendee_count INTEGER DEFAULT 0, recorded_by INTEGER REFERENCES members(id) ON DELETE SET NULL, next_meeting_date DATE, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: SURVEYS & POLLS ===
+  `CREATE TABLE IF NOT EXISTS org_surveys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT DEFAULT '', survey_type VARCHAR(20) DEFAULT 'survey', is_anonymous BOOLEAN DEFAULT false, questions JSONB DEFAULT '[]', is_active BOOLEAN DEFAULT true, closes_at TIMESTAMPTZ, max_responses INTEGER, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS org_survey_responses (id SERIAL PRIMARY KEY, survey_id INTEGER REFERENCES org_surveys(id) ON DELETE CASCADE, respondent_email TEXT NOT NULL, answers JSONB DEFAULT '{}', created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: DISCUSSIONS ===
+  `CREATE TABLE IF NOT EXISTS org_discussions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, category VARCHAR(30) DEFAULT 'General', content TEXT NOT NULL, author_email TEXT NOT NULL, is_pinned BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS org_discussion_replies (id SERIAL PRIMARY KEY, discussion_id INTEGER REFERENCES org_discussions(id) ON DELETE CASCADE, content TEXT NOT NULL, author_email TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: EMAIL TEMPLATES ===
+  `CREATE TABLE IF NOT EXISTS org_email_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, template_type VARCHAR(30) DEFAULT 'custom', subject TEXT DEFAULT '', body TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: BROADCASTS ===
+  `CREATE TABLE IF NOT EXISTS org_broadcasts (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, subject TEXT NOT NULL, message TEXT NOT NULL, channel VARCHAR(20) DEFAULT 'notification', priority VARCHAR(10) DEFAULT 'normal', target VARCHAR(20) DEFAULT 'all', recipient_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: DATA BACKUPS ===
+  `CREATE TABLE IF NOT EXISTS org_data_backups (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, description TEXT DEFAULT '', record_count INTEGER DEFAULT 0, file_size INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // === ORG PORTAL: MEMBER ACCESS CONTROL ===
   `ALTER TABLE members ADD COLUMN IF NOT EXISTS can_manage_finance BOOLEAN DEFAULT false`,
   `ALTER TABLE members ADD COLUMN IF NOT EXISTS can_manage_members BOOLEAN DEFAULT false`,
@@ -2360,7 +2377,8 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 .tab-bar a{flex:1;padding:12px;text-align:center;background:${dark ? '#1e293b' : 'white'};color:${dark ? '#94a3b8' : '#64748b'};font-weight:600;text-decoration:none;transition:0.2s}
 .tab-bar a:hover{background:${dark ? '#334155' : '#f1f5f9'};text-decoration:none}
 .tab-bar a.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
-@media(max-width:768px){.nav{display:none!important}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}.hero{padding:30px 15px}.container{padding:0 12px}.card{padding:16px;margin-bottom:12px}.btn{padding:14px 20px;width:100%;text-align:center}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{padding:8px;font-size:13px}.stat-num{font-size:24px}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}}
+@media(max-width:768px){.nav{display:none!important}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}.hero{padding:30px 15px}.container{padding:0 12px}.card{padding:16px;margin-bottom:12px}.btn{padding:14px 20px;width:100%;text-align:center}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{padding:8px;font-size:13px}.stat-num{font-size:24px}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}.hero h1{font-size:22px!important}.hero p{font-size:14px!important}form input,form select,form textarea{font-size:16px!important}.tag{font-size:11px;padding:2px 6px}h2{font-size:18px}h3{font-size:16px}.stat-card{min-width:auto!important}}
+@media(max-width:480px){.hero h1{font-size:18px!important}.grid{grid-template-columns:1fr!important}.stats{grid-template-columns:1fr 1fr!important}.card{padding:12px;margin-bottom:8px}table{font-size:12px}}
 </style>
 <!-- CookieYes Consent Banner -->
 <script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/0e110963fc8230516a615baf/script.js"></script>
@@ -4710,6 +4728,17 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card" style="background:#fee2e2;border:2px solid #dc2626"><h3 style="color:#dc2626">Reminders</h3><a href="/org/reminders" class="btn btn-sm">Alerts</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Export</h3><a href="/org/export" class="btn btn-sm">Data Export</a></div>
       <div class="card" style="background:#f5f3ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Access</h3><a href="/org/roles" class="btn btn-sm">Permissions</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">PDF Reports</h3><a href="/org/reports" class="btn btn-sm">Generate PDF</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #4f46e5"><h3 style="color:#4f46e5">Minutes</h3><a href="/org/minutes" class="btn btn-sm">Meeting Notes</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Surveys</h3><a href="/org/surveys" class="btn btn-sm">Polls & Surveys</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Discussions</h3><a href="/org/discussions" class="btn btn-sm">Forum</a></div>
+      <div class="card" style="background:#f0f9ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">Kanban</h3><a href="/org/tasks/board" class="btn btn-sm">Task Board</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Budget</h3><a href="/org/budget" class="btn btn-sm">Budget vs Actual</a></div>
+      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Templates</h3><a href="/org/templates" class="btn btn-sm">Email Templates</a></div>
+      <div class="card" style="background:#fff7ed;border:2px solid #ea580c"><h3 style="color:#ea580c">Broadcast</h3><a href="/org/broadcast" class="btn btn-sm">Mass Notify</a></div>
+      <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Search</h3><a href="/org/search" class="btn btn-sm">Global Search</a></div>
+      <div class="card" style="background:#f1f5f9;border:2px solid #334155"><h3 style="color:#334155">Backup</h3><a href="/org/backup" class="btn btn-sm">Data Backup</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #b91c1c"><h3 style="color:#b91c1c">Churn AI</h3><a href="/org/churn-enhanced" class="btn btn-sm">Enhanced Churn</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid for staff & visitors</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a></div>
     </div>
@@ -18019,6 +18048,1006 @@ app.get('/org/export', requireAuth, requireNotBanned, ah(async (req, res) => {
         </div>
         <button class="btn btn-green" style="margin-top:15px">Download Export</button>
       </form>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG PORTAL V6: ALL REMAINING FEATURES
+// PDF Reports, Meeting Minutes, Surveys & Polls,
+// Discussions, Kanban Board, Budget vs Actual,
+// Email Templates, Broadcast, Global Search,
+// Data Backup, Churn Enhancement, Mobile CSS,
+// Dashboard Widgets
+// =============================================
+
+// === V6: PDF REPORT GENERATION ===
+app.get('/org/reports', requireAuth, requireNotBanned, ah(async (req, res) => {
+  res.send(renderPage('PDF Reports', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#991b1b)"><h1>PDF Reports</h1><p>Generate professional PDF reports</p></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px">
+      <div class="card" style="border-left:4px solid #3b82f6"><h3>Members Report</h3><p class="muted">Complete member directory with contact info, roles, and join dates</p><a href="/org/reports/members/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #059669"><h3>Finance Report</h3><p class="muted">Income and expense summary with category breakdown</p><a href="/org/reports/finance/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #f59e0b"><h3>Tasks Report</h3><p class="muted">Task status overview with priority and assignee details</p><a href="/org/reports/tasks/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #8b5cf6"><h3>Events Report</h3><p class="muted">Upcoming and past events with attendance and RSVP data</p><a href="/org/reports/events/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #ec4899"><h3>Attendance Report</h3><p class="muted">Member attendance trends and statistics</p><a href="/org/reports/attendance/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #14b8a6"><h3>Churn Risk Report</h3><p class="muted">Members at risk of churning with risk factors</p><a href="/org/reports/churn/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/reports/members/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const members = (await pool.query('SELECT name,email,phone,role,joined_at FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="members_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#1e40af').text('Members Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Generated: ' + new Date().toLocaleDateString(), { align: 'center' });
+  doc.moveDown(1.5);
+  doc.fontSize(10).fillColor('#334155');
+  doc.text('Total Members: ' + members.length, { underline: false });
+  doc.moveDown(0.5);
+  const tableTop = doc.y;
+  const colWidths = [180, 150, 100, 80];
+  const headers = ['Name', 'Email', 'Role', 'Joined'];
+  let y = tableTop;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  headers.forEach((h, i) => { doc.text(h, x, y, { width: colWidths[i] }); x += colWidths[i]; });
+  y += 18;
+  doc.fillColor('#475569');
+  for (const m of members) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text(m.name || '-', x, y, { width: colWidths[0] });
+    doc.text(m.email || '-', x + colWidths[0], y, { width: colWidths[1] });
+    doc.text(m.role || 'Member', x + colWidths[0] + colWidths[1], y, { width: colWidths[2] });
+    doc.text(m.joined_at ? new Date(m.joined_at).toLocaleDateString() : '-', x + colWidths[0] + colWidths[1] + colWidths[2], y, { width: colWidths[3] });
+    y += 16;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated members PDF report');
+}));
+
+app.get('/org/reports/finance/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const finance = (await pool.query("SELECT type,amount,description,category,created_at FROM org_finance WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200", [t])).rows;
+  const totals = (await pool.query("SELECT type,SUM(amount) as total FROM org_finance WHERE tenant_id=$1 GROUP BY type", [t])).rows;
+  const totalIncome = (totals.find(r => r.type === 'income')?.total || 0);
+  const totalExpense = (totals.find(r => r.type === 'expense')?.total || 0);
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="finance_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#059669').text('Finance Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Generated: ' + new Date().toLocaleDateString(), { align: 'center' });
+  doc.moveDown(1);
+  doc.fontSize(14).fillColor('#059669').text('Total Income: UGX ' + parseInt(totalIncome).toLocaleString());
+  doc.fillColor('#dc2626').text('Total Expenses: UGX ' + parseInt(totalExpense).toLocaleString());
+  doc.fillColor('#1e293b').text('Net: UGX ' + (parseInt(totalIncome) - parseInt(totalExpense)).toLocaleString());
+  doc.moveDown(1);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [80, 80, 140, 80, 80];
+  ['Type', 'Amount', 'Description', 'Category', 'Date'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const f of finance) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text(f.type || '-', x, y, { width: cols[0] });
+    doc.text('UGX ' + parseInt(f.amount || 0).toLocaleString(), x + cols[0], y, { width: cols[1] });
+    doc.text((f.description || '-').substring(0, 35), x + cols[0] + cols[1], y, { width: cols[2] });
+    doc.text(f.category || '-', x + cols[0] + cols[1] + cols[2], y, { width: cols[3] });
+    doc.text(f.created_at ? new Date(f.created_at).toLocaleDateString() : '-', x + cols[0] + cols[1] + cols[2] + cols[3], y, { width: cols[4] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated finance PDF report');
+}));
+
+app.get('/org/reports/tasks/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const tasks = (await pool.query('SELECT ot.*, m.name as assignee_name FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 ORDER BY ot.priority DESC, ot.due_date ASC', [t])).rows;
+  const stats = (await pool.query("SELECT status,COUNT(*) as cnt FROM org_tasks WHERE tenant_id=$1 GROUP BY status", [t])).rows;
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="tasks_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#7c3aed').text('Tasks Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Generated: ' + new Date().toLocaleDateString(), { align: 'center' });
+  doc.moveDown(1);
+  doc.fontSize(11).fillColor('#334155');
+  for (const s of stats) { doc.text(s.status + ': ' + s.cnt); }
+  doc.text('Total: ' + tasks.length);
+  doc.moveDown(1);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [150, 80, 70, 100, 70];
+  ['Title', 'Priority', 'Status', 'Assignee', 'Due Date'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const tk of tasks) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text((tk.title || '-').substring(0, 30), x, y, { width: cols[0] });
+    doc.text(tk.priority || '-', x + cols[0], y, { width: cols[1] });
+    doc.text(tk.status || '-', x + cols[0] + cols[1], y, { width: cols[2] });
+    doc.text(tk.assignee_name || 'Unassigned', x + cols[0] + cols[1] + cols[2], y, { width: cols[3] });
+    doc.text(tk.due_date ? new Date(tk.due_date).toLocaleDateString() : '-', x + cols[0] + cols[1] + cols[2] + cols[3], y, { width: cols[4] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated tasks PDF report');
+}));
+
+app.get('/org/reports/events/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const events = (await pool.query('SELECT * FROM events WHERE tenant_id=$1 ORDER BY event_date DESC LIMIT 100', [t])).rows;
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="events_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#f59e0b').text('Events Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Total Events: ' + events.length, { align: 'center' });
+  doc.moveDown(1.5);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [160, 90, 100, 80, 50];
+  ['Event', 'Date', 'Venue', 'Budget', 'Recurring'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const e of events) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text((e.name || '-').substring(0, 32), x, y, { width: cols[0] });
+    doc.text(e.event_date ? new Date(e.event_date).toLocaleDateString() : '-', x + cols[0], y, { width: cols[1] });
+    doc.text((e.venue || '-').substring(0, 20), x + cols[0] + cols[1], y, { width: cols[2] });
+    doc.text(e.budget ? 'UGX ' + parseInt(e.budget).toLocaleString() : '-', x + cols[0] + cols[1] + cols[2], y, { width: cols[3] });
+    doc.text(e.is_recurring ? e.recurring_pattern || 'Yes' : 'No', x + cols[0] + cols[1] + cols[2] + cols[3], y, { width: cols[4] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated events PDF report');
+}));
+
+app.get('/org/reports/attendance/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const records = (await pool.query("SELECT m.name,a.date,a.status FROM attendance a JOIN members m ON m.id=a.member_id WHERE a.tenant_id=$1 ORDER BY a.date DESC LIMIT 200", [t])).rows;
+  const summary = (await pool.query("SELECT status,COUNT(*) as cnt FROM attendance WHERE tenant_id=$1 GROUP BY status", [t])).rows;
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="attendance_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#14b8a6').text('Attendance Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Generated: ' + new Date().toLocaleDateString(), { align: 'center' });
+  doc.moveDown(1);
+  for (const s of summary) { doc.fontSize(11).fillColor('#334155').text(s.status + ': ' + s.cnt); }
+  doc.moveDown(1);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [200, 150, 100];
+  ['Member', 'Date', 'Status'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const r of records) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text(r.name || '-', x, y, { width: cols[0] });
+    doc.text(r.date ? new Date(r.date).toLocaleDateString() : '-', x + cols[0], y, { width: cols[1] });
+    doc.text(r.status || '-', x + cols[0] + cols[1], y, { width: cols[2] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated attendance PDF report');
+}));
+
+app.get('/org/reports/churn/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const members = (await pool.query('SELECT * FROM members WHERE tenant_id=$1', [t])).rows;
+  const attendanceData = (await pool.query("SELECT student_id, COUNT(*) as total, SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) as present FROM attendance WHERE tenant_id=$1 GROUP BY student_id", [t])).rows;
+  const attendanceMap = {};
+  attendanceData.forEach(a => { attendanceMap[a.student_id] = { total: parseInt(a.total), present: parseInt(a.present) }; });
+  const donationData = (await pool.query('SELECT member_id, COUNT(*) as cnt, SUM(amount) as total, MAX(created_at) as last_donation FROM donations WHERE tenant_id=$1 GROUP BY member_id', [t])).rows;
+  const donationMap = {};
+  donationData.forEach(d => { donationMap[d.member_id] = { count: parseInt(d.cnt), total: parseInt(d.total), last: d.last_donation }; });
+  const scored = members.map(m => {
+    let riskScore = 0;
+    let riskFactors = [];
+    const daysSince = (Date.now() - new Date(m.joined_at || m.created_at).getTime()) / (1000*60*60*24);
+    if (!m.email && !m.phone) { riskScore += 2; riskFactors.push('No contact info'); }
+    if (daysSince > 180 && (!m.role || m.role === 'Member')) { riskScore += 2; riskFactors.push('Inactive > 6 months'); }
+    if (daysSince > 365) { riskScore += 1; riskFactors.push('Member > 1 year'); }
+    const att = attendanceMap[m.id];
+    if (att && att.total > 0) {
+      const rate = att.present / att.total;
+      if (rate < 0.3) { riskScore += 3; riskFactors.push('Attendance ' + Math.round(rate*100) + '%'); }
+      else if (rate < 0.5) { riskScore += 2; riskFactors.push('Attendance ' + Math.round(rate*100) + '%'); }
+    } else if (!att && daysSince > 30) { riskScore += 2; riskFactors.push('No attendance'); }
+    if (m.role === 'Member' && !m.email) { riskScore += 1; riskFactors.push('Basic member'); }
+    const don = donationMap[m.id];
+    if (!don && daysSince > 60) { riskScore += 1; riskFactors.push('Never donated'); }
+    else if (don) {
+      const daysSinceDon = don.last ? (Date.now() - new Date(don.last).getTime()) / (1000*60*60*24) : 999;
+      if (daysSinceDon > 180) { riskScore += 2; riskFactors.push('Last donation > 6mo ago'); }
+    }
+    const level = riskScore >= 7 ? 'Critical' : riskScore >= 4 ? 'High' : riskScore >= 2 ? 'Medium' : 'Low';
+    return { ...m, riskScore, level, riskFactors, daysSince: Math.round(daysSince) };
+  });
+  const atRisk = scored.filter(m => m.riskScore >= 2).sort((a,b) => b.riskScore - a.riskScore);
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="churn_risk_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#dc2626').text('Churn Risk Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | At-Risk: ' + atRisk.length + '/' + members.length, { align: 'center' });
+  doc.moveDown(1.5);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [130, 55, 55, 230];
+  ['Name', 'Score', 'Level', 'Risk Factors'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const m of atRisk.slice(0, 60)) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text((m.name || '-').substring(0, 26), x, y, { width: cols[0] });
+    doc.text(String(m.riskScore), x + cols[0], y, { width: cols[1] });
+    doc.text(m.level, x + cols[0] + cols[1], y, { width: cols[2] });
+    doc.text(m.riskFactors.join(', ').substring(0, 50), x + cols[0] + cols[1] + cols[2], y, { width: cols[3] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated churn risk PDF report');
+}));
+
+// === V6: MEETING MINUTES ===
+app.get('/org/minutes', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const result = await pool.query('SELECT mm.*, m.name as recorder_name FROM org_meeting_minutes mm LEFT JOIN members m ON m.id=mm.recorded_by WHERE mm.tenant_id=$1 ORDER BY mm.meeting_date DESC LIMIT $2 OFFSET $3', [t, limit, offset]);
+  const countResult = await pool.query('SELECT COUNT(*) FROM org_meeting_minutes WHERE tenant_id=$1', [t]);
+  const total = parseInt(countResult.rows[0].count);
+  const totalPages = Math.ceil(total / limit);
+  res.send(renderPage('Meeting Minutes', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#3730a3)"><h1>Meeting Minutes</h1><p>Record and access meeting notes</p></div>
+    <div style="margin:15px 0"><a href="/org/minutes/new" class="btn">+ Record Minutes</a></div>
+    <div class="card">
+      ${result.rows.length ? `<table><tr><th>Date</th><th>Title</th><th>Type</th><th>Attendees</th><th>Recorded By</th><th>Actions</th></tr>${result.rows.map(r => `<tr><td>${new Date(r.meeting_date).toLocaleDateString()}</td><td><strong>${esc(r.title)}</strong></td><td><span class="tag">${esc(r.meeting_type||'General')}</span></td><td>${r.attendee_count||0}</td><td>${esc(r.recorder_name||'N/A')}</td><td><a href="/org/minutes/${r.id}" class="btn btn-sm">View</a> <a href="/org/minutes/${r.id}/edit" class="btn btn-sm">Edit</a></td></tr>`).join('')}</table>` : '<p class="muted">No meeting minutes recorded yet.</p>'}
+      ${totalPages > 1 ? `<div style="margin-top:15px;text-align:center">${Array.from({length:Math.min(totalPages,10)},(_,i)=>`<a href="/org/minutes?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-green':''}" style="margin:2px">${i+1}</a>`).join('')}</div>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/minutes/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Record Minutes', `<div class="card" style="max-width:800px;margin:0 auto"><h2>Record Meeting Minutes</h2>
+    <form method="POST" action="/org/minutes/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Meeting Title</label><input name="title" required placeholder="Monthly Board Meeting"></div>
+        <div><label>Meeting Date</label><input name="meeting_date" type="date" required></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Meeting Type</label><select name="meeting_type"><option value="General">General</option><option value="Board">Board</option><option value="Committee">Committee</option><option value="AGM">AGM</option><option value="Special">Special</option></select></div>
+        <div><label>Venue</label><input name="venue" placeholder="Main Hall"></div>
+      </div>
+      <label>Attendees (hold Ctrl/Cmd to select multiple)</label>
+      <select name="attendees" multiple style="height:120px;width:100%;padding:8px">${members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
+      <label>Agenda</label><textarea name="agenda" rows="4" placeholder="1. Opening prayer&#10;2. Review of previous minutes&#10;3. Financial report&#10;4. Any other business"></textarea>
+      <label>Minutes / Notes</label><textarea name="content" rows="8" placeholder="Detailed notes of what was discussed, decisions made, and action items agreed upon..." required></textarea>
+      <label>Key Decisions</label><textarea name="decisions" rows="3" placeholder="List the key decisions made during the meeting"></textarea>
+      <label>Action Items</label><textarea name="action_items" rows="3" placeholder="List action items with assignees and deadlines"></textarea>
+      <label>Next Meeting Date</label><input name="next_meeting_date" type="date">
+      <button class="btn btn-green" style="margin-top:10px">Save Minutes</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/minutes/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, meeting_date, meeting_type, venue, agenda, content, decisions, action_items, next_meeting_date } = req.body;
+  const attendees = Array.isArray(req.body.attendees) ? req.body.attendees : req.body.attendees ? [req.body.attendees] : [];
+  const member = (await pool.query('SELECT id FROM members WHERE tenant_id=$1 AND email=$2', [t, req.session.user.email])).rows[0];
+  await pool.query('INSERT INTO org_meeting_minutes(tenant_id,title,meeting_date,meeting_type,venue,agenda,content,decisions,action_items,attendee_count,recorded_by,next_meeting_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+    [t, title, meeting_date, meeting_type||'General', venue||'', agenda||'', content, decisions||'', action_items||'', attendees.length, member?.id||null, next_meeting_date||null]);
+  await audit(req.session.user.email, 'create_minutes', 'Recorded meeting minutes: ' + title);
+  res.redirect('/org/minutes');
+}));
+
+app.get('/org/minutes/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const min = (await pool.query('SELECT mm.*, m.name as recorder_name FROM org_meeting_minutes mm LEFT JOIN members m ON m.id=mm.recorded_by WHERE mm.tenant_id=$1 AND mm.id=$2', [t, req.params.id])).rows[0];
+  if (!min) return res.status(404).send('Minutes not found');
+  res.send(renderPage('Meeting Minutes: ' + min.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#3730a3)"><h1>${esc(min.title)}</h1><p>${new Date(min.meeting_date).toLocaleDateString()} | ${esc(min.meeting_type)} | ${esc(min.venue||'N/A')}</p></div>
+    <div class="card">
+      <div style="display:flex;gap:15px;margin-bottom:15px;flex-wrap:wrap">
+        <span class="tag">${esc(min.meeting_type)}</span>
+        <span class="muted">Attendees: ${min.attendee_count||0}</span>
+        <span class="muted">Recorded by: ${esc(min.recorder_name||'N/A')}</span>
+        ${min.next_meeting_date ? `<span class="tag" style="background:#dbeafe;color:#1e40af">Next: ${new Date(min.next_meeting_date).toLocaleDateString()}</span>` : ''}
+      </div>
+      ${min.agenda ? `<h3>Agenda</h3><div style="white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:15px">${esc(min.agenda)}</div>` : ''}
+      <h3>Minutes</h3><div style="white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:15px">${esc(min.content)}</div>
+      ${min.decisions ? `<h3>Key Decisions</h3><div style="white-space:pre-wrap;background:#f0fdf4;padding:12px;border-radius:8px;border-left:4px solid #059669;margin-bottom:15px">${esc(min.decisions)}</div>` : ''}
+      ${min.action_items ? `<h3>Action Items</h3><div style="white-space:pre-wrap;background:#fffbeb;padding:12px;border-radius:8px;border-left:4px solid #f59e0b;margin-bottom:15px">${esc(min.action_items)}</div>` : ''}
+      <div style="margin-top:15px"><a href="/org/minutes" class="btn">Back to Minutes</a> <a href="/org/minutes/${min.id}/edit" class="btn">Edit</a></div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/minutes/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const min = (await pool.query('SELECT * FROM org_meeting_minutes WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!min) return res.status(404).send('Minutes not found');
+  res.send(renderPage('Edit Minutes', `<div class="card" style="max-width:800px;margin:0 auto"><h2>Edit Minutes: ${esc(min.title)}</h2>
+    <form method="POST" action="/org/minutes/${min.id}/update">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Title</label><input name="title" value="${esc(min.title)}" required></div>
+        <div><label>Date</label><input name="meeting_date" type="date" value="${min.meeting_date?new Date(min.meeting_date).toISOString().split('T')[0]:''}" required></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Type</label><select name="meeting_type"><option value="General" ${min.meeting_type==='General'?'selected':''}>General</option><option value="Board" ${min.meeting_type==='Board'?'selected':''}>Board</option><option value="Committee" ${min.meeting_type==='Committee'?'selected':''}>Committee</option><option value="AGM" ${min.meeting_type==='AGM'?'selected':''}>AGM</option><option value="Special" ${min.meeting_type==='Special'?'selected':''}>Special</option></select></div>
+        <div><label>Venue</label><input name="venue" value="${esc(min.venue||'')}"></div>
+      </div>
+      <label>Agenda</label><textarea name="agenda" rows="3">${esc(min.agenda||'')}</textarea>
+      <label>Minutes</label><textarea name="content" rows="8" required>${esc(min.content)}</textarea>
+      <label>Key Decisions</label><textarea name="decisions" rows="3">${esc(min.decisions||'')}</textarea>
+      <label>Action Items</label><textarea name="action_items" rows="3">${esc(min.action_items||'')}</textarea>
+      <label>Next Meeting Date</label><input name="next_meeting_date" type="date" value="${min.next_meeting_date?new Date(min.next_meeting_date).toISOString().split('T')[0]:''}">
+      <div style="margin-top:10px"><button class="btn btn-green">Update</button> <a href="/org/minutes" class="btn">Cancel</a></div>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/minutes/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, meeting_date, meeting_type, venue, agenda, content, decisions, action_items, next_meeting_date } = req.body;
+  await pool.query('UPDATE org_meeting_minutes SET title=$1,meeting_date=$2,meeting_type=$3,venue=$4,agenda=$5,content=$6,decisions=$7,action_items=$8,next_meeting_date=$9 WHERE tenant_id=$10 AND id=$11',
+    [title, meeting_date, meeting_type||'General', venue||'', agenda||'', content, decisions||'', action_items||'', next_meeting_date||null, t, req.params.id]);
+  await audit(req.session.user.email, 'update_minutes', 'Updated minutes: ' + title);
+  res.redirect('/org/minutes/' + req.params.id);
+}));
+
+// === V6: SURVEYS & POLLS ===
+app.get('/org/surveys', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const surveys = (await pool.query('SELECT s.*, (SELECT COUNT(*) FROM org_survey_responses WHERE survey_id=s.id) as response_count FROM org_surveys s WHERE s.tenant_id=$1 ORDER BY s.created_at DESC', [t])).rows;
+  res.send(renderPage('Surveys & Polls', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"><h1>Surveys & Polls</h1><p>Collect feedback and vote on decisions</p></div>
+    <div style="margin:15px 0"><a href="/org/surveys/new" class="btn">+ Create Survey</a> <a href="/org/surveys/quick-poll" class="btn" style="background:#f59e0b;color:white">Quick Poll</a></div>
+    <div class="card">
+      ${surveys.length ? `<table><tr><th>Title</th><th>Type</th><th>Status</th><th>Responses</th><th>Created</th><th>Actions</th></tr>${surveys.map(s => `<tr><td><strong>${esc(s.title)}</strong></td><td><span class="tag">${esc(s.survey_type||'survey')}</span></td><td><span class="tag" style="background:${s.is_active?'#d1fae5;color:#059669':'#fee2e2;color:#dc2626'}">${s.is_active?'Active':'Closed'}</span></td><td>${s.response_count||0}</td><td>${new Date(s.created_at).toLocaleDateString()}</td><td><a href="/org/surveys/${s.id}" class="btn btn-sm">View</a> ${s.is_active?`<a href="/org/surveys/${s.id}/close" class="btn btn-sm btn-red">Close</a>`:`<a href="/org/surveys/${s.id}/results" class="btn btn-sm">Results</a>`}</td></tr>`).join('')}</table>` : '<p class="muted">No surveys yet. Create one to start collecting feedback!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/surveys/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Survey', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create Survey</h2>
+    <form method="POST" action="/org/surveys/save">
+      <label>Survey Title</label><input name="title" required placeholder="Member Satisfaction Survey">
+      <label>Description</label><textarea name="description" rows="2" placeholder="What this survey is about..."></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Survey Type</label><select name="survey_type"><option value="survey">Survey (Free Text)</option><option value="poll">Poll (Single Choice)</option><option value="rating">Rating (1-5 Scale)</option></select></div>
+        <div><label>Allow Anonymous</label><select name="is_anonymous"><option value="true">Yes</option><option value="false" selected>No</option></select></div>
+      </div>
+      <label>Questions (one per line)</label><textarea name="questions" rows="6" placeholder="How satisfied are you with our events?&#10;What improvements would you suggest?&#10;Would you recommend this organization to others?" required></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Closes On (optional)</label><input name="closes_at" type="date"></div>
+        <div><label>Max Responses</label><input name="max_responses" type="number" placeholder="Unlimited" min="1"></div>
+      </div>
+      <button class="btn btn-green" style="margin-top:10px">Create Survey</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.get('/org/surveys/quick-poll', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Quick Poll', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Create Quick Poll</h2>
+    <form method="POST" action="/org/surveys/save">
+      <label>Poll Question</label><input name="title" required placeholder="Where should we hold the next event?">
+      <input type="hidden" name="survey_type" value="poll">
+      <label>Options (one per line)</label><textarea name="questions" rows="4" placeholder="City Center&#10;Community Hall&#10;Outdoor Park" required></textarea>
+      <label>Allow Multiple Choices?</label><select name="is_anonymous"><option value="true">Single Choice</option><option value="false">Multiple Choice</option></select>
+      <div><label>Closes On (optional)</label><input name="closes_at" type="date"></div>
+      <button class="btn" style="background:#f59e0b;color:white;margin-top:10px">Create Poll</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/surveys/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, description, survey_type, is_anonymous, questions, closes_at, max_responses } = req.body;
+  const questionsArr = questions.split('\n').map(q => q.trim()).filter(Boolean);
+  await pool.query('INSERT INTO org_surveys(tenant_id,title,description,survey_type,is_anonymous,questions,is_active,closes_at,max_responses) VALUES($1,$2,$3,$4,$5,$6,true,$7,$8)',
+    [t, title, description||'', survey_type||'survey', is_anonymous==='true', JSON.stringify(questionsArr), closes_at||null, max_responses?parseInt(max_responses):null]);
+  await audit(req.session.user.email, 'create_survey', 'Created survey: ' + title);
+  res.redirect('/org/surveys');
+}));
+
+app.get('/org/surveys/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const survey = (await pool.query('SELECT * FROM org_surveys WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!survey) return res.status(404).send('Survey not found');
+  const responses = (await pool.query('SELECT * FROM org_survey_responses WHERE survey_id=$1 ORDER BY created_at DESC', [survey.id])).rows;
+  const questions = JSON.parse(survey.questions || '[]');
+  res.send(renderPage(survey.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"><h1>${esc(survey.title)}</h1><p>${esc(survey.description||'')} | ${responses.length} responses</p></div>
+    ${survey.is_active ? `<div class="card" style="max-width:700px;margin:0 auto">
+      <h2>Submit Your Response</h2>
+      <form method="POST" action="/org/surveys/${survey.id}/respond">
+        ${questions.map((q, i) => {
+          if (survey.survey_type === 'poll') {
+            return `<div style="margin-bottom:12px"><label>${esc(q)}</label><select name="q${i}" required style="width:100%;padding:8px"><option value="">Select...</option>${questions.map((opt, j) => `<option value="${esc(opt)}">${esc(opt)}</option>`).join('')}</select></div>`;
+          } else if (survey.survey_type === 'rating') {
+            return `<div style="margin-bottom:12px"><label>${esc(q)}</label><select name="q${i}" required style="width:100%;padding:8px"><option value="">Rate...</option><option value="5">5 - Excellent</option><option value="4">4 - Good</option><option value="3">3 - Average</option><option value="2">2 - Below Average</option><option value="1">1 - Poor</option></select></div>`;
+          } else {
+            return `<div style="margin-bottom:12px"><label>${esc(q)}</label><textarea name="q${i}" rows="3" required placeholder="Your answer..."></textarea></div>`;
+          }
+        }).join('')}
+        <button class="btn btn-green">Submit Response</button>
+      </form>
+    </div>` : '<div class="alert">This survey is now closed.</div>'}
+    ${responses.length ? `<div class="card" style="margin-top:15px"><h3>Responses (${responses.length})</h3>
+      <table><tr><th>Respondent</th><th>Date</th><th>Answers</th></tr>${responses.map(r => {
+        let answers;
+        try { answers = JSON.parse(r.answers); } catch(e) { answers = {}; }
+        return `<tr><td>${survey.is_anonymous ? 'Anonymous' : esc(r.respondent_email||'N/A')}</td><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${Object.entries(answers).map(([k,v]) => `<strong>${esc(k)}:</strong> ${esc(String(v))}`).join(' | ')}</td></tr>`;
+      }).join('')}</table>
+    </div>` : ''}
+    <div style="margin-top:15px"><a href="/org/surveys" class="btn">Back to Surveys</a> ${survey.is_active ? `<a href="/org/surveys/${survey.id}/close" class="btn btn-red">Close Survey</a>` : ''}</div>
+  `, req.session.user));
+}));
+
+app.post('/org/surveys/:id/respond', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const survey = (await pool.query('SELECT * FROM org_surveys WHERE tenant_id=$1 AND id=$2 AND is_active=true', [t, req.params.id])).rows[0];
+  if (!survey) return res.status(400).send('Survey not found or closed');
+  const questions = JSON.parse(survey.questions || '[]');
+  const answers = {};
+  questions.forEach((q, i) => { answers[q] = req.body['q' + i] || ''; });
+  const existing = (await pool.query('SELECT id FROM org_survey_responses WHERE survey_id=$1 AND respondent_email=$2', [survey.id, req.session.user.email])).rows[0];
+  if (existing && !survey.is_anonymous) return res.status(400).send('You have already responded to this survey');
+  await pool.query('INSERT INTO org_survey_responses(survey_id,respondent_email,answers) VALUES($1,$2,$3)', [survey.id, req.session.user.email, JSON.stringify(answers)]);
+  await audit(req.session.user.email, 'survey_response', 'Responded to survey: ' + survey.title);
+  res.redirect('/org/surveys/' + survey.id);
+}));
+
+app.get('/org/surveys/:id/close', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE org_surveys SET is_active=false WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  await audit(req.session.user.email, 'close_survey', 'Closed survey ID: ' + req.params.id);
+  res.redirect('/org/surveys');
+}));
+
+app.get('/org/surveys/:id/results', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const survey = (await pool.query('SELECT * FROM org_surveys WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!survey) return res.status(404).send('Survey not found');
+  const responses = (await pool.query('SELECT * FROM org_survey_responses WHERE survey_id=$1', [survey.id])).rows;
+  const questions = JSON.parse(survey.questions || '[]');
+  const tallies = {};
+  if (survey.survey_type === 'poll' || survey.survey_type === 'rating') {
+    questions.forEach(q => { tallies[q] = {}; });
+    responses.forEach(r => {
+      let answers; try { answers = JSON.parse(r.answers); } catch(e) { answers = {}; }
+      Object.entries(answers).forEach(([q, a]) => { if (tallies[q]) { tallies[q][a] = (tallies[q][a] || 0) + 1; } });
+    });
+  }
+  res.send(renderPage('Results: ' + survey.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"><h1>${esc(survey.title)} - Results</h1><p>${responses.length} total responses</p></div>
+    <div class="card">
+      ${survey.survey_type === 'poll' || survey.survey_type === 'rating' ?
+        questions.map(q => `<h3>${esc(q)}</h3><div style="margin:10px 0">${Object.entries(tallies[q]||{}).map(([opt, cnt]) => {
+          const pct = responses.length ? Math.round(cnt/responses.length*100) : 0;
+          return `<div style="margin:5px 0"><span style="display:inline-block;width:150px">${esc(opt)}</span><div style="display:inline-block;width:200px;background:#e2e8f0;border-radius:4px;height:20px"><div style="width:${pct}%;background:#8b5cf6;border-radius:4px;height:20px"></div></div> <span style="margin-left:8px">${cnt} (${pct}%)</span></div>`;
+        }).join('')}</div>`).join('') :
+        `<table><tr><th>Respondent</th><th>Date</th><th>Answers</th></tr>${responses.map(r => {
+          let answers; try { answers = JSON.parse(r.answers); } catch(e) { answers = {}; }
+          return `<tr><td>${survey.is_anonymous?'Anonymous':esc(r.respondent_email||'N/A')}</td><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${Object.entries(answers).map(([k,v]) => `<strong>${esc(k)}:</strong> ${esc(String(v))}`).join('<br>')}</td></tr>`;
+        }).join('')}</table>`
+      }
+    </div>
+    <div style="margin-top:15px"><a href="/org/surveys" class="btn">Back to Surveys</a></div>
+  `, req.session.user));
+}));
+
+// === V6: DISCUSSIONS / FORUM ===
+app.get('/org/discussions', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const discussions = (await pool.query('SELECT d.*, m.name as author_name, (SELECT COUNT(*) FROM org_discussion_replies WHERE discussion_id=d.id) as reply_count FROM org_discussions d LEFT JOIN members m ON m.email=d.author_email WHERE d.tenant_id=$1 ORDER BY d.is_pinned DESC, d.updated_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  res.send(renderPage('Discussions', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>Discussions</h1><p>Community conversations and decision-making</p></div>
+    <div style="margin:15px 0"><a href="/org/discussions/new" class="btn">+ New Discussion</a></div>
+    <div class="card">
+      ${discussions.length ? `<table><tr><th>Topic</th><th>Author</th><th>Category</th><th>Replies</th><th>Last Activity</th></tr>${discussions.map(d => `<tr><td><a href="/org/discussions/${d.id}"><strong>${esc(d.title)}</strong></a>${d.is_pinned?' <span class="tag" style="background:#fef3c7;color:#92400e">Pinned</span>':''}</td><td>${esc(d.author_name||d.author_email)}</td><td><span class="tag">${esc(d.category||'General')}</span></td><td>${d.reply_count||0}</td><td>${getTimeAgo(d.updated_at)}</td></tr>`).join('')}</table>` : '<p class="muted">No discussions yet. Start a conversation!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/discussions/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Discussion', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Start a Discussion</h2>
+    <form method="POST" action="/org/discussions/save">
+      <label>Topic</label><input name="title" required placeholder="How can we improve member engagement?">
+      <label>Category</label><select name="category"><option value="General">General</option><option value="Ideas">Ideas</option><option value="Announcements">Announcements</option><option value="Questions">Questions</option><option value="Feedback">Feedback</option><option value="Governance">Governance</option></select>
+      <label>Description</label><textarea name="content" rows="6" placeholder="Share your thoughts, ideas, or questions..." required></textarea>
+      <button class="btn btn-green" style="margin-top:10px">Post Discussion</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/discussions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, category, content } = req.body;
+  await pool.query('INSERT INTO org_discussions(tenant_id,title,category,content,author_email) VALUES($1,$2,$3,$4,$5)', [t, title, category||'General', content, req.session.user.email]);
+  await audit(req.session.user.email, 'create_discussion', 'Started discussion: ' + title);
+  res.redirect('/org/discussions');
+}));
+
+app.get('/org/discussions/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const disc = (await pool.query('SELECT d.*, m.name as author_name FROM org_discussions d LEFT JOIN members m ON m.email=d.author_email WHERE d.tenant_id=$1 AND d.id=$2', [t, req.params.id])).rows[0];
+  if (!disc) return res.status(404).send('Discussion not found');
+  const replies = (await pool.query('SELECT r.*, m.name as author_name FROM org_discussion_replies r LEFT JOIN members m ON m.email=r.author_email WHERE r.discussion_id=$1 ORDER BY r.created_at ASC', [disc.id])).rows;
+  res.send(renderPage(disc.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>${esc(disc.title)}</h1><p>${esc(disc.category)} | by ${esc(disc.author_name||disc.author_email)} | ${getTimeAgo(disc.created_at)}</p></div>
+    <div class="card">
+      <div style="white-space:pre-wrap;line-height:1.6">${esc(disc.content)}</div>
+      <div style="margin-top:10px;display:flex;gap:10px">
+        <a href="/org/discussions/${disc.id}/pin" class="btn btn-sm">${disc.is_pinned?'Unpin':'Pin'}</a>
+        <a href="/org/discussions/${disc.id}/delete" class="btn btn-sm btn-red">Delete</a>
+      </div>
+    </div>
+    <div class="card" style="margin-top:15px"><h3>Replies (${replies.length})</h3>
+      ${replies.map(r => `<div style="border-left:3px solid #0891b2;padding:10px;margin:10px 0;background:#f8fafc;border-radius:0 8px 8px 0"><strong>${esc(r.author_name||r.author_email)}</strong> <span class="muted">${getTimeAgo(r.created_at)}</span><div style="white-space:pre-wrap;margin-top:5px">${esc(r.content)}</div></div>`).join('')}
+      <form method="POST" action="/org/discussions/${disc.id}/reply" style="margin-top:15px">
+        <textarea name="content" rows="3" placeholder="Write a reply..." required></textarea>
+        <button class="btn btn-green" style="margin-top:5px">Post Reply</button>
+      </form>
+    </div>
+    <div style="margin-top:15px"><a href="/org/discussions" class="btn">Back to Discussions</a></div>
+  `, req.session.user));
+}));
+
+app.post('/org/discussions/:id/reply', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { content } = req.body;
+  if (!content || !content.trim()) return res.status(400).send('Reply cannot be empty');
+  await pool.query('INSERT INTO org_discussion_replies(discussion_id,content,author_email) VALUES($1,$2,$3)', [req.params.id, content, req.session.user.email]);
+  await pool.query('UPDATE org_discussions SET updated_at=NOW() WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  res.redirect('/org/discussions/' + req.params.id);
+}));
+
+app.get('/org/discussions/:id/pin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE org_discussions SET is_pinned=NOT is_pinned WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  res.redirect('/org/discussions/' + req.params.id);
+}));
+
+app.get('/org/discussions/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM org_discussion_replies WHERE discussion_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM org_discussions WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  await audit(req.session.user.email, 'delete_discussion', 'Deleted discussion ID: ' + req.params.id);
+  res.redirect('/org/discussions');
+}));
+
+// === V6: KANBAN BOARD FOR TASKS ===
+app.get('/org/tasks/board', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tasks = (await pool.query('SELECT ot.*, m.name as assignee_name FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 ORDER BY ot.priority DESC, ot.created_at ASC', [t])).rows;
+  const columns = { todo: [], in_progress: [], review: [], completed: [] };
+  tasks.forEach(tk => {
+    const status = tk.status || 'todo';
+    if (columns[status]) columns[status].push(tk);
+    else columns.todo.push(tk);
+  });
+  const priorityColors = { urgent: '#dc2626', high: '#f59e0b', medium: '#3b82f6', low: '#6b7280' };
+  res.send(renderPage('Task Board', `
+    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7)"><h1>Task Board</h1><p>Visual task management with drag-and-drop style view</p></div>
+    <div style="margin:15px 0"><a href="/org/tasks" class="btn">List View</a> <a href="/org/tasks/new" class="btn btn-green">+ New Task</a></div>
+    <div style="display:flex;gap:15px;overflow-x:auto;padding-bottom:10px">
+      ${Object.entries(columns).map(([status, items]) => {
+        const statusColors = { todo: '#6b7280', in_progress: '#3b82f6', review: '#f59e0b', completed: '#059669' };
+        const statusLabels = { todo: 'To Do', in_progress: 'In Progress', review: 'Review', completed: 'Completed' };
+        return `<div style="min-width:260px;flex:1;background:#f1f5f9;border-radius:12px;padding:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h3 style="color:${statusColors[status]};margin:0;font-size:14px">${statusLabels[status] || status}</h3>
+            <span style="background:${statusColors[status]};color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold">${items.length}</span>
+          </div>
+          ${items.map(tk => `<div style="background:white;border-radius:8px;padding:12px;margin-bottom:8px;border-left:4px solid ${priorityColors[tk.priority]||'#6b7280'};box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+            <div style="font-weight:600;font-size:13px;margin-bottom:4px">${esc(tk.title)}</div>
+            ${tk.description ? `<div style="font-size:11px;color:#64748b;margin-bottom:6px">${esc(tk.description.substring(0,60))}${tk.description.length>60?'...':''}</div>` : ''}
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:#64748b">${esc(tk.assignee_name||'Unassigned')}</span>
+              ${tk.due_date ? `<span style="font-size:11px;color:${new Date(tk.due_date)<new Date()?'#dc2626':'#64748b'}">${new Date(tk.due_date).toLocaleDateString()}</span>` : ''}
+            </div>
+            <div style="margin-top:6px"><a href="/org/tasks/${tk.id}?status=todo" class="btn btn-sm" style="font-size:10px;padding:2px 6px">Todo</a> <a href="/org/tasks/${tk.id}?status=in_progress" class="btn btn-sm" style="font-size:10px;padding:2px 6px">Prog</a> <a href="/org/tasks/${tk.id}?status=review" class="btn btn-sm" style="font-size:10px;padding:2px 6px">Rev</a> <a href="/org/tasks/${tk.id}?status=completed" class="btn btn-sm" style="font-size:10px;padding:2px 6px">Done</a></div>
+          </div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/tasks/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const newStatus = req.query.status;
+  if (newStatus && ['todo','in_progress','review','completed'].includes(newStatus)) {
+    await pool.query('UPDATE org_tasks SET status=$1 WHERE tenant_id=$2 AND id=$3', [newStatus, t, req.params.id]);
+    await audit(req.session.user.email, 'update_task_status', 'Task #' + req.params.id + ' -> ' + newStatus);
+  }
+  res.redirect('/org/tasks/board');
+}));
+
+// === V6: BUDGET VS ACTUAL DASHBOARD ===
+app.get('/org/budget', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const projects = (await pool.query('SELECT * FROM projects WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const categories = (await pool.query('SELECT * FROM finance_categories WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const totalBudget = projects.reduce((sum, p) => sum + parseInt(p.budget || 0), 0);
+  const totalSpent = projects.reduce((sum, p) => sum + parseInt(p.spent || 0), 0);
+  const totalRemaining = totalBudget - totalSpent;
+  const overBudget = projects.filter(p => parseInt(p.spent || 0) > parseInt(p.budget || 0) && parseInt(p.budget) > 0);
+  const nearBudget = projects.filter(p => { const b = parseInt(p.budget||0); return b > 0 && parseInt(p.spent||0)/b >= 0.9 && parseInt(p.spent||0) <= b; });
+  res.send(renderPage('Budget vs Actual', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Budget vs Actual</h1><p>Track spending against planned budgets</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalBudget.toLocaleString()}</div><div>Total Budget</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${totalSpent.toLocaleString()}</div><div>Total Spent</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${totalRemaining>=0?'#3b82f6':'#dc2626'}">UGX ${totalRemaining.toLocaleString()}</div><div>${totalRemaining>=0?'Remaining':'Over Budget'}</div></div>
+      <div class="stat-card"><div class="stat-num">${totalBudget>0?Math.round(totalSpent/totalBudget*100):0}%</div><div>Utilization</div></div>
+    </div>
+    ${overBudget.length ? `<div class="card" style="border-left:4px solid #dc2626"><h3 style="color:#dc2626">Over Budget (${overBudget.length})</h3><table><tr><th>Project</th><th>Budget</th><th>Spent</th><th>Over By</th><th>% Used</th></tr>${overBudget.map(p => `<tr><td><strong>${esc(p.name)}</strong></td><td>UGX ${parseInt(p.budget).toLocaleString()}</td><td style="color:#dc2626;font-weight:bold">UGX ${parseInt(p.spent).toLocaleString()}</td><td style="color:#dc2626">UGX ${(parseInt(p.spent)-parseInt(p.budget)).toLocaleString()}</td><td style="color:#dc2626">${Math.round(parseInt(p.spent)/parseInt(p.budget)*100)}%</td></tr>`).join('')}</table></div>` : ''}
+    ${nearBudget.length ? `<div class="card" style="border-left:4px solid #f59e0b"><h3 style="color:#f59e0b">Near Budget (${nearBudget.length})</h3><table><tr><th>Project</th><th>Budget</th><th>Spent</th><th>Remaining</th><th>% Used</th></tr>${nearBudget.map(p => `<tr><td><strong>${esc(p.name)}</strong></td><td>UGX ${parseInt(p.budget).toLocaleString()}</td><td>UGX ${parseInt(p.spent).toLocaleString()}</td><td>UGX ${(parseInt(p.budget)-parseInt(p.spent)).toLocaleString()}</td><td style="color:#f59e0b">${Math.round(parseInt(p.spent)/parseInt(p.budget)*100)}%</td></tr>`).join('')}</table></div>` : ''}
+    <div class="card"><h3>All Projects Budget</h3>
+      ${projects.length ? `<table><tr><th>Project</th><th>Status</th><th>Budget</th><th>Spent</th><th>Remaining</th><th>Progress</th></tr>${projects.map(p => {
+        const budget = parseInt(p.budget||0), spent = parseInt(p.spent||0);
+        const pct = budget > 0 ? Math.round(spent/budget*100) : 0;
+        const barColor = pct > 100 ? '#dc2626' : pct > 90 ? '#f59e0b' : '#059669';
+        return `<tr><td><strong>${esc(p.name)}</strong></td><td><span class="tag" style="background:${p.status==='active'?'#d1fae5;color:#059669':'#f1f5f9;color:#64748b'}">${esc(p.status||'active')}</span></td><td>UGX ${budget.toLocaleString()}</td><td>UGX ${spent.toLocaleString()}</td><td style="color:${pct>100?'#dc2626':'#334155'}">UGX ${(budget-spent).toLocaleString()}</td><td><div style="display:flex;align-items:center;gap:5px"><div style="flex:1;background:#e2e8f0;border-radius:4px;height:8px"><div style="width:${Math.min(pct,100)}%;background:${barColor};border-radius:4px;height:8px"></div></div><span style="font-size:12px;min-width:35px">${pct}%</span></div></td></tr>`;
+      }).join('')}</table>` : '<p class="muted">No projects with budgets yet.</p>'}
+    </div>
+    ${categories.length ? `<div class="card"><h3>Budget by Category</h3><table><tr><th>Category</th><th>Type</th><th>Budget</th></tr>${categories.map(c => `<tr><td><strong>${esc(c.name)}</strong></td><td><span class="tag">${esc(c.type||'general')}</span></td><td>UGX ${parseInt(c.budget||0).toLocaleString()}</td></tr>`).join('')}</table></div>` : ''}
+  `, req.session.user));
+}));
+
+// === V6: EMAIL TEMPLATES ===
+app.get('/org/templates', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const templates = (await pool.query('SELECT * FROM org_email_templates WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Email Templates', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#be185d)"><h1>Email Templates</h1><p>Customize email templates for notices and reminders</p></div>
+    <div style="margin:15px 0"><a href="/org/templates/new" class="btn">+ Create Template</a></div>
+    <div class="card">
+      ${templates.length ? `<table><tr><th>Name</th><th>Type</th><th>Subject</th><th>Updated</th><th>Actions</th></tr>${templates.map(tp => `<tr><td><strong>${esc(tp.name)}</strong></td><td><span class="tag">${esc(tp.template_type||'general')}</span></td><td>${esc(tp.subject||'-')}</td><td>${new Date(tp.updated_at||tp.created_at).toLocaleDateString()}</td><td><a href="/org/templates/${tp.id}/edit" class="btn btn-sm">Edit</a> <a href="/org/templates/${tp.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No email templates yet. Create one to standardize your communications!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/templates/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Template', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create Email Template</h2>
+    <form method="POST" action="/org/templates/save">
+      <label>Template Name</label><input name="name" required placeholder="Welcome Email">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Type</label><select name="template_type"><option value="notice">Notice</option><option value="reminder">Reminder</option><option value="invitation">Invitation</option><option value="thank_you">Thank You</option><option value="welcome">Welcome</option><option value="custom">Custom</option></select></div>
+        <div><label>Subject Line</label><input name="subject" required placeholder="Welcome to {{org_name}}!"></div>
+      </div>
+      <label>Body Content</label><textarea name="body" rows="10" placeholder="Dear {{member_name}},&#10;&#10;Welcome to {{org_name}}! We are excited to have you...&#10;&#10;Best regards,&#10;{{org_name}} Team" required></textarea>
+      <div class="card" style="background:#f8fafc;margin-top:10px"><h4>Available Variables</h4>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+          <span class="tag">{{member_name}}</span><span class="tag">{{org_name}}</span><span class="tag">{{event_name}}</span><span class="tag">{{event_date}}</span><span class="tag">{{task_title}}</span><span class="tag">{{due_date}}</span><span class="tag">{{amount}}</span><span class="tag">{{link}}</span>
+        </div>
+      </div>
+      <button class="btn btn-green" style="margin-top:10px">Save Template</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/templates/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, template_type, subject, body } = req.body;
+  await pool.query('INSERT INTO org_email_templates(tenant_id,name,template_type,subject,body) VALUES($1,$2,$3,$4,$5)', [t, name, template_type||'custom', subject||'', body]);
+  await audit(req.session.user.email, 'create_template', 'Created email template: ' + name);
+  res.redirect('/org/templates');
+}));
+
+app.get('/org/templates/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tp = (await pool.query('SELECT * FROM org_email_templates WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!tp) return res.status(404).send('Template not found');
+  res.send(renderPage('Edit Template', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Edit: ${esc(tp.name)}</h2>
+    <form method="POST" action="/org/templates/${tp.id}/update">
+      <label>Name</label><input name="name" value="${esc(tp.name)}" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Type</label><select name="template_type"><option value="notice" ${tp.template_type==='notice'?'selected':''}>Notice</option><option value="reminder" ${tp.template_type==='reminder'?'selected':''}>Reminder</option><option value="invitation" ${tp.template_type==='invitation'?'selected':''}>Invitation</option><option value="thank_you" ${tp.template_type==='thank_you'?'selected':''}>Thank You</option><option value="welcome" ${tp.template_type==='welcome'?'selected':''}>Welcome</option><option value="custom" ${tp.template_type==='custom'?'selected':''}>Custom</option></select></div>
+        <div><label>Subject</label><input name="subject" value="${esc(tp.subject||'')}" required></div>
+      </div>
+      <label>Body</label><textarea name="body" rows="10" required>${esc(tp.body)}</textarea>
+      <button class="btn btn-green" style="margin-top:10px">Update</button> <a href="/org/templates" class="btn">Cancel</a>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/templates/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, template_type, subject, body } = req.body;
+  await pool.query('UPDATE org_email_templates SET name=$1,template_type=$2,subject=$3,body=$4 WHERE tenant_id=$5 AND id=$6', [name, template_type||'custom', subject||'', body, t, req.params.id]);
+  res.redirect('/org/templates');
+}));
+
+app.get('/org/templates/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM org_email_templates WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  await audit(req.session.user.email, 'delete_template', 'Deleted email template ID: ' + req.params.id);
+  res.redirect('/org/templates');
+}));
+
+// === V6: BROADCAST / ANNOUNCEMENTS ===
+app.get('/org/broadcast', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query("SELECT COUNT(*) as total, COUNT(CASE WHEN email IS NOT NULL AND email!='' THEN 1 END) as with_email FROM members WHERE tenant_id=$1", [t])).rows[0];
+  const recent = (await pool.query('SELECT * FROM org_broadcasts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10', [t])).rows;
+  res.send(renderPage('Broadcast', `
+    <div class="hero" style="background:linear-gradient(135deg,#ea580c,#c2410c)"><h1>Broadcast Message</h1><p>Send announcements to all members</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${members.total||0}</div><div>Total Members</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${members.with_email||0}</div><div>With Email</div></div>
+    </div>
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <h2>Send Broadcast</h2>
+      <form method="POST" action="/org/broadcast/send">
+        <label>Subject</label><input name="subject" required placeholder="Important Announcement">
+        <label>Message</label><textarea name="message" rows="5" placeholder="Dear members,..." required></textarea>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Send Via</label><select name="channel"><option value="notification">In-App Notification</option><option value="email">Email</option><option value="both">Both (Notification + Email)</option></select></div>
+          <div><label>Priority</label><select name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
+        </div>
+        <label>Target Audience</label><select name="target"><option value="all">All Members</option><option value="admins">Admins Only</option><option value="committee">Committee Members</option></select>
+        <button class="btn" style="background:#ea580c;color:white;margin-top:10px">Send Broadcast</button>
+      </form>
+    </div>
+    ${recent.length ? `<div class="card" style="margin-top:15px"><h3>Recent Broadcasts</h3><table><tr><th>Subject</th><th>Channel</th><th>Target</th><th>Sent</th></tr>${recent.map(b => `<tr><td><strong>${esc(b.subject)}</strong></td><td><span class="tag">${esc(b.channel)}</span></td><td><span class="tag">${esc(b.target||'all')}</span></td><td>${new Date(b.created_at).toLocaleDateString()}</td></tr>`).join('')}</table></div>` : ''}
+  `, req.session.user));
+}));
+
+app.post('/org/broadcast/send', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { subject, message, channel, priority, target } = req.body;
+  let targetMembers;
+  if (target === 'admins') {
+    targetMembers = (await pool.query('SELECT email FROM members WHERE tenant_id=$1 AND is_admin=true AND email IS NOT NULL', [t])).rows;
+  } else if (target === 'committee') {
+    targetMembers = (await pool.query('SELECT m.email FROM members m JOIN committee_members cm ON cm.member_id=m.id WHERE m.tenant_id=$1 AND m.email IS NOT NULL', [t])).rows;
+  } else {
+    targetMembers = (await pool.query("SELECT email FROM members WHERE tenant_id=$1 AND email IS NOT NULL AND email!=''", [t])).rows;
+  }
+  let notified = 0;
+  for (const m of targetMembers) {
+    if (m.email && channel !== 'email') {
+      await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, m.email, subject, message, '']);
+      notified++;
+    }
+    if (m.email && (channel === 'email' || channel === 'both')) {
+      try { await sendEmail(m.email, subject, message); } catch(e) { /* log but don't fail */ }
+      notified++;
+    }
+  }
+  await pool.query('INSERT INTO org_broadcasts(tenant_id,subject,message,channel,priority,target,recipient_count) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, subject, message, channel||'notification', priority||'normal', target||'all', notified]);
+  await audit(req.session.user.email, 'broadcast', 'Sent broadcast "' + subject + '" to ' + notified + ' recipients');
+  res.redirect('/org/broadcast');
+}));
+
+// === V6: GLOBAL SEARCH ===
+app.get('/org/search', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 2) {
+    return res.send(renderPage('Search', `
+      <div class="hero" style="background:linear-gradient(135deg,#64748b,#475569)"><h1>Global Search</h1><p>Search across all organization data</p></div>
+      <div class="card" style="max-width:600px;margin:0 auto">
+        <form method="GET" action="/org/search"><input name="q" placeholder="Search members, events, tasks, finance..." style="width:100%;padding:12px;font-size:16px;border-radius:8px;border:2px solid #e2e8f0" value="${esc(q)}"><button class="btn btn-green" style="margin-top:10px;width:100%">Search</button></form>
+      </div>
+    `, req.session.user));
+  }
+  const like = '%' + q + '%';
+  const [members, events, tasks, finance, notices, committees] = await Promise.all([
+    pool.query('SELECT id,name,email,phone,role FROM members WHERE tenant_id=$1 AND (name ILIKE $2 OR email ILIKE $2 OR phone ILIKE $2) LIMIT 10', [t, like]),
+    pool.query('SELECT id,name,event_date,venue FROM events WHERE tenant_id=$1 AND (name ILIKE $2 OR venue ILIKE $2) LIMIT 10', [t, like]),
+    pool.query('SELECT id,title,status,priority FROM org_tasks WHERE tenant_id=$1 AND (title ILIKE $2 OR description ILIKE $2) LIMIT 10', [t, like]),
+    pool.query('SELECT id,amount,type,description,category FROM org_finance WHERE tenant_id=$1 AND (description ILIKE $2 OR category ILIKE $2) LIMIT 10', [t, like]),
+    pool.query('SELECT id,title FROM notice_board WHERE tenant_id=$1 AND (title ILIKE $2 OR content ILIKE $2) LIMIT 5', [t, like]),
+    pool.query('SELECT id,name FROM committees WHERE tenant_id=$1 AND name ILIKE $2 LIMIT 5', [t, like])
+  ]);
+  const total = members.rows.length + events.rows.length + tasks.rows.length + finance.rows.length + notices.rows.length + committees.rows.length;
+  res.send(renderPage('Search Results: ' + q, `
+    <div class="hero" style="background:linear-gradient(135deg,#64748b,#475569)"><h1>Search Results</h1><p>"${esc(q)}" - ${total} results</p></div>
+    <div style="margin:15px 0"><form method="GET" action="/org/search" style="display:flex;gap:8px"><input name="q" value="${esc(q)}" style="flex:1;padding:10px;border-radius:8px;border:2px solid #e2e8f0;font-size:14px"><button class="btn btn-green">Search</button></form></div>
+    ${members.rows.length ? `<div class="card"><h3>Members (${members.rows.length})</h3><table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th></tr>${members.rows.map(m => `<tr><td><a href="/org/members/${m.id}"><strong>${esc(m.name)}</strong></a></td><td>${esc(m.email||'-')}</td><td>${esc(m.phone||'-')}</td><td><span class="tag">${esc(m.role||'Member')}</span></td></tr>`).join('')}</table></div>` : ''}
+    ${events.rows.length ? `<div class="card"><h3>Events (${events.rows.length})</h3><table><tr><th>Name</th><th>Date</th><th>Venue</th></tr>${events.rows.map(e => `<tr><td><strong>${esc(e.name)}</strong></td><td>${e.event_date?new Date(e.event_date).toLocaleDateString():'-'}</td><td>${esc(e.venue||'-')}</td></tr>`).join('')}</table></div>` : ''}
+    ${tasks.rows.length ? `<div class="card"><h3>Tasks (${tasks.rows.length})</h3><table><tr><th>Title</th><th>Status</th><th>Priority</th></tr>${tasks.rows.map(tk => `<tr><td><strong>${esc(tk.title)}</strong></td><td><span class="tag">${esc(tk.status)}</span></td><td><span class="tag" style="background:${tk.priority==='urgent'?'#fee2e2;color:#dc2626':tk.priority==='high'?'#fef3c7;color:#92400e':'#dbeafe;color:#1e40af'}">${esc(tk.priority)}</span></td></tr>`).join('')}</table></div>` : ''}
+    ${finance.rows.length ? `<div class="card"><h3>Finance (${finance.rows.length})</h3><table><tr><th>Amount</th><th>Type</th><th>Description</th><th>Category</th></tr>${finance.rows.map(f => `<tr><td>UGX ${parseInt(f.amount||0).toLocaleString()}</td><td><span class="tag">${esc(f.type)}</span></td><td>${esc(f.description||'-')}</td><td>${esc(f.category||'-')}</td></tr>`).join('')}</table></div>` : ''}
+    ${notices.rows.length ? `<div class="card"><h3>Notices (${notices.rows.length})</h3>${notices.rows.map(n => `<div><strong>${esc(n.title)}</strong></div>`).join('')}</div>` : ''}
+    ${committees.rows.length ? `<div class="card"><h3>Committees (${committees.rows.length})</h3>${committees.rows.map(c => `<div><strong>${esc(c.name)}</strong></div>`).join('')}</div>` : ''}
+    ${total === 0 ? '<div class="card"><div class="alert">No results found for "' + esc(q) + '". Try different keywords.</div></div>' : ''}
+  `, req.session.user));
+}));
+
+// === V6: DATA BACKUP ===
+app.get('/org/backup', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const backups = (await pool.query('SELECT * FROM org_data_backups WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10', [t])).rows;
+  res.send(renderPage('Data Backup', `
+    <div class="hero" style="background:linear-gradient(135deg,#475569,#334155)"><h1>Data Backup</h1><p>Create and download organization data snapshots</p></div>
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <h2>Create Backup</h2>
+      <p class="muted">This will export all your organization data as a single JSON file for safekeeping or migration.</p>
+      <form method="POST" action="/org/backup/create">
+        <label>Backup Description</label><input name="description" placeholder="Monthly backup - May 2026">
+        <button class="btn" style="background:#475569;color:white;margin-top:10px">Create Backup Now</button>
+      </form>
+    </div>
+    ${backups.length ? `<div class="card" style="margin-top:15px"><h3>Backup History</h3><table><tr><th>Date</th><th>Description</th><th>Records</th><th>Size</th><th>Actions</th></tr>${backups.map(b => `<tr><td>${new Date(b.created_at).toLocaleDateString()}</td><td>${esc(b.description||'Manual backup')}</td><td>${b.record_count||'N/A'}</td><td>${b.file_size?Math.round(b.file_size/1024)+'KB':'N/A'}</td><td><a href="/org/backup/${b.id}/download" class="btn btn-sm">Download</a></td></tr>`).join('')}</table></div>` : ''}
+  `, req.session.user));
+}));
+
+app.post('/org/backup/create', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const description = req.body.description || 'Manual backup';
+  const tables = ['members', 'events', 'org_finance', 'org_tasks', 'org_task_comments', 'org_notifications', 'notice_board', 'projects', 'committees', 'committee_members', 'org_meeting_minutes', 'org_surveys', 'org_survey_responses', 'org_discussions', 'org_discussion_replies', 'org_email_templates', 'org_broadcasts', 'org_attachments', 'meeting_action_items', 'attendance', 'resolution_votes'];
+  const backup = { tenant_id: t, exported_at: new Date().toISOString(), description };
+  let totalRecords = 0;
+  for (const table of tables) {
+    try {
+      const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t]);
+      backup[table] = result.rows;
+      totalRecords += result.rows.length;
+    } catch(e) { /* table may not exist, skip */ }
+  }
+  const jsonStr = JSON.stringify(backup, null, 2);
+  const fileSize = Buffer.byteLength(jsonStr);
+  await pool.query('INSERT INTO org_data_backups(tenant_id,description,record_count,file_size) VALUES($1,$2,$3,$4)', [t, description, totalRecords, fileSize]);
+  await audit(req.session.user.email, 'create_backup', 'Created backup with ' + totalRecords + ' records');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="org_backup_${t}_${Date.now()}.json"');
+  res.send(jsonStr);
+}));
+
+app.get('/org/backup/:id/download', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const backupRecord = (await pool.query('SELECT * FROM org_data_backups WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!backupRecord) return res.status(404).send('Backup not found');
+  const tables = ['members', 'events', 'org_finance', 'org_tasks', 'notice_board', 'projects', 'committees', 'attendance'];
+  const backup = { tenant_id: t, backup_id: backupRecord.id, created_at: backupRecord.created_at, description: backupRecord.description };
+  for (const table of tables) {
+    try {
+      const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t]);
+      backup[table] = result.rows;
+    } catch(e) { /* skip */ }
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="org_backup_${backupRecord.id}.json"');
+  res.send(JSON.stringify(backup, null, 2));
+}));
+
+// === V6: ENHANCED CHURN PREDICTION ===
+app.get('/org/churn-enhanced', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT * FROM members WHERE tenant_id=$1', [t])).rows;
+  const attendanceData = (await pool.query("SELECT student_id, COUNT(*) as total, SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) as present FROM attendance WHERE tenant_id=$1 GROUP BY student_id", [t])).rows;
+  const attendanceMap = {};
+  attendanceData.forEach(a => { attendanceMap[a.student_id] = { total: parseInt(a.total), present: parseInt(a.present) }; });
+  const [donationData, financeData, eventData, taskData] = await Promise.all([
+    pool.query('SELECT member_id, COUNT(*) as cnt, SUM(amount) as total, MAX(created_at) as last_donation FROM donations WHERE tenant_id=$1 GROUP BY member_id', [t]),
+    pool.query('SELECT member_id, COUNT(*) as cnt FROM org_finance WHERE tenant_id=$1 AND member_id IS NOT NULL GROUP BY member_id', [t]),
+    pool.query('SELECT er.member_id, COUNT(*) as rsvp_count FROM event_rsvps er WHERE er.tenant_id=$1 GROUP BY er.member_id', [t]),
+    pool.query('SELECT assigned_to, COUNT(*) as total, SUM(CASE WHEN status=\'completed\' THEN 1 ELSE 0 END) as completed FROM org_tasks WHERE tenant_id=$1 AND assigned_to IS NOT NULL GROUP BY assigned_to', [t])
+  ]);
+  const donationMap = {}; donationData.rows.forEach(d => { donationMap[d.member_id] = { count: parseInt(d.cnt), total: parseInt(d.total), last: d.last_donation }; });
+  const financeMap = {}; financeData.rows.forEach(f => { financeMap[f.member_id] = parseInt(f.cnt); });
+  const eventMap = {}; eventData.rows.forEach(e => { eventMap[e.member_id] = parseInt(e.rsvp_count); });
+  const taskMap = {}; taskData.rows.forEach(tk => { taskMap[tk.assigned_to] = { total: parseInt(tk.total), completed: parseInt(tk.completed) }; });
+  const scored = members.map(m => {
+    let riskScore = 0;
+    let riskFactors = [];
+    let protectiveFactors = [];
+    const daysSince = m.joined_at ? (Date.now() - new Date(m.joined_at).getTime()) / (1000*60*60*24) : 0;
+    if (!m.email && !m.phone) { riskScore += 2; riskFactors.push('No contact info'); }
+    else if (!m.email) { riskScore += 1; riskFactors.push('No email'); }
+    if (daysSince > 180 && (!m.role || m.role === 'Member')) { riskScore += 2; riskFactors.push('Inactive > 6 months'); }
+    if (daysSince > 365) { riskScore += 1; riskFactors.push('Member > 1 year'); }
+    const att = attendanceMap[m.id];
+    if (att && att.total > 0) {
+      const rate = att.present / att.total;
+      if (rate < 0.3) { riskScore += 3; riskFactors.push('Attendance ' + Math.round(rate*100) + '%'); }
+      else if (rate < 0.5) { riskScore += 2; riskFactors.push('Attendance ' + Math.round(rate*100) + '%'); }
+      else if (rate > 0.8) { protectiveFactors.push('Strong attendance'); riskScore -= 1; }
+    } else if (!att && daysSince > 30) { riskScore += 2; riskFactors.push('No attendance'); }
+    const don = donationMap[m.id];
+    if (!don && daysSince > 60) { riskScore += 1; riskFactors.push('Never donated'); }
+    else if (don) {
+      const daysSinceDon = don.last ? (Date.now() - new Date(don.last).getTime()) / (1000*60*60*24) : 999;
+      if (daysSinceDon > 180) { riskScore += 2; riskFactors.push('Last donation > 6mo ago'); }
+      else if (daysSinceDon < 30) { protectiveFactors.push('Recent donor'); riskScore -= 1; }
+      if (don.count > 5) { protectiveFactors.push('Frequent donor'); riskScore -= 1; }
+    }
+    const fin = financeMap[m.id];
+    if (!fin && daysSince > 60) { riskScore += 1; riskFactors.push('No financial activity'); }
+    else if (fin && fin > 3) { protectiveFactors.push('Active in finance'); riskScore -= 1; }
+    const ev = eventMap[m.id];
+    if (!ev && daysSince > 30) { riskScore += 1; riskFactors.push('No event RSVPs'); }
+    else if (ev && ev > 3) { protectiveFactors.push('Active participant'); riskScore -= 1; }
+    const tk = taskMap[m.id];
+    if (tk && tk.total > 0) {
+      const taskRate = tk.completed / tk.total;
+      if (taskRate < 0.3 && tk.total > 2) { riskScore += 1; riskFactors.push('Low task completion'); }
+      else if (taskRate > 0.8) { protectiveFactors.push('Reliable completer'); riskScore -= 1; }
+    }
+    if (m.role && m.role !== 'Member') { protectiveFactors.push('Has role: ' + m.role); riskScore -= 1; }
+    riskScore = Math.max(0, riskScore);
+    const level = riskScore >= 7 ? 'Critical' : riskScore >= 4 ? 'High' : riskScore >= 2 ? 'Medium' : 'Low';
+    return { ...m, riskScore, level, riskFactors, protectiveFactors, daysSince: Math.round(daysSince) };
+  });
+  const atRisk = scored.filter(m => m.riskScore >= 2).sort((a,b) => b.riskScore - a.riskScore);
+  const critical = scored.filter(m => m.level === 'Critical').length;
+  const high = scored.filter(m => m.level === 'High').length;
+  const medium = scored.filter(m => m.level === 'Medium').length;
+  const low = scored.filter(m => m.level === 'Low').length;
+  const avgScore = members.length ? (scored.reduce((s,m) => s+m.riskScore, 0) / members.length).toFixed(1) : 0;
+  res.send(renderPage('Enhanced Churn Analysis', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>Enhanced Churn Analysis</h1><p>AI-powered risk assessment with multi-factor scoring</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${members.length}</div><div>Total Members</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${critical}</div><div>Critical</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${high}</div><div>High</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${medium}</div><div>Medium</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${low}</div><div>Low</div></div>
+      <div class="stat-card"><div class="stat-num">${avgScore}</div><div>Avg Risk</div></div>
+    </div>
+    <div class="card">
+      <h3>Risk Factors Analyzed</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">
+        <span class="tag" style="background:#fee2e2;color:#991b1b">No Contact</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">Low Attendance</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">No Donations</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">No Event RSVPs</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">No Finance Activity</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">Low Task Completion</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">Long Inactivity</span>
+        <span class="tag" style="background:#d1fae5;color:#065f46">Strong Attendance</span>
+        <span class="tag" style="background:#d1fae5;color:#065f46">Recent Donor</span>
+        <span class="tag" style="background:#d1fae5;color:#065f46">Active Participant</span>
+        <span class="tag" style="background:#d1fae5;color:#065f46">Reliable Completer</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Members at Risk (${atRisk.length})</h3>
+      ${atRisk.length ? `<table><tr><th>Name</th><th>Score</th><th>Level</th><th>Risk Factors</th><th>Protective Factors</th><th>Action</th></tr>${atRisk.map(m => `<tr><td><strong>${esc(m.name)}</strong></td><td style="font-weight:bold">${m.riskScore}</td><td><span class="tag" style="background:${m.level==='Critical'?'#fee2e2;color:#991b1b':m.level==='High'?'#fef3c7;color:#92400e':'#dbeafe;color:#1e40af'}">${m.level}</span></td><td style="font-size:0.85em">${m.riskFactors.map(f => `<span style="display:inline-block;background:#fee2e2;padding:2px 6px;border-radius:4px;margin:1px;color:#991b1b">${esc(f)}</span>`).join(' ')}</td><td style="font-size:0.85em">${m.protectiveFactors.map(f => `<span style="display:inline-block;background:#d1fae5;padding:2px 6px;border-radius:4px;margin:1px;color:#065f46">${esc(f)}</span>`).join(' ')}</td><td><form method="POST" action="/org/notifications/send-reminder" style="display:inline"><input type="hidden" name="email" value="${esc(m.email||'')}"><input type="hidden" name="title" value="We miss you!"><input type="hidden" name="message" value="Hi ${esc(m.name)}, we noticed you haven't been active recently. We'd love to see you again!"><button class="btn btn-sm" style="background:#f59e0b;color:white">Reach Out</button></form></td></tr>`).join('')}</table>` : '<div class="alert alert-success">No members at significant risk of churning.</div>'}
     </div>
   `, req.session.user));
 }));
