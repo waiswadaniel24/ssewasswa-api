@@ -663,45 +663,83 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ` : ''}
 
       <!-- HERO SECTION -->
-      <div style="background:linear-gradient(135deg,#059669 0%,#0d9488 40%,#0891b2 100%);padding:80px 20px;text-align:center;position:relative;overflow:hidden">
-        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2240%22 fill=%22rgba(255,255,255,0.05)%22/></svg>') repeat;background-size:60px;opacity:0.3"></div>
+      <div style="background:linear-gradient(135deg,#059669 0%,#0d9488 30%,#0891b2 60%,#6366f1 100%);padding:100px 20px 80px;text-align:center;position:relative;overflow:hidden;min-height:520px">
+        <!-- Animated gradient overlay -->
+        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(135deg,rgba(99,102,241,0.15) 0%,rgba(6,182,212,0.1) 50%,rgba(5,150,105,0.15) 100%);animation:heroShift 8s ease-in-out infinite alternate;z-index:1"></div>
+        <style>@keyframes heroShift{0%{opacity:0.6;transform:scale(1)}100%{opacity:1;transform:scale(1.05)}}</style>
+        <!-- Floating geometric shapes -->
+        <div style="position:absolute;top:10%;left:8%;width:80px;height:80px;border:3px solid rgba(255,255,255,0.15);border-radius:50%;z-index:1;animation:float1 6s ease-in-out infinite"></div>
+        <div style="position:absolute;top:20%;right:12%;width:50px;height:50px;background:rgba(255,255,255,0.08);border-radius:12px;transform:rotate(45deg);z-index:1;animation:float2 8s ease-in-out infinite"></div>
+        <div style="position:absolute;bottom:15%;left:15%;width:30px;height:30px;background:rgba(255,255,255,0.1);border-radius:50%;z-index:1;animation:float3 5s ease-in-out infinite"></div>
+        <div style="position:absolute;top:55%;right:8%;width:60px;height:60px;border:2px solid rgba(255,255,255,0.1);border-radius:16px;z-index:1;animation:float1 7s ease-in-out infinite reverse"></div>
+        <div style="position:absolute;top:8%;left:40%;width:20px;height:20px;background:rgba(255,255,255,0.12);border-radius:50%;z-index:1;animation:float3 4s ease-in-out infinite"></div>
+        <div style="position:absolute;bottom:25%;right:25%;width:40px;height:40px;border:2px solid rgba(255,255,255,0.08);border-radius:50%;z-index:1;animation:float2 9s ease-in-out infinite"></div>
+        <style>@keyframes float1{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-20px) rotate(5deg)}}@keyframes float2{0%,100%{transform:translateY(0) rotate(45deg)}50%{transform:translateY(-15px) rotate(50deg)}}@keyframes float3{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-25px) scale(1.1)}}</style>
+        <!-- Dot pattern overlay -->
+        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(rgba(255,255,255,0.06) 1px,transparent 1px);background-size:24px 24px;z-index:1"></div>
         <div style="position:relative;z-index:2">
-          <div style="font-size:14px;font-weight:600;letter-spacing:3px;text-transform:uppercase;opacity:0.9;margin-bottom:16px;color:#d1fae5">Now Serving All of Africa</div>
-          <h1 style="font-size:clamp(28px,5vw,56px);font-weight:900;color:white;margin-bottom:16px;line-height:1.15">
+          <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.12);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.2);border-radius:50px;padding:8px 20px;margin-bottom:24px">
+            <span style="width:8px;height:8px;background:#34d399;border-radius:50%;display:inline-block;animation:pulse 2s infinite"></span>
+            <span style="font-size:13px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#d1fae5">Now Serving All of Africa</span>
+          </div>
+          <style>@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.8)}}</style>
+          <h1 style="font-size:clamp(30px,5.5vw,60px);font-weight:900;color:white;margin-bottom:20px;line-height:1.1;letter-spacing:-0.02em">
             The Operating System for<br>Schools, Clinics, Churches,<br>Businesses &amp; Public Services
           </h1>
-          <p style="font-size:clamp(16px,2.5vw,24px);color:#d1fae5;font-weight:600;margin-bottom:8px">
+          <p style="font-size:clamp(17px,2.5vw,24px);color:#d1fae5;font-weight:600;margin-bottom:8px;letter-spacing:-0.01em">
             Stop Juggling 12 Different Apps.<br>Start Running Your Institution.
           </p>
-          <p style="font-size:16px;color:rgba(255,255,255,0.8);margin-bottom:36px;max-width:600px;margin-left:auto;margin-right:auto">
+          <p style="font-size:16px;color:rgba(255,255,255,0.75);margin-bottom:40px;max-width:600px;margin-left:auto;margin-right:auto">
             One platform. All your operations. Built for Uganda, designed for Africa.
           </p>
           <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
             ${loggedIn ? `
-              <a href="/portal/${currentType}" style="display:inline-block;padding:16px 36px;background:white;color:#059669;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;transition:0.3s;box-shadow:0 8px 30px rgba(0,0,0,0.2)">My Dashboard (${currentType.charAt(0).toUpperCase()+currentType.slice(1)}) &rarr;</a>
-              <a href="/switch-portal" style="display:inline-block;padding:16px 36px;background:rgba(255,255,255,0.15);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;border:2px solid rgba(255,255,255,0.4);transition:0.3s">Switch Portal</a>
+              <a href="/portal/${currentType}" style="display:inline-flex;align-items:center;gap:8px;padding:16px 40px;background:white;color:#059669;border-radius:50px;font-weight:700;font-size:17px;text-decoration:none;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);box-shadow:0 8px 32px rgba(0,0,0,0.2),0 0 0 1px rgba(255,255,255,0.1)">My Dashboard (${currentType.charAt(0).toUpperCase()+currentType.slice(1)}) &rarr;</a>
+              <a href="/switch-portal" style="display:inline-flex;align-items:center;gap:8px;padding:16px 40px;background:rgba(255,255,255,0.1);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:white;border-radius:50px;font-weight:700;font-size:17px;text-decoration:none;border:1px solid rgba(255,255,255,0.3);transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">Switch Portal</a>
             ` : `
-              <a href="/register" style="display:inline-block;padding:16px 36px;background:white;color:#059669;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;transition:0.3s;box-shadow:0 8px 30px rgba(0,0,0,0.2)">Start Free &rarr;</a>
-              <a href="/login" style="display:inline-block;padding:16px 36px;background:rgba(255,255,255,0.15);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;border:2px solid rgba(255,255,255,0.4);transition:0.3s">Login</a>
+              <a href="/register" style="display:inline-flex;align-items:center;gap:8px;padding:16px 40px;background:white;color:#059669;border-radius:50px;font-weight:700;font-size:17px;text-decoration:none;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);box-shadow:0 8px 32px rgba(0,0,0,0.2),0 0 0 1px rgba(255,255,255,0.1)">Start Free &rarr;</a>
+              <a href="/login" style="display:inline-flex;align-items:center;gap:8px;padding:16px 40px;background:rgba(255,255,255,0.1);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:white;border-radius:50px;font-weight:700;font-size:17px;text-decoration:none;border:1px solid rgba(255,255,255,0.3);transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">Login</a>
             `}
-            <button id="install-btn" style="display:none;padding:16px 36px;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border-radius:12px;font-weight:700;font-size:18px;border:none;cursor:pointer;transition:0.3s">Install App</button>
+            <button id="install-btn" style="display:none;padding:16px 40px;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border-radius:50px;font-weight:700;font-size:17px;border:none;cursor:pointer;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);box-shadow:0 4px 16px rgba(245,158,11,0.3)">Install App</button>
           </div>
-          <div style="margin-top:24px;display:flex;gap:24px;justify-content:center;flex-wrap:wrap">
-            <span style="color:rgba(255,255,255,0.9);font-size:14px">&#10003; No credit card required</span>
-            <span style="color:rgba(255,255,255,0.9);font-size:14px">&#10003; Setup in 10 minutes</span>
-            <span style="color:rgba(255,255,255,0.9);font-size:14px">&#10003; Works offline</span>
+          <!-- Trust badges with icon circles -->
+          <div style="margin-top:36px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+            <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.1);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);border-radius:50px;padding:8px 18px;color:rgba(255,255,255,0.95);font-size:13px;font-weight:500"><span style="width:22px;height:22px;background:rgba(52,211,153,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px">&#10003;</span> No credit card</span>
+            <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.1);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);border-radius:50px;padding:8px 18px;color:rgba(255,255,255,0.95);font-size:13px;font-weight:500"><span style="width:22px;height:22px;background:rgba(52,211,153,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px">&#10003;</span> Setup in 10 min</span>
+            <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.1);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);border-radius:50px;padding:8px 18px;color:rgba(255,255,255,0.95);font-size:13px;font-weight:500"><span style="width:22px;height:22px;background:rgba(52,211,153,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px">&#10003;</span> Works offline</span>
           </div>
         </div>
       </div>
 
       <!-- ANIMATED STATS COUNTER -->
-      <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:60px 20px;margin:40px 0;border-radius:20px;text-align:center">
-        <h2 style="color:white;font-size:28px;margin-bottom:30px">Trusted by Institutions Across Africa</h2>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:30px;max-width:800px;margin:0 auto">
-          <div><div style="font-size:42px;font-weight:900;color:white" id="stat1">0</div><div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:4px">Active Users</div></div>
-          <div><div style="font-size:42px;font-weight:900;color:white" id="stat2">0</div><div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:4px">Institutions</div></div>
-          <div><div style="font-size:42px;font-weight:900;color:white" id="stat3">0</div><div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:4px">Records Managed</div></div>
-          <div><div style="font-size:42px;font-weight:900;color:white" id="stat4">0</div><div style="color:rgba(255,255,255,0.8);font-size:14px;margin-top:4px">Countries</div></div>
+      <div style="background:linear-gradient(135deg,#4f46e5 0%,#6366f1 40%,#7c3aed 100%);padding:70px 20px;margin:-20px 20px 40px;border-radius:24px;text-align:center;position:relative;overflow:hidden">
+        <!-- Decorative glow -->
+        <div style="position:absolute;top:-50%;left:-20%;width:60%;height:200%;background:radial-gradient(ellipse,rgba(99,102,241,0.3) 0%,transparent 70%);pointer-events:none"></div>
+        <div style="position:absolute;bottom:-50%;right:-20%;width:60%;height:200%;background:radial-gradient(ellipse,rgba(124,58,237,0.3) 0%,transparent 70%);pointer-events:none"></div>
+        <div style="position:relative;z-index:2">
+          <h2 style="color:white;font-size:clamp(22px,3vw,32px);font-weight:800;margin-bottom:36px;letter-spacing:-0.02em">Trusted by Institutions Across Africa</h2>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:20px;max-width:900px;margin:0 auto">
+            <div style="background:rgba(255,255,255,0.08);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.15);border-radius:20px;padding:28px 16px;transition:transform 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:48px;height:48px;background:rgba(255,255,255,0.12);border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:22px">&#128101;</div>
+              <div style="font-size:clamp(32px,4vw,44px);font-weight:900;color:white;letter-spacing:-0.02em" id="stat1">0</div>
+              <div style="color:rgba(255,255,255,0.75);font-size:13px;margin-top:4px;font-weight:500">Active Users</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.08);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.15);border-radius:20px;padding:28px 16px;transition:transform 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:48px;height:48px;background:rgba(255,255,255,0.12);border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:22px">&#127963;</div>
+              <div style="font-size:clamp(32px,4vw,44px);font-weight:900;color:white;letter-spacing:-0.02em" id="stat2">0</div>
+              <div style="color:rgba(255,255,255,0.75);font-size:13px;margin-top:4px;font-weight:500">Institutions</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.08);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.15);border-radius:20px;padding:28px 16px;transition:transform 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:48px;height:48px;background:rgba(255,255,255,0.12);border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:22px">&#128202;</div>
+              <div style="font-size:clamp(32px,4vw,44px);font-weight:900;color:white;letter-spacing:-0.02em" id="stat3">0</div>
+              <div style="color:rgba(255,255,255,0.75);font-size:13px;margin-top:4px;font-weight:500">Records Managed</div>
+            </div>
+            <div style="background:rgba(255,255,255,0.08);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.15);border-radius:20px;padding:28px 16px;transition:transform 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:48px;height:48px;background:rgba(255,255,255,0.12);border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:22px">&#127758;</div>
+              <div style="font-size:clamp(32px,4vw,44px);font-weight:900;color:white;letter-spacing:-0.02em" id="stat4">0</div>
+              <div style="color:rgba(255,255,255,0.75);font-size:13px;margin-top:4px;font-weight:500">Countries</div>
+            </div>
+          </div>
         </div>
       </div>
       <script>
@@ -727,259 +765,273 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
 
       <!-- FEATURE SECTIONS -->
       <div style="padding:60px 20px;max-width:1200px;margin:0 auto">
-        <h2 style="text-align:center;font-size:36px;font-weight:800;margin-bottom:12px;color:#1e293b">Built For Your Institution</h2>
-        <p style="text-align:center;color:#64748b;margin-bottom:48px;font-size:18px">Choose your sector. We handle the rest.</p>
+        <h2 style="text-align:center;font-size:clamp(28px,4vw,40px);font-weight:800;margin-bottom:12px;color:var(--text);letter-spacing:-0.02em">Built For Your Institution</h2>
+        <p style="text-align:center;color:var(--text-muted);margin-bottom:48px;font-size:18px">Choose your sector. We handle the rest.</p>
 
         <!-- SCHOOLS -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-bottom:48px">
-          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #059669;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#127979;</div>
-            <h3 style="font-size:22px;font-weight:800;color:#059669;margin-bottom:4px">For Schools</h3>
-            <div style="font-size:14px;color:#059669;font-weight:600;margin-bottom:16px">UGX 150,000/month</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
-              <li>&#10003; Student Management (Admissions to Graduation)</li>
-              <li>&#10003; Fees Collection &amp; Payment Tracking</li>
-              <li>&#10003; Exam &amp; Report Card Generation</li>
-              <li>&#10003; Attendance (Biometric Ready)</li>
-              <li>&#10003; Timetable &amp; Lesson Planning</li>
-              <li>&#10003; Parent Portal &amp; SMS Alerts</li>
-              <li>&#10003; School Clinic (Doctor-Pharmacist-Lab)</li>
-              <li>&#10003; Transport &amp; Hostel Management</li>
-              <li>&#10003; Library &amp; Digital Resources</li>
-              <li>&#10003; Staff Payroll &amp; HR</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);border-left:5px solid #059669;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle at top right,rgba(5,150,105,0.06) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:linear-gradient(135deg,#059669,#10b981);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#127979;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#059669;margin-bottom:4px;letter-spacing:-0.02em">For Schools</h3>
+            <div style="display:inline-block;font-size:13px;color:white;background:linear-gradient(135deg,#059669,#10b981);font-weight:700;margin-bottom:16px;padding:4px 12px;border-radius:50px">UGX 150,000/mo</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-muted);line-height:2.2">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Student Management (Admissions to Graduation)</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Fees Collection &amp; Payment Tracking</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Exam &amp; Report Card Generation</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Attendance (Biometric Ready)</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Timetable &amp; Lesson Planning</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Parent Portal &amp; SMS Alerts</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> School Clinic (Doctor-Pharmacist-Lab)</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Transport &amp; Hostel Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Library &amp; Digital Resources</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700;font-size:16px">&#10003;</span> Staff Payroll &amp; HR</li>
             </ul>
             ${portalBtn('school', '#059669', 'School')}
           </div>
 
           <!-- CLINICS -->
-          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #0891b2;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#127973;</div>
-            <h3 style="font-size:22px;font-weight:800;color:#0891b2;margin-bottom:4px">For Clinics</h3>
-            <div style="font-size:14px;color:#0891b2;font-weight:600;margin-bottom:16px">UGX 200,000/month</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
-              <li>&#10003; Patient Registration &amp; Records</li>
-              <li>&#10003; Doctor Consultation Workflow</li>
-              <li>&#10003; Pharmacy Management</li>
-              <li>&#10003; Laboratory &amp; Results</li>
-              <li>&#10003; Appointment Scheduling</li>
-              <li>&#10003; Billing &amp; Insurance Claims</li>
-              <li>&#10003; Drug Inventory &amp; Expiry Alerts</li>
-              <li>&#10003; Inpatient &amp; Ward Management</li>
-              <li>&#10003; SMS Reminders to Patients</li>
-              <li>&#10003; HMIS Reports (MOH Compliant)</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);border-left:5px solid #0891b2;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle at top right,rgba(8,145,178,0.06) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:linear-gradient(135deg,#0891b2,#06b6d4);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#127973;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#0891b2;margin-bottom:4px;letter-spacing:-0.02em">For Clinics</h3>
+            <div style="display:inline-block;font-size:13px;color:white;background:linear-gradient(135deg,#0891b2,#06b6d4);font-weight:700;margin-bottom:16px;padding:4px 12px;border-radius:50px">UGX 200,000/mo</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-muted);line-height:2.2">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> Patient Registration &amp; Records</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> Doctor Consultation Workflow</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> Pharmacy Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> Laboratory &amp; Results</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> Appointment Scheduling</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> Billing &amp; Insurance Claims</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> Drug Inventory &amp; Expiry Alerts</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> Inpatient &amp; Ward Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> SMS Reminders to Patients</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0891b2;font-weight:700;font-size:16px">&#10003;</span> HMIS Reports (MOH Compliant)</li>
             </ul>
             ${portalBtn('health', '#0891b2', 'Health')}
           </div>
 
           <!-- CHURCHES -->
-          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #7c3aed;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#9938;</div>
-            <h3 style="font-size:22px;font-weight:800;color:#7c3aed;margin-bottom:4px">For Churches</h3>
-            <div style="font-size:14px;color:#7c3aed;font-weight:600;margin-bottom:16px">UGX 100,000/month</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
-              <li>&#10003; Member Directory &amp; Groups</li>
-              <li>&#10003; Tithe &amp; Offering Tracking</li>
-              <li>&#10003; Sermon Library &amp; Archive</li>
-              <li>&#10003; Prayer Request Management</li>
-              <li>&#10003; Event &amp; Conference Planning</li>
-              <li>&#10003; Choir &amp; Music Ministry</li>
-              <li>&#10003; Cell Group Management</li>
-              <li>&#10003; Fundraising &amp; Campaigns</li>
-              <li>&#10003; Church Attendance Tracking</li>
-              <li>&#10003; SMS &amp; Email Broadcast</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);border-left:5px solid #7c3aed;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle at top right,rgba(124,58,237,0.06) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#9938;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#7c3aed;margin-bottom:4px;letter-spacing:-0.02em">For Churches</h3>
+            <div style="display:inline-block;font-size:13px;color:white;background:linear-gradient(135deg,#7c3aed,#a855f7);font-weight:700;margin-bottom:16px;padding:4px 12px;border-radius:50px">UGX 100,000/mo</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-muted);line-height:2.2">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Member Directory &amp; Groups</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Tithe &amp; Offering Tracking</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Sermon Library &amp; Archive</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Prayer Request Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Event &amp; Conference Planning</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Choir &amp; Music Ministry</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Cell Group Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Fundraising &amp; Campaigns</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> Church Attendance Tracking</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700;font-size:16px">&#10003;</span> SMS &amp; Email Broadcast</li>
             </ul>
             ${portalBtn('church', '#7c3aed', 'Church')}
           </div>
 
           <!-- BUSINESSES -->
-          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #d97706;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#128188;</div>
-            <h3 style="font-size:22px;font-weight:800;color:#d97706;margin-bottom:4px">For Businesses</h3>
-            <div style="font-size:14px;color:#d97706;font-weight:600;margin-bottom:16px">UGX 180,000/month</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
-              <li>&#10003; Point of Sale (POS)</li>
-              <li>&#10003; Inventory &amp; Stock Management</li>
-              <li>&#10003; Invoice &amp; Quotation Generator</li>
-              <li>&#10003; Customer Relationship Management</li>
-              <li>&#10003; Profit &amp; Loss Reports</li>
-              <li>&#10003; Payroll &amp; HR Management</li>
-              <li>&#10003; Expense Tracking</li>
-              <li>&#10003; Tax Reports (URA Compliant)</li>
-              <li>&#10003; Purchase Orders &amp; Suppliers</li>
-              <li>&#10003; Multi-branch Support</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);border-left:5px solid #d97706;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle at top right,rgba(217,119,6,0.06) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:linear-gradient(135deg,#d97706,#f59e0b);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#128188;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#d97706;margin-bottom:4px;letter-spacing:-0.02em">For Businesses</h3>
+            <div style="display:inline-block;font-size:13px;color:white;background:linear-gradient(135deg,#d97706,#f59e0b);font-weight:700;margin-bottom:16px;padding:4px 12px;border-radius:50px">UGX 180,000/mo</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-muted);line-height:2.2">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Point of Sale (POS)</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Inventory &amp; Stock Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Invoice &amp; Quotation Generator</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Customer Relationship Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Profit &amp; Loss Reports</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Payroll &amp; HR Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Expense Tracking</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Tax Reports (URA Compliant)</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Purchase Orders &amp; Suppliers</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700;font-size:16px">&#10003;</span> Multi-branch Support</li>
             </ul>
             ${portalBtn('business', '#d97706', 'Business')}
           </div>
         </div>
 
         <!-- ROW 2: Additional Portal Types -->
-        <h3 style="text-align:center;font-size:24px;font-weight:800;margin:48px 0 24px;color:#1e293b">More Portal Types</h3>
+        <h3 style="text-align:center;font-size:24px;font-weight:800;margin:48px 0 24px;color:var(--text);letter-spacing:-0.02em">More Portal Types</h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-bottom:48px">
           <!-- HEALTH (expanded from Clinics) -->
-          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #ef4444;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#127973;</div>
-            <h3 style="font-size:22px;font-weight:800;color:#ef4444;margin-bottom:4px">Health Portal</h3>
-            <div style="font-size:14px;color:#ef4444;font-weight:600;margin-bottom:16px">Hospitals, Clinics, Pharmacies & Labs</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
-              <li>&#10003; Patient Queue & Triage System</li>
-              <li>&#10003; Doctor Consultation Workflow</li>
-              <li>&#10003; Pharmacy & Drug Inventory</li>
-              <li>&#10003; Laboratory & Results Management</li>
-              <li>&#10003; Bed & Ward Management</li>
-              <li>&#10003; Insurance Claims & Billing</li>
-              <li>&#10003; Electronic Health Records (EHR)</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);border-left:5px solid #ef4444;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle at top right,rgba(239,68,68,0.06) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:linear-gradient(135deg,#ef4444,#f87171);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#127973;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#ef4444;margin-bottom:4px;letter-spacing:-0.02em">Health Portal</h3>
+            <div style="font-size:13px;color:var(--text-muted);font-weight:600;margin-bottom:16px">Hospitals, Clinics, Pharmacies & Labs</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-muted);line-height:2.2">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#ef4444;font-weight:700;font-size:16px">&#10003;</span> Patient Queue & Triage System</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#ef4444;font-weight:700;font-size:16px">&#10003;</span> Doctor Consultation Workflow</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#ef4444;font-weight:700;font-size:16px">&#10003;</span> Pharmacy & Drug Inventory</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#ef4444;font-weight:700;font-size:16px">&#10003;</span> Laboratory & Results Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#ef4444;font-weight:700;font-size:16px">&#10003;</span> Bed & Ward Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#ef4444;font-weight:700;font-size:16px">&#10003;</span> Insurance Claims & Billing</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#ef4444;font-weight:700;font-size:16px">&#10003;</span> Electronic Health Records (EHR)</li>
             </ul>
             ${portalBtn('health', '#ef4444', 'Health')}
           </div>
 
           <!-- PUBLIC PORTAL -->
-          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #0ea5e9;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#127760;</div>
-            <h3 style="font-size:22px;font-weight:800;color:#0ea5e9;margin-bottom:4px">Public Portal</h3>
-            <div style="font-size:14px;color:#0ea5e9;font-weight:600;margin-bottom:16px">Community Pages, Blogs & Shop</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
-              <li>&#10003; Public Pages & Content CMS</li>
-              <li>&#10003; Blog & News Posts</li>
-              <li>&#10003; Online Shop / E-Commerce</li>
-              <li>&#10003; Community Forum & Engagement</li>
-              <li>&#10003; Event Listings & Calendar</li>
-              <li>&#10003; Newsletter Subscriptions</li>
-              <li>&#10003; SEO-Optimized Public Profiles</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);border-left:5px solid #0ea5e9;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle at top right,rgba(14,165,233,0.06) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:linear-gradient(135deg,#0ea5e9,#38bdf8);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#127760;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#0ea5e9;margin-bottom:4px;letter-spacing:-0.02em">Public Portal</h3>
+            <div style="font-size:13px;color:var(--text-muted);font-weight:600;margin-bottom:16px">Community Pages, Blogs & Shop</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-muted);line-height:2.2">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0ea5e9;font-weight:700;font-size:16px">&#10003;</span> Public Pages & Content CMS</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0ea5e9;font-weight:700;font-size:16px">&#10003;</span> Blog & News Posts</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0ea5e9;font-weight:700;font-size:16px">&#10003;</span> Online Shop / E-Commerce</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0ea5e9;font-weight:700;font-size:16px">&#10003;</span> Community Forum & Engagement</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0ea5e9;font-weight:700;font-size:16px">&#10003;</span> Event Listings & Calendar</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0ea5e9;font-weight:700;font-size:16px">&#10003;</span> Newsletter Subscriptions</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#0ea5e9;font-weight:700;font-size:16px">&#10003;</span> SEO-Optimized Public Profiles</li>
             </ul>
             ${portalBtn('public', '#0ea5e9', 'Public')}
           </div>
 
           <!-- ORGANIZATION / NGO -->
-          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #10b981;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#129309;</div>
-            <h3 style="font-size:22px;font-weight:800;color:#10b981;margin-bottom:4px">Organization / NGO</h3>
-            <div style="font-size:14px;color:#10b981;font-weight:600;margin-bottom:16px">NGOs, CBOs & Community Organizations</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
-              <li>&#10003; Project & Program Management</li>
-              <li>&#10003; Member Directory & Roles</li>
-              <li>&#10003; Document Management</li>
-              <li>&#10003; Meeting Scheduling & Minutes</li>
-              <li>&#10003; Task Boards & Assignments</li>
-              <li>&#10003; Fundraising & Donor Tracking</li>
-              <li>&#10003; Impact Reports & Analytics</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);border-left:5px solid #10b981;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle at top right,rgba(16,185,129,0.06) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:linear-gradient(135deg,#10b981,#34d399);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#129309;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#10b981;margin-bottom:4px;letter-spacing:-0.02em">Organization / NGO</h3>
+            <div style="font-size:13px;color:var(--text-muted);font-weight:600;margin-bottom:16px">NGOs, CBOs & Community Organizations</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-muted);line-height:2.2">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#10b981;font-weight:700;font-size:16px">&#10003;</span> Project & Program Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#10b981;font-weight:700;font-size:16px">&#10003;</span> Member Directory & Roles</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#10b981;font-weight:700;font-size:16px">&#10003;</span> Document Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#10b981;font-weight:700;font-size:16px">&#10003;</span> Meeting Scheduling & Minutes</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#10b981;font-weight:700;font-size:16px">&#10003;</span> Task Boards & Assignments</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#10b981;font-weight:700;font-size:16px">&#10003;</span> Fundraising & Donor Tracking</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#10b981;font-weight:700;font-size:16px">&#10003;</span> Impact Reports & Analytics</li>
             </ul>
             ${portalBtn('organization', '#10b981', 'Organization')}
           </div>
 
           <!-- INDIVIDUAL / PERSONAL -->
-          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #8b5cf6;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#128100;</div>
-            <h3 style="font-size:22px;font-weight:800;color:#8b5cf6;margin-bottom:4px">Individual / Personal</h3>
-            <div style="font-size:14px;color:#8b5cf6;font-weight:600;margin-bottom:16px">Personal Productivity & Finance</div>
-            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
-              <li>&#10003; Personal Notes & Journal</li>
-              <li>&#10003; Goal Setting & Tracking</li>
-              <li>&#10003; Personal Finance & Budgets</li>
-              <li>&#10003; Task Management & Reminders</li>
-              <li>&#10003; Income & Expense Tracking</li>
-              <li>&#10003; Document Storage</li>
-              <li>&#10003; Entertainment & News Feed</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);border-left:5px solid #8b5cf6;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:radial-gradient(circle at top right,rgba(139,92,246,0.06) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:linear-gradient(135deg,#8b5cf6,#a78bfa);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#128100;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#8b5cf6;margin-bottom:4px;letter-spacing:-0.02em">Individual / Personal</h3>
+            <div style="font-size:13px;color:var(--text-muted);font-weight:600;margin-bottom:16px">Personal Productivity & Finance</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:var(--text-muted);line-height:2.2">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;font-weight:700;font-size:16px">&#10003;</span> Personal Notes & Journal</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;font-weight:700;font-size:16px">&#10003;</span> Goal Setting & Tracking</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;font-weight:700;font-size:16px">&#10003;</span> Personal Finance & Budgets</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;font-weight:700;font-size:16px">&#10003;</span> Task Management & Reminders</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;font-weight:700;font-size:16px">&#10003;</span> Income & Expense Tracking</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;font-weight:700;font-size:16px">&#10003;</span> Document Storage</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#8b5cf6;font-weight:700;font-size:16px">&#10003;</span> Entertainment & News Feed</li>
             </ul>
             ${portalBtn('individual', '#8b5cf6', 'Individual')}
           </div>
         </div>
 
         <!-- CROSS-CUTTING FEATURES: ENTERTAINMENT & FUNDRAISING -->
-        <h3 style="text-align:center;font-size:24px;font-weight:800;margin:48px 0 24px;color:#1e293b">Cross-Cutting Features (Available in ALL Portals)</h3>
+        <h3 style="text-align:center;font-size:24px;font-weight:800;margin:48px 0 24px;color:var(--text);letter-spacing:-0.02em">Cross-Cutting Features (Available in ALL Portals)</h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;margin-bottom:48px;max-width:700px;margin-left:auto;margin-right:auto">
           <!-- ENTERTAINMENT HUB -->
-          <div style="background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.15);color:white;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#127916;</div>
+          <div style="background:linear-gradient(135deg,#7c3aed 0%,#a855f7 50%,#c084fc 100%);border-radius:20px;padding:32px;box-shadow:0 8px 32px rgba(124,58,237,0.25);color:white;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;background:rgba(255,255,255,0.08);border-radius:50%;pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#127916;</div>
             <h3 style="font-size:22px;font-weight:800;margin-bottom:4px">Entertainment Hub</h3>
             <p style="font-size:14px;opacity:0.85;margin-bottom:16px">Movies, Music, News & Celebrity Updates</p>
-            <ul style="list-style:none;padding:0;font-size:14px;line-height:2;opacity:0.95">
-              <li>&#10003; Latest Movie Trailers & Reviews</li>
-              <li>&#10003; Music Videos & Audio Streaming</li>
-              <li>&#10003; Celebrity News & Gossip</li>
-              <li>&#10003; Sports Updates & Scores</li>
-              <li>&#10003; News Aggregation (Local & International)</li>
-              <li>&#10003; Auto-Scraped Content (No manual work)</li>
+            <ul style="list-style:none;padding:0;font-size:14px;line-height:2.2;opacity:0.95">
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Latest Movie Trailers & Reviews</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Music Videos & Audio Streaming</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Celebrity News & Gossip</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Sports Updates & Scores</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> News Aggregation (Local & International)</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Auto-Scraped Content (No manual work)</li>
             </ul>
-            ${loggedIn ? `<a href="/entertainment" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#7c3aed;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Open Entertainment &rarr;</a>` : `<a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#7c3aed;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Sign Up to Access</a>`}
+            ${loggedIn ? `<a href="/entertainment" style="display:inline-block;margin-top:12px;padding:10px 24px;background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:50px;font-weight:600;text-decoration:none;font-size:14px">Open Entertainment &rarr;</a>` : `<a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:50px;font-weight:600;text-decoration:none;font-size:14px">Sign Up to Access</a>`}
           </div>
 
           <!-- FUNDRAISING -->
-          <div style="background:linear-gradient(135deg,#059669,#10b981);border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.15);color:white;transition:transform 0.3s">
-            <div style="font-size:40px;margin-bottom:12px">&#127881;</div>
+          <div style="background:linear-gradient(135deg,#059669 0%,#10b981 50%,#34d399 100%);border-radius:20px;padding:32px;box-shadow:0 8px 32px rgba(5,150,105,0.25);color:white;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:-20px;right:-20px;width:80px;height:80px;background:rgba(255,255,255,0.08);border-radius:50%;pointer-events:none"></div>
+            <div style="width:52px;height:52px;background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px">&#127881;</div>
             <h3 style="font-size:22px;font-weight:800;margin-bottom:4px">Fundraising Platform</h3>
             <p style="font-size:14px;opacity:0.85;margin-bottom:16px">Campaigns, Donations & Investment Pitches</p>
-            <ul style="list-style:none;padding:0;font-size:14px;line-height:2;opacity:0.95">
-              <li>&#10003; Create Fundraising Campaigns</li>
-              <li>&#10003; Accept Donations (Mobile Money & Card)</li>
-              <li>&#10003; Investor Offer Management</li>
-              <li>&#10003; Campaign Analytics & Reports</li>
-              <li>&#10003; Public Discovery Page</li>
-              <li>&#10003; Automated Donor Receipts</li>
+            <ul style="list-style:none;padding:0;font-size:14px;line-height:2.2;opacity:0.95">
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Create Fundraising Campaigns</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Accept Donations (Mobile Money & Card)</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Investor Offer Management</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Campaign Analytics & Reports</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Public Discovery Page</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="font-weight:700;font-size:16px">&#10003;</span> Automated Donor Receipts</li>
             </ul>
-            ${loggedIn ? `<a href="/fundraising" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#059669;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Open Fundraising &rarr;</a>` : `<a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#059669;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Fundraising</a>`}
+            ${loggedIn ? `<a href="/fundraising" style="display:inline-block;margin-top:12px;padding:10px 24px;background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:50px;font-weight:600;text-decoration:none;font-size:14px">Open Fundraising &rarr;</a>` : `<a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:rgba(255,255,255,0.15);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:50px;font-weight:600;text-decoration:none;font-size:14px">Start Fundraising</a>`}
           </div>
         </div>
       </div>
 
       <!-- TESTIMONIALS -->
-      <div style="margin:60px 0">
-        <h2 style="text-align:center;font-size:28px;font-weight:800;margin-bottom:30px;color:#1e293b">What Our Users Say</h2>
+      <div style="margin:60px 0;padding:0 20px">
+        <h2 style="text-align:center;font-size:clamp(24px,3vw,32px);font-weight:800;margin-bottom:36px;color:var(--text);letter-spacing:-0.02em">What Our Users Say</h2>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;max-width:1000px;margin:0 auto">
-          <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
-            <p style="color:#475569;line-height:1.7;font-style:italic">"Comfort made managing our school so easy. We track fees, attendance, and grades all in one place. Parents love the real-time updates!"</p>
-            <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
-              <div style="width:40px;height:40px;background:linear-gradient(135deg,#059669,#10b981);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">JK</div>
-              <div><div style="font-weight:600;color:#1e293b">James K.</div><div style="font-size:13px;color:#64748b">School Administrator, Kampala</div></div>
+          <div style="background:var(--bg-card);padding:28px;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);position:relative;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+            <div style="position:absolute;top:16px;right:20px;font-size:48px;color:var(--border);font-family:Georgia,serif;line-height:1;opacity:0.5">&#10077;</div>
+            <div style="display:flex;gap:2px;margin-bottom:14px"><span style="color:#f59e0b;font-size:18px;text-shadow:0 0 8px rgba(245,158,11,0.3)">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
+            <p style="color:var(--text-muted);line-height:1.7;font-style:italic;margin-bottom:20px">"Comfort made managing our school so easy. We track fees, attendance, and grades all in one place. Parents love the real-time updates!"</p>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:44px;height:44px;background:linear-gradient(135deg,#059669,#10b981);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:14px;border:2px solid rgba(5,150,105,0.3);box-shadow:0 0 0 3px rgba(5,150,105,0.1)">JK</div>
+              <div><div style="font-weight:700;color:var(--text);font-size:14px">James K.</div><div style="font-size:12px;color:var(--text-dim)">School Administrator, Kampala</div></div>
             </div>
           </div>
-          <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
-            <p style="color:#475569;line-height:1.7;font-style:italic">"Our church tithe collection improved by 60% after switching to Comfort. The mobile money integration is perfect for Uganda."</p>
-            <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
-              <div style="width:40px;height:40px;background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">GN</div>
-              <div><div style="font-weight:600;color:#1e293b">Grace N.</div><div style="font-size:13px;color:#64748b">Church Treasurer, Entebbe</div></div>
+          <div style="background:var(--bg-card);padding:28px;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);position:relative;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+            <div style="position:absolute;top:16px;right:20px;font-size:48px;color:var(--border);font-family:Georgia,serif;line-height:1;opacity:0.5">&#10077;</div>
+            <div style="display:flex;gap:2px;margin-bottom:14px"><span style="color:#f59e0b;font-size:18px;text-shadow:0 0 8px rgba(245,158,11,0.3)">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
+            <p style="color:var(--text-muted);line-height:1.7;font-style:italic;margin-bottom:20px">"Our church tithe collection improved by 60% after switching to Comfort. The mobile money integration is perfect for Uganda."</p>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:44px;height:44px;background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:14px;border:2px solid rgba(124,58,237,0.3);box-shadow:0 0 0 3px rgba(124,58,237,0.1)">GN</div>
+              <div><div style="font-weight:700;color:var(--text);font-size:14px">Grace N.</div><div style="font-size:12px;color:var(--text-dim)">Church Treasurer, Entebbe</div></div>
             </div>
           </div>
-          <div style="background:white;padding:24px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06);border:1px solid #e2e8f0">
-            <div style="display:flex;gap:4px;margin-bottom:12px"><span style="color:#f59e0b;font-size:18px">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
-            <p style="color:#475569;line-height:1.7;font-style:italic">"As a small business owner, Comfort replaced 4 different apps for me. Invoices, inventory, customers — everything in one dashboard."</p>
-            <div style="margin-top:16px;display:flex;align-items:center;gap:12px">
-              <div style="width:40px;height:40px;background:linear-gradient(135deg,#d97706,#f59e0b);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700">PM</div>
-              <div><div style="font-weight:600;color:#1e293b">Peter M.</div><div style="font-size:13px;color:#64748b">Business Owner, Jinja</div></div>
+          <div style="background:var(--bg-card);padding:28px;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);position:relative;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+            <div style="position:absolute;top:16px;right:20px;font-size:48px;color:var(--border);font-family:Georgia,serif;line-height:1;opacity:0.5">&#10077;</div>
+            <div style="display:flex;gap:2px;margin-bottom:14px"><span style="color:#f59e0b;font-size:18px;text-shadow:0 0 8px rgba(245,158,11,0.3)">&#9733;&#9733;&#9733;&#9733;&#9733;</span></div>
+            <p style="color:var(--text-muted);line-height:1.7;font-style:italic;margin-bottom:20px">"As a small business owner, Comfort replaced 4 different apps for me. Invoices, inventory, customers — everything in one dashboard."</p>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:44px;height:44px;background:linear-gradient(135deg,#d97706,#f59e0b);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:14px;border:2px solid rgba(217,119,6,0.3);box-shadow:0 0 0 3px rgba(217,119,6,0.1)">PM</div>
+              <div><div style="font-weight:700;color:var(--text);font-size:14px">Peter M.</div><div style="font-size:12px;color:var(--text-dim)">Business Owner, Jinja</div></div>
             </div>
           </div>
         </div>
       </div>
 
       <!-- SETUP IN 10 MINUTES -->
-      <div style="background:linear-gradient(135deg,#059669,#0891b2);padding:50px 20px;margin-top:40px">
-        <div style="max-width:800px;margin:0 auto;text-align:center">
-          <h2 style="font-size:28px;font-weight:800;color:white;margin-bottom:12px">Setup in 10 Minutes</h2>
+      <div style="background:linear-gradient(135deg,#059669 0%,#0d9488 40%,#0891b2 100%);padding:60px 20px;margin-top:40px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(rgba(255,255,255,0.04) 1px,transparent 1px);background-size:20px 20px;pointer-events:none"></div>
+        <div style="max-width:800px;margin:0 auto;text-align:center;position:relative;z-index:2">
+          <h2 style="font-size:clamp(24px,3vw,32px);font-weight:800;color:white;margin-bottom:12px;letter-spacing:-0.02em">Setup in 10 Minutes</h2>
           <p style="color:#d1fae5;margin-bottom:36px;font-size:16px">From sign-up to fully operational. No technical skills needed.</p>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px">
-            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
-              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">1</div>
+            <div style="background:rgba(255,255,255,0.1);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:20px 12px;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:44px;height:44px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,0.1)">1</div>
               <div style="color:white;font-weight:700;font-size:13px">Sign Up</div>
             </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
-              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">2</div>
+            <div style="background:rgba(255,255,255,0.1);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:20px 12px;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:44px;height:44px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,0.1)">2</div>
               <div style="color:white;font-weight:700;font-size:13px">Pick Portal</div>
             </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
-              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">3</div>
+            <div style="background:rgba(255,255,255,0.1);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:20px 12px;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:44px;height:44px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,0.1)">3</div>
               <div style="color:white;font-weight:700;font-size:13px">Activate</div>
             </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
-              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">4</div>
+            <div style="background:rgba(255,255,255,0.1);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:20px 12px;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:44px;height:44px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,0.1)">4</div>
               <div style="color:white;font-weight:700;font-size:13px">Import Data</div>
             </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
-              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">5</div>
+            <div style="background:rgba(255,255,255,0.1);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:20px 12px;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:44px;height:44px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,0.1)">5</div>
               <div style="color:white;font-weight:700;font-size:13px">Invite Team</div>
             </div>
-            <div style="background:rgba(255,255,255,0.15);border-radius:14px;padding:20px 12px">
-              <div style="width:40px;height:40px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:#059669;font-size:18px">6</div>
+            <div style="background:rgba(255,255,255,0.1);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.15);border-radius:16px;padding:20px 12px;transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">
+              <div style="width:44px;height:44px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:800;color:white;font-size:18px;box-shadow:0 4px 12px rgba(245,158,11,0.3)">6</div>
               <div style="color:white;font-weight:700;font-size:13px">Go Live!</div>
             </div>
           </div>
@@ -987,84 +1039,124 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       </div>
 
       <!-- PRICING -->
-      <div style="padding:50px 20px;max-width:1100px;margin:0 auto" id="pricing">
-        <h2 style="text-align:center;font-size:32px;font-weight:800;margin-bottom:12px;color:#1e293b">Simple, Transparent Pricing</h2>
-        <p style="text-align:center;color:#64748b;margin-bottom:40px;font-size:16px">No hidden fees. Start free, upgrade when ready.</p>
+      <div style="padding:60px 20px;max-width:1100px;margin:0 auto" id="pricing">
+        <h2 style="text-align:center;font-size:clamp(28px,4vw,36px);font-weight:800;margin-bottom:12px;color:var(--text);letter-spacing:-0.02em">Simple, Transparent Pricing</h2>
+        <p style="text-align:center;color:var(--text-muted);margin-bottom:44px;font-size:16px">No hidden fees. Start free, upgrade when ready.</p>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:20px">
-          <div style="background:white;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:2px solid #e2e8f0">
-            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#64748b;margin-bottom:6px">Free</div>
-            <div style="font-size:38px;font-weight:900;color:#1e293b">UGX 0</div>
-            <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">/month</div>
-            <ul style="list-style:none;padding:0;font-size:13px;color:#475569;text-align:left;line-height:2.2;margin-bottom:20px">
-              <li>&#10003; Up to 50 records</li><li>&#10003; 1 User</li><li>&#10003; Basic reports</li><li>&#10003; SMS (5/day)</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--text-dim),var(--border))"></div>
+            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--text-dim);margin-bottom:8px">Free</div>
+            <div style="font-size:42px;font-weight:900;color:var(--text);letter-spacing:-0.02em">UGX 0</div>
+            <div style="font-size:13px;color:var(--text-dim);margin-bottom:20px">/month</div>
+            <ul style="list-style:none;padding:0;font-size:13px;color:var(--text-muted);text-align:left;line-height:2.4;margin-bottom:24px">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-dim);font-weight:700">&#10003;</span> Up to 50 records</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-dim);font-weight:700">&#10003;</span> 1 User</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-dim);font-weight:700">&#10003;</span> Basic reports</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-dim);font-weight:700">&#10003;</span> SMS (5/day)</li>
             </ul>
-            <a href="/register?plan=free" style="display:block;padding:12px;background:#e2e8f0;color:#475569;border-radius:10px;font-weight:700;text-decoration:none">Get Started</a>
+            <a href="/register?plan=free" style="display:block;padding:12px;background:var(--border);color:var(--text-muted);border-radius:50px;font-weight:700;text-decoration:none;transition:all 0.3s">Get Started</a>
           </div>
-          <div style="background:white;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:2px solid #059669;position:relative">
-            <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:#059669;color:white;padding:3px 16px;border-radius:16px;font-size:11px;font-weight:700">POPULAR</div>
-            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#059669;margin-bottom:6px">Basic</div>
-            <div style="font-size:38px;font-weight:900;color:#1e293b">UGX 100K</div>
-            <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">/month</div>
-            <ul style="list-style:none;padding:0;font-size:13px;color:#475569;text-align:left;line-height:2.2;margin-bottom:20px">
-              <li>&#10003; Up to 500 records</li><li>&#10003; 5 Users</li><li>&#10003; Advanced reports</li><li>&#10003; SMS (50/day)</li><li>&#10003; Custom branding</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;text-align:center;box-shadow:0 8px 40px rgba(5,150,105,0.15);border:2px solid #059669;position:relative;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);overflow:hidden;transform:scale(1.03)">
+            <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#059669,#10b981)"></div>
+            <div style="position:absolute;top:14px;right:14px;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:5px 14px;border-radius:50px;font-size:11px;font-weight:700;letter-spacing:0.5px;box-shadow:0 2px 8px rgba(5,150,105,0.3)">&#9733; POPULAR</div>
+            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#059669;margin-bottom:8px">Basic</div>
+            <div style="font-size:42px;font-weight:900;color:var(--text);letter-spacing:-0.02em">UGX 100K</div>
+            <div style="font-size:13px;color:var(--text-dim);margin-bottom:20px">/month</div>
+            <ul style="list-style:none;padding:0;font-size:13px;color:var(--text-muted);text-align:left;line-height:2.4;margin-bottom:24px">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700">&#10003;</span> Up to 500 records</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700">&#10003;</span> 5 Users</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700">&#10003;</span> Advanced reports</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700">&#10003;</span> SMS (50/day)</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#059669;font-weight:700">&#10003;</span> Custom branding</li>
             </ul>
-            <a href="/register?plan=basic" style="display:block;padding:12px;background:#059669;color:white;border-radius:10px;font-weight:700;text-decoration:none">Choose Basic</a>
+            <a href="/register?plan=basic" style="display:block;padding:12px;background:linear-gradient(135deg,#059669,#10b981);color:white;border-radius:50px;font-weight:700;text-decoration:none;transition:all 0.3s;box-shadow:0 4px 16px rgba(5,150,105,0.3)">Choose Basic</a>
           </div>
-          <div style="background:white;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:2px solid #7c3aed">
-            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#7c3aed;margin-bottom:6px">Pro</div>
-            <div style="font-size:38px;font-weight:900;color:#1e293b">UGX 200K</div>
-            <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">/month</div>
-            <ul style="list-style:none;padding:0;font-size:13px;color:#475569;text-align:left;line-height:2.2;margin-bottom:20px">
-              <li>&#10003; Up to 50,000 records</li><li>&#10003; Unlimited Users</li><li>&#10003; Full analytics</li><li>&#10003; API access</li><li>&#10003; Priority support</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#7c3aed,#a855f7)"></div>
+            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#7c3aed;margin-bottom:8px">Pro</div>
+            <div style="font-size:42px;font-weight:900;color:var(--text);letter-spacing:-0.02em">UGX 200K</div>
+            <div style="font-size:13px;color:var(--text-dim);margin-bottom:20px">/month</div>
+            <ul style="list-style:none;padding:0;font-size:13px;color:var(--text-muted);text-align:left;line-height:2.4;margin-bottom:24px">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700">&#10003;</span> Up to 50,000 records</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700">&#10003;</span> Unlimited Users</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700">&#10003;</span> Full analytics</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700">&#10003;</span> API access</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#7c3aed;font-weight:700">&#10003;</span> Priority support</li>
             </ul>
-            <a href="/register?plan=pro" style="display:block;padding:12px;background:#7c3aed;color:white;border-radius:10px;font-weight:700;text-decoration:none">Choose Pro</a>
+            <a href="/register?plan=pro" style="display:block;padding:12px;background:linear-gradient(135deg,#7c3aed,#a855f7);color:white;border-radius:50px;font-weight:700;text-decoration:none;transition:all 0.3s;box-shadow:0 4px 16px rgba(124,58,237,0.3)">Choose Pro</a>
           </div>
-          <div style="background:white;border-radius:16px;padding:28px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.06);border:2px solid #d97706">
-            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#d97706;margin-bottom:6px">Enterprise</div>
-            <div style="font-size:38px;font-weight:900;color:#1e293b">Custom</div>
-            <div style="font-size:13px;color:#94a3b8;margin-bottom:16px">tailored for you</div>
-            <ul style="list-style:none;padding:0;font-size:13px;color:#475569;text-align:left;line-height:2.2;margin-bottom:20px">
-              <li>&#10003; Unlimited everything</li><li>&#10003; Dedicated support</li><li>&#10003; Custom integrations</li><li>&#10003; On-premise option</li><li>&#10003; SLA guarantee</li>
+          <div style="background:var(--bg-card);border-radius:20px;padding:32px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,0.06);border:1px solid var(--border);transition:all 0.3s cubic-bezier(0.16,1,0.3,1);position:relative;overflow:hidden">
+            <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#d97706,#f59e0b)"></div>
+            <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#d97706;margin-bottom:8px">Enterprise</div>
+            <div style="font-size:42px;font-weight:900;color:var(--text);letter-spacing:-0.02em">Custom</div>
+            <div style="font-size:13px;color:var(--text-dim);margin-bottom:20px">tailored for you</div>
+            <ul style="list-style:none;padding:0;font-size:13px;color:var(--text-muted);text-align:left;line-height:2.4;margin-bottom:24px">
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700">&#10003;</span> Unlimited everything</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700">&#10003;</span> Dedicated support</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700">&#10003;</span> Custom integrations</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700">&#10003;</span> On-premise option</li>
+              <li style="display:flex;align-items:center;gap:8px"><span style="color:#d97706;font-weight:700">&#10003;</span> SLA guarantee</li>
             </ul>
-            <a href="/register?plan=enterprise" style="display:block;padding:12px;background:#d97706;color:white;border-radius:10px;font-weight:700;text-decoration:none">Contact Sales</a>
+            <a href="/register?plan=enterprise" style="display:block;padding:12px;background:linear-gradient(135deg,#d97706,#f59e0b);color:white;border-radius:50px;font-weight:700;text-decoration:none;transition:all 0.3s;box-shadow:0 4px 16px rgba(217,119,6,0.3)">Contact Sales</a>
           </div>
         </div>
       </div>
 
       <!-- FAQ -->
-      <div style="padding:50px 20px;max-width:750px;margin:0 auto" id="faq">
-        <h2 style="text-align:center;font-size:28px;font-weight:800;margin-bottom:30px;color:#1e293b">Frequently Asked Questions</h2>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">Is Comfort really free to start?</summary>
-            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">Yes! Our Free plan includes up to 50 records, 1 user, and basic reports. No credit card required. Upgrade when you need more.</p>
+      <div style="padding:60px 20px;max-width:750px;margin:0 auto" id="faq">
+        <h2 style="text-align:center;font-size:clamp(24px,3vw,32px);font-weight:800;margin-bottom:36px;color:var(--text);letter-spacing:-0.02em">Frequently Asked Questions</h2>
+        <style>
+          .faq-item { background:var(--bg-card); border-radius:16px; padding:20px 24px; box-shadow:0 2px 12px rgba(0,0,0,0.04); border:1px solid var(--border); transition:all 0.3s cubic-bezier(0.16,1,0.3,1); margin-bottom:10px; }
+          .faq-item:hover { border-color:var(--primary-light); box-shadow:0 4px 20px rgba(99,102,241,0.08); }
+          .faq-item summary { font-weight:700; cursor:pointer; color:var(--text); font-size:15px; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:12px; letter-spacing:-0.01em; }
+          .faq-item summary::-webkit-details-marker { display:none; }
+          .faq-item summary::after { content:'+'; font-size:20px; font-weight:300; color:var(--primary); transition:transform 0.3s ease; flex-shrink:0; width:28px; height:28px; display:flex; align-items:center; justify-content:center; background:rgba(99,102,241,0.08); border-radius:8px; }
+          .faq-item[open] summary::after { content:'\\2212'; transform:rotate(180deg); }
+          .faq-item summary:hover::after { background:rgba(99,102,241,0.15); }
+          .faq-item p { margin-top:14px; color:var(--text-muted); font-size:14px; line-height:1.7; padding-top:14px; border-top:1px solid var(--border); }
+        </style>
+        <div style="display:flex;flex-direction:column;gap:0">
+          <details class="faq-item">
+            <summary>Is Comfort really free to start?</summary>
+            <p>Yes! Our Free plan includes up to 50 records, 1 user, and basic reports. No credit card required. Upgrade when you need more.</p>
           </details>
-          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">Does it work without internet?</summary>
-            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">Yes! Comfort has offline mode. Enter data offline, and it syncs automatically when your connection returns.</p>
+          <details class="faq-item">
+            <summary>Does it work without internet?</summary>
+            <p>Yes! Comfort has offline mode. Enter data offline, and it syncs automatically when your connection returns.</p>
           </details>
-          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">How do I pay?</summary>
-            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">We accept MTN MoMo, Airtel Money, bank transfers, and card payments via Flutterwave. All prices in Uganda Shillings.</p>
+          <details class="faq-item">
+            <summary>How do I pay?</summary>
+            <p>We accept MTN MoMo, Airtel Money, bank transfers, and card payments via Flutterwave. All prices in Uganda Shillings.</p>
           </details>
-          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">Can I install it on my phone?</summary>
-            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">Yes! Comfort is a Progressive Web App. Tap the Install button on any browser to add it to your home screen like a native app.</p>
+          <details class="faq-item">
+            <summary>Can I install it on my phone?</summary>
+            <p>Yes! Comfort is a Progressive Web App. Tap the Install button on any browser to add it to your home screen like a native app.</p>
           </details>
-          <details style="background:white;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #e2e8f0">
-            <summary style="font-weight:700;cursor:pointer;color:#1e293b;font-size:15px">Is my data secure?</summary>
-            <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.7">Your data is encrypted, backed up daily, and stored securely. Each institution's data is completely isolated.</p>
+          <details class="faq-item">
+            <summary>Is my data secure?</summary>
+            <p>Your data is encrypted, backed up daily, and stored securely. Each institution's data is completely isolated.</p>
           </details>
         </div>
       </div>
 
       <!-- FINAL CTA -->
-      <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:60px 20px;text-align:center;margin-top:40px">
-        <h2 style="font-size:clamp(22px,4vw,36px);font-weight:900;color:white;margin-bottom:12px">Ready to Transform Your Institution?</h2>
-        <p style="color:#94a3b8;font-size:16px;margin-bottom:28px;max-width:500px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics, and businesses already using Comfort.</p>
-        <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
-          <a href="/register" style="display:inline-block;padding:14px 36px;background:linear-gradient(135deg,#059669,#0891b2);color:white;border-radius:12px;font-weight:700;font-size:16px;text-decoration:none">Start Free Now</a>
-          <a href="https://wa.me/${WHATSAPP_NUMBER}" target="_blank" style="display:inline-block;padding:14px 36px;background:rgba(255,255,255,0.1);color:white;border-radius:12px;font-weight:700;font-size:16px;text-decoration:none;border:2px solid rgba(255,255,255,0.3)">WhatsApp Us</a>
+      <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 30%,#312e81 70%,#4c1d95 100%);padding:80px 20px;text-align:center;margin-top:40px;position:relative;overflow:hidden">
+        <!-- Floating particles -->
+        <div style="position:absolute;top:15%;left:10%;width:8px;height:8px;background:rgba(99,102,241,0.4);border-radius:50%;animation:float3 4s ease-in-out infinite"></div>
+        <div style="position:absolute;top:30%;right:15%;width:6px;height:6px;background:rgba(6,182,212,0.4);border-radius:50%;animation:float1 5s ease-in-out infinite"></div>
+        <div style="position:absolute;bottom:20%;left:20%;width:10px;height:10px;background:rgba(5,150,105,0.3);border-radius:50%;animation:float2 6s ease-in-out infinite"></div>
+        <div style="position:absolute;top:50%;right:8%;width:12px;height:12px;border:2px solid rgba(99,102,241,0.2);border-radius:50%;animation:float3 7s ease-in-out infinite"></div>
+        <div style="position:absolute;bottom:30%;right:30%;width:5px;height:5px;background:rgba(245,158,11,0.4);border-radius:50%;animation:float1 3s ease-in-out infinite"></div>
+        <!-- Glow effects -->
+        <div style="position:absolute;top:-30%;left:10%;width:40%;height:160%;background:radial-gradient(ellipse,rgba(99,102,241,0.1) 0%,transparent 70%);pointer-events:none"></div>
+        <div style="position:absolute;bottom:-30%;right:10%;width:40%;height:160%;background:radial-gradient(ellipse,rgba(76,29,149,0.15) 0%,transparent 70%);pointer-events:none"></div>
+        <div style="position:relative;z-index:2">
+          <h2 style="font-size:clamp(24px,4vw,40px);font-weight:900;color:white;margin-bottom:16px;letter-spacing:-0.02em">Ready to Transform Your Institution?</h2>
+          <p style="color:rgba(255,255,255,0.65);font-size:17px;margin-bottom:36px;max-width:520px;margin-left:auto;margin-right:auto">Join hundreds of schools, churches, clinics, and businesses already using Comfort.</p>
+          <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+            <a href="/register" style="display:inline-flex;align-items:center;gap:8px;padding:16px 40px;background:linear-gradient(135deg,#059669,#0891b2);color:white;border-radius:50px;font-weight:700;font-size:16px;text-decoration:none;transition:all 0.3s cubic-bezier(0.16,1,0.3,1);box-shadow:0 8px 32px rgba(5,150,105,0.3)">Start Free Now</a>
+            <a href="https://wa.me/${WHATSAPP_NUMBER}" target="_blank" style="display:inline-flex;align-items:center;gap:8px;padding:16px 40px;background:rgba(255,255,255,0.08);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);color:white;border-radius:50px;font-weight:700;font-size:16px;text-decoration:none;border:1px solid rgba(255,255,255,0.2);transition:all 0.3s cubic-bezier(0.16,1,0.3,1)">WhatsApp Us</a>
+          </div>
         </div>
       </div>
 
