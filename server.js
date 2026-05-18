@@ -2781,24 +2781,22 @@ app.get('/register', (req, res) => {
         </select>
         <input name="email" type="email" placeholder="Your Email" required>
         <input name="phone" placeholder="Phone +256..." required>
-        <input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number">
-        <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required>
+        <input name="password" type="password" placeholder="Choose a Password (min 4 chars)" minlength="4" required>
+        <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="4" required>
         <button class="btn" style="width:100%">Register</button>
       </form>
     </div>
   `, null, req));
 });
 
-app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 8 }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
+app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 4 }, name: { required: true, maxLength: 100 }, tenant_name: { maxLength: 200 } }), ah(async (req, res) => {
   const { org_name, type, email, phone, password, confirm_password } = req.body;
-  // Password complexity validation (Phase 1 Security Fix)
+  // Basic password validation
   const passwordErrors = [];
-  if (!password || password.length < 8) passwordErrors.push('Password must be at least 8 characters long');
-  if (password && !/[A-Z]/.test(password)) passwordErrors.push('Password must contain at least 1 uppercase letter');
-  if (password && !/[0-9]/.test(password)) passwordErrors.push('Password must contain at least 1 number');
+  if (!password || password.length < 4) passwordErrors.push('Password must be at least 4 characters long');
   if (password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) {
-    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="health" ${type==='health'?'selected':''}>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Password (min 8 chars, 1 uppercase, 1 number)" minlength="8" required pattern="(?=.*[A-Z])(?=.*\\d).{8,}" title="Minimum 8 characters with at least 1 uppercase letter and 1 number"><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="8" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
+    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="health" ${type==='health'?'selected':''}>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Choose a Password (min 4 chars)" minlength="4" required><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="4" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
   }
   const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
@@ -2930,7 +2928,7 @@ app.get('/reset-password', ah(async (req, res) => {
       <h2 style="text-align:center;margin-bottom:20px">Set New Password</h2>
       <form method="POST" action="/reset-password">
         <input type="hidden" name="token" value="${esc(token)}">
-        <input name="password" type="password" placeholder="New Password (min 6)" minlength="6" required>
+        <input name="password" type="password" placeholder="New Password (min 4 chars)" minlength="4" required>
         <input name="confirm_password" type="password" placeholder="Confirm Password" required>
         <button class="btn" style="width:100%">Reset Password</button>
       </form>
@@ -3670,7 +3668,7 @@ app.get('/school/staff/new', requireAuth, requireNotBanned, requireRole('head_te
       <form method="POST" action="/school/staff/save">
         <input name="name" placeholder="Full Name" required>
         <input name="email" type="email" placeholder="Email" required>
-        <input name="password" type="password" placeholder="Password (min 6)" minlength="6" required>
+        <input name="password" type="password" placeholder="Password (min 4 chars)" minlength="4" required>
         <select name="role" required>
           <option value="head_teacher">Head Teacher</option>
           <option value="deputy">Deputy Head</option>
@@ -7495,7 +7493,7 @@ app.get('/settings/password', requireAuth, (req, res) => {
     <div class="card" style="max-width:500px;margin:40px auto"><h3>Change Password</h3>
       <form method="POST" action="/settings/password/save">
         <input name="current_password" type="password" placeholder="Current Password" required>
-        <input name="new_password" type="password" placeholder="New Password (min 6)" minlength="6" required>
+        <input name="new_password" type="password" placeholder="New Password (min 4 chars)" minlength="4" required>
         <input name="confirm_password" type="password" placeholder="Confirm New Password" required>
         <button class="btn btn-red">Change Password</button>
       </form>
@@ -7505,11 +7503,9 @@ app.get('/settings/password', requireAuth, (req, res) => {
 
 app.post('/settings/password/save', requireAuth, ah(async (req, res) => {
   const { current_password, new_password, confirm_password } = req.body;
-  // Password complexity validation (Phase 1 Security Fix)
+  // Basic password validation
   const passwordErrors = [];
-  if (!new_password || new_password.length < 8) passwordErrors.push('New password must be at least 8 characters long');
-  if (new_password && !/[A-Z]/.test(new_password)) passwordErrors.push('New password must contain at least 1 uppercase letter');
-  if (new_password && !/[0-9]/.test(new_password)) passwordErrors.push('New password must contain at least 1 number');
+  if (!new_password || new_password.length < 4) passwordErrors.push('New password must be at least 4 characters long');
   if (new_password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) return res.send(renderPage('Change Password', `<div class="card"><div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><a href="/settings/password" class="btn btn-sm">Try Again</a></div>`, req.session.user, req));
   // Try getting both password columns, fall back to just password
@@ -29808,7 +29804,7 @@ app.get('/dashboard/workers', requireAuth, ah(async (req, res) => {
       <form method="POST" action="/dashboard/workers/add" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div><label>Username</label><input name="username" placeholder="e.g. john" required></div>
         <div><label>Display Name</label><input name="display_name" placeholder="e.g. John Secretary" required></div>
-        <div><label>Password (min 6 chars)</label><input name="password" type="password" placeholder="Temporary password" required minlength="6"></div>
+        <div><label>Password (min 4 chars)</label><input name="password" type="password" placeholder="Temporary password" required minlength="4"></div>
         <div><label>Role</label>
           <select name="role">
             <option value="viewer">Viewer (Read Only)</option>
@@ -29858,8 +29854,8 @@ app.post('/dashboard/workers/add', requireAuth, ah(async (req, res) => {
   if (!username || !password || !display_name) {
     return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">All fields are required</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
   }
-  if (password.length < 6) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 6 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  if (password.length < 4) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 4 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
   }
   const validRoles = ['viewer','content_manager','task_manager','full_worker'];
   if (!validRoles.includes(role)) {
@@ -29893,8 +29889,8 @@ app.get('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, res
   if (!worker) return res.redirect('/dashboard/workers');
   if (req.method === 'POST') {
     const { new_password } = req.body;
-    if (!new_password || new_password.length < 6) {
-      return res.send(renderPage('Reset Worker Password', '<div class="card"><div class="alert alert-error">Password must be at least 6 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+    if (!new_password || new_password.length < 4) {
+      return res.send(renderPage('Reset Worker Password', '<div class="card"><div class="alert alert-error">Password must be at least 4 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
     }
     const hash = await bcrypt.hash(new_password, 12);
     await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [hash, req.params.id, t]);
@@ -29905,8 +29901,8 @@ app.get('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, res
     <div class="card" style="max-width:500px;margin:40px auto">
       <h3>Reset Password for ${esc(worker.display_name)} (@${esc(worker.username)})</h3>
       <form method="POST">
-        <label>New Password (min 6 chars)</label>
-        <input name="new_password" type="password" required minlength="6" placeholder="Enter new password">
+        <label>New Password (min 4 chars)</label>
+        <input name="new_password" type="password" required minlength="4" placeholder="Enter new password">
         <button class="btn btn-green" type="submit" style="margin-top:10px">Reset Password</button>
         <a href="/dashboard/workers" class="btn" style="margin-left:10px">Cancel</a>
       </form>
@@ -29919,8 +29915,8 @@ app.post('/dashboard/workers/:id/reset-password', requireAuth, ah(async (req, re
   if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin only');
   const t = u.tenant_id;
   const { new_password } = req.body;
-  if (!new_password || new_password.length < 6) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 6 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
+  if (!new_password || new_password.length < 4) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Password must be at least 4 characters</div><a href="/dashboard/workers" class="btn">Back</a></div>', req.session.user));
   }
   const hash = await bcrypt.hash(new_password, 12);
   await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3', [hash, req.params.id, t]);
@@ -30253,7 +30249,7 @@ app.get('/worker/profile', requireWorkerAuth, ah(async (req, res) => {
       <h3 style="margin-top:20px">Change Password</h3>
       <form method="POST" action="/worker/profile/password">
         <input name="current_password" type="password" placeholder="Current Password" required>
-        <input name="new_password" type="password" placeholder="New Password (min 6 chars)" required minlength="6">
+        <input name="new_password" type="password" placeholder="New Password (min 4 chars)" required minlength="4">
         <button class="btn btn-green" type="submit" style="margin-top:10px">Update Password</button>
       </form>
       <a href="/worker/dashboard" class="btn" style="margin-top:10px;display:inline-block">Back to Dashboard</a>
@@ -30268,8 +30264,8 @@ app.post('/worker/profile/password', requireWorkerAuth, ah(async (req, res) => {
   if (!worker || !(await bcrypt.compare(current_password, worker.password_hash))) {
     return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">Current password is incorrect</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
   }
-  if (new_password.length < 6) {
-    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">New password must be at least 6 characters</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
+  if (new_password.length < 4) {
+    return res.send(renderPage('Error', '<div class="card"><div class="alert alert-error">New password must be at least 4 characters</div><a href="/worker/profile" class="btn">Back</a></div>', req.session.user));
   }
   const hash = await bcrypt.hash(new_password, 12);
   await pool.query('UPDATE dashboard_workers SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, w.id]);

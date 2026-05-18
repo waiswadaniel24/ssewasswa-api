@@ -781,7 +781,7 @@ ${subOptions.length > 1 ? `<label>Sub-Type / Category</label><select name="sub_t
 <label>Phone Number *</label>
 <input name="phone" placeholder="+256 7XX XXX XXX" required>
 <label>Password *</label>
-<input name="password" type="password" id="pw" placeholder="Min 8 chars, 1 uppercase, 1 number" required minlength="8" pattern="(?=.*[A-Z])(?=.*\\d).{8,}" oninput="checkPw(this.value)">
+<input name="password" type="password" id="pw" placeholder="Choose a password (min 4 chars)" required minlength="4" oninput="checkPw(this.value)">
 <div class="pw-strength"><div class="pw-fill" id="pw-fill" style="width:0;background:#e5e7eb"></div></div>
 <label>Confirm Password *</label>
 <input name="confirm_password" type="password" placeholder="Re-enter password" required>
@@ -791,8 +791,8 @@ ${subOptions.length > 1 ? `<label>Sub-Type / Category</label><select name="sub_t
 <div class="back"><a href="/register">← Choose different type</a> | <a href="/login">Already have an account?</a></div>
 </div>
 <script>
-function checkPw(v){var s=0,c='red';if(v.length>=8)s++;if(/[A-Z]/.test(v))s++;if(/[0-9]/.test(v))s++;if(/[^A-Za-z0-9]/.test(v))s++;
-if(s<=1){c='red';s=25}else if(s==2){c='orange';s=50}else if(s==3){c='#f59e0b';s=75}else{c='#059669';s=100}
+function checkPw(v){var s=0,c='red';if(v.length>=4)s++;if(v.length>=8)s++;if(/[A-Z]/.test(v))s++;if(/[0-9]/.test(v))s++;if(/[^A-Za-z0-9]/.test(v))s++;
+if(s<=1){c='red';s=20}else if(s==2){c='orange';s=40}else if(s==3){c='#f59e0b';s=60}else if(s==4){c='#84cc16';s=80}else{c='#059669';s=100}
 var f=document.getElementById('pw-fill');f.style.width=s+'%';f.style.background=c;}
 </script>
 </body></html>`;

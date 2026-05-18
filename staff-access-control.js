@@ -1000,7 +1000,7 @@ module.exports = function staffAccessControl(app, db, pool, renderPage, esc) {
               '<div class="sac-form-group">' +
                 '<label for="password">Password <span style="color:' + C.red + '">*</span></label>' +
                 '<div style="display:flex;gap:6px">' +
-                  '<input id="password" name="password" type="password" class="sac-input" required minlength="6" placeholder="Min 6 characters">' +
+                  '<input id="password" name="password" type="password" class="sac-input" required minlength="4" placeholder="Min 4 characters">' +
                   '<button type="button" class="sac-btn sac-btn-secondary sac-btn-sm" onclick="document.getElementById(\'password\').value=Array.from({length:12},()=>\'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789\'[Math.floor(Math.random()*58)]).join(\'\');document.getElementById(\'auto-gen-note\').style.display=\'block\'">\u{1F3B2}</button>' +
                 '</div>' +
                 '<div id="auto-gen-note" style="display:none;font-size:11px;color:' + C.green + ';margin-top:4px">\u{2705} Auto-generated password</div>' +
@@ -1109,8 +1109,8 @@ module.exports = function staffAccessControl(app, db, pool, renderPage, esc) {
     if (!email || !password || !role) {
       return res.redirect('/staff-control/staff/add?msg=Email,+password,+and+role+are+required&msg_type=error');
     }
-    if (password.length < 6) {
-      return res.redirect('/staff-control/staff/add?msg=Password+must+be+at+least+6+characters&msg_type=error');
+    if (password.length < 4) {
+      return res.redirect('/staff-control/staff/add?msg=Password+must+be+at+least+4+characters&msg_type=error');
     }
 
     // Sub-manager restrictions

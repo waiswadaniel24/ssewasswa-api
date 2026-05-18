@@ -1074,7 +1074,7 @@ module.exports = (app, pool, requireAuth, logger, audit, notify, wsBroadcast) =>
           <label style="font-weight:600;font-size:13px;color:#475569">Current Password</label>
           <input name="current_password" type="password" required>
           <label style="font-weight:600;font-size:13px;color:#475569">New Password</label>
-          <input name="new_password" type="password" required minlength="8">
+          <input name="new_password" type="password" required minlength="4">
           <label style="font-weight:600;font-size:13px;color:#475569">Confirm New Password</label>
           <input name="confirm_password" type="password" required>
           <button type="submit" class="btn" style="margin-top:8px">Update Password</button>
@@ -1113,8 +1113,8 @@ module.exports = (app, pool, requireAuth, logger, audit, notify, wsBroadcast) =>
     if (new_password !== confirm_password) {
       return res.redirect('/parent/settings?msg=Passwords+do+not+match&type=error');
     }
-    if (new_password.length < 8) {
-      return res.redirect('/parent/settings?msg=Password+must+be+at+least+8+characters&type=error');
+    if (new_password.length < 4) {
+      return res.redirect('/parent/settings?msg=Password+must+be+at+least+4+characters&type=error');
     }
 
     const hash = await bcrypt.hash(new_password, 12);
