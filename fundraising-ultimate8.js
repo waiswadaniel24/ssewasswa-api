@@ -63,18 +63,18 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { name, description, total_goal, quiet_phase_goal, public_phase_start, end_date, status } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
     const r = await pool.query('INSERT INTO capital_campaigns (tenant_id,name,description,total_goal,quiet_phase_goal,public_phase_start,end_date,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [req.session.user.tenant_id, esc(name), esc(description||''), total_goal||0, quiet_phase_goal||0, public_phase_start||null, end_date||null, status||'planning']);
-    await audit(req, 'create', 'capital_campaigns', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'capital_campaigns id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/capital-campaigns/:id', requireAuth, ah(async (req, res) => {
     const { name, description, total_goal, quiet_phase_goal, public_phase_start, end_date, status } = req.body;
     const r = await pool.query('UPDATE capital_campaigns SET name=COALESCE($1,name), description=COALESCE($2,description), total_goal=COALESCE($3,total_goal), quiet_phase_goal=COALESCE($4,quiet_phase_goal), public_phase_start=COALESCE($5,public_phase_start), end_date=COALESCE($6,end_date), status=COALESCE($7,status) WHERE tenant_id=$8 AND id=$9 RETURNING *', [name?esc(name):null, description?esc(description):null, total_goal||null, quiet_phase_goal||null, public_phase_start||null, end_date||null, status||null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    await audit(req, 'update', 'capital_campaigns', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'capital_campaigns id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/capital-campaigns/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM capital_campaigns WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    await audit(req, 'delete', 'capital_campaigns', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'capital_campaigns id=' + req.params.id); res.json({ ok: true });
   }));
   app.get('/api/capital-campaigns/:id/progress', requireAuth, ah(async (req, res) => {
     const camp = await pool.query('SELECT * FROM capital_campaigns WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -96,16 +96,16 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { phase_name, goal_amount, start_date, end_date, status } = req.body;
     if (!phase_name) return res.status(400).json({ error: 'phase_name required' });
     const r = await pool.query('INSERT INTO capital_phases (tenant_id,campaign_id,phase_name,goal_amount,start_date,end_date,status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(phase_name), goal_amount||0, start_date||null, end_date||null, status||'upcoming']);
-    await audit(req, 'create', 'capital_phases', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'capital_phases id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/capital-phases/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE capital_phases SET phase_name=COALESCE($1,phase_name), goal_amount=COALESCE($2,goal_amount), status=COALESCE($3,status) WHERE tenant_id=$4 AND id=$5 RETURNING *', [req.body.phase_name?esc(req.body.phase_name):null, req.body.goal_amount||null, req.body.status||null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Phase not found' });
-    await audit(req, 'update', 'capital_phases', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'capital_phases id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/capital-phases/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM capital_phases WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'capital_phases', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'capital_phases id=' + req.params.id); res.json({ ok: true });
   }));
   // Capital Pledges CRUD
   app.get('/api/capital-campaigns/:id/pledges', requireAuth, ah(async (req, res) => {
@@ -122,7 +122,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!donor_name) return res.status(400).json({ error: 'donor_name required' });
     const r = await pool.query('INSERT INTO capital_pledges (tenant_id,campaign_id,phase_id,donor_name,donor_email,amount_pledged,amount_paid) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [req.session.user.tenant_id, req.params.id, phase_id||null, esc(donor_name), esc(donor_email||''), amount_pledged||0, amount_paid||0]);
     await pool.query('UPDATE capital_campaigns SET current_total=current_total+$1 WHERE id=$2 AND tenant_id=$3', [amount_paid||0, req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'capital_pledges', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'capital_pledges id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/capital-pledges/:id/pay', requireAuth, ah(async (req, res) => {
     const { amount } = req.body;
@@ -131,11 +131,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!pledge.rows.length) return res.status(404).json({ error: 'Pledge not found' });
     const r = await pool.query('UPDATE capital_pledges SET amount_paid=amount_paid+$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', [amount, req.session.user.tenant_id, req.params.id]);
     await pool.query('UPDATE capital_campaigns SET current_total=current_total+$1 WHERE id=$2 AND tenant_id=$3', [amount, pledge.rows[0].campaign_id, req.session.user.tenant_id]);
-    await audit(req, 'update', 'capital_pledges', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'capital_pledges id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/capital-pledges/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM capital_pledges WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'capital_pledges', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'capital_pledges id=' + req.params.id); res.json({ ok: true });
   }));
   app.get('/api/capital-campaigns/stats', requireAuth, ah(async (req, res) => {
     const r = await pool.query('SELECT COUNT(*) as total_campaigns, COALESCE(SUM(total_goal),0) as total_goals, COALESCE(SUM(current_total),0) as total_raised, COUNT(CASE WHEN status=$1 THEN 1 END) as active FROM capital_campaigns WHERE tenant_id=$2', ['active', req.session.user.tenant_id]);
@@ -168,16 +168,16 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { campaign_id, donor_name, donor_email, tribute_type, honoree_name, honoree_email, family_contact_name, family_contact_email, message, amount } = req.body;
     if (!honoree_name) return res.status(400).json({ error: 'honoree_name required' });
     const r = await pool.query('INSERT INTO tribute_donations (tenant_id,campaign_id,donor_name,donor_email,tribute_type,honoree_name,honoree_email,family_contact_name,family_contact_email,message,amount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *', [req.session.user.tenant_id, campaign_id||null, esc(donor_name||''), esc(donor_email||''), tribute_type||'honor', esc(honoree_name), esc(honoree_email||''), esc(family_contact_name||''), esc(family_contact_email||''), esc(message||''), amount||0]);
-    await audit(req, 'create', 'tribute_donations', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'tribute_donations id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/tribute-donations/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE tribute_donations SET message=COALESCE($1,message), amount=COALESCE($2,amount), tribute_type=COALESCE($3,tribute_type) WHERE tenant_id=$4 AND id=$5 RETURNING *', [req.body.message?esc(req.body.message):null, req.body.amount||null, req.body.tribute_type?esc(req.body.tribute_type):null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Not found' });
-    await audit(req, 'update', 'tribute_donations', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'tribute_donations id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/tribute-donations/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM tribute_donations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'tribute_donations', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'tribute_donations id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/tribute-donations/:id/notify-family', requireAuth, ah(async (req, res) => {
     const td = await pool.query('SELECT * FROM tribute_donations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -185,7 +185,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const t = td.rows[0];
     if (!t.family_contact_email) return res.status(400).json({ error: 'No family contact email on file' });
     await pool.query('UPDATE tribute_donations SET family_notified=true WHERE id=$1 AND tenant_id=$2', [t.id, req.session.user.tenant_id]);
-    await audit(req, 'update', 'tribute_donations', t.id);
+    await audit(req.session.user.email, 'update', 'tribute_donations id=' + t.id);
     res.json({ ok: true, notified: t.family_contact_email, tribute_type: t.tribute_type, honoree: t.honoree_name });
   }));
   app.get('/api/tribute-donations/stats', requireAuth, ah(async (req, res) => {
@@ -206,15 +206,15 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { honoree_name, biography, page_url, is_active } = req.body;
     if (!honoree_name) return res.status(400).json({ error: 'honoree_name required' });
     const r = await pool.query('INSERT INTO memorial_pages (tenant_id,honoree_name,biography,page_url,is_active) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.session.user.tenant_id, esc(honoree_name), esc(biography||''), esc(page_url||''), is_active!==undefined?is_active:true]);
-    await audit(req, 'create', 'memorial_pages', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'memorial_pages id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/memorial-pages/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE memorial_pages SET honoree_name=COALESCE($1,honoree_name), biography=COALESCE($2,biography), page_url=COALESCE($3,page_url), is_active=COALESCE($4,is_active) WHERE tenant_id=$5 AND id=$6 RETURNING *', [req.body.honoree_name?esc(req.body.honoree_name):null, req.body.biography?esc(req.body.biography):null, req.body.page_url?esc(req.body.page_url):null, req.body.is_active, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'memorial_pages', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'memorial_pages id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/memorial-pages/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM memorial_pages WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'memorial_pages', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'memorial_pages id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/memorial-pages/:id/donate', requireAuth, ah(async (req, res) => {
     const { donor_name, donor_email, amount, message } = req.body;
@@ -222,7 +222,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const page = await pool.query('SELECT * FROM memorial_pages WHERE tenant_id=$1 AND id=$2 AND is_active=true', [req.session.user.tenant_id, req.params.id]);
     if (!page.rows.length) return res.status(404).json({ error: 'Memorial page not found or inactive' });
     await pool.query('UPDATE memorial_pages SET total_raised=total_raised+$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'update', 'memorial_pages', req.params.id); res.json({ ok: true, amount, page: page.rows[0].honoree_name });
+    await audit(req.session.user.email, 'update', 'memorial_pages id=' + req.params.id); res.json({ ok: true, amount, page: page.rows[0].honoree_name });
   }));
   app.get('/tribute-memorial', requireAuth, ah(async (req, res) => {
     const tributes = await pool.query('SELECT * FROM tribute_donations WHERE tenant_id=$1 LIMIT 20', [req.session.user.tenant_id]);
@@ -252,15 +252,15 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { campaign_id, perk_name, description, min_amount, quantity_available, estimated_delivery } = req.body;
     if (!perk_name) return res.status(400).json({ error: 'perk_name required' });
     const r = await pool.query('INSERT INTO crowdfunding_perks (tenant_id,campaign_id,perk_name,description,min_amount,quantity_available,estimated_delivery) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [req.session.user.tenant_id, campaign_id||null, esc(perk_name), esc(description||''), min_amount||0, quantity_available||null, estimated_delivery||null]);
-    await audit(req, 'create', 'crowdfunding_perks', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'crowdfunding_perks id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/crowdfunding-perks/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE crowdfunding_perks SET perk_name=COALESCE($1,perk_name), description=COALESCE($2,description), min_amount=COALESCE($3,min_amount), quantity_available=COALESCE($4,quantity_available), estimated_delivery=COALESCE($5,estimated_delivery) WHERE tenant_id=$6 AND id=$7 RETURNING *', [req.body.perk_name?esc(req.body.perk_name):null, req.body.description?esc(req.body.description):null, req.body.min_amount||null, req.body.quantity_available||null, req.body.estimated_delivery||null, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'crowdfunding_perks', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'crowdfunding_perks id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/crowdfunding-perks/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM crowdfunding_perks WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'crowdfunding_perks', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'crowdfunding_perks id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/perks/:id/claim', requireAuth, ah(async (req, res) => {
     const { donor_name, donor_email, shipping_address } = req.body;
@@ -271,7 +271,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (p.quantity_available !== null && parseInt(p.quantity_claimed) >= parseInt(p.quantity_available)) return res.status(400).json({ error: 'Perk sold out' });
     const r = await pool.query('INSERT INTO perk_claims (tenant_id,perk_id,donor_name,donor_email,shipping_address) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(donor_name), esc(donor_email||''), esc(shipping_address||'')]);
     await pool.query('UPDATE crowdfunding_perks SET quantity_claimed=quantity_claimed+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'perk_claims', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'perk_claims id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.get('/api/perk-claims', requireAuth, ah(async (req, res) => {
     const { fulfilled } = req.query;
@@ -285,7 +285,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.put('/api/perk-claims/:id/fulfill', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE perk_claims SET fulfilled=true WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Claim not found' });
-    await audit(req, 'update', 'perk_claims', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'perk_claims id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.get('/api/perk-claims/stats', requireAuth, ah(async (req, res) => {
     const r = await pool.query('SELECT COUNT(*) as total_claims, COUNT(CASE WHEN fulfilled THEN 1 END) as fulfilled, COUNT(CASE WHEN NOT fulfilled THEN 1 END) as pending FROM perk_claims WHERE tenant_id=$1', [req.session.user.tenant_id]);
@@ -313,15 +313,15 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { campaign_id, widget_type, style, color_scheme, show_donor_count } = req.body;
     const token = 'thm-' + Math.random().toString(36).substring(2, 14) + Date.now().toString(36);
     const r = await pool.query('INSERT INTO campaign_thermometers (tenant_id,campaign_id,widget_type,style,color_scheme,show_donor_count,embed_token) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [req.session.user.tenant_id, campaign_id||null, widget_type||'thermometer', style||'classic', color_scheme||'#10b981', show_donor_count!==undefined?show_donor_count:true, token]);
-    await audit(req, 'create', 'campaign_thermometers', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'campaign_thermometers id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/campaign-thermometers/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE campaign_thermometers SET widget_type=COALESCE($1,widget_type), style=COALESCE($2,style), color_scheme=COALESCE($3,color_scheme), show_donor_count=COALESCE($4,show_donor_count), is_active=COALESCE($5,is_active) WHERE tenant_id=$6 AND id=$7 RETURNING *', [req.body.widget_type||null, req.body.style||null, req.body.color_scheme||null, req.body.show_donor_count, req.body.is_active, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'campaign_thermometers', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'campaign_thermometers id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/campaign-thermometers/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM campaign_thermometers WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'campaign_thermometers', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'campaign_thermometers id=' + req.params.id); res.json({ ok: true });
   }));
   app.get('/api/thermometer/:embedToken/embed', ah(async (req, res) => {
     const thm = await pool.query('SELECT ct.*, cc.name as campaign_name, cc.total_goal, cc.current_total FROM campaign_thermometers ct LEFT JOIN capital_campaigns cc ON ct.campaign_id=cc.id WHERE ct.embed_token=$1 AND ct.is_active=true', [req.params.embedToken]);
@@ -364,7 +364,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const email = req.session.user.email;
     const { display_name, bio, preferred_communication, show_donations_publicly } = req.body;
     const r = await pool.query('UPDATE donor_portal_preferences SET display_name=COALESCE($1,display_name), bio=COALESCE($2,bio), preferred_communication=COALESCE($3,preferred_communication), show_donations_publicly=COALESCE($4,show_donations_publicly) WHERE tenant_id=$5 AND donor_email=$6 RETURNING *', [display_name?esc(display_name):null, bio?esc(bio):null, preferred_communication||null, show_donations_publicly!==undefined?show_donations_publicly:null, req.session.user.tenant_id, esc(email)]);
-    await audit(req, 'update', 'donor_portal_preferences', r.rows[0]?.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'donor_portal_preferences id=' + r.rows[0]?.id); res.json(r.rows[0]);
   }));
   app.get('/api/donor-portal/donations', requireAuth, ah(async (req, res) => {
     const email = req.session.user.email;
@@ -426,15 +426,15 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { name, subject, body_html, category, is_default } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
     const r = await pool.query('INSERT INTO email_templates_builder (tenant_id,name,subject,body_html,category,is_default) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.session.user.tenant_id, esc(name), esc(subject||''), esc(body_html||''), esc(category||'general'), is_default||false]);
-    await audit(req, 'create', 'email_templates_builder', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'email_templates_builder id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/email-templates-builder/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE email_templates_builder SET name=COALESCE($1,name), subject=COALESCE($2,subject), body_html=COALESCE($3,body_html), category=COALESCE($4,category) WHERE tenant_id=$5 AND id=$6 RETURNING *', [req.body.name?esc(req.body.name):null, req.body.subject?esc(req.body.subject):null, req.body.body_html?esc(req.body.body_html):null, req.body.category?esc(req.body.category):null, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'email_templates_builder', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'email_templates_builder id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/email-templates-builder/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM email_templates_builder WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'email_templates_builder', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'email_templates_builder id=' + req.params.id); res.json({ ok: true });
   }));
   // Email Campaigns
   app.get('/api/email-campaign-builder', requireAuth, ah(async (req, res) => {
@@ -455,11 +455,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { template_id, name, subject, body_html, sender_name, sender_email, recipient_segment } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
     const r = await pool.query('INSERT INTO email_campaign_builder (tenant_id,template_id,name,subject,body_html,sender_name,sender_email,recipient_segment) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [req.session.user.tenant_id, template_id||null, esc(name), esc(subject||''), esc(body_html||''), esc(sender_name||''), esc(sender_email||''), esc(recipient_segment||'all')]);
-    await audit(req, 'create', 'email_campaign_builder', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'email_campaign_builder id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/email-campaign-builder/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE email_campaign_builder SET name=COALESCE($1,name), subject=COALESCE($2,subject), body_html=COALESCE($3,body_html), recipient_segment=COALESCE($4,recipient_segment) WHERE tenant_id=$5 AND id=$6 RETURNING *', [req.body.name?esc(req.body.name):null, req.body.subject?esc(req.body.subject):null, req.body.body_html?esc(req.body.body_html):null, req.body.recipient_segment?esc(req.body.recipient_segment):null, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'email_campaign_builder', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'email_campaign_builder id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/email-campaign-builder/:id/preview', requireAuth, ah(async (req, res) => {
     const ec = await pool.query('SELECT ec.*, et.name as template_name FROM email_campaign_builder ec LEFT JOIN email_templates_builder et ON ec.template_id=et.id WHERE ec.tenant_id=$1 AND ec.id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -470,14 +470,14 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { scheduled_at } = req.body;
     if (!scheduled_at) return res.status(400).json({ error: 'scheduled_at required' });
     const r = await pool.query('UPDATE email_campaign_builder SET status=$1, scheduled_at=$2 WHERE tenant_id=$3 AND id=$4 RETURNING *', ['scheduled', scheduled_at, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'email_campaign_builder', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'email_campaign_builder id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/email-campaign-builder/:id/send', requireAuth, ah(async (req, res) => {
     const ec = await pool.query('SELECT * FROM email_campaign_builder WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!ec.rows.length) return res.status(404).json({ error: 'Campaign not found' });
     const count = await pool.query('SELECT COUNT(*) as cnt FROM donors WHERE tenant_id=$1', [req.session.user.tenant_id]);
     const r = await pool.query('UPDATE email_campaign_builder SET status=$1, sent_at=NOW(), recipient_count=$2 WHERE tenant_id=$3 AND id=$4 RETURNING *', ['sent', parseInt(count.rows[0]?.cnt||0), req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'email_campaign_builder', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'email_campaign_builder id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.get('/api/email-campaign-builder/stats', requireAuth, ah(async (req, res) => {
     const r = await pool.query('SELECT status, COUNT(*) as count, COALESCE(SUM(recipient_count),0) as total_recipients, COALESCE(SUM(open_count),0) as total_opens, COALESCE(SUM(click_count),0) as total_clicks FROM email_campaign_builder WHERE tenant_id=$1 GROUP BY status', [req.session.user.tenant_id]);
@@ -510,15 +510,15 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { name, template_content, recipient_segment, mail_class, estimated_cost } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
     const r = await pool.query('INSERT INTO direct_mail_campaigns (tenant_id,name,template_content,recipient_segment,mail_class,estimated_cost) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.session.user.tenant_id, esc(name), esc(template_content||''), esc(recipient_segment||'all'), esc(mail_class||'standard'), estimated_cost||0]);
-    await audit(req, 'create', 'direct_mail_campaigns', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'direct_mail_campaigns id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/direct-mail-campaigns/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE direct_mail_campaigns SET name=COALESCE($1,name), template_content=COALESCE($2,template_content), recipient_segment=COALESCE($3,recipient_segment), mail_class=COALESCE($4,mail_class), status=COALESCE($5,status) WHERE tenant_id=$6 AND id=$7 RETURNING *', [req.body.name?esc(req.body.name):null, req.body.template_content?esc(req.body.template_content):null, req.body.recipient_segment?esc(req.body.recipient_segment):null, req.body.mail_class?esc(req.body.mail_class):null, req.body.status||null, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'direct_mail_campaigns', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'direct_mail_campaigns id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/direct-mail-campaigns/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM direct_mail_campaigns WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'direct_mail_campaigns', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'direct_mail_campaigns id=' + req.params.id); res.json({ ok: true });
   }));
   app.get('/api/direct-mail-campaigns/:id/recipients', requireAuth, ah(async (req, res) => {
     const { status } = req.query;
@@ -538,14 +538,14 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       added++;
     }
     await pool.query('UPDATE direct_mail_campaigns SET total_recipients=total_recipients+$1 WHERE id=$2 AND tenant_id=$3', [added, req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'update', 'direct_mail_campaigns', req.params.id); res.json({ ok: true, added });
+    await audit(req.session.user.email, 'update', 'direct_mail_campaigns id=' + req.params.id); res.json({ ok: true, added });
   }));
   app.post('/api/direct-mail-campaigns/:id/send', requireAuth, ah(async (req, res) => {
     const camp = await pool.query('SELECT * FROM direct_mail_campaigns WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!camp.rows.length) return res.status(404).json({ error: 'Campaign not found' });
     const r = await pool.query('UPDATE direct_mail_campaigns SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['sent', req.session.user.tenant_id, req.params.id]);
     await pool.query('UPDATE direct_mail_recipients SET status=$1 WHERE campaign_id=$2 AND tenant_id=$3', ['mailed', req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'update', 'direct_mail_campaigns', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'direct_mail_campaigns id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.get('/api/direct-mail-campaigns/:id/cost-estimate', requireAuth, ah(async (req, res) => {
     const camp = await pool.query('SELECT * FROM direct_mail_campaigns WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -587,7 +587,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { donor_email, donor_name, latitude, longitude, city, region, country, total_donated, donation_count } = req.body;
     if (!donor_name) return res.status(400).json({ error: 'donor_name required' });
     const r = await pool.query('INSERT INTO donor_heatmap_data (tenant_id,donor_email,donor_name,latitude,longitude,city,region,country,total_donated,donation_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *', [req.session.user.tenant_id, esc(donor_email||''), esc(donor_name), latitude||0, longitude||0, esc(city||''), esc(region||''), esc(country||''), total_donated||0, donation_count||0]);
-    await audit(req, 'create', 'donor_heatmap_data', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'donor_heatmap_data id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/donor-heatmap/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE donor_heatmap_data SET total_donated=COALESCE($1,total_donated), donation_count=COALESCE($2,donation_count), city=COALESCE($3,city), region=COALESCE($4,region), country=COALESCE($5,country) WHERE tenant_id=$6 AND id=$7 RETURNING *', [req.body.total_donated||null, req.body.donation_count||null, req.body.city?esc(req.body.city):null, req.body.region?esc(req.body.region):null, req.body.country?esc(req.body.country):null, req.session.user.tenant_id, req.params.id]);
@@ -595,7 +595,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   }));
   app.delete('/api/donor-heatmap/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM donor_heatmap_data WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'donor_heatmap_data', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'donor_heatmap_data id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/donor-heatmap/refresh', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM regional_donation_stats WHERE tenant_id=$1', [req.session.user.tenant_id]);
@@ -603,7 +603,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     for (const r of regions.rows) {
       await pool.query('INSERT INTO regional_donation_stats (tenant_id,region,country,total_donated,donor_count,avg_donation) VALUES ($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, esc(r.region||''), esc(r.country||''), r.total_donated||0, r.donor_count||0, r.avg_donation||0]);
     }
-    await audit(req, 'update', 'donor_heatmap_data', 0); res.json({ ok: true, regions_refreshed: regions.rows.length });
+    await audit(req.session.user.email, 'update', 'donor_heatmap_data id=' + 0); res.json({ ok: true, regions_refreshed: regions.rows.length });
   }));
   app.get('/api/donor-heatmap/regions', requireAuth, ah(async (req, res) => {
     const r = await pool.query('SELECT * FROM regional_donation_stats WHERE tenant_id=$1 ORDER BY total_donated DESC', [req.session.user.tenant_id]);

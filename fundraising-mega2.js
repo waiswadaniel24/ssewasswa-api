@@ -408,7 +408,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     await pool.query('UPDATE campaign_ab_tests SET conversion_rate = CASE WHEN views > 0 THEN (donations::NUMERIC / views::NUMERIC) * 100 ELSE 0 END WHERE id=$1 AND tenant_id=$2', [testId, t]);
 
     const updated = (await pool.query('SELECT * FROM campaign_ab_tests WHERE id=$1 AND tenant_id=$2', [testId, t])).rows[0];
-    await audit(req, 'ab_test_tracked', 'ab_tests', req.params.id);
+    await audit(req.session.user.email, 'ab_test_tracked', 'ab_tests id=' + req.params.id);
     res.json(updated);
   }));
 
@@ -752,7 +752,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         } catch(e) {}
       }
 
-      await audit(req, 'wishlist_fulfilled', 'campaign_wishlists', req.params.id);
+      await audit(req.session.user.email, 'wishlist_fulfilled', 'campaign_wishlists id=' + req.params.id);
       res.json({ fulfillment: result.rows[0], item_fully_fulfilled: isFullyFulfilled });
     } catch(e) {
       await client.query('ROLLBACK').catch(() => {});
@@ -948,7 +948,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       await client.query('COMMIT');
       client.release();
 
-      await audit(req, 'corporate_match_claimed', 'corporate_match_claims', result.rows[0].id);
+      await audit(req.session.user.email, 'corporate_match_claimed', 'corporate_match_claims id=' + result.rows[0].id);
 
       // Notify matcher contact
       if (matcher.contact_email) {

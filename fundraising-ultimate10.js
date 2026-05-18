@@ -496,7 +496,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO landing_page_versions (tenant_id,page_id,version_number,body_html,saved_by) VALUES ($1,$2,1,$3,$4)',
       [req.session.user.tenant_id, r.rows[0].id, esc(body_html||''), esc(req.session.user.name||'')]
     );
-    await audit(req, 'create', 'landing_pages', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'landing_pages id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -521,7 +521,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         [req.session.user.tenant_id, req.params.id, nextVer, esc(body_html), esc(req.session.user.name||'')]
       );
     }
-    await audit(req, 'update', 'landing_pages', req.params.id);
+    await audit(req.session.user.email, 'update', 'landing_pages id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -529,7 +529,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.delete('/api/landing-pages/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM landing_pages WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Landing page not found' });
-    await audit(req, 'delete', 'landing_pages', req.params.id);
+    await audit(req.session.user.email, 'delete', 'landing_pages id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -537,7 +537,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/landing-pages/:id/publish', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE landing_pages SET is_published=true, updated_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Landing page not found' });
-    await audit(req, 'update', 'landing_pages', req.params.id);
+    await audit(req.session.user.email, 'update', 'landing_pages id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -545,7 +545,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/landing-pages/:id/unpublish', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE landing_pages SET is_published=false, updated_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Landing page not found' });
-    await audit(req, 'update', 'landing_pages', req.params.id);
+    await audit(req.session.user.email, 'update', 'landing_pages id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -558,7 +558,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO landing_pages (tenant_id,title,slug,body_html,meta_description,hero_image_url,theme,cta_text,cta_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
       [req.session.user.tenant_id, esc(o.title + ' (Copy)'), esc(o.slug + '-copy-' + Date.now()), esc(o.body_html||''), esc(o.meta_description||''), esc(o.hero_image_url||''), esc(o.theme||'default'), esc(o.cta_text||'Donate Now'), esc(o.cta_url||'')]
     );
-    await audit(req, 'create', 'landing_pages', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'landing_pages id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -599,7 +599,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [req.session.user.tenant_id, req.params.id, nextVer, ver.rows[0].body_html, esc(req.session.user.name||'')]
     );
     const r = await pool.query('UPDATE landing_pages SET body_html=$1, updated_at=NOW() WHERE tenant_id=$2 AND id=$3 RETURNING *', [ver.rows[0].body_html, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'landing_pages', req.params.id);
+    await audit(req.session.user.email, 'update', 'landing_pages id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -615,7 +615,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO landing_page_sections (tenant_id,page_id,section_type,section_order,title,content,image_url,settings_json,is_visible) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
       [req.session.user.tenant_id, req.params.id, esc(section_type||'text'), section_order||0, esc(title||''), esc(content||''), esc(image_url||''), JSON.stringify(settings_json||{}), is_visible!==undefined?is_visible:true]
     );
-    await audit(req, 'create', 'landing_page_sections', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'landing_page_sections id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -631,13 +631,13 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        req.session.user.tenant_id, req.params.sectionId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Section not found' });
-    await audit(req, 'update', 'landing_page_sections', req.params.sectionId);
+    await audit(req.session.user.email, 'update', 'landing_page_sections id=' + req.params.sectionId);
     res.json(r.rows[0]);
   }));
 
   app.delete('/api/landing-page-sections/:sectionId', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM landing_page_sections WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.sectionId]);
-    await audit(req, 'delete', 'landing_page_sections', req.params.sectionId);
+    await audit(req.session.user.email, 'delete', 'landing_page_sections id=' + req.params.sectionId);
     res.json({ ok: true });
   }));
 
@@ -701,7 +701,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [req.session.user.tenant_id, esc(gateway_name), esc(gateway_type), esc(api_key||''), esc(api_secret||''), esc(webhook_url||''), esc(merchant_id||''), sandbox_mode!==undefined?sandbox_mode:true, fee_percentage||0, flat_fee||0, esc(currency||'UGX'), is_active!==undefined?is_active:true, is_default||false]
     );
     if (is_default) await pool.query('UPDATE payment_gateways SET is_default=false WHERE tenant_id=$1 AND id!=$2', [req.session.user.tenant_id, r.rows[0].id]);
-    await audit(req, 'create', 'payment_gateways', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'payment_gateways id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -721,7 +721,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Gateway not found' });
     if (is_default) await pool.query('UPDATE payment_gateways SET is_default=false WHERE tenant_id=$1 AND id!=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'payment_gateways', req.params.id);
+    await audit(req.session.user.email, 'update', 'payment_gateways id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -729,7 +729,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.delete('/api/payment-gateways/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM payment_gateways WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Gateway not found' });
-    await audit(req, 'delete', 'payment_gateways', req.params.id);
+    await audit(req.session.user.email, 'delete', 'payment_gateways id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -802,7 +802,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!status) return res.status(400).json({ error: 'status required' });
     const r = await pool.query('UPDATE gateway_transactions SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', [esc(status), req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Transaction not found' });
-    await audit(req, 'update', 'gateway_transactions', req.params.id);
+    await audit(req.session.user.email, 'update', 'gateway_transactions id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -814,7 +814,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO gateway_payouts (tenant_id,gateway_id,amount,payout_method,reference,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [req.session.user.tenant_id, req.params.id, amount, esc(payout_method||'bank_transfer'), esc(reference||''), 'pending']
     );
-    await audit(req, 'create', 'gateway_payouts', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'gateway_payouts id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -873,7 +873,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [req.session.user.tenant_id, esc(name), esc(description||''), esc(target_segment||'lapsed'), start_date||null, end_date||null, goal_amount||0, target_count||0, esc(email_template||''), esc(sms_template||''), auto_remind||false, remind_interval_days||14]
     );
-    await audit(req, 'create', 'donor_renewal_campaigns', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'donor_renewal_campaigns id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -891,7 +891,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
+    await audit(req.session.user.email, 'update', 'donor_renewal_campaigns id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -899,7 +899,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.delete('/api/renewal-campaigns/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM donor_renewal_campaigns WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    await audit(req, 'delete', 'donor_renewal_campaigns', req.params.id);
+    await audit(req.session.user.email, 'delete', 'donor_renewal_campaigns id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -907,7 +907,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/renewal-campaigns/:id/start', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE donor_renewal_campaigns SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['active', req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
+    await audit(req.session.user.email, 'update', 'donor_renewal_campaigns id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -915,7 +915,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/renewal-campaigns/:id/pause', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE donor_renewal_campaigns SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['paused', req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
+    await audit(req.session.user.email, 'update', 'donor_renewal_campaigns id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -923,7 +923,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/renewal-campaigns/:id/complete', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE donor_renewal_campaigns SET status=$1, end_date=COALESCE(end_date,CURRENT_DATE) WHERE tenant_id=$2 AND id=$3 RETURNING *', ['completed', req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
+    await audit(req.session.user.email, 'update', 'donor_renewal_campaigns id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -942,7 +942,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     } else if (reminder_type === 'sms' && donor_phone) {
       try { await sendSMS(donor_phone, message || 'We miss your support! Please consider renewing your gift.'); } catch(e) {}
     }
-    await audit(req, 'create', 'renewal_reminders', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'renewal_reminders id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -968,7 +968,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       }
       sent++;
     }
-    await audit(req, 'update', 'donor_renewal_campaigns', req.params.id);
+    await audit(req.session.user.email, 'update', 'donor_renewal_campaigns id=' + req.params.id);
     res.json({ ok: true, sent });
   }));
 
@@ -987,7 +987,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (r.rows[0].campaign_id) {
       await pool.query('UPDATE donor_renewal_campaigns SET renewal_count=renewal_count+1, raised_amount=raised_amount+$1 WHERE id=$2 AND tenant_id=$3', [response_amount||0, r.rows[0].campaign_id, req.session.user.tenant_id]);
     }
-    await audit(req, 'update', 'renewal_reminders', req.params.id);
+    await audit(req.session.user.email, 'update', 'renewal_reminders id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1059,7 +1059,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [req.session.user.tenant_id, esc(club_name), min_amount||0, max_amount||null, esc(description||''), esc(benefits||''), esc(color||'#10b981'), esc(icon||'award'), esc(welcome_email_subject||''), esc(welcome_email_body||''), esc(annual_event||'')]
     );
-    await audit(req, 'create', 'donor_gift_clubs', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'donor_gift_clubs id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1077,7 +1077,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        annual_event?esc(annual_event):null, is_active, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Gift club not found' });
-    await audit(req, 'update', 'donor_gift_clubs', req.params.id);
+    await audit(req.session.user.email, 'update', 'donor_gift_clubs id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1085,7 +1085,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.delete('/api/gift-clubs/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM donor_gift_clubs WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Gift club not found' });
-    await audit(req, 'delete', 'donor_gift_clubs', req.params.id);
+    await audit(req.session.user.email, 'delete', 'donor_gift_clubs id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -1124,7 +1124,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         }
       }
     }
-    await audit(req, 'update', 'gift_club_members', 0);
+    await audit(req.session.user.email, 'update', 'gift_club_members id=' + 0);
     res.json({ ok: true, assigned, promoted });
   }));
 
@@ -1157,14 +1157,14 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO gift_club_members (tenant_id,club_id,donor_name,donor_email,donor_phone,total_donated,membership_start_date) VALUES ($1,$2,$3,$4,$5,$6,CURRENT_DATE) RETURNING *',
       [req.session.user.tenant_id, req.params.id, esc(donor_name), esc(donor_email), esc(donor_phone||''), total_donated||0]
     );
-    await audit(req, 'create', 'gift_club_members', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'gift_club_members id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
   // Remove member from club
   app.delete('/api/gift-clubs/:clubId/members/:memberId', requireAuth, ah(async (req, res) => {
     await pool.query('UPDATE gift_club_members SET is_active=false WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.memberId]);
-    await audit(req, 'update', 'gift_club_members', req.params.memberId);
+    await audit(req.session.user.email, 'update', 'gift_club_members id=' + req.params.memberId);
     res.json({ ok: true });
   }));
 
@@ -1180,7 +1180,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       try { await sendEmail(m.donor_email, m.welcome_email_subject, m.welcome_email_body.replace('{name}', m.donor_name).replace('{club}', m.club_name)); } catch(e) {}
     }
     await pool.query('UPDATE gift_club_members SET welcome_sent=true WHERE id=$1 AND tenant_id=$2', [m.id, req.session.user.tenant_id]);
-    await audit(req, 'update', 'gift_club_members', m.id);
+    await audit(req.session.user.email, 'update', 'gift_club_members id=' + m.id);
     res.json({ ok: true, sent: true });
   }));
 
@@ -1197,7 +1197,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO gift_club_events (tenant_id,club_id,event_name,event_date,venue,description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [req.session.user.tenant_id, req.params.id, esc(event_name), event_date||null, esc(venue||''), esc(description||'')]
     );
-    await audit(req, 'create', 'gift_club_events', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'gift_club_events id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1259,7 +1259,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [req.session.user.tenant_id, campaign_id||null, esc(title), esc(video_url), esc(video_type||'youtube'), esc(thumbnail_url||''), esc(description||''), duration_seconds||0, is_featured||false, scheduled_at||null, esc(transcript_url||'')]
     );
-    await audit(req, 'create', 'campaign_videos', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'campaign_videos id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1276,7 +1276,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
-    await audit(req, 'update', 'campaign_videos', req.params.id);
+    await audit(req.session.user.email, 'update', 'campaign_videos id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1284,7 +1284,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.delete('/api/campaign-videos/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM campaign_videos WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
-    await audit(req, 'delete', 'campaign_videos', req.params.id);
+    await audit(req.session.user.email, 'delete', 'campaign_videos id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -1292,7 +1292,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/campaign-videos/:id/go-live', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE campaign_videos SET is_live=true, scheduled_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
-    await audit(req, 'update', 'campaign_videos', req.params.id);
+    await audit(req.session.user.email, 'update', 'campaign_videos id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1300,7 +1300,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/campaign-videos/:id/end-live', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE campaign_videos SET is_live=false WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
-    await audit(req, 'update', 'campaign_videos', req.params.id);
+    await audit(req.session.user.email, 'update', 'campaign_videos id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1308,7 +1308,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/campaign-videos/:id/toggle-featured', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE campaign_videos SET is_featured=NOT is_featured WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Video not found' });
-    await audit(req, 'update', 'campaign_videos', req.params.id);
+    await audit(req.session.user.email, 'update', 'campaign_videos id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1356,7 +1356,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO video_playlists (tenant_id,name,description,video_ids_json,is_public) VALUES ($1,$2,$3,$4,$5) RETURNING *',
       [req.session.user.tenant_id, esc(name), esc(description||''), JSON.stringify(video_ids||[]), is_public!==undefined?is_public:true]
     );
-    await audit(req, 'create', 'video_playlists', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'video_playlists id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1367,13 +1367,13 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [name?esc(name):null, description?esc(description):null, video_ids?JSON.stringify(video_ids):null, is_public, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Playlist not found' });
-    await audit(req, 'update', 'video_playlists', req.params.id);
+    await audit(req.session.user.email, 'update', 'video_playlists id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
   app.delete('/api/video-playlists/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM video_playlists WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'video_playlists', req.params.id);
+    await audit(req.session.user.email, 'delete', 'video_playlists id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -1427,7 +1427,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
       [req.session.user.tenant_id, esc(donor_name), esc(donor_email||''), esc(donor_phone||''), esc(company_name), esc(ticker_symbol||''), number_of_shares||0, share_price||0, total_value, esc(brokerage_name||''), esc(brokerage_contact||''), esc(dtc_number||''), transfer_date||null, esc(transfer_method||'dwtc'), mean_price_on_date||0, esc(notes||'')]
     );
-    await audit(req, 'create', 'stock_donations', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'stock_donations id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1443,7 +1443,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [number_of_shares, share_price, total_value, status?esc(status):null, acknowledged, notes?esc(notes):null, transfer_date||null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Stock donation not found' });
-    await audit(req, 'update', 'stock_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'stock_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1451,7 +1451,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.delete('/api/stock-donations/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM stock_donations WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Stock donation not found' });
-    await audit(req, 'delete', 'stock_donations', req.params.id);
+    await audit(req.session.user.email, 'delete', 'stock_donations id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -1463,7 +1463,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (r.rows[0].donor_email) {
       try { await sendEmail(r.rows[0].donor_email, 'Stock Donation Acknowledged', `Dear ${r.rows[0].donor_name}, your donation of ${r.rows[0].number_of_shares} shares of ${r.rows[0].company_name} has been acknowledged. Thank you for your generosity.`); } catch(e) {}
     }
-    await audit(req, 'update', 'stock_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'stock_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1474,7 +1474,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (r.rows[0].donor_email) {
       try { await sendEmail(r.rows[0].donor_email, 'Tax Letter for Stock Donation', `Dear ${r.rows[0].donor_name}, attached is your tax letter for the donation of ${r.rows[0].number_of_shares} shares of ${r.rows[0].company_name}. Valued at UGX ${r.rows[0].total_value}.`); } catch(e) {}
     }
-    await audit(req, 'update', 'stock_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'stock_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1494,7 +1494,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO stock_valuations (tenant_id,stock_donation_id,valuation_date,share_price,total_value,high_price,low_price,appraiser,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
       [req.session.user.tenant_id, req.params.id, valuation_date||'NOW()', share_price||0, total, high_price||0, low_price||0, esc(appraiser||''), esc(notes||'')]
     );
-    await audit(req, 'create', 'stock_valuations', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'stock_valuations id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1511,7 +1511,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO stock_transfer_docs (tenant_id,stock_donation_id,doc_type,doc_name,doc_url) VALUES ($1,$2,$3,$4,$5) RETURNING *',
       [req.session.user.tenant_id, req.params.id, esc(doc_type||'transfer_form'), esc(doc_name), esc(doc_url||'')]
     );
-    await audit(req, 'create', 'stock_transfer_docs', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'stock_transfer_docs id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1578,7 +1578,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [req.session.user.tenant_id, esc(donor_name), esc(donor_email||''), esc(donor_phone||''), esc(property_name), esc(property_address||''), esc(property_type||'residential'), square_footage||0, lot_size||0, year_built||null, appraised_value||0, esc(legal_description||''), esc(deed_number||''), esc(notes||'')]
     );
-    await audit(req, 'create', 'real_estate_donations', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'real_estate_donations id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1594,7 +1594,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        square_footage, appraised_value, status?esc(status):null, notes?esc(notes):null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1602,7 +1602,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.delete('/api/real-estate-donations/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM real_estate_donations WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'delete', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'delete', 'real_estate_donations id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -1614,7 +1614,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [appraised_value||null, appraised_by?esc(appraised_by):null, appraisal_date||null, 'completed', req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1626,7 +1626,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [reviewStatus?esc(reviewStatus):null, notes?esc(notes):null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1638,7 +1638,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [title_search_status?esc(title_search_status):null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1650,7 +1650,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [environmental_status?esc(environmental_status):null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1662,7 +1662,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [tax_lien_check?esc(tax_lien_check):null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1674,7 +1674,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [insurance_status?esc(insurance_status):null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1689,7 +1689,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (r.rows[0].donor_email) {
       try { await sendEmail(r.rows[0].donor_email, 'Property Donation Accepted', `Dear ${r.rows[0].donor_name}, your donation of "${r.rows[0].property_name}" has been accepted. Thank you for your generosity.`); } catch(e) {}
     }
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1701,7 +1701,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       ['rejected', reason?esc(reason):null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Property donation not found' });
-    await audit(req, 'update', 'real_estate_donations', req.params.id);
+    await audit(req.session.user.email, 'update', 'real_estate_donations id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1720,7 +1720,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     );
     // Update the main property with the latest appraised value
     await pool.query('UPDATE real_estate_donations SET appraised_value=$1, appraisal_status=$2 WHERE id=$3 AND tenant_id=$4', [appraised_value||0, 'completed', req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'real_estate_appraisals', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'real_estate_appraisals id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1737,7 +1737,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO real_estate_documents (tenant_id,property_id,doc_type,doc_name,doc_url,description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [req.session.user.tenant_id, req.params.id, esc(doc_type||'deed'), esc(doc_name), esc(doc_url||''), esc(description||'')]
     );
-    await audit(req, 'create', 'real_estate_documents', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'real_estate_documents id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1807,7 +1807,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [req.session.user.tenant_id, esc(donor_name), esc(donor_email||''), esc(donor_phone||''), esc(donor_ssn_last4||''), esc(ira_type||'traditional'), esc(custodian_name||''), esc(custodian_account||''), esc(custodian_phone||''), distribution_amount||0, distribution_date||null, esc(transfer_method||'direct'), is_qcd||false, qcd_age_verified||false, esc(notes||'')]
     );
-    await audit(req, 'create', 'ira_rollovers', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'ira_rollovers id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1825,7 +1825,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        is_qcd, qcd_age_verified, status?esc(status):null, notes?esc(notes):null, req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
-    await audit(req, 'update', 'ira_rollovers', req.params.id);
+    await audit(req.session.user.email, 'update', 'ira_rollovers id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1833,7 +1833,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.delete('/api/ira-rollovers/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('DELETE FROM ira_rollovers WHERE tenant_id=$1 AND id=$2 RETURNING id', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found' });
-    await audit(req, 'delete', 'ira_rollovers', req.params.id);
+    await audit(req.session.user.email, 'delete', 'ira_rollovers id=' + req.params.id);
     res.json({ ok: true });
   }));
 
@@ -1848,7 +1848,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (r.rows[0].donor_email) {
       try { await sendEmail(r.rows[0].donor_email, 'IRA Rollover Confirmed', `Dear ${r.rows[0].donor_name}, your IRA rollover of UGX ${r.rows[0].distribution_amount} has been confirmed. Thank you for your generosity.`); } catch(e) {}
     }
-    await audit(req, 'update', 'ira_rollovers', req.params.id);
+    await audit(req.session.user.email, 'update', 'ira_rollovers id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1870,7 +1870,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (r.rows[0].donor_email) {
       try { await sendEmail(r.rows[0].donor_email, `IRA Tax Receipt - ${year}`, `Dear ${r.rows[0].donor_name}, your IRA distribution tax receipt for ${year} is attached. Amount: UGX ${r.rows[0].distribution_amount}. ${r.rows[0].is_qcd?'This qualifies as a Qualified Charitable Distribution (QCD).':''}`); } catch(e) {}
     }
-    await audit(req, 'update', 'ira_rollovers', req.params.id);
+    await audit(req.session.user.email, 'update', 'ira_rollovers id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1884,7 +1884,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (r.rows[0].donor_email) {
       try { await sendEmail(r.rows[0].donor_email, 'IRA Rollover Acknowledgment', `Dear ${r.rows[0].donor_name}, we acknowledge receipt of your IRA rollover donation of UGX ${r.rows[0].distribution_amount}. Thank you!`); } catch(e) {}
     }
-    await audit(req, 'update', 'ira_rollovers', req.params.id);
+    await audit(req.session.user.email, 'update', 'ira_rollovers id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1895,7 +1895,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [req.session.user.tenant_id, req.params.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'IRA rollover not found or not a QCD' });
-    await audit(req, 'update', 'ira_rollovers', req.params.id);
+    await audit(req.session.user.email, 'update', 'ira_rollovers id=' + req.params.id);
     res.json(r.rows[0]);
   }));
 
@@ -1913,7 +1913,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [req.session.user.tenant_id, req.params.id, distribution_amount, distribution_date||null, esc(check_number||''), esc(wire_reference||''), received_date||null, deposit_date||null, esc(deposit_account||''), esc(notes||'')]
     );
-    await audit(req, 'create', 'ira_distributions', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'ira_distributions id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 
@@ -1925,13 +1925,13 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [distribution_amount, received_date||null, deposit_date||null, notes?esc(notes):null, req.session.user.tenant_id, req.params.distId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Distribution not found' });
-    await audit(req, 'update', 'ira_distributions', req.params.distId);
+    await audit(req.session.user.email, 'update', 'ira_distributions id=' + req.params.distId);
     res.json(r.rows[0]);
   }));
 
   app.delete('/api/ira-distributions/:distId', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM ira_distributions WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.distId]);
-    await audit(req, 'delete', 'ira_distributions', req.params.distId);
+    await audit(req.session.user.email, 'delete', 'ira_distributions id=' + req.params.distId);
     res.json({ ok: true });
   }));
 
@@ -1948,7 +1948,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO ira_tax_documents (tenant_id,ira_rollover_id,doc_type,doc_name,doc_url,tax_year) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [req.session.user.tenant_id, req.params.id, esc(doc_type||'acknowledgment'), esc(doc_name), esc(doc_url||''), tax_year||new Date().getFullYear()]
     );
-    await audit(req, 'create', 'ira_tax_documents', r.rows[0].id);
+    await audit(req.session.user.email, 'create', 'ira_tax_documents id=' + r.rows[0].id);
     res.json(r.rows[0]);
   }));
 

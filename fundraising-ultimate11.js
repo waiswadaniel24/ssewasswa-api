@@ -115,35 +115,35 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { donor_name, donor_email, donor_phone, vehicle_make, vehicle_model, vehicle_year, vin, color, mileage, condition, estimated_value, pickup_address, notes } = req.body;
     if (!donor_name || !vehicle_make || !vehicle_model) return res.status(400).json({ error: 'donor_name, vehicle_make, and vehicle_model required' });
     const r = await pool.query('INSERT INTO vehicle_donations (tenant_id,donor_name,donor_email,donor_phone,vehicle_make,vehicle_model,vehicle_year,vin,color,mileage,condition,estimated_value,pickup_address,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *', [req.session.user.tenant_id, esc(donor_name), esc(donor_email||''), esc(donor_phone||''), esc(vehicle_make), esc(vehicle_model), vehicle_year||null, esc(vin||''), esc(color||''), mileage||null, esc(condition||'good'), estimated_value||0, esc(pickup_address||''), esc(notes||'')]);
-    await audit(req, 'create', 'vehicle_donations', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'vehicle_donations id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/vehicle-donations/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE vehicle_donations SET condition=COALESCE($1,condition), estimated_value=COALESCE($2,estimated_value), status=COALESCE($3,status), notes=COALESCE($4,notes) WHERE tenant_id=$5 AND id=$6 RETURNING *', [req.body.condition?esc(req.body.condition):null, req.body.estimated_value||null, req.body.status||null, req.body.notes?esc(req.body.notes):null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Vehicle donation not found' });
-    await audit(req, 'update', 'vehicle_donations', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'vehicle_donations id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/vehicle-donations/:id', requireAuth, ah(async (req, res) => {
     const check = await pool.query('SELECT id FROM vehicle_donations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!check.rows.length) return res.status(404).json({ error: 'Vehicle donation not found' });
     await pool.query('DELETE FROM vehicle_donations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'vehicle_donations', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'vehicle_donations id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/vehicle-donations/:id/schedule-pickup', requireAuth, ah(async (req, res) => {
     const { pickup_date } = req.body;
     if (!pickup_date) return res.status(400).json({ error: 'pickup_date required' });
     const r = await pool.query('UPDATE vehicle_donations SET pickup_scheduled_date=$1, status=$2 WHERE tenant_id=$3 AND id=$4 RETURNING *', [pickup_date, 'pickup_scheduled', req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Vehicle donation not found' });
-    await audit(req, 'update', 'vehicle_donations', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'vehicle_donations id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/vehicle-donations/:id/complete-pickup', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE vehicle_donations SET pickup_completed_date=CURRENT_DATE, status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['picked_up', req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Vehicle donation not found' });
-    await audit(req, 'update', 'vehicle_donations', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'vehicle_donations id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/vehicle-donations/:id/transfer-title', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE vehicle_donations SET title_transferred=true, status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['title_transferred', req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Vehicle donation not found' });
-    await audit(req, 'update', 'vehicle_donations', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'vehicle_donations id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/vehicle-donations/:id/acknowledge', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE vehicle_donations SET acknowledged=true WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
@@ -152,7 +152,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (v.donor_email) {
       try { await sendEmail(v.donor_email, 'Vehicle Donation Acknowledged', `Dear ${v.donor_name},\n\nYour vehicle donation (${v.vehicle_year||''} ${v.vehicle_make} ${v.vehicle_model}) has been acknowledged. Thank you for your generosity!`); } catch(e) {}
     }
-    await audit(req, 'update', 'vehicle_donations', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'vehicle_donations id=' + req.params.id); res.json(r.rows[0]);
   }));
   // Valuations
   app.get('/api/vehicle-donations/:id/valuations', requireAuth, ah(async (req, res) => {
@@ -165,7 +165,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!vehicle.rows.length) return res.status(404).json({ error: 'Vehicle donation not found' });
     const r = await pool.query('INSERT INTO vehicle_valuations (tenant_id,vehicle_donation_id,valuation_date,appraised_value,appraiser_name,condition_rating,notes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [req.session.user.tenant_id, req.params.id, valuation_date||'NOW()', appraised_value||0, esc(appraiser_name||''), esc(condition_rating||''), esc(notes||'')]);
     await pool.query('UPDATE vehicle_donations SET estimated_value=$1 WHERE id=$2 AND tenant_id=$3', [appraised_value||0, req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'vehicle_valuations', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'vehicle_valuations id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   // Photos
   app.get('/api/vehicle-donations/:id/photos', requireAuth, ah(async (req, res) => {
@@ -209,19 +209,19 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!foundation_name) return res.status(400).json({ error: 'foundation_name required' });
     const r = await pool.query('INSERT INTO family_foundations (tenant_id,foundation_name,contact_name,contact_email,contact_phone,mission_statement,total_assets,annual_grant_budget) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [req.session.user.tenant_id, esc(foundation_name), esc(contact_name||''), esc(contact_email||''), esc(contact_phone||''), esc(mission_statement||''), total_assets||0, annual_grant_budget||0]);
     await pool.query('INSERT INTO foundation_activity_log (tenant_id,foundation_id,action,performed_by,details) VALUES ($1,$2,$3,$4,$5)', [req.session.user.tenant_id, r.rows[0].id, 'created', esc(req.session.user.email), 'Foundation created: ' + esc(foundation_name)]);
-    await audit(req, 'create', 'family_foundations', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'family_foundations id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/foundations/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE family_foundations SET foundation_name=COALESCE($1,foundation_name), status=COALESCE($2,status), annual_grant_budget=COALESCE($3,annual_grant_budget), mission_statement=COALESCE($4,mission_statement) WHERE tenant_id=$5 AND id=$6 RETURNING *', [req.body.foundation_name?esc(req.body.foundation_name):null, req.body.status||null, req.body.annual_grant_budget||null, req.body.mission_statement?esc(req.body.mission_statement):null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Foundation not found' });
     await pool.query('INSERT INTO foundation_activity_log (tenant_id,foundation_id,action,performed_by,details) VALUES ($1,$2,$3,$4,$5)', [req.session.user.tenant_id, req.params.id, 'updated', esc(req.session.user.email), 'Foundation details updated']);
-    await audit(req, 'update', 'family_foundations', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'family_foundations id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/foundations/:id', requireAuth, ah(async (req, res) => {
     const check = await pool.query('SELECT id FROM family_foundations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!check.rows.length) return res.status(404).json({ error: 'Foundation not found' });
     await pool.query('DELETE FROM family_foundations WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'family_foundations', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'family_foundations id=' + req.params.id); res.json({ ok: true });
   }));
   // Members
   app.get('/api/foundations/:id/members', requireAuth, ah(async (req, res) => {
@@ -233,16 +233,16 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!member_name) return res.status(400).json({ error: 'member_name required' });
     const r = await pool.query('INSERT INTO foundation_members (tenant_id,foundation_id,member_name,member_email,role) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(member_name), esc(member_email||''), esc(role||'member')]);
     await pool.query('INSERT INTO foundation_activity_log (tenant_id,foundation_id,action,performed_by,details) VALUES ($1,$2,$3,$4,$5)', [req.session.user.tenant_id, req.params.id, 'member_added', esc(req.session.user.email), 'Added member: ' + esc(member_name)]);
-    await audit(req, 'create', 'foundation_members', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'foundation_members id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/foundations/:foundationId/members/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE foundation_members SET role=COALESCE($1,role) WHERE tenant_id=$2 AND id=$3 RETURNING *', [req.body.role?esc(req.body.role):null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Member not found' });
-    await audit(req, 'update', 'foundation_members', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'foundation_members id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/foundations/:foundationId/members/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM foundation_members WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'foundation_members', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'foundation_members id=' + req.params.id); res.json({ ok: true });
   }));
   // Grants
   app.get('/api/foundations/:id/grants', requireAuth, ah(async (req, res) => {
@@ -255,23 +255,23 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const r = await pool.query('INSERT INTO foundation_grants (tenant_id,foundation_id,grant_to,purpose,amount,notes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(grant_to), esc(purpose||''), amount, esc(notes||'')]);
     await pool.query('UPDATE family_foundations SET total_assets=total_assets-$1, grants_disbursed=grants_disbursed+$1, grant_count=grant_count+1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
     await pool.query('INSERT INTO foundation_activity_log (tenant_id,foundation_id,action,performed_by,details) VALUES ($1,$2,$3,$4,$5)', [req.session.user.tenant_id, req.params.id, 'grant_created', esc(req.session.user.email), 'Grant of ' + amount + ' to ' + esc(grant_to)]);
-    await audit(req, 'create', 'foundation_grants', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'foundation_grants id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.post('/api/foundations/:foundationId/grants/:id/approve', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE foundation_grants SET status=$1, approved_by=$2, approved_at=NOW() WHERE tenant_id=$3 AND id=$4 RETURNING *', ['approved', esc(req.session.user.email), req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Grant not found' });
     await pool.query('INSERT INTO foundation_activity_log (tenant_id,foundation_id,action,performed_by,details) VALUES ($1,$2,$3,$4,$5)', [req.session.user.tenant_id, r.rows[0].foundation_id, 'grant_approved', esc(req.session.user.email), 'Grant approved: ' + r.rows[0].amount]);
-    await audit(req, 'update', 'foundation_grants', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'foundation_grants id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/foundations/:foundationId/grants/:id/disburse', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE foundation_grants SET status=$1, granted_at=NOW() WHERE tenant_id=$2 AND id=$3 AND status=$4 RETURNING *', ['disbursed', req.session.user.tenant_id, req.params.id, 'approved']);
     if (!r.rows.length) return res.status(400).json({ error: 'Grant not found or not approved' });
     await pool.query('INSERT INTO foundation_activity_log (tenant_id,foundation_id,action,performed_by,details) VALUES ($1,$2,$3,$4,$5)', [req.session.user.tenant_id, r.rows[0].foundation_id, 'grant_disbursed', esc(req.session.user.email), 'Grant disbursed: ' + r.rows[0].amount]);
-    await audit(req, 'update', 'foundation_grants', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'foundation_grants id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/foundations/:foundationId/grants/:id/reject', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE foundation_grants SET status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['rejected', req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'foundation_grants', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'foundation_grants id=' + req.params.id); res.json(r.rows[0]);
   }));
   // Activity Log
   app.get('/api/foundations/:id/activity', requireAuth, ah(async (req, res) => {
@@ -297,7 +297,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.put('/api/mobile-config', requireAuth, ah(async (req, res) => {
     const { app_name, primary_color, accent_color, logo_url, enable_push, enable_sms, dark_mode_supported, offline_mode_enabled, home_screen_json, splash_screen_url } = req.body;
     const r = await pool.query('UPDATE mobile_experience_config SET app_name=COALESCE($1,app_name), primary_color=COALESCE($2,primary_color), accent_color=COALESCE($3,accent_color), logo_url=COALESCE($4,logo_url), enable_push=COALESCE($5,enable_push), enable_sms=COALESCE($6,enable_sms), dark_mode_supported=COALESCE($7,dark_mode_supported), offline_mode_enabled=COALESCE($8,offline_mode_enabled), home_screen_json=COALESCE($9,home_screen_json), splash_screen_url=COALESCE($10,splash_screen_url) WHERE tenant_id=$11 RETURNING *', [app_name?esc(app_name):null, primary_color||null, accent_color||null, logo_url?esc(logo_url):null, enable_push, enable_sms, dark_mode_supported, offline_mode_enabled, home_screen_json?JSON.stringify(home_screen_json):null, splash_screen_url?esc(splash_screen_url):null, req.session.user.tenant_id]);
-    await audit(req, 'update', 'mobile_experience_config', r.rows[0]?.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'mobile_experience_config id=' + r.rows[0]?.id); res.json(r.rows[0]);
   }));
   // Push Notifications
   app.get('/api/push-notifications', requireAuth, ah(async (req, res) => {
@@ -315,15 +315,15 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { title, body, target_segment, deep_link, scheduled_at } = req.body;
     if (!title || !body) return res.status(400).json({ error: 'title and body required' });
     const r = await pool.query('INSERT INTO push_notifications (tenant_id,title,body,target_segment,deep_link,scheduled_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.session.user.tenant_id, esc(title), esc(body), esc(target_segment||'all'), esc(deep_link||''), scheduled_at||null]);
-    await audit(req, 'create', 'push_notifications', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'push_notifications id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/push-notifications/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE push_notifications SET status=COALESCE($1,status), title=COALESCE($2,title), body=COALESCE($3,body) WHERE tenant_id=$4 AND id=$5 RETURNING *', [req.body.status||null, req.body.title?esc(req.body.title):null, req.body.body?esc(req.body.body):null, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'push_notifications', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'push_notifications id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/push-notifications/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM push_notifications WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'push_notifications', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'push_notifications id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/mobile/broadcast', requireAuth, ah(async (req, res) => {
     const { title, body, target_segment } = req.body;
@@ -337,7 +337,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       donorCount = await pool.query('SELECT COUNT(*) as cnt FROM donors WHERE tenant_id=$1', [req.session.user.tenant_id]);
     }
     const r = await pool.query('INSERT INTO push_notifications (tenant_id,title,body,target_segment,sent_at,recipient_count,status) VALUES ($1,$2,$3,$4,NOW(),$5,$6) RETURNING *', [req.session.user.tenant_id, esc(title), esc(body), esc(target_segment||'all'), parseInt(donorCount.rows[0]?.cnt||0), 'sent']);
-    await audit(req, 'create', 'push_notifications', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'push_notifications id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.get('/api/mobile/manifest', ah(async (req, res) => {
     const tid = req.session?.user?.tenant_id || 1;
@@ -424,7 +424,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const level = score >= 60 ? 'critical' : score >= 40 ? 'high' : score >= 20 ? 'medium' : 'low';
     const r = await pool.query('INSERT INTO campaign_risk_assessments (tenant_id,campaign_id,campaign_name,risk_level,risk_category,description,probability,impact,risk_score,assessed_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *', [req.session.user.tenant_id, campaign_id||null, esc(campaign_name), esc(level), esc(risk_category||'general'), esc(description||''), prob, imp, score, esc(assessed_by||req.session.user.email)]);
     await pool.query('INSERT INTO risk_audit_trail (tenant_id,assessment_id,action,performed_by,details) VALUES ($1,$2,$3,$4,$5)', [req.session.user.tenant_id, r.rows[0].id, 'created', esc(req.session.user.email), 'Assessment created: score=' + score + ', level=' + level]);
-    await audit(req, 'create', 'campaign_risk_assessments', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'campaign_risk_assessments id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/risk-assessments/:id', requireAuth, ah(async (req, res) => {
     const existing = await pool.query('SELECT * FROM campaign_risk_assessments WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -436,11 +436,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const level = score >= 60 ? 'critical' : score >= 40 ? 'high' : score >= 20 ? 'medium' : 'low';
     const r = await pool.query('UPDATE campaign_risk_assessments SET probability=$1, impact=$2, risk_score=$3, risk_level=$4, description=COALESCE($5,description), risk_category=COALESCE($6,risk_category), assessed_at=NOW() WHERE tenant_id=$7 AND id=$8 RETURNING *', [prob, imp, score, level, description?esc(description):null, risk_category?esc(risk_category):null, req.session.user.tenant_id, req.params.id]);
     await pool.query('INSERT INTO risk_audit_trail (tenant_id,assessment_id,action,performed_by,old_value,new_value) VALUES ($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, req.params.id, 'updated', esc(req.session.user.email), 'score=' + existing.rows[0].risk_score + ',level=' + existing.rows[0].risk_level, 'score=' + score + ',level=' + level]);
-    await audit(req, 'update', 'campaign_risk_assessments', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'campaign_risk_assessments id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/risk-assessments/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM campaign_risk_assessments WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'campaign_risk_assessments', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'campaign_risk_assessments id=' + req.params.id); res.json({ ok: true });
   }));
   // Mitigation Plans
   app.get('/api/risk-assessments/:id/mitigation-plans', requireAuth, ah(async (req, res) => {
@@ -451,7 +451,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { mitigation_strategy, responsible_person, deadline, status } = req.body;
     if (!mitigation_strategy) return res.status(400).json({ error: 'mitigation_strategy required' });
     const r = await pool.query('INSERT INTO risk_mitigation_plans (tenant_id,assessment_id,mitigation_strategy,responsible_person,deadline,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(mitigation_strategy), esc(responsible_person||''), deadline||null, status||'planned']);
-    await audit(req, 'create', 'risk_mitigation_plans', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'risk_mitigation_plans id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/risk-assessments/:assessmentId/mitigation-plans/:id', requireAuth, ah(async (req, res) => {
     const { status, progress, responsible_person, deadline } = req.body;
@@ -463,11 +463,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     q += ' WHERE tenant_id=$' + idx + ' AND id=$' + (idx+1) + ' RETURNING *';
     params.push(req.session.user.tenant_id, req.params.id);
     const r = await pool.query(q, params);
-    await audit(req, 'update', 'risk_mitigation_plans', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'risk_mitigation_plans id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/risk-assessments/:assessmentId/mitigation-plans/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM risk_mitigation_plans WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'risk_mitigation_plans', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'risk_mitigation_plans id=' + req.params.id); res.json({ ok: true });
   }));
   // Audit trail
   app.get('/api/risk-assessments/:id/audit-trail', requireAuth, ah(async (req, res) => {
@@ -506,22 +506,22 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { requirement_name, category, description, regulation_reference, is_mandatory, frequency, next_due, penalty_text } = req.body;
     if (!requirement_name) return res.status(400).json({ error: 'requirement_name required' });
     const r = await pool.query('INSERT INTO compliance_requirements (tenant_id,requirement_name,category,description,regulation_reference,is_mandatory,frequency,next_due,penalty_text) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [req.session.user.tenant_id, esc(requirement_name), esc(category||'general'), esc(description||''), esc(regulation_reference||''), is_mandatory!==undefined?is_mandatory:true, esc(frequency||'annual'), next_due||null, esc(penalty_text||'')]);
-    await audit(req, 'create', 'compliance_requirements', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'compliance_requirements id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/compliance-requirements/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE compliance_requirements SET requirement_name=COALESCE($1,requirement_name), next_due=COALESCE($2,next_due), category=COALESCE($3,category), is_mandatory=COALESCE($4,is_mandatory), frequency=COALESCE($5,frequency), penalty_text=COALESCE($6,penalty_text) WHERE tenant_id=$7 AND id=$8 RETURNING *', [req.body.requirement_name?esc(req.body.requirement_name):null, req.body.next_due||null, req.body.category?esc(req.body.category):null, req.body.is_mandatory, req.body.frequency?esc(req.body.frequency):null, req.body.penalty_text?esc(req.body.penalty_text):null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Requirement not found' });
-    await audit(req, 'update', 'compliance_requirements', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'compliance_requirements id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/compliance-requirements/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM compliance_requirements WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'compliance_requirements', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'compliance_requirements id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/compliance-requirements/:id/complete', requireAuth, ah(async (req, res) => {
     const { status, notes, evidence_url } = req.body;
     const check = await pool.query('INSERT INTO fundraising_compliance_checks (tenant_id,requirement_id,checked_by,status,notes,evidence_url) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(req.session.user.email), esc(status||'compliant'), esc(notes||''), esc(evidence_url||'')]);
     await pool.query('UPDATE compliance_requirements SET last_checked=CURRENT_DATE WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'create', 'fundraising_compliance_checks', check.rows[0].id); res.json(check.rows[0]);
+    await audit(req.session.user.email, 'create', 'fundraising_compliance_checks id=' + check.rows[0].id); res.json(check.rows[0]);
   }));
   app.get('/api/compliance-requirements/:id/checks', requireAuth, ah(async (req, res) => {
     const r = await pool.query('SELECT * FROM fundraising_compliance_checks WHERE tenant_id=$1 AND requirement_id=$2 ORDER BY check_date DESC', [req.session.user.tenant_id, req.params.id]);
@@ -563,25 +563,25 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { title, description, total_funds, beneficiaries_count, period_start, period_end, cover_image_url } = req.body;
     if (!title) return res.status(400).json({ error: 'title required' });
     const r = await pool.query('INSERT INTO donation_impact_reports (tenant_id,title,description,total_funds,beneficiaries_count,period_start,period_end,cover_image_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [req.session.user.tenant_id, esc(title), esc(description||''), total_funds||0, beneficiaries_count||0, period_start||null, period_end||null, esc(cover_image_url||'')]);
-    await audit(req, 'create', 'donation_impact_reports', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'donation_impact_reports id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/impact-reports/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE donation_impact_reports SET title=COALESCE($1,title), description=COALESCE($2,description), total_funds=COALESCE($3,total_funds), beneficiaries_count=COALESCE($4,beneficiaries_count), is_published=COALESCE($5,is_published), cover_image_url=COALESCE($6,cover_image_url) WHERE tenant_id=$7 AND id=$8 RETURNING *', [req.body.title?esc(req.body.title):null, req.body.description?esc(req.body.description):null, req.body.total_funds||null, req.body.beneficiaries_count||null, req.body.is_published, req.body.cover_image_url?esc(req.body.cover_image_url):null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Report not found' });
-    await audit(req, 'update', 'donation_impact_reports', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'donation_impact_reports id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/impact-reports/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM donation_impact_reports WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'donation_impact_reports', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'donation_impact_reports id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/impact-reports/:id/publish', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE donation_impact_reports SET is_published=true, published_at=NOW() WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Report not found' });
-    await audit(req, 'update', 'donation_impact_reports', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'donation_impact_reports id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/impact-reports/:id/unpublish', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE donation_impact_reports SET is_published=false WHERE tenant_id=$1 AND id=$2 RETURNING *', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'donation_impact_reports', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'donation_impact_reports id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.post('/api/impact-reports/:id/duplicate', requireAuth, ah(async (req, res) => {
     const orig = await pool.query('SELECT * FROM donation_impact_reports WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -592,7 +592,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     for (const s of sections.rows) {
       await pool.query('INSERT INTO impact_report_sections (tenant_id,report_id,section_title,section_type,content_html,image_url,data_json,sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [req.session.user.tenant_id, r.rows[0].id, esc(s.section_title), esc(s.section_type), esc(s.content_html||''), esc(s.image_url||''), s.data_json, s.sort_order]);
     }
-    await audit(req, 'create', 'donation_impact_reports', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'donation_impact_reports id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.post('/api/impact-reports/:id/send-to-donors', requireAuth, ah(async (req, res) => {
     const report = await pool.query('SELECT * FROM donation_impact_reports WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -605,7 +605,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         sent++;
       } catch(e) {}
     }
-    await audit(req, 'update', 'donation_impact_reports', req.params.id);
+    await audit(req.session.user.email, 'update', 'donation_impact_reports id=' + req.params.id);
     res.json({ ok: true, sent_to: sent });
   }));
   app.get('/api/impact-reports/public/:id', ah(async (req, res) => {
@@ -624,15 +624,15 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { section_title, section_type, content_html, image_url, data_json, sort_order } = req.body;
     if (!section_title) return res.status(400).json({ error: 'section_title required' });
     const r = await pool.query('INSERT INTO impact_report_sections (tenant_id,report_id,section_title,section_type,content_html,image_url,data_json,sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(section_title), esc(section_type||'text'), esc(content_html||''), esc(image_url||''), JSON.stringify(data_json||{}), sort_order||0]);
-    await audit(req, 'create', 'impact_report_sections', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'impact_report_sections id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/impact-reports/:reportId/sections/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE impact_report_sections SET section_title=COALESCE($1,section_title), content_html=COALESCE($2,content_html), image_url=COALESCE($3,image_url), sort_order=COALESCE($4,sort_order) WHERE tenant_id=$5 AND id=$6 RETURNING *', [req.body.section_title?esc(req.body.section_title):null, req.body.content_html?esc(req.body.content_html):null, req.body.image_url?esc(req.body.image_url):null, req.body.sort_order||null, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'impact_report_sections', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'impact_report_sections id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/impact-reports/:reportId/sections/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM impact_report_sections WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'impact_report_sections', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'impact_report_sections id=' + req.params.id); res.json({ ok: true });
   }));
   app.get('/impact-reports', requireAuth, ah(async (req, res) => {
     const reports = await pool.query('SELECT * FROM donation_impact_reports WHERE tenant_id=$1 ORDER BY created_at DESC', [req.session.user.tenant_id]);
@@ -667,16 +667,16 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         try { await notify(email, 'You have been invited to collaborate on: ' + campaign_name); } catch(e) {}
       }
     }
-    await audit(req, 'create', 'campaign_collaboration', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'campaign_collaboration id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/collaborations/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE campaign_collaboration SET description=COALESCE($1,description), status=COALESCE($2,status), invited_emails=COALESCE($3,invited_emails) WHERE tenant_id=$4 AND id=$5 RETURNING *', [req.body.description?esc(req.body.description):null, req.body.status||null, req.body.invited_emails?JSON.stringify(req.body.invited_emails):null, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Collaboration not found' });
-    await audit(req, 'update', 'campaign_collaboration', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'campaign_collaboration id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/collaborations/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM campaign_collaboration WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'campaign_collaboration', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'campaign_collaboration id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/collaborations/:id/accept', requireAuth, ah(async (req, res) => {
     const collab = await pool.query('SELECT * FROM campaign_collaboration WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -694,7 +694,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       await pool.query('UPDATE campaign_collaboration SET invited_emails=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(existing), req.params.id, req.session.user.tenant_id]);
     }
     try { await notify(email, 'You have been invited to collaborate on: ' + collab.rows[0].campaign_name); } catch(e) {}
-    await audit(req, 'update', 'campaign_collaboration', req.params.id); res.json({ ok: true, invited: email });
+    await audit(req.session.user.email, 'update', 'campaign_collaboration id=' + req.params.id); res.json({ ok: true, invited: email });
   }));
   // Tasks
   app.get('/api/collaborations/:id/tasks', requireAuth, ah(async (req, res) => {
@@ -716,7 +716,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (assignee_email) {
       try { await notify(assignee_email, 'New task assigned: ' + task_name); } catch(e) {}
     }
-    await audit(req, 'create', 'collaboration_tasks', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'collaboration_tasks id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/collaborations/:collaborationId/tasks/:id', requireAuth, ah(async (req, res) => {
     const { status, assignee_email, priority, due_date, description } = req.body;
@@ -728,11 +728,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     params.push(req.session.user.tenant_id, req.params.id);
     const r = await pool.query(q, params);
     if (!r.rows.length) return res.status(404).json({ error: 'Task not found' });
-    await audit(req, 'update', 'collaboration_tasks', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'collaboration_tasks id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/collaborations/:collaborationId/tasks/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM collaboration_tasks WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'collaboration_tasks', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'collaboration_tasks id=' + req.params.id); res.json({ ok: true });
   }));
   // Comments on tasks
   app.get('/api/collaboration-tasks/:taskId/comments', requireAuth, ah(async (req, res) => {
@@ -798,7 +798,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       }
     }
     await pool.query('INSERT INTO unified_messages (tenant_id,hub_id,donor_email,channel,message_text,thread_id) VALUES ($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, r.rows[0].id, esc(recipient), esc(channel_type||'email'), esc(body), 'thread-' + r.rows[0].id]);
-    await audit(req, 'create', 'communication_hub', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'communication_hub id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/communication-hub/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE communication_hub SET status=COALESCE($1,status), read_at=CASE WHEN $2=true THEN NOW() ELSE read_at END WHERE tenant_id=$3 AND id=$4 RETURNING *', [req.body.status||null, req.body.is_read||false, req.session.user.tenant_id, req.params.id]);
@@ -807,7 +807,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   }));
   app.delete('/api/communication-hub/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM communication_hub WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'communication_hub', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'communication_hub id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/communication-hub/broadcast', requireAuth, ah(async (req, res) => {
     const { channel_type, subject, body, target_segment } = req.body;
@@ -834,7 +834,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       }
       sent++;
     }
-    await audit(req, 'create', 'communication_hub', 0); res.json({ ok: true, sent });
+    await audit(req.session.user.email, 'create', 'communication_hub id=' + 0); res.json({ ok: true, sent });
   }));
   app.get('/api/communication-hub/donor-history', requireAuth, ah(async (req, res) => {
     const { donor_email } = req.query;
@@ -857,16 +857,16 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { template_name, channel_type, subject, body_template, variables_json } = req.body;
     if (!template_name || !body_template) return res.status(400).json({ error: 'template_name and body_template required' });
     const r = await pool.query('INSERT INTO communication_templates (tenant_id,template_name,channel_type,subject,body_template,variables_json) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.session.user.tenant_id, esc(template_name), esc(channel_type||'email'), esc(subject||''), esc(body_template), JSON.stringify(variables_json||[])]);
-    await audit(req, 'create', 'communication_templates', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'communication_templates id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/communication-templates/:id', requireAuth, ah(async (req, res) => {
     const r = await pool.query('UPDATE communication_templates SET template_name=COALESCE($1,template_name), subject=COALESCE($2,subject), body_template=COALESCE($3,body_template), is_active=COALESCE($4,is_active) WHERE tenant_id=$5 AND id=$6 RETURNING *', [req.body.template_name?esc(req.body.template_name):null, req.body.subject?esc(req.body.subject):null, req.body.body_template?esc(req.body.body_template):null, req.body.is_active, req.session.user.tenant_id, req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Template not found' });
-    await audit(req, 'update', 'communication_templates', req.params.id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'update', 'communication_templates id=' + req.params.id); res.json(r.rows[0]);
   }));
   app.delete('/api/communication-templates/:id', requireAuth, ah(async (req, res) => {
     await pool.query('DELETE FROM communication_templates WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'communication_templates', req.params.id); res.json({ ok: true });
+    await audit(req.session.user.email, 'delete', 'communication_templates id=' + req.params.id); res.json({ ok: true });
   }));
   app.post('/api/communication-templates/:id/use', requireAuth, ah(async (req, res) => {
     const tmpl = await pool.query('SELECT * FROM communication_templates WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
@@ -887,7 +887,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     } else {
       try { await sendEmail(recipient, subject, body); } catch(e) {}
     }
-    await audit(req, 'create', 'communication_hub', r.rows[0].id); res.json(r.rows[0]);
+    await audit(req.session.user.email, 'create', 'communication_hub id=' + r.rows[0].id); res.json(r.rows[0]);
   }));
   // Unified Messages
   app.get('/api/unified-messages', requireAuth, ah(async (req, res) => {

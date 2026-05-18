@@ -1898,7 +1898,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     await pool.query('INSERT INTO campaign_comments(tenant_id,campaign_id,user_email,author_name,content,is_anonymous) VALUES($1,$2,$3,$4,$5,$6)',
       [t, req.params.id, req.session.user.email, author_name||req.session.user.name, content, is_anonymous==='on']);
     const result = await pool.query('SELECT id FROM campaign_comments WHERE tenant_id=$1 AND campaign_id=$2 AND user_email=$3 ORDER BY created_at DESC LIMIT 1', [t, req.params.id, req.session.user.email]);
-    if (result.rows[0]) await audit(req, 'comment_created', 'campaign_comments', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'comment_created', 'campaign_comments id=' + result.rows[0].id);
     await pool.query('UPDATE fundraising_campaigns SET total_comments=COALESCE(total_comments,0)+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
     // Notify campaign followers
     try {
@@ -1913,7 +1913,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
 
   app.post('/comments/:id/like', requireAuth, ah(async (req, res) => {
     await pool.query('UPDATE campaign_comments SET likes=likes+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
-    await audit(req, 'comment_liked', 'campaign_comments', req.params.id);
+    await audit(req.session.user.email, 'comment_liked', 'campaign_comments id=' + req.params.id);
     res.json({ success: true });
   }));
 
@@ -1956,7 +1956,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       await sendSMS(donation.donor_phone, 'Thank you for donating UGX '+(parseInt(donation.amount)||0).toLocaleString()+' to "'+donation.campaign_title+'". Your generosity is making a difference! - Comfort Zone').catch(()=>{});
     }
     await pool.query('UPDATE campaign_donations SET thank_you_sent=true WHERE id=$1 AND tenant_id=$2', [req.params.id, donation.tenant_id]);
-    await audit(req, 'thank_you_sent', 'campaign_donations', req.params.id);
+    await audit(req.session.user.email, 'thank_you_sent', 'campaign_donations id=' + req.params.id);
     res.json({ success: true, sent: true });
   }));
 
@@ -1974,7 +1974,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       await pool.query('INSERT INTO campaign_followers(tenant_id,campaign_id,user_email) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [t, req.params.id, req.session.user.email]);
       const result = await pool.query('SELECT id FROM campaign_followers WHERE tenant_id=$1 AND campaign_id=$2 AND user_email=$3', [t, req.params.id, req.session.user.email]);
       await pool.query('UPDATE fundraising_campaigns SET total_followers=COALESCE(total_followers,0)+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-      if (result.rows[0]) await audit(req, 'campaign_followed', 'campaign_followers', result.rows[0].id);
+      if (result.rows[0]) await audit(req.session.user.email, 'campaign_followed', 'campaign_followers id=' + result.rows[0].id);
       await audit(req.session.user.email, 'campaign_follow', 'campaign_followers campaign_id='+req.params.id);
     } catch(e) {}
     res.redirect('back');
@@ -1985,7 +1985,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       const t = req.session.user.tenant_id;
       await pool.query('DELETE FROM campaign_followers WHERE campaign_id=$1 AND user_email=$2 AND tenant_id=$3', [req.params.id, req.session.user.email, t]);
       await pool.query('UPDATE fundraising_campaigns SET total_followers=GREATEST(COALESCE(total_followers,0)-1,0) WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
-      await audit(req, 'campaign_unfollowed', 'campaign_followers', req.params.id);
+      await audit(req.session.user.email, 'campaign_unfollowed', 'campaign_followers id=' + req.params.id);
       await audit(req.session.user.email, 'campaign_unfollow', 'campaign_followers campaign_id='+req.params.id);
     } catch(e) {}
     res.redirect('back');
@@ -2020,7 +2020,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     await pool.query('INSERT INTO campaign_testimonials(tenant_id,campaign_id,author_name,author_title,content,rating) VALUES($1,$2,$3,$4,$5,$6)',
       [t, req.params.id, author_name, author_title||'', content, rating||5]);
     const result = await pool.query('SELECT id FROM campaign_testimonials WHERE tenant_id=$1 AND campaign_id=$2 AND author_name=$3 ORDER BY created_at DESC LIMIT 1', [t, req.params.id, author_name]);
-    if (result.rows[0]) await audit(req, 'testimonial_created', 'campaign_testimonials', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'testimonial_created', 'campaign_testimonials id=' + result.rows[0].id);
     await pool.query('UPDATE fundraising_campaigns SET total_testimonials=COALESCE(total_testimonials,0)+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
     res.redirect('/campaigns/'+req.params.id+'/testimonials');
   }));
@@ -3303,7 +3303,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     await pool.query('INSERT INTO wishlist_pledges(tenant_id,wishlist_id,campaign_id,pledger_name,pledger_email,pledger_phone,quantity_pledged,message) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
       [t, req.params.itemId, req.params.campaignId, pledger_name, pledger_email, pledger_phone, quantity_pledged, message||'']);
     const result = await pool.query('SELECT id FROM wishlist_pledges WHERE tenant_id=$1 AND wishlist_id=$2 AND pledger_email=$3 ORDER BY created_at DESC LIMIT 1', [t, req.params.itemId, pledger_email]);
-    if (result.rows[0]) await audit(req, 'wishlist_pledge_created', 'campaign_wishlist_pledges', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'wishlist_pledge_created', 'campaign_wishlist_pledges id=' + result.rows[0].id);
     await pool.query('UPDATE campaign_wishlists SET quantity_fulfilled=quantity_fulfilled+$1 WHERE id=$2 AND tenant_id=$3', [quantity_pledged, req.params.itemId, t]);
     await pool.query('UPDATE campaign_wishlists SET is_fulfilled=true WHERE id=$1 AND quantity_fulfilled>=quantity_needed AND tenant_id=$2', [req.params.itemId, t]);
     res.redirect('/campaigns/'+req.params.campaignId+'/wishlist');
@@ -3409,7 +3409,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     await pool.query('INSERT INTO campaign_volunteers(tenant_id,campaign_id,volunteer_name,volunteer_email,volunteer_phone,skills,availability,hours_pledged,role,motivation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
       [t, req.params.id, volunteer_name, volunteer_email, volunteer_phone||null, skills ? skills.split(',').map(s=>s.trim()) : [], availability||'flexible', hours_pledged||0, role||null, motivation||'']);
     const result = await pool.query('SELECT id FROM campaign_volunteers WHERE tenant_id=$1 AND campaign_id=$2 AND volunteer_email=$3 ORDER BY created_at DESC LIMIT 1', [t, req.params.id, volunteer_email]);
-    if (result.rows[0]) await audit(req, 'volunteer_signed_up', 'campaign_volunteers', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'volunteer_signed_up', 'campaign_volunteers id=' + result.rows[0].id);
     await pool.query('UPDATE fundraising_campaigns SET has_volunteers=true, volunteer_count=(SELECT COUNT(*) FROM campaign_volunteers WHERE campaign_id=$1 AND status IN ($2,$3)) WHERE id=$1 AND tenant_id=$4', [req.params.id, 'approved', 'active', t]);
     res.redirect('/campaigns/'+req.params.id+'/volunteers');
   }));
@@ -3480,7 +3480,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     await pool.query('INSERT INTO campaign_endorsements(tenant_id,campaign_id,endorser_name,endorser_title,endorser_organization,endorser_photo,endorser_email,endorsement_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
       [t, req.params.id, endorser_name, endorser_title||null, endorser_organization||null, endorser_photo||null, endorser_email||null, endorsement_text]);
     const result = await pool.query('SELECT id FROM campaign_endorsements WHERE tenant_id=$1 AND campaign_id=$2 AND endorser_email=$3 ORDER BY created_at DESC LIMIT 1', [t, req.params.id, endorser_email||null]);
-    if (result.rows[0]) await audit(req, 'endorsement_created', 'campaign_endorsements', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'endorsement_created', 'campaign_endorsements id=' + result.rows[0].id);
     await pool.query('UPDATE fundraising_campaigns SET endorsement_count=(SELECT COUNT(*) FROM campaign_endorsements WHERE campaign_id=$1 AND is_public=true) WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
     res.redirect('/campaigns/'+req.params.id+'/endorsements');
   }));
@@ -3622,7 +3622,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     // Tip goes to platform wallet
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [tipAmt]);
     await pool.query('UPDATE fundraising_campaigns SET tip_total=COALESCE(tip_total,0)+$1 WHERE id=$2 AND tenant_id=$3', [tipAmt, donation.campaign_id, donation.tenant_id]);
-    await audit(req, 'tip_given', 'campaign_donations', req.params.id);
+    await audit(req.session.user.email, 'tip_given', 'campaign_donations id=' + req.params.id);
     res.json({ success: true, tip: tipAmt });
   }));
 
@@ -3906,7 +3906,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     await pool.query('INSERT INTO campaign_event_registrations(tenant_id,event_id,campaign_id,attendee_name,attendee_email,attendee_phone,num_tickets,amount_paid,ticket_code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
       [t, req.params.eventId, req.params.campaignId, attendee_name, attendee_email, attendee_phone||null, num_tickets||1, amountPaid, ticketCode]);
     const result = await pool.query('SELECT id FROM campaign_event_registrations WHERE tenant_id=$1 AND event_id=$2 AND attendee_email=$3 ORDER BY created_at DESC LIMIT 1', [t, req.params.eventId, attendee_email]);
-    if (result.rows[0]) await audit(req, 'event_registered', 'campaign_event_registrations', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'event_registered', 'campaign_event_registrations id=' + result.rows[0].id);
     await pool.query('UPDATE campaign_events SET registered_count=registered_count+$1 WHERE id=$2 AND tenant_id=$3', [num_tickets||1, req.params.eventId, t]);
     // If paid event, create donation
     if (amountPaid > 0) {
@@ -4006,7 +4006,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     await pool.query('INSERT INTO donation_gift_cards(tenant_id,card_code,amount,purchaser_name,purchaser_email,recipient_name,recipient_email,message) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
       [t, cardCode, amount, purchaser_name||req.session.user.name, req.session.user.email, recipient_name, recipient_email, message||'']);
     const result = await pool.query('SELECT id FROM donation_gift_cards WHERE tenant_id=$1 AND card_code=$2', [t, cardCode]);
-    if (result.rows[0]) await audit(req, 'gift_card_purchased', 'gift_cards', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'gift_card_purchased', 'gift_cards id=' + result.rows[0].id);
     // Send email to recipient
     try {
       const purchaserN = purchaser_name || req.session.user.name || 'Someone';
@@ -4057,7 +4057,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     const gc = (await pool.query("SELECT * FROM donation_gift_cards WHERE card_code=$1 AND status='active'", [card_code])).rows[0];
     if (!gc) return res.send(renderPage('Invalid Gift Card', '<div style="text-align:center;padding:40px"><h2 style="color:#ef4444">Invalid or Already Used</h2><p>This gift card code is not valid or has already been redeemed.</p><a href="/gift-cards/redeem" class="btn">Try Again</a></div>', req.session.user));
     await pool.query("UPDATE donation_gift_cards SET status='redeemed', redeemed_by=$1, redeemed_at=NOW() WHERE id=$2 AND tenant_id=$3", [req.session.user.email, gc.id, gc.tenant_id]);
-    await audit(req, 'gift_card_redeemed', 'gift_card_redemptions', gc.id);
+    await audit(req.session.user.email, 'gift_card_redeemed', 'gift_card_redemptions id=' + gc.id);
     // Add to user's donor balance or create a credit
     await pool.query(`INSERT INTO donor_profiles(tenant_id,user_email,full_name,gift_card_balance) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id, user_email) DO UPDATE SET gift_card_balance=COALESCE(gift_card_balance,0)+$4`,
       [gc.tenant_id, req.session.user.email, req.session.user.name||'', gc.amount]);
@@ -4161,7 +4161,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     await pool.query('INSERT INTO challenge_participants(tenant_id,challenge_id,campaign_id) VALUES($1,$2,$3) ON CONFLICT (challenge_id, campaign_id) DO NOTHING',
       [t, req.params.id, campaign_id]);
     const result = await pool.query('SELECT id FROM challenge_participants WHERE tenant_id=$1 AND challenge_id=$2 AND campaign_id=$3', [t, req.params.id, campaign_id]);
-    if (result.rows[0]) await audit(req, 'challenge_joined', 'campaign_challenge_participants', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'challenge_joined', 'campaign_challenge_participants id=' + result.rows[0].id);
     await pool.query('UPDATE campaign_challenges SET participant_count=(SELECT COUNT(*) FROM challenge_participants WHERE challenge_id=$1) WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
     res.redirect('/challenges/'+req.params.id);
   }));
@@ -4207,7 +4207,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     await pool.query('INSERT INTO campaign_ambassadors(tenant_id,campaign_id,ambassador_name,ambassador_email,motivation,promotion_plan,social_reach) VALUES($1,$2,$3,$4,$5,$6,$7)',
       [t, req.params.id, ambassador_name, req.session.user.email, motivation||'', promotion_plan||'', social_reach||0]);
     const result = await pool.query('SELECT id FROM campaign_ambassadors WHERE tenant_id=$1 AND campaign_id=$2 AND ambassador_email=$3 ORDER BY created_at DESC LIMIT 1', [t, req.params.id, req.session.user.email]);
-    if (result.rows[0]) await audit(req, 'ambassador_created', 'campaign_ambassadors', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'ambassador_created', 'campaign_ambassadors id=' + result.rows[0].id);
     res.redirect('/campaigns/'+req.params.id+'/ambassadors');
   }));
 
@@ -4347,7 +4347,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
     await pool.query('INSERT INTO campaign_community_posts(tenant_id,campaign_id,author_name,author_email,title,post_type,content) VALUES($1,$2,$3,$4,$5,$6,$7)',
       [t, req.params.id, author_name, req.session.user.email, title, post_type||'discussion', content]);
     const result = await pool.query('SELECT id FROM campaign_community_posts WHERE tenant_id=$1 AND campaign_id=$2 AND author_email=$3 ORDER BY created_at DESC LIMIT 1', [t, req.params.id, req.session.user.email]);
-    if (result.rows[0]) await audit(req, 'community_post_created', 'campaign_community_posts', result.rows[0].id);
+    if (result.rows[0]) await audit(req.session.user.email, 'community_post_created', 'campaign_community_posts id=' + result.rows[0].id);
     res.redirect('/campaigns/'+req.params.id+'/community');
   }));
 
@@ -4567,7 +4567,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
         [referred_email, referred_name||'', 'signed_up', ref.id, req.session.user.tenant_id]);
       await pool.query('UPDATE fundraising_campaigns SET referral_count=referral_count+1 WHERE id=$1 AND tenant_id=$2', [ref.campaign_id, req.session.user.tenant_id]);
       const result = await pool.query('SELECT id FROM donor_referrals WHERE id=$1', [ref.id]);
-      if (result.rows[0]) await audit(req, 'referral_tracked', 'donor_referrals', result.rows[0].id);
+      if (result.rows[0]) await audit(req.session.user.email, 'referral_tracked', 'donor_referrals id=' + result.rows[0].id);
       res.json({ success: true, message: 'Referral tracked successfully' });
     } catch(e) { res.status(500).json({ error: e.message }); }
   }));
@@ -4660,7 +4660,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       await pool.query('INSERT INTO campaign_auctions(tenant_id,campaign_id,item_name,description,image_url,starting_bid,current_bid,bid_increment,reserve_price,buy_now_price,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11)',
         [c.tenant_id, req.params.id, req.body.item_name, req.body.description||'', req.body.image_url||'', parseInt(req.body.starting_bid)||50000, parseInt(req.body.bid_increment)||10000, parseInt(req.body.reserve_price)||null, parseInt(req.body.buy_now_price)||null, req.body.start_date, req.body.end_date]);
       const result = await pool.query('SELECT id FROM campaign_auctions WHERE tenant_id=$1 AND campaign_id=$2 ORDER BY created_at DESC LIMIT 1', [c.tenant_id, req.params.id]);
-      if (result.rows[0]) await audit(req, 'auction_created', 'campaign_auctions', result.rows[0].id);
+      if (result.rows[0]) await audit(req.session.user.email, 'auction_created', 'campaign_auctions id=' + result.rows[0].id);
       await pool.query('UPDATE fundraising_campaigns SET has_auctions=true, auction_count=auction_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, c.tenant_id]);
       res.redirect('/campaigns/'+req.params.id+'/auctions');
     } catch(e) { res.status(500).send('Error: '+e.message); }
@@ -4708,7 +4708,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       await pool.query('INSERT INTO auction_bids(tenant_id,auction_id,campaign_id,bidder_name,bidder_email,bid_amount,is_winning) VALUES($1,$2,$3,$4,$5,$6,true)',
         [tenant_id, auction.id, req.params.campaignId, req.body.bidder_name, req.body.bidder_email, bidAmount]);
       const result = await pool.query('SELECT id FROM auction_bids WHERE tenant_id=$1 AND auction_id=$2 AND bidder_email=$3 ORDER BY created_at DESC LIMIT 1', [tenant_id, auction.id, req.body.bidder_email]);
-      if (result.rows[0]) await audit(req, 'bid_placed', 'auction_bids', result.rows[0].id);
+      if (result.rows[0]) await audit(req.session.user.email, 'bid_placed', 'auction_bids id=' + result.rows[0].id);
       // Update auction current bid
       await pool.query('UPDATE campaign_auctions SET current_bid=$1, current_bidder=$2, current_bidder_email=$3, total_bids=total_bids+1 WHERE id=$4 AND tenant_id=$5',
         [bidAmount, req.body.bidder_name, req.body.bidder_email, auction.id, tenant_id]);
@@ -4767,7 +4767,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       await pool.query('INSERT INTO campaign_pledges(tenant_id,campaign_id,pledgor_name,pledgor_email,pledgor_phone,pledged_amount,pledge_date,expected_fulfillment_date,notes) VALUES($1,$2,$3,$4,$5,$6,CURRENT_DATE,$7,$8)',
         [c.tenant_id, req.params.id, req.body.pledgor_name, req.body.pledgor_email, req.body.pledgor_phone||'', parseInt(req.body.pledged_amount), req.body.expected_fulfillment_date, req.body.notes||'']);
       const result = await pool.query('SELECT id FROM campaign_pledges WHERE tenant_id=$1 AND campaign_id=$2 AND pledgor_email=$3 ORDER BY created_at DESC LIMIT 1', [c.tenant_id, req.params.id, req.body.pledgor_email]);
-      if (result.rows[0]) await audit(req, 'pledge_created', 'campaign_pledges', result.rows[0].id);
+      if (result.rows[0]) await audit(req.session.user.email, 'pledge_created', 'campaign_pledges id=' + result.rows[0].id);
       await pool.query('UPDATE fundraising_campaigns SET has_pledges=true, pledge_total=pledge_total+$1 WHERE id=$2 AND tenant_id=$3', [parseInt(req.body.pledged_amount), req.params.id, c.tenant_id]);
       res.redirect('/campaigns/'+req.params.id+'/pledges');
     } catch(e) { res.status(500).send('Error: '+e.message); }
@@ -4818,7 +4818,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       await pool.query('INSERT INTO campaign_social_posts(tenant_id,campaign_id,platform,content,image_url,link_url,hashtags,scheduled_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
         [c.tenant_id, req.params.id, req.body.platform, req.body.content, req.body.image_url||'', req.body.link_url||'', hashtags, req.body.scheduled_at, req.session.user?.email||'']);
       const result = await pool.query('SELECT id FROM campaign_social_posts WHERE tenant_id=$1 AND campaign_id=$2 AND created_by=$3 ORDER BY created_at DESC LIMIT 1', [c.tenant_id, req.params.id, req.session.user?.email||'']);
-      if (result.rows[0]) await audit(req, 'social_post_created', 'campaign_social_posts', result.rows[0].id);
+      if (result.rows[0]) await audit(req.session.user.email, 'social_post_created', 'campaign_social_posts id=' + result.rows[0].id);
       res.redirect('/campaigns/'+req.params.id+'/social-posts');
     } catch(e) { res.status(500).send('Error: '+e.message); }
   }));
@@ -4876,7 +4876,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
       await pool.query('INSERT INTO donor_tributes(tenant_id,campaign_id,tribute_type,honoree_name,honoree_email,honoree_relationship,tribute_message,notify_honoree,donor_name,donor_email) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
         [c.tenant_id, req.params.id, req.body.tribute_type, req.body.honoree_name, req.body.honoree_email||'', req.body.honoree_relationship||'', req.body.tribute_message, req.body.notify_honoree==='true', req.body.donor_name, req.body.donor_email]);
       const result = await pool.query('SELECT id FROM donor_tributes WHERE tenant_id=$1 AND campaign_id=$2 AND donor_email=$3 ORDER BY created_at DESC LIMIT 1', [c.tenant_id, req.params.id, req.body.donor_email]);
-      if (result.rows[0]) await audit(req, 'tribute_created', 'donor_tributes', result.rows[0].id);
+      if (result.rows[0]) await audit(req.session.user.email, 'tribute_created', 'donor_tributes id=' + result.rows[0].id);
       await pool.query('UPDATE fundraising_campaigns SET has_tributes=true, tribute_count=tribute_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, c.tenant_id]);
       // Notify honoree if requested
       if (req.body.notify_honoree === 'true' && req.body.honoree_email) {

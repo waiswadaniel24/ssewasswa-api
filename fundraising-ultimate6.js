@@ -510,7 +510,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO integration_configs (tenant_id, integration_type, name, config_json, credentials_encrypted, is_active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, tenant_id, integration_type, name, config_json, is_active, last_sync_at, sync_status',
       [t, esc(integration_type), esc(name), JSON.stringify(config_json || {}), credentials_encrypted ? esc(credentials_encrypted) : null, is_active !== undefined ? is_active : true]
     );
-    await audit(req, 'integration_created', 'platform_integrations', result.rows[0].id);
+    await audit(req.session.user.email, 'integration_created', 'platform_integrations id=' + result.rows[0].id);
     await audit(req.session.user.email, 'integration_created', 'Created integration: ' + esc(name));
     res.json(result.rows[0]);
   }));
@@ -524,7 +524,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [integration_type ? esc(integration_type) : null, name ? esc(name) : null, config_json ? JSON.stringify(config_json) : null, credentials_encrypted ? esc(credentials_encrypted) : null, is_active !== undefined ? is_active : null, req.params.id, t]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Integration not found' });
-    await audit(req, 'integration_updated', 'platform_integrations', req.params.id);
+    await audit(req.session.user.email, 'integration_updated', 'platform_integrations id=' + req.params.id);
     await audit(req.session.user.email, 'integration_updated', 'Updated integration #' + req.params.id);
     res.json(result.rows[0]);
   }));
@@ -534,7 +534,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const t = req.session.user.tenant_id;
     const result = await pool.query('DELETE FROM integration_configs WHERE id=$1 AND tenant_id=$2 RETURNING *', [req.params.id, t]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Integration not found' });
-    await audit(req, 'integration_deleted', 'platform_integrations', req.params.id);
+    await audit(req.session.user.email, 'integration_deleted', 'platform_integrations id=' + req.params.id);
     await audit(req.session.user.email, 'integration_deleted', 'Deleted integration #' + req.params.id);
     res.json({ success: true });
   }));
@@ -555,7 +555,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Simulate sync completion
     await pool.query('UPDATE integration_configs SET sync_status=$1, last_sync_at=NOW() WHERE id=$2 AND tenant_id=$3', ['success', config.id, t]);
     await pool.query('UPDATE integration_sync_log SET status=$1, records_processed=$2, completed_at=NOW() WHERE id=$3 AND tenant_id=$4', ['completed', 0, log.rows[0].id, t]);
-    await audit(req, 'integration_synced', 'platform_integrations', req.params.id);
+    await audit(req.session.user.email, 'integration_synced', 'platform_integrations id=' + req.params.id);
     await audit(req.session.user.email, 'integration_sync_triggered', 'Triggered sync for integration #' + req.params.id);
     res.json({ success: true, log: log.rows[0] });
   }));
@@ -616,7 +616,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO crm_sync_configs (tenant_id, crm_type, api_url, field_mapping_json, sync_frequency, is_active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [t, esc(crm_type), api_url ? esc(api_url) : null, JSON.stringify(field_mapping_json || {}), sync_frequency || 'manual', is_active !== undefined ? is_active : true]
     );
-    await audit(req, 'crm_sync_created', 'crm_sync_configs', result.rows[0].id);
+    await audit(req.session.user.email, 'crm_sync_created', 'crm_sync_configs id=' + result.rows[0].id);
     await audit(req.session.user.email, 'crm_sync_config_created', 'Created CRM sync config for ' + esc(crm_type));
     res.json(result.rows[0]);
   }));
@@ -636,7 +636,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     await pool.query('UPDATE crm_sync_configs SET last_sync=NOW() WHERE id=$1 AND tenant_id=$2', [config.id, t]);
     // Process the queue item
     await pool.query('UPDATE crm_sync_queue SET status=$1, attempts=attempts+1 WHERE id=$2 AND tenant_id=$3', ['completed', queueResult.rows[0].id, t]);
-    await audit(req, 'crm_sync_executed', 'crm_sync_configs', req.params.id);
+    await audit(req.session.user.email, 'crm_sync_executed', 'crm_sync_configs id=' + req.params.id);
     await audit(req.session.user.email, 'crm_sync_triggered', 'Triggered CRM sync for config #' + req.params.id);
     res.json({ success: true, queue_item: queueResult.rows[0] });
   }));
@@ -670,7 +670,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'UPDATE crm_sync_configs SET field_mapping_json=$1 WHERE id=$2 AND tenant_id=$3 RETURNING *',
       [JSON.stringify(field_mapping_json), req.params.id, t]
     );
-    await audit(req, 'crm_fields_mapped', 'crm_field_mappings', result.rows[0]?.id);
+    await audit(req.session.user.email, 'crm_fields_mapped', 'crm_field_mappings id=' + result.rows[0]?.id);
     await audit(req.session.user.email, 'crm_field_mapping_updated', 'Updated field mapping for CRM config #' + req.params.id);
     res.json(result.rows[0]);
   }));
@@ -697,7 +697,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO email_marketing_configs (tenant_id, provider, api_key_encrypted, list_id, sync_donors, sync_frequency, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, tenant_id, provider, list_id, sync_donors, sync_frequency, last_sync, is_active',
       [t, esc(provider), api_key_encrypted ? esc(api_key_encrypted) : null, list_id ? esc(list_id) : null, sync_donors !== undefined ? sync_donors : true, sync_frequency || 'daily', is_active !== undefined ? is_active : true]
     );
-    await audit(req, 'email_integration_created', 'email_marketing_configs', result.rows[0].id);
+    await audit(req.session.user.email, 'email_integration_created', 'email_marketing_configs id=' + result.rows[0].id);
     await audit(req.session.user.email, 'email_marketing_config_created', 'Created email marketing config for ' + esc(provider));
     res.json(result.rows[0]);
   }));
@@ -712,7 +712,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const donorCount = (await pool.query('SELECT COUNT(*) as cnt FROM donors WHERE tenant_id=$1', [t])).rows[0].cnt;
     // Update last_sync
     await pool.query('UPDATE email_marketing_configs SET last_sync=NOW() WHERE id=$1 AND tenant_id=$2', [config.id, t]);
-    await audit(req, 'email_sync_executed', 'email_marketing_configs', req.params.id);
+    await audit(req.session.user.email, 'email_sync_executed', 'email_marketing_configs id=' + req.params.id);
     await audit(req.session.user.email, 'email_marketing_sync', 'Synced ' + donorCount + ' donors to ' + config.provider);
     res.json({ success: true, donors_synced: parseInt(donorCount), provider: config.provider });
   }));
@@ -751,7 +751,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO accounting_sync_configs (tenant_id, software_type, api_url, credentials_encrypted, sync_categories_json, auto_sync, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
       [t, esc(software_type), api_url ? esc(api_url) : null, credentials_encrypted ? esc(credentials_encrypted) : null, JSON.stringify(sync_categories_json || []), auto_sync || false, is_active !== undefined ? is_active : true]
     );
-    await audit(req, 'accounting_sync_created', 'accounting_sync_configs', result.rows[0].id);
+    await audit(req.session.user.email, 'accounting_sync_created', 'accounting_sync_configs id=' + result.rows[0].id);
     await audit(req.session.user.email, 'accounting_sync_created', 'Created accounting sync for ' + esc(software_type));
     res.json(result.rows[0]);
   }));
@@ -770,7 +770,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Simulate push completion
     await pool.query('UPDATE accounting_sync_records SET status=$1, external_id=$2 WHERE id=$3 AND tenant_id=$4', ['synced', 'EXT-' + Date.now(), syncRecord.rows[0].id, t]);
     await pool.query('UPDATE accounting_sync_configs SET last_sync=NOW() WHERE id=$1 AND tenant_id=$2', [config.id, t]);
-    await audit(req, 'accounting_push_executed', 'accounting_sync_configs', req.params.id);
+    await audit(req.session.user.email, 'accounting_push_executed', 'accounting_sync_configs id=' + req.params.id);
     await audit(req.session.user.email, 'accounting_push', 'Pushed ' + (record_type || 'donation') + ' to ' + config.software_type);
     res.json({ success: true, record: syncRecord.rows[0] });
   }));
@@ -782,7 +782,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!config) return res.status(404).json({ error: 'Accounting sync config not found' });
     if (!config.is_active) return res.status(400).json({ error: 'Config is not active' });
     await pool.query('UPDATE accounting_sync_configs SET last_sync=NOW() WHERE id=$1 AND tenant_id=$2', [config.id, t]);
-    await audit(req, 'accounting_pull_executed', 'accounting_sync_configs', req.params.id);
+    await audit(req.session.user.email, 'accounting_pull_executed', 'accounting_sync_configs id=' + req.params.id);
     await audit(req.session.user.email, 'accounting_pull', 'Pulled data from ' + config.software_type);
     res.json({ success: true, message: 'Data pull initiated from ' + config.software_type });
   }));
@@ -825,7 +825,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO webhook_endpoints_pro (tenant_id, url, events_json, secret, is_active) VALUES ($1,$2,$3,$4,$5) RETURNING *',
       [t, esc(url), JSON.stringify(events_json || []), esc(generatedSecret), is_active !== undefined ? is_active : true]
     );
-    await audit(req, 'webhook_created', 'webhook_endpoints', result.rows[0].id);
+    await audit(req.session.user.email, 'webhook_created', 'webhook_endpoints id=' + result.rows[0].id);
     await audit(req.session.user.email, 'webhook_endpoint_created', 'Created webhook endpoint: ' + esc(url));
     res.json(result.rows[0]);
   }));
@@ -839,7 +839,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       [url ? esc(url) : null, events_json ? JSON.stringify(events_json) : null, secret ? esc(secret) : null, is_active !== undefined ? is_active : null, req.params.id, t]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Webhook endpoint not found' });
-    await audit(req, 'webhook_updated', 'webhook_endpoints', req.params.id);
+    await audit(req.session.user.email, 'webhook_updated', 'webhook_endpoints id=' + req.params.id);
     await audit(req.session.user.email, 'webhook_endpoint_updated', 'Updated webhook endpoint #' + req.params.id);
     res.json(result.rows[0]);
   }));
@@ -849,7 +849,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const t = req.session.user.tenant_id;
     const result = await pool.query('DELETE FROM webhook_endpoints_pro WHERE id=$1 AND tenant_id=$2 RETURNING *', [req.params.id, t]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Webhook endpoint not found' });
-    await audit(req, 'webhook_deleted', 'webhook_endpoints', req.params.id);
+    await audit(req.session.user.email, 'webhook_deleted', 'webhook_endpoints id=' + req.params.id);
     await audit(req.session.user.email, 'webhook_endpoint_deleted', 'Deleted webhook endpoint #' + req.params.id);
     res.json({ success: true });
   }));
@@ -935,7 +935,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO api_gateway_keys_pro (tenant_id, key_hash, name, permissions_json, rate_limit, expires_at, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, tenant_id, name, permissions_json, rate_limit, usage_count, last_used, expires_at, is_active',
       [t, keyHash, esc(name), JSON.stringify(permissions_json || []), rate_limit || 1000, expires_at || null, is_active !== undefined ? is_active : true]
     );
-    await audit(req, 'api_key_created', 'api_gateway_keys', result.rows[0].id);
+    await audit(req.session.user.email, 'api_key_created', 'api_gateway_keys id=' + result.rows[0].id);
     await audit(req.session.user.email, 'api_key_created', 'Created API key: ' + esc(name));
     res.json({ ...result.rows[0], raw_key: rawKey });
   }));
@@ -952,7 +952,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const t = req.session.user.tenant_id;
     const result = await pool.query('DELETE FROM api_gateway_keys_pro WHERE id=$1 AND tenant_id=$2 RETURNING id, name', [req.params.id, t]);
     if (!result.rows[0]) return res.status(404).json({ error: 'API key not found' });
-    await audit(req, 'api_key_deleted', 'api_gateway_keys', req.params.id);
+    await audit(req.session.user.email, 'api_key_deleted', 'api_gateway_keys id=' + req.params.id);
     await audit(req.session.user.email, 'api_key_revoked', 'Revoked API key: ' + result.rows[0].name);
     res.json({ success: true });
   }));
@@ -1011,7 +1011,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO data_import_jobs (tenant_id, filename, source_format, field_mapping_json, total_rows, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [t, esc(filename), source_format || 'csv', JSON.stringify(field_mapping_json || {}), total_rows || 0, esc(req.session.user.email)]
     );
-    await audit(req, 'data_import_created', 'data_import_jobs', result.rows[0].id);
+    await audit(req.session.user.email, 'data_import_created', 'data_import_jobs id=' + result.rows[0].id);
     await audit(req.session.user.email, 'import_job_created', 'Created import job: ' + esc(filename));
     res.json(result.rows[0]);
   }));
@@ -1041,7 +1041,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'UPDATE data_import_jobs SET field_mapping_json=$1, status=$2 WHERE id=$3 AND tenant_id=$4 RETURNING *',
       [JSON.stringify(field_mapping_json), 'mapping', req.params.id, t]
     );
-    await audit(req, 'data_import_mapped', 'data_import_jobs', req.params.id);
+    await audit(req.session.user.email, 'data_import_mapped', 'data_import_jobs id=' + req.params.id);
     res.json(result.rows[0]);
   }));
 
@@ -1058,7 +1058,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const errorCount = 0;
     await pool.query('UPDATE data_import_jobs SET status=$1, processed_rows=$2, errors_count=$3, completed_at=NOW() WHERE id=$4 AND tenant_id=$5',
       ['completed', processedRows, errorCount, job.id, t]);
-    await audit(req, 'data_import_executed', 'data_import_jobs', req.params.id);
+    await audit(req.session.user.email, 'data_import_executed', 'data_import_jobs id=' + req.params.id);
     await audit(req.session.user.email, 'import_job_executed', 'Executed import job #' + req.params.id + ' (' + processedRows + ' rows)');
     const updated = (await pool.query('SELECT * FROM data_import_jobs WHERE id=$1 AND tenant_id=$2', [job.id, t])).rows[0];
     res.json(updated);
@@ -1087,7 +1087,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const fileUrl = '/downloads/export_' + result.rows[0].id + '.' + (format || 'csv');
     await pool.query('UPDATE data_export_jobs SET status=$1, file_url=$2, started_at=NOW(), completed_at=NOW() WHERE id=$3 AND tenant_id=$4',
       ['completed', fileUrl, result.rows[0].id, t]);
-    await audit(req, 'data_export_created', 'data_export_jobs', result.rows[0].id);
+    await audit(req.session.user.email, 'data_export_created', 'data_export_jobs id=' + result.rows[0].id);
     await audit(req.session.user.email, 'export_job_created', 'Created export job for ' + esc(export_type));
     const updated = (await pool.query('SELECT * FROM data_export_jobs WHERE id=$1 AND tenant_id=$2', [result.rows[0].id, t])).rows[0];
     res.json(updated);
@@ -1125,7 +1125,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         'INSERT INTO whitelabel_pro_config (tenant_id, primary_color, secondary_color, logo_url, favicon_url, font_family, custom_css, custom_js, footer_text) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
         [t, primary_color || '#10b981', secondary_color || '#059669', logo_url || null, favicon_url || null, font_family || 'Inter', custom_css || null, custom_js || null, footer_text || 'Powered by Ssewasswa']
       );
-      await audit(req, 'whitelabel_updated', 'whitelabel_configs', result.rows[0]?.id || req.session.user.tenant_id);
+      await audit(req.session.user.email, 'whitelabel_updated', 'whitelabel_configs id=' + result.rows[0]?.id || req.session.user.tenant_id);
     await audit(req.session.user.email, 'whitelabel_config_created', 'Created whitelabel configuration');
       return res.json(result.rows[0]);
     }
@@ -1133,7 +1133,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'UPDATE whitelabel_pro_config SET primary_color=COALESCE($1,primary_color), secondary_color=COALESCE($2,secondary_color), logo_url=COALESCE($3,logo_url), favicon_url=COALESCE($4,favicon_url), font_family=COALESCE($5,font_family), custom_css=COALESCE($6,custom_css), custom_js=COALESCE($7,custom_js), footer_text=COALESCE($8,footer_text) WHERE tenant_id=$9 RETURNING *',
       [primary_color || null, secondary_color || null, logo_url || null, favicon_url || null, font_family || null, custom_css || null, custom_js || null, footer_text || null, t]
     );
-    await audit(req, 'whitelabel_updated', 'whitelabel_configs', result.rows[0]?.id || req.session.user.tenant_id);
+    await audit(req.session.user.email, 'whitelabel_updated', 'whitelabel_configs id=' + result.rows[0]?.id || req.session.user.tenant_id);
     await audit(req.session.user.email, 'whitelabel_config_updated', 'Updated whitelabel configuration');
     res.json(result.rows[0]);
   }));
@@ -1180,7 +1180,7 @@ ${config.custom_css || ''}
         'INSERT INTO language_configs (tenant_id, primary_language, supported_languages_json, auto_translate) VALUES ($1,$2,$3,$4) RETURNING *',
         [t, primary_language || 'en', JSON.stringify(supported_languages_json || ['en','fr','sw']), auto_translate || false]
       );
-      await audit(req, 'language_config_updated', 'language_configs', result.rows[0]?.id || req.session.user.tenant_id);
+      await audit(req.session.user.email, 'language_config_updated', 'language_configs id=' + result.rows[0]?.id || req.session.user.tenant_id);
     await audit(req.session.user.email, 'language_config_created', 'Created language configuration');
       return res.json(result.rows[0]);
     }
@@ -1188,7 +1188,7 @@ ${config.custom_css || ''}
       'UPDATE language_configs SET primary_language=COALESCE($1,primary_language), supported_languages_json=COALESCE($2,supported_languages_json), auto_translate=COALESCE($3,auto_translate) WHERE tenant_id=$4 RETURNING *',
       [primary_language || null, supported_languages_json ? JSON.stringify(supported_languages_json) : null, auto_translate !== undefined ? auto_translate : null, t]
     );
-    await audit(req, 'language_config_updated', 'language_configs', result.rows[0]?.id || req.session.user.tenant_id);
+    await audit(req.session.user.email, 'language_config_updated', 'language_configs id=' + result.rows[0]?.id || req.session.user.tenant_id);
     await audit(req.session.user.email, 'language_config_updated', 'Updated language configuration');
     res.json(result.rows[0]);
   }));
@@ -1234,7 +1234,7 @@ ${config.custom_css || ''}
       'INSERT INTO translations (tenant_id, entity_type, entity_id, language_code, field_name, translated_text) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [t, esc(entity_type), entity_id || 0, esc(language_code), esc(field_name), esc(translated_text)]
     );
-    await audit(req, 'translation_created', 'translations', result.rows[0].id);
+    await audit(req.session.user.email, 'translation_created', 'translations id=' + result.rows[0].id);
     await audit(req.session.user.email, 'translation_created', 'Created translation for ' + entity_type + ' #' + (entity_id || 0) + ' (' + language_code + ')');
     res.json(result.rows[0]);
   }));
@@ -1249,7 +1249,7 @@ ${config.custom_css || ''}
       [esc(translated_text), req.params.id, t]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Translation not found' });
-    await audit(req, 'translation_updated', 'translations', req.params.id);
+    await audit(req.session.user.email, 'translation_updated', 'translations id=' + req.params.id);
     await audit(req.session.user.email, 'translation_updated', 'Updated translation #' + req.params.id);
     res.json(result.rows[0]);
   }));
@@ -1279,7 +1279,7 @@ ${config.custom_css || ''}
       'INSERT INTO custom_domains (tenant_id, domain, ssl_status, dns_verified, verification_token, is_active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [t, esc(domain), 'pending', false, verificationToken, false]
     );
-    await audit(req, 'custom_domain_created', 'custom_domains', result.rows[0].id);
+    await audit(req.session.user.email, 'custom_domain_created', 'custom_domains id=' + result.rows[0].id);
     await audit(req.session.user.email, 'custom_domain_added', 'Added custom domain: ' + esc(domain));
     res.json(result.rows[0]);
   }));
@@ -1289,7 +1289,7 @@ ${config.custom_css || ''}
     const t = req.session.user.tenant_id;
     const result = await pool.query('DELETE FROM custom_domains WHERE id=$1 AND tenant_id=$2 RETURNING *', [req.params.id, t]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Custom domain not found' });
-    await audit(req, 'custom_domain_deleted', 'custom_domains', req.params.id);
+    await audit(req.session.user.email, 'custom_domain_deleted', 'custom_domains id=' + req.params.id);
     await audit(req.session.user.email, 'custom_domain_removed', 'Removed custom domain: ' + result.rows[0].domain);
     res.json({ success: true });
   }));
@@ -1305,7 +1305,7 @@ ${config.custom_css || ''}
     if (dnsVerified) {
       await pool.query('UPDATE custom_domains SET is_active=true WHERE id=$1 AND tenant_id=$2', [domain.id, t]);
     }
-    await audit(req, 'dns_verification_requested', 'custom_domains', req.params.id);
+    await audit(req.session.user.email, 'dns_verification_requested', 'custom_domains id=' + req.params.id);
     await audit(req.session.user.email, 'dns_verification', 'DNS verification for ' + domain.domain + ': ' + (dnsVerified ? 'success' : 'failed'));
     res.json({ success: true, dns_verified: dnsVerified, domain: domain.domain });
   }));
@@ -1319,7 +1319,7 @@ ${config.custom_css || ''}
     // Simulate SSL verification
     const sslActive = true;
     await pool.query('UPDATE custom_domains SET ssl_status=$1 WHERE id=$2 AND tenant_id=$3', [sslActive ? 'active' : 'error', domain.id, t]);
-    await audit(req, 'ssl_verification_requested', 'custom_domains', req.params.id);
+    await audit(req.session.user.email, 'ssl_verification_requested', 'custom_domains id=' + req.params.id);
     await audit(req.session.user.email, 'ssl_verification', 'SSL verification for ' + domain.domain + ': ' + (sslActive ? 'active' : 'failed'));
     res.json({ success: true, ssl_status: sslActive ? 'active' : 'error', domain: domain.domain });
   }));
@@ -1348,7 +1348,7 @@ ${config.custom_css || ''}
       'INSERT INTO sso_configs (tenant_id, provider, client_id, client_secret_encrypted, authorize_url, token_url, userinfo_url, scopes, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, tenant_id, provider, client_id, authorize_url, token_url, userinfo_url, scopes, is_active',
       [t, esc(provider), esc(client_id), esc(client_secret_encrypted), authorize_url ? esc(authorize_url) : null, token_url ? esc(token_url) : null, userinfo_url ? esc(userinfo_url) : null, scopes || 'openid profile email', is_active !== undefined ? is_active : true]
     );
-    await audit(req, 'sso_config_created', 'sso_configs', result.rows[0].id);
+    await audit(req.session.user.email, 'sso_config_created', 'sso_configs id=' + result.rows[0].id);
     await audit(req.session.user.email, 'sso_config_created', 'Created SSO config for ' + esc(provider));
     res.json(result.rows[0]);
   }));
@@ -1362,7 +1362,7 @@ ${config.custom_css || ''}
       [provider ? esc(provider) : null, client_id ? esc(client_id) : null, client_secret_encrypted ? esc(client_secret_encrypted) : null, authorize_url ? esc(authorize_url) : null, token_url ? esc(token_url) : null, userinfo_url ? esc(userinfo_url) : null, scopes || null, is_active !== undefined ? is_active : null, req.params.id, t]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'SSO config not found' });
-    await audit(req, 'sso_config_updated', 'sso_configs', req.params.id);
+    await audit(req.session.user.email, 'sso_config_updated', 'sso_configs id=' + req.params.id);
     await audit(req.session.user.email, 'sso_config_updated', 'Updated SSO config #' + req.params.id);
     res.json(result.rows[0]);
   }));
@@ -1372,7 +1372,7 @@ ${config.custom_css || ''}
     const t = req.session.user.tenant_id;
     const result = await pool.query('DELETE FROM sso_configs WHERE id=$1 AND tenant_id=$2 RETURNING id, provider', [req.params.id, t]);
     if (!result.rows[0]) return res.status(404).json({ error: 'SSO config not found' });
-    await audit(req, 'sso_config_deleted', 'sso_configs', req.params.id);
+    await audit(req.session.user.email, 'sso_config_deleted', 'sso_configs id=' + req.params.id);
     await audit(req.session.user.email, 'sso_config_deleted', 'Deleted SSO config for ' + result.rows[0].provider);
     res.json({ success: true });
   }));
@@ -1427,7 +1427,7 @@ ${config.custom_css || ''}
         [t, esc(donor_email), selectedMethod, esc(secret), JSON.stringify(backupCodes), false]
       );
     }
-    await audit(req, 'donor_2fa_setup', 'donor_2fa_configs', existing?.id);
+    await audit(req.session.user.email, 'donor_2fa_setup', 'donor_2fa_configs id=' + existing?.id);
     await audit(req.session.user.email, 'donor_2fa_setup', '2FA setup initiated for ' + esc(donor_email) + ' (' + selectedMethod + ')');
     // Don't return the secret in production, but for this API we include it for verification flow
     res.json({ success: true, method: selectedMethod, backup_codes: backupCodes, message: 'Verify with a code to enable 2FA' });
@@ -1459,7 +1459,7 @@ ${config.custom_css || ''}
         const updatedCodes = backupCodes.filter(c => c !== code);
         await pool.query('UPDATE donor_2fa_configs SET backup_codes_json=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(updatedCodes), config.id, t]);
       }
-      await audit(req, 'donor_2fa_verified', 'donor_2fa_configs', req.params.id || 'verify');
+      await audit(req.session.user.email, 'donor_2fa_verified', 'donor_2fa_configs id=' + req.params.id || 'verify');
     await audit(req.session.user.email, 'donor_2fa_verified', '2FA verified for ' + esc(donor_email));
       res.json({ success: true, is_enabled: true });
     } else {
@@ -1485,7 +1485,7 @@ ${config.custom_css || ''}
     );
     if (!isValid) return res.status(400).json({ error: 'Valid verification code required to disable 2FA' });
     await pool.query('UPDATE donor_2fa_configs SET is_enabled=false WHERE id=$1 AND tenant_id=$2', [config.id, t]);
-    await audit(req, 'donor_2fa_disabled', 'donor_2fa_configs', req.params.id || 'disable');
+    await audit(req.session.user.email, 'donor_2fa_disabled', 'donor_2fa_configs id=' + req.params.id || 'disable');
     await audit(req.session.user.email, 'donor_2fa_disabled', '2FA disabled for ' + esc(donor_email));
     // Notify donor
     notify(t, donor_email, '2FA Disabled', 'Two-factor authentication has been disabled on your account', 'security');
@@ -1526,8 +1526,8 @@ ${config.custom_css || ''}
       )).rows[0];
       if (existing) {
         await pool.query('UPDATE privacy_consent_records SET withdrawn_at=NOW() WHERE id=$1 AND tenant_id=$2', [existing.id, t]);
-        await audit(req, 'privacy_consent_updated', 'privacy_consents', req.params.id);
-    await audit(req, 'privacy_consent_updated', 'privacy_consents', req.params.id);
+        await audit(req.session.user.email, 'privacy_consent_updated', 'privacy_consents id=' + req.params.id);
+    await audit(req.session.user.email, 'privacy_consent_updated', 'privacy_consents id=' + req.params.id);
     await audit(req.session.user.email, 'consent_withdrawn', 'Consent withdrawn for ' + esc(donor_email) + ' (' + consent_type + ')');
         return res.json({ success: true, action: 'withdrawn', record_id: existing.id });
       }
@@ -1536,7 +1536,7 @@ ${config.custom_css || ''}
       'INSERT INTO privacy_consent_records (tenant_id, donor_email, consent_type, consent_given, consent_text_version, ip_address) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [t, esc(donor_email), esc(consent_type), consent_given !== undefined ? consent_given : true, consent_text_version || '1.0', ip_address || req.ip || null]
     );
-    await audit(req, 'privacy_consent_given', 'privacy_consents', result.rows[0].id);
+    await audit(req.session.user.email, 'privacy_consent_given', 'privacy_consents id=' + result.rows[0].id);
     await audit(req.session.user.email, 'consent_recorded', 'Consent recorded for ' + esc(donor_email) + ' (' + consent_type + ': ' + (consent_given !== false ? 'given' : 'denied') + ')');
     res.json(result.rows[0]);
   }));
@@ -1580,7 +1580,7 @@ ${config.custom_css || ''}
         'INSERT INTO privacy_settings (tenant_id, default_consent_required, data_retention_days, allow_analytics, allow_marketing) VALUES ($1,$2,$3,$4,$5) RETURNING *',
         [t, default_consent_required !== undefined ? default_consent_required : true, data_retention_days || 365, allow_analytics || false, allow_marketing !== undefined ? allow_marketing : true]
       );
-      await audit(req, 'privacy_settings_updated', 'privacy_settings', req.session.user.tenant_id);
+      await audit(req.session.user.email, 'privacy_settings_updated', 'privacy_settings id=' + req.session.user.tenant_id);
     await audit(req.session.user.email, 'privacy_settings_created', 'Created privacy settings');
       return res.json(result.rows[0]);
     }
@@ -1588,7 +1588,7 @@ ${config.custom_css || ''}
       'UPDATE privacy_settings SET default_consent_required=COALESCE($1,default_consent_required), data_retention_days=COALESCE($2,data_retention_days), allow_analytics=COALESCE($3,allow_analytics), allow_marketing=COALESCE($4,allow_marketing) WHERE tenant_id=$5 RETURNING *',
       [default_consent_required !== undefined ? default_consent_required : null, data_retention_days || null, allow_analytics !== undefined ? allow_analytics : null, allow_marketing !== undefined ? allow_marketing : null, t]
     );
-    await audit(req, 'privacy_settings_updated', 'privacy_settings', req.session.user.tenant_id);
+    await audit(req.session.user.email, 'privacy_settings_updated', 'privacy_settings id=' + req.session.user.tenant_id);
     await audit(req.session.user.email, 'privacy_settings_updated', 'Updated privacy settings');
     res.json(result.rows[0]);
   }));
@@ -1622,7 +1622,7 @@ ${config.custom_css || ''}
       'INSERT INTO data_retention_policies (tenant_id, data_category, retention_days, action_on_expiry, is_active) VALUES ($1,$2,$3,$4,$5) RETURNING *',
       [t, esc(data_category), parseInt(retention_days), action_on_expiry || 'archive', is_active !== undefined ? is_active : true]
     );
-    await audit(req, 'retention_policy_created', 'data_retention_policies', result.rows[0].id);
+    await audit(req.session.user.email, 'retention_policy_created', 'data_retention_policies id=' + result.rows[0].id);
     await audit(req.session.user.email, 'retention_policy_created', 'Created retention policy for ' + esc(data_category) + ' (' + retention_days + ' days)');
     res.json(result.rows[0]);
   }));
@@ -1636,7 +1636,7 @@ ${config.custom_css || ''}
       [data_category ? esc(data_category) : null, retention_days ? parseInt(retention_days) : null, action_on_expiry || null, is_active !== undefined ? is_active : null, req.params.id, t]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Retention policy not found' });
-    await audit(req, 'retention_policy_updated', 'data_retention_policies', req.params.id);
+    await audit(req.session.user.email, 'retention_policy_updated', 'data_retention_policies id=' + req.params.id);
     await audit(req.session.user.email, 'retention_policy_updated', 'Updated retention policy #' + req.params.id);
     res.json(result.rows[0]);
   }));
@@ -1646,7 +1646,7 @@ ${config.custom_css || ''}
     const t = req.session.user.tenant_id;
     const result = await pool.query('DELETE FROM data_retention_policies WHERE id=$1 AND tenant_id=$2 RETURNING *', [req.params.id, t]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Retention policy not found' });
-    await audit(req, 'retention_policy_deleted', 'data_retention_policies', req.params.id);
+    await audit(req.session.user.email, 'retention_policy_deleted', 'data_retention_policies id=' + req.params.id);
     await audit(req.session.user.email, 'retention_policy_deleted', 'Deleted retention policy #' + req.params.id);
     res.json({ success: true });
   }));
@@ -1704,7 +1704,7 @@ ${config.custom_css || ''}
         records_archived: archivedCount
       });
     }
-    await audit(req, 'data_retention_executed', 'data_retention_policies', 'batch');
+    await audit(req.session.user.email, 'data_retention_executed', 'data_retention_policies batch');
     await audit(req.session.user.email, 'retention_executed', 'Executed ' + results.length + ' retention policies');
     res.json({ success: true, executed: results });
   }));
@@ -1757,7 +1757,7 @@ ${config.custom_css || ''}
     }
     // Increment download count
     await pool.query('UPDATE plugin_marketplace SET downloads=downloads+1 WHERE id=$1', [pluginId]);
-    await audit(req, 'plugin_installed', 'platform_plugins', result.rows[0].id);
+    await audit(req.session.user.email, 'plugin_installed', 'platform_plugins id=' + result.rows[0].id);
     await audit(req.session.user.email, 'plugin_installed', 'Installed plugin: ' + plugin.name + ' v' + plugin.version);
     res.json(result.rows[0]);
   }));
@@ -1769,7 +1769,7 @@ ${config.custom_css || ''}
     const plugin = (await pool.query('SELECT * FROM platform_plugins WHERE tenant_id=$1 AND plugin_id=$2', [t, pluginId])).rows[0];
     if (!plugin) return res.status(404).json({ error: 'Plugin not installed' });
     await pool.query('DELETE FROM platform_plugins WHERE tenant_id=$1 AND plugin_id=$2', [t, pluginId]);
-    await audit(req, 'plugin_uninstalled', 'platform_plugins', req.params.pluginId);
+    await audit(req.session.user.email, 'plugin_uninstalled', 'platform_plugins id=' + req.params.pluginId);
     await audit(req.session.user.email, 'plugin_uninstalled', 'Uninstalled plugin: ' + plugin.name);
     res.json({ success: true });
   }));
@@ -1785,7 +1785,7 @@ ${config.custom_css || ''}
       'UPDATE platform_plugins SET config_json=$1 WHERE id=$2 AND tenant_id=$3 RETURNING *',
       [JSON.stringify(config_json), req.params.id, t]
     );
-    await audit(req, 'plugin_config_updated', 'platform_plugins', req.params.id);
+    await audit(req.session.user.email, 'plugin_config_updated', 'platform_plugins id=' + req.params.id);
     await audit(req.session.user.email, 'plugin_config_updated', 'Updated config for plugin: ' + plugin.name);
     res.json(result.rows[0]);
   }));
@@ -1809,7 +1809,7 @@ ${config.custom_css || ''}
       'UPDATE platform_plugins SET is_active=$1 WHERE id=$2 AND tenant_id=$3 RETURNING *',
       [newActive, req.params.id, t]
     );
-    await audit(req, 'plugin_toggled', 'platform_plugins', req.params.id);
+    await audit(req.session.user.email, 'plugin_toggled', 'platform_plugins id=' + req.params.id);
     await audit(req.session.user.email, 'plugin_toggled', (newActive ? 'Activated' : 'Deactivated') + ' plugin: ' + plugin.name);
     res.json(result.rows[0]);
   }));
