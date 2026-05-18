@@ -2587,6 +2587,8 @@ if(!_isStandalone){setTimeout(function(){if(_dp){var nb=document.getElementById(
         </div>
       </div>
       <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
+      <a href="/entertainment" style="font-size:13px" title="Entertainment Hub">🎬</a>
+      <a href="/fundraising" style="font-size:13px" title="Fundraising">🎯</a>
       <div style="position:relative;display:inline-block" id="modulesDropdown">
         <button onclick="closeAllDropdowns('modules');var m=document.getElementById('modulesMenu');m.style.display=m.style.display==='none'?'block':'none'" style="background:none;border:none;cursor:pointer;color:white;font-size:14px;padding:4px 8px">${esc(uiT('nav.modules'))} ▾</button>
         <div id="modulesMenu" style="display:none;position:absolute;right:0;top:30px;width:220px;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000;padding:6px 0">
@@ -2612,7 +2614,7 @@ if(!_isStandalone){setTimeout(function(){if(_dp){var nb=document.getElementById(
         <option value="fr" ${user.language==='fr'?'selected':''}>FR</option>
       </select>
       <a href="/logout">${esc(uiT('nav.logout'))}</a>
-    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/install" style="font-size:13px;color:#10b981;font-weight:600">&#128241; Get App</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
+    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/install" style="font-size:13px;color:#10b981;font-weight:600">&#128241; Get App</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/p/entertainment" style="font-size:13px" title="Entertainment">🎬</a><a href="/p/fundraising" style="font-size:13px" title="Fundraising">🎯</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
@@ -2809,43 +2811,114 @@ app.post('/login/2fa', ah(async (req, res) => {
 
 app.get('/register', (req, res) => {
   const preType = req.query.type || '';
+  const prePlan = req.query.plan || '';
+  const preBizType = req.query.business_type || '';
+  const portalOpts = [
+    {v:'school',l:'School / Education',emoji:'School'},
+    {v:'health',l:'Health Institution (Hospital/Clinic/Pharmacy/Lab)',emoji:'Health'},
+    {v:'organization',l:'Organization / NGO / CBO',emoji:'Org'},
+    {v:'church',l:'Church / Religious Institution',emoji:'Church'},
+    {v:'business',l:'Business (see subtypes below)',emoji:'Biz'},
+    {v:'individual',l:'Individual / Personal',emoji:'Individual'},
+    {v:'public',l:'Public Portal / Community',emoji:'Public'}
+  ];
+  const bizTypes = [
+    {v:'general',l:'General Business'},
+    {v:'hotel',l:'Hotel / Lodge / Guest House'},
+    {v:'restaurant',l:'Restaurant / Cafe / Bar'},
+    {v:'retail',l:'Retail Shop / Supermarket'},
+    {v:'salon',l:'Salon / Spa / Barbershop'},
+    {v:'gym',l:'Gym / Fitness Center'},
+    {v:'hardware',l:'Hardware / Construction Store'},
+    {v:'supermarket',l:'Supermarket / Grocery'},
+    {v:'transport',l:'Transport / Logistics Company'},
+    {v:'electronics',l:'Electronics / Phone Shop'},
+    {v:'pharmacy',l:'Pharmacy / Drug Store'},
+    {v:'agriculture',l:'Agriculture / Farm'},
+    {v:'real_estate',l:'Real Estate / Property Management'},
+    {v:'other',l:'Other Business Type'}
+  ];
+  const plans = [
+    {v:'free',l:'Free',price:'UGX 0/mo',feat:'Up to 50 records, 1 user, basic reports'},
+    {v:'basic',l:'Basic',price:'UGX 50,000/mo',feat:'500 records, 5 users, inventory, POS, clinic'},
+    {v:'pro',l:'Professional (Premier)',price:'UGX 150,000/mo',feat:'50K records, SMS/email campaigns, AI, API, payroll'},
+    {v:'enterprise',l:'Enterprise',price:'Custom Pricing',feat:'Unlimited, white-label, custom domain, SLA'}
+  ];
+  const makeOpt = (val, label, sel) => `<option value="${val}" ${sel?'selected':''}>${label}</option>`;
+  const bizOptsHtml = bizTypes.map(b => makeOpt(b.v, b.l, preBizType===b.v)).join('');
+  const planRadios = plans.map(p => `
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:2px solid ${prePlan===p.v?'#059669':'#e2e8f0'};border-radius:10px;cursor:pointer;margin-bottom:8px;background:${prePlan===p.v?'#f0fdf4':'white'}">
+        <input type="radio" name="plan" value="${p.v}" ${prePlan===p.v?'checked':''} style="margin-top:4px">
+        <div><strong style="color:#1e293b">${p.l}</strong> <span style="color:#059669;font-weight:700">${p.price}</span><div style="font-size:12px;color:#64748b;margin-top:2px">${p.feat}</div></div>
+      </label>`).join('');
   res.send(renderPage('Register', `
-    <div class="card" style="max-width:450px;margin:40px auto">
-      <h2 style="text-align:center;margin-bottom:20px">Create Account</h2>
-      <form method="POST" action="/register">
-        <input name="name" placeholder="Your Full Name" required>
-        <input name="org_name" placeholder="Organization/School/Business Name" required>
-        <select name="type" required>
-          <option value="">Select Type</option>
-          <option value="school" ${preType==='school'?'selected':''}>School</option>
-          <option value="health" ${preType==='health'?'selected':''}>Health Institution (Hospital/Clinic/Pharmacy)</option>
-          <option value="organization" ${preType==='organization'?'selected':''}>Organization / NGO</option>
-          <option value="church" ${preType==='church'?'selected':''}>Church</option>
-          <option value="business" ${preType==='business'?'selected':''}>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option>
-          <option value="individual" ${preType==='individual'?'selected':''}>Individual</option>
-        </select>
-        <input name="email" type="email" placeholder="Your Email" required>
-        <input name="phone" placeholder="Phone +256..." required>
-        <input name="password" type="password" placeholder="Choose a Password (min 4 chars)" minlength="4" required>
-        <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="4" required>
-        <button class="btn" style="width:100%">Register</button>
-      </form>
+    <div style="max-width:520px;margin:30px auto">
+      <div style="text-align:center;margin-bottom:24px">
+        <h2 style="margin-bottom:6px">Create Your Account</h2>
+        <p class="muted" style="font-size:14px">Join Comfort Zone — All-in-one management platform for Africa</p>
+      </div>
+      <div class="card">
+        <form method="POST" action="/register" id="regForm">
+          <input name="name" placeholder="Your Full Name" required>
+          <input name="org_name" placeholder="Organization / Institution / Business Name" required>
+          <label style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:4px;display:block">Portal Type *</label>
+          <select name="type" id="regType" required onchange="toggleBizSubtype()">
+            <option value="">-- Select Portal Type --</option>
+            ${portalOpts.map(o => makeOpt(o.v, o.l, preType===o.v)).join('')}
+          </select>
+          <div id="bizSubtypeWrap" style="display:none;margin-top:-8px">
+            <label style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:4px;display:block">Business Subtype *</label>
+            <select name="business_type" id="regBizType">
+              <option value="">-- Select Business Type --</option>
+              ${bizOptsHtml}
+            </select>
+            <p class="muted" style="font-size:11px;margin-top:2px">Choose the specific type of business you are registering</p>
+          </div>
+          <label style="font-weight:600;font-size:14px;color:#1e293b;margin-bottom:8px;display:block">Subscription Plan *</label>
+          ${planRadios}
+          <input name="email" type="email" placeholder="Your Email" required>
+          <input name="phone" placeholder="Phone +256..." required>
+          <input name="password" type="password" placeholder="Choose a Password (min 4 chars)" minlength="4" required>
+          <input name="confirm_password" type="password" placeholder="Confirm Password" minlength="4" required>
+          <button class="btn" style="width:100%;margin-top:8px;font-size:16px;padding:14px">Create Account &rarr;</button>
+        </form>
+        <p style="text-align:center;margin-top:16px;font-size:14px;color:#64748b">Already have an account? <a href="/login" style="color:#059669;font-weight:600">Login here</a></p>
+      </div>
     </div>
+    <script>
+    function toggleBizSubtype(){
+      var t=document.getElementById('regType').value;
+      var w=document.getElementById('bizSubtypeWrap');
+      if(t==='business'){w.style.display='block';document.getElementById('regBizType').required=true;}
+      else{w.style.display='none';document.getElementById('regBizType').required=false;}
+    }
+    // init
+    toggleBizSubtype();
+    </script>
   `, null, req));
 });
 
 app.post('/register', validate({ email: { required: true, email: true }, password: { required: true, minLength: 4 }, name: { required: true, maxLength: 100 }, org_name: { required: true, maxLength: 200 }, type: { required: true } }), ah(async (req, res) => {
-  const { name, org_name, type, email, phone, password, confirm_password } = req.body;
+  const { name, org_name, type, email, phone, password, confirm_password, plan, business_type } = req.body;
   // Basic password validation
   const passwordErrors = [];
   if (!password || password.length < 4) passwordErrors.push('Password must be at least 4 characters long');
   if (password !== confirm_password) passwordErrors.push('Passwords do not match');
   if (passwordErrors.length > 0) {
-    return res.send(renderPage('Register', `<div class="alert alert-error"><h3>Password Requirements Not Met</h3><ul>${passwordErrors.map(e => '<li>' + esc(e) + '</li>').join('')}</ul></div><div class="card" style="max-width:450px;margin:40px auto"><h2 style="text-align:center;margin-bottom:20px">Create Account</h2><form method="POST" action="/register"><input name="name" placeholder="Your Full Name" value="${esc(name)}" required><input name="org_name" placeholder="Organization/School/Business Name" value="${esc(org_name)}" required><select name="type" required><option value="">Select Type</option><option value="school" ${type==='school'?'selected':''}>School</option><option value="health" ${type==='health'?'selected':''}>Health Institution (Hospital/Clinic/Pharmacy)</option><option value="organization" ${type==='organization'?'selected':''}>Organization / NGO</option><option value="church" ${type==='church'?'selected':''}>Church</option><option value="business" ${type==='business'?'selected':''}>Business (Hotel/Restaurant/Retail/Salon/Shop & more)</option><option value="individual" ${type==='individual'?'selected':''}>Individual</option></select><input name="email" type="email" placeholder="Your Email" value="${esc(email)}" required><input name="phone" placeholder="Phone +256..." value="${esc(phone)}" required><input name="password" type="password" placeholder="Choose a Password (min 4 chars)" minlength="4" required><input name="confirm_password" type="password" placeholder="Confirm Password" minlength="4" required><button class="btn" style="width:100%">Register</button></form></div>`, null));
+    return res.redirect('/register?type=' + encodeURIComponent(type || '') + '&plan=' + encodeURIComponent(plan || '') + '&business_type=' + encodeURIComponent(business_type || ''));
   }
   const hash = await bcrypt.hash(password, 12);
   const subdomain = org_name.toLowerCase().replace(/[^a-z0-9]/g, '') + Math.floor(Math.random() * 1000);
+  // Determine valid plan (default to 'free' if empty or invalid)
+  const validPlans = ['free','basic','pro','enterprise'];
+  const chosenPlan = validPlans.includes(plan) ? plan : 'free';
+  const planAmounts = { free: 0, basic: 50000, pro: 150000, enterprise: 0 };
   const tenant = await pool.query('INSERT INTO tenants(name,type,email,phone,subdomain,approved) VALUES($1,$2,$3,$4,$5,true) RETURNING id', [org_name, type, email, phone, subdomain]);
+  const newTenantId = tenant.rows[0].id;
+  // Save business_type if provided
+  if (business_type && type === 'business') {
+    try { await pool.query('UPDATE tenants SET business_type = $1 WHERE id = $2', [business_type, newTenantId]); } catch(e) { /* column may not exist yet, non-critical */ }
+  }
   // Try inserting with both password columns, fall back to just password
   try {
     await pool.query('INSERT INTO users(tenant_id,email,name,password,password_hash,role,approved) VALUES($1,$2,$3,$4,$4,$5,true)', [tenant.rows[0].id, email, name, hash, type]);
@@ -2879,8 +2952,12 @@ app.post('/register', validate({ email: { required: true, email: true }, passwor
   </div></div>`;
   sendEmail(email, 'Welcome to Comfort!', welcomeHtml);
   queueEmail(tenant.rows[0].id, email, 'Welcome to Comfort!', welcomeHtml);
-  // v1.0: Free subscription
-  try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status) VALUES($1,$2,$3,$4)', [tenant.rows[0].id, 'free', 0, 'active']); } catch(e) { /* duplicate subscription OK */ }
+  // v1.0: Subscription based on chosen plan
+  try { await pool.query('INSERT INTO subscriptions(tenant_id,plan,amount,status) VALUES($1,$2,$3,$4)', [newTenantId, chosenPlan, planAmounts[chosenPlan] || 0, chosenPlan === 'free' ? 'active' : 'pending_payment']); } catch(e) { /* duplicate subscription OK */ }
+  // If plan is not free, update the subscription status to pending_payment for billing
+  if (chosenPlan !== 'free') {
+    try { await pool.query('UPDATE subscriptions SET plan=$1, amount=$2, status=$3 WHERE tenant_id=$4', [chosenPlan, planAmounts[chosenPlan], 'pending_payment', newTenantId]); } catch(e) { /* non-critical */ }
+  }
   res.send(renderPage('Success', '<div class="card"><div class="alert alert-success">Account created! Check your email for a welcome message. You can now login.</div><a href="/login" class="btn">Login</a></div>', null));
 }));
 
@@ -32310,12 +32387,13 @@ app.get('/dev/restore-session', requireAuth, requireSuperAdmin, ah(async (req, r
 
 // === USER PORTAL SWITCHER (available to ALL users, not just super_admin) ===
 const USER_PORTAL_TYPES = [
-  { type: 'school', label: 'School', icon: '🏫', color: '#059669', desc: 'Students, fees, exams, attendance, report cards' },
-  { type: 'church', label: 'Church', icon: '⛪', color: '#7c3aed', desc: 'Members, tithes, sermons, events, groups' },
-  { type: 'organization', label: 'Organization', icon: '🤝', color: '#10b981', desc: 'Projects, members, documents, meetings' },
-  { type: 'health', label: 'Health Institution', icon: '🏥', color: '#ef4444', desc: 'Hospital, clinic, pharmacy, lab, patients, prescriptions' },
-  { type: 'business', label: 'Business', icon: '🏢', color: '#0891b2', desc: 'POS, invoices, payroll, inventory — includes Hotel, Restaurant, Retail, Salon & more' },
-  { type: 'individual', label: 'Individual', icon: '👤', color: '#8b5cf6', desc: 'Personal notes, goals, finance, tasks' }
+  { type: 'school', label: 'School', icon: '🏫', color: '#059669', desc: 'Students, fees, exams, attendance, report cards, timetable, transport, library' },
+  { type: 'church', label: 'Church', icon: '⛪', color: '#7c3aed', desc: 'Members, tithes, sermons, events, groups, choir, cell groups' },
+  { type: 'organization', label: 'Organization', icon: '🤝', color: '#10b981', desc: 'Projects, members, documents, meetings, task boards' },
+  { type: 'health', label: 'Health Institution', icon: '🏥', color: '#ef4444', desc: 'Hospital, clinic, pharmacy, lab, patients, prescriptions, bed management' },
+  { type: 'business', label: 'Business', icon: '🏢', color: '#0891b2', desc: 'POS, invoices, payroll, inventory — Hotel, Restaurant, Retail, Salon & more' },
+  { type: 'individual', label: 'Individual', icon: '👤', color: '#8b5cf6', desc: 'Personal notes, goals, finance, tasks, budgets' },
+  { type: 'public', label: 'Public Portal', icon: '🌐', color: '#0ea5e9', desc: 'Public pages, blog posts, shop, community content, entertainment & fundraising' }
 ];
 
 app.get('/switch-portal', requireAuth, requireNotBanned, ah(async (req, res) => {

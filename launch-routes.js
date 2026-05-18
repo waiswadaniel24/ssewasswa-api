@@ -652,7 +652,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
         <div style="position:relative;z-index:2">
           <div style="font-size:14px;font-weight:600;letter-spacing:3px;text-transform:uppercase;opacity:0.9;margin-bottom:16px;color:#d1fae5">Now Serving All of Africa</div>
           <h1 style="font-size:clamp(28px,5vw,56px);font-weight:900;color:white;margin-bottom:16px;line-height:1.15">
-            The Operating System for<br>Schools, Clinics, Churches<br>&amp; Businesses in Africa
+            The Operating System for<br>Schools, Clinics, Churches,<br>Businesses &amp; Public Services
           </h1>
           <p style="font-size:clamp(16px,2.5vw,24px);color:#d1fae5;font-weight:600;margin-bottom:8px">
             Stop Juggling 12 Different Apps.<br>Start Running Your Institution.
@@ -747,7 +747,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; SMS Reminders to Patients</li>
               <li>&#10003; HMIS Reports (MOH Compliant)</li>
             </ul>
-            <a href="/register?type=clinic" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#0891b2;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+            <a href="/register?type=health" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#0891b2;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
           </div>
 
           <!-- CHURCHES -->
@@ -788,6 +788,114 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Multi-branch Support</li>
             </ul>
             <a href="/register?type=business" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#d97706;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+          </div>
+        </div>
+
+        <!-- ROW 2: Additional Portal Types -->
+        <h3 style="text-align:center;font-size:24px;font-weight:800;margin:48px 0 24px;color:#1e293b">More Portal Types</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-bottom:48px">
+          <!-- HEALTH (expanded from Clinics) -->
+          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #ef4444;transition:transform 0.3s">
+            <div style="font-size:40px;margin-bottom:12px">&#127973;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#ef4444;margin-bottom:4px">Health Portal</h3>
+            <div style="font-size:14px;color:#ef4444;font-weight:600;margin-bottom:16px">Hospitals, Clinics, Pharmacies & Labs</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
+              <li>&#10003; Patient Queue & Triage System</li>
+              <li>&#10003; Doctor Consultation Workflow</li>
+              <li>&#10003; Pharmacy & Drug Inventory</li>
+              <li>&#10003; Laboratory & Results Management</li>
+              <li>&#10003; Bed & Ward Management</li>
+              <li>&#10003; Insurance Claims & Billing</li>
+              <li>&#10003; Electronic Health Records (EHR)</li>
+            </ul>
+            <a href="/register?type=health" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#ef4444;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+          </div>
+
+          <!-- PUBLIC PORTAL -->
+          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #0ea5e9;transition:transform 0.3s">
+            <div style="font-size:40px;margin-bottom:12px">&#127760;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#0ea5e9;margin-bottom:4px">Public Portal</h3>
+            <div style="font-size:14px;color:#0ea5e9;font-weight:600;margin-bottom:16px">Community Pages, Blogs & Shop</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
+              <li>&#10003; Public Pages & Content CMS</li>
+              <li>&#10003; Blog & News Posts</li>
+              <li>&#10003; Online Shop / E-Commerce</li>
+              <li>&#10003; Community Forum & Engagement</li>
+              <li>&#10003; Event Listings & Calendar</li>
+              <li>&#10003; Newsletter Subscriptions</li>
+              <li>&#10003; SEO-Optimized Public Profiles</li>
+            </ul>
+            <a href="/register?type=public" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#0ea5e9;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Get Started Free</a>
+          </div>
+
+          <!-- ORGANIZATION / NGO -->
+          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #10b981;transition:transform 0.3s">
+            <div style="font-size:40px;margin-bottom:12px">&#129309;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#10b981;margin-bottom:4px">Organization / NGO</h3>
+            <div style="font-size:14px;color:#10b981;font-weight:600;margin-bottom:16px">NGOs, CBOs & Community Organizations</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
+              <li>&#10003; Project & Program Management</li>
+              <li>&#10003; Member Directory & Roles</li>
+              <li>&#10003; Document Management</li>
+              <li>&#10003; Meeting Scheduling & Minutes</li>
+              <li>&#10003; Task Boards & Assignments</li>
+              <li>&#10003; Fundraising & Donor Tracking</li>
+              <li>&#10003; Impact Reports & Analytics</li>
+            </ul>
+            <a href="/register?type=organization" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#10b981;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+          </div>
+
+          <!-- INDIVIDUAL / PERSONAL -->
+          <div style="background:white;border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.08);border-top:5px solid #8b5cf6;transition:transform 0.3s">
+            <div style="font-size:40px;margin-bottom:12px">&#128100;</div>
+            <h3 style="font-size:22px;font-weight:800;color:#8b5cf6;margin-bottom:4px">Individual / Personal</h3>
+            <div style="font-size:14px;color:#8b5cf6;font-weight:600;margin-bottom:16px">Personal Productivity & Finance</div>
+            <ul style="list-style:none;padding:0;font-size:14px;color:#475569;line-height:2">
+              <li>&#10003; Personal Notes & Journal</li>
+              <li>&#10003; Goal Setting & Tracking</li>
+              <li>&#10003; Personal Finance & Budgets</li>
+              <li>&#10003; Task Management & Reminders</li>
+              <li>&#10003; Income & Expense Tracking</li>
+              <li>&#10003; Document Storage</li>
+              <li>&#10003; Entertainment & News Feed</li>
+            </ul>
+            <a href="/register?type=individual" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#8b5cf6;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Get Started Free</a>
+          </div>
+        </div>
+
+        <!-- CROSS-CUTTING FEATURES: ENTERTAINMENT & FUNDRAISING -->
+        <h3 style="text-align:center;font-size:24px;font-weight:800;margin:48px 0 24px;color:#1e293b">Cross-Cutting Features (Available in ALL Portals)</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;margin-bottom:48px;max-width:700px;margin-left:auto;margin-right:auto">
+          <!-- ENTERTAINMENT HUB -->
+          <div style="background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.15);color:white;transition:transform 0.3s">
+            <div style="font-size:40px;margin-bottom:12px">&#127916;</div>
+            <h3 style="font-size:22px;font-weight:800;margin-bottom:4px">Entertainment Hub</h3>
+            <p style="font-size:14px;opacity:0.85;margin-bottom:16px">Movies, Music, News & Celebrity Updates</p>
+            <ul style="list-style:none;padding:0;font-size:14px;line-height:2;opacity:0.95">
+              <li>&#10003; Latest Movie Trailers & Reviews</li>
+              <li>&#10003; Music Videos & Audio Streaming</li>
+              <li>&#10003; Celebrity News & Gossip</li>
+              <li>&#10003; Sports Updates & Scores</li>
+              <li>&#10003; News Aggregation (Local & International)</li>
+              <li>&#10003; Auto-Scraped Content (No manual work)</li>
+            </ul>
+            <a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#7c3aed;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Sign Up to Access</a>
+          </div>
+
+          <!-- FUNDRAISING -->
+          <div style="background:linear-gradient(135deg,#059669,#10b981);border-radius:20px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.15);color:white;transition:transform 0.3s">
+            <div style="font-size:40px;margin-bottom:12px">&#127881;</div>
+            <h3 style="font-size:22px;font-weight:800;margin-bottom:4px">Fundraising Platform</h3>
+            <p style="font-size:14px;opacity:0.85;margin-bottom:16px">Campaigns, Donations & Investment Pitches</p>
+            <ul style="list-style:none;padding:0;font-size:14px;line-height:2;opacity:0.95">
+              <li>&#10003; Create Fundraising Campaigns</li>
+              <li>&#10003; Accept Donations (Mobile Money & Card)</li>
+              <li>&#10003; Investor Offer Management</li>
+              <li>&#10003; Campaign Analytics & Reports</li>
+              <li>&#10003; Public Discovery Page</li>
+              <li>&#10003; Automated Donor Receipts</li>
+            </ul>
+            <a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#059669;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Fundraising</a>
           </div>
         </div>
       </div>
