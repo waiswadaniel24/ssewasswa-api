@@ -131,9 +131,14 @@ const pool = new Pool({
   // Always use rejectUnauthorized:false — Render/Heroku/Neon managed PostgreSQL uses self-signed CA certs.
   // Using NODE_ENV check breaks when Render doesn't set NODE_ENV=production by default.
   ssl: { rejectUnauthorized: false },
-  max: 10,
-  idleTimeoutMillis: 60000,
-  connectionTimeoutMillis: 30000
+  max: 5, // Reduced from 10 for Render free tier (97 connection limit shared across apps)
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 15000
+});
+
+// Handle pool-level errors to prevent crashes
+pool.on('error', (err) => {
+  console.error('[DB Pool] Unexpected error on idle client:', err.message);
 });
 
 // === SECURITY ===
@@ -206,8 +211,15 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   console.error('FATAL: SESSION_SECRET must be set in production');
   process.exit(1);
 }
+// Wrap session store creation in try/catch — if DB is unavailable, use memory store as fallback
+let sessionStore;
+try {
+  sessionStore = (pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true }));
+} catch (e) {
+  console.warn('[Session] PG store failed, using memory store:', e.message);
+}
 app.use(session({
-  store: (pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true })),
+  store: sessionStore || undefined, // undefined = default memory store
   secret: process.env.SESSION_SECRET || 'dev-session-secret-local-only',
   resave: false,
   saveUninitialized: false,
