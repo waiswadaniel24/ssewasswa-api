@@ -39,11 +39,17 @@ function statusBadge(status) {
   const map = {
     completed: { bg: '#dcfce7', color: '#16a34a', label: 'Completed' },
     pending: { bg: '#fef9c3', color: '#a16207', label: 'Pending' },
+    pending_momo: { bg: '#dbeafe', color: '#2563eb', label: 'Awaiting MoMo Confirmation' },
     failed: { bg: '#fee2e2', color: '#dc2626', label: 'Failed' },
     expired: { bg: '#f1f5f9', color: '#64748b', label: 'Expired' }
   };
   const s = map[status] || map.pending;
   return `<span style="display:inline-block;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:700;background:${s.bg};color:${s.color}">${s.label}</span>`;
+}
+
+function calculatePlatformFee(amount) {
+  const a = parseFloat(amount) || 0;
+  return Math.max(500, Math.round(a * 0.03));
 }
 
 function providerIcon(p) {
@@ -145,7 +151,10 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
     `CREATE INDEX IF NOT EXISTS idx_prequests_ref ON payment_requests(reference)`,
     `CREATE INDEX IF NOT EXISTS idx_prequests_status ON payment_requests(tenant_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_ptransactions_tenant ON payment_transactions(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_ptransactions_req ON payment_transactions(payment_request_id)`
+    `CREATE INDEX IF NOT EXISTS idx_ptransactions_req ON payment_transactions(payment_request_id)`,
+    `ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS mtn_reference_id VARCHAR(100)`,
+    `ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS platform_fee NUMERIC(10,2) DEFAULT 0`,
+    `CREATE INDEX IF NOT EXISTS idx_prequests_mtn_ref ON payment_requests(mtn_reference_id)`
   ];
 
   (async () => {
@@ -155,6 +164,108 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
     catch (e) { logger.error({ msg: '[PaymentGateway] Migration error', error: e.message }); }
     finally { client.release(); }
   })();
+
+  // ============================================================
+  // MTN MoMo API HELPERS
+  // ============================================================
+  const MTN_BASE_URL = process.env.MTN_MOMO_BASE_URL || 'https://momodeveloper.mtn.com';
+  const MTN_PRIMARY_KEY = process.env.MTN_COLLECTION_PRIMARY_KEY || '';
+  const MTN_USER_ID = process.env.MTN_COLLECTION_USER_ID || '';
+  const MTN_API_KEY = process.env.MTN_COLLECTION_API_KEY || '';
+  const MTN_ENV = process.env.MTN_MOMO_ENV || 'sandbox';
+
+  // Cache the OAuth token (MTN tokens are valid for ~3600s)
+  let _mtnTokenCache = { token: null, expires: 0 };
+
+  async function getMtnAccessToken() {
+    if (_mtnTokenCache.token && Date.now() < _mtnTokenCache.expires) return _mtnTokenCache.token;
+    const auth = Buffer.from(`${MTN_USER_ID}:${MTN_API_KEY}`).toString('base64');
+    const resp = await fetch(`${MTN_BASE_URL}/collection/token/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Ocp-Apim-Subscription-Key': MTN_PRIMARY_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`MTN token request failed (${resp.status}): ${body}`);
+    }
+    const data = await resp.json();
+    _mtnTokenCache = { token: data.access_token, expires: Date.now() + ((data.expires_in || 3500) * 1000) };
+    return data.access_token;
+  }
+
+  async function requestMtnPayment(phone, amount, reference, tenantId) {
+    const token = await getMtnAccessToken();
+    // Format phone to MSISDN (256XXXXXXXXX)
+    let msisdn = String(phone).replace(/[^0-9]/g, '');
+    if (msisdn.startsWith('0')) msisdn = '256' + msisdn.substring(1);
+    else if (msisdn.startsWith('+256')) msisdn = msisdn.substring(1);
+    else if (!msisdn.startsWith('256')) msisdn = '256' + msisdn;
+
+    const xRef = reference.replace(/[^a-zA-Z0-9-]/g, '').substring(0, 36);
+    const resp = await fetch(`${MTN_BASE_URL}/collection/v1_0/requesttopay`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Reference-Id': xRef,
+        'X-Target-Environment': MTN_ENV,
+        'Ocp-Apim-Subscription-Key': MTN_PRIMARY_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        amount: String(Math.round(amount)),
+        currency: 'UGX',
+        externalId: reference,
+        payer: { partyIdType: 'MSISDN', partyId: msisdn },
+        payerMessage: `Payment ${reference}`,
+        payeeNote: `Tenant ${tenantId}`
+      })
+    });
+    // MTN returns 202 Accepted on success with empty body; the X-Reference-Id is the lookup key
+    if (resp.status === 202) return xRef;
+    const body = await resp.text();
+    throw new Error(`MTN requesttopay failed (${resp.status}): ${body}`);
+  }
+
+  async function checkMtnPaymentStatus(referenceId) {
+    const token = await getMtnAccessToken();
+    const resp = await fetch(`${MTN_BASE_URL}/collection/v1_0/requesttopay/${referenceId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Target-Environment': MTN_ENV,
+        'Ocp-Apim-Subscription-Key': MTN_PRIMARY_KEY
+      }
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`MTN status check failed (${resp.status}): ${body}`);
+    }
+    return await resp.json(); // { status: 'PENDING'|'SUCCESSFUL'|'FAILED'|'REJECTED', ... }
+  }
+
+  // Shared helper: complete a payment (update request + create transaction)
+  async function completePayment(pr, provider, mtnFinRef) {
+    const fee = calculateFee(provider, pr.amount);
+    const platformFee = calculatePlatformFee(pr.amount);
+    const net = pr.amount - fee;
+    const txRef = 'TXN-' + Date.now().toString(36).toUpperCase();
+
+    await pool.query(
+      `UPDATE payment_requests SET status='completed', paid_at=NOW(), provider_response=COALESCE(provider_response,'{}') || $1 WHERE id=$2`,
+      [{ completed_via: 'mtn_api', mtn_financial_ref: mtnFinRef, completed_at: new Date().toISOString() }, pr.id]
+    );
+    await pool.query(
+      `INSERT INTO payment_transactions (tenant_id, payment_request_id, transaction_ref, amount, fee, net_amount, platform_fee, status, provider, provider_ref, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,'completed',$8,$9,$10)`,
+      [pr.tenant_id, pr.id, txRef, pr.amount, fee, net, platformFee, provider,
+        mtnFinRef || ('MTN-' + txRef),
+        { payer_name: pr.payer_name, payer_phone: pr.payer_phone }]
+    );
+    return { txRef, fee, net, platformFee };
+  }
 
   // ============================================================
   // ROUTE 1: GET /payments — Payment Dashboard
@@ -316,10 +427,35 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
     const ref = generateReference();
     const method = (await pool.query('SELECT id FROM payment_methods WHERE tenant_id=$1 AND provider=$2 AND is_active=true LIMIT 1', [tid, provider])).rows[0];
 
+    // For MTN MoMo, the payer phone is required
+    if (provider === 'mtn' && !(payer_phone || '').trim()) {
+      return res.send(renderPage('Error', '<div class="card" style="text-align:center;padding:40px"><p style="color:#dc2626;font-size:16px">Phone number is required for MTN MoMo payments.</p><a href="/payments/collect" class="pg-btn pg-btn-primary" style="margin-top:16px">← Try Again</a></div>', user));
+    }
+
+    const isMtnMomo = provider === 'mtn' && MTN_PRIMARY_KEY && MTN_USER_ID && MTN_API_KEY;
+    const initialStatus = isMtnMomo ? 'pending_momo' : 'pending';
+
     const result = await pool.query(
-      `INSERT INTO payment_requests (tenant_id, reference, amount, currency, payer_name, payer_phone, payer_email, description, method_id, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, NOW() + INTERVAL '30 minutes') RETURNING id, reference`,
-      [tid, ref, amt, 'UGX', (payer_name || '').trim(), (payer_phone || '').trim(), (payer_email || '').trim(), (description || '').trim(), method ? method.id : null]
+      `INSERT INTO payment_requests (tenant_id, reference, amount, currency, payer_name, payer_phone, payer_email, description, method_id, status, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, NOW() + INTERVAL '30 minutes') RETURNING id, reference`,
+      [tid, ref, amt, 'UGX', (payer_name || '').trim(), (payer_phone || '').trim(), (payer_email || '').trim(), (description || '').trim(), method ? method.id : null, initialStatus]
     );
+
+    // If MTN MoMo, call the real API
+    if (isMtnMomo) {
+      try {
+        const mtnRefId = await requestMtnPayment((payer_phone || '').trim(), amt, ref, tid);
+        await pool.query('UPDATE payment_requests SET mtn_reference_id=$1 WHERE id=$2', [mtnRefId, result.rows[0].id]);
+        audit(user.email, 'momo_payment_requested', `MTN MoMo request sent for ${ref}: UGX ${amt.toLocaleString()}, mtn_ref=${mtnRefId}`);
+        logger.info({ msg: '[PaymentGateway] MTN MoMo requesttopay sent', ref, amount: amt, mtnRefId, by: user.email });
+      } catch (mtnErr) {
+        // MTN API failed — mark as failed so the user is informed
+        await pool.query('UPDATE payment_requests SET status=$1, provider_response=$2 WHERE id=$3',
+          ['failed', { error: mtnErr.message, attempted_at: new Date().toISOString() }, result.rows[0].id]);
+        audit(user.email, 'momo_payment_failed', `MTN MoMo request failed for ${ref}: ${mtnErr.message}`);
+        logger.error({ msg: '[PaymentGateway] MTN MoMo requesttopay failed', ref, error: mtnErr.message });
+      }
+    }
+
     audit(user.email, 'payment_initiated', `Payment ${ref} for UGX ${amt.toLocaleString()} via ${provider}`);
     logger.info({ msg: '[PaymentGateway] Payment initiated', ref, amount: amt, provider, by: user.email });
     res.redirect('/payments/collect/' + result.rows[0].reference);
@@ -330,15 +466,48 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
   // ============================================================
   app.get('/payments/collect/:ref', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, ref = req.params.ref;
-    const pr = (await pool.query(
+    let pr = (await pool.query(
       `SELECT pr.*, pm.provider, pm.phone_number as merchant_phone FROM payment_requests pr LEFT JOIN payment_methods pm ON pm.id=pr.method_id WHERE pr.reference=$1 AND pr.tenant_id=$2`, [ref, tid]
     )).rows[0];
     if (!pr) return res.send(renderPage('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2 style="color:#dc2626">Payment not found</h2><a href="/payments" class="pg-btn pg-btn-primary" style="margin-top:12px">← Dashboard</a></div>', user));
 
+    // If status is pending_momo, poll the MTN API for the current status
+    if (pr.status === 'pending_momo' && pr.mtn_reference_id) {
+      try {
+        const mtnStatus = await checkMtnPaymentStatus(pr.mtn_reference_id);
+        logger.info({ msg: '[PaymentGateway] MoMo status poll', ref, mtnRefId: pr.mtn_reference_id, status: mtnStatus.status });
+
+        if (mtnStatus.status === 'SUCCESSFUL') {
+          const { txRef } = await completePayment(pr, 'mtn', mtnStatus.financialTransactionId);
+          try { await notify(pr.payer_email || user.email, 'Payment Received', `Your payment of ${formatCurrency(pr.amount)} (Ref: ${ref}) has been received. Thank you!`); } catch (e) { /* non-critical */ }
+          audit(user.email, 'momo_payment_completed', `MTN MoMo payment ${ref} confirmed: ${formatCurrency(pr.amount)}`);
+          // Re-fetch the updated row so the page shows "completed"
+          pr = (await pool.query(
+            `SELECT pr.*, pm.provider, pm.phone_number as merchant_phone FROM payment_requests pr LEFT JOIN payment_methods pm ON pm.id=pr.method_id WHERE pr.reference=$1 AND pr.tenant_id=$2`, [ref, tid]
+          )).rows[0];
+        } else if (mtnStatus.status === 'FAILED' || mtnStatus.status === 'REJECTED') {
+          await pool.query('UPDATE payment_requests SET status=$1, provider_response=COALESCE(provider_response,\'{}\') || $2 WHERE id=$3',
+            ['failed', { mtn_status: mtnStatus.status, reason: mtnStatus.reason || '', failed_at: new Date().toISOString() }, pr.id]);
+          audit(user.email, 'momo_payment_failed', `MTN MoMo payment ${ref} ${mtnStatus.status}: ${mtnStatus.reason || 'no reason'}`);
+          pr = (await pool.query(
+            `SELECT pr.*, pm.provider, pm.phone_number as merchant_phone FROM payment_requests pr LEFT JOIN payment_methods pm ON pm.id=pr.method_id WHERE pr.reference=$1 AND pr.tenant_id=$2`, [ref, tid]
+          )).rows[0];
+        }
+        // If PENDING, leave as pending_momo — the auto-refresh will poll again
+      } catch (pollErr) {
+        logger.error({ msg: '[PaymentGateway] MoMo status poll error', ref, error: pollErr.message });
+        // Non-fatal: show current status as-is
+      }
+    }
+
     const fee = calculateFee(pr.provider, pr.amount);
+    const platformFee = calculatePlatformFee(pr.amount);
     const provider = pr.provider || 'cash';
     const isPending = pr.status === 'pending';
+    const isPendingMomo = pr.status === 'pending_momo';
+    const isActive = isPending || isPendingMomo;
     const isCompleted = pr.status === 'completed';
+    const isFailed = pr.status === 'failed';
     const instructions = {
       mtn: `<div style="text-align:center;padding:20px;background:#fef9c3;border-radius:12px"><div style="font-size:36px;margin-bottom:8px">📱</div><p style="font-weight:700;color:#1e293b;font-size:16px">Dial *165# on MTN</p><p style="color:#64748b;font-size:13px;margin-top:4px">Select "Pay Bill" → Enter Business Number → Amount: ${formatCurrency(pr.amount)}</p></div>`,
       airtel: `<div style="text-align:center;padding:20px;background:#fef9c3;border-radius:12px"><div style="font-size:36px;margin-bottom:8px">📱</div><p style="font-weight:700;color:#1e293b;font-size:16px">Dial *185# on Airtel</p><p style="color:#64748b;font-size:13px;margin-top:4px">Select "Pay Bill" → Enter Business Number → Amount: ${formatCurrency(pr.amount)}</p></div>`,
@@ -347,33 +516,45 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
       cash: `<div style="text-align:center;padding:20px;background:#f0fdf4;border-radius:12px"><div style="font-size:36px;margin-bottom:8px">💵</div><p style="font-weight:700;color:#1e293b;font-size:16px">Cash Payment</p><p style="color:#64748b;font-size:13px;margin-top:4px">Collect cash from ${esc(pr.payer_name || 'payer')} and confirm below</p></div>`
     };
 
+    // MoMo-specific: show a "push payment sent" message instead of USSD instructions
+    const momoPendingBlock = isPendingMomo ? `<div style="text-align:center;padding:20px;background:#dbeafe;border-radius:12px"><div style="font-size:36px;margin-bottom:8px">📱</div><p style="font-weight:700;color:#1e293b;font-size:16px">MTN MoMo Push Sent</p><p style="color:#64748b;font-size:13px;margin-top:4px">A payment request has been sent to <strong>${esc(pr.payer_phone || '')}</strong>. The payer should approve the prompt on their phone.</p><p style="color:#94a3b8;font-size:11px;margin-top:6px">MTN Ref: ${esc(pr.mtn_reference_id || '—')}</p></div>` : '';
+
+    // For MTN MoMo payments, show real status instead of demo button
+    const momoStatusNote = isPendingMomo ? `<p style="font-size:12px;color:#2563eb;margin-top:8px">🔄 Checking payment status automatically... This page will refresh every 10 seconds.</p>` : '';
+
+    // Demo button only for non-MTN-MoMo methods (cash, bank, etc.)
+    const demoVerifyBtn = (isPending && !isPendingMomo) ? `
+          <form method="POST" action="/payments/verify/${esc(pr.reference)}" style="margin-top:20px" onsubmit="return confirm('Confirm this payment as received?')">
+            <button type="submit" class="pg-btn pg-btn-success" style="padding:14px 32px;font-size:15px">✅ Mark as Paid (Demo)</button>
+          </form>
+          <p style="font-size:11px;color:#94a3b8;margin-top:8px">In production, payment is verified automatically via provider API</p>` : '';
+
+    const failedBlock = isFailed ? `<div style="margin-top:16px;padding:16px;background:#fee2e2;border-radius:10px;text-align:left;font-size:13px;color:#dc2626"><strong>Payment Failed</strong><br>${esc((pr.provider_response && pr.provider_response.error) || (pr.provider_response && pr.provider_response.reason) || 'The payment request was not completed. Please try again.')}</div>
+          <a href="/payments/collect" class="pg-btn pg-btn-primary" style="margin-top:12px">🔄 Try Again</a>` : '';
+
     const html = PG_CSS + `
     <div style="max-width:600px;margin:0 auto">
       <a href="/payments" style="color:#64748b;font-size:14px;text-decoration:none;display:inline-block;margin-bottom:16px">← Back to Dashboard</a>
       <div class="card" style="padding:24px;text-align:center">
-        <div style="font-size:48px;margin-bottom:8px">${isCompleted ? '✅' : isPending ? '⏳' : '❌'}</div>
-        <h2 style="color:#1e293b;margin:0">${isCompleted ? 'Payment Completed!' : isPending ? 'Awaiting Payment' : 'Payment ' + pr.status.charAt(0).toUpperCase() + pr.status.slice(1)}</h2>
+        <div style="font-size:48px;margin-bottom:8px">${isCompleted ? '✅' : isPendingMomo ? '📱' : isPending ? '⏳' : isFailed ? '❌' : '❌'}</div>
+        <h2 style="color:#1e293b;margin:0">${isCompleted ? 'Payment Completed!' : isPendingMomo ? 'Awaiting MoMo Confirmation' : isPending ? 'Awaiting Payment' : isFailed ? 'Payment Failed' : 'Payment ' + pr.status.charAt(0).toUpperCase() + pr.status.slice(1)}</h2>
         <div style="font-family:monospace;font-size:14px;color:#64748b;margin-top:8px;background:#f8fafc;display:inline-block;padding:6px 16px;border-radius:8px">${esc(pr.reference)}</div>
         <div style="margin-top:20px;padding:20px;background:#f8fafc;border-radius:12px;text-align:left;font-size:14px">
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="color:#64748b">Amount</span><span style="font-weight:700">${formatCurrency(pr.amount, pr.currency)}</span></div>
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="color:#64748b">Fee (${providerLabel(provider)})</span><span style="font-weight:600">${formatCurrency(fee)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="color:#64748b">Platform Fee (3%)</span><span style="font-weight:600">${formatCurrency(platformFee)}</span></div>
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="color:#64748b">Net Amount</span><span style="font-weight:700;color:#059669">${formatCurrency(pr.amount - fee)}</span></div>
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="color:#64748b">Payer</span><span>${esc(pr.payer_name || '—')}</span></div>
           <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="color:#64748b">Method</span><span>${providerIcon(provider)} ${esc(providerLabel(provider))}</span></div>
           <div style="display:flex;justify-content:space-between;padding:8px 0"><span style="color:#64748b">Status</span><span>${statusBadge(pr.status)}</span></div>
         </div>
         ${pr.description ? `<p style="font-size:13px;color:#64748b;margin-top:12px">📝 ${esc(pr.description)}</p>` : ''}
-        ${isPending ? `
-          <div style="margin-top:20px">${instructions[provider] || instructions.cash}</div>
-          <div style="margin-top:16px">
-            <div class="pg-timer" id="countdown">--:--</div>
-            <div class="pg-timer-label">Time remaining</div>
-          </div>
-          <form method="POST" action="/payments/verify/${esc(pr.reference)}" style="margin-top:20px" onsubmit="return confirm('Confirm this payment as received?')">
-            <button type="submit" class="pg-btn pg-btn-success" style="padding:14px 32px;font-size:15px">✅ Mark as Paid (Demo)</button>
-          </form>
-          <p style="font-size:11px;color:#94a3b8;margin-top:8px">In production, payment is verified automatically via provider API</p>
-        ` : ''}
+        ${isPending ? `<div style="margin-top:20px">${instructions[provider] || instructions.cash}</div>` : ''}
+        ${momoPendingBlock}
+        ${isActive ? `<div style="margin-top:16px"><div class="pg-timer" id="countdown">--:--</div><div class="pg-timer-label">Time remaining</div></div>` : ''}
+        ${demoVerifyBtn}
+        ${momoStatusNote}
+        ${failedBlock}
         ${isCompleted ? `
           <div style="margin-top:20px;display:flex;gap:10px;justify-content:center">
             <a href="/payments/receipt/${esc(pr.reference)}" class="pg-btn pg-btn-secondary">🧾 View Receipt</a>
@@ -382,12 +563,13 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
           </div>` : ''}
       </div>
     </div>
-    ${isPending ? `<script>
+    ${isActive ? `<script>
       function startCountdown(){const exp=new Date('${new Date(pr.expires_at).toISOString()}');const iv=setInterval(()=>{const now=new Date();const diff=Math.max(0,exp-now);if(diff<=0){clearInterval(iv);document.getElementById('countdown').textContent='EXPIRED';document.getElementById('countdown').style.color='#dc2626';return}
       const m=Math.floor(diff/60000);const s=Math.floor((diff%60000)/1000);document.getElementById('countdown').textContent=String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')},1000)}
       startCountdown();setTimeout(()=>location.reload(),60000);
     </script>` : ''}
-    ${isPending ? '<meta http-equiv="refresh" content="30">' : ''}`;
+    ${isPendingMomo ? '<meta http-equiv="refresh" content="10">' : ''}
+    ${isPending && !isPendingMomo ? '<meta http-equiv="refresh" content="30">' : ''}`;
     res.send(renderPage('Payment — ' + ref, html, user));
   }));
 
@@ -832,6 +1014,52 @@ module.exports = function paymentGateway(app, pool, requireAuth, logger, audit, 
       </div>
     </div>`;
     res.send(renderPage('Receipt — ' + ref, html, user));
+  }));
+
+  // ============================================================
+  // WEBHOOK: POST /payments/webhook/momo — MTN MoMo Callback
+  // ============================================================
+  app.post('/payments/webhook/momo', ah(async (req, res) => {
+    const referenceId = req.headers['x-reference-id'];
+    if (!referenceId) {
+      logger.warn('[PaymentGateway] MoMo webhook missing x-reference-id header');
+      return res.status(400).json({ error: 'Missing x-reference-id header' });
+    }
+
+    logger.info({ msg: '[PaymentGateway] MoMo webhook received', referenceId, body: req.body });
+
+    // Look up the payment request by MTN reference ID
+    const pr = (await pool.query(
+      `SELECT pr.*, pm.provider FROM payment_requests pr LEFT JOIN payment_methods pm ON pm.id=pr.method_id WHERE pr.mtn_reference_id=$1`, [referenceId]
+    )).rows[0];
+
+    if (!pr) {
+      logger.warn({ msg: '[PaymentGateway] MoMo webhook: no payment request found for reference', referenceId });
+      return res.status(200).json({ status: 'ignored' }); // Return 200 so MTN doesn't retry
+    }
+
+    // Only process if still in pending_momo state (idempotency)
+    if (pr.status !== 'pending_momo') {
+      logger.info({ msg: '[PaymentGateway] MoMo webhook: payment already processed', referenceId, currentStatus: pr.status });
+      return res.status(200).json({ status: 'already_processed' });
+    }
+
+    const mtnStatus = (req.body && req.body.status) || 'PENDING';
+
+    if (mtnStatus === 'SUCCESSFUL') {
+      const financialTxId = req.body.financialTransactionId || null;
+      const { txRef } = await completePayment(pr, 'mtn', financialTxId);
+      audit('momo_webhook', 'momo_payment_completed', `MTN MoMo webhook confirmed payment ${pr.reference}: ${formatCurrency(pr.amount)}`);
+      logger.info({ msg: '[PaymentGateway] MoMo webhook: payment completed', referenceId, ref: pr.reference, txRef });
+      try { await notify(pr.payer_email, 'Payment Received', `Your payment of ${formatCurrency(pr.amount)} (Ref: ${pr.reference}) has been received. Thank you!`); } catch (e) { /* non-critical */ }
+    } else if (mtnStatus === 'FAILED' || mtnStatus === 'REJECTED') {
+      await pool.query('UPDATE payment_requests SET status=$1, provider_response=COALESCE(provider_response,\'{}\') || $2 WHERE id=$3',
+        ['failed', { mtn_status: mtnStatus, reason: req.body.reason || '', webhook_at: new Date().toISOString() }, pr.id]);
+      audit('momo_webhook', 'momo_payment_failed', `MTN MoMo webhook reported ${mtnStatus} for ${pr.reference}`);
+      logger.info({ msg: '[PaymentGateway] MoMo webhook: payment failed', referenceId, ref: pr.reference, status: mtnStatus });
+    }
+
+    res.status(200).json({ status: 'ok' });
   }));
 
 };

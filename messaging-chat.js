@@ -219,7 +219,7 @@ module.exports = function messagingChat(app, pool, requireAuth, logger, audit, n
       `INSERT INTO chat_messages (tenant_id, conversation_id, sender_email, message_text, message_type) VALUES ($1,$2,'system',$3,'system')`,
       [tenantId, convId, text]);
     await pool.query(
-      `UPDATE chat_conversations SET last_message_at=NOW(), last_message_preview=$1 WHERE id=$2`, [text, convId]);
+      `UPDATE chat_conversations SET last_message_at=NOW(), last_message_preview=$1 WHERE id=$2 AND tenant_id=$3`, [text, convId, tenantId]);
   }
 
   async function getUnreadCounts(tenantId, userEmail) {
@@ -574,7 +574,7 @@ module.exports = function messagingChat(app, pool, requireAuth, logger, audit, n
     }
 
     const preview = (message.trim().substring(0, 100)) || (fileName ? '📎 ' + fileName : '');
-    await pool.query('UPDATE chat_conversations SET last_message_at=NOW(), last_message_preview=$1 WHERE id=$2', [preview, convId]);
+    await pool.query('UPDATE chat_conversations SET last_message_at=NOW(), last_message_preview=$1 WHERE id=$2 AND tenant_id=$3', [preview, convId, tid]);
 
     // Detect @mentions and notify
     const mentionRegex = /@([\w.\-]+@[\w.\-]+\.\w+)/g;
@@ -678,7 +678,7 @@ module.exports = function messagingChat(app, pool, requireAuth, logger, audit, n
     if (!current) return res.status(404).json({ error: 'Message not found' });
 
     const newPin = !current.is_pinned;
-    await pool.query('UPDATE chat_messages SET is_pinned=$1 WHERE id=$2', [newPin, msgId]);
+    await pool.query('UPDATE chat_messages SET is_pinned=$1 WHERE id=$2 AND tenant_id=$3', [newPin, msgId, tid]);
     audit(user.email, 'chat_pin', `${newPin ? 'Pinned' : 'Unpinned'} message #${msgId} in conversation #${convId}`);
     res.json({ success: true, is_pinned: newPin });
   }));
@@ -788,7 +788,7 @@ module.exports = function messagingChat(app, pool, requireAuth, logger, audit, n
     if (!conv) return res.redirect('/chat/' + convId);
     if (conv.created_by !== user.email && email !== user.email) return res.redirect('/chat/' + convId);
 
-    await pool.query('DELETE FROM chat_participants WHERE conversation_id=$1 AND user_email=$2', [convId, email.trim()]);
+    await pool.query('DELETE FROM chat_participants WHERE conversation_id=$1 AND user_email=$2 AND conversation_id IN (SELECT id FROM chat_conversations WHERE tenant_id=$3)', [convId, email.trim(), tid]);
     await addSystemMessage(tid, convId, `${email.split('@')[0]} was removed from the group`);
     audit(user.email, 'chat_remove_participant', `Removed ${email} from conversation #${convId}`);
     res.redirect(email === user.email ? '/chat' : '/chat/' + convId);
@@ -798,9 +798,9 @@ module.exports = function messagingChat(app, pool, requireAuth, logger, audit, n
   // BONUS: POST /chat/:id/mute — Mute/unmute conversation
   // ============================================================
   app.post('/chat/:id/mute', requireAuth, ah(async (req, res) => {
-    const user = req.session.user, convId = parseInt(req.params.id);
+    const user = req.session.user, tid = user.tenant_id, convId = parseInt(req.params.id);
     const current = (await pool.query('SELECT is_muted FROM chat_participants WHERE conversation_id=$1 AND user_email=$2', [convId, user.email])).rows[0];
-    if (current) await pool.query('UPDATE chat_participants SET is_muted=$1 WHERE conversation_id=$2 AND user_email=$3', [!current.is_muted, convId, user.email]);
+    if (current) await pool.query('UPDATE chat_participants SET is_muted=$1 WHERE conversation_id=$2 AND user_email=$3 AND conversation_id IN (SELECT id FROM chat_conversations WHERE tenant_id=$4)', [!current.is_muted, convId, user.email, tid]);
     res.redirect('/chat/' + convId);
   }));
 

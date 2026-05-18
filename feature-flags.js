@@ -207,7 +207,7 @@ module.exports = function(app, pool, opts) {
     if (!flag.is_enabled) return false;
     if (flag.flag_type === 'boolean') return true;
     if (flag.flag_type === 'percentage') {
-      const bucket = consistentHash(email + flag_key, 100);
+      const bucket = consistentHash(email + flagKey, 100);
       return bucket < flag.rollout_percentage;
     }
     if (flag.flag_type === 'multivariate') {
@@ -426,7 +426,7 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req), fid = req.params.id;
     const { rows: flag } = await pool.query('SELECT * FROM feature_flags WHERE id=$1 AND tenant_id=$2', [fid, tid]);
     if (!flag.length) return res.status(404).send('Flag not found');
-    await pool.query('DELETE FROM feature_flag_assignments WHERE flag_id=$1', [fid]);
+    await pool.query('DELETE FROM feature_flag_assignments WHERE flag_id=$1 AND tenant_id=$2', [fid, tid]);
     await pool.query('DELETE FROM feature_flag_audit WHERE flag_id=$1 AND tenant_id=$2', [fid, tid]);
     await pool.query('DELETE FROM feature_flags WHERE id=$1 AND tenant_id=$2', [fid, tid]);
     await logAudit(tid, parseInt(fid), null, 'flag_deleted', flag[0], null, req);

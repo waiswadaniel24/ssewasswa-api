@@ -474,8 +474,8 @@ module.exports = function helpdesk(app, db, pool, renderPage, esc) {
       `INSERT INTO ticket_replies (tenant_id, ticket_id, author_id, author_name, body, is_internal) VALUES ($1,$2,$3,$4,$5,$6)`,
       [tid, ticketId, user.id, user.name || user.email, body.trim(), is_internal === 'on']
     );
-    if (ticket.status === 'open') await pool.query(`UPDATE support_tickets SET status='in_progress', updated_at=NOW() WHERE id=$1`, [ticketId]);
-    await pool.query(`UPDATE support_tickets SET updated_at=NOW() WHERE id=$1`, [ticketId]);
+    if (ticket.status === 'open') await pool.query(`UPDATE support_tickets SET status='in_progress', updated_at=NOW() WHERE id=$1 AND tenant_id=$2`, [ticketId, tid]);
+    await pool.query(`UPDATE support_tickets SET updated_at=NOW() WHERE id=$1 AND tenant_id=$2`, [ticketId, tid]);
     console.log(`[Helpdesk] Reply added to ticket #${ticketId} by ${user.email}`);
     res.redirect('/helpdesk/' + ticketId);
   }));
@@ -502,7 +502,7 @@ module.exports = function helpdesk(app, db, pool, renderPage, esc) {
     const old = (await pool.query(`SELECT status FROM support_tickets WHERE id=$1 AND tenant_id=$2`, [ticketId, tid])).rows[0];
     await pool.query(`UPDATE support_tickets SET status=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3`, [status, ticketId, tid]);
     if (status === 'closed' && old) {
-      await pool.query(`UPDATE support_tickets SET resolution_time=EXTRACT(EPOCH FROM (NOW() - created_at))/3600 WHERE id=$1`, [ticketId]);
+      await pool.query(`UPDATE support_tickets SET resolution_time=EXTRACT(EPOCH FROM (NOW() - created_at))/3600 WHERE id=$1 AND tenant_id=$2`, [ticketId, tid]);
     }
     console.log(`[Helpdesk] Ticket #${ticketId} status changed to "${status}" by ${user.email}`);
     res.redirect('/helpdesk/' + ticketId);

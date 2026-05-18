@@ -185,6 +185,13 @@ MONETIZATION_MIGRATIONS.forEach(m => migrations.push(m));
 // ============================================================
 const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 
+// Sanitize ad HTML to prevent XSS from injected script tags or event handlers
+function sanitizeAdHTML(html) {
+  return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+             .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+             .replace(/on\w+\s*=\s*[^\s>]*/gi, '');
+}
+
 const CPM_RATES = {
   header: 3.50,    // $3.50 per 1000 impressions
   sidebar: 2.00,
@@ -345,7 +352,7 @@ app.get('/api/ads/:placement', ah(async (req, res) => {
     await pool.query(`INSERT INTO ad_impressions (ad_id, ip_address, page_url, user_agent, country) VALUES ($1, $2, $3, $4, $5)`,
       [ad.id, req.ip, page, req.headers['user-agent'] || '', 'UG']);
 
-    res.json({ id: ad.id, title: ad.title, image_url: ad.image_url, link_url: ad.link_url, html_content: ad.html_content, placement: ad.placement, cpm: ad.cpm_rate });
+    res.json({ id: ad.id, title: ad.title, image_url: ad.image_url, link_url: ad.link_url, html_content: sanitizeAdHTML(ad.html_content || ''), placement: ad.placement, cpm: ad.cpm_rate });
   } else {
     res.json({ id: 0, html_content: `<div style="text-align:center;padding:12px;background:#f8fafc;border-radius:8px;font-size:12px;color:#94a3b8">Ad Space — <a href="/admin/ads">Advertise Here</a></div>`, placement });
   }
@@ -506,6 +513,10 @@ app.get('/go/:slug', ah(async (req, res) => {
     await pool.query('UPDATE cloaked_links SET clicks = clicks + 1 WHERE id = $1', [link.id]);
     // Build destination with UTM params
     const url = new URL(link.destination_url);
+    // Validate URL: only allow http/https, block javascript: and data: URLs
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return res.status(400).send('Invalid redirect URL');
+    }
     url.searchParams.set('utm_source', link.utm_source || 'comfortzone');
     url.searchParams.set('utm_medium', link.utm_medium || 'affiliate');
     url.searchParams.set('utm_campaign', link.utm_campaign || 'organic');

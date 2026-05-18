@@ -35942,7 +35942,7 @@ setTimeout(() => {
   try { const m = require('./asset-tracker'); m(app, db, pool, renderPage, esc); console.log('[Assets] Module loaded'); } catch(e) { console.warn('[Assets] Error:', e.message); }
   try { const m = require('./crm'); m(app, db, pool, renderPage, esc); console.log('[CRM] Module loaded'); } catch(e) { console.warn('[CRM] Error:', e.message); }
   try { const m = require('./blog-cms'); m(app, db, pool, renderPage, esc); console.log('[Blog] Module loaded'); } catch(e) { console.warn('[Blog] Error:', e.message); }
-  try { const m = require('./sms-blast'); m(app, db, pool, renderPage, esc); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
+  try { const _atInit = (process.env.AT_API_KEY && process.env.AT_USERNAME) ? require('africastalking')({ apiKey: process.env.AT_API_KEY, username: process.env.AT_USERNAME }) : null; const m = require('./sms-blast'); m(app, db, pool, renderPage, esc, { africastalking: _atInit }); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
   try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
 }, 6000);
 
@@ -36158,6 +36158,37 @@ function loadSelfExec(modName, label) {
 
 // 1. MONETIZATION ENGINE (defines trackRevenue, creditDeveloperRevenue)
 loadSelfExec('monetization-engine', 'Monetization');
+
+// 1b. SUBSCRIPTION ENFORCEMENT — Actual plan limit blocking, feature gating, downgrade execution
+try {
+  const subEnforcement = require('./subscription-enforcement')(app, pool, { esc, audit, sendEmail });
+  // Expose enforcement middleware globally so other modules can use them
+  global.enforcePlanLimit = subEnforcement.enforcePlanLimit;
+  global.enforceFeature = subEnforcement.enforceFeature;
+  global.enforcePlanOrAbove = subEnforcement.enforcePlanOrAbove;
+  console.log('[SubscriptionEnforcement] Plan enforcement middleware registered globally');
+} catch(e) { console.warn('[SubscriptionEnforcement] Failed:', e.message); }
+
+// 1c. SUBSCRIPTION DUNNING — Payment recovery & auto-downgrade pipeline
+try {
+  require('./subscription-dunning')(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail,
+    { info: (...a) => console.log('[Dunning]', ...a), warn: (...a) => console.warn('[Dunning]', ...a), error: (...a) => console.error('[Dunning]', ...a) });
+  console.log('[Dunning] Subscription dunning pipeline loaded');
+} catch(e) { console.warn('[Dunning] Failed:', e.message); }
+
+// 1e. GOOGLE OAUTH2 — "Sign in with Google" (manual OAuth2, no passport)
+try {
+  require('./google-oauth')(app, pool, { esc, audit, ah, renderPage, bcrypt });
+  console.log('[GoogleOAuth] Google OAuth2 login module loaded');
+} catch(e) { console.warn('[GoogleOAuth] Failed:', e.message); }
+
+// 1d. USAGE METERING — Track usage per tenant, enforce limits, generate overage charges
+try {
+  const usageMetering = require('./usage-metering')(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail,
+    { info: (...a) => console.log('[Usage]', ...a), warn: (...a) => console.warn('[Usage]', ...a), error: (...a) => console.error('[Usage]', ...a) });
+  if (usageMetering?.trackUsage) global.trackUsage = usageMetering.trackUsage;
+  console.log('[UsageMetering] Usage metering module loaded');
+} catch(e) { console.warn('[UsageMetering] Failed:', e.message); }
 
 // 2. VIRAL CONTENT ENGINE (defines awardPoints)
 loadSelfExec('viral-content-engine', 'ViralEngine');
@@ -36431,6 +36462,28 @@ try { const m = require('./content-moderation'); m(app, pool, _newModOpts); cons
 console.log('[Phase4] 27 additional feature modules activated — total module count now 159+');
 
 // ============================================================
+// === REFERRAL & INVITE SYSTEM — Invite & Earn, Growth Loop ===
+// ============================================================
+['referral_codes', 'referral_signups', 'referral_rewards'].forEach(t => VALID_TABLES.add(t));
+try {
+  const m = require('./referral-system');
+  m(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger);
+  console.log('[Referral] Referral & invite system loaded — 3 tables, 5 routes');
+} catch(e) { console.warn('[Referral] Error:', e.message); }
+
+// ============================================================
+// === EMAIL VERIFICATION SYSTEM — 6-digit code verification ===
+// ============================================================
+['email_verifications'].forEach(t => VALID_TABLES.add(t));
+try {
+  const emailVerification = require('./email-verification')(app, pool, _newModOpts);
+  if (emailVerification?.requireVerifiedEmail) {
+    global.requireVerifiedEmail = emailVerification.requireVerifiedEmail;
+  }
+  console.log('[EmailVerification] Email verification system loaded — 1 table, 4 routes + middleware');
+} catch(e) { console.warn("[EmailVerification] Error:", e.message); }
+
+// ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===
 // Social Sharing, Donor Dashboard, Payouts, Donor Wall, QR Codes,
 // Refund Handling, Embed Widget, Matching Donations, Comments,
@@ -36487,6 +36540,15 @@ try {
   for (const sql of claimAlters) { try { await pool.query(sql); } catch(e) { /* column may already exist */ } }
 
   console.log('[Migrations] All new tables ready');
+
+  // === FIX SCHEMA GAPS — Missing tables + duplicate schema columns ===
+  try {
+    const fixSchemaGaps = require('./fix-schema-gaps');
+    await fixSchemaGaps(pool);
+    console.log('[Schema] Gap fixes applied');
+  } catch(e) {
+    console.warn('[Schema] Gap fixes error:', e.message);
+  }
 })();
 
 // ============================================================

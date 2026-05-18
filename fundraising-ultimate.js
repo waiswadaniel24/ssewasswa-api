@@ -555,7 +555,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Get total raised for campaign from donations
     let raised = 0;
     try {
-      const r = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE campaign_id=$1', [req.params.id]);
+      const r = await pool.query('SELECT COALESCE(SUM(amount),0) as total FROM campaign_donations WHERE campaign_id=$1 AND tenant_id=$2', [req.params.id, t]);
       raised = parseInt(r.rows[0].total) || 0;
     } catch(e) {}
 
@@ -759,7 +759,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Fetch donation stats
     let totalRaised = 0, donorCount = 0;
     try {
-      const stats = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(DISTINCT donor_name) as donors FROM campaign_donations WHERE campaign_id=$1', [campaignId])).rows[0];
+      const stats = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(DISTINCT donor_name) as donors FROM campaign_donations WHERE campaign_id=$1 AND tenant_id=$2', [campaignId, t])).rows[0];
       totalRaised = parseInt(stats.total) || 0;
       donorCount = parseInt(stats.donors) || 0;
     } catch(e) {}
@@ -767,7 +767,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Fetch update count
     let updateCount = 0;
     try {
-      const u = await pool.query('SELECT COUNT(*) as cnt FROM campaign_updates WHERE campaign_id=$1', [campaignId]);
+      const u = await pool.query('SELECT COUNT(*) as cnt FROM campaign_updates WHERE campaign_id=$1 AND tenant_id=$2', [campaignId, t]);
       updateCount = parseInt(u.rows[0].cnt) || 0;
     } catch(e) {}
 
@@ -1069,13 +1069,21 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   }));
 
   // POST /api/whatsapp-donate/webhook — Webhook for WhatsApp donate interactions
+  // SECURITY: tenant_id is derived from the phone_number config lookup, NOT from req.body
   app.post('/api/whatsapp-donate/webhook', ah(async (req, res) => {
-    const { phone_number, message, tenant_id } = req.body;
-    if (!phone_number || !tenant_id) return res.status(400).json({ error: 'phone_number and tenant_id are required' });
+    const { phone_number, message } = req.body;
+    if (!phone_number) return res.status(400).json({ error: 'phone_number is required' });
 
-    const t = parseInt(tenant_id);
-    const config = (await pool.query('SELECT * FROM whatsapp_donate_config WHERE tenant_id=$1 AND is_active=true', [t])).rows[0];
-    if (!config) return res.status(404).json({ error: 'WhatsApp donate not configured for this tenant' });
+    // Derive tenant_id from the WhatsApp config that matches this phone_number
+    // (instead of trusting tenant_id from req.body which allows cross-tenant access)
+    const configLookup = (await pool.query(
+      'SELECT * FROM whatsapp_donate_config WHERE phone_number LIKE $1 AND is_active=true LIMIT 1',
+      ['%' + esc(phone_number.replace(/[^+0-9]/g, '')) + '%']
+    )).rows[0];
+    if (!configLookup) return res.status(404).json({ error: 'No WhatsApp donate configuration found for this phone number' });
+
+    const t = configLookup.tenant_id;
+    const config = configLookup;
 
     // Find or create session
     let session = (await pool.query(
@@ -1352,7 +1360,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Fetch donation stats
     let totalRaised = 0, donorCount = 0;
     try {
-      const stats = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(*) as donors FROM campaign_donations WHERE campaign_id=$1', [req.params.id])).rows[0];
+      const stats = (await pool.query('SELECT COALESCE(SUM(amount),0) as total, COUNT(*) as donors FROM campaign_donations WHERE campaign_id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
       totalRaised = parseInt(stats.total) || 0;
       donorCount = parseInt(stats.donors) || 0;
     } catch(e) {}

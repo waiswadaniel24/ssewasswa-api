@@ -6,9 +6,9 @@
 module.exports = function aiAssistant(app, db, pool, renderPage, esc) {
 
   const requireAuth = (req, res, next) => {
-    if (!req.session || !req.session.userId) return res.redirect('/login');
-    req.tenantId = req.session.tenantId;
-    req.userId = req.session.userId;
+    if (!req.session || !req.session.user || !req.session.user.id) return res.redirect('/login');
+    req.tenantId = req.session.user.tenant_id;
+    req.userId = req.session.user.id;
     next();
   };
 

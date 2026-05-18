@@ -296,8 +296,12 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     res.redirect('/fundraising/' + c.id);
   }));
 
-  // Admin: Process payout requests
-  app.get('/admin/payouts', requireAuth, ah(async (req, res) => {
+  // Admin: Process payout requests (admin/super_admin only)
+  app.get('/admin/payouts', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const payouts = (await pool.query('SELECT cp.*, fc.title as campaign_title FROM campaign_payouts cp JOIN fundraising_campaigns fc ON cp.campaign_id=fc.id WHERE cp.tenant_id=$1 ORDER BY cp.created_at DESC', [t])).rows;
     res.send(renderPage('Manage Payouts', `
@@ -309,14 +313,22 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `, req.session.user));
   }));
 
-  app.post('/admin/payouts/:id/approve', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/approve', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     await pool.query("UPDATE campaign_payouts SET status='approved', processed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
     await audit(req.session.user.email, 'payout_approved', 'Approved payout #' + req.params.id, t);
     res.redirect('/admin/payouts');
   }));
 
-  app.post('/admin/payouts/:id/complete', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/complete', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const payout = (await pool.query('SELECT * FROM campaign_payouts WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!payout) return res.status(404).send('Not found');
@@ -329,7 +341,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     res.redirect('/admin/payouts');
   }));
 
-  app.post('/admin/payouts/:id/reject', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/reject', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     await pool.query("UPDATE campaign_payouts SET status='rejected', processed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
     await audit(req.session.user.email, 'payout_rejected', 'Rejected payout #' + req.params.id, t);
@@ -346,10 +362,9 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Get donations with donor profiles (check if anonymous)
     const donations = (await pool.query(`SELECT cd.*, dp.is_anonymous, dp.display_name as profile_name
       FROM campaign_donations cd
-      LEFT JOIN donor_profiles dp ON cd.donor_name = dp.display_name AND dp.tenant_id = fc.tenant_id
-      JOIN fundraising_campaigns fc ON cd.campaign_id = fc.id
-      WHERE cd.campaign_id = $1
-      ORDER BY cd.amount DESC, cd.donated_at DESC LIMIT 100`, [c.id])).rows;
+      LEFT JOIN donor_profiles dp ON cd.donor_name = dp.display_name AND dp.tenant_id = cd.tenant_id
+      WHERE cd.campaign_id = $1 AND cd.tenant_id = $2
+      ORDER BY cd.amount DESC, cd.donated_at DESC LIMIT 100`, [c.id, c.tenant_id])).rows;
 
     // Simplified query that works
     const simpleDonations = (await pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 AND tenant_id=$2 AND amount > 0 ORDER BY amount DESC, donated_at DESC LIMIT 100', [c.id, c.tenant_id])).rows;
@@ -429,7 +444,12 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 6. REFUND HANDLING
   // =============================================
-  app.get('/admin/refunds', requireAuth, ah(async (req, res) => {
+  // Admin: Refund management (admin/super_admin only)
+  app.get('/admin/refunds', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const transactions = (await pool.query(`SELECT it.*, fc.title as campaign_title, i.full_name as investor_name
       FROM investment_transactions it
@@ -455,7 +475,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `, req.session.user));
   }));
 
-  app.post('/admin/refunds/:id/process', requireAuth, ah(async (req, res) => {
+  app.post('/admin/refunds/:id/process', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const tx = (await pool.query('SELECT * FROM investment_transactions WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!tx) return res.status(404).send('Not found');
