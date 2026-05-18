@@ -7595,7 +7595,7 @@ app.post('/settings/backup/upload', requireAuth, express.raw({ type: 'applicatio
     return res.send(renderPage('Import Error', '<div class="card"><div class="alert alert-error">Invalid backup file. Missing metadata.</div><a href="/settings/backup" class="btn">Back</a></div>', req.session.user));
   }
 
-  const allowedTables = ['students', 'fees', 'exams', 'marks', 'attendance', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'invoices', 'expenses', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'service_schedule', 'customers', 'budget_items', 'goals', 'personal_notes', 'staff', 'timetable', 'grading_scales', 'fee_structures', 'church_members', 'donations', 'parent_links'];
+  const allowedTables = ['students', 'fees', 'exams', 'marks', 'attendance', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'invoices', 'expenses', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'service_schedule', 'customers', 'budget_items', 'goals', 'personal_notes', 'staff', 'timetable', 'grading_scales', 'fee_structures', 'church_members', 'donations', 'parent_links', 'ip_rules', 'ip_block_log', 'encryption_keys', 'key_usage_log', 'login_attempts', 'account_lockouts', 'captcha_settings', 'captcha_verification_log', 'slow_queries_log', 'query_optimization_rules', 'error_logs', 'error_aggregates', 'scheduled_tasks', 'task_execution_logs', 'custom_api_endpoints', 'api_call_logs', 'custom_domains', 'domain_redirects', 'push_config', 'push_subscribers', 'push_campaigns', 'push_delivery_log', 'chat_widget_config', 'chat_canned_responses', 'chat_departments', 'custom_forms', 'form_submissions', 'form_conditions', 'school_themes', 'theme_components', 'locales', 'translation_keys', 'translations', 'accessibility_scans', 'accessibility_issues', 'recycle_bin', 'recycle_bin_settings', 'audit_exports', 'communication_analytics', 'communication_daily_stats'];
   let imported = 0;
   for (const table of allowedTables) {
     if (backup[table] && Array.isArray(backup[table])) {
@@ -36379,6 +36379,58 @@ try { const m = require('./data-archive'); m(app, pool, _newModOpts); console.lo
 console.log('[Phase2] 10 new feature modules activated — total module count now 132+');
 
 // ============================================================
+// === PHASE 4: 27 Additional Feature Modules ===
+// === Security, Monitoring, UX, Analytics, Communication ===
+// ============================================================
+
+// --- Security & Access Control ---
+try { const m = require('./ip-protection'); m(app, pool, _newModOpts); console.log('[IPProtection] IP whitelist/blacklist loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[IPProtection] Error:', e.message); }
+try { const m = require('./encryption-key-manager'); m(app, pool, _newModOpts); console.log('[EncryptionKeys] Encryption key manager loaded — 2 tables, 12 routes'); } catch(e) { console.warn('[EncryptionKeys] Error:', e.message); }
+try { const m = require('./login-attempt-dashboard'); m(app, pool, _newModOpts); console.log('[LoginSecurity] Login attempt dashboard loaded — 2 tables, 15 routes'); } catch(e) { console.warn('[LoginSecurity] Error:', e.message); }
+try { const m = require('./captcha-config'); m(app, pool, _newModOpts); console.log('[CAPTCHA] CAPTCHA configuration loaded — 2 tables, 13 routes'); } catch(e) { console.warn('[CAPTCHA] Error:', e.message); }
+
+// --- Monitoring & Diagnostics ---
+try { const m = require('./slow-query-monitor'); m(app, pool, _newModOpts); console.log('[SlowQueries] Slow query monitor loaded — 2 tables, 15 routes'); } catch(e) { console.warn('[SlowQueries] Error:', e.message); }
+try { const m = require('./error-log-dashboard'); m(app, pool, _newModOpts); console.log('[ErrorLogs] Error log dashboard loaded — 2 tables, 17 routes'); } catch(e) { console.warn('[ErrorLogs] Error:', e.message); }
+try { const m = require('./session-manager'); m(app, pool, _newModOpts); console.log('[Sessions] Session manager loaded — routes'); } catch(e) { console.warn('[Sessions] Error:', e.message); }
+
+// --- Task Automation ---
+try { const m = require('./scheduled-tasks'); m(app, pool, _newModOpts); console.log('[ScheduledTasks] Scheduled tasks manager loaded — 2 tables, 16 routes'); } catch(e) { console.warn('[ScheduledTasks] Error:', e.message); }
+try { const m = require('./quick-actions'); m(app, pool, _newModOpts); console.log('[QuickActions] Quick actions loaded — routes'); } catch(e) { console.warn('[QuickActions] Error:', e.message); }
+
+// --- API & Integration ---
+try { const m = require('./api-endpoint-builder'); m(app, pool, _newModOpts); console.log('[APIBuilder] API endpoint builder loaded — 2 tables, 12 routes'); } catch(e) { console.warn('[APIBuilder] Error:', e.message); }
+try { const m = require('./custom-domain-manager'); m(app, pool, _newModOpts); console.log('[Domains] Custom domain manager loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[Domains] Error:', e.message); }
+try { const m = require('./push-notifications'); m(app, pool, _newModOpts); console.log('[Push] Push notification manager loaded — 4 tables, 15 routes'); } catch(e) { console.warn('[Push] Error:', e.message); }
+
+// --- Live Chat & Forms ---
+try { const m = require('./live-chat-config'); m(app, pool, _newModOpts); console.log('[ChatConfig] Live chat widget config loaded — 3 tables, 13 routes'); } catch(e) { console.warn('[ChatConfig] Error:', e.message); }
+try { const m = require('./form-builder-advanced'); m(app, pool, _newModOpts); console.log('[FormBuilder] Advanced form builder loaded — 3 tables, 17 routes'); } catch(e) { console.warn('[FormBuilder] Error:', e.message); }
+
+// --- UX & Theming ---
+try { const m = require('./theme-builder'); m(app, pool, _newModOpts); console.log('[ThemeBuilder] Visual theme builder loaded — 2 tables, 16 routes'); } catch(e) { console.warn('[ThemeBuilder] Error:', e.message); }
+try { const m = require('./theme-manager'); m(app, pool, _newModOpts); console.log('[ThemeManager] Theme manager loaded — routes'); } catch(e) { console.warn('[ThemeManager] Error:', e.message); }
+try { const m = require('./locale-manager'); m(app, pool, _newModOpts); console.log('[Locales] Language/locale manager loaded — 3 tables, 15 routes'); } catch(e) { console.warn('[Locales] Error:', e.message); }
+try { const m = require('./accessibility-checker'); m(app, pool, _newModOpts); console.log('[A11y] Accessibility checker loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[A11y] Error:', e.message); }
+
+// --- Data Management ---
+try { const m = require('./recycle-bin'); m(app, pool, _newModOpts); console.log('[RecycleBin] Recycle bin/soft delete loaded — 2 tables, 13 routes'); } catch(e) { console.warn('[RecycleBin] Error:', e.message); }
+try { const m = require('./audit-trail-export'); m(app, pool, _newModOpts); console.log('[AuditExport] Audit trail export loaded — 1 table, 12 routes'); } catch(e) { console.warn('[AuditExport] Error:', e.message); }
+try { const m = require('./bulk-import'); m(app, pool, _newModOpts); console.log('[BulkImport] Bulk user import loaded — routes'); } catch(e) { console.warn('[BulkImport] Error:', e.message); }
+
+// --- Analytics & Intelligence ---
+try { const m = require('./communication-analytics'); m(app, pool, _newModOpts); console.log('[CommAnalytics] Communication analytics loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[CommAnalytics] Error:', e.message); }
+try { const m = require('./funnel-analytics'); m(app, pool, _newModOpts); console.log('[FunnelAnalytics] Funnel analytics loaded — routes'); } catch(e) { console.warn('[FunnelAnalytics] Error:', e.message); }
+try { const m = require('./financial-forecast'); m(app, pool, _newModOpts); console.log('[FinForecast] Financial forecast loaded — routes'); } catch(e) { console.warn('[FinForecast] Error:', e.message); }
+try { const m = require('./visual-report-builder'); m(app, pool, _newModOpts); console.log('[ReportBuilder] Visual report builder loaded — routes'); } catch(e) { console.warn('[ReportBuilder] Error:', e.message); }
+try { const m = require('./user-segmentation'); m(app, pool, _newModOpts); console.log('[UserSegmentation] User segmentation engine loaded — routes'); } catch(e) { console.warn('[UserSegmentation] Error:', e.message); }
+
+// --- Content & Moderation ---
+try { const m = require('./content-moderation'); m(app, pool, _newModOpts); console.log('[ContentMod] Content moderation loaded — routes'); } catch(e) { console.warn('[ContentMod] Error:', e.message); }
+
+console.log('[Phase4] 27 additional feature modules activated — total module count now 159+');
+
+// ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===
 // Social Sharing, Donor Dashboard, Payouts, Donor Wall, QR Codes,
 // Refund Handling, Embed Widget, Matching Donations, Comments,
@@ -37143,3 +37195,4 @@ server.listen(PORT, () => {
   console.log(`WebSocket: ws${process.env.NODE_ENV === 'production' ? 's' : ''}://localhost:${PORT}/ws/notifications`);
 });
 // Deploy trigger 1779091065
+// Phase 4 deploy trigger: 27 additional modules — 2026-05-18
