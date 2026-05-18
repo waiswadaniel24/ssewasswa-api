@@ -2455,6 +2455,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .nav{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:15px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;box-shadow:0 4px 12px rgba(79,70,229,0.3)}
 .nav a{color:white;text-decoration:none;padding:8px 16px;border-radius:8px;transition:0.2s;font-size:14px}.nav a:hover{background:rgba(255,255,255,0.2)}
 .container{max-width:1200px;margin:20px auto;padding:0 20px}
+.dd{position:relative;display:inline-block}.dd-btn{background:none;border:none;cursor:pointer;color:white;font-size:14px;padding:8px 12px;border-radius:8px;transition:0.2s;display:flex;align-items:center;gap:4px;white-space:nowrap}.dd-btn:hover{background:rgba(255,255,255,0.2)}.dd-btn .dd-arrow{font-size:10px;transition:transform 0.2s}.dd.open .dd-arrow{transform:rotate(180deg)}
+.dd-menu{display:none;position:absolute;right:0;top:100%;min-width:200px;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,0.18);z-index:1100;padding:6px 0;margin-top:4px;animation:ddFadeIn 0.15s ease}
+.dd.open .dd-menu{display:block}
+.dd-menu a{display:flex;align-items:center;gap:8px;padding:9px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px;border-radius:0;transition:background 0.1s}
+.dd-menu a:hover{background:${dark ? '#334155' : '#f1f5f9'};text-decoration:none}
+.dd-menu a .dd-icon{font-size:16px;width:22px;text-align:center;flex-shrink:0}
+.dd-menu a .dd-label{flex:1}
+.dd-menu .dd-divider{height:1px;background:${dark ? '#334155' : '#e2e8f0'};margin:4px 12px}
+.dd-menu .dd-header{padding:8px 16px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:${dark ? '#64748b' : '#94a3b8'}}
+@keyframes ddFadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
 .card{background:${dark ? '#1e293b' : 'white'};border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 4px 20px rgba(0,0,0,${dark ? '0.3' : '0.08'});border:1px solid ${dark ? '#334155' : '#e2e8f0'};transition:background 0.3s}
 .btn{display:inline-block;padding:12px 24px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;text-decoration:none;border-radius:10px;font-weight:600;border:none;cursor:pointer;transition:0.2s;font-size:14px}
 .btn:hover{opacity:0.9;box-shadow:0 4px 15px rgba(79,70,229,0.3)}
@@ -2490,7 +2500,7 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 .tab-bar a{flex:1;padding:12px;text-align:center;background:${dark ? '#1e293b' : 'white'};color:${dark ? '#94a3b8' : '#64748b'};font-weight:600;text-decoration:none;transition:0.2s}
 .tab-bar a:hover{background:${dark ? '#334155' : '#f1f5f9'};text-decoration:none}
 .tab-bar a.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
-@media(max-width:768px){.nav{flex-wrap:wrap;flex-direction:column;align-items:stretch;padding:10px 15px;gap:4px}.nav .nav-links{display:none;flex-direction:column;width:100%;padding-top:8px;border-top:1px solid rgba(255,255,255,0.2)}.nav.open .nav-links{display:flex!important}.nav .nav-links a,.nav .nav-links button,.nav .nav-links select,.nav .nav-links span{width:100%;text-align:left;padding:10px 12px;font-size:14px}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.tab-bar{flex-direction:column}.hero{padding:24px 16px}.container{padding:0 12px}.card{padding:14px;margin-bottom:10px;border-radius:12px}.card h3{font-size:14px;margin-bottom:6px}.btn{padding:10px 16px;font-size:13px}.btn-sm{padding:8px 12px;font-size:11px}.btn-group{gap:6px}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}form input,form select,form textarea{font-size:16px!important}.tag{font-size:11px;padding:2px 6px}h2{font-size:18px}h3{font-size:15px}.stat-num{font-size:22px}.stat-card{padding:12px 8px}.stat-card>div:last-child{font-size:11px}.dash-section{font-size:13px;margin:16px 0 6px}}
+@media(max-width:768px){.nav{flex-wrap:wrap;flex-direction:column;align-items:stretch;padding:10px 15px;gap:4px}.nav .nav-links{display:none;flex-direction:column;width:100%;padding-top:8px;border-top:1px solid rgba(255,255,255,0.2)}.nav.open .nav-links{display:flex!important}.nav .nav-links a,.nav .nav-links button,.nav .nav-links select,.nav .nav-links span{width:100%;text-align:left;padding:10px 12px;font-size:14px}.nav .nav-links .dd{width:100%}.nav .nav-links .dd-btn{width:100%;justify-content:space-between}.nav .nav-links .dd-menu{right:auto;left:0;position:static;box-shadow:none;border:none;border-radius:0;background:transparent;padding:0;margin-top:0;animation:none;display:none;min-width:0}.nav .nav-links .dd.open .dd-menu{display:block}.nav .nav-links .dd-menu a{color:white;padding:10px 16px 10px 32px;font-size:13px}.nav .nav-links .dd-menu a:hover{background:rgba(255,255,255,0.15)}.nav .nav-links .dd-menu .dd-divider{background:rgba(255,255,255,0.15);margin:2px 16px}.nav .nav-links .dd-menu .dd-header{color:rgba(255,255,255,0.6);padding:6px 16px 2px;font-size:9px}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.tab-bar{flex-direction:column}.hero{padding:24px 16px}.container{padding:0 12px}.card{padding:14px;margin-bottom:10px;border-radius:12px}.card h3{font-size:14px;margin-bottom:6px}.btn{padding:10px 16px;font-size:13px}.btn-sm{padding:8px 12px;font-size:11px}.btn-group{gap:6px}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}form input,form select,form textarea{font-size:16px!important}.tag{font-size:11px;padding:2px 6px}h2{font-size:18px}h3{font-size:15px}.stat-num{font-size:22px}.stat-card{padding:12px 8px}.stat-card>div:last-child{font-size:11px}.dash-section{font-size:13px;margin:16px 0 6px}}
 @media(max-width:480px){.grid{grid-template-columns:repeat(2,1fr)!important;gap:10px}.stats{grid-template-columns:repeat(2,1fr)!important;gap:8px}.card{padding:12px;margin-bottom:8px;border-radius:12px}.card h3{font-size:13px;margin-bottom:4px}.card .btn-sm{padding:6px 10px;font-size:11px}.card p{font-size:11px}.stat-num{font-size:20px}.hero{padding:20px 14px}.view-toggle{bottom:80px;right:10px}.view-toggle button{width:38px;height:38px;font-size:15px}}
 @media(min-width:769px) and (max-width:1024px){.stats{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:repeat(2,1fr)}.stat-num{font-size:26px}}
 @media(max-width:380px){.grid{grid-template-columns:1fr!important;gap:8px}}@media print{.nav,.bottom-nav,.float-install-btn,.btn-group,.view-toggle{display:none!important}.card{border:none!important;box-shadow:none!important;break-inside:avoid}body{background:white!important;padding:0!important}}
@@ -2575,9 +2585,18 @@ if(_isStandalone){_hideInstallBtns();}
 </div>
 <nav class="nav" role="navigation" aria-label="Main navigation">
   <div style="display:flex;align-items:center;gap:12px"><button onclick="document.querySelector('.nav').classList.toggle('open');this.textContent=this.textContent==='☰'?'✕':'☰'" style="display:none;background:none;border:none;color:white;font-size:24px;cursor:pointer;padding:4px" id="menuBtn">☰</button><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
-  <div class="nav-links" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+  <div class="nav-links" style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">
     ${user ? `
-      <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
+      <div class="dd" id="ddAccount">
+        <button class="dd-btn" onclick="toggleDD('ddAccount')">Hi, ${esc(user.email.split('@')[0])} <span class="dd-arrow">▾</span></button>
+        <div class="dd-menu">
+          <div class="dd-header">Account</div>
+          <a href="/settings/profile"><span class="dd-icon">👤</span><span class="dd-label">Profile Settings</span></a>
+          <a href="/toggle-dark"><span class="dd-icon">${dark ? '☀️' : '🌙'}</span><span class="dd-label">${dark ? 'Light Mode' : 'Dark Mode'}</span></a>
+          <div class="dd-divider"></div>
+          <a href="/logout"><span class="dd-icon">🚪</span><span class="dd-label">Logout</span></a>
+        </div>
+      </div>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
       <div style="position:relative;display:inline-block" id="notifDropdown">
         <button onclick="closeAllDropdowns('notif');toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="Notifications">
@@ -2596,33 +2615,50 @@ if(_isStandalone){_hideInstallBtns();}
         </div>
       </div>
       <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
-      <a href="/entertainment" style="font-size:13px" title="Entertainment Hub">🎬</a>
-      <a href="/fundraising" style="font-size:13px" title="Fundraising">🎯</a>
-      <div style="position:relative;display:inline-block" id="modulesDropdown">
-        <button onclick="closeAllDropdowns('modules');var m=document.getElementById('modulesMenu');m.style.display=m.style.display==='none'?'block':'none'" style="background:none;border:none;cursor:pointer;color:white;font-size:14px;padding:4px 8px">${esc(uiT('nav.modules'))} ▾</button>
-        <div id="modulesMenu" style="display:none;position:absolute;right:0;top:30px;width:220px;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.15);z-index:1000;padding:6px 0">
-          <a href="/hr" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">👥 ${esc(uiT('mod.hr'))}</a>
-          <a href="/bookings" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">📅 ${esc(uiT('mod.bookings'))}</a>
-          <a href="/procurement" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🛒 ${esc(uiT('mod.procurement'))}</a>
-          <a href="/incidents" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🚨 ${esc(uiT('mod.incidents'))}</a>
-          <a href="/fleet" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🚗 ${esc(uiT('mod.fleet'))}</a>
-          <a href="/tickets" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🎫 ${esc(uiT('mod.tickets'))}</a>
-          <a href="/kb" style="display:block;padding:8px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">📚 ${esc(uiT('mod.kb'))}</a>
+      <div class="dd" id="ddModules">
+        <button class="dd-btn" onclick="toggleDD('ddModules')">${esc(uiT('nav.modules'))} <span class="dd-arrow">▾</span></button>
+        <div class="dd-menu">
+          <div class="dd-header">Modules</div>
+          <a href="/hr"><span class="dd-icon">👥</span><span class="dd-label">${esc(uiT('mod.hr'))}</span></a>
+          <a href="/bookings"><span class="dd-icon">📅</span><span class="dd-label">${esc(uiT('mod.bookings'))}</span></a>
+          <a href="/procurement"><span class="dd-icon">🛒</span><span class="dd-label">${esc(uiT('mod.procurement'))}</span></a>
+          <a href="/incidents"><span class="dd-icon">🚨</span><span class="dd-label">${esc(uiT('mod.incidents'))}</span></a>
+          <a href="/fleet"><span class="dd-icon">🚗</span><span class="dd-label">${esc(uiT('mod.fleet'))}</span></a>
+          <a href="/tickets"><span class="dd-icon">🎫</span><span class="dd-label">${esc(uiT('mod.tickets'))}</span></a>
+          <a href="/kb"><span class="dd-icon">📚</span><span class="dd-label">${esc(uiT('mod.kb'))}</span></a>
         </div>
       </div>
-      <a href="/search">${esc(uiT('nav.search'))}</a>
-      <a href="/switch-portal" style="color:#c084fc;font-weight:600" title="Switch Portal Type">&#127760; ${esc(uiT('nav.portal'))}</a>
-      <a href="/settings/profile">${esc(uiT('nav.settings'))}</a>
-      <a href="/install" id="nav-install-btn" onclick="_installApp();return false" style="font-size:13px;color:#10b981;font-weight:600;background:rgba(16,185,129,0.1);padding:4px 10px;border-radius:8px;text-decoration:none;align-items:center;gap:4px;cursor:pointer">&#128241; Install</a>
-      <a href="/parent/login" style="font-size:12px">${esc(uiT('nav.parent'))}</a>
-      <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
-      <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(csrfToken || '')}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer" title="Language">
-        <option value="en" ${(user.language||'en')==='en'?'selected':''}>EN</option>
-        <option value="lg" ${user.language==='lg'?'selected':''}>LG</option>
-        <option value="sw" ${user.language==='sw'?'selected':''}>SW</option>
-        <option value="fr" ${user.language==='fr'?'selected':''}>FR</option>
-      </select>
-      <a href="/logout">${esc(uiT('nav.logout'))}</a>
+      <div class="dd" id="ddMore">
+        <button class="dd-btn" onclick="toggleDD('ddMore')">More <span class="dd-arrow">▾</span></button>
+        <div class="dd-menu">
+          <div class="dd-header">Quick Access</div>
+          <a href="/entertainment"><span class="dd-icon">🎬</span><span class="dd-label">Entertainment</span></a>
+          <a href="/fundraising"><span class="dd-icon">🎯</span><span class="dd-label">Fundraising</span></a>
+          <a href="/parent/login"><span class="dd-icon">👨‍👩‍👧</span><span class="dd-label">Parent Portal</span></a>
+          <a href="/blog"><span class="dd-icon">📰</span><span class="dd-label">Blog & News</span></a>
+          <a href="/library"><span class="dd-icon">📚</span><span class="dd-label">Library</span></a>
+          <div class="dd-divider"></div>
+          <div class="dd-header">Language</div>
+          <a href="#" onclick="event.preventDefault();document.getElementById('langPicker').style.display=document.getElementById('langPicker').style.display==='none'?'block':'none'" style="cursor:pointer"><span class="dd-icon">🌐</span><span class="dd-label">Change Language</span><span style="font-size:11px;color:#94a3b8;margin-left:auto">▾</span></a>
+          <div id="langPicker" style="display:none;padding:4px 16px 8px">
+            <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(csrfToken || '')}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="width:100%;padding:8px;background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:8px;font-size:13px;cursor:pointer">
+              <option value="en" ${(user.language||'en')==='en'?'selected':''}>🇬🇧 English</option>
+              <option value="lg" ${user.language==='lg'?'selected':''}>🇺🇬 Luganda</option>
+              <option value="sw" ${user.language==='sw'?'selected':''}>🇹🇿 Swahili</option>
+              <option value="fr" ${user.language==='fr'?'selected':''}>🇫🇷 French</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="dd" id="ddPortal">
+        <button class="dd-btn" onclick="toggleDD('ddPortal')" style="color:#c084fc">🌍 <span class="dd-label">Portal</span> <span class="dd-arrow">▾</span></button>
+        <div class="dd-menu">
+          <div class="dd-header">Switch Portal</div>
+          <a href="/switch-portal"><span class="dd-icon">🔄</span><span class="dd-label">Change Portal Type</span></a>
+          <a href="/install" onclick="_installApp();return false"><span class="dd-icon">📱</span><span class="dd-label">Install App</span></a>
+        </div>
+      </div>
+      <a href="/search" style="padding:8px 10px" title="Search">🔍</a>
     ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/install" style="font-size:13px;color:#10b981;font-weight:600">&#128241; Get App</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/p/entertainment" style="font-size:13px" title="Entertainment">🎬</a><a href="/p/fundraising" style="font-size:13px" title="Fundraising">🎯</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
   </div>
 </nav>
@@ -2669,17 +2705,33 @@ function updateNotifBadge(count){ if(!_notifBadge) return; if(count>0){_notifBad
 // Dropdown close manager — closes all dropdowns except the one being opened
 var _openDropdown = null;
 function closeAllDropdowns(except) {
+  // Close notification panel
   var notifPanel = document.getElementById('notifPanel');
   if (notifPanel && except !== 'notif') { notifPanel.style.display = 'none'; _notifPanelOpen = false; }
-  var modulesMenu = document.getElementById('modulesMenu');
-  if (modulesMenu && except !== 'modules') { modulesMenu.style.display = 'none'; }
+  // Close all new .dd dropdowns
+  document.querySelectorAll('.dd.open').forEach(function(dd) {
+    if (dd.id !== except) dd.classList.remove('open');
+  });
   _openDropdown = except || null;
 }
-// Close dropdowns when clicking outside any of them
+// Toggle .dd dropdowns
+function toggleDD(id) {
+  var dd = document.getElementById(id);
+  if (!dd) return;
+  var isOpen = dd.classList.contains('open');
+  // Close all dropdowns first
+  document.querySelectorAll('.dd.open').forEach(function(d) { d.classList.remove('open'); });
+  var notifPanel = document.getElementById('notifPanel');
+  if (notifPanel) { notifPanel.style.display = 'none'; _notifPanelOpen = false; }
+  // Toggle clicked one
+  if (!isOpen) dd.classList.add('open');
+}
+// Close dropdowns when clicking outside
 document.addEventListener('click', function(e) {
-  var notifDd = document.getElementById('notifDropdown');
-  var modulesDd = document.getElementById('modulesDropdown');
-  var clickedInside = (notifDd && notifDd.contains(e.target)) || (modulesDd && modulesDd.contains(e.target));
+  var clickedInside = false;
+  document.querySelectorAll('.dd, #notifDropdown').forEach(function(dd) {
+    if (dd && dd.contains(e.target)) clickedInside = true;
+  });
   if (!clickedInside) { closeAllDropdowns(); }
 });
 var _notifPanelOpen = false;
@@ -13292,6 +13344,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .nav{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;padding:15px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;box-shadow:0 4px 12px rgba(79,70,229,0.3)}
 .nav a{color:white;text-decoration:none;padding:8px 16px;border-radius:8px;transition:0.2s;font-size:14px}.nav a:hover{background:rgba(255,255,255,0.2)}
 .container{max-width:1200px;margin:20px auto;padding:0 20px}
+.dd{position:relative;display:inline-block}.dd-btn{background:none;border:none;cursor:pointer;color:white;font-size:14px;padding:8px 12px;border-radius:8px;transition:0.2s;display:flex;align-items:center;gap:4px;white-space:nowrap}.dd-btn:hover{background:rgba(255,255,255,0.2)}.dd-btn .dd-arrow{font-size:10px;transition:transform 0.2s}.dd.open .dd-arrow{transform:rotate(180deg)}
+.dd-menu{display:none;position:absolute;right:0;top:100%;min-width:200px;background:${dark ? '#1e293b' : 'white'};border:1px solid ${dark ? '#334155' : '#e2e8f0'};border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,0.18);z-index:1100;padding:6px 0;margin-top:4px;animation:ddFadeIn 0.15s ease}
+.dd.open .dd-menu{display:block}
+.dd-menu a{display:flex;align-items:center;gap:8px;padding:9px 16px;color:${dark ? '#e2e8f0' : '#1e293b'};text-decoration:none;font-size:13px;border-radius:0;transition:background 0.1s}
+.dd-menu a:hover{background:${dark ? '#334155' : '#f1f5f9'};text-decoration:none}
+.dd-menu a .dd-icon{font-size:16px;width:22px;text-align:center;flex-shrink:0}
+.dd-menu a .dd-label{flex:1}
+.dd-menu .dd-divider{height:1px;background:${dark ? '#334155' : '#e2e8f0'};margin:4px 12px}
+.dd-menu .dd-header{padding:8px 16px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:${dark ? '#64748b' : '#94a3b8'}}
+@keyframes ddFadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
 .card{background:${dark ? '#1e293b' : 'white'};border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 4px 20px rgba(0,0,0,${dark ? '0.3' : '0.08'});border:1px solid ${dark ? '#334155' : '#e2e8f0'};transition:background 0.3s}
 .btn{display:inline-block;padding:12px 24px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white;text-decoration:none;border-radius:10px;font-weight:600;border:none;cursor:pointer;transition:0.3s;font-size:14px}
 .btn:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(79,70,229,0.4)}
@@ -13308,7 +13370,7 @@ table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:10px 12px;
 .alert{padding:16px;border-radius:10px;margin-bottom:15px}.alert-success{background:#d1fae5;color:#065f46}.alert-error{background:#fee2e2;color:#991b1b}.alert-info{background:#dbeafe;color:#1e40af}
 .muted{color:${dark ? '#94a3b8' : '#64748b'};font-size:13px}
 a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
-@media(max-width:768px){.nav{flex-wrap:wrap;flex-direction:column;align-items:stretch;padding:10px 15px;gap:4px}.nav .nav-links-v3{display:none;flex-direction:column;width:100%;padding-top:8px;border-top:1px solid rgba(255,255,255,0.2)}.nav.open .nav-links-v3{display:flex!important}.nav .nav-links-v3 a,.nav .nav-links-v3 button,.nav .nav-links-v3 select,.nav .nav-links-v3 span{width:100%;text-align:left;padding:10px 12px;font-size:14px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.card{padding:14px;margin-bottom:10px}.stat-num{font-size:22px}h2{font-size:18px}h3{font-size:15px}body{padding-bottom:70px}}
+@media(max-width:768px){.nav{flex-wrap:wrap;flex-direction:column;align-items:stretch;padding:10px 15px;gap:4px}.nav .nav-links-v3{display:none;flex-direction:column;width:100%;padding-top:8px;border-top:1px solid rgba(255,255,255,0.2)}.nav.open .nav-links-v3{display:flex!important}.nav .nav-links-v3 a,.nav .nav-links-v3 button,.nav .nav-links-v3 select,.nav .nav-links-v3 span{width:100%;text-align:left;padding:10px 12px;font-size:14px}.nav .nav-links-v3 .dd{width:100%}.nav .nav-links-v3 .dd-btn{width:100%;justify-content:space-between}.nav .nav-links-v3 .dd-menu{right:auto;left:0;position:static;box-shadow:none;border:none;border-radius:0;background:transparent;padding:0;margin-top:0;animation:none;display:none;min-width:0}.nav .nav-links-v3 .dd.open .dd-menu{display:block}.nav .nav-links-v3 .dd-menu a{color:white;padding:10px 16px 10px 32px;font-size:13px}.nav .nav-links-v3 .dd-menu a:hover{background:rgba(255,255,255,0.15)}.nav .nav-links-v3 .dd-menu .dd-divider{background:rgba(255,255,255,0.15);margin:2px 16px}.nav .nav-links-v3 .dd-menu .dd-header{color:rgba(255,255,255,0.6);padding:6px 16px 2px;font-size:9px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.card{padding:14px;margin-bottom:10px}.stat-num{font-size:22px}h2{font-size:18px}h3{font-size:15px}body{padding-bottom:70px}}
 @media(max-width:480px){.grid{grid-template-columns:repeat(2,1fr)!important;gap:10px}.stats{grid-template-columns:repeat(2,1fr)!important;gap:8px}.card{padding:12px;margin-bottom:8px;border-radius:12px}.card h3{font-size:13px;margin-bottom:4px}.card .btn-sm{padding:6px 10px;font-size:11px}.card p{font-size:11px}.stat-num{font-size:20px}.view-toggle{bottom:80px;right:10px}.view-toggle button{width:38px;height:38px;font-size:15px}}
 @media(min-width:769px) and (max-width:1024px){.stats{grid-template-columns:repeat(4,1fr)}.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:380px){.grid{grid-template-columns:1fr!important;gap:8px}}@media print{.nav,.bottom-nav,.view-toggle{display:none!important}}
 </style>
@@ -13340,9 +13402,18 @@ ${process.env.GA_TRACKING_ID ? `
 </head><body>
 <nav class="nav">
   <div style="display:flex;align-items:center;gap:12px"><button onclick="document.querySelector('.nav').classList.toggle('open');this.textContent=this.textContent==='☰'?'✕':'☰'" style="display:none;background:none;border:none;color:white;font-size:24px;cursor:pointer;padding:4px" id="menuBtn">☰</button><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
-  <div class="nav-links-v3" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+  <div class="nav-links-v3" style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">
     ${user ? `
-      <span style="font-size:13px">Hi, ${esc(user.email.split('@')[0])}</span>
+      <div class="dd" id="ddAccount3">
+        <button class="dd-btn" onclick="toggleDD('ddAccount3')">Hi, ${esc(user.email.split('@')[0])} <span class="dd-arrow">▾</span></button>
+        <div class="dd-menu">
+          <div class="dd-header">Account</div>
+          <a href="/settings/profile"><span class="dd-icon">👤</span><span class="dd-label">Profile Settings</span></a>
+          <a href="/toggle-dark"><span class="dd-icon">${dark ? '☀️' : '🌙'}</span><span class="dd-label">${dark ? 'Light Mode' : 'Dark Mode'}</span></a>
+          <div class="dd-divider"></div>
+          <a href="/logout"><span class="dd-icon">🚪</span><span class="dd-label">Logout</span></a>
+        </div>
+      </div>
       ${user.role === 'super_admin' ? `<a href="/dev/master" style="color:#fbbf24;font-weight:700">Dev Hub</a>` : ''}
       <div style="position:relative;display:inline-block" id="notifDropdown">
         <button onclick="closeAllDropdowns('notif');toggleNotifPanel()" style="background:none;border:none;cursor:pointer;font-size:20px;position:relative" title="Notifications">
@@ -13362,12 +13433,23 @@ ${process.env.GA_TRACKING_ID ? `
       </div>
       <a href="/dashboard">${esc(uiT('nav.dashboard'))}</a>
       <a href="/search">${esc(uiT('nav.search'))}</a>
-      <a href="/settings/profile">${esc(uiT('nav.settings'))}</a>
-      <a href="/guide" style="font-size:12px">${esc(uiT('nav.guide'))}</a>
-      <a href="/parent/login" style="font-size:12px">${esc(uiT('nav.parent'))}</a>
-      <a href="/worker/login" style="font-size:12px">${esc(uiT('nav.worker'))}</a>
-      <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
-      <a href="/logout">${esc(uiT('nav.logout'))}</a>
+      <div class="dd" id="ddMore3">
+        <button class="dd-btn" onclick="toggleDD('ddMore3')">More <span class="dd-arrow">▾</span></button>
+        <div class="dd-menu">
+          <div class="dd-header">Quick Access</div>
+          <a href="/entertainment"><span class="dd-icon">🎬</span><span class="dd-label">Entertainment</span></a>
+          <a href="/fundraising"><span class="dd-icon">🎯</span><span class="dd-label">Fundraising</span></a>
+          <a href="/parent/login"><span class="dd-icon">👨‍👩‍👧</span><span class="dd-label">Parent Portal</span></a>
+          <a href="/worker/login"><span class="dd-icon">👷</span><span class="dd-label">Worker Portal</span></a>
+          <a href="/guide"><span class="dd-icon">📖</span><span class="dd-label">Guide</span></a>
+          <a href="/blog"><span class="dd-icon">📰</span><span class="dd-label">Blog & News</span></a>
+          <a href="/library"><span class="dd-icon">📚</span><span class="dd-label">Library</span></a>
+          <div class="dd-divider"></div>
+          <a href="/switch-portal"><span class="dd-icon">🌍</span><span class="dd-label">Switch Portal</span></a>
+          <a href="/install"><span class="dd-icon">📱</span><span class="dd-label">Install App</span></a>
+        </div>
+      </div>
+      <a href="/search" style="padding:8px 10px" title="Search">🔍</a>
     ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/install" style="font-size:13px;color:#10b981;font-weight:600">&#128241; Get App</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
   </div>
 </nav>
@@ -13413,11 +13495,26 @@ var _openDropdown = null;
 function closeAllDropdowns(except) {
   var notifPanel = document.getElementById('notifPanel');
   if (notifPanel && except !== 'notif') { notifPanel.style.display = 'none'; _notifPanelOpen = false; }
+  document.querySelectorAll('.dd.open').forEach(function(dd) {
+    if (dd.id !== except) dd.classList.remove('open');
+  });
   _openDropdown = except || null;
 }
+function toggleDD(id) {
+  var dd = document.getElementById(id);
+  if (!dd) return;
+  var isOpen = dd.classList.contains('open');
+  document.querySelectorAll('.dd.open').forEach(function(d) { d.classList.remove('open'); });
+  var notifPanel = document.getElementById('notifPanel');
+  if (notifPanel) { notifPanel.style.display = 'none'; _notifPanelOpen = false; }
+  if (!isOpen) dd.classList.add('open');
+}
 document.addEventListener('click', function(e) {
-  var dd = document.getElementById('notifDropdown');
-  if (dd && !dd.contains(e.target)) { closeAllDropdowns(); }
+  var clickedInside = false;
+  document.querySelectorAll('.dd, #notifDropdown').forEach(function(dd) {
+    if (dd && dd.contains(e.target)) clickedInside = true;
+  });
+  if (!clickedInside) { closeAllDropdowns(); }
 });
 var _notifPanelOpen = false;
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
