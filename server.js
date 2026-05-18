@@ -188,6 +188,18 @@ app.use(helmet({
 }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
+// === SERVICE WORKER ROUTE — Must be BEFORE express.static to set proper headers ===
+app.get('/sw.js', (req, res) => {
+  const swPath = path.join(__dirname, 'public', 'sw.js');
+  res.set('Content-Type', 'application/javascript');
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Service-Worker-Allowed', '/');
+  if (fs.existsSync(swPath)) {
+    res.sendFile(swPath);
+  } else {
+    res.send(`const CACHE_NAME='comfort-v7.0';self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(['/','/login','/offline'])).catch(()=>{}));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});`);
+  }
+});
 app.use(express.static('public'));
 
 // === CSRF PROTECTION (Phase 2 - Full Enforcement) ===
@@ -15314,75 +15326,255 @@ const trackEvent = (eventType, entityType, entityId) => async (req, res, next) =
 // =============================================
 app.get('/install', (req, res) => {
   const isStandalone = req.headers['sec-ch-ua-mode'] === 'standalone';
-  res.send(renderPage('Install Comfort App', `
-    <div style="max-width:600px;margin:40px auto;padding:0 20px">
-      <div style="text-align:center;margin-bottom:40px">
-        <div style="width:80px;height:80px;background:linear-gradient(135deg,#059669,#10b981);border-radius:20px;display:inline-flex;align-items:center;justify-content:center;font-size:40px;margin-bottom:16px">&#128241;</div>
-        <h1 style="font-size:28px;margin-bottom:8px">Install Comfort Zone</h1>
-        <p style="color:#64748b;font-size:16px">Use Comfort Zone like a native app on your phone or computer. No app store needed.</p>
+  const ua = req.headers['user-agent'] || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua);
+  const isAndroid = /Android/.test(ua);
+  const isChrome = /Chrome\//.test(ua) && !/Edge|OPR/.test(ua);
+  const isEdge = /Edge\//.test(ua);
+  const isFirefox = /Firefox\//.test(ua);
+  const isSafari = /Safari\//.test(ua) && !/Chrome/.test(ua);
+
+  let browserType = 'other';
+  if (isIOS) browserType = 'ios';
+  else if (isAndroid && isChrome) browserType = 'android-chrome';
+  else if (isAndroid) browserType = 'android-other';
+  else if (isChrome || isEdge) browserType = 'desktop-chrome';
+  else if (isSafari) browserType = 'safari';
+  else if (isFirefox) browserType = 'firefox';
+
+  res.send(renderPage('Install App', `
+    <div style="max-width:600px;margin:30px auto;padding:0 16px">
+      <!-- Hero -->
+      <div style="text-align:center;margin-bottom:32px">
+        <div style="width:90px;height:90px;background:linear-gradient(135deg,#059669,#10b981);border-radius:22px;display:inline-flex;align-items:center;justify-content:center;font-size:44px;margin-bottom:16px;box-shadow:0 8px 30px rgba(5,150,105,0.3)">&#128241;</div>
+        <h1 style="font-size:26px;margin-bottom:8px">Install Comfort Zone</h1>
+        <p style="color:#64748b;font-size:15px;line-height:1.6">Get the full app experience on your device. Works like a native app — no app store needed.</p>
       </div>
-      ${isStandalone ? '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;text-align:center;margin-bottom:24px"><strong style="color:#166534">You already have Comfort Zone installed!</strong><p style="color:#166534;font-size:14px;margin-top:4px">You are using the app version right now.</p></div>' : '<div style="text-align:center;margin-bottom:24px"><button id="install-now-btn" onclick="tryPwaInstall()" style="background:linear-gradient(135deg,#059669,#10b981);color:white;padding:16px 40px;border-radius:12px;font-weight:700;font-size:18px;border:none;cursor:pointer;box-shadow:0 4px 20px rgba(5,150,105,0.4)">&#128241; Install Now</button><p style="color:#94a3b8;font-size:12px;margin-top:8px">One-tap install for Chrome and Android users</p><div id="install-fallback-msg" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:16px;margin-top:16px;text-align:left"><strong style="color:#92400e">Quick Install Tip:</strong><p style="color:#92400e;font-size:14px;margin-top:4px">Your browser does not support one-tap install. Use the step-by-step instructions below to add Comfort Zone to your home screen.</p></div></div>'}
-      <div style="background:#f8fafc;border-radius:16px;padding:24px;margin-bottom:24px">
-        <h2 style="font-size:18px;margin-bottom:16px">Step-by-Step Instructions</h2>
-        <div style="margin-bottom:24px">
-          <h3 style="font-size:15px;color:#059669;margin-bottom:8px">&#127822; iPhone / iPad (Safari)</h3>
-          <ol style="padding-left:20px;color:#475569;font-size:14px;line-height:2.2">
-            <li>Open this page in <strong>Safari</strong> (required on iOS)</li>
-            <li>Tap the <strong>Share button</strong> (square with arrow at bottom of screen)</li>
-            <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
-            <li>Tap <strong>"Add"</strong> in the top right corner</li>
-            <li>The Comfort Zone icon will appear on your home screen</li>
-          </ol>
-        </div>
-        <div style="margin-bottom:24px">
-          <h3 style="font-size:15px;color:#059669;margin-bottom:8px">&#129302; Android Phone (Chrome)</h3>
-          <ol style="padding-left:20px;color:#475569;font-size:14px;line-height:2.2">
-            <li>Open this page in <strong>Chrome</strong></li>
-            <li>Tap the <strong>three-dot menu</strong> (top right corner)</li>
-            <li>Tap <strong>"Install app"</strong> or <strong>"Add to Home Screen"</strong></li>
-            <li>Tap <strong>"Install"</strong> to confirm</li>
-            <li>Find the Comfort Zone app in your app drawer and home screen</li>
-          </ol>
-        </div>
-        <div style="margin-bottom:8px">
-          <h3 style="font-size:15px;color:#059669;margin-bottom:8px">&#128187; Computer (Chrome / Edge)</h3>
-          <ol style="padding-left:20px;color:#475569;font-size:14px;line-height:2.2">
-            <li>Open this page in <strong>Chrome</strong> or <strong>Edge</strong></li>
-            <li>Click the <strong>install icon</strong> in the address bar (or the "Install Now" button above)</li>
-            <li>Click <strong>"Install"</strong> to confirm</li>
-            <li>The app will open in its own window, separate from your browser</li>
-          </ol>
-        </div>
-      </div>
-      <div style="background:#eff6ff;border-radius:16px;padding:24px;margin-bottom:24px">
-        <h3 style="font-size:16px;margin-bottom:12px">Why Install the App?</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div style="background:white;border-radius:10px;padding:16px;text-align:center"><span style="font-size:28px;display:block;margin-bottom:4px">&#9889;</span><strong style="font-size:13px">Faster Access</strong><p style="font-size:11px;color:#64748b;margin-top:4px">Opens instantly like a native app</p></div>
-          <div style="background:white;border-radius:10px;padding:16px;text-align:center"><span style="font-size:28px;display:block;margin-bottom:4px">&#128274;</span><strong style="font-size:13px">Works Offline</strong><p style="font-size:11px;color:#64748b;margin-top:4px">View cached data without internet</p></div>
-          <div style="background:white;border-radius:10px;padding:16px;text-align:center"><span style="font-size:28px;display:block;margin-bottom:4px">&#128276;</span><strong style="font-size:13px">Push Alerts</strong><p style="font-size:11px;color:#64748b;margin-top:4px">Get notified about important updates</p></div>
-          <div style="background:white;border-radius:10px;padding:16px;text-align:center"><span style="font-size:28px;display:block;margin-bottom:4px">&#127760;</span><strong style="font-size:13px">No App Store</strong><p style="font-size:11px;color:#64748b;margin-top:4px">Install directly, no downloads needed</p></div>
+
+      ${isStandalone ? `
+      <!-- Already Installed -->
+      <div style="background:#f0fdf4;border:2px solid #bbf7d0;border-radius:14px;padding:24px;text-align:center;margin-bottom:24px">
+        <div style="font-size:48px;margin-bottom:8px">&#9989;</div>
+        <h3 style="color:#166534;margin-bottom:4px">Already Installed!</h3>
+        <p style="color:#166534;font-size:14px">You are using the app version right now.</p>
+      </div>` : `
+      <!-- Install Button (works on Chrome/Edge/Android) -->
+      <div id="pwa-install-section" style="text-align:center;margin-bottom:28px">
+        <button id="install-now-btn" onclick="tryPwaInstall()" style="background:linear-gradient(135deg,#059669,#10b981);color:white;padding:18px 48px;border-radius:14px;font-weight:700;font-size:18px;border:none;cursor:pointer;box-shadow:0 4px 20px rgba(5,150,105,0.4);width:100%;max-width:320px;transition:0.2s" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 30px rgba(5,150,105,0.5)'" onmouseout="this.style.transform='';this.style.boxShadow='0 4px 20px rgba(5,150,105,0.4)'">&#128241; Install Now</button>
+        <div id="install-status" style="margin-top:12px;font-size:13px;color:#64748b"></div>
+        <div id="install-fallback-msg" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:16px;margin-top:16px;text-align:left">
+          <strong style="color:#92400e">Your browser needs a manual step:</strong>
+          <p style="color:#92400e;font-size:14px;margin-top:6px" id="fallback-instruction"></p>
         </div>
       </div>
-      <div style="text-align:center;margin-top:24px;padding:20px;background:#f1f5f9;border-radius:12px">
-        <p style="color:#64748b;font-size:13px">&#128274; Your data is always synced and secure across the web and installed app.</p>
-        <a href="/" style="color:#059669;font-weight:600;text-decoration:none">Back to Home</a>
+
+      <!-- Browser-Specific Instructions -->
+      <div style="background:#f8fafc;border-radius:16px;padding:24px;margin-bottom:20px;border:1px solid #e2e8f0">
+
+        ${browserType === 'ios' ? `
+        <h3 style="font-size:16px;color:#059669;margin-bottom:12px">&#127822; iPhone / iPad — Quick Install</h3>
+        <div style="background:white;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #e2e8f0">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">1</div>
+            <div><strong>Tap the Share button</strong><br><span style="color:#64748b;font-size:13px">Look for the <strong>square icon with an up arrow</strong> at the bottom of Safari</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">2</div>
+            <div><strong>Scroll down and tap "Add to Home Screen"</strong><br><span style="color:#64748b;font-size:13px">You may need to scroll down in the share menu to find it</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">3</div>
+            <div><strong>Tap "Add" in the top right</strong><br><span style="color:#64748b;font-size:13px">The Comfort Zone icon will appear on your home screen like a real app!</span></div>
+          </div>
+        </div>
+        <p style="font-size:13px;color:#64748b;text-align:center">&#128161; You must use <strong>Safari</strong> to install on iPhone/iPad. This is an Apple requirement.</p>
+        ` : browserType === 'android-chrome' ? `
+        <h3 style="font-size:16px;color:#059669;margin-bottom:12px">&#129302; Android — Quick Install</h3>
+        <div style="background:white;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #e2e8f0">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">1</div>
+            <div><strong>Tap "Install Now" above</strong><br><span style="color:#64748b;font-size:13px">The one-tap install button should work on Chrome for Android</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">2</div>
+            <div><strong>Or use the Chrome menu</strong><br><span style="color:#64748b;font-size:13px">Tap the <strong>three dots</strong> (top right) then <strong>"Install app"</strong> or <strong>"Add to Home Screen"</strong></span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">3</div>
+            <div><strong>Tap "Install" to confirm</strong><br><span style="color:#64748b;font-size:13px">Find the app in your app drawer and home screen</span></div>
+          </div>
+        </div>
+        ` : browserType === 'android-other' ? `
+        <h3 style="font-size:16px;color:#059669;margin-bottom:12px">&#129302; Android — Quick Install</h3>
+        <div style="background:white;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #e2e8f0">
+          <p style="color:#475569;font-size:14px;margin-bottom:12px"><strong>For the best experience, open this page in Chrome first.</strong></p>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">1</div>
+            <div><strong>Open Chrome</strong> and go to this same URL</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">2</div>
+            <div><strong>Tap the three-dot menu</strong> then <strong>"Install app"</strong></div>
+          </div>
+        </div>
+        ` : browserType === 'desktop-chrome' ? `
+        <h3 style="font-size:16px;color:#059669;margin-bottom:12px">&#128187; Computer — Quick Install</h3>
+        <div style="background:white;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #e2e8f0">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">1</div>
+            <div><strong>Click "Install Now" above</strong><br><span style="color:#64748b;font-size:13px">Or look for the install icon in the address bar</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">2</div>
+            <div><strong>Click "Install" to confirm</strong><br><span style="color:#64748b;font-size:13px">The app opens in its own window, separate from your browser</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">3</div>
+            <div><strong>Find it in your apps</strong><br><span style="color:#64748b;font-size:13px">Search "Comfort Zone" in your Start menu or Launchpad</span></div>
+          </div>
+        </div>
+        ` : browserType === 'safari' ? `
+        <h3 style="font-size:16px;color:#059669;margin-bottom:12px">&#128187; Safari (Mac) — Quick Install</h3>
+        <div style="background:white;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #e2e8f0">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">1</div>
+            <div><strong>Click File in the menu bar</strong> (or the Share button)</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">2</div>
+            <div><strong>Click "Add to Dock"</strong> (macOS Sonoma+) or drag the URL to your Desktop</div>
+          </div>
+        </div>
+        ` : `
+        <h3 style="font-size:16px;color:#059669;margin-bottom:12px">&#127760; Install on Any Browser</h3>
+        <div style="background:white;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #e2e8f0">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">1</div>
+            <div><strong>Try "Install Now" above</strong> — works on Chrome, Edge, and most Android browsers</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:40px;height:40px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">2</div>
+            <div><strong>Or bookmark this page</strong> and add it to your home screen for quick access</div>
+          </div>
+        </div>
+        `}
+
+        <!-- All Platforms Reference -->
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;color:#4f46e5;font-weight:600;font-size:14px">View instructions for all devices</summary>
+          <div style="margin-top:12px">
+            <div style="margin-bottom:16px">
+              <h4 style="font-size:14px;color:#059669;margin-bottom:6px">&#127822; iPhone / iPad (Safari only)</h4>
+              <ol style="padding-left:20px;color:#475569;font-size:13px;line-height:2">
+                <li>Open this page in <strong>Safari</strong></li>
+                <li>Tap the <strong>Share button</strong> (square with up arrow)</li>
+                <li>Tap <strong>"Add to Home Screen"</strong></li>
+                <li>Tap <strong>"Add"</strong></li>
+              </ol>
+            </div>
+            <div style="margin-bottom:16px">
+              <h4 style="font-size:14px;color:#059669;margin-bottom:6px">&#129302; Android (Chrome)</h4>
+              <ol style="padding-left:20px;color:#475569;font-size:13px;line-height:2">
+                <li>Open this page in <strong>Chrome</strong></li>
+                <li>Tap <strong>three-dot menu</strong> then <strong>"Install app"</strong></li>
+                <li>Tap <strong>"Install"</strong></li>
+              </ol>
+            </div>
+            <div>
+              <h4 style="font-size:14px;color:#059669;margin-bottom:6px">&#128187; Computer (Chrome / Edge)</h4>
+              <ol style="padding-left:20px;color:#475569;font-size:13px;line-height:2">
+                <li>Click the <strong>install icon</strong> in the address bar</li>
+                <li>Or click <strong>"Install Now"</strong> above</li>
+                <li>Click <strong>"Install"</strong></li>
+              </ol>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- Why Install -->
+      <div style="background:#eff6ff;border-radius:16px;padding:20px;margin-bottom:20px;border:1px solid #bfdbfe">
+        <h3 style="font-size:15px;margin-bottom:12px;color:#1e40af">Why Install the App?</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div style="background:white;border-radius:10px;padding:14px;text-align:center;border:1px solid #e2e8f0"><span style="font-size:24px;display:block;margin-bottom:4px">&#9889;</span><strong style="font-size:12px">Faster Access</strong><p style="font-size:11px;color:#64748b;margin-top:2px">Opens instantly like a native app</p></div>
+          <div style="background:white;border-radius:10px;padding:14px;text-align:center;border:1px solid #e2e8f0"><span style="font-size:24px;display:block;margin-bottom:4px">&#128274;</span><strong style="font-size:12px">Works Offline</strong><p style="font-size:11px;color:#64748b;margin-top:2px">View data without internet</p></div>
+          <div style="background:white;border-radius:10px;padding:14px;text-align:center;border:1px solid #e2e8f0"><span style="font-size:24px;display:block;margin-bottom:4px">&#128276;</span><strong style="font-size:12px">Push Alerts</strong><p style="font-size:11px;color:#64748b;margin-top:2px">Get real-time notifications</p></div>
+          <div style="background:white;border-radius:10px;padding:14px;text-align:center;border:1px solid #e2e8f0"><span style="font-size:24px;display:block;margin-bottom:4px">&#127760;</span><strong style="font-size:12px">No Download</strong><p style="font-size:11px;color:#64748b;margin-top:2px">Install directly from browser</p></div>
+        </div>
+      </div>`}
+
+      <div style="text-align:center;padding:16px;background:#f1f5f9;border-radius:12px">
+        <p style="color:#64748b;font-size:13px">&#128274; Your data is always synced and secure across web and app.</p>
+        <a href="/" style="color:#059669;font-weight:600;text-decoration:none;font-size:14px">Back to Home</a>
       </div>
     </div>
     <script>
+    // Smart install flow
+    var _dp=null;
+    var _isStandalone=window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone===true;
+
+    window.addEventListener('beforeinstallprompt',function(e){
+      e.preventDefault();
+      _dp=e;
+      console.log('[PWA] beforeinstallprompt captured');
+      // Update the button to show it's ready
+      var btn=document.getElementById('install-now-btn');
+      var status=document.getElementById('install-status');
+      if(btn){btn.style.background='linear-gradient(135deg,#059669,#10b981)';btn.style.boxShadow='0 4px 20px rgba(5,150,105,0.5)';}
+      if(status){status.textContent='Ready to install! Tap the button above.';status.style.color='#059669';}
+    });
+
     function tryPwaInstall(){
-      if(typeof _dp!=='undefined'&&_dp){
+      var btn=document.getElementById('install-now-btn');
+      var status=document.getElementById('install-status');
+      var fallback=document.getElementById('install-fallback-msg');
+
+      if(_dp){
+        // Chrome/Edge/Android — use native install prompt
+        if(status){status.textContent='Installing...';status.style.color='#4f46e5';}
         _dp.prompt();
         _dp.userChoice.then(function(c){
-          if(c.outcome==='accepted'){console.log('[PWA] App installed');_hideInstallBtns();}
+          if(c.outcome==='accepted'){
+            console.log('[PWA] App installed');
+            if(status){status.textContent='App installed successfully!';status.style.color='#059669';}
+            if(btn){btn.textContent='Installed!';btn.style.background='#059669';btn.style.opacity='0.7';btn.disabled=true;}
+            _hideInstallBtns();
+          } else {
+            if(status){status.textContent='Install cancelled. You can try again anytime.';status.style.color='#d97706';}
+          }
           _dp=null;
-        }).catch(function(){_dp=null;});
+        }).catch(function(){
+          if(status){status.textContent='Install failed. Try using your browser menu instead.';status.style.color='#dc2626';}
+          _dp=null;
+        });
       } else {
-        var fb=document.getElementById('install-fallback-msg');
-        if(fb) fb.style.display='block';
-        var btn=document.getElementById('install-now-btn');
-        if(btn){btn.textContent='Follow instructions below';btn.style.opacity='0.6';btn.disabled=true;}
+        // No native prompt — show browser-specific instructions
+        var fallbackMsg=document.getElementById('fallback-instruction');
+        var isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+        var isAndroid=/Android/.test(navigator.userAgent);
+        var isSafari=/Safari/.test(navigator.userAgent)&&!/Chrome/.test(navigator.userAgent);
+
+        if(isIOS||isSafari){
+          if(fallbackMsg)fallbackMsg.textContent='Tap the Share button at the bottom of Safari, then scroll down and tap "Add to Home Screen".';
+          if(btn){btn.textContent='Open Safari Share Menu';btn.onclick=function(){window.location.href='/install';};}
+        } else if(isAndroid){
+          if(fallbackMsg)fallbackMsg.textContent='Open this page in Chrome, tap the three-dot menu, then tap "Install app" or "Add to Home Screen".';
+          if(btn){btn.textContent='Follow Steps Below';btn.style.opacity='0.6';btn.disabled=true;}
+        } else {
+          if(fallbackMsg)fallbackMsg.textContent='Use your browser menu to install this app, or look for the install icon in the address bar.';
+          if(btn){btn.textContent='Follow Steps Below';btn.style.opacity='0.6';btn.disabled=true;}
+        }
+        if(fallback)fallback.style.display='block';
       }
     }
+
+    function _hideInstallBtns(){
+      _dp=null;
+      var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='none';
+      var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='none';
+    }
+    window.addEventListener('appinstalled',function(){_hideInstallBtns();});
+    if(_isStandalone){_hideInstallBtns();}
     </script>
   `, req.session?.user || null));
 });
@@ -20208,24 +20400,6 @@ app.get('/shortcuts', requireAuth, requireFeature('keyboard_shortcuts'), (req, r
       <script>document.addEventListener('keydown',function(e){if(e.altKey&&e.key==='d'){e.preventDefault();window.location='/dashboard'}if(e.altKey&&e.key==='s'){e.preventDefault();window.location='/search'}if(e.altKey&&e.key==='n'){e.preventDefault();window.location='/notifications'}if(e.altKey&&e.key==='/'){e.preventDefault();window.location='/shortcuts'}});</script>
     </div>
   `, req.session.user));
-});
-
-app.get('/sw.js', (req, res) => {
-  const swPath = path.join(__dirname, 'public', 'sw.js');
-  res.set('Content-Type', 'application/javascript');
-  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.set('Service-Worker-Allowed', '/');
-  if (fs.existsSync(swPath)) {
-    res.sendFile(swPath);
-  } else {
-    // Fallback minimal service worker
-    res.send(`const CACHE_NAME='comfort-v5.0';const OFFLINE_URLS=['/','/login','/dashboard','/offline'];
-self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(OFFLINE_URLS)).catch(()=>{}));self.skipWaiting()});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim()});
-self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{if(r.status===200){const rc=r.clone();caches.open(CACHE_NAME).then(c=>c.put(e.request,rc))}return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))))});
-self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'Comfort Zone',{body:d.body||'New update',icon:'/icon-192.png',badge:'/icon-96.png',data:d}))});
-self.addEventListener('notificationclick',e=>{e.notification.close();const url=e.notification.data?.url||'/';e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(self.location.origin)&&'focus'in c){c.navigate(url);return c.focus()}}return clients.openWindow(url)}))});`);
-  }
 });
 
 
