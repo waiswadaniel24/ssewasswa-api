@@ -219,19 +219,21 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   console.error('FATAL: SESSION_SECRET must be set in production');
   process.exit(1);
 }
-// Wrap session store creation — test DB first, fall back to memory store
+// Session store — use memory store by default, upgrade to PG when DB is confirmed ready
 let sessionStore;
 let _dbReady = false;
-// Try a quick DB connection test (async, non-blocking)
+// Start with memory store immediately (no DB dependency for startup)
+console.log('[Session] Starting with memory store (will upgrade to PG when DB ready)');
+
+// Test DB and upgrade session store in background
 pool.query('SELECT 1').then(() => {
   _dbReady = true;
   try {
     pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true });
-    console.log('[Session] PG session store ready');
+    console.log('[Session] Upgraded to PG session store');
   } catch (e) { console.warn('[Session] PG store creation failed:', e.message); }
 }).catch(e => {
-  console.warn('[Session] DB not ready yet, using memory store:', e.message);
-  // Retry in background every 5s
+  console.warn('[Session] DB not ready yet, will retry:', e.message);
   const retry = setInterval(() => {
     pool.query('SELECT 1').then(() => {
       _dbReady = true;
