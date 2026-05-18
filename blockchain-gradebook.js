@@ -4,7 +4,7 @@
 // credential verification, grade attestation, transcripts,
 // employer verification portal, academic achievement NFTs,
 // grade dispute resolution.
-// 12+ routes, MySQL-backed, tenant-aware.
+// 12+ routes, PostgreSQL-backed, tenant-aware.
 // ============================================================
 const crypto = require('crypto');
 
@@ -99,14 +99,14 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const role = req.session.user.role;
 
-    const [totalGrades] = await pool.query('SELECT COUNT(*) as c FROM blockchain_grades WHERE tenant_id=?', [tid]);
-    const [verifiedGrades] = await pool.query('SELECT COUNT(*) as c FROM blockchain_grades WHERE tenant_id=? AND verified=1', [tid]);
-    const [totalAttestations] = await pool.query('SELECT COUNT(*) as c FROM grade_attestations WHERE tenant_id=?', [tid]);
-    const [pendingRequests] = await pool.query('SELECT COUNT(*) as c FROM transcript_requests WHERE tenant_id=? AND status="pending"', [tid]);
-    const [disputed] = await pool.query('SELECT COUNT(*) as c FROM blockchain_grades WHERE tenant_id=? AND dispute_status="pending"', [tid]);
+    const [totalGrades] = await pool.query('SELECT COUNT(*) as c FROM blockchain_grades WHERE tenant_id=$1', [tid]);
+    const [verifiedGrades] = await pool.query('SELECT COUNT(*) as c FROM blockchain_grades WHERE tenant_id=$1 AND verified=1', [tid]);
+    const [totalAttestations] = await pool.query('SELECT COUNT(*) as c FROM grade_attestations WHERE tenant_id=$1', [tid]);
+    const [pendingRequests] = await pool.query('SELECT COUNT(*) as c FROM transcript_requests WHERE tenant_id=$1 AND status=\'pending\'', [tid]);
+    const [disputed] = await pool.query('SELECT COUNT(*) as c FROM blockchain_grades WHERE tenant_id=$1 AND dispute_status=\'pending\'', [tid]);
 
-    const [recentGrades] = await pool.query('SELECT bg.*, u.name as student_name FROM blockchain_grades bg LEFT JOIN users u ON u.id=bg.student_id WHERE bg.tenant_id=? ORDER BY bg.timestamp DESC LIMIT 6', [tid]);
-    const [myGrades] = await pool.query('SELECT * FROM blockchain_grades WHERE tenant_id=? AND student_id=? ORDER BY semester DESC, subject', [tid, uid]);
+    const [recentGrades] = await pool.query('SELECT bg.*, u.name as student_name FROM blockchain_grades bg LEFT JOIN users u ON u.id=bg.student_id WHERE bg.tenant_id=$1 ORDER BY bg.timestamp DESC LIMIT 6', [tid]);
+    const [myGrades] = await pool.query('SELECT * FROM blockchain_grades WHERE tenant_id=$1 AND student_id=$2 ORDER BY semester DESC, subject', [tid, uid]);
 
     res.send(renderPage('Blockchain Gradebook', SKIP + `<div style="max-width:1200px;margin:0 auto;padding:20px">
       ${nav('dash')}
@@ -202,14 +202,15 @@ module.exports = function(app, pool, opts) {
     const semesterFilter = req.query.semester || '';
     const subjectFilter = req.query.subject || '';
 
-    let whereClause = 'WHERE tenant_id=?';
+    let paramIdx = 1;
+    let whereClause = 'WHERE tenant_id=$' + paramIdx++;
     const params = [tid];
-    if (semesterFilter) { whereClause += ' AND semester=?'; params.push(semesterFilter); }
-    if (subjectFilter) { whereClause += ' AND subject=?'; params.push(subjectFilter); }
+    if (semesterFilter) { whereClause += ' AND semester=$' + paramIdx++; params.push(semesterFilter); }
+    if (subjectFilter) { whereClause += ' AND subject=$' + paramIdx++; params.push(subjectFilter); }
 
     const [grades] = await pool.query(`SELECT bg.*, u.name as student_name FROM blockchain_grades bg LEFT JOIN users u ON u.id=bg.student_id ${whereClause} ORDER BY bg.timestamp DESC`, params);
-    const [semesters] = await pool.query('SELECT DISTINCT semester FROM blockchain_grades WHERE tenant_id=? ORDER BY semester DESC', [tid]);
-    const [subjects] = await pool.query('SELECT DISTINCT subject FROM blockchain_grades WHERE tenant_id=? ORDER BY subject', [tid]);
+    const [semesters] = await pool.query('SELECT DISTINCT semester FROM blockchain_grades WHERE tenant_id=$1 ORDER BY semester DESC', [tid]);
+    const [subjects] = await pool.query('SELECT DISTINCT subject FROM blockchain_grades WHERE tenant_id=$1 ORDER BY subject', [tid]);
 
     res.send(renderPage('Grade Records', SKIP + `<div style="max-width:1100px;margin:0 auto;padding:20px">
       ${nav('grades')}
@@ -294,14 +295,14 @@ module.exports = function(app, pool, opts) {
     const { student_id, subject, grade, score, semester } = req.body;
 
     // Get previous hash
-    const [prev] = await pool.query('SELECT block_hash FROM blockchain_grades WHERE tenant_id=? ORDER BY id DESC LIMIT 1', [tid]);
+    const [prev] = await pool.query('SELECT block_hash FROM blockchain_grades WHERE tenant_id=$1 ORDER BY id DESC LIMIT 1', [tid]);
     const previousHash = prev.length > 0 ? prev[0].block_hash : 'GENESIS_' + tid + '_' + Date.now().toString(36);
 
     // Generate block hash
     const gradeData = { student_id, subject, grade, score, semester, tenant_id };
     const blockHash = computeHash(gradeData, previousHash, crypto.randomBytes(16).toString('hex'));
 
-    await pool.query('INSERT INTO blockchain_grades (tenant_id, student_id, subject, grade, score, semester, block_hash, previous_hash, verified_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    await pool.query('INSERT INTO blockchain_grades (tenant_id, student_id, subject, grade, score, semester, block_hash, previous_hash, verified_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
       [tid, student_id, subject, grade, parseFloat(score), semester, blockHash, previousHash, uid]);
 
     audit({ action: 'record_blockchain_grade', student_id, subject, grade, score, semester, user: req.session.user });
@@ -311,7 +312,7 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 5: Verify Grade ───────────────────────────────
   app.get('/school/blockchain-gradebook/grades/:id/verify', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [grade] = await pool.query('SELECT * FROM blockchain_grades WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const [grade] = await pool.query('SELECT * FROM blockchain_grades WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!grade[0]) return res.redirect('/school/blockchain-gradebook/grades');
     const g = grade[0];
 
@@ -322,7 +323,7 @@ module.exports = function(app, pool, opts) {
       if (g.previous_hash.startsWith('GENESIS_')) {
         chainValid = true;
       } else {
-        const [prevGrade] = await pool.query('SELECT block_hash FROM blockchain_grades WHERE block_hash=? AND tenant_id=?', [g.previous_hash, tid]);
+        const [prevGrade] = await pool.query('SELECT block_hash FROM blockchain_grades WHERE block_hash=$1 AND tenant_id=$2', [g.previous_hash, tid]);
         if (prevGrade.length === 0) {
           // Check if it's by ID for older records
           chainValid = true; // assume valid if structure differs
@@ -330,7 +331,7 @@ module.exports = function(app, pool, opts) {
       }
     }
 
-    const [attestations] = await pool.query('SELECT ga.*, u.name as attester_name FROM grade_attestations ga LEFT JOIN users u ON u.id=ga.attester_id WHERE ga.grade_id=? AND ga.tenant_id=?', [g.id, tid]);
+    const [attestations] = await pool.query('SELECT ga.*, u.name as attester_name FROM grade_attestations ga LEFT JOIN users u ON u.id=ga.attester_id WHERE ga.grade_id=$1 AND ga.tenant_id=$2', [g.id, tid]);
 
     res.send(renderPage('Grade Verification', SKIP + `<div style="max-width:800px;margin:0 auto;padding:20px">
       <a href="/school/blockchain-gradebook/grades" style="color:${P};text-decoration:none;font-size:13px">← Back to Grades</a>
@@ -383,7 +384,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/blockchain-gradebook/grades/:id/attest', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [grade] = await pool.query('SELECT * FROM blockchain_grades WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const [grade] = await pool.query('SELECT * FROM blockchain_grades WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!grade[0]) return res.redirect('/school/blockchain-gradebook/grades');
 
     res.send(renderPage('Attest Grade', SKIP + `<div style="max-width:600px;margin:0 auto;padding:20px">
@@ -417,11 +418,11 @@ module.exports = function(app, pool, opts) {
     const gradeId = req.params.id;
     const signature = crypto.createHash('sha256').update(uid + ':' + gradeId + ':' + Date.now()).digest('hex');
 
-    await pool.query('INSERT INTO grade_attestations (tenant_id, grade_id, attester_id, attester_role, signature, comments) VALUES (?, ?, ?, ?, ?, ?)',
+    await pool.query('INSERT INTO grade_attestations (tenant_id, grade_id, attester_id, attester_role, signature, comments) VALUES ($1, $2, $3, $4, $5, $6)',
       [tid, gradeId, uid, attester_role, signature, comments]);
 
-    const [cnt] = await pool.query('SELECT COUNT(*) as c FROM grade_attestations WHERE grade_id=? AND tenant_id=?', [gradeId, tid]);
-    await pool.query('UPDATE blockchain_grades SET attestation_count=?, verified=1, verified_by=? WHERE id=? AND tenant_id=?',
+    const [cnt] = await pool.query('SELECT COUNT(*) as c FROM grade_attestations WHERE grade_id=$1 AND tenant_id=$2', [gradeId, tid]);
+    await pool.query('UPDATE blockchain_grades SET attestation_count=$1, verified=1, verified_by=$2 WHERE id=$3 AND tenant_id=$4',
       [cnt[0].c, uid, gradeId, tid]);
 
     audit({ action: 'attest_grade', gradeId, role: attester_role, user: req.session.user });
@@ -431,7 +432,7 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 8: Blockchain Ledger ──────────────────────────
   app.get('/school/blockchain-gradebook/ledger', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [blocks] = await pool.query('SELECT id, student_id, subject, grade, score, block_hash, previous_hash, timestamp, verified FROM blockchain_grades WHERE tenant_id=? ORDER BY id', [tid]);
+    const [blocks] = await pool.query('SELECT id, student_id, subject, grade, score, block_hash, previous_hash, timestamp, verified FROM blockchain_grades WHERE tenant_id=$1 ORDER BY id', [tid]);
 
     res.send(renderPage('Blockchain Ledger', SKIP + `<div style="max-width:1100px;margin:0 auto;padding:20px">
       ${nav('ledger')}
@@ -465,7 +466,7 @@ module.exports = function(app, pool, opts) {
     let verificationResult = null;
 
     if (code) {
-      const [request] = await pool.query('SELECT tr.*, u.name as student_name FROM transcript_requests tr LEFT JOIN users u ON u.id=tr.student_id WHERE tr.verification_code=? AND tr.tenant_id=?', [code, req.session.user.tenant_id]);
+      const [request] = await pool.query('SELECT tr.*, u.name as student_name FROM transcript_requests tr LEFT JOIN users u ON u.id=tr.student_id WHERE tr.verification_code=$1 AND tr.tenant_id=$2', [code, req.session.user.tenant_id]);
       if (request[0]) {
         verificationResult = request[0];
       }
@@ -531,7 +532,7 @@ module.exports = function(app, pool, opts) {
     const verificationCode = crypto.randomBytes(8).toString('hex').toUpperCase();
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
 
-    await pool.query('INSERT INTO transcript_requests (tenant_id, student_id, recipient_name, recipient_email, purpose, verification_code, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, "pending")',
+    await pool.query('INSERT INTO transcript_requests (tenant_id, student_id, recipient_name, recipient_email, purpose, verification_code, expires_at, status) VALUES ($1, $2, $3, $4, $5, $6, $7, \'pending\')',
       [tid, uid, recipient_name, recipient_email, purpose, verificationCode, expiresAt]);
 
     audit({ action: 'request_transcript', recipient: recipient_name, purpose, user: req.session.user });
@@ -565,9 +566,10 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const role = req.session.user.role;
 
-    let whereClause = 'WHERE tenant_id=?';
+    let paramIdx = 1;
+    let whereClause = 'WHERE tenant_id=$' + paramIdx++;
     const params = [tid];
-    if (role !== 'admin' && role !== 'teacher') { whereClause += ' AND student_id=?'; params.push(uid); }
+    if (role !== 'admin' && role !== 'teacher') { whereClause += ' AND student_id=$' + paramIdx++; params.push(uid); }
 
     const [requests] = await pool.query(`SELECT tr.*, u.name as student_name FROM transcript_requests tr ${role!=='admin'&&role!=='teacher'?'':'LEFT JOIN users u ON u.id=tr.student_id'} ${whereClause} ORDER BY tr.created_at DESC`, params);
 
@@ -599,7 +601,7 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 13: File Dispute ──────────────────────────────
   app.get('/school/blockchain-gradebook/dispute/:gradeId', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [grade] = await pool.query('SELECT * FROM blockchain_grades WHERE id=? AND tenant_id=?', [req.params.gradeId, tid]);
+    const [grade] = await pool.query('SELECT * FROM blockchain_grades WHERE id=$1 AND tenant_id=$2', [req.params.gradeId, tid]);
     if (!grade[0]) return res.redirect('/school/blockchain-gradebook');
 
     const g = grade[0];
@@ -633,7 +635,7 @@ module.exports = function(app, pool, opts) {
     const tid = req.session.user.tenant_id;
     const { reason, explanation } = req.body;
 
-    await pool.query('UPDATE blockchain_grades SET dispute_status="pending" WHERE id=? AND tenant_id=?', [req.params.gradeId, tid]);
+    await pool.query('UPDATE blockchain_grades SET dispute_status=\'pending\' WHERE id=$1 AND tenant_id=$2', [req.params.gradeId, tid]);
 
     audit({ action: 'file_grade_dispute', gradeId: req.params.gradeId, reason, explanation, user: req.session.user });
     res.redirect('/school/blockchain-gradebook/disputes');
@@ -645,9 +647,10 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const role = req.session.user.role;
 
-    let whereClause = 'WHERE tenant_id=? AND dispute_status!="none"';
+    let paramIdx = 1;
+    let whereClause = 'WHERE tenant_id=$' + paramIdx++ + " AND dispute_status!='none'";
     const params = [tid];
-    if (role !== 'admin' && role !== 'teacher') { whereClause += ' AND student_id=?'; params.push(uid); }
+    if (role !== 'admin' && role !== 'teacher') { whereClause += ' AND student_id=$' + paramIdx++; params.push(uid); }
 
     const [disputes] = await pool.query(`SELECT bg.*, u.name as student_name FROM blockchain_grades bg LEFT JOIN users u ON u.id=bg.student_id ${whereClause} ORDER BY bg.id DESC`, params);
 

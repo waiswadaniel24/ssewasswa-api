@@ -78,7 +78,7 @@ module.exports = function(app, pool, opts) {
           title VARCHAR(256) NOT NULL,
           slug VARCHAR(256) NOT NULL,
           description TEXT,
-          content MEDIUMTEXT,
+          content TEXT,
           category VARCHAR(64) DEFAULT 'general',
           difficulty TEXT DEFAULT 'beginner',
           sort_order INT DEFAULT 0,
@@ -186,23 +186,23 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(
-        `SELECT ba.*, s.name AS student_name FROM bank_accounts ba LEFT JOIN students s ON s.id = ba.student_id AND s.tenant_id = ba.tenant_id WHERE ba.tenant_id = ? AND ba.student_id = ? AND ba.status != 'closed' ORDER BY ba.created_at DESC`, [tid, uid]
+      const { rows: accounts } = await pool.query(
+        `SELECT ba.*, s.name AS student_name FROM bank_accounts ba LEFT JOIN students s ON s.id = ba.student_id AND s.tenant_id = ba.tenant_id WHERE ba.tenant_id = $1 AND ba.student_id = $2 AND ba.status != 'closed' ORDER BY ba.created_at DESC`, [tid, uid]
       );
       const accIds = accounts.map(a => a.id);
       let totalBalance = accounts.reduce((s, a) => s + Number(a.balance), 0);
-      const [recentTx] = accIds.length ? await pool.query(
-        `SELECT bt.*, ba.account_number FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.account_id WHERE bt.tenant_id = ? AND bt.account_id IN (?) ORDER BY bt.created_at DESC LIMIT 10`, [tid, accIds]
-      ) : [[]];
-      const [goals] = accIds.length ? await pool.query(
-        `SELECT * FROM savings_goals WHERE tenant_id = ? AND account_id IN (?) AND status = 'active' ORDER BY deadline ASC`, [tid, accIds]
-      ) : [[]];
-      const [catSpend] = accIds.length ? await pool.query(
-        `SELECT category, SUM(amount) AS total FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND type IN ('withdrawal','fee') AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY category ORDER BY total DESC`, [tid, accIds]
-      ) : [[]];
-      const [monthlyTrend] = accIds.length ? await pool.query(
-        `SELECT DATE_FORMAT(created_at, '%b') AS label, SUM(CASE WHEN type IN ('withdrawal','fee','transfer_out') THEN amount ELSE 0 END) AS spent, SUM(CASE WHEN type IN ('deposit','interest','transfer_in') THEN amount ELSE 0 END) AS earned FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH) GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY MIN(created_at)`, [tid, accIds]
-      ) : [[]];
+      const { rows: recentTx } = accIds.length ? await pool.query(
+        `SELECT bt.*, ba.account_number FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.account_id WHERE bt.tenant_id = $1 AND bt.account_id = ANY($2::bigint[]) ORDER BY bt.created_at DESC LIMIT 10`, [tid, accIds]
+      ) : { rows: [] };
+      const { rows: goals } = accIds.length ? await pool.query(
+        `SELECT * FROM savings_goals WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND status = 'active' ORDER BY deadline ASC`, [tid, accIds]
+      ) : { rows: [] };
+      const { rows: catSpend } = accIds.length ? await pool.query(
+        `SELECT category, SUM(amount) AS total FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND type IN ('withdrawal','fee') AND created_at >= NOW() - INTERVAL '30 days' GROUP BY category ORDER BY total DESC`, [tid, accIds]
+      ) : { rows: [] };
+      const { rows: monthlyTrend } = accIds.length ? await pool.query(
+        `SELECT TO_CHAR(created_at, 'Mon') AS label, SUM(CASE WHEN type IN ('withdrawal','fee','transfer_out') THEN amount ELSE 0 END) AS spent, SUM(CASE WHEN type IN ('deposit','interest','transfer_in') THEN amount ELSE 0 END) AS earned FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND created_at >= NOW() - INTERVAL '6 months' GROUP BY TO_CHAR(created_at, 'YYYY-MM') ORDER BY MIN(created_at)`, [tid, accIds]
+      ) : { rows: [] };
 
       const donutData = catSpend.map(c => ({ label: CAT_LABELS[c.category] || c.category, value: Number(c.total), color: CAT_COLORS[c.category] || '#6b7280' }));
       const trendData = monthlyTrend.map(m => ({ label: m.label, value: Number(m.spent) }));
@@ -242,8 +242,8 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/accounts', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(
-        `SELECT ba.*, (SELECT COUNT(*) FROM bank_transactions bt WHERE bt.account_id = ba.id AND bt.tenant_id = ba.tenant_id) AS tx_count FROM bank_accounts ba WHERE ba.tenant_id = ? AND ba.student_id = ? ORDER BY ba.created_at DESC`, [tid, uid]
+      const { rows: accounts } = await pool.query(
+        `SELECT ba.*, (SELECT COUNT(*) FROM bank_transactions bt WHERE bt.account_id = ba.id AND bt.tenant_id = ba.tenant_id) AS tx_count FROM bank_accounts ba WHERE ba.tenant_id = $1 AND ba.student_id = $2 ORDER BY ba.created_at DESC`, [tid, uid]
       );
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Accounts</div>`;
@@ -283,17 +283,18 @@ module.exports = function(app, pool, opts) {
       const { account_type = 'checking', initial_deposit = 0, daily_limit = 500, monthly_limit = 5000, parent_pin } = req.body;
       const deposit = Math.max(0, Number(initial_deposit) || 0);
       const acctNum = generateAccountNumber();
-      const [result] = await pool.query(
-        `INSERT INTO bank_accounts (tenant_id, student_id, account_number, balance, account_type, daily_limit, monthly_limit, parent_pin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      const { rows: [newAcct] } = await pool.query(
+        `INSERT INTO bank_accounts (tenant_id, student_id, account_number, balance, account_type, daily_limit, monthly_limit, parent_pin) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
         [tid, uid, acctNum, deposit, account_type, daily_limit, monthly_limit, parent_pin || null]
       );
+      const accountId = newAcct.id;
       if (deposit > 0) {
         await pool.query(
-          `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES (?, ?, 'deposit', ?, 'Initial deposit', 'savings', ?, ?, ?)`,
-          [tid, result.insertId, deposit, 'INIT' + Date.now().toString(36).toUpperCase(), deposit, uid]
+          `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES ($1, $2, 'deposit', $3, 'Initial deposit', 'savings', $4, $5, $6)`,
+          [tid, accountId, deposit, 'INIT' + Date.now().toString(36).toUpperCase(), deposit, uid]
         );
       }
-      await audit(req, 'bank_account_created', { account_id: result.insertId, account_number: acctNum, type: account_type });
+      await audit(req, 'bank_account_created', { account_id: accountId, account_number: acctNum, type: account_type });
       req.session.flash = { type: 'success', msg: 'Account created successfully!' };
       res.redirect('/school/student-banking/accounts');
     } catch(e) { ah(e, req, res); }
@@ -303,7 +304,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/deposit', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active' ORDER BY created_at DESC`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active' ORDER BY created_at DESC`, [tid, uid]);
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Deposit</div>`;
       html += `<h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827">Make a Deposit</h2>`;
@@ -332,13 +333,13 @@ module.exports = function(app, pool, opts) {
       const { account_id, amount, description, category } = req.body;
       const amt = Number(amount);
       if (!amt || amt <= 0) { req.session.flash = { type: 'error', msg: 'Invalid amount' }; return res.redirect('/school/student-banking/deposit'); }
-      const [acct] = await pool.query(`SELECT id, balance, status FROM bank_accounts WHERE id = ? AND tenant_id = ? AND student_id = ? AND status = 'active'`, [account_id, tid, uid]);
+      const { rows: acct } = await pool.query(`SELECT id, balance, status FROM bank_accounts WHERE id = $1 AND tenant_id = $2 AND student_id = $3 AND status = 'active'`, [account_id, tid, uid]);
       if (!acct.length) { req.session.flash = { type: 'error', msg: 'Account not found or inactive' }; return res.redirect('/school/student-banking/deposit'); }
       const newBal = Number(acct[0].balance) + amt;
       const ref = 'DEP' + Date.now().toString(36).toUpperCase();
-      await pool.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newBal, account_id]);
+      await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newBal, account_id]);
       await pool.query(
-        `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES (?, ?, 'deposit', ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES ($1, $2, 'deposit', $3, $4, $5, $6, $7, $8)`,
         [tid, account_id, amt, description || 'Deposit', category || 'other', ref, newBal, uid]
       );
       await audit(req, 'bank_deposit', { account_id, amount: amt, reference: ref });
@@ -351,7 +352,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/withdraw', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(`SELECT id, account_number, account_type, balance, daily_limit FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active' ORDER BY created_at DESC`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, account_type, balance, daily_limit FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active' ORDER BY created_at DESC`, [tid, uid]);
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Withdraw</div>`;
       html += `<h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827">Make a Withdrawal</h2>`;
@@ -381,11 +382,11 @@ module.exports = function(app, pool, opts) {
       const { account_id, amount, description, category, merchant } = req.body;
       const amt = Number(amount);
       if (!amt || amt <= 0) { req.session.flash = { type: 'error', msg: 'Invalid amount' }; return res.redirect('/school/student-banking/withdraw'); }
-      const [acct] = await pool.query(`SELECT id, balance, daily_limit, monthly_limit FROM bank_accounts WHERE id = ? AND tenant_id = ? AND student_id = ? AND status = 'active'`, [account_id, tid, uid]);
+      const { rows: acct } = await pool.query(`SELECT id, balance, daily_limit, monthly_limit FROM bank_accounts WHERE id = $1 AND tenant_id = $2 AND student_id = $3 AND status = 'active'`, [account_id, tid, uid]);
       if (!acct.length) { req.session.flash = { type: 'error', msg: 'Account not found or inactive' }; return res.redirect('/school/student-banking/withdraw'); }
       if (Number(acct[0].balance) < amt) { req.session.flash = { type: 'error', msg: 'Insufficient funds' }; return res.redirect('/school/student-banking/withdraw'); }
-      const [dayTotal] = await pool.query(
-        `SELECT COALESCE(SUM(amount), 0) AS total FROM bank_transactions WHERE tenant_id = ? AND account_id = ? AND type IN ('withdrawal','fee','transfer_out') AND created_at >= CURDATE()`, [tid, account_id]
+      const { rows: dayTotal } = await pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS total FROM bank_transactions WHERE tenant_id = $1 AND account_id = $2 AND type IN ('withdrawal','fee','transfer_out') AND created_at >= CURRENT_DATE`, [tid, account_id]
       );
       if (Number(dayTotal[0].total) + amt > Number(acct[0].daily_limit)) {
         req.session.flash = { type: 'error', msg: `Daily limit of ${formatCurrency(acct[0].daily_limit)} exceeded` };
@@ -393,9 +394,9 @@ module.exports = function(app, pool, opts) {
       }
       const newBal = Number(acct[0].balance) - amt;
       const ref = 'WDR' + Date.now().toString(36).toUpperCase();
-      await pool.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newBal, account_id]);
+      await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newBal, account_id]);
       await pool.query(
-        `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, merchant, reference, balance_after, created_by) VALUES (?, ?, 'withdrawal', ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, merchant, reference, balance_after, created_by) VALUES ($1, $2, 'withdrawal', $3, $4, $5, $6, $7, $8, $9)`,
         [tid, account_id, amt, description || 'Withdrawal', category || 'other', merchant || null, ref, newBal, uid]
       );
       await audit(req, 'bank_withdrawal', { account_id, amount: amt, reference: ref });
@@ -408,7 +409,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/transfer', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active' ORDER BY created_at DESC`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active' ORDER BY created_at DESC`, [tid, uid]);
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Transfer</div>`;
       html += `<h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827">Transfer Funds</h2>`;
@@ -439,38 +440,37 @@ module.exports = function(app, pool, opts) {
       const amt = Number(amount);
       if (!amt || amt <= 0) { req.session.flash = { type: 'error', msg: 'Invalid amount' }; return res.redirect('/school/student-banking/transfer'); }
       if (!to_account_id && to_account_number) {
-        const [lookup] = await pool.query(`SELECT id FROM bank_accounts WHERE account_number = ? AND tenant_id = ? AND status = 'active'`, [to_account_number, tid]);
+        const { rows: lookup } = await pool.query(`SELECT id FROM bank_accounts WHERE account_number = $1 AND tenant_id = $2 AND status = 'active'`, [to_account_number, tid]);
         if (lookup.length) to_account_id = lookup[0].id;
       }
       if (!to_account_id || Number(from_account_id) === Number(to_account_id)) {
         req.session.flash = { type: 'error', msg: 'Please select a valid destination account' };
         return res.redirect('/school/student-banking/transfer');
       }
-      const [fromAcct] = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = ? AND tenant_id = ? AND student_id = ? AND status = 'active'`, [from_account_id, tid, uid]);
+      const { rows: fromAcct } = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = $1 AND tenant_id = $2 AND student_id = $3 AND status = 'active'`, [from_account_id, tid, uid]);
       if (!fromAcct.length || Number(fromAcct[0].balance) < amt) {
         req.session.flash = { type: 'error', msg: 'Insufficient funds or invalid source account' };
         return res.redirect('/school/student-banking/transfer');
       }
-      const [toAcct] = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = ? AND tenant_id = ? AND status = 'active'`, [to_account_id, tid]);
+      const { rows: toAcct } = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = $1 AND tenant_id = $2 AND status = 'active'`, [to_account_id, tid]);
       if (!toAcct.length) { req.session.flash = { type: 'error', msg: 'Destination account not found' }; return res.redirect('/school/student-banking/transfer'); }
       const ref = 'TRF' + Date.now().toString(36).toUpperCase();
       const newFromBal = Number(fromAcct[0].balance) - amt;
       const newToBal = Number(toAcct[0].balance) + amt;
-      const conn = await pool.getConnection();
       try {
-        await conn.beginTransaction();
-        await conn.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newFromBal, from_account_id]);
-        await conn.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newToBal, to_account_id]);
-        await conn.query(
-          `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, reference, balance_after, created_by) VALUES (?, ?, 'transfer_out', ?, ?, ?, ?, ?)`,
+        await pool.query('BEGIN');
+        await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newFromBal, from_account_id]);
+        await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newToBal, to_account_id]);
+        await pool.query(
+          `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, reference, balance_after, created_by) VALUES ($1, $2, 'transfer_out', $3, $4, $5, $6, $7)`,
           [tid, from_account_id, amt, description || 'Transfer out', ref, newFromBal, uid]
         );
-        await conn.query(
-          `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, reference, balance_after, created_by) VALUES (?, ?, 'transfer_in', ?, ?, ?, ?, ?)`,
+        await pool.query(
+          `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, reference, balance_after, created_by) VALUES ($1, $2, 'transfer_in', $3, $4, $5, $6, $7)`,
           [tid, to_account_id, amt, description || 'Transfer in', ref, newToBal, uid]
         );
-        await conn.commit();
-      } finally { conn.release(); }
+        await pool.query('COMMIT');
+      } catch(e) { await pool.query('ROLLBACK'); throw e; }
       await audit(req, 'bank_transfer', { from: from_account_id, to: to_account_id, amount: amt, reference: ref });
       req.session.flash = { type: 'success', msg: `Transferred ${formatCurrency(amt)} successfully!` };
       res.redirect('/school/student-banking/transactions');
@@ -485,26 +485,32 @@ module.exports = function(app, pool, opts) {
       const limit = 25;
       const offset = (page - 1) * limit;
       const { type, category, account_id, from_date, to_date, search } = req.query;
-      let where = `bt.tenant_id = ?`;
+      let where = `bt.tenant_id = $1`;
       const params = [tid];
-      if (account_id) { where += ` AND bt.account_id = ?`; params.push(account_id); }
+      let paramIdx = 1;
+      if (account_id) { paramIdx++; where += ` AND bt.account_id = $${paramIdx}`; params.push(account_id); }
       else {
-        const [accts] = await pool.query(`SELECT id FROM bank_accounts WHERE tenant_id = ? AND student_id = ?`, [tid, uid]);
+        const { rows: accts } = await pool.query(`SELECT id FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2`, [tid, uid]);
         const ids = accts.map(a => a.id);
         if (!ids.length) { renderPage(req, res, 'Transactions', SKIP + '<div class="empty-state"><h2>No accounts</h2></div>'); return; }
-        where += ` AND bt.account_id IN (${ids.map(() => '?').join(',')})`;
-        params.push(...ids);
+        paramIdx++;
+        where += ` AND bt.account_id = ANY($${paramIdx}::bigint[])`;
+        params.push(ids);
       }
-      if (type) { where += ` AND bt.type = ?`; params.push(type); }
-      if (category) { where += ` AND bt.category = ?`; params.push(category); }
-      if (from_date) { where += ` AND bt.created_at >= ?`; params.push(from_date); }
-      if (to_date) { where += ` AND bt.created_at <= ?`; params.push(to_date + ' 23:59:59'); }
-      if (search) { where += ` AND (bt.description LIKE ? OR bt.reference LIKE ? OR bt.merchant LIKE ?)`; const s = `%${search}%`; params.push(s, s, s); }
-      const [[{ total }]] = await pool.query(`SELECT COUNT(*) AS total FROM bank_transactions bt WHERE ${where}`, params);
-      const [transactions] = await pool.query(`SELECT bt.*, ba.account_number FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.account_id WHERE ${where} ORDER BY bt.created_at DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
+      if (type) { paramIdx++; where += ` AND bt.type = $${paramIdx}`; params.push(type); }
+      if (category) { paramIdx++; where += ` AND bt.category = $${paramIdx}`; params.push(category); }
+      if (from_date) { paramIdx++; where += ` AND bt.created_at >= $${paramIdx}`; params.push(from_date); }
+      if (to_date) { paramIdx++; where += ` AND bt.created_at <= $${paramIdx}`; params.push(to_date + ' 23:59:59'); }
+      if (search) { paramIdx++; const s = `%${search}%`; where += ` AND (bt.description LIKE $${paramIdx} OR bt.reference LIKE $${paramIdx} OR bt.merchant LIKE $${paramIdx})`; params.push(s); }
+      const { rows: [{ total }] } = await pool.query(`SELECT COUNT(*) AS total FROM bank_transactions bt WHERE ${where}`, params);
+      paramIdx++;
+      const limitParamIdx = paramIdx;
+      paramIdx++;
+      const offsetParamIdx = paramIdx;
+      const { rows: transactions } = await pool.query(`SELECT bt.*, ba.account_number FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.account_id WHERE ${where} ORDER BY bt.created_at DESC LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`, [...params, limit, offset]);
       const totalPages = Math.ceil(total / limit);
 
-      const [accounts] = await pool.query(`SELECT id, account_number, account_type FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active'`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, account_type FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active'`, [tid, uid]);
 
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Transactions</div>`;
@@ -547,11 +553,11 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/savings-goals', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(`SELECT id, account_number, account_type FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active'`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, account_type FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active'`, [tid, uid]);
       const accIds = accounts.map(a => a.id);
-      const [goals] = accIds.length ? await pool.query(
-        `SELECT sg.*, ba.account_number FROM savings_goals sg JOIN bank_accounts ba ON ba.id = sg.account_id WHERE sg.tenant_id = ? AND sg.account_id IN (?) ORDER BY sg.created_at DESC`, [tid, accIds]
-      ) : [[]];
+      const { rows: goals } = accIds.length ? await pool.query(
+        `SELECT sg.*, ba.account_number FROM savings_goals sg JOIN bank_accounts ba ON ba.id = sg.account_id WHERE sg.tenant_id = $1 AND sg.account_id = ANY($2::bigint[]) ORDER BY sg.created_at DESC`, [tid, accIds]
+      ) : { rows: [] };
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Savings Goals</div>`;
       html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h2 style="margin:0;font-size:22px;font-weight:700;color:#111827">Savings Goals</h2><a href="/school/student-banking/savings-goals/create" class="btn">+ New Goal</a></div>`;
@@ -585,7 +591,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/savings-goals/create', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(`SELECT id, account_number, balance FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active'`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, balance FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active'`, [tid, uid]);
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; <a href="/school/student-banking/savings-goals" style="color:${P}">Goals</a> &rsaquo; New</div>`;
       html += `<h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827">Create Savings Goal</h2>`;
@@ -619,28 +625,29 @@ module.exports = function(app, pool, opts) {
       const target = Number(target_amount);
       const initial = Math.max(0, Number(initial_amount) || 0);
       if (!name || !target || target <= 0) { req.session.flash = { type: 'error', msg: 'Please fill in goal name and target amount' }; return res.redirect('/school/student-banking/savings-goals/create'); }
-      const [acct] = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = ? AND tenant_id = ? AND student_id = ? AND status = 'active'`, [account_id, tid, uid]);
+      const { rows: acct } = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = $1 AND tenant_id = $2 AND student_id = $3 AND status = 'active'`, [account_id, tid, uid]);
       if (!acct.length) { req.session.flash = { type: 'error', msg: 'Invalid account' }; return res.redirect('/school/student-banking/savings-goals/create'); }
       if (initial > Number(acct[0].balance)) { req.session.flash = { type: 'error', msg: 'Insufficient balance for initial contribution' }; return res.redirect('/school/student-banking/savings-goals/create'); }
-      const conn = await pool.getConnection();
+      let goalId;
       try {
-        await conn.beginTransaction();
-        const [result] = await conn.query(
-          `INSERT INTO savings_goals (tenant_id, account_id, name, description, target_amount, current_amount, deadline, auto_contribute) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        await pool.query('BEGIN');
+        const { rows: [newGoal] } = await pool.query(
+          `INSERT INTO savings_goals (tenant_id, account_id, name, description, target_amount, current_amount, deadline, auto_contribute) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
           [tid, account_id, name, description || null, target, initial, deadline || null, auto_contribute || 0]
         );
+        goalId = newGoal.id;
         if (initial > 0) {
           const newBal = Number(acct[0].balance) - initial;
-          await conn.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newBal, account_id]);
-          await conn.query(
-            `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES (?, ?, 'withdrawal', ?, ?, 'savings', ?, ?, ?)`,
-            [tid, account_id, initial, `Savings goal: ${name}`, 'SG' + result.insertId, newBal, uid]
+          await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newBal, account_id]);
+          await pool.query(
+            `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES ($1, $2, 'withdrawal', $3, $4, 'savings', $5, $6, $7)`,
+            [tid, account_id, initial, `Savings goal: ${name}`, 'SG' + goalId, newBal, uid]
           );
         }
-        await conn.commit();
-        await audit(req, 'savings_goal_created', { goal_id: result.insertId, name, target });
-        req.session.flash = { type: 'success', msg: 'Savings goal created!' };
-      } finally { conn.release(); }
+        await pool.query('COMMIT');
+      } catch(e) { await pool.query('ROLLBACK'); throw e; }
+      await audit(req, 'savings_goal_created', { goal_id: goalId, name, target });
+      req.session.flash = { type: 'success', msg: 'Savings goal created!' };
       res.redirect('/school/student-banking/savings-goals');
     } catch(e) { ah(e, req, res); }
   });
@@ -652,29 +659,28 @@ module.exports = function(app, pool, opts) {
       const { goal_id, amount } = req.body;
       const amt = Number(amount);
       if (!amt || amt <= 0) { req.session.flash = { type: 'error', msg: 'Invalid amount' }; return res.redirect('/school/student-banking/savings-goals'); }
-      const [goal] = await pool.query(`SELECT * FROM savings_goals WHERE id = ? AND tenant_id = ? AND status = 'active'`, [goal_id, tid]);
+      const { rows: goal } = await pool.query(`SELECT * FROM savings_goals WHERE id = $1 AND tenant_id = $2 AND status = 'active'`, [goal_id, tid]);
       if (!goal.length) { req.session.flash = { type: 'error', msg: 'Goal not found' }; return res.redirect('/school/student-banking/savings-goals'); }
       const g = goal[0];
       const remaining = Number(g.target_amount) - Number(g.current_amount);
       const actualAmt = Math.min(amt, remaining);
-      const [acct] = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = ? AND tenant_id = ? AND status = 'active'`, [g.account_id, tid]);
+      const { rows: acct } = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = $1 AND tenant_id = $2 AND status = 'active'`, [g.account_id, tid]);
       if (!acct.length || Number(acct[0].balance) < actualAmt) { req.session.flash = { type: 'error', msg: 'Insufficient account balance' }; return res.redirect('/school/student-banking/savings-goals'); }
-      const conn = await pool.getConnection();
       try {
-        await conn.beginTransaction();
+        await pool.query('BEGIN');
         const newBal = Number(acct[0].balance) - actualAmt;
         const newGoalAmt = Number(g.current_amount) + actualAmt;
         const isComplete = newGoalAmt >= Number(g.target_amount);
-        await conn.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newBal, g.account_id]);
-        await conn.query(`UPDATE savings_goals SET current_amount = ?, status = ? WHERE id = ?`, [newGoalAmt, isComplete ? 'completed' : 'active', goal_id]);
-        await conn.query(
-          `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES (?, ?, 'withdrawal', ?, ?, 'savings', ?, ?, ?)`,
+        await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newBal, g.account_id]);
+        await pool.query(`UPDATE savings_goals SET current_amount = $1, status = $2 WHERE id = $3`, [newGoalAmt, isComplete ? 'completed' : 'active', goal_id]);
+        await pool.query(
+          `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES ($1, $2, 'withdrawal', $3, $4, 'savings', $5, $6, $7)`,
           [tid, g.account_id, actualAmt, `Savings goal: ${g.name}`, 'SG' + goal_id, newBal, uid]
         );
-        await conn.commit();
+        await pool.query('COMMIT');
         await audit(req, 'savings_goal_contribute', { goal_id, amount: actualAmt, completed: isComplete });
         req.session.flash = { type: 'success', msg: `Added ${formatCurrency(actualAmt)} to "${g.name}"${isComplete ? ' — Goal reached! 🎉' : ''}` };
-      } finally { conn.release(); }
+      } catch(e) { await pool.query('ROLLBACK'); throw e; }
       res.redirect('/school/student-banking/savings-goals');
     } catch(e) { ah(e, req, res); }
   });
@@ -683,7 +689,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/savings-goals/edit/:id', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [goal] = await pool.query(`SELECT sg.* FROM savings_goals sg JOIN bank_accounts ba ON ba.id = sg.account_id WHERE sg.id = ? AND sg.tenant_id = ? AND ba.student_id = ? AND sg.status = 'active'`, [req.params.id, tid, uid]);
+      const { rows: goal } = await pool.query(`SELECT sg.* FROM savings_goals sg JOIN bank_accounts ba ON ba.id = sg.account_id WHERE sg.id = $1 AND sg.tenant_id = $2 AND ba.student_id = $3 AND sg.status = 'active'`, [req.params.id, tid, uid]);
       if (!goal.length) { req.session.flash = { type: 'error', msg: 'Goal not found' }; return res.redirect('/school/student-banking/savings-goals'); }
       const g = goal[0];
       let html = SKIP;
@@ -707,9 +713,9 @@ module.exports = function(app, pool, opts) {
     try {
       const tid = req.tenant_id, uid = req.user.id;
       const { name, description, target_amount, deadline, auto_contribute } = req.body;
-      const [goal] = await pool.query(`SELECT sg.* FROM savings_goals sg JOIN bank_accounts ba ON ba.id = sg.account_id WHERE sg.id = ? AND sg.tenant_id = ? AND ba.student_id = ?`, [req.params.id, tid, uid]);
+      const { rows: goal } = await pool.query(`SELECT sg.* FROM savings_goals sg JOIN bank_accounts ba ON ba.id = sg.account_id WHERE sg.id = $1 AND sg.tenant_id = $2 AND ba.student_id = $3`, [req.params.id, tid, uid]);
       if (!goal.length) { req.session.flash = { type: 'error', msg: 'Goal not found' }; return res.redirect('/school/student-banking/savings-goals'); }
-      await pool.query(`UPDATE savings_goals SET name = ?, description = ?, target_amount = ?, deadline = ?, auto_contribute = ? WHERE id = ? AND tenant_id = ?`, [name, description || null, target_amount, deadline || null, auto_contribute || 0, req.params.id, tid]);
+      await pool.query(`UPDATE savings_goals SET name = $1, description = $2, target_amount = $3, deadline = $4, auto_contribute = $5 WHERE id = $6 AND tenant_id = $7`, [name, description || null, target_amount, deadline || null, auto_contribute || 0, req.params.id, tid]);
       await audit(req, 'savings_goal_updated', { goal_id: req.params.id });
       req.session.flash = { type: 'success', msg: 'Goal updated!' };
       res.redirect('/school/student-banking/savings-goals');
@@ -721,26 +727,25 @@ module.exports = function(app, pool, opts) {
     try {
       const tid = req.tenant_id, uid = req.user.id;
       const { goal_id } = req.body;
-      const [goal] = await pool.query(`SELECT sg.* FROM savings_goals sg JOIN bank_accounts ba ON ba.id = sg.account_id WHERE sg.id = ? AND sg.tenant_id = ? AND ba.student_id = ? AND sg.status = 'active'`, [goal_id, tid, uid]);
+      const { rows: goal } = await pool.query(`SELECT sg.* FROM savings_goals sg JOIN bank_accounts ba ON ba.id = sg.account_id WHERE sg.id = $1 AND sg.tenant_id = $2 AND ba.student_id = $3 AND sg.status = 'active'`, [goal_id, tid, uid]);
       if (!goal.length) { req.session.flash = { type: 'error', msg: 'Goal not found' }; return res.redirect('/school/student-banking/savings-goals'); }
       const g = goal[0];
       const refund = Number(g.current_amount);
       if (refund > 0) {
-        const conn = await pool.getConnection();
         try {
-          await conn.beginTransaction();
-          const [acct] = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = ? AND tenant_id = ? FOR UPDATE`, [g.account_id, tid]);
+          await pool.query('BEGIN');
+          const { rows: acct } = await pool.query(`SELECT id, balance FROM bank_accounts WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [g.account_id, tid]);
           const newBal = Number(acct[0].balance) + refund;
-          await conn.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newBal, g.account_id]);
-          await conn.query(`UPDATE savings_goals SET status = 'abandoned', current_amount = 0 WHERE id = ?`, [goal_id]);
-          await conn.query(
-            `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES (?, ?, 'deposit', ?, ?, 'savings', ?, ?, ?)`,
+          await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newBal, g.account_id]);
+          await pool.query(`UPDATE savings_goals SET status = 'abandoned', current_amount = 0 WHERE id = $1`, [goal_id]);
+          await pool.query(
+            `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES ($1, $2, 'deposit', $3, $4, 'savings', $5, $6, $7)`,
             [tid, g.account_id, refund, `Refund from abandoned goal: ${g.name}`, 'SG-REFUND' + goal_id, newBal, uid]
           );
-          await conn.commit();
-        } finally { conn.release(); }
+          await pool.query('COMMIT');
+        } catch(e) { await pool.query('ROLLBACK'); throw e; }
       } else {
-        await pool.query(`UPDATE savings_goals SET status = 'abandoned' WHERE id = ? AND tenant_id = ?`, [goal_id, tid]);
+        await pool.query(`UPDATE savings_goals SET status = 'abandoned' WHERE id = $1 AND tenant_id = $2`, [goal_id, tid]);
       }
       await audit(req, 'savings_goal_abandoned', { goal_id });
       req.session.flash = { type: 'success', msg: 'Goal abandoned. Funds refunded.' };
@@ -753,7 +758,7 @@ module.exports = function(app, pool, opts) {
     try {
       const tid = req.tenant_id, uid = req.user.id;
       const selMonth = req.query.month || new Date().toISOString().slice(0, 7);
-      const [accounts] = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active'`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active'`, [tid, uid]);
       const accIds = accounts.map(a => a.id);
       const startDate = selMonth + '-01';
       const endDate = selMonth + '-31';
@@ -762,11 +767,11 @@ module.exports = function(app, pool, opts) {
       html += `<h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827">Monthly Statements</h2>`;
       html += `<div class="card" style="margin-bottom:16px"><form method="GET" style="display:flex;gap:10px;align-items:end"><div class="form-group" style="margin:0;flex:1"><label class="form-label">Select Month</label><input type="month" name="month" value="${esc(selMonth)}" style="max-width:220px"></div><button type="submit" class="btn btn-sm">View</button></form></div>`;
       if (accIds.length) {
-        const [stmtTx] = await pool.query(
-          `SELECT bt.*, ba.account_number FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.account_id WHERE bt.tenant_id = ? AND bt.account_id IN (?) AND bt.created_at >= ? AND bt.created_at <= ? ORDER BY bt.created_at ASC`, [tid, accIds, startDate, endDate + ' 23:59:59']
+        const { rows: stmtTx } = await pool.query(
+          `SELECT bt.*, ba.account_number FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.account_id WHERE bt.tenant_id = $1 AND bt.account_id = ANY($2::bigint[]) AND bt.created_at >= $3 AND bt.created_at <= $4 ORDER BY bt.created_at ASC`, [tid, accIds, startDate, endDate + ' 23:59:59']
         );
-        const [summary] = await pool.query(
-          `SELECT type, SUM(amount) AS total, COUNT(*) AS count FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND created_at >= ? AND created_at <= ? GROUP BY type`, [tid, accIds, startDate, endDate + ' 23:59:59']
+        const { rows: summary } = await pool.query(
+          `SELECT type, SUM(amount) AS total, COUNT(*) AS count FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND created_at >= $3 AND created_at <= $4 GROUP BY type`, [tid, accIds, startDate, endDate + ' 23:59:59']
         );
         const deposits = summary.filter(s => s.type === 'deposit' || s.type === 'transfer_in' || s.type === 'interest').reduce((a, s) => a + Number(s.total), 0);
         const withdrawals = summary.filter(s => s.type === 'withdrawal' || s.type === 'fee' || s.type === 'transfer_out').reduce((a, s) => a + Number(s.total), 0);
@@ -775,8 +780,8 @@ module.exports = function(app, pool, opts) {
         html += `<div class="stat-card"><div class="stat-label">Total Out</div><div class="stat-value" style="color:#ef4444">${formatCurrency(withdrawals)}</div></div>`;
         html += `<div class="stat-card"><div class="stat-label">Net Change</div><div class="stat-value" style="color:${deposits - withdrawals >= 0 ? '#10b981' : '#ef4444'}">${deposits >= withdrawals ? '+' : ''}${formatCurrency(deposits - withdrawals)}</div></div>`;
         html += `</div>`;
-        const [catSpend] = await pool.query(
-          `SELECT category, SUM(amount) AS total FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND type IN ('withdrawal','fee','transfer_out') AND created_at >= ? AND created_at <= ? GROUP BY category ORDER BY total DESC`, [tid, accIds, startDate, endDate + ' 23:59:59']
+        const { rows: catSpend } = await pool.query(
+          `SELECT category, SUM(amount) AS total FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND type IN ('withdrawal','fee','transfer_out') AND created_at >= $3 AND created_at <= $4 GROUP BY category ORDER BY total DESC`, [tid, accIds, startDate, endDate + ' 23:59:59']
         );
         if (catSpend.length) {
           html += `<div class="chart-container"><h3 style="margin:0 0 12px;font-size:16px;color:#111827">Spending Breakdown — ${esc(selMonth)}</h3>`;
@@ -802,7 +807,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/financial-literacy', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [lessons] = await pool.query(`SELECT fl.*, lp.status, lp.quiz_score, lp.completed_at FROM financial_lessons fl LEFT JOIN lesson_progress lp ON lp.lesson_id = fl.id AND lp.student_id = ? AND lp.tenant_id = ? WHERE fl.tenant_id = ? AND fl.is_published = 1 ORDER BY fl.sort_order, fl.created_at`, [uid, tid, tid]);
+      const { rows: lessons } = await pool.query(`SELECT fl.*, lp.status, lp.quiz_score, lp.completed_at FROM financial_lessons fl LEFT JOIN lesson_progress lp ON lp.lesson_id = fl.id AND lp.student_id = $1 AND lp.tenant_id = $2 WHERE fl.tenant_id = $3 AND fl.is_published = 1 ORDER BY fl.sort_order, fl.created_at`, [uid, tid, tid]);
       const totalLessons = lessons.length;
       const completed = lessons.filter(l => l.status === 'completed').length;
       const avgScore = lessons.filter(l => l.quiz_score !== null).reduce((a, l) => a + l.quiz_score, 0) / Math.max(1, lessons.filter(l => l.quiz_score !== null).length);
@@ -840,12 +845,12 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/financial-literacy/:id', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [lessons] = await pool.query(`SELECT * FROM financial_lessons WHERE id = ? AND tenant_id = ? AND is_published = 1`, [req.params.id, tid]);
+      const { rows: lessons } = await pool.query(`SELECT * FROM financial_lessons WHERE id = $1 AND tenant_id = $2 AND is_published = 1`, [req.params.id, tid]);
       if (!lessons.length) { req.session.flash = { type: 'error', msg: 'Lesson not found' }; return res.redirect('/school/student-banking/financial-literacy'); }
       const l = lessons[0];
-      const [progress] = await pool.query(`SELECT * FROM lesson_progress WHERE lesson_id = ? AND student_id = ? AND tenant_id = ?`, [l.id, uid, tid]);
+      const { rows: progress } = await pool.query(`SELECT * FROM lesson_progress WHERE lesson_id = $1 AND student_id = $2 AND tenant_id = $3`, [l.id, uid, tid]);
       if (!progress.length) {
-        await pool.query(`INSERT INTO lesson_progress (tenant_id, student_id, lesson_id, status) VALUES (?, ?, ?, 'in_progress')`, [tid, uid, l.id]);
+        await pool.query(`INSERT INTO lesson_progress (tenant_id, student_id, lesson_id, status) VALUES ($1, $2, $3, 'in_progress')`, [tid, uid, l.id]);
         await audit(req, 'lesson_started', { lesson_id: l.id, title: l.title });
       }
       let html = SKIP;
@@ -873,7 +878,7 @@ module.exports = function(app, pool, opts) {
       const tid = req.tenant_id, uid = req.user.id;
       const quizScore = Math.min(100, Math.max(0, Number(req.body.quiz_score) || null));
       await pool.query(
-        `INSERT INTO lesson_progress (tenant_id, student_id, lesson_id, status, quiz_score, completed_at) VALUES (?, ?, ?, 'completed', ?, NOW()) ON DUPLICATE KEY UPDATE status = 'completed', quiz_score = COALESCE(VALUES(quiz_score), quiz_score), completed_at = NOW()`,
+        `INSERT INTO lesson_progress (tenant_id, student_id, lesson_id, status, quiz_score, completed_at) VALUES ($1, $2, $3, 'completed', $4, NOW()) ON CONFLICT (tenant_id, student_id, lesson_id) DO UPDATE SET status = 'completed', quiz_score = COALESCE(EXCLUDED.quiz_score, lesson_progress.quiz_score), completed_at = NOW()`,
         [tid, uid, req.params.id, quizScore]
       );
       await audit(req, 'lesson_completed', { lesson_id: req.params.id, quiz_score });
@@ -886,7 +891,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/reports', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active'`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active'`, [tid, uid]);
       const accIds = accounts.map(a => a.id);
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Reports</div>`;
@@ -894,24 +899,24 @@ module.exports = function(app, pool, opts) {
       if (!accIds.length) { html += `<div class="empty-state"><p>No active accounts. Create an account first.</p></div>`; }
       else {
         // 6-month income vs expense
-        const [monthly] = await pool.query(
-          `SELECT DATE_FORMAT(created_at, '%Y-%m') AS month, DATE_FORMAT(created_at, '%b %Y') AS label, SUM(CASE WHEN type IN ('deposit','interest','transfer_in') THEN amount ELSE 0 END) AS income, SUM(CASE WHEN type IN ('withdrawal','fee','transfer_out') THEN amount ELSE 0 END) AS expense FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH) GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY month`, [tid, accIds]
+        const { rows: monthly } = await pool.query(
+          `SELECT TO_CHAR(created_at, 'YYYY-MM') AS month, TO_CHAR(created_at, 'Mon YYYY') AS label, SUM(CASE WHEN type IN ('deposit','interest','transfer_in') THEN amount ELSE 0 END) AS income, SUM(CASE WHEN type IN ('withdrawal','fee','transfer_out') THEN amount ELSE 0 END) AS expense FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND created_at >= NOW() - INTERVAL '6 months' GROUP BY TO_CHAR(created_at, 'YYYY-MM') ORDER BY month`, [tid, accIds]
         );
         // Top spending categories
-        const [topCats] = await pool.query(
-          `SELECT category, SUM(amount) AS total, COUNT(*) AS tx_count FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND type IN ('withdrawal','fee','transfer_out') AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY) GROUP BY category ORDER BY total DESC LIMIT 8`, [tid, accIds]
+        const { rows: topCats } = await pool.query(
+          `SELECT category, SUM(amount) AS total, COUNT(*) AS tx_count FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND type IN ('withdrawal','fee','transfer_out') AND created_at >= NOW() - INTERVAL '90 days' GROUP BY category ORDER BY total DESC LIMIT 8`, [tid, accIds]
         );
         // Daily spending (last 30 days)
-        const [dailySpend] = await pool.query(
-          `SELECT DATE(created_at) AS day, SUM(amount) AS total FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND type IN ('withdrawal','fee','transfer_out') AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY DATE(created_at) ORDER BY day`, [tid, accIds]
+        const { rows: dailySpend } = await pool.query(
+          `SELECT created_at::date AS day, SUM(amount) AS total FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND type IN ('withdrawal','fee','transfer_out') AND created_at >= NOW() - INTERVAL '30 days' GROUP BY created_at::date ORDER BY day`, [tid, accIds]
         );
         // Interest earned
-        const [[{ totalInterest }]] = await pool.query(
-          `SELECT COALESCE(SUM(amount), 0) AS totalInterest FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND type = 'interest'`, [tid, accIds]
+        const { rows: [{ totalinterest: totalInterest }] } = await pool.query(
+          `SELECT COALESCE(SUM(amount), 0) AS totalinterest FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND type = 'interest'`, [tid, accIds]
         );
         // Average transaction size
-        const [[{ avgTx }]] = await pool.query(
-          `SELECT COALESCE(AVG(amount), 0) AS avgTx FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)`, [tid, accIds]
+        const { rows: [{ avgtx: avgTx }] } = await pool.query(
+          `SELECT COALESCE(AVG(amount), 0) AS avgtx FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND created_at >= NOW() - INTERVAL '90 days'`, [tid, accIds]
         );
 
         html += `<div class="grid grid-4" style="margin-bottom:20px">`;
@@ -940,7 +945,7 @@ module.exports = function(app, pool, opts) {
 
         // Daily spending trend
         html += `<div class="chart-container"><h3 style="margin:0 0 12px;font-size:16px;color:#111827">Daily Spending (30 days)</h3>`;
-        html += svgLine(dailySpend.map(d => ({ label: d.day?.slice(5) || '', value: Number(d.total) })), 700, 200);
+        html += svgLine(dailySpend.map(d => ({ label: d.day?.toISOString?.().slice(5) || '', value: Number(d.total) })), 700, 200);
         html += `</div>`;
 
         // Category table
@@ -962,7 +967,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/student-banking/settings', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(`SELECT * FROM bank_accounts WHERE tenant_id = ? AND student_id = ? ORDER BY created_at DESC`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT * FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 ORDER BY created_at DESC`, [tid, uid]);
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Settings</div>`;
       html += `<h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827">Account Settings</h2>`;
@@ -997,10 +1002,10 @@ module.exports = function(app, pool, opts) {
     try {
       const tid = req.tenant_id, uid = req.user.id;
       const { account_id, daily_limit, monthly_limit, interest_rate, status } = req.body;
-      const [acct] = await pool.query(`SELECT id FROM bank_accounts WHERE id = ? AND tenant_id = ? AND student_id = ?`, [account_id, tid, uid]);
+      const { rows: acct } = await pool.query(`SELECT id FROM bank_accounts WHERE id = $1 AND tenant_id = $2 AND student_id = $3`, [account_id, tid, uid]);
       if (!acct.length) { req.session.flash = { type: 'error', msg: 'Account not found' }; return res.redirect('/school/student-banking/settings'); }
       await pool.query(
-        `UPDATE bank_accounts SET daily_limit = ?, monthly_limit = ?, interest_rate = ?, status = ? WHERE id = ? AND tenant_id = ?`,
+        `UPDATE bank_accounts SET daily_limit = $1, monthly_limit = $2, interest_rate = $3, status = $4 WHERE id = $5 AND tenant_id = $6`,
         [daily_limit, monthly_limit, interest_rate, status, account_id, tid]
       );
       await audit(req, 'bank_settings_updated', { account_id, daily_limit, monthly_limit, interest_rate, status });
@@ -1012,27 +1017,26 @@ module.exports = function(app, pool, opts) {
   app.post('/school/student-banking/settings/calc-interest', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const [accounts] = await pool.query(`SELECT id, balance, interest_rate FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active' AND interest_rate > 0`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, balance, interest_rate FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active' AND interest_rate > 0`, [tid, uid]);
       let totalInterest = 0;
-      const conn = await pool.getConnection();
       try {
-        await conn.beginTransaction();
+        await pool.query('BEGIN');
         for (const a of accounts) {
           const monthlyRate = Number(a.interest_rate) / 12;
           const interest = Number(a.balance) * monthlyRate;
           if (interest > 0.005) {
             const roundedInterest = Math.round(interest * 100) / 100;
             const newBal = Number(a.balance) + roundedInterest;
-            await conn.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newBal, a.id]);
-            await conn.query(
-              `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES (?, ?, 'interest', ?, ?, 'savings', ?, ?, ?)`,
+            await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newBal, a.id]);
+            await pool.query(
+              `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, reference, balance_after, created_by) VALUES ($1, $2, 'interest', $3, $4, 'savings', $5, $6, $7)`,
               [tid, a.id, roundedInterest, `Monthly interest (${(Number(a.interest_rate) * 100).toFixed(2)}% APR)`, 'INT' + Date.now().toString(36).toUpperCase() + a.id, newBal, uid]
             );
             totalInterest += roundedInterest;
           }
         }
-        await conn.commit();
-      } finally { conn.release(); }
+        await pool.query('COMMIT');
+      } catch(e) { await pool.query('ROLLBACK'); throw e; }
       await audit(req, 'interest_calculated', { total_interest: totalInterest, accounts: accounts.length });
       req.session.flash = { type: 'success', msg: `Interest applied: ${formatCurrency(totalInterest)} across ${accounts.length} account(s).` };
       res.redirect('/school/student-banking/settings');
@@ -1043,13 +1047,13 @@ module.exports = function(app, pool, opts) {
     try {
       const tid = req.tenant_id, uid = req.user.id;
       const period = req.body.period || new Date().toISOString().slice(0, 7);
-      const [accounts] = await pool.query(`SELECT id FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active'`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active'`, [tid, uid]);
       if (!accounts.length) { req.session.flash = { type: 'error', msg: 'No active accounts' }; return res.redirect('/school/student-banking/settings'); }
       for (const cat of CATEGORIES) {
         const limit = Number(req.body[`budget_${cat}`]) || 0;
         for (const a of accounts) {
           await pool.query(
-            `INSERT INTO bank_budgets (tenant_id, account_id, category, monthly_limit, period_month) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE monthly_limit = VALUES(monthly_limit)`,
+            `INSERT INTO bank_budgets (tenant_id, account_id, category, monthly_limit, period_month) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id, account_id, category, period_month) DO UPDATE SET monthly_limit = EXCLUDED.monthly_limit`,
             [tid, a.id, cat, limit, period]
           );
         }
@@ -1065,17 +1069,17 @@ module.exports = function(app, pool, opts) {
     try {
       const tid = req.tenant_id, uid = req.user.id;
       const period = req.query.period || new Date().toISOString().slice(0, 7);
-      const [accounts] = await pool.query(`SELECT id, account_number FROM bank_accounts WHERE tenant_id = ? AND student_id = ? AND status = 'active'`, [tid, uid]);
+      const { rows: accounts } = await pool.query(`SELECT id, account_number FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active'`, [tid, uid]);
       const accIds = accounts.map(a => a.id);
       let html = SKIP;
       html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Budget</div>`;
       html += `<h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827">Budget Tracker — ${esc(period)}</h2>`;
       if (accIds.length) {
-        const [budgets] = await pool.query(
-          `SELECT bb.category, bb.monthly_limit FROM bank_budgets bb WHERE bb.tenant_id = ? AND bb.account_id IN (?) AND bb.period_month = ?`, [tid, accIds, period]
+        const { rows: budgets } = await pool.query(
+          `SELECT bb.category, bb.monthly_limit FROM bank_budgets bb WHERE bb.tenant_id = $1 AND bb.account_id = ANY($2::bigint[]) AND bb.period_month = $3`, [tid, accIds, period]
         );
-        const [spending] = await pool.query(
-          `SELECT category, SUM(amount) AS total FROM bank_transactions WHERE tenant_id = ? AND account_id IN (?) AND type IN ('withdrawal','fee','transfer_out') AND created_at >= ? AND created_at <= ? GROUP BY category`,
+        const { rows: spending } = await pool.query(
+          `SELECT category, SUM(amount) AS total FROM bank_transactions WHERE tenant_id = $1 AND account_id = ANY($2::bigint[]) AND type IN ('withdrawal','fee','transfer_out') AND created_at >= $3 AND created_at <= $4 GROUP BY category`,
           [tid, accIds, period + '-01', period + '-31 23:59:59']
         );
         const budgetMap = {};
@@ -1083,55 +1087,75 @@ module.exports = function(app, pool, opts) {
         const spendMap = {};
         spending.forEach(s => { spendMap[s.category] = Number(s.total); });
         html += `<div class="card">`;
-        let hasBudget = false;
         CATEGORIES.forEach(cat => {
           const limit = budgetMap[cat] || 0;
           const spent = spendMap[cat] || 0;
           if (limit > 0 || spent > 0) {
-            hasBudget = true;
+            const overBudget = spent > limit && limit > 0;
             const pct = limit > 0 ? Math.min(100, (spent / limit) * 100) : 0;
-            const overBudget = limit > 0 && spent > limit;
             const barColor = overBudget ? '#ef4444' : pct > 75 ? '#f59e0b' : '#10b981';
             html += `<div style="margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:14px;color:#374151">${CAT_LABELS[cat]}</span><span style="font-size:13px;color:${overBudget ? '#ef4444' : GRAY}">${formatCurrency(spent)} / ${formatCurrency(limit)} ${overBudget ? '⚠️ OVER BUDGET' : ''}</span></div><div class="progress-bar"><div class="progress-fill" style="width:${pct.toFixed(1)}%;background:${barColor}"></div></div></div>`;
           }
         });
-        if (!hasBudget) {
-          html += `<div class="empty-state"><p>No budgets set for this month. Go to <a href="/school/student-banking/settings" style="color:${P}">Settings</a> to configure budgets.</p></div>`;
-        }
         html += `</div>`;
-        html += `<div class="card" style="margin-top:16px"><form method="GET" action="/school/student-banking/budget"><label class="form-label">View Different Month</label><input type="month" name="period" value="${esc(period)}" style="max-width:200px;margin-right:10px"><button type="submit" class="btn btn-sm">View</button></form></div>`;
       }
       html += `<div style="margin-top:16px"><a href="/school/student-banking" class="btn btn-outline">← Dashboard</a></div>`;
       renderPage(req, res, 'Budget Tracker', html);
     } catch(e) { ah(e, req, res); }
   });
 
-  // ── Route: Merchant Categorization / Quick Spend ────────────────
-  app.post('/school/student-banking/quick-spend', requireAuth, requireNotBanned, async (req, res) => {
+  // ── Route: Quick Pay (POS simulation) ──────────────────────────
+  app.get('/school/student-banking/quick-pay', requireAuth, requireNotBanned, async (req, res) => {
     try {
       const tid = req.tenant_id, uid = req.user.id;
-      const { account_id, amount, description, category, merchant } = req.body;
-      const amt = Number(amount);
-      if (!amt || amt <= 0) { return res.json({ ok: false, msg: 'Invalid amount' }); }
-      const [acct] = await pool.query(`SELECT id, balance, daily_limit FROM bank_accounts WHERE id = ? AND tenant_id = ? AND student_id = ? AND status = 'active'`, [account_id, tid, uid]);
-      if (!acct.length || Number(acct[0].balance) < amt) { return res.json({ ok: false, msg: 'Insufficient funds' }); }
-      const [dayTotal] = await pool.query(
-        `SELECT COALESCE(SUM(amount), 0) AS total FROM bank_transactions WHERE tenant_id = ? AND account_id = ? AND type IN ('withdrawal','fee','transfer_out') AND created_at >= CURDATE()`, [tid, account_id]
-      );
-      if (Number(dayTotal[0].total) + amt > Number(acct[0].daily_limit)) {
-        return res.json({ ok: false, msg: 'Daily limit exceeded' });
+      const { rows: accounts } = await pool.query(`SELECT id, account_number, account_type, balance FROM bank_accounts WHERE tenant_id = $1 AND student_id = $2 AND status = 'active' ORDER BY created_at DESC`, [tid, uid]);
+      let html = SKIP;
+      html += `<div class="breadcrumb" style="margin-bottom:16px"><a href="/school" style="color:${P}">School</a> &rsaquo; <a href="/school/student-banking" style="color:${P}">Banking</a> &rsaquo; Quick Pay</div>`;
+      html += `<h2 style="margin:0 0 20px;font-size:22px;font-weight:700;color:#111827">Quick Pay</h2>`;
+      if (!accounts.length) { html += `<div class="alert alert-info">No active accounts.</div>`; }
+      else {
+        html += `<div class="card"><form method="POST" action="/school/student-banking/quick-pay">`;
+        html += `<div class="form-group"><label class="form-label">Account</label><select name="account_id" required>`;
+        accounts.forEach(a => { html += `<option value="${a.id}">${esc(a.account_number)} (${a.account_type}) — ${formatCurrency(a.balance)}</option>`; });
+        html += `</select></div>`;
+        html += `<div class="form-group"><label class="form-label">Amount</label><input type="number" name="amount" step="0.01" min="0.01" required placeholder="Enter amount"></div>`;
+        html += `<div class="form-group"><label class="form-label">Merchant</label><input name="merchant" required placeholder="e.g. School Canteen"></div>`;
+        html += `<div class="form-group"><label class="form-label">Category</label><select name="category">`;
+        CATEGORIES.forEach(c => { html += `<option value="${c}">${CAT_LABELS[c]}</option>`; });
+        html += `</select></div>`;
+        html += `<button type="submit" class="btn">Pay Now</button> <a href="/school/student-banking" class="btn btn-outline">Cancel</a>`;
+        html += `</form></div>`;
       }
-      const newBal = Number(acct[0].balance) - amt;
-      const ref = 'QS' + Date.now().toString(36).toUpperCase();
-      await pool.query(`UPDATE bank_accounts SET balance = ? WHERE id = ?`, [newBal, account_id]);
-      await pool.query(
-        `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, merchant, reference, balance_after, created_by) VALUES (?, ?, 'withdrawal', ?, ?, ?, ?, ?, ?, ?)`,
-        [tid, account_id, amt, description || 'Quick spend', category || 'other', merchant || null, ref, newBal, uid]
-      );
-      await audit(req, 'quick_spend', { account_id, amount: amt, merchant, category });
-      res.json({ ok: true, balance: newBal, msg: 'Spent ' + formatCurrency(amt) });
+      renderPage(req, res, 'Quick Pay', html);
     } catch(e) { ah(e, req, res); }
   });
 
-  console.log('[StudentBanking] Module loaded — /school/student-banking/*');
+  app.post('/school/student-banking/quick-pay', requireAuth, requireNotBanned, async (req, res) => {
+    try {
+      const tid = req.tenant_id, uid = req.user.id;
+      const { account_id, amount, merchant, category } = req.body;
+      const amt = Number(amount);
+      if (!amt || amt <= 0) { req.session.flash = { type: 'error', msg: 'Invalid amount' }; return res.redirect('/school/student-banking/quick-pay'); }
+      const { rows: acct } = await pool.query(`SELECT id, balance, daily_limit FROM bank_accounts WHERE id = $1 AND tenant_id = $2 AND student_id = $3 AND status = 'active'`, [account_id, tid, uid]);
+      if (!acct.length) { req.session.flash = { type: 'error', msg: 'Account not found or inactive' }; return res.redirect('/school/student-banking/quick-pay'); }
+      if (Number(acct[0].balance) < amt) { req.session.flash = { type: 'error', msg: 'Insufficient funds' }; return res.redirect('/school/student-banking/quick-pay'); }
+      const { rows: dayTotal } = await pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS total FROM bank_transactions WHERE tenant_id = $1 AND account_id = $2 AND type IN ('withdrawal','fee','transfer_out') AND created_at >= CURRENT_DATE`, [tid, account_id]
+      );
+      if (Number(dayTotal[0].total) + amt > Number(acct[0].daily_limit)) {
+        req.session.flash = { type: 'error', msg: `Daily limit of ${formatCurrency(acct[0].daily_limit)} exceeded` };
+        return res.redirect('/school/student-banking/quick-pay');
+      }
+      const newBal = Number(acct[0].balance) - amt;
+      const ref = 'QP' + Date.now().toString(36).toUpperCase();
+      await pool.query(`UPDATE bank_accounts SET balance = $1 WHERE id = $2`, [newBal, account_id]);
+      await pool.query(
+        `INSERT INTO bank_transactions (tenant_id, account_id, type, amount, description, category, merchant, reference, balance_after, created_by) VALUES ($1, $2, 'withdrawal', $3, $4, $5, $6, $7, $8, $9)`,
+        [tid, account_id, amt, `Quick pay: ${merchant || 'Purchase'}`, category || 'other', merchant || null, ref, newBal, uid]
+      );
+      await audit(req, 'bank_quick_pay', { account_id, amount: amt, merchant, reference: ref });
+      req.session.flash = { type: 'success', msg: `Paid ${formatCurrency(amt)} to ${merchant || 'merchant'} successfully!` };
+      res.redirect('/school/student-banking/transactions');
+    } catch(e) { ah(e, req, res); }
+  });
 };

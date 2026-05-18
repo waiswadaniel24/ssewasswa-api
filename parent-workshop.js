@@ -63,7 +63,7 @@ module.exports = function(app, pool, opts) {
           speaker_bio TEXT,
           date DATE NOT NULL,
           time TIME NOT NULL,
-          duration INT NOT NULL DEFAULT 60 COMMENT 'minutes',
+          duration INT NOT NULL DEFAULT 60,
           venue VARCHAR(255),
           meeting_link VARCHAR(512),
           max_participants INT DEFAULT 50,
@@ -87,7 +87,7 @@ module.exports = function(app, pool, opts) {
           registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           attended SMALLINT DEFAULT 0,
           attended_at TIMESTAMP NULL,
-          feedback_score SMALLINT DEFAULT NULL COMMENT '1-5',
+          feedback_score SMALLINT DEFAULT NULL,
           feedback_comment TEXT,
           certificate_issued SMALLINT DEFAULT 0,
           certificate_issued_at TIMESTAMP NULL,
@@ -116,29 +116,29 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id;
-    const [stats] = await pool.query(`
+    const { rows: stats } = await pool.query(`
       SELECT
         COUNT(*) AS total_workshops,
         SUM(CASE WHEN status='registration-open' THEN 1 ELSE 0 END) AS open_reg,
         SUM(CASE WHEN status='in-progress' THEN 1 ELSE 0 END) AS in_progress,
         SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
-        SUM(CASE WHEN DATE(date) >= CURDATE() THEN 1 ELSE 0 END) AS upcoming
-      FROM parent_workshops WHERE tenant_id = ?`, [tid]);
-    const [regStats] = await pool.query(`
+        SUM(CASE WHEN date >= CURRENT_DATE THEN 1 ELSE 0 END) AS upcoming
+      FROM parent_workshops WHERE tenant_id = $1`, [tid]);
+    const { rows: regStats } = await pool.query(`
       SELECT
         COUNT(*) AS total_registrations,
         SUM(attended) AS total_attended,
         ROUND(AVG(feedback_score), 1) AS avg_feedback,
         SUM(certificate_issued) AS total_certificates
       FROM workshop_registrations wr
-      JOIN parent_workshops w ON w.id = wr.workshop_id AND w.tenant_id = ?
-      WHERE wr.tenant_id = ?`, [tid, tid]);
-    const [recent] = await pool.query(`
+      JOIN parent_workshops w ON w.id = wr.workshop_id AND w.tenant_id = $1
+      WHERE wr.tenant_id = $2`, [tid, tid]);
+    const { rows: recent } = await pool.query(`
       SELECT id, title, topic, date, time, mode, status, speaker,
         (SELECT COUNT(*) FROM workshop_registrations WHERE workshop_id = parent_workshops.id) AS reg_count
-      FROM parent_workshops WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 5`, [tid]);
-    const [topTopics] = await pool.query(`
-      SELECT topic, COUNT(*) AS cnt FROM parent_workshops WHERE tenant_id = ? GROUP BY topic ORDER BY cnt DESC LIMIT 5`, [tid]);
+      FROM parent_workshops WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 5`, [tid]);
+    const { rows: topTopics } = await pool.query(`
+      SELECT topic, COUNT(*) AS cnt FROM parent_workshops WHERE tenant_id = $1 GROUP BY topic ORDER BY cnt DESC LIMIT 5`, [tid]);
     const s = stats[0], r = regStats[0];
     res.send(renderPage(req, 'Parent Workshops', SKIP + `
       <h2 style="margin-bottom:20px">Parent Workshop & Training</h2>
@@ -245,14 +245,15 @@ module.exports = function(app, pool, opts) {
       meeting_link, max_participants, mode, status, cover_image } = req.body;
     const validStatuses = ['draft', 'published', 'registration-open'];
     const st = validStatuses.includes(status) ? status : 'draft';
-    const [result] = await pool.query(`
+    const { rows: result } = await pool.query(`
       INSERT INTO parent_workshops (tenant_id, title, description, topic, speaker, speaker_bio,
         date, time, duration, venue, meeting_link, max_participants, mode, status, cover_image)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING id`,
       [tid, title, description || null, topic || 'parenting-skills', speaker || null, speaker_bio || null,
         date, time, parseInt(duration) || 60, venue || null, meeting_link || null,
         parseInt(max_participants) || 50, mode || 'in-person', st, cover_image || null]);
-    audit(req, 'parent_workshop_create', { workshop_id: result.insertId, title, topic });
+    audit(req, 'parent_workshop_create', { workshop_id: result[0].id, title, topic });
     res.redirect('/school/parent-workshop/workshops');
   }));
 
@@ -262,13 +263,14 @@ module.exports = function(app, pool, opts) {
   app.get('/school/parent-workshop/workshops', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id;
     const { topic, status, mode, q } = req.query;
-    let where = 'WHERE w.tenant_id = ?';
+    let paramIdx = 1;
+    let where = `WHERE w.tenant_id = $${paramIdx++}`;
     const params = [tid];
-    if (topic && TOPICS.includes(topic)) { where += ' AND w.topic = ?'; params.push(topic); }
-    if (status && STATUSES.includes(status)) { where += ' AND w.status = ?'; params.push(status); }
-    if (mode && MODES.includes(mode)) { where += ' AND w.mode = ?'; params.push(mode); }
-    if (q) { where += ' AND (w.title LIKE ? OR w.speaker LIKE ?)'; params.push(`%${q}%`, `%${q}%`); }
-    const [workshops] = await pool.query(`
+    if (topic && TOPICS.includes(topic)) { where += ` AND w.topic = $${paramIdx++}`; params.push(topic); }
+    if (status && STATUSES.includes(status)) { where += ` AND w.status = $${paramIdx++}`; params.push(status); }
+    if (mode && MODES.includes(mode)) { where += ` AND w.mode = $${paramIdx++}`; params.push(mode); }
+    if (q) { where += ` AND (w.title LIKE $${paramIdx++} OR w.speaker LIKE $${paramIdx++})`; params.push(`%${q}%`, `%${q}%`); }
+    const { rows: workshops } = await pool.query(`
       SELECT w.*,
         (SELECT COUNT(*) FROM workshop_registrations wr WHERE wr.workshop_id = w.id) AS reg_count,
         (SELECT SUM(wr.attended) FROM workshop_registrations wr WHERE wr.workshop_id = w.id) AS attend_count
@@ -317,14 +319,14 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/workshops/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
-    const [rows] = await pool.query(`SELECT * FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows } = await pool.query(`SELECT * FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
     if (!rows.length) return res.status(404).send('Workshop not found');
     const w = rows[0];
-    const [regs] = await pool.query(`
+    const { rows: regs } = await pool.query(`
       SELECT id, parent_name, parent_email, registered_at, attended, feedback_score, feedback_comment, certificate_issued
-      FROM workshop_registrations WHERE workshop_id = ? AND tenant_id = ? ORDER BY registered_at DESC`, [wid, tid]);
-    const [resources] = await pool.query(`
-      SELECT * FROM workshop_resources WHERE workshop_id = ? AND tenant_id = ? ORDER BY sort_order ASC`, [wid, tid]);
+      FROM workshop_registrations WHERE workshop_id = $1 AND tenant_id = $2 ORDER BY registered_at DESC`, [wid, tid]);
+    const { rows: resources } = await pool.query(`
+      SELECT * FROM workshop_resources WHERE workshop_id = $1 AND tenant_id = $2 ORDER BY sort_order ASC`, [wid, tid]);
     const attendedCount = regs.filter(r => r.attended).length;
     const feedbackCount = regs.filter(r => r.feedback_score).length;
     const avgFeedback = feedbackCount > 0 ? (regs.reduce((s, r) => s + (r.feedback_score || 0), 0) / feedbackCount).toFixed(1) : '—';
@@ -403,7 +405,7 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/workshops/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
-    const [rows] = await pool.query(`SELECT * FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows } = await pool.query(`SELECT * FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
     if (!rows.length) return res.status(404).send('Workshop not found');
     const w = rows[0];
     const topicOpts = TOPICS.map(t => `<option value="${t}" ${w.topic === t ? 'selected' : ''}>${esc(TOPIC_LABELS[t])}</option>`).join('');
@@ -457,19 +459,19 @@ module.exports = function(app, pool, opts) {
   app.post('/school/parent-workshop/workshops/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
     if (req.body.action === 'delete') {
-      await pool.query(`DELETE FROM workshop_resources WHERE workshop_id = ? AND tenant_id = ?`, [wid, tid]);
-      await pool.query(`DELETE FROM workshop_registrations WHERE workshop_id = ? AND tenant_id = ?`, [wid, tid]);
-      await pool.query(`DELETE FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+      await pool.query(`DELETE FROM workshop_resources WHERE workshop_id = $1 AND tenant_id = $2`, [wid, tid]);
+      await pool.query(`DELETE FROM workshop_registrations WHERE workshop_id = $1 AND tenant_id = $2`, [wid, tid]);
+      await pool.query(`DELETE FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
       audit(req, 'parent_workshop_delete', { workshop_id: wid });
       return res.redirect('/school/parent-workshop/workshops');
     }
     const { title, description, topic, speaker, speaker_bio, date, time, duration, venue,
       meeting_link, max_participants, mode, status, cover_image, recording_url } = req.body;
     await pool.query(`
-      UPDATE parent_workshops SET title=?, description=?, topic=?, speaker=?, speaker_bio=?,
-        date=?, time=?, duration=?, venue=?, meeting_link=?, max_participants=?, mode=?, status=?,
-        cover_image=?, recording_url=?
-      WHERE id = ? AND tenant_id = ?`,
+      UPDATE parent_workshops SET title=$1, description=$2, topic=$3, speaker=$4, speaker_bio=$5,
+        date=$6, time=$7, duration=$8, venue=$9, meeting_link=$10, max_participants=$11, mode=$12, status=$13,
+        cover_image=$14, recording_url=$15
+      WHERE id = $16 AND tenant_id = $17`,
       [title, description || null, topic || 'parenting-skills', speaker || null, speaker_bio || null,
         date, time, parseInt(duration) || 60, venue || null, meeting_link || null,
         parseInt(max_participants) || 50, mode || 'in-person', status || 'draft',
@@ -483,7 +485,7 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/workshops/:id/recording', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
-    const [rows] = await pool.query(`SELECT id, title FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows } = await pool.query(`SELECT id, title FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
     if (!rows.length) return res.status(404).send('Workshop not found');
     res.send(renderPage(req, 'Upload Recording', SKIP + `
       <div class="card" style="max-width:600px">
@@ -501,7 +503,7 @@ module.exports = function(app, pool, opts) {
   app.post('/school/parent-workshop/workshops/:id/recording', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
     const { recording_url } = req.body;
-    await pool.query(`UPDATE parent_workshops SET recording_url = ? WHERE id = ? AND tenant_id = ?`,
+    await pool.query(`UPDATE parent_workshops SET recording_url = $1 WHERE id = $2 AND tenant_id = $3`,
       [recording_url, wid, tid]);
     audit(req, 'workshop_recording_upload', { workshop_id: wid });
     res.redirect(`/school/parent-workshop/workshops/${wid}`);
@@ -512,11 +514,11 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/register/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
-    const [rows] = await pool.query(`SELECT * FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows } = await pool.query(`SELECT * FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
     if (!rows.length) return res.status(404).send('Workshop not found');
     const w = rows[0];
-    const [existing] = await pool.query(
-      `SELECT COUNT(*) AS cnt FROM workshop_registrations WHERE workshop_id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows: existing } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM workshop_registrations WHERE workshop_id = $1 AND tenant_id = $2`, [wid, tid]);
     const spotsLeft = Math.max(0, w.max_participants - existing[0].cnt);
     res.send(renderPage(req, 'Register Parent', SKIP + `
       <div class="card" style="max-width:600px">
@@ -541,17 +543,17 @@ module.exports = function(app, pool, opts) {
   app.post('/school/parent-workshop/register/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
     const { parent_name, parent_email, parent_id } = req.body;
-    const [ws] = await pool.query(`SELECT max_participants FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows: ws } = await pool.query(`SELECT max_participants FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
     if (!ws.length) return res.status(404).send('Workshop not found');
-    const [cnt] = await pool.query(
-      `SELECT COUNT(*) AS c FROM workshop_registrations WHERE workshop_id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows: cnt } = await pool.query(
+      `SELECT COUNT(*) AS c FROM workshop_registrations WHERE workshop_id = $1 AND tenant_id = $2`, [wid, tid]);
     if (cnt[0].c >= ws[0].max_participants) {
       return res.send(renderPage(req, 'Registration Full', SKIP + '<div class="card"><p>This workshop has reached maximum capacity.</p><a href="/school/parent-workshop/workshops" class="btn btn-outline">Back</a></div>'));
     }
     try {
       await pool.query(`
         INSERT INTO workshop_registrations (tenant_id, workshop_id, parent_id, parent_name, parent_email)
-        VALUES (?, ?, ?, ?, ?)`,
+        VALUES ($1, $2, $3, $4, $5)`,
         [tid, wid, parent_id || null, parent_name, parent_email]);
       audit(req, 'workshop_register', { workshop_id: wid, parent_name, parent_email });
       if (parent_email && queueEmail) {
@@ -559,7 +561,7 @@ module.exports = function(app, pool, opts) {
           html: `<p>You have been registered for <strong>${esc(parent_name)}</strong>.</p><p>Please check the workshop details in the portal.</p>` });
       }
     } catch(e) {
-      if (e.code === 'ER_DUP_ENTRY') {
+      if (e.code === '23505') {
         return res.send(renderPage(req, 'Already Registered', SKIP +
           '<div class="card"><p>This parent is already registered for this workshop.</p><a href="/school/parent-workshop" class="btn btn-outline">Back</a></div>'));
       }
@@ -573,11 +575,11 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/attendees/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
-    const [ws] = await pool.query(`SELECT id, title, max_participants FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows: ws } = await pool.query(`SELECT id, title, max_participants FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
     if (!ws.length) return res.status(404).send('Workshop not found');
     const w = ws[0];
-    const [regs] = await pool.query(`
-      SELECT * FROM workshop_registrations WHERE workshop_id = ? AND tenant_id = ? ORDER BY registered_at DESC`, [wid, tid]);
+    const { rows: regs } = await pool.query(`
+      SELECT * FROM workshop_registrations WHERE workshop_id = $1 AND tenant_id = $2 ORDER BY registered_at DESC`, [wid, tid]);
     const attended = regs.filter(r => r.attended).length;
     res.send(renderPage(req, `Attendees: ${w.title}`, SKIP + `
       <div class="flex mb-2" style="justify-content:space-between;align-items:center">
@@ -623,13 +625,13 @@ module.exports = function(app, pool, opts) {
     const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number) : [parseInt(req.body.ids)].filter(Boolean);
     if (!ids.length) return res.redirect(`/school/parent-workshop/attendees/${wid}`);
     if (req.body.bulk_action === 'mark-attended') {
-      const placeholders = ids.map(() => '?').join(',');
-      await pool.query(`UPDATE workshop_registrations SET attended = 1, attended_at = NOW() WHERE id IN (${placeholders}) AND tenant_id = ?`,
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+      await pool.query(`UPDATE workshop_registrations SET attended = 1, attended_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders}) AND tenant_id = $${ids.length + 1}`,
         [...ids, tid]);
       audit(req, 'workshop_bulk_attend', { workshop_id: wid, count: ids.length });
     } else if (req.body.bulk_action === 'remove') {
-      const placeholders = ids.map(() => '?').join(',');
-      await pool.query(`DELETE FROM workshop_registrations WHERE id IN (${placeholders}) AND tenant_id = ?`, [...ids, tid]);
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+      await pool.query(`DELETE FROM workshop_registrations WHERE id IN (${placeholders}) AND tenant_id = $${ids.length + 1}`, [...ids, tid]);
       audit(req, 'workshop_bulk_remove', { workshop_id: wid, count: ids.length });
     }
     res.redirect(`/school/parent-workshop/attendees/${wid}`);
@@ -638,8 +640,8 @@ module.exports = function(app, pool, opts) {
   /* Mark single attendee */
   app.post('/school/parent-workshop/attendees/:rid/attend', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, rid = parseInt(req.params.rid);
-    await pool.query(`UPDATE workshop_registrations SET attended = 1, attended_at = NOW() WHERE id = ? AND tenant_id = ?`, [rid, tid]);
-    const [reg] = await pool.query(`SELECT workshop_id FROM workshop_registrations WHERE id = ? AND tenant_id = ?`, [rid, tid]);
+    await pool.query(`UPDATE workshop_registrations SET attended = 1, attended_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2`, [rid, tid]);
+    const { rows: reg } = await pool.query(`SELECT workshop_id FROM workshop_registrations WHERE id = $1 AND tenant_id = $2`, [rid, tid]);
     audit(req, 'workshop_mark_attended', { registration_id: rid });
     if (reg.length) res.redirect(`/school/parent-workshop/attendees/${reg[0].workshop_id}`);
     else res.redirect('/school/parent-workshop');
@@ -648,8 +650,8 @@ module.exports = function(app, pool, opts) {
   /* Remove single attendee */
   app.post('/school/parent-workshop/attendees/:rid/remove', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, rid = parseInt(req.params.rid);
-    const [reg] = await pool.query(`SELECT workshop_id FROM workshop_registrations WHERE id = ? AND tenant_id = ?`, [rid, tid]);
-    await pool.query(`DELETE FROM workshop_registrations WHERE id = ? AND tenant_id = ?`, [rid, tid]);
+    const { rows: reg } = await pool.query(`SELECT workshop_id FROM workshop_registrations WHERE id = $1 AND tenant_id = $2`, [rid, tid]);
+    await pool.query(`DELETE FROM workshop_registrations WHERE id = $1 AND tenant_id = $2`, [rid, tid]);
     audit(req, 'workshop_remove_attendee', { registration_id: rid });
     res.redirect(`/school/parent-workshop/attendees/${reg.length ? reg[0].workshop_id : 0}`);
   }));
@@ -662,10 +664,10 @@ module.exports = function(app, pool, opts) {
     const { workshop_id } = req.query;
     if (workshop_id) {
       const wid = parseInt(workshop_id);
-      const [ws] = await pool.query(`SELECT id, title FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+      const { rows: ws } = await pool.query(`SELECT id, title FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
       if (!ws.length) return res.status(404).send('Workshop not found');
-      const [resources] = await pool.query(
-        `SELECT * FROM workshop_resources WHERE workshop_id = ? AND tenant_id = ? ORDER BY sort_order ASC`, [wid, tid]);
+      const { rows: resources } = await pool.query(
+        `SELECT * FROM workshop_resources WHERE workshop_id = $1 AND tenant_id = $2 ORDER BY sort_order ASC`, [wid, tid]);
       res.send(renderPage(req, 'Workshop Resources', SKIP + `
         <div class="flex mb-2" style="justify-content:space-between;align-items:center">
           <h2>Resources: ${esc(ws[0].title)}</h2>
@@ -689,11 +691,11 @@ module.exports = function(app, pool, opts) {
       `));
     } else {
       /* All resources across workshops */
-      const [resources] = await pool.query(`
+      const { rows: resources } = await pool.query(`
         SELECT r.*, w.title AS workshop_title
         FROM workshop_resources r
         JOIN parent_workshops w ON w.id = r.workshop_id AND w.tenant_id = r.tenant_id
-        WHERE r.tenant_id = ? ORDER BY r.created_at DESC LIMIT 50`, [tid]);
+        WHERE r.tenant_id = $1 ORDER BY r.created_at DESC LIMIT 50`, [tid]);
       res.send(renderPage(req, 'All Resources', SKIP + `
         <h2 style="margin-bottom:16px">All Workshop Resources (${resources.length})</h2>
         ${resources.length ? `<div class="card"><table>
@@ -712,7 +714,7 @@ module.exports = function(app, pool, opts) {
   /* Add resource form */
   app.get('/school/parent-workshop/resources/add', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.query.workshop_id);
-    const [ws] = await pool.query(`SELECT id, title FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows: ws } = await pool.query(`SELECT id, title FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
     if (!ws.length) return res.status(404).send('Workshop not found');
     const fileTypes = ['pdf', 'doc', 'ppt', 'video', 'audio', 'image', 'spreadsheet', 'link', 'other'];
     const typeOpts = fileTypes.map(t => `<option value="${t}">${t.toUpperCase()}</option>`).join('');
@@ -740,7 +742,7 @@ module.exports = function(app, pool, opts) {
     const { workshop_id, title, file_type, file_url, description, sort_order } = req.body;
     await pool.query(`
       INSERT INTO workshop_resources (tenant_id, workshop_id, title, file_type, file_url, description, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [tid, parseInt(workshop_id), title, file_type || 'pdf', file_url || null, description || null, parseInt(sort_order) || 0]);
     audit(req, 'workshop_resource_add', { workshop_id, title });
     res.redirect(`/school/parent-workshop/resources?workshop_id=${workshop_id}`);
@@ -748,8 +750,8 @@ module.exports = function(app, pool, opts) {
 
   app.post('/school/parent-workshop/resources/:rid/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, rid = parseInt(req.params.rid);
-    const [r] = await pool.query(`SELECT workshop_id FROM workshop_resources WHERE id = ? AND tenant_id = ?`, [rid, tid]);
-    await pool.query(`DELETE FROM workshop_resources WHERE id = ? AND tenant_id = ?`, [rid, tid]);
+    const { rows: r } = await pool.query(`SELECT workshop_id FROM workshop_resources WHERE id = $1 AND tenant_id = $2`, [rid, tid]);
+    await pool.query(`DELETE FROM workshop_resources WHERE id = $1 AND tenant_id = $2`, [rid, tid]);
     audit(req, 'workshop_resource_delete', { resource_id: rid });
     res.redirect(`/school/parent-workshop/resources?workshop_id=${r.length ? r[0].workshop_id : ''}`);
   }));
@@ -760,20 +762,21 @@ module.exports = function(app, pool, opts) {
   app.get('/school/parent-workshop/feedback', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id;
     const { workshop_id } = req.query;
-    let where = 'WHERE wr.tenant_id = ? AND wr.feedback_score IS NOT NULL';
+    let paramIdx = 1;
+    let where = `WHERE wr.tenant_id = $${paramIdx++} AND wr.feedback_score IS NOT NULL`;
     const params = [tid];
-    if (workshop_id) { where += ' AND wr.workshop_id = ?'; params.push(parseInt(workshop_id)); }
-    const [feedback] = await pool.query(`
+    if (workshop_id) { where += ` AND wr.workshop_id = $${paramIdx++}`; params.push(parseInt(workshop_id)); }
+    const { rows: feedback } = await pool.query(`
       SELECT wr.*, w.title AS workshop_title, w.topic, w.date
       FROM workshop_registrations wr
       JOIN parent_workshops w ON w.id = wr.workshop_id AND w.tenant_id = wr.tenant_id
       ${where} ORDER BY wr.registered_at DESC`, params);
-    const [summary] = await pool.query(`
+    const { rows: summary } = await pool.query(`
       SELECT w.id, w.title, w.topic, COUNT(*) AS fb_count, ROUND(AVG(wr.feedback_score),1) AS avg_score,
         COUNT(CASE WHEN wr.feedback_score=5 THEN 1 END) AS five_star
       FROM workshop_registrations wr
       JOIN parent_workshops w ON w.id = wr.workshop_id AND w.tenant_id = wr.tenant_id
-      WHERE wr.tenant_id = ? AND wr.feedback_score IS NOT NULL
+      WHERE wr.tenant_id = $1 AND wr.feedback_score IS NOT NULL
       GROUP BY w.id ORDER BY avg_score DESC`, [tid]);
     res.send(renderPage(req, 'Workshop Feedback', SKIP + `
       <h2 style="margin-bottom:16px">Workshop Feedback</h2>
@@ -808,10 +811,10 @@ module.exports = function(app, pool, opts) {
     const tid = req.tenant_id, rid = parseInt(req.params.rid);
     const { score, comment } = req.body;
     const s = Math.min(5, Math.max(1, parseInt(score) || 5));
-    await pool.query(`UPDATE workshop_registrations SET feedback_score = ?, feedback_comment = ? WHERE id = ? AND tenant_id = ?`,
+    await pool.query(`UPDATE workshop_registrations SET feedback_score = $1, feedback_comment = $2 WHERE id = $3 AND tenant_id = $4`,
       [s, comment || null, rid, tid]);
     audit(req, 'workshop_feedback_submit', { registration_id: rid, score: s });
-    const [reg] = await pool.query(`SELECT workshop_id, parent_email FROM workshop_registrations WHERE id = ? AND tenant_id = ?`, [rid, tid]);
+    const { rows: reg } = await pool.query(`SELECT workshop_id, parent_email FROM workshop_registrations WHERE id = $1 AND tenant_id = $2`, [rid, tid]);
     if (reg.length && queueEmail && reg[0].parent_email) {
       queueEmail({ to: reg[0].parent_email, subject: 'Thank you for your feedback!',
         html: '<p>Thank you for providing feedback on the workshop. Your input helps us improve future sessions.</p>' });
@@ -828,27 +831,28 @@ module.exports = function(app, pool, opts) {
     if (action === 'issue' && workshop_id) {
       /* Issue certificates to all attended participants */
       const wid = parseInt(workshop_id);
-      const [result] = await pool.query(`
-        UPDATE workshop_registrations SET certificate_issued = 1, certificate_issued_at = NOW()
-        WHERE workshop_id = ? AND tenant_id = ? AND attended = 1 AND certificate_issued = 0`, [wid, tid]);
-      audit(req, 'workshop_certificates_issue_bulk', { workshop_id: wid, count: result.affectedRows });
+      const { rowCount: result } = await pool.query(`
+        UPDATE workshop_registrations SET certificate_issued = 1, certificate_issued_at = CURRENT_TIMESTAMP
+        WHERE workshop_id = $1 AND tenant_id = $2 AND attended = 1 AND certificate_issued = 0`, [wid, tid]);
+      audit(req, 'workshop_certificates_issue_bulk', { workshop_id: wid, count: result });
       return res.redirect(`/school/parent-workshop/certificates?workshop_id=${wid}`);
     }
-    let where = 'WHERE wr.tenant_id = ? AND wr.certificate_issued = 1';
+    let paramIdx = 1;
+    let where = `WHERE wr.tenant_id = $${paramIdx++} AND wr.certificate_issued = 1`;
     const params = [tid];
-    if (workshop_id) { where += ' AND wr.workshop_id = ?'; params.push(parseInt(workshop_id)); }
-    const [certs] = await pool.query(`
+    if (workshop_id) { where += ` AND wr.workshop_id = $${paramIdx++}`; params.push(parseInt(workshop_id)); }
+    const { rows: certs } = await pool.query(`
       SELECT wr.*, w.title AS workshop_title, w.topic, w.date, w.speaker
       FROM workshop_registrations wr
       JOIN parent_workshops w ON w.id = wr.workshop_id AND w.tenant_id = wr.tenant_id
       ${where} ORDER BY wr.certificate_issued_at DESC`, params);
-    const [workshops] = await pool.query(`
+    const { rows: workshops } = await pool.query(`
       SELECT w.id, w.title, w.date,
         COUNT(*) AS total_attended,
         SUM(wr.certificate_issued) AS certs_issued
       FROM parent_workshops w
       JOIN workshop_registrations wr ON wr.workshop_id = w.id AND wr.tenant_id = w.tenant_id
-      WHERE w.tenant_id = ? AND wr.attended = 1
+      WHERE w.tenant_id = $1 AND wr.attended = 1
       GROUP BY w.id ORDER BY w.date DESC`, [tid]);
     res.send(renderPage(req, 'Certificates', SKIP + `
       <h2 style="margin-bottom:16px">Workshop Certificates</h2>
@@ -886,8 +890,8 @@ module.exports = function(app, pool, opts) {
     const year = parseInt(req.query.year) || new Date().getFullYear();
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
-    const [workshops] = await pool.query(`
-      SELECT * FROM parent_workshops WHERE tenant_id = ? AND date >= ? AND date <= ? ORDER BY date, time`, [tid, startDate, endDate]);
+    const { rows: workshops } = await pool.query(`
+      SELECT * FROM parent_workshops WHERE tenant_id = $1 AND date >= $2 AND date <= $3 ORDER BY date, time`, [tid, startDate, endDate]);
     const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
     const monthName = monthNames[month - 1] || 'January';
     const firstDay = new Date(year, month - 1, 1).getDay();
@@ -960,19 +964,19 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/speakers', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id;
-    const [speakers] = await pool.query(`
+    const { rows: speakers } = await pool.query(`
       SELECT speaker, speaker_bio, COUNT(*) AS workshop_count,
         MIN(date) AS first_workshop, MAX(date) AS last_workshop,
         ROUND(AVG(wr.feedback_score), 1) AS avg_feedback
       FROM parent_workshops w
       LEFT JOIN workshop_registrations wr ON wr.workshop_id = w.id AND wr.tenant_id = w.tenant_id AND wr.feedback_score IS NOT NULL
-      WHERE w.tenant_id = ? AND w.speaker IS NOT NULL AND w.speaker != ''
+      WHERE w.tenant_id = $1 AND w.speaker IS NOT NULL AND w.speaker != ''
       GROUP BY speaker, speaker_bio
       ORDER BY workshop_count DESC`, [tid]);
-    const [workshopsBySpeaker] = await pool.query(`
+    const { rows: workshopsBySpeaker } = await pool.query(`
       SELECT speaker, w.id, w.title, w.date, w.topic, w.status
       FROM parent_workshops w
-      WHERE w.tenant_id = ? AND w.speaker IS NOT NULL AND w.speaker != ''
+      WHERE w.tenant_id = $1 AND w.speaker IS NOT NULL AND w.speaker != ''
       ORDER BY w.date DESC`, [tid]);
     const speakerWorkshops = {};
     workshopsBySpeaker.forEach(w => {
@@ -1012,12 +1016,12 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/public', requireAuth, ah(async (req, res) => {
     const tid = req.tenant_id;
-    const [workshops] = await pool.query(`
+    const { rows: workshops } = await pool.query(`
       SELECT id, title, description, topic, speaker, date, time, duration, venue, mode, max_participants, cover_image,
         (SELECT COUNT(*) FROM workshop_registrations WHERE workshop_id = parent_workshops.id) AS reg_count
       FROM parent_workshops
-      WHERE tenant_id = ? AND status IN ('published','registration-open')
-      AND date >= CURDATE()
+      WHERE tenant_id = $1 AND status IN ('published','registration-open')
+      AND date >= CURRENT_DATE
       ORDER BY date ASC, time ASC`, [tid]);
     const topicTabs = [...new Set(workshops.map(w => w.topic))];
     res.send(renderPage(req, 'Upcoming Workshops', SKIP + `
@@ -1055,16 +1059,16 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/api/stats', requireAuth, ah(async (req, res) => {
     const tid = req.tenant_id;
-    const [ws] = await pool.query(`
+    const { rows: ws } = await pool.query(`
       SELECT COUNT(*) AS total, SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
         SUM(CASE WHEN status='registration-open' THEN 1 ELSE 0 END) AS open
-      FROM parent_workshops WHERE tenant_id = ?`, [tid]);
-    const [reg] = await pool.query(`
+      FROM parent_workshops WHERE tenant_id = $1`, [tid]);
+    const { rows: reg } = await pool.query(`
       SELECT COUNT(*) AS registrations, SUM(attended) AS attended,
         ROUND(AVG(feedback_score),1) AS avg_feedback, SUM(certificate_issued) AS certificates
       FROM workshop_registrations wr
       JOIN parent_workshops w ON w.id = wr.workshop_id AND w.tenant_id = wr.tenant_id
-      WHERE wr.tenant_id = ?`, [tid]);
+      WHERE wr.tenant_id = $1`, [tid]);
     res.json({ workshops: ws[0], registrations: reg[0] || {} });
   }));
 
@@ -1073,12 +1077,12 @@ module.exports = function(app, pool, opts) {
      ════════════════════════════════════════════ */
   app.get('/school/parent-workshop/api/export/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.tenant_id, wid = parseInt(req.params.id);
-    const [ws] = await pool.query(`SELECT title FROM parent_workshops WHERE id = ? AND tenant_id = ?`, [wid, tid]);
+    const { rows: ws } = await pool.query(`SELECT title FROM parent_workshops WHERE id = $1 AND tenant_id = $2`, [wid, tid]);
     if (!ws.length) return res.status(404).json({ error: 'Workshop not found' });
-    const [regs] = await pool.query(`
+    const { rows: regs } = await pool.query(`
       SELECT parent_name, parent_email, registered_at, attended, attended_at,
         feedback_score, feedback_comment, certificate_issued
-      FROM workshop_registrations WHERE workshop_id = ? AND tenant_id = ? ORDER BY registered_at`, [wid, tid]);
+      FROM workshop_registrations WHERE workshop_id = $1 AND tenant_id = $2 ORDER BY registered_at`, [wid, tid]);
     const header = 'Parent Name,Email,Registered,Attended,Attended At,Feedback Score,Comment,Certificate Issued\n';
     const rows = regs.map(r =>
       `"${(r.parent_name || '').replace(/"/g, '""')}","${(r.parent_email || '').replace(/"/g, '""')}","${r.registered_at || ''}","${r.attended ? 'Yes' : 'No'}","${r.attended_at || ''}","${r.feedback_score || ''}","${(r.feedback_comment || '').replace(/"/g, '""')}","${r.certificate_issued ? 'Yes' : 'No'}"`

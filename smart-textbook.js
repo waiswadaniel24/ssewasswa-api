@@ -2,7 +2,7 @@
 // SMART-TEXTBOOK MODULE — School SaaS Portal
 // Digital textbook management, chapter content, bookmarking,
 // highlighting, note-taking, progress tracking, quiz integration.
-// 12+ routes, MySQL-backed, tenant-aware.
+// 12+ routes, PostgreSQL-backed, tenant-aware.
 // ============================================================
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
@@ -84,11 +84,11 @@ module.exports = function(app, pool, opts) {
   app.get('/school/smart-textbook', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [totalBooks] = await pool.query('SELECT COUNT(*) as c FROM textbooks WHERE tenant_id=? AND status="published"', [tid]);
-    const [myProgress] = await pool.query('SELECT COUNT(*) as c FROM textbook_progress WHERE tenant_id=? AND student_id=?', [tid, uid]);
-    const [completedBooks] = await pool.query('SELECT COUNT(*) as c FROM textbook_progress WHERE tenant_id=? AND student_id=? AND completion_pct=100', [tid, uid]);
-    const [recentBooks] = await pool.query('SELECT tp.*, t.title as textbook_title, t.subject, t.cover_url, t.total_chapters FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=? AND tp.student_id=? ORDER BY tp.last_accessed DESC LIMIT 4', [tid, uid]);
-    const [recentTextbooks] = await pool.query('SELECT * FROM textbooks WHERE tenant_id=? AND status="published" ORDER BY created_at DESC LIMIT 6', [tid]);
+    const { rows: totalBooks } = await pool.query(`SELECT COUNT(*) as c FROM textbooks WHERE tenant_id=$1 AND status='published'`, [tid]);
+    const { rows: myProgress } = await pool.query('SELECT COUNT(*) as c FROM textbook_progress WHERE tenant_id=$1 AND student_id=$2', [tid, uid]);
+    const { rows: completedBooks } = await pool.query('SELECT COUNT(*) as c FROM textbook_progress WHERE tenant_id=$1 AND student_id=$2 AND completion_pct=100', [tid, uid]);
+    const { rows: recentBooks } = await pool.query('SELECT tp.*, t.title as textbook_title, t.subject, t.cover_url, t.total_chapters FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=$1 AND tp.student_id=$2 ORDER BY tp.last_accessed DESC LIMIT 4', [tid, uid]);
+    const { rows: recentTextbooks } = await pool.query(`SELECT * FROM textbooks WHERE tenant_id=$1 AND status='published' ORDER BY created_at DESC LIMIT 6`, [tid]);
 
     res.send(renderPage('Smart Textbooks', SKIP + `<div style="max-width:1200px;margin:0 auto;padding:20px">
       ${nav('dash')}
@@ -157,15 +157,16 @@ module.exports = function(app, pool, opts) {
     const gradeFilter = req.query.grade || '';
     const searchQuery = req.query.search || '';
 
-    let whereClause = 'WHERE tenant_id=? AND status="published"';
+    let paramIdx = 1;
+    let whereClause = `WHERE tenant_id=$${paramIdx++} AND status='published'`;
     const params = [tid];
-    if (subjectFilter) { whereClause += ' AND subject=?'; params.push(subjectFilter); }
-    if (gradeFilter) { whereClause += ' AND grade=?'; params.push(gradeFilter); }
-    if (searchQuery) { whereClause += ' AND (title LIKE ? OR author LIKE ?)'; params.push('%'+searchQuery+'%', '%'+searchQuery+'%'); }
+    if (subjectFilter) { whereClause += ` AND subject=$${paramIdx++}`; params.push(subjectFilter); }
+    if (gradeFilter) { whereClause += ` AND grade=$${paramIdx++}`; params.push(gradeFilter); }
+    if (searchQuery) { whereClause += ` AND (title LIKE $${paramIdx++} OR author LIKE $${paramIdx++})`; params.push('%'+searchQuery+'%', '%'+searchQuery+'%'); }
 
-    const [textbooks] = await pool.query(`SELECT * FROM textbooks ${whereClause} ORDER BY title`, params);
-    const [subjects] = await pool.query('SELECT DISTINCT subject FROM textbooks WHERE tenant_id=? AND status="published" ORDER BY subject', [tid]);
-    const [grades] = await pool.query('SELECT DISTINCT grade FROM textbooks WHERE tenant_id=? AND status="published" ORDER BY grade', [tid]);
+    const { rows: textbooks } = await pool.query(`SELECT * FROM textbooks ${whereClause} ORDER BY title`, params);
+    const { rows: subjects } = await pool.query(`SELECT DISTINCT subject FROM textbooks WHERE tenant_id=$1 AND status='published' ORDER BY subject`, [tid]);
+    const { rows: grades } = await pool.query(`SELECT DISTINCT grade FROM textbooks WHERE tenant_id=$1 AND status='published' ORDER BY grade`, [tid]);
 
     res.send(renderPage('Browse Textbooks', SKIP + `<div style="max-width:1100px;margin:0 auto;padding:20px">
       ${nav('browse')}
@@ -211,11 +212,11 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 3: Textbook Detail ────────────────────────────
   app.get('/school/smart-textbook/detail/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [textbook] = await pool.query('SELECT * FROM textbooks WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const { rows: textbook } = await pool.query('SELECT * FROM textbooks WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!textbook[0]) return res.redirect('/school/smart-textbook');
 
     const t = textbook[0];
-    const [chapters] = await pool.query('SELECT id, chapter_num, title, status FROM textbook_chapters WHERE tenant_id=? AND textbook_id=? ORDER BY chapter_num', [tid, t.id]);
+    const { rows: chapters } = await pool.query('SELECT id, chapter_num, title, status FROM textbook_chapters WHERE tenant_id=$1 AND textbook_id=$2 ORDER BY chapter_num', [tid, t.id]);
 
     res.send(renderPage('Textbook Detail', SKIP + `<div style="max-width:900px;margin:0 auto;padding:20px">
       <a href="/school/smart-textbook/browse" style="color:${P};text-decoration:none;font-size:13px">← Back to Library</a>
@@ -253,27 +254,27 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const bookId = req.params.id;
 
-    const [textbook] = await pool.query('SELECT * FROM textbooks WHERE id=? AND tenant_id=?', [bookId, tid]);
+    const { rows: textbook } = await pool.query('SELECT * FROM textbooks WHERE id=$1 AND tenant_id=$2', [bookId, tid]);
     if (!textbook[0]) return res.redirect('/school/smart-textbook');
 
     const t = textbook[0];
-    const [chapters] = await pool.query('SELECT * FROM textbook_chapters WHERE tenant_id=? AND textbook_id=? AND status="published" ORDER BY chapter_num', [tid, bookId]);
+    const { rows: chapters } = await pool.query(`SELECT * FROM textbook_chapters WHERE tenant_id=$1 AND textbook_id=$2 AND status='published' ORDER BY chapter_num`, [tid, bookId]);
 
     // Find target chapter
     let targetChapter = chapters.find(ch => ch.id == req.query.chapter);
     if (!targetChapter && chapters.length > 0) targetChapter = chapters[0];
 
     // Get or create progress
-    const [existingProgress] = await pool.query('SELECT * FROM textbook_progress WHERE tenant_id=? AND student_id=? AND textbook_id=?', [tid, uid, bookId]);
+    const { rows: existingProgress } = await pool.query('SELECT * FROM textbook_progress WHERE tenant_id=$1 AND student_id=$2 AND textbook_id=$3', [tid, uid, bookId]);
     let progress = existingProgress[0];
     if (!progress) {
-      await pool.query('INSERT INTO textbook_progress (tenant_id, student_id, textbook_id, current_chapter, last_accessed) VALUES (?, ?, ?, 1, NOW())', [tid, uid, bookId]);
-      const [newProg] = await pool.query('SELECT * FROM textbook_progress WHERE tenant_id=? AND student_id=? AND textbook_id=?', [tid, uid, bookId]);
+      await pool.query('INSERT INTO textbook_progress (tenant_id, student_id, textbook_id, current_chapter, last_accessed) VALUES ($1, $2, $3, 1, CURRENT_TIMESTAMP)', [tid, uid, bookId]);
+      const { rows: newProg } = await pool.query('SELECT * FROM textbook_progress WHERE tenant_id=$1 AND student_id=$2 AND textbook_id=$3', [tid, uid, bookId]);
       progress = newProg[0];
     } else {
       const newChapter = targetChapter ? targetChapter.chapter_num : progress.current_chapter;
       const newPct = chapters.length > 0 ? Math.round((newChapter / chapters.length) * 100) : 0;
-      await pool.query('UPDATE textbook_progress SET current_chapter=?, completion_pct=?, last_accessed=NOW() WHERE id=?', [newChapter, newPct, progress.id]);
+      await pool.query('UPDATE textbook_progress SET current_chapter=$1, completion_pct=$2, last_accessed=CURRENT_TIMESTAMP WHERE id=$3', [newChapter, newPct, progress.id]);
     }
 
     const bookmarks = Array.isArray(progress.bookmarks) ? progress.bookmarks : [];
@@ -376,13 +377,13 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const { textbook_id, chapter_id, note } = req.body;
 
-    const [progress] = await pool.query('SELECT * FROM textbook_progress WHERE tenant_id=? AND student_id=? AND textbook_id=?', [tid, uid, textbook_id]);
+    const { rows: progress } = await pool.query('SELECT * FROM textbook_progress WHERE tenant_id=$1 AND student_id=$2 AND textbook_id=$3', [tid, uid, textbook_id]);
     if (!progress[0]) return res.redirect('/school/smart-textbook');
 
     const notes = Array.isArray(progress[0].notes) ? progress[0].notes : [];
     notes.push({ chapterId: parseInt(chapter_id), text: note, time: new Date().toISOString() });
 
-    await pool.query('UPDATE textbook_progress SET notes=? WHERE id=? AND tenant_id=?', [JSON.stringify(notes), progress[0].id, tid]);
+    await pool.query('UPDATE textbook_progress SET notes=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(notes), progress[0].id, tid]);
     res.redirect('/school/smart-textbook/read/' + textbook_id + '?chapter=' + chapter_id);
   }));
 
@@ -392,9 +393,9 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const { bookId, chapterId } = req.params;
 
-    const [progress] = await pool.query('SELECT * FROM textbook_progress WHERE tenant_id=? AND student_id=? AND textbook_id=?', [tid, uid, bookId]);
+    const { rows: progress } = await pool.query('SELECT * FROM textbook_progress WHERE tenant_id=$1 AND student_id=$2 AND textbook_id=$3', [tid, uid, bookId]);
     if (!progress[0]) {
-      await pool.query('INSERT INTO textbook_progress (tenant_id, student_id, textbook_id, bookmarks) VALUES (?, ?, ?, ?)', [tid, uid, bookId, JSON.stringify([parseInt(chapterId)])]);
+      await pool.query('INSERT INTO textbook_progress (tenant_id, student_id, textbook_id, bookmarks) VALUES ($1, $2, $3, $4)', [tid, uid, bookId, JSON.stringify([parseInt(chapterId)])]);
       return res.json({ ok: true });
     }
 
@@ -403,14 +404,14 @@ module.exports = function(app, pool, opts) {
     if (idx >= 0) bookmarks.splice(idx, 1);
     else bookmarks.push(parseInt(chapterId));
 
-    await pool.query('UPDATE textbook_progress SET bookmarks=? WHERE id=? AND tenant_id=?', [JSON.stringify(bookmarks), progress[0].id, tid]);
+    await pool.query('UPDATE textbook_progress SET bookmarks=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(bookmarks), progress[0].id, tid]);
     res.json({ ok: true });
   }));
 
   // ─── ROUTE 7: Chapter Quiz ───────────────────────────────
   app.get('/school/smart-textbook/quiz/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [chapter] = await pool.query('SELECT tc.*, t.title as textbook_title FROM textbook_chapters tc JOIN textbooks t ON t.id=tc.textbook_id WHERE tc.id=? AND tc.tenant_id=?', [req.query.chapter, tid]);
+    const { rows: chapter } = await pool.query('SELECT tc.*, t.title as textbook_title FROM textbook_chapters tc JOIN textbooks t ON t.id=tc.textbook_id WHERE tc.id=$1 AND tc.tenant_id=$2', [req.query.chapter, tid]);
     if (!chapter[0]) return res.redirect('/school/smart-textbook');
 
     const ch = chapter[0];
@@ -491,7 +492,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/smart-textbook/my-books', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [progress] = await pool.query('SELECT tp.*, t.title, t.subject, t.author, t.total_chapters, t.cover_url FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=? AND tp.student_id=? ORDER BY tp.last_accessed DESC', [tid, uid]);
+    const { rows: progress } = await pool.query('SELECT tp.*, t.title, t.subject, t.author, t.total_chapters, t.cover_url FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=$1 AND tp.student_id=$2 ORDER BY tp.last_accessed DESC', [tid, uid]);
 
     res.send(renderPage('My Books', SKIP + `<div style="max-width:1000px;margin:0 auto;padding:20px">
       ${nav('mine')}
@@ -519,7 +520,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/smart-textbook/notes', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [progress] = await pool.query('SELECT tp.*, t.title as textbook_title FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=? AND tp.student_id=? AND tp.notes IS NOT NULL', [tid, uid]);
+    const { rows: progress } = await pool.query('SELECT tp.*, t.title as textbook_title FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=$1 AND tp.student_id=$2 AND tp.notes IS NOT NULL', [tid, uid]);
 
     const allNotes = [];
     for (const p of progress) {
@@ -548,7 +549,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/smart-textbook/highlights', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [progress] = await pool.query('SELECT tp.*, t.title as textbook_title FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=? AND tp.student_id=? AND tp.highlights IS NOT NULL', [tid, uid]);
+    const { rows: progress } = await pool.query('SELECT tp.*, t.title as textbook_title FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=$1 AND tp.student_id=$2 AND tp.highlights IS NOT NULL', [tid, uid]);
 
     const allHighlights = [];
     for (const p of progress) {
@@ -575,13 +576,13 @@ module.exports = function(app, pool, opts) {
   app.get('/school/smart-textbook/bookmarks', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [progress] = await pool.query('SELECT tp.*, t.title as textbook_title, t.subject FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=? AND tp.student_id=?', [tid, uid]);
+    const { rows: progress } = await pool.query('SELECT tp.*, t.title as textbook_title, t.subject FROM textbook_progress tp JOIN textbooks t ON t.id=tp.textbook_id WHERE tp.tenant_id=$1 AND tp.student_id=$2', [tid, uid]);
 
     const allBookmarks = [];
     for (const p of progress) {
       const bookmarks = Array.isArray(p.bookmarks) ? p.bookmarks : [];
       for (const chId of bookmarks) {
-        const [chapter] = await pool.query('SELECT id, chapter_num, title FROM textbook_chapters WHERE id=? AND tenant_id=?', [chId, tid]);
+        const { rows: chapter } = await pool.query('SELECT id, chapter_num, title FROM textbook_chapters WHERE id=$1 AND tenant_id=$2', [chId, tid]);
         if (chapter[0]) allBookmarks.push({ ...chapter[0], textbookId: p.textbook_id, textbookTitle: p.textbook_title, subject: p.subject });
       }
     }
@@ -668,11 +669,11 @@ module.exports = function(app, pool, opts) {
     const status = publish === '1' ? 'published' : 'draft';
 
     if (id) {
-      await pool.query('UPDATE textbooks SET title=?, subject=?, grade=?, author=?, publisher=?, isbn=?, cover_url=?, status=? WHERE id=? AND tenant_id=?',
+      await pool.query('UPDATE textbooks SET title=$1, subject=$2, grade=$3, author=$4, publisher=$5, isbn=$6, cover_url=$7, status=$8 WHERE id=$9 AND tenant_id=$10',
         [title, subject, grade, author, publisher, isbn, cover_url, status, id, tid]);
       audit({ action: 'update_textbook', textbookId: id, user: req.session.user });
     } else {
-      await pool.query('INSERT INTO textbooks (tenant_id, title, subject, grade, author, publisher, isbn, cover_url, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      await pool.query('INSERT INTO textbooks (tenant_id, title, subject, grade, author, publisher, isbn, cover_url, status, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
         [tid, title, subject, grade, author, publisher, isbn, cover_url, status, uid]);
       audit({ action: 'create_textbook', title, subject, user: req.session.user });
     }
@@ -682,9 +683,9 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 15: Add Chapter ───────────────────────────────
   app.get('/school/smart-textbook/:id/chapter/new', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [textbook] = await pool.query('SELECT * FROM textbooks WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const { rows: textbook } = await pool.query('SELECT * FROM textbooks WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!textbook[0]) return res.redirect('/school/smart-textbook');
-    const [existing] = await pool.query('SELECT chapter_num FROM textbook_chapters WHERE tenant_id=? AND textbook_id=? ORDER BY chapter_num DESC LIMIT 1', [tid, req.params.id]);
+    const { rows: existing } = await pool.query('SELECT chapter_num FROM textbook_chapters WHERE tenant_id=$1 AND textbook_id=$2 ORDER BY chapter_num DESC LIMIT 1', [tid, req.params.id]);
     const nextNum = existing.length > 0 ? existing[0].chapter_num + 1 : 1;
 
     res.send(renderPage('Add Chapter', SKIP + `<div style="max-width:700px;margin:0 auto;padding:20px">
@@ -740,16 +741,16 @@ module.exports = function(app, pool, opts) {
     const status = publish === '1' ? 'published' : 'draft';
 
     if (id) {
-      await pool.query('UPDATE textbook_chapters SET chapter_num=?, title=?, content=?, objectives=?, glossary=?, status=? WHERE id=? AND tenant_id=?',
+      await pool.query('UPDATE textbook_chapters SET chapter_num=$1, title=$2, content=$3, objectives=$4, glossary=$5, status=$6 WHERE id=$7 AND tenant_id=$8',
         [chapter_num, title, content, JSON.stringify(objectivesArr), JSON.stringify(glossaryArr), status, id, tid]);
     } else {
-      await pool.query('INSERT INTO textbook_chapters (tenant_id, textbook_id, chapter_num, title, content, objectives, glossary, status) VALUES (?,?,?,?,?,?,?,?)',
+      await pool.query('INSERT INTO textbook_chapters (tenant_id, textbook_id, chapter_num, title, content, objectives, glossary, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
         [tid, textbook_id, chapter_num, title, content, JSON.stringify(objectivesArr), JSON.stringify(glossaryArr), status]);
     }
 
     // Update total_chapters
-    const [cnt] = await pool.query('SELECT COUNT(*) as c FROM textbook_chapters WHERE tenant_id=? AND textbook_id=?', [tid, textbook_id]);
-    await pool.query('UPDATE textbooks SET total_chapters=? WHERE id=? AND tenant_id=?', [cnt[0].c, textbook_id, tid]);
+    const { rows: cnt } = await pool.query('SELECT COUNT(*) as c FROM textbook_chapters WHERE tenant_id=$1 AND textbook_id=$2', [tid, textbook_id]);
+    await pool.query('UPDATE textbooks SET total_chapters=$1 WHERE id=$2 AND tenant_id=$3', [cnt[0].c, textbook_id, tid]);
 
     audit({ action: 'save_chapter', textbookId: textbook_id, chapterNum: chapter_num, user: req.session.user });
     res.redirect('/school/smart-textbook/detail/' + textbook_id);
@@ -758,9 +759,9 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 17: Delete Textbook ───────────────────────────
   app.post('/school/smart-textbook/:id/delete', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM textbook_progress WHERE textbook_id=? AND tenant_id=?', [req.params.id, tid]);
-    await pool.query('DELETE FROM textbook_chapters WHERE textbook_id=? AND tenant_id=?', [req.params.id, tid]);
-    await pool.query('DELETE FROM textbooks WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    await pool.query('DELETE FROM textbook_progress WHERE textbook_id=$1 AND tenant_id=$2', [req.params.id, tid]);
+    await pool.query('DELETE FROM textbook_chapters WHERE textbook_id=$1 AND tenant_id=$2', [req.params.id, tid]);
+    await pool.query('DELETE FROM textbooks WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     audit({ action: 'delete_textbook', textbookId: req.params.id, user: req.session.user });
     res.redirect('/school/smart-textbook');
   }));

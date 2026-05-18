@@ -226,7 +226,7 @@ module.exports = function(app, pool, opts) {
     const role = userRole(req);
 
     // Stats
-    const [stats] = await pool.query(
+    const { rows: stats } = await pool.query(
       `SELECT
          COUNT(*) AS total_sessions,
          SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_sessions,
@@ -234,21 +234,21 @@ module.exports = function(app, pool, opts) {
          COUNT(DISTINCT wp.id) AS total_pages
        FROM whiteboard_sessions ws
        LEFT JOIN whiteboard_pages wp ON wp.session_id=ws.id
-       WHERE ws.tenant_id=? AND (ws.created_by=? OR ws.id IN (
-         SELECT session_id FROM whiteboard_collaborators WHERE user_id=?
+       WHERE ws.tenant_id=$1 AND (ws.created_by=$2 OR ws.id IN (
+         SELECT session_id FROM whiteboard_collaborators WHERE user_id=$3
        ))`,
       [tid, uid, uid]
     );
 
     // Recent sessions
-    const [recent] = await pool.query(
+    const { rows: recent } = await pool.query(
       `SELECT ws.*, u.display_name AS creator_name,
         (SELECT COUNT(*) FROM whiteboard_pages WHERE session_id=ws.id) AS page_count,
         (SELECT COUNT(*) FROM whiteboard_collaborators WHERE session_id=ws.id AND is_online=1) AS online_count
        FROM whiteboard_sessions ws
        LEFT JOIN users u ON u.id=ws.created_by
-       WHERE ws.tenant_id=? AND (ws.created_by=? OR ws.id IN (
-         SELECT session_id FROM whiteboard_collaborators WHERE user_id=?
+       WHERE ws.tenant_id=$1 AND (ws.created_by=$2 OR ws.id IN (
+         SELECT session_id FROM whiteboard_collaborators WHERE user_id=$3
        ))
        ORDER BY ws.updated_at DESC LIMIT 20`,
       [tid, uid, uid]
@@ -257,12 +257,12 @@ module.exports = function(app, pool, opts) {
     // Pending submissions (for teachers)
     let pendingSubs = [];
     if (role === 'teacher' || role === 'admin') {
-      const [rows] = await pool.query(
+      const { rows: rows } = await pool.query(
         `SELECT wbs.*, u.display_name AS student_name, ws.title AS session_title
          FROM whiteboard_submissions wbs
          JOIN users u ON u.id=wbs.student_id
          JOIN whiteboard_sessions ws ON ws.id=wbs.session_id
-         WHERE wbs.tenant_id=? AND wbs.status='submitted'
+         WHERE wbs.tenant_id=$1 AND wbs.status='submitted'
          ORDER BY wbs.submitted_at DESC LIMIT 10`,
         [tid]
       );
@@ -270,9 +270,9 @@ module.exports = function(app, pool, opts) {
     }
 
     // Recent templates
-    const [templates] = await pool.query(
+    const { rows: templates } = await pool.query(
       `SELECT * FROM whiteboard_templates
-       WHERE (tenant_id=0 AND is_builtin=1) OR tenant_id=?
+       WHERE (tenant_id=0 AND is_builtin=1) OR tenant_id=$1
        ORDER BY category, name LIMIT 12`,
       [tid]
     );
@@ -399,19 +399,19 @@ module.exports = function(app, pool, opts) {
 
     let templateConfig = null;
     if (templateId) {
-      const [rows] = await pool.query(
-        'SELECT config FROM whiteboard_templates WHERE id=? AND (tenant_id=0 OR tenant_id=?) LIMIT 1',
+      const { rows: rows } = await pool.query(
+        'SELECT config FROM whiteboard_templates WHERE id=$1 AND (tenant_id=0 OR tenant_id=$2) LIMIT 1',
         [templateId, tid]
       );
       if (rows.length) templateConfig = rows[0].config;
     }
 
     // Fetch available classes and subjects for dropdown
-    const [classes] = await pool.query(
-      'SELECT id, name FROM classes WHERE tenant_id=? ORDER BY name', [tid]
+    const { rows: classes } = await pool.query(
+      'SELECT id, name FROM classes WHERE tenant_id=$1 ORDER BY name', [tid]
     );
-    const [subjects] = await pool.query(
-      'SELECT id, name FROM subjects WHERE tenant_id=? ORDER BY name', [tid]
+    const { rows: subjects } = await pool.query(
+      'SELECT id, name FROM subjects WHERE tenant_id=$1 ORDER BY name', [tid]
     );
 
     const html = renderPage('New Whiteboard Session', `
@@ -486,25 +486,25 @@ module.exports = function(app, pool, opts) {
       bgConfig = BUILTIN_TEMPLATES[int(template_id) - 1].config;
     }
 
-    const [result] = await pool.query(
+    const result = await pool.query(
       `INSERT INTO whiteboard_sessions (tenant_id, title, description, class_id, subject_id, mode, status, background_config, created_by, presenter_id, auto_save_interval)
-       VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, 'draft', $7, $8, $9, $10) RETURNING id`,
       [tid, title.trim(), description || null, class_id || null, subject_id || null, mode || 'live', bgConfig, uid, uid, auto_save_interval || 30]
     );
 
-    const sessionId = result.insertId;
+    const sessionId = result.rows[0].id;
 
     // Create first page
     await pool.query(
       `INSERT INTO whiteboard_pages (tenant_id, session_id, page_number, title, background_config)
-       VALUES (?, ?, 1, 'Page 1', ?)`,
+       VALUES ($1, $2, 1, 'Page 1', $3)`,
       [tid, sessionId, bgConfig]
     );
 
     // Add creator as presenter collaborator
     await pool.query(
       `INSERT INTO whiteboard_collaborators (tenant_id, session_id, user_id, permission, color, is_online)
-       VALUES (?, ?, ?, 'presenter', '#FF4444', 1)`,
+       VALUES ($1, $2, $3, 'presenter', '#FF4444', 1)`,
       [tid, sessionId, uid]
     );
 
@@ -518,19 +518,19 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sid = int(req.params.id);
 
-    const [sessions] = await pool.query(
-      'SELECT * FROM whiteboard_sessions WHERE id=? AND tenant_id=?', [sid, tid]
+    const { rows: sessions } = await pool.query(
+      'SELECT * FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2', [sid, tid]
     );
     if (!sessions.length) return res.status(404).send('Session not found');
 
     const session = sessions[0];
-    const [classes] = await pool.query('SELECT id, name FROM classes WHERE tenant_id=? ORDER BY name', [tid]);
-    const [subjects] = await pool.query('SELECT id, name FROM subjects WHERE tenant_id=? ORDER BY name', [tid]);
-    const [collaborators] = await pool.query(
+    const { rows: classes } = await pool.query('SELECT id, name FROM classes WHERE tenant_id=$1 ORDER BY name', [tid]);
+    const { rows: subjects } = await pool.query('SELECT id, name FROM subjects WHERE tenant_id=$1 ORDER BY name', [tid]);
+    const { rows: collaborators } = await pool.query(
       `SELECT wc.*, u.display_name, u.email
        FROM whiteboard_collaborators wc
        JOIN users u ON u.id=wc.user_id
-       WHERE wc.session_id=? AND wc.tenant_id=?`,
+       WHERE wc.session_id=$1 AND wc.tenant_id=$2`,
       [sid, tid]
     );
 
@@ -666,8 +666,8 @@ module.exports = function(app, pool, opts) {
     const { title, description, class_id, subject_id, mode, status } = req.body;
 
     await pool.query(
-      `UPDATE whiteboard_sessions SET title=?, description=?, class_id=?, subject_id=?, mode=?, status=?, updated_at=NOW()
-       WHERE id=? AND tenant_id=?`,
+      `UPDATE whiteboard_sessions SET title=$1, description=$2, class_id=$3, subject_id=$4, mode=$5, status=$6, updated_at=NOW()
+       WHERE id=$7 AND tenant_id=$8`,
       [title?.trim(), description || null, class_id || null, subject_id || null, mode || 'live', status || 'draft', sid, tid]
     );
 
@@ -680,7 +680,7 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sid = int(req.params.id);
 
-    await pool.query('DELETE FROM whiteboard_sessions WHERE id=? AND tenant_id=?', [sid, tid]);
+    await pool.query('DELETE FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2', [sid, tid]);
     audit(req, 'whiteboard_session_delete', { session_id: sid });
     res.redirect(`${PREFIX}/dashboard?deleted=1`);
   }));
@@ -691,41 +691,41 @@ module.exports = function(app, pool, opts) {
     const uid = userId(req);
     const sid = int(req.params.id);
 
-    const [originals] = await pool.query(
-      'SELECT * FROM whiteboard_sessions WHERE id=? AND tenant_id=?', [sid, tid]
+    const { rows: originals } = await pool.query(
+      'SELECT * FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2', [sid, tid]
     );
     if (!originals.length) return res.status(404).json({ error: 'Session not found' });
 
     const orig = originals[0];
 
-    const [result] = await pool.query(
+    const result = await pool.query(
       `INSERT INTO whiteboard_sessions (tenant_id, title, description, class_id, subject_id, lesson_plan_id, mode, status, background_config, created_by, presenter_id, auto_save_interval)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9, $10, $11) RETURNING id`,
       [tid, orig.title + ' (Copy)', orig.description, orig.class_id, orig.subject_id, orig.lesson_plan_id, orig.mode, orig.background_config, uid, uid, orig.auto_save_interval]
     );
 
-    const newSid = result.insertId;
+    const newSid = result.rows[0].id;
 
     // Copy pages
-    const [pages] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE session_id=?', [sid]
+    const { rows: pages } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE session_id=$1', [sid]
     );
     for (const page of pages) {
-      const [pgResult] = await pool.query(
+      const pgResult = await pool.query(
         `INSERT INTO whiteboard_pages (tenant_id, session_id, page_number, title, background_config, canvas_data, thumbnail, width, height)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
         [tid, newSid, page.page_number, page.title, page.background_config, page.canvas_data, page.thumbnail, page.width, page.height]
       );
-      const newPageId = pgResult.insertId;
+      const newPageId = pgResult.rows[0].id;
 
       // Copy content
-      const [contents] = await pool.query(
-        'SELECT * FROM whiteboard_content WHERE page_id=?', [page.id]
+      const { rows: contents } = await pool.query(
+        'SELECT * FROM whiteboard_content WHERE page_id=$1', [page.id]
       );
       for (const content of contents) {
         await pool.query(
           `INSERT INTO whiteboard_content (tenant_id, page_id, content_type, content_data, z_index, locked, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [tid, newPageId, content.content_type, content.content_data, content.z_index, content.locked, uid]
         );
       }
@@ -745,8 +745,8 @@ module.exports = function(app, pool, opts) {
     const sid = int(req.params.id);
     const { email, permission } = req.body;
 
-    const [users] = await pool.query(
-      'SELECT id, display_name FROM users WHERE email=? AND tenant_id=? LIMIT 1',
+    const { rows: users } = await pool.query(
+      'SELECT id, display_name FROM users WHERE email=$1 AND tenant_id=$2 LIMIT 1',
       [email, tid]
     );
 
@@ -760,7 +760,7 @@ module.exports = function(app, pool, opts) {
     try {
       await pool.query(
         `INSERT INTO whiteboard_collaborators (tenant_id, session_id, user_id, permission, color)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5)`,
         [tid, sid, targetUser.id, permission || 'viewer', collabColors[targetUser.id % collabColors.length]]
       );
     } catch (e) {
@@ -777,12 +777,12 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const cid = int(req.params.id);
 
-    const [collabs] = await pool.query(
-      'SELECT session_id FROM whiteboard_collaborators WHERE id=? AND tenant_id=?',
+    const { rows: collabs } = await pool.query(
+      'SELECT session_id FROM whiteboard_collaborators WHERE id=$1 AND tenant_id=$2',
       [cid, tid]
     );
     if (collabs.length) {
-      await pool.query('DELETE FROM whiteboard_collaborators WHERE id=? AND tenant_id=?', [cid, tid]);
+      await pool.query('DELETE FROM whiteboard_collaborators WHERE id=$1 AND tenant_id=$2', [cid, tid]);
       audit(req, 'whiteboard_collaborator_remove', { collaborator_id: cid });
     }
     res.redirect('back');
@@ -795,7 +795,7 @@ module.exports = function(app, pool, opts) {
     const { permission } = req.body;
 
     await pool.query(
-      'UPDATE whiteboard_collaborators SET permission=? WHERE id=? AND tenant_id=?',
+      'UPDATE whiteboard_collaborators SET permission=$1 WHERE id=$2 AND tenant_id=$3',
       [permission, cid, tid]
     );
     json(res, { success: true });
@@ -813,32 +813,32 @@ module.exports = function(app, pool, opts) {
     const activePage = int(req.query.page, 1);
     const submissionId = int(req.query.submission);
 
-    const [sessions] = await pool.query(
-      'SELECT ws.*, u.display_name AS creator_name FROM whiteboard_sessions ws JOIN users u ON u.id=ws.created_by WHERE ws.id=? AND ws.tenant_id=?',
+    const { rows: sessions } = await pool.query(
+      'SELECT ws.*, u.display_name AS creator_name FROM whiteboard_sessions ws JOIN users u ON u.id=ws.created_by WHERE ws.id=$1 AND ws.tenant_id=$2',
       [sid, tid]
     );
     if (!sessions.length) return res.status(404).send('Session not found');
 
     const session = sessions[0];
-    const [pages] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE session_id=? ORDER BY page_number', [sid]
+    const { rows: pages } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE session_id=$1 ORDER BY page_number', [sid]
     );
     const activePageData = pages.find(p => p.page_number === activePage) || pages[0];
 
     if (!activePageData) return res.status(404).send('No pages found');
 
     // Load content for active page
-    const [contents] = await pool.query(
-      'SELECT * FROM whiteboard_content WHERE page_id=? ORDER BY z_index, created_at',
+    const { rows: contents } = await pool.query(
+      'SELECT * FROM whiteboard_content WHERE page_id=$1 ORDER BY z_index, created_at',
       [activePageData.id]
     );
 
     // Load collaborators
-    const [collaborators] = await pool.query(
+    const { rows: collaborators } = await pool.query(
       `SELECT wc.*, u.display_name, u.avatar_url
        FROM whiteboard_collaborators wc
        JOIN users u ON u.id=wc.user_id
-       WHERE wc.session_id=? AND wc.tenant_id=?`,
+       WHERE wc.session_id=$1 AND wc.tenant_id=$2`,
       [sid, tid]
     );
 
@@ -849,8 +849,8 @@ module.exports = function(app, pool, opts) {
       : (myCollab ? myCollab.permission : 'viewer');
 
     // Version history
-    const [versions] = await pool.query(
-      `SELECT * FROM whiteboard_version_history WHERE session_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 20`,
+    const { rows: versions } = await pool.query(
+      `SELECT * FROM whiteboard_version_history WHERE session_id=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 20`,
       [sid, tid]
     );
 
@@ -1035,19 +1035,19 @@ module.exports = function(app, pool, opts) {
     }
 
     // Verify ownership
-    const [pages] = await pool.query(
+    const { rows: pages } = await pool.query(
       `SELECT wp.*, ws.created_by AS session_owner
        FROM whiteboard_pages wp
        JOIN whiteboard_sessions ws ON ws.id=wp.session_id
-       WHERE wp.id=? AND wp.tenant_id=? AND wp.session_id=?`,
+       WHERE wp.id=$1 AND wp.tenant_id=$2 AND wp.session_id=$3`,
       [page_id, tid, session_id]
     );
 
     if (!pages.length) return json(res, { error: 'Page not found' }, 404);
 
     // Check permission
-    const [collabs] = await pool.query(
-      'SELECT permission FROM whiteboard_collaborators WHERE session_id=? AND user_id=? AND tenant_id=?',
+    const { rows: collabs } = await pool.query(
+      'SELECT permission FROM whiteboard_collaborators WHERE session_id=$1 AND user_id=$2 AND tenant_id=$3',
       [session_id, uid, tid]
     );
     const perm = (pages[0].session_owner === uid || userRole(req) === 'admin')
@@ -1056,12 +1056,12 @@ module.exports = function(app, pool, opts) {
     if (perm === 'viewer') return json(res, { error: 'No write permission' }, 403);
 
     await pool.query(
-      'UPDATE whiteboard_pages SET canvas_data=?, thumbnail=?, updated_at=NOW() WHERE id=? AND tenant_id=?',
+      'UPDATE whiteboard_pages SET canvas_data=$1, thumbnail=$2, updated_at=NOW() WHERE id=$3 AND tenant_id=$4',
       [canvas_data || null, thumbnail || null, page_id, tid]
     );
 
     await pool.query(
-      'UPDATE whiteboard_sessions SET last_saved_at=NOW(), status="active", updated_at=NOW() WHERE id=? AND tenant_id=?',
+      `UPDATE whiteboard_sessions SET last_saved_at=NOW(), status='active', updated_at=NOW() WHERE id=$1 AND tenant_id=$2`,
       [session_id, tid]
     );
 
@@ -1078,13 +1078,13 @@ module.exports = function(app, pool, opts) {
       return json(res, { error: 'page_id and content_type required' }, 400);
     }
 
-    const [result] = await pool.query(
+    const result = await pool.query(
       `INSERT INTO whiteboard_content (tenant_id, page_id, content_type, content_data, z_index, locked, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [tid, page_id, content_type, JSON.stringify(content_data || {}), z_index || 0, locked ? 1 : 0, uid]
     );
 
-    json(res, { success: true, content_id: result.insertId }, 201);
+    json(res, { success: true, content_id: result.rows[0].id }, 201);
   }));
 
   // 4d. API: Update content block
@@ -1096,9 +1096,9 @@ module.exports = function(app, pool, opts) {
     const updates = [];
     const params = [];
 
-    if (content_data !== undefined) { updates.push('content_data=?'); params.push(JSON.stringify(content_data)); }
-    if (z_index !== undefined) { updates.push('z_index=?'); params.push(z_index); }
-    if (locked !== undefined) { updates.push('locked=?'); params.push(locked ? 1 : 0); }
+    if (content_data !== undefined) { updates.push(`content_data=$${updates.length + 1}`); params.push(JSON.stringify(content_data)); }
+    if (z_index !== undefined) { updates.push(`z_index=$${updates.length + 1}`); params.push(z_index); }
+    if (locked !== undefined) { updates.push(`locked=$${updates.length + 1}`); params.push(locked ? 1 : 0); }
 
     if (!updates.length) return json(res, { error: 'Nothing to update' }, 400);
 
@@ -1106,7 +1106,7 @@ module.exports = function(app, pool, opts) {
     params.push(cid, tid);
 
     await pool.query(
-      `UPDATE whiteboard_content SET ${updates.join(',')} WHERE id=? AND tenant_id=?`,
+      `UPDATE whiteboard_content SET ${updates.join(',')} WHERE id=$${params.length - 1} AND tenant_id=$${params.length}`,
       params
     );
 
@@ -1118,7 +1118,7 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const cid = int(req.params.id);
 
-    await pool.query('DELETE FROM whiteboard_content WHERE id=? AND tenant_id=?', [cid, tid]);
+    await pool.query('DELETE FROM whiteboard_content WHERE id=$1 AND tenant_id=$2', [cid, tid]);
     json(res, { success: true });
   }));
 
@@ -1130,12 +1130,12 @@ module.exports = function(app, pool, opts) {
     if (!page_id) return json(res, { error: 'page_id required' }, 400);
 
     await pool.query(
-      'DELETE FROM whiteboard_content WHERE page_id=? AND tenant_id=?',
+      'DELETE FROM whiteboard_content WHERE page_id=$1 AND tenant_id=$2',
       [page_id, tid]
     );
 
     await pool.query(
-      'UPDATE whiteboard_pages SET canvas_data=NULL, thumbnail=NULL, updated_at=NOW() WHERE id=? AND tenant_id=?',
+      'UPDATE whiteboard_pages SET canvas_data=NULL, thumbnail=NULL, updated_at=NOW() WHERE id=$1 AND tenant_id=$2',
       [page_id, tid]
     );
 
@@ -1155,19 +1155,19 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     // Get next page number
-    const [maxNum] = await pool.query(
-      'SELECT COALESCE(MAX(page_number),0) AS max_num FROM whiteboard_pages WHERE session_id=? AND tenant_id=?',
+    const { rows: maxNum } = await pool.query(
+      'SELECT COALESCE(MAX(page_number),0) AS max_num FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2',
       [session_id, tid]
     );
     const nextNum = (maxNum[0]?.max_num || 0) + 1;
 
-    const [result] = await pool.query(
+    const result = await pool.query(
       `INSERT INTO whiteboard_pages (tenant_id, session_id, page_number, title, background_config, width, height)
-       VALUES (?, ?, ?, ?, ?, 1920, 1080)`,
+       VALUES ($1, $2, $3, $4, $5, 1920, 1080) RETURNING id`,
       [tid, session_id, nextNum, title || ('Page ' + nextNum), background_config || null]
     );
 
-    json(res, { success: true, page_id: result.insertId, page_number: nextNum }, 201);
+    json(res, { success: true, page_id: result.rows[0].id, page_number: nextNum }, 201);
   }));
 
   // 5b. Rename page
@@ -1177,7 +1177,7 @@ module.exports = function(app, pool, opts) {
     const { title } = req.body;
 
     await pool.query(
-      'UPDATE whiteboard_pages SET title=?, updated_at=NOW() WHERE id=? AND tenant_id=?',
+      'UPDATE whiteboard_pages SET title=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3',
       [title || '', pid, tid]
     );
 
@@ -1190,15 +1190,15 @@ module.exports = function(app, pool, opts) {
     const pid = int(req.params.id);
 
     // Check minimum page count
-    const [pageInfo] = await pool.query(
-      'SELECT session_id FROM whiteboard_pages WHERE id=? AND tenant_id=?',
+    const { rows: pageInfo } = await pool.query(
+      'SELECT session_id FROM whiteboard_pages WHERE id=$1 AND tenant_id=$2',
       [pid, tid]
     );
 
     if (pageInfo.length) {
       const sessionId = pageInfo[0].session_id;
-      const [count] = await pool.query(
-        'SELECT COUNT(*) AS cnt FROM whiteboard_pages WHERE session_id=? AND tenant_id=?',
+      const { rows: count } = await pool.query(
+        'SELECT COUNT(*) AS cnt FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2',
         [sessionId, tid]
       );
 
@@ -1207,16 +1207,16 @@ module.exports = function(app, pool, opts) {
       }
 
       // Delete will cascade to content
-      await pool.query('DELETE FROM whiteboard_pages WHERE id=? AND tenant_id=?', [pid, tid]);
+      await pool.query('DELETE FROM whiteboard_pages WHERE id=$1 AND tenant_id=$2', [pid, tid]);
 
       // Re-number remaining pages
-      const [remaining] = await pool.query(
-        'SELECT id, page_number FROM whiteboard_pages WHERE session_id=? AND tenant_id=? ORDER BY page_number',
+      const { rows: remaining } = await pool.query(
+        'SELECT id, page_number FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2 ORDER BY page_number',
         [sessionId, tid]
       );
       for (let i = 0; i < remaining.length; i++) {
         await pool.query(
-          'UPDATE whiteboard_pages SET page_number=? WHERE id=? AND tenant_id=?',
+          'UPDATE whiteboard_pages SET page_number=$1 WHERE id=$2 AND tenant_id=$3',
           [i + 1, remaining[i].id, tid]
         );
       }
@@ -1231,8 +1231,8 @@ module.exports = function(app, pool, opts) {
     const uid = userId(req);
     const pid = int(req.params.id);
 
-    const [pages] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE id=? AND tenant_id=?',
+    const { rows: pages } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE id=$1 AND tenant_id=$2',
       [pid, tid]
     );
     if (!pages.length) return json(res, { error: 'Page not found' }, 404);
@@ -1240,31 +1240,31 @@ module.exports = function(app, pool, opts) {
     const orig = pages[0];
 
     // Get next page number
-    const [maxNum] = await pool.query(
-      'SELECT COALESCE(MAX(page_number),0) AS max_num FROM whiteboard_pages WHERE session_id=? AND tenant_id=?',
+    const { rows: maxNum } = await pool.query(
+      'SELECT COALESCE(MAX(page_number),0) AS max_num FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2',
       [orig.session_id, tid]
     );
     const nextNum = (maxNum[0]?.max_num || 0) + 1;
 
-    const [result] = await pool.query(
+    const result = await pool.query(
       `INSERT INTO whiteboard_pages (tenant_id, session_id, page_number, title, background_config, canvas_data, thumbnail, width, height)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
       [tid, orig.session_id, nextNum, orig.title + ' (Copy)', orig.background_config, orig.canvas_data, orig.thumbnail, orig.width, orig.height]
     );
 
     // Copy content blocks
-    const [contents] = await pool.query(
-      'SELECT * FROM whiteboard_content WHERE page_id=?', [pid]
+    const { rows: contents } = await pool.query(
+      'SELECT * FROM whiteboard_content WHERE page_id=$1', [pid]
     );
     for (const c of contents) {
       await pool.query(
         `INSERT INTO whiteboard_content (tenant_id, page_id, content_type, content_data, z_index, locked, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [tid, result.insertId, c.content_type, c.content_data, c.z_index, c.locked, uid]
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [tid, result.rows[0].id, c.content_type, c.content_data, c.z_index, c.locked, uid]
       );
     }
 
-    json(res, { success: true, page_id: result.insertId, page_number: nextNum });
+    json(res, { success: true, page_id: result.rows[0].id, page_number: nextNum });
   }));
 
   // 5e. Reorder pages
@@ -1278,7 +1278,7 @@ module.exports = function(app, pool, opts) {
 
     for (let i = 0; i < page_order.length; i++) {
       await pool.query(
-        'UPDATE whiteboard_pages SET page_number=? WHERE id=? AND tenant_id=? AND session_id=?',
+        'UPDATE whiteboard_pages SET page_number=$1 WHERE id=$2 AND tenant_id=$3 AND session_id=$4',
         [i + 1, page_order[i], tid, session_id]
       );
     }
@@ -1295,23 +1295,23 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const category = req.query.category || '';
 
-    let where = '((tenant_id=0 AND is_builtin=1) OR tenant_id=?)';
+    let where = '((tenant_id=0 AND is_builtin=1) OR tenant_id=$1)';
     const params = [tid];
 
     if (category) {
-      where += ' AND category=?';
+      where += ' AND category=$2';
       params.push(category);
     }
 
-    const [templates] = await pool.query(
+    const { rows: templates } = await pool.query(
       `SELECT * FROM whiteboard_templates WHERE ${where} ORDER BY is_builtin DESC, category, name`,
       params
     );
 
     // Get distinct categories
-    const [categories] = await pool.query(
+    const { rows: categories } = await pool.query(
       `SELECT DISTINCT category FROM whiteboard_templates
-       WHERE (tenant_id=0 AND is_builtin=1) OR tenant_id=?
+       WHERE (tenant_id=0 AND is_builtin=1) OR tenant_id=$1
        ORDER BY category`,
       [tid]
     );
@@ -1403,8 +1403,8 @@ module.exports = function(app, pool, opts) {
 
     if (session_id) {
       // Copy background config from the session
-      const [sessions] = await pool.query(
-        'SELECT background_config FROM whiteboard_sessions WHERE id=? AND tenant_id=?',
+      const { rows: sessions } = await pool.query(
+        'SELECT background_config FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2',
         [session_id, tid]
       );
       if (sessions.length && sessions[0].background_config) {
@@ -1414,7 +1414,7 @@ module.exports = function(app, pool, opts) {
 
     await pool.query(
       `INSERT INTO whiteboard_templates (tenant_id, name, description, category, config, is_builtin, is_public, created_by)
-       VALUES (?, ?, ?, ?, ?, 0, 1, ?)`,
+       VALUES ($1, $2, $3, $4, $5, 0, 1, $6)`,
       [tid, name.trim(), description || null, category || 'custom', config, uid]
     );
 
@@ -1429,7 +1429,7 @@ module.exports = function(app, pool, opts) {
 
     // Only allow deleting non-builtin tenant-specific templates
     await pool.query(
-      'DELETE FROM whiteboard_templates WHERE id=? AND tenant_id=? AND is_builtin=0',
+      'DELETE FROM whiteboard_templates WHERE id=$1 AND tenant_id=$2 AND is_builtin=0',
       [tplId, tid]
     );
 
@@ -1441,8 +1441,8 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const tplId = int(req.params.id);
 
-    const [templates] = await pool.query(
-      'SELECT * FROM whiteboard_templates WHERE id=? AND (tenant_id=0 OR tenant_id=?)',
+    const { rows: templates } = await pool.query(
+      'SELECT * FROM whiteboard_templates WHERE id=$1 AND (tenant_id=0 OR tenant_id=$2)',
       [tplId, tid]
     );
 
@@ -1467,26 +1467,26 @@ module.exports = function(app, pool, opts) {
     const sortOrder = req.query.order || 'DESC';
 
     // Build WHERE clause
-    let where = 'ws.tenant_id=?';
+    let where = 'ws.tenant_id=$1';
     const params = [tid];
 
     // Only show sessions user owns or is collaborator on
-    where += ' AND (ws.created_by=? OR ws.id IN (SELECT session_id FROM whiteboard_collaborators WHERE user_id=?))';
+    where += ' AND (ws.created_by=$2 OR ws.id IN (SELECT session_id FROM whiteboard_collaborators WHERE user_id=$3))';
     params.push(uid, uid);
 
     if (search) {
-      where += ' AND (ws.title LIKE ? OR ws.description LIKE ?)';
+      where += ` AND (ws.title LIKE $${params.length + 1} OR ws.description LIKE $${params.length + 2})`;
       const searchPattern = '%' + search + '%';
       params.push(searchPattern, searchPattern);
     }
 
     if (status) {
-      where += ' AND ws.status=?';
+      where += ` AND ws.status=$${params.length + 1}`;
       params.push(status);
     }
 
     if (mode) {
-      where += ' AND ws.mode=?';
+      where += ` AND ws.mode=$${params.length + 1}`;
       params.push(mode);
     }
 
@@ -1495,7 +1495,7 @@ module.exports = function(app, pool, opts) {
     const sortDir = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     // Get total count
-    const [countResult] = await pool.query(
+    const { rows: countResult } = await pool.query(
       `SELECT COUNT(*) AS total FROM whiteboard_sessions ws WHERE ${where}`,
       params
     );
@@ -1503,14 +1503,14 @@ module.exports = function(app, pool, opts) {
     const pag = paginate(page, perPage, total);
 
     // Get sessions
-    const [sessions] = await pool.query(
+    const { rows: sessions } = await pool.query(
       `SELECT ws.*, u.display_name AS creator_name,
         (SELECT COUNT(*) FROM whiteboard_pages WHERE session_id=ws.id) AS page_count
        FROM whiteboard_sessions ws
        LEFT JOIN users u ON u.id=ws.created_by
        WHERE ${where}
        ORDER BY ws.${sortCol} ${sortDir}
-       LIMIT ? OFFSET ?`,
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, pag.perPage, pag.offset]
     );
 
@@ -1629,8 +1629,8 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sid = int(req.params.id);
 
-    const [sessions] = await pool.query(
-      'SELECT id, title FROM whiteboard_sessions WHERE id=? AND tenant_id=?',
+    const { rows: sessions } = await pool.query(
+      'SELECT id, title FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2',
       [sid, tid]
     );
 
@@ -1653,12 +1653,12 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sid = int(req.params.id);
 
-    const [pages] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE session_id=? AND tenant_id=? ORDER BY page_number',
+    const { rows: pages } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2 ORDER BY page_number',
       [sid, tid]
     );
-    const [session] = await pool.query(
-      'SELECT title FROM whiteboard_sessions WHERE id=? AND tenant_id=?',
+    const { rows: session } = await pool.query(
+      'SELECT title FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2',
       [sid, tid]
     );
 
@@ -1689,12 +1689,12 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sid = int(req.params.id);
 
-    const [pages] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE session_id=? AND tenant_id=? ORDER BY page_number',
+    const { rows: pages } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2 ORDER BY page_number',
       [sid, tid]
     );
-    const [session] = await pool.query(
-      'SELECT title FROM whiteboard_sessions WHERE id=? AND tenant_id=?',
+    const { rows: session } = await pool.query(
+      'SELECT title FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2',
       [sid, tid]
     );
 
@@ -1742,16 +1742,16 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sid = int(req.params.id);
 
-    const [sessions] = await pool.query(
-      'SELECT * FROM whiteboard_sessions WHERE id=? AND tenant_id=?',
+    const { rows: sessions } = await pool.query(
+      'SELECT * FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2',
       [sid, tid]
     );
     if (!sessions.length) return res.status(404).send('Session not found');
 
     const session = sessions[0];
 
-    const [pages] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE session_id=? AND tenant_id=? ORDER BY page_number',
+    const { rows: pages } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2 ORDER BY page_number',
       [sid, tid]
     );
 
@@ -1765,8 +1765,8 @@ module.exports = function(app, pool, opts) {
         background_config: session.background_config
       },
       pages: await Promise.all(pages.map(async (p) => {
-        const [contents] = await pool.query(
-          'SELECT * FROM whiteboard_content WHERE page_id=? ORDER BY z_index, created_at',
+        const { rows: contents } = await pool.query(
+          'SELECT * FROM whiteboard_content WHERE page_id=$1 ORDER BY z_index, created_at',
           [p.id]
         );
         return {
@@ -1810,22 +1810,22 @@ module.exports = function(app, pool, opts) {
     const sessionTitle = title || data.session?.title || 'Imported Whiteboard';
 
     // Create session
-    const [result] = await pool.query(
+    const result = await pool.query(
       `INSERT INTO whiteboard_sessions (tenant_id, title, description, mode, status, background_config, created_by, presenter_id)
-       VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7) RETURNING id`,
       [tid, sessionTitle, data.session?.description || null, data.session?.mode || 'static',
        data.session?.background_config || null, uid, uid]
     );
 
-    const sessionId = result.insertId;
+    const sessionId = result.rows[0].id;
 
     // Import pages
     if (Array.isArray(data.pages)) {
       for (let i = 0; i < data.pages.length; i++) {
         const p = data.pages[i];
-        const [pgResult] = await pool.query(
+        const pgResult = await pool.query(
           `INSERT INTO whiteboard_pages (tenant_id, session_id, page_number, title, background_config, canvas_data, width, height)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
           [tid, sessionId, p.page_number || (i + 1), p.title || ('Page ' + (i + 1)),
            p.background_config || null, typeof p.canvas_data === 'string' ? p.canvas_data : JSON.stringify(p.canvas_data),
            p.width || 1920, p.height || 1080]
@@ -1836,8 +1836,8 @@ module.exports = function(app, pool, opts) {
           for (const c of p.content_blocks) {
             await pool.query(
               `INSERT INTO whiteboard_content (tenant_id, page_id, content_type, content_data, z_index, locked, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              [tid, pgResult.insertId, c.type || 'freehand',
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [tid, pgResult.rows[0].id, c.type || 'freehand',
                typeof c.data === 'string' ? c.data : JSON.stringify(c.data || {}),
                c.z_index || 0, c.locked ? 1 : 0, uid]
             );
@@ -1866,7 +1866,7 @@ module.exports = function(app, pool, opts) {
 
     await pool.query(
       `INSERT INTO whiteboard_version_history (tenant_id, session_id, page_id, version_label, snapshot_data, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [tid, session_id, page_id || null, version_label || 'Manual save',
        typeof snapshot_data === 'string' ? snapshot_data : JSON.stringify(snapshot_data), uid]
     );
@@ -1879,11 +1879,11 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sessionId = int(req.params.sessionId);
 
-    const [versions] = await pool.query(
+    const { rows: versions } = await pool.query(
       `SELECT vh.*, u.display_name AS creator_name
        FROM whiteboard_version_history vh
        LEFT JOIN users u ON u.id=vh.created_by
-       WHERE vh.session_id=? AND vh.tenant_id=?
+       WHERE vh.session_id=$1 AND vh.tenant_id=$2
        ORDER BY vh.created_at DESC LIMIT 50`,
       [sessionId, tid]
     );
@@ -1896,8 +1896,8 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const vid = int(req.params.id);
 
-    const [versions] = await pool.query(
-      'SELECT * FROM whiteboard_version_history WHERE id=? AND tenant_id=?',
+    const { rows: versions } = await pool.query(
+      'SELECT * FROM whiteboard_version_history WHERE id=$1 AND tenant_id=$2',
       [vid, tid]
     );
 
@@ -1916,7 +1916,7 @@ module.exports = function(app, pool, opts) {
 
       if (snapshot && snapshot.canvas_data) {
         await pool.query(
-          'UPDATE whiteboard_pages SET canvas_data=?, updated_at=NOW() WHERE id=? AND tenant_id=?',
+          'UPDATE whiteboard_pages SET canvas_data=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3',
           [snapshot.canvas_data, version.page_id, tid]
         );
       }
@@ -1925,7 +1925,7 @@ module.exports = function(app, pool, opts) {
       if (snapshot && Array.isArray(snapshot.content_blocks)) {
         // Clear existing content
         await pool.query(
-          'DELETE FROM whiteboard_content WHERE page_id=? AND tenant_id=?',
+          'DELETE FROM whiteboard_content WHERE page_id=$1 AND tenant_id=$2',
           [version.page_id, tid]
         );
 
@@ -1933,7 +1933,7 @@ module.exports = function(app, pool, opts) {
         for (const c of snapshot.content_blocks) {
           await pool.query(
             `INSERT INTO whiteboard_content (tenant_id, page_id, content_type, content_data, z_index, locked, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
             [tid, version.page_id, c.type || 'freehand',
              typeof c.data === 'string' ? c.data : JSON.stringify(c.data || {}),
              c.z_index || 0, c.locked ? 1 : 0, userId(req)]
@@ -1952,7 +1952,7 @@ module.exports = function(app, pool, opts) {
     const vid = int(req.params.id);
 
     await pool.query(
-      'DELETE FROM whiteboard_version_history WHERE id=? AND tenant_id=?',
+      'DELETE FROM whiteboard_version_history WHERE id=$1 AND tenant_id=$2',
       [vid, tid]
     );
 
@@ -1971,7 +1971,7 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     await pool.query(
-      'UPDATE whiteboard_sessions SET lesson_plan_id=?, updated_at=NOW() WHERE id=? AND tenant_id=?',
+      'UPDATE whiteboard_sessions SET lesson_plan_id=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3',
       [lesson_plan_id || null, session_id, tid]
     );
 
@@ -1984,12 +1984,12 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const lessonId = int(req.params.lessonId);
 
-    const [sessions] = await pool.query(
+    const { rows: sessions } = await pool.query(
       `SELECT ws.*, u.display_name AS creator_name,
         (SELECT COUNT(*) FROM whiteboard_pages WHERE session_id=ws.id) AS page_count
        FROM whiteboard_sessions ws
        JOIN users u ON u.id=ws.created_by
-       WHERE ws.lesson_plan_id=? AND ws.tenant_id=?
+       WHERE ws.lesson_plan_id=$1 AND ws.tenant_id=$2
        ORDER BY ws.created_at DESC`,
       [lessonId, tid]
     );
@@ -2008,8 +2008,8 @@ module.exports = function(app, pool, opts) {
     }
 
     // Store homework attachment as a content block on the first page
-    const [pages] = await pool.query(
-      'SELECT id FROM whiteboard_pages WHERE session_id=? AND tenant_id=? ORDER BY page_number LIMIT 1',
+    const { rows: pages } = await pool.query(
+      'SELECT id FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2 ORDER BY page_number LIMIT 1',
       [session_id, tid]
     );
 
@@ -2017,7 +2017,7 @@ module.exports = function(app, pool, opts) {
 
     await pool.query(
       `INSERT INTO whiteboard_content (tenant_id, page_id, content_type, content_data, z_index, locked, created_by)
-       VALUES (?, ?, 'sticky_note', ?, 999, 1, ?)`,
+       VALUES ($1, $2, 'sticky_note', $3, 999, 1, $4)`,
       [tid, pages[0].id, JSON.stringify({
         x: 1500, y: 50, width: 300, height: 200,
         title: homework_title || 'Homework Assignment',
@@ -2046,27 +2046,27 @@ module.exports = function(app, pool, opts) {
     const page = int(req.query.page, 1);
     const perPage = int(req.query.perPage, 20);
 
-    let where = 'wbs.tenant_id=?';
+    let where = 'wbs.tenant_id=$1';
     const params = [tid];
 
     if (role === 'student') {
-      where += ' AND wbs.student_id=?';
+      where += ` AND wbs.student_id=$${params.length + 1}`;
       params.push(uid);
     }
 
     if (status) {
-      where += ' AND wbs.status=?';
+      where += ` AND wbs.status=$${params.length + 1}`;
       params.push(status);
     }
 
-    const [countResult] = await pool.query(
+    const { rows: countResult } = await pool.query(
       `SELECT COUNT(*) AS total FROM whiteboard_submissions wbs WHERE ${where}`,
       params
     );
     const total = countResult[0]?.total || 0;
     const pag = paginate(page, perPage, total);
 
-    const [submissions] = await pool.query(
+    const { rows: submissions } = await pool.query(
       `SELECT wbs.*, u.display_name AS student_name, ws.title AS session_title,
         grader.display_name AS grader_name
        FROM whiteboard_submissions wbs
@@ -2075,7 +2075,7 @@ module.exports = function(app, pool, opts) {
        LEFT JOIN users grader ON grader.id=wbs.graded_by
        WHERE ${where}
        ORDER BY wbs.updated_at DESC
-       LIMIT ? OFFSET ?`,
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, pag.perPage, pag.offset]
     );
 
@@ -2154,15 +2154,15 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     // Verify session exists
-    const [sessions] = await pool.query(
-      'SELECT id FROM whiteboard_sessions WHERE id=? AND tenant_id=?',
+    const { rows: sessions } = await pool.query(
+      'SELECT id FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2',
       [session_id, tid]
     );
     if (!sessions.length) return json(res, { error: 'Session not found' }, 404);
 
     // Check if submission already exists
-    const [existing] = await pool.query(
-      'SELECT id FROM whiteboard_submissions WHERE session_id=? AND student_id=? AND tenant_id=?',
+    const { rows: existing } = await pool.query(
+      'SELECT id FROM whiteboard_submissions WHERE session_id=$1 AND student_id=$2 AND tenant_id=$3',
       [session_id, uid, tid]
     );
 
@@ -2170,18 +2170,18 @@ module.exports = function(app, pool, opts) {
       // Update existing
       await pool.query(
         `UPDATE whiteboard_submissions SET status='submitted', submitted_at=NOW(), updated_at=NOW()
-         WHERE id=? AND tenant_id=?`,
+         WHERE id=$1 AND tenant_id=$2`,
         [existing[0].id, tid]
       );
       json(res, { success: true, submission_id: existing[0].id, status: 'submitted' });
     } else {
-      const [result] = await pool.query(
+      const result = await pool.query(
         `INSERT INTO whiteboard_submissions (tenant_id, assignment_id, session_id, student_id, status, submitted_at)
-         VALUES (?, ?, ?, ?, 'submitted', NOW())`,
+         VALUES ($1, $2, $3, $4, 'submitted', NOW()) RETURNING id`,
         [tid, assignment_id || null, session_id, uid]
       );
       audit(req, 'whiteboard_submission_create', { session_id, assignment_id });
-      json(res, { success: true, submission_id: result.insertId, status: 'submitted' }, 201);
+      json(res, { success: true, submission_id: result.rows[0].id, status: 'submitted' }, 201);
     }
   }));
 
@@ -2190,13 +2190,13 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const subId = int(req.params.id);
 
-    const [subs] = await pool.query(
+    const { rows: subs } = await pool.query(
       `SELECT wbs.*, u.display_name AS student_name, ws.title AS session_title,
         (SELECT COUNT(*) FROM whiteboard_pages WHERE session_id=wbs.session_id) AS page_count
        FROM whiteboard_submissions wbs
        JOIN users u ON u.id=wbs.student_id
        JOIN whiteboard_sessions ws ON ws.id=wbs.session_id
-       WHERE wbs.id=? AND wbs.tenant_id=?`,
+       WHERE wbs.id=$1 AND wbs.tenant_id=$2`,
       [subId, tid]
     );
 
@@ -2304,8 +2304,8 @@ module.exports = function(app, pool, opts) {
 
     await pool.query(
       `UPDATE whiteboard_submissions
-       SET grade=?, score=?, feedback=?, status=?, graded_by=?, graded_at=NOW(), updated_at=NOW()
-       WHERE id=? AND tenant_id=?`,
+       SET grade=$1, score=$2, feedback=$3, status=$4, graded_by=$5, graded_at=NOW(), updated_at=NOW()
+       WHERE id=$6 AND tenant_id=$7`,
       [grade, score || null, feedback || null, status || 'graded', uid, subId, tid]
     );
 
@@ -2321,7 +2321,7 @@ module.exports = function(app, pool, opts) {
 
     await pool.query(
       `UPDATE whiteboard_submissions SET status='submitted', submitted_at=NOW(), updated_at=NOW()
-       WHERE id=? AND tenant_id=? AND student_id=?`,
+       WHERE id=$1 AND tenant_id=$2 AND student_id=$3`,
       [subId, tid, uid]
     );
 
@@ -2334,12 +2334,12 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const subId = int(req.params.id);
 
-    const [subs] = await pool.query(
+    const { rows: subs } = await pool.query(
       `SELECT wbs.*, u.display_name AS student_name, ws.title AS session_title
        FROM whiteboard_submissions wbs
        JOIN users u ON u.id=wbs.student_id
        JOIN whiteboard_sessions ws ON ws.id=wbs.session_id
-       WHERE wbs.id=? AND wbs.tenant_id=?`,
+       WHERE wbs.id=$1 AND wbs.tenant_id=$2`,
       [subId, tid]
     );
 
@@ -2361,8 +2361,8 @@ module.exports = function(app, pool, opts) {
       if (!sub.id || !sub.grade) continue;
       await pool.query(
         `UPDATE whiteboard_submissions
-         SET grade=?, score=?, feedback=?, status='graded', graded_by=?, graded_at=NOW(), updated_at=NOW()
-         WHERE id=? AND tenant_id=?`,
+         SET grade=$1, score=$2, feedback=$3, status='graded', graded_by=$4, graded_at=NOW(), updated_at=NOW()
+         WHERE id=$5 AND tenant_id=$6`,
         [sub.grade, sub.score || null, sub.feedback || null, uid, sub.id, tid]
       );
     }
@@ -2384,12 +2384,12 @@ module.exports = function(app, pool, opts) {
 
     if (enabled) {
       await pool.query(
-        'UPDATE whiteboard_sessions SET mode="live", updated_at=NOW() WHERE id=? AND tenant_id=?',
+        `UPDATE whiteboard_sessions SET mode='live', updated_at=NOW() WHERE id=$1 AND tenant_id=$2`,
         [session_id, tid]
       );
     } else {
       await pool.query(
-        'UPDATE whiteboard_sessions SET mode="static", updated_at=NOW() WHERE id=? AND tenant_id=?',
+        `UPDATE whiteboard_sessions SET mode='static', updated_at=NOW() WHERE id=$1 AND tenant_id=$2`,
         [session_id, tid]
       );
     }
@@ -2398,7 +2398,7 @@ module.exports = function(app, pool, opts) {
     if (!enabled) {
       await pool.query(
         `UPDATE whiteboard_collaborators SET permission='viewer'
-         WHERE session_id=? AND tenant_id=? AND permission != 'presenter'`,
+         WHERE session_id=$1 AND tenant_id=$2 AND permission != 'presenter'`,
         [session_id, tid]
       );
     }
@@ -2416,8 +2416,8 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     await pool.query(
-      `UPDATE whiteboard_collaborators SET cursor_x=?, cursor_y=?, last_active=NOW(), is_online=1
-       WHERE session_id=? AND user_id=? AND tenant_id=?`,
+      `UPDATE whiteboard_collaborators SET cursor_x=$1, cursor_y=$2, last_active=NOW(), is_online=1
+       WHERE session_id=$3 AND user_id=$4 AND tenant_id=$5`,
       [cursor_x || 0, cursor_y || 0, session_id, uid, tid]
     );
 
@@ -2433,8 +2433,8 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     await pool.query(
-      `UPDATE whiteboard_collaborators SET is_online=?, last_active=NOW()
-       WHERE session_id=? AND user_id=? AND tenant_id=?`,
+      `UPDATE whiteboard_collaborators SET is_online=$1, last_active=NOW()
+       WHERE session_id=$2 AND user_id=$3 AND tenant_id=$4`,
       [online ? 1 : 0, session_id, uid, tid]
     );
 
@@ -2446,11 +2446,11 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sessionId = int(req.params.sessionId);
 
-    const [collabs] = await pool.query(
+    const { rows: collabs } = await pool.query(
       `SELECT wc.*, u.display_name, u.avatar_url
        FROM whiteboard_collaborators wc
        JOIN users u ON u.id=wc.user_id
-       WHERE wc.session_id=? AND wc.tenant_id=? AND wc.is_online=1
+       WHERE wc.session_id=$1 AND wc.tenant_id=$2 AND wc.is_online=1
        ORDER BY wc.permission DESC`,
       [sessionId, tid]
     );
@@ -2467,7 +2467,7 @@ module.exports = function(app, pool, opts) {
 
     for (const cid of content_ids) {
       await pool.query(
-        'UPDATE whiteboard_content SET locked=? WHERE id=? AND tenant_id=?',
+        'UPDATE whiteboard_content SET locked=$1 WHERE id=$2 AND tenant_id=$3',
         [locked ? 1 : 0, cid, tid]
       );
     }
@@ -2483,8 +2483,8 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     // Store student permissions in session background_config
-    const [sessions] = await pool.query(
-      'SELECT background_config FROM whiteboard_sessions WHERE id=? AND tenant_id=?',
+    const { rows: sessions } = await pool.query(
+      'SELECT background_config FROM whiteboard_sessions WHERE id=$1 AND tenant_id=$2',
       [session_id, tid]
     );
 
@@ -2500,7 +2500,7 @@ module.exports = function(app, pool, opts) {
       };
 
       await pool.query(
-        'UPDATE whiteboard_sessions SET background_config=?, updated_at=NOW() WHERE id=? AND tenant_id=?',
+        'UPDATE whiteboard_sessions SET background_config=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3',
         [JSON.stringify(config), session_id, tid]
       );
     }
@@ -2521,8 +2521,8 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     // Save current state as recording start point
-    const [pages] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE session_id=? AND tenant_id=? ORDER BY page_number',
+    const { rows: pages } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2 ORDER BY page_number',
       [session_id, tid]
     );
 
@@ -2533,7 +2533,7 @@ module.exports = function(app, pool, opts) {
 
     await pool.query(
       `INSERT INTO whiteboard_version_history (tenant_id, session_id, version_label, snapshot_data, created_by)
-       VALUES (?, ?, 'Recording Start', ?, ?)`,
+       VALUES ($1, $2, 'Recording Start', $3, $4)`,
       [tid, session_id, JSON.stringify({ recording: true, initial_state: initialState, started_at: new Date().toISOString() }), uid]
     );
 
@@ -2549,14 +2549,14 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     // Save final state
-    const [pages] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE session_id=? AND tenant_id=? ORDER BY page_number',
+    const { rows: pages } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2 ORDER BY page_number',
       [session_id, tid]
     );
 
     await pool.query(
       `INSERT INTO whiteboard_version_history (tenant_id, session_id, version_label, snapshot_data, created_by)
-       VALUES (?, ?, 'Recording End', ?, ?)`,
+       VALUES ($1, $2, 'Recording End', $3, $4)`,
       [tid, session_id, JSON.stringify({
         recording: false,
         final_state: pages.map(p => ({ page_number: p.page_number, canvas_data: p.canvas_data })),
@@ -2576,16 +2576,16 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const sid = int(req.params.sessionId);
 
-    const [sessionStats] = await pool.query(
+    const { rows: sessionStats } = await pool.query(
       `SELECT
-         (SELECT COUNT(*) FROM whiteboard_pages WHERE session_id=? AND tenant_id=?) AS total_pages,
+         (SELECT COUNT(*) FROM whiteboard_pages WHERE session_id=$1 AND tenant_id=$2) AS total_pages,
          (SELECT COUNT(*) FROM whiteboard_content wc
           JOIN whiteboard_pages wp ON wp.id=wc.page_id
-          WHERE wp.session_id=? AND wc.tenant_id=?) AS total_content_blocks,
-         (SELECT COUNT(*) FROM whiteboard_collaborators WHERE session_id=? AND tenant_id=?) AS total_collaborators,
-         (SELECT COUNT(*) FROM whiteboard_collaborators WHERE session_id=? AND tenant_id=? AND is_online=1) AS online_collaborators,
-         (SELECT COUNT(*) FROM whiteboard_version_history WHERE session_id=? AND tenant_id=?) AS total_versions,
-         (SELECT COUNT(*) FROM whiteboard_submissions WHERE session_id=? AND tenant_id=?) AS total_submissions`,
+          WHERE wp.session_id=$3 AND wc.tenant_id=$4) AS total_content_blocks,
+         (SELECT COUNT(*) FROM whiteboard_collaborators WHERE session_id=$5 AND tenant_id=$6) AS total_collaborators,
+         (SELECT COUNT(*) FROM whiteboard_collaborators WHERE session_id=$7 AND tenant_id=$8 AND is_online=1) AS online_collaborators,
+         (SELECT COUNT(*) FROM whiteboard_version_history WHERE session_id=$9 AND tenant_id=$10) AS total_versions,
+         (SELECT COUNT(*) FROM whiteboard_submissions WHERE session_id=$11 AND tenant_id=$12) AS total_submissions`,
       [sid, tid, sid, tid, sid, tid, sid, tid, sid, tid, sid, tid]
     );
 
@@ -2601,26 +2601,26 @@ module.exports = function(app, pool, opts) {
       return json(res, { error: 'Unauthorized' }, 403);
     }
 
-    const [globalStats] = await pool.query(
+    const { rows: globalStats } = await pool.query(
       `SELECT
          COUNT(*) AS total_sessions,
          SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_sessions,
          SUM(CASE WHEN mode='live' THEN 1 ELSE 0 END) AS live_sessions,
-         (SELECT COUNT(*) FROM whiteboard_pages WHERE tenant_id=?) AS total_pages,
-         (SELECT COUNT(*) FROM whiteboard_content WHERE tenant_id=?) AS total_content_blocks,
-         (SELECT COUNT(*) FROM whiteboard_collaborators WHERE tenant_id=?) AS total_collaborators,
-         (SELECT COUNT(*) FROM whiteboard_submissions WHERE tenant_id=?) AS total_submissions,
-         (SELECT COUNT(*) FROM whiteboard_submissions WHERE tenant_id=? AND status='submitted') AS pending_grading,
-         (SELECT COUNT(*) FROM whiteboard_version_history WHERE tenant_id=?) AS total_versions,
-         (SELECT COUNT(*) FROM whiteboard_templates WHERE tenant_id=? OR tenant_id=0) AS total_templates`,
+         (SELECT COUNT(*) FROM whiteboard_pages WHERE tenant_id=$1) AS total_pages,
+         (SELECT COUNT(*) FROM whiteboard_content WHERE tenant_id=$2) AS total_content_blocks,
+         (SELECT COUNT(*) FROM whiteboard_collaborators WHERE tenant_id=$3) AS total_collaborators,
+         (SELECT COUNT(*) FROM whiteboard_submissions WHERE tenant_id=$4) AS total_submissions,
+         (SELECT COUNT(*) FROM whiteboard_submissions WHERE tenant_id=$5 AND status='submitted') AS pending_grading,
+         (SELECT COUNT(*) FROM whiteboard_version_history WHERE tenant_id=$6) AS total_versions,
+         (SELECT COUNT(*) FROM whiteboard_templates WHERE tenant_id=$7 OR tenant_id=0) AS total_templates`,
       [tid, tid, tid, tid, tid, tid, tid]
     );
 
     // Weekly activity
-    const [weeklyActivity] = await pool.query(
+    const { rows: weeklyActivity } = await pool.query(
       `SELECT DATE(created_at) AS date, COUNT(*) AS sessions_created
        FROM whiteboard_sessions
-       WHERE tenant_id=? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+       WHERE tenant_id=$1 AND created_at >= NOW() - INTERVAL '30 days'
        GROUP BY DATE(created_at)
        ORDER BY date DESC`,
       [tid]
@@ -2638,19 +2638,19 @@ module.exports = function(app, pool, opts) {
     if (!q) return json(res, []);
 
     // Search in session titles, descriptions, and content blocks
-    const [results] = await pool.query(
+    const { rows: results } = await pool.query(
       `SELECT 'session' AS result_type, ws.id, ws.title AS name, ws.description,
          ws.updated_at AS date, NULL AS session_id
        FROM whiteboard_sessions ws
-       WHERE ws.tenant_id=? AND (ws.title LIKE ? OR ws.description LIKE ?)
+       WHERE ws.tenant_id=$1 AND (ws.title LIKE $2 OR ws.description LIKE $3)
        UNION ALL
        SELECT 'content' AS result_type, wc.id, wc.content_type AS name, NULL,
          wc.updated_at AS date, wp.session_id
        FROM whiteboard_content wc
        JOIN whiteboard_pages wp ON wp.id=wc.page_id
-       WHERE wc.tenant_id=? AND (wc.content_data LIKE ? OR wc.content_type LIKE ?)
+       WHERE wc.tenant_id=$4 AND (wc.content_data LIKE $5 OR wc.content_type LIKE $6)
        ORDER BY date DESC
-       LIMIT ?`,
+       LIMIT $7`,
       [tid, `%${q}%`, `%${q}%`, tid, `%${q}%`, `%${q}%`, limit]
     );
 
@@ -2665,7 +2665,7 @@ module.exports = function(app, pool, opts) {
     if (!session_id) return json(res, { error: 'session_id required' }, 400);
 
     await pool.query(
-      'UPDATE whiteboard_sessions SET thumbnail=?, updated_at=NOW() WHERE id=? AND tenant_id=?',
+      'UPDATE whiteboard_sessions SET thumbnail=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3',
       [thumbnail || null, session_id, tid]
     );
 
@@ -2681,10 +2681,11 @@ module.exports = function(app, pool, opts) {
       return json(res, { error: 'session_ids array required' }, 400);
     }
 
+    const idPlaceholders = session_ids.map((_, i) => `$${i + 1}`).join(',');
     await pool.query(
       `UPDATE whiteboard_sessions SET status='archived', updated_at=NOW()
-       WHERE id IN (?) AND tenant_id=?`,
-      [session_ids, tid]
+       WHERE id IN (${idPlaceholders}) AND tenant_id=$${session_ids.length + 1}`,
+      [...session_ids, tid]
     );
 
     audit(req, 'whiteboard_bulk_archive', { count: session_ids.length });
@@ -2696,15 +2697,15 @@ module.exports = function(app, pool, opts) {
     const tid = tenantId(req);
     const pid = int(req.params.id);
 
-    const [page] = await pool.query(
-      'SELECT * FROM whiteboard_pages WHERE id=? AND tenant_id=?',
+    const { rows: page } = await pool.query(
+      'SELECT * FROM whiteboard_pages WHERE id=$1 AND tenant_id=$2',
       [pid, tid]
     );
 
     if (!page.length) return json(res, { error: 'Page not found' }, 404);
 
-    const [contents] = await pool.query(
-      'SELECT * FROM whiteboard_content WHERE page_id=? ORDER BY z_index, created_at',
+    const { rows: contents } = await pool.query(
+      'SELECT * FROM whiteboard_content WHERE page_id=$1 ORDER BY z_index, created_at',
       [pid]
     );
 

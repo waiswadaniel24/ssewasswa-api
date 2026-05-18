@@ -2,7 +2,7 @@
 // VIRTUAL-LAB MODULE — School SaaS Portal
 // Virtual science experiments, simulation management, lab
 // reports, equipment simulation, safety procedures, grading.
-// 12+ routes, MySQL-backed, tenant-aware.
+// 12+ routes, PostgreSQL-backed, tenant-aware.
 // ============================================================
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
@@ -42,7 +42,7 @@ module.exports = function(app, pool, opts) {
         status TEXT DEFAULT 'draft',
         created_by INT,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      `);
+      )`);
       console.log('[VirtualLab] virtual_experiments OK');
     } catch(e) { console.warn('[VirtualLab] Warn:', e.message); }
 
@@ -62,7 +62,7 @@ module.exports = function(app, pool, opts) {
         graded_at TIMESTAMPTZ,
         graded_by INT,
         feedback TEXT
-      `);
+      )`);
       console.log('[VirtualLab] virtual_lab_sessions OK');
     } catch(e) { console.warn('[VirtualLab] Warn:', e.message); }
 
@@ -81,7 +81,7 @@ module.exports = function(app, pool, opts) {
         graded_at TIMESTAMPTZ,
         graded_by INT,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      `);
+      )`);
       console.log('[VirtualLab] lab_reports OK');
     } catch(e) { console.warn('[VirtualLab] Warn:', e.message); }
   })();
@@ -92,11 +92,11 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const role = req.session.user.role;
 
-    const [totalExp] = await pool.query('SELECT COUNT(*) as c FROM virtual_experiments WHERE tenant_id=? AND status="published"', [tid]);
-    const [mySessions] = await pool.query('SELECT COUNT(*) as c FROM virtual_lab_sessions WHERE tenant_id=? AND student_id=?', [tid, uid]);
-    const [completed] = await pool.query('SELECT COUNT(*) as c FROM virtual_lab_sessions WHERE tenant_id=? AND student_id=? AND status="graded"', [tid, uid]);
-    const [pending] = await pool.query('SELECT COUNT(*) as c FROM virtual_lab_sessions WHERE tenant_id=? AND student_id=? AND status="submitted"', [tid, uid]);
-    const [recentSessions] = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.tenant_id=? AND vls.student_id=? ORDER BY vls.started_at DESC LIMIT 5', [tid, uid]);
+    const { rows: totalExp } = await pool.query("SELECT COUNT(*) as c FROM virtual_experiments WHERE tenant_id=$1 AND status='published'", [tid]);
+    const { rows: mySessions } = await pool.query('SELECT COUNT(*) as c FROM virtual_lab_sessions WHERE tenant_id=$1 AND student_id=$2', [tid, uid]);
+    const { rows: completed } = await pool.query("SELECT COUNT(*) as c FROM virtual_lab_sessions WHERE tenant_id=$1 AND student_id=$2 AND status='graded'", [tid, uid]);
+    const { rows: pending } = await pool.query("SELECT COUNT(*) as c FROM virtual_lab_sessions WHERE tenant_id=$1 AND student_id=$2 AND status='submitted'", [tid, uid]);
+    const { rows: recentSessions } = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.tenant_id=$1 AND vls.student_id=$2 ORDER BY vls.started_at DESC LIMIT 5', [tid, uid]);
 
     res.send(renderPage('Virtual Lab', SKIP + `<div style="max-width:1200px;margin:0 auto;padding:20px">
       ${nav('dash')}
@@ -175,14 +175,15 @@ module.exports = function(app, pool, opts) {
     const subjectFilter = req.query.subject || '';
     const catFilter = req.query.category || '';
 
-    let whereClause = 'WHERE tenant_id=? AND status="published"';
+    let whereClause = "WHERE tenant_id=$1 AND status='published'";
     const params = [tid];
-    if (subjectFilter) { whereClause += ' AND subject=?'; params.push(subjectFilter); }
-    if (catFilter) { whereClause += ' AND category=?'; params.push(catFilter); }
+    let paramIdx = 2;
+    if (subjectFilter) { whereClause += ` AND subject=$${paramIdx++}`; params.push(subjectFilter); }
+    if (catFilter) { whereClause += ` AND category=$${paramIdx++}`; params.push(catFilter); }
 
-    const [experiments] = await pool.query(`SELECT * FROM virtual_experiments ${whereClause} ORDER BY title`, params);
-    const [subjects] = await pool.query('SELECT DISTINCT subject FROM virtual_experiments WHERE tenant_id=? AND status="published"', [tid]);
-    const [categories] = await pool.query('SELECT DISTINCT category FROM virtual_experiments WHERE tenant_id=? AND status="published"', [tid]);
+    const { rows: experiments } = await pool.query(`SELECT * FROM virtual_experiments ${whereClause} ORDER BY title`, params);
+    const { rows: subjects } = await pool.query("SELECT DISTINCT subject FROM virtual_experiments WHERE tenant_id=$1 AND status='published'", [tid]);
+    const { rows: categories } = await pool.query("SELECT DISTINCT category FROM virtual_experiments WHERE tenant_id=$1 AND status='published'", [tid]);
 
     res.send(renderPage('Experiments', SKIP + `<div style="max-width:1100px;margin:0 auto;padding:20px">
       ${nav('experiments')}
@@ -226,7 +227,7 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 3: Experiment Detail ──────────────────────────
   app.get('/school/virtual-lab/experiment/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [experiment] = await pool.query('SELECT * FROM virtual_experiments WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const { rows: experiment } = await pool.query('SELECT * FROM virtual_experiments WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!experiment[0]) return res.redirect('/school/virtual-lab/experiments');
 
     const e = experiment[0];
@@ -288,18 +289,18 @@ module.exports = function(app, pool, opts) {
   app.get('/school/virtual-lab/experiment/:id/start', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [experiment] = await pool.query('SELECT * FROM virtual_experiments WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const { rows: experiment } = await pool.query('SELECT * FROM virtual_experiments WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!experiment[0]) return res.redirect('/school/virtual-lab/experiments');
 
     // Check for existing in-progress session
-    const [existing] = await pool.query('SELECT id FROM virtual_lab_sessions WHERE tenant_id=? AND student_id=? AND experiment_id=? AND status="in_progress"', [tid, uid, req.params.id]);
+    const { rows: existing } = await pool.query("SELECT id FROM virtual_lab_sessions WHERE tenant_id=$1 AND student_id=$2 AND experiment_id=$3 AND status='in_progress'", [tid, uid, req.params.id]);
 
     let sessionId;
     if (existing.length > 0) {
       sessionId = existing[0].id;
     } else {
-      const [result] = await pool.query('INSERT INTO virtual_lab_sessions (tenant_id, experiment_id, student_id, status) VALUES (?, ?, ?, "in_progress")', [tid, req.params.id, uid]);
-      sessionId = result.insertId;
+      const { rows: result } = await pool.query("INSERT INTO virtual_lab_sessions (tenant_id, experiment_id, student_id, status) VALUES ($1, $2, $3, 'in_progress') RETURNING id", [tid, req.params.id, uid]);
+      sessionId = result[0].id;
     }
 
     audit({ action: 'start_lab_session', experimentId: req.params.id, sessionId, user: req.session.user });
@@ -310,7 +311,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/virtual-lab/session/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [session] = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject, ve.description, ve.procedure, ve.safety_notes, ve.equipment_needed FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.id=? AND vls.tenant_id=? AND vls.student_id=?', [req.params.id, tid, uid]);
+    const { rows: session } = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject, ve.description, ve.procedure, ve.safety_notes, ve.equipment_needed FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.id=$1 AND vls.tenant_id=$2 AND vls.student_id=$3', [req.params.id, tid, uid]);
     if (!session[0]) return res.redirect('/school/virtual-lab');
 
     const s = session[0];
@@ -432,13 +433,13 @@ module.exports = function(app, pool, opts) {
   app.post('/school/virtual-lab/session/:id/data', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { label, value } = req.body;
-    const [session] = await pool.query('SELECT * FROM virtual_lab_sessions WHERE id=? AND tenant_id=? AND status="in_progress"', [req.params.id, tid]);
+    const { rows: session } = await pool.query("SELECT * FROM virtual_lab_sessions WHERE id=$1 AND tenant_id=$2 AND status='in_progress'", [req.params.id, tid]);
     if (!session[0]) return res.redirect('/school/virtual-lab');
 
     const data = Array.isArray(session[0].data_collected) ? session[0].data_collected : [];
     data.push({ label, value, time: new Date().toISOString() });
 
-    await pool.query('UPDATE virtual_lab_sessions SET data_collected=? WHERE id=? AND tenant_id=?', [JSON.stringify(data), req.params.id, tid]);
+    await pool.query('UPDATE virtual_lab_sessions SET data_collected=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(data), req.params.id, tid]);
     res.redirect('/school/virtual-lab/session/' + req.params.id);
   }));
 
@@ -446,33 +447,33 @@ module.exports = function(app, pool, opts) {
   app.post('/school/virtual-lab/session/:id/data/:idx/delete', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const idx = parseInt(req.params.idx);
-    const [session] = await pool.query('SELECT * FROM virtual_lab_sessions WHERE id=? AND tenant_id=? AND status="in_progress"', [req.params.id, tid]);
+    const { rows: session } = await pool.query("SELECT * FROM virtual_lab_sessions WHERE id=$1 AND tenant_id=$2 AND status='in_progress'", [req.params.id, tid]);
     if (!session[0]) return res.redirect('/school/virtual-lab');
 
     const data = Array.isArray(session[0].data_collected) ? session[0].data_collected : [];
     data.splice(idx, 1);
-    await pool.query('UPDATE virtual_lab_sessions SET data_collected=? WHERE id=? AND tenant_id=?', [JSON.stringify(data), req.params.id, tid]);
+    await pool.query('UPDATE virtual_lab_sessions SET data_collected=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(data), req.params.id, tid]);
     res.redirect('/school/virtual-lab/session/' + req.params.id);
   }));
 
   // ─── ROUTE 8: Save Observations ──────────────────────────
   app.post('/school/virtual-lab/session/:id/observe', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    await pool.query('UPDATE virtual_lab_sessions SET observations=? WHERE id=? AND tenant_id=?', [req.body.observation, req.params.id, tid]);
+    await pool.query('UPDATE virtual_lab_sessions SET observations=$1 WHERE id=$2 AND tenant_id=$3', [req.body.observation, req.params.id, tid]);
     res.redirect('/school/virtual-lab/session/' + req.params.id);
   }));
 
   // ─── ROUTE 9: Save Conclusion ────────────────────────────
   app.post('/school/virtual-lab/session/:id/conclude', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    await pool.query('UPDATE virtual_lab_sessions SET conclusion=? WHERE id=? AND tenant_id=?', [req.body.conclusion, req.params.id, tid]);
+    await pool.query('UPDATE virtual_lab_sessions SET conclusion=$1 WHERE id=$2 AND tenant_id=$3', [req.body.conclusion, req.params.id, tid]);
     res.redirect('/school/virtual-lab/session/' + req.params.id);
   }));
 
   // ─── ROUTE 10: Submit Session ────────────────────────────
   app.post('/school/virtual-lab/session/:id/submit', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    await pool.query('UPDATE virtual_lab_sessions SET status="submitted", submitted_at=NOW() WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    await pool.query("UPDATE virtual_lab_sessions SET status='submitted', submitted_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, tid]);
     audit({ action: 'submit_lab_session', sessionId: req.params.id, user: req.session.user });
     res.json({ ok: true });
   }));
@@ -481,7 +482,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/virtual-lab/my-sessions', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [sessions] = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject, ve.difficulty FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.tenant_id=? AND vls.student_id=? ORDER BY vls.started_at DESC', [tid, uid]);
+    const { rows: sessions } = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject, ve.difficulty FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.tenant_id=$1 AND vls.student_id=$2 ORDER BY vls.started_at DESC', [tid, uid]);
 
     res.send(renderPage('My Lab Sessions', SKIP + `<div style="max-width:1000px;margin:0 auto;padding:20px">
       ${nav('sessions')}
@@ -511,11 +512,12 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const role = req.session.user.role;
 
-    let whereClause = 'WHERE lr.tenant_id=?';
+    let whereClause = 'WHERE lr.tenant_id=$1';
     const params = [tid];
-    if (role !== 'admin' && role !== 'teacher') { whereClause += ' AND lr.student_id=?'; params.push(uid); }
+    let paramIdx = 2;
+    if (role !== 'admin' && role !== 'teacher') { whereClause += ` AND lr.student_id=$${paramIdx++}`; params.push(uid); }
 
-    const [reports] = await pool.query(`SELECT lr.*, u.name as student_name, ve.title as exp_title, ve.subject
+    const { rows: reports } = await pool.query(`SELECT lr.*, u.name as student_name, ve.title as exp_title, ve.subject
       FROM lab_reports lr
       LEFT JOIN virtual_lab_sessions vls ON vls.id=lr.session_id
       LEFT JOIN virtual_experiments ve ON ve.id=vls.experiment_id
@@ -548,7 +550,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/virtual-lab/report/create/:sessionId', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [session] = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.id=? AND vls.tenant_id=? AND vls.student_id=?', [req.params.sessionId, tid, uid]);
+    const { rows: session } = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.id=$1 AND vls.tenant_id=$2 AND vls.student_id=$3', [req.params.sessionId, tid, uid]);
     if (!session[0]) return res.redirect('/school/virtual-lab/my-sessions');
 
     const s = session[0];
@@ -602,16 +604,25 @@ module.exports = function(app, pool, opts) {
     const { session_id, title, content, action } = req.body;
 
     const status = action === 'submit' ? 'submitted' : 'draft';
-    const submittedAt = action === 'submit' ? 'NOW()' : 'NULL';
 
-    const [existing] = await pool.query('SELECT id FROM lab_reports WHERE tenant_id=? AND session_id=?', [tid, session_id]);
+    const { rows: existing } = await pool.query('SELECT id FROM lab_reports WHERE tenant_id=$1 AND session_id=$2', [tid, session_id]);
 
     if (existing.length > 0) {
-      await pool.query('UPDATE lab_reports SET title=?, content=?, status=?, submitted_at='+submittedAt+' WHERE id=? AND tenant_id=?',
-        [title, content, status, existing[0].id, tid]);
+      if (action === 'submit') {
+        await pool.query('UPDATE lab_reports SET title=$1, content=$2, status=$3, submitted_at=NOW() WHERE id=$4 AND tenant_id=$5',
+          [title, content, status, existing[0].id, tid]);
+      } else {
+        await pool.query('UPDATE lab_reports SET title=$1, content=$2, status=$3, submitted_at=NULL WHERE id=$4 AND tenant_id=$5',
+          [title, content, status, existing[0].id, tid]);
+      }
     } else {
-      await pool.query('INSERT INTO lab_reports (tenant_id, session_id, student_id, title, content, status, submitted_at) VALUES (?, ?, ?, ?, ?, ?, '+submittedAt+')',
-        [tid, session_id, uid, title, content, status]);
+      if (action === 'submit') {
+        await pool.query('INSERT INTO lab_reports (tenant_id, session_id, student_id, title, content, status, submitted_at) VALUES ($1, $2, $3, $4, $5, $6, NOW())',
+          [tid, session_id, uid, title, content, status]);
+      } else {
+        await pool.query('INSERT INTO lab_reports (tenant_id, session_id, student_id, title, content, status, submitted_at) VALUES ($1, $2, $3, $4, $5, $6, NULL)',
+          [tid, session_id, uid, title, content, status]);
+      }
     }
 
     audit({ action: action === 'submit' ? 'submit_lab_report' : 'save_lab_report_draft', sessionId: session_id, user: req.session.user });
@@ -675,7 +686,7 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 16: Teacher Grade Session ─────────────────────
   app.get('/school/virtual-lab/grade/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [session] = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.id=? AND vls.tenant_id=?', [req.params.id, tid]);
+    const { rows: session } = await pool.query('SELECT vls.*, ve.title as exp_title, ve.subject FROM virtual_lab_sessions vls JOIN virtual_experiments ve ON ve.id=vls.experiment_id WHERE vls.id=$1 AND vls.tenant_id=$2', [req.params.id, tid]);
     if (!session[0]) return res.redirect('/school/virtual-lab');
     const s = session[0];
 
@@ -709,7 +720,7 @@ module.exports = function(app, pool, opts) {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
     const { score, feedback } = req.body;
-    await pool.query('UPDATE virtual_lab_sessions SET score=?, feedback=?, status="graded", graded_at=NOW(), graded_by=? WHERE id=? AND tenant_id=?',
+    await pool.query("UPDATE virtual_lab_sessions SET score=$1, feedback=$2, status='graded', graded_at=NOW(), graded_by=$3 WHERE id=$4 AND tenant_id=$5",
       [parseFloat(score), feedback, uid, req.params.id, tid]);
     audit({ action: 'grade_lab_session', sessionId: req.params.id, score, user: req.session.user });
     res.redirect('/school/virtual-lab/reports');

@@ -6,7 +6,7 @@
  *           Route Optimization (clustering), Live Tracking, Trip Log,
  *           Parent Notifications, Fleet Maintenance, Analytics Dashboard
  *
- * 22 routes • MySQL • tenant_id scoped
+ * 22 routes • PostgreSQL • tenant_id scoped
  */
 module.exports = function(app, pool, opts) {
 
@@ -277,11 +277,11 @@ module.exports = function(app, pool, opts) {
     const tid = req.session.user.tenant_id;
 
     const [routesR, busesR, assignR, tripsR, maintR] = await Promise.all([
-      pool.query("SELECT COUNT(*) AS c FROM bus_routes WHERE tenant_id=?", [tid]),
-      pool.query("SELECT COUNT(*) AS c FROM bus_fleet WHERE tenant_id=? AND status='active'", [tid]),
-      pool.query("SELECT COUNT(*) AS c FROM bus_student_assignments WHERE tenant_id=? AND status='active'", [tid]),
-      pool.query("SELECT COUNT(*) AS c FROM bus_trips WHERE tenant_id=? AND DATE(trip_date)=CURDATE()", [tid]),
-      pool.query("SELECT COUNT(*) AS c FROM bus_maintenance WHERE tenant_id=? AND status='scheduled'", [tid]),
+      pool.query("SELECT COUNT(*) AS c FROM bus_routes WHERE tenant_id=$1", [tid]),
+      pool.query("SELECT COUNT(*) AS c FROM bus_fleet WHERE tenant_id=$1 AND status='active'", [tid]),
+      pool.query("SELECT COUNT(*) AS c FROM bus_student_assignments WHERE tenant_id=$1 AND status='active'", [tid]),
+      pool.query("SELECT COUNT(*) AS c FROM bus_trips WHERE tenant_id=$1 AND trip_date::date=CURRENT_DATE", [tid]),
+      pool.query("SELECT COUNT(*) AS c FROM bus_maintenance WHERE tenant_id=$1 AND status='scheduled'", [tid]),
     ]);
 
     const routeCount = routesR[0][0].c;
@@ -296,7 +296,7 @@ module.exports = function(app, pool, opts) {
        FROM bus_trips t
        LEFT JOIN bus_routes r ON r.id=t.route_id
        LEFT JOIN bus_fleet f ON f.id=t.bus_id
-       WHERE t.tenant_id=? ORDER BY t.trip_date DESC LIMIT 8`, [tid]);
+       WHERE t.tenant_id=$1 ORDER BY t.trip_date DESC LIMIT 8`, [tid]);
 
     // Active routes with utilization
     const routeUtil = await pool.query(
@@ -305,7 +305,7 @@ module.exports = function(app, pool, opts) {
               (SELECT COUNT(*) FROM bus_student_assignments sa WHERE sa.route_id=r.id AND sa.status='active') AS stu_count
        FROM bus_routes r
        LEFT JOIN bus_fleet f ON f.id=r.assigned_bus_id
-       WHERE r.tenant_id=? AND r.status='active'
+       WHERE r.tenant_id=$1 AND r.status='active'
        ORDER BY r.name LIMIT 10`, [tid]);
 
     // Upcoming maintenance
@@ -313,7 +313,7 @@ module.exports = function(app, pool, opts) {
       `SELECT m.*, f.registration_number, f.model
        FROM bus_maintenance m
        LEFT JOIN bus_fleet f ON f.id=m.bus_id
-       WHERE m.tenant_id=? AND m.status='scheduled'
+       WHERE m.tenant_id=$1 AND m.status='scheduled'
        ORDER BY m.scheduled_date ASC LIMIT 5`, [tid]);
 
     // Recent notifications
@@ -321,7 +321,7 @@ module.exports = function(app, pool, opts) {
       `SELECT n.*, sa.student_name
        FROM bus_notifications_log n
        LEFT JOIN bus_student_assignments sa ON sa.id=n.student_assignment_id
-       WHERE n.tenant_id=? ORDER BY n.created_at DESC LIMIT 5`, [tid]);
+       WHERE n.tenant_id=$1 ORDER BY n.created_at DESC LIMIT 5`, [tid]);
 
     let h = '<div class="bro-wrap">' + CSS + nav('Dashboard');
 
@@ -425,9 +425,9 @@ module.exports = function(app, pool, opts) {
                (SELECT COUNT(*) FROM bus_student_assignments sa WHERE sa.route_id=r.id AND sa.status='active') AS stu_count,
                (SELECT COUNT(*) FROM bus_stops s WHERE s.route_id=r.id AND s.status='active') AS stop_count
                FROM bus_routes r LEFT JOIN bus_fleet f ON f.id=r.assigned_bus_id
-               WHERE r.tenant_id=?`;
+               WHERE r.tenant_id=$1`;
     const params = [tid];
-    if (statusFilter) { sql += ' AND r.status=?'; params.push(statusFilter); }
+    if (statusFilter) { sql += ' AND r.status=$2'; params.push(statusFilter); }
     sql += ' ORDER BY r.name';
 
     const routes = await pool.query(sql, params);
@@ -509,9 +509,9 @@ module.exports = function(app, pool, opts) {
 
     if (id) {
       await pool.query(
-        `UPDATE bus_routes SET name=?, description=?, waypoints=?, distance_km=?, estimated_time_min=?,
-         assigned_bus_id=?, assigned_driver_id=?, operating_days=?, morning_departure=?, afternoon_departure=?, status=?
-         WHERE id=? AND tenant_id=?`,
+        `UPDATE bus_routes SET name=$1, description=$2, waypoints=$3, distance_km=$4, estimated_time_min=$5,
+         assigned_bus_id=$6, assigned_driver_id=$7, operating_days=$8, morning_departure=$9, afternoon_departure=$10, status=$11
+         WHERE id=$12 AND tenant_id=$13`,
         [name.trim(), description || '', JSON.stringify(wpParsed), parseFloat(distance_km) || 0,
          parseInt(estimated_time_min) || 0, assigned_bus_id || null, assigned_driver_id || null,
          JSON.stringify(daysParsed), morning_departure || null, afternoon_departure || null,
@@ -521,7 +521,7 @@ module.exports = function(app, pool, opts) {
       await pool.query(
         `INSERT INTO bus_routes (tenant_id, name, description, waypoints, distance_km, estimated_time_min,
          assigned_bus_id, assigned_driver_id, operating_days, morning_departure, afternoon_departure, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [tid, name.trim(), description || '', JSON.stringify(wpParsed), parseFloat(distance_km) || 0,
          parseInt(estimated_time_min) || 0, assigned_bus_id || null, assigned_driver_id || null,
          JSON.stringify(daysParsed), morning_departure || null, afternoon_departure || null,
@@ -538,7 +538,7 @@ module.exports = function(app, pool, opts) {
   app.delete(BASE + '/routes/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
-    await pool.query('DELETE FROM bus_routes WHERE id=? AND tenant_id=?', [id, tid]);
+    await pool.query('DELETE FROM bus_routes WHERE id=$1 AND tenant_id=$2', [id, tid]);
     audit(req, 'bus_route_delete', { routeId: id });
     res.json({ ok: true });
   }));
@@ -552,9 +552,9 @@ module.exports = function(app, pool, opts) {
 
     let sql = `SELECT f.*,
                (SELECT COUNT(*) FROM bus_routes r WHERE r.assigned_bus_id=f.id AND r.status='active') AS route_count
-               FROM bus_fleet f WHERE f.tenant_id=?`;
+               FROM bus_fleet f WHERE f.tenant_id=$1`;
     const params = [tid];
-    if (statusFilter) { sql += ' AND f.status=?'; params.push(statusFilter); }
+    if (statusFilter) { sql += ' AND f.status=$2'; params.push(statusFilter); }
     sql += ' ORDER BY f.registration_number';
 
     const buses = await pool.query(sql, params);
@@ -617,10 +617,10 @@ module.exports = function(app, pool, opts) {
 
     if (id) {
       await pool.query(
-        `UPDATE bus_fleet SET registration_number=?, model=?, capacity=?, driver_name=?, driver_phone=?,
-         driver_license=?, insurance_expiry=?, current_mileage=?, fuel_type=?, fuel_capacity_litres=?,
-         status=?, purchase_date=?, purchase_cost=?
-         WHERE id=? AND tenant_id=?`,
+        `UPDATE bus_fleet SET registration_number=$1, model=$2, capacity=$3, driver_name=$4, driver_phone=$5,
+         driver_license=$6, insurance_expiry=$7, current_mileage=$8, fuel_type=$9, fuel_capacity_litres=$10,
+         status=$11, purchase_date=$12, purchase_cost=$13
+         WHERE id=$14 AND tenant_id=$15`,
         [registration_number.trim(), model || '', parseInt(capacity) || 50, driver_name || '', driver_phone || '',
          driver_license || '', insurance_expiry || null, parseInt(current_mileage) || 0,
          fuel_type || 'diesel', parseInt(fuel_capacity_litres) || 80, status || 'active',
@@ -628,7 +628,7 @@ module.exports = function(app, pool, opts) {
       audit(req, 'bus_update', { busId: id });
     } else {
       // Check duplicate
-      const dup = await pool.query('SELECT id FROM bus_fleet WHERE tenant_id=? AND registration_number=?', [tid, registration_number.trim()]);
+      const dup = await pool.query('SELECT id FROM bus_fleet WHERE tenant_id=$1 AND registration_number=$2', [tid, registration_number.trim()]);
       if (dup.length) {
         return res.send('<div class="bro-alert warn">A bus with this registration number already exists.</div><a href="javascript:history.back()">Go back</a>');
       }
@@ -636,7 +636,7 @@ module.exports = function(app, pool, opts) {
         `INSERT INTO bus_fleet (tenant_id, registration_number, model, capacity, driver_name, driver_phone,
          driver_license, insurance_expiry, current_mileage, fuel_type, fuel_capacity_litres,
          status, purchase_date, purchase_cost)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [tid, registration_number.trim(), model || '', parseInt(capacity) || 50, driver_name || '',
          driver_phone || '', driver_license || '', insurance_expiry || null,
          parseInt(current_mileage) || 0, fuel_type || 'diesel', parseInt(fuel_capacity_litres) || 80,
@@ -653,7 +653,7 @@ module.exports = function(app, pool, opts) {
   app.delete(BASE + '/buses/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
-    await pool.query('DELETE FROM bus_fleet WHERE id=? AND tenant_id=?', [id, tid]);
+    await pool.query('DELETE FROM bus_fleet WHERE id=$1 AND tenant_id=$2', [id, tid]);
     audit(req, 'bus_delete', { busId: id });
     res.json({ ok: true });
   }));
@@ -667,13 +667,13 @@ module.exports = function(app, pool, opts) {
 
     let sql = `SELECT s.*, r.name AS route_name
                FROM bus_stops s LEFT JOIN bus_routes r ON r.id=s.route_id
-               WHERE s.tenant_id=?`;
+               WHERE s.tenant_id=$1`;
     const params = [tid];
-    if (routeFilter) { sql += ' AND s.route_id=?'; params.push(parseInt(routeFilter)); }
+    if (routeFilter) { sql += ' AND s.route_id=$2'; params.push(parseInt(routeFilter)); }
     sql += ' ORDER BY s.route_id, s.stop_order';
 
     const stops = await pool.query(sql, params);
-    const routes = await pool.query('SELECT id, name FROM bus_routes WHERE tenant_id=? AND status="active" ORDER BY name', [tid]);
+    const routes = await pool.query('SELECT id, name FROM bus_routes WHERE tenant_id=$1 AND status=\'active\' ORDER BY name', [tid]);
 
     let h = '<div class="bro-wrap">' + CSS + nav('Stops');
     h += '<div class="bro-flex" style="margin-bottom:16px">';
@@ -741,9 +741,9 @@ module.exports = function(app, pool, opts) {
 
     if (id) {
       await pool.query(
-        `UPDATE bus_stops SET name=?, latitude=?, longitude=?, stop_type=?, route_id=?, stop_order=?,
-         estimated_arrival_min=?, estimated_departure_min=?, landmark=?, status=?
-         WHERE id=? AND tenant_id=?`,
+        `UPDATE bus_stops SET name=$1, latitude=$2, longitude=$3, stop_type=$4, route_id=$5, stop_order=$6,
+         estimated_arrival_min=$7, estimated_departure_min=$8, landmark=$9, status=$10
+         WHERE id=$11 AND tenant_id=$12`,
         [name.trim(), parseFloat(latitude) || 0, parseFloat(longitude) || 0,
          stop_type || 'both', route_id || null, parseInt(stop_order) || 0,
          parseInt(estimated_arrival_min) || 0, parseInt(estimated_departure_min) || 0,
@@ -753,7 +753,7 @@ module.exports = function(app, pool, opts) {
       await pool.query(
         `INSERT INTO bus_stops (tenant_id, name, latitude, longitude, stop_type, route_id, stop_order,
          estimated_arrival_min, estimated_departure_min, landmark, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [tid, name.trim(), parseFloat(latitude) || 0, parseFloat(longitude) || 0,
          stop_type || 'both', route_id || null, parseInt(stop_order) || 0,
          parseInt(estimated_arrival_min) || 0, parseInt(estimated_departure_min) || 0,
@@ -770,7 +770,7 @@ module.exports = function(app, pool, opts) {
   app.delete(BASE + '/stops/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const { id } = req.params;
-    await pool.query('DELETE FROM bus_stops WHERE id=? AND tenant_id=?', [id, tid]);
+    await pool.query('DELETE FROM bus_stops WHERE id=$1 AND tenant_id=$2', [id, tid]);
     audit(req, 'bus_stop_delete', { stopId: id });
     res.json({ ok: true });
   }));
@@ -788,14 +788,14 @@ module.exports = function(app, pool, opts) {
                LEFT JOIN bus_routes r ON r.id=sa.route_id
                LEFT JOIN bus_stops ps ON ps.id=sa.pickup_stop_id
                LEFT JOIN bus_stops ds ON ds.id=sa.dropoff_stop_id
-               WHERE sa.tenant_id=?`;
+               WHERE sa.tenant_id=$1`;
     const params = [tid];
-    if (routeFilter) { sql += ' AND sa.route_id=?'; params.push(parseInt(routeFilter)); }
-    if (statusFilter) { sql += ' AND sa.status=?'; params.push(statusFilter); }
+    if (routeFilter) { sql += ' AND sa.route_id=$2'; params.push(parseInt(routeFilter)); }
+    if (statusFilter) { sql += ' AND sa.status=$3'; params.push(statusFilter); }
     sql += ' ORDER BY sa.route_id, sa.student_name';
 
     const assignments = await pool.query(sql, params);
-    const routes = await pool.query('SELECT id, name FROM bus_routes WHERE tenant_id=? AND status="active" ORDER BY name', [tid]);
+    const routes = await pool.query('SELECT id, name FROM bus_routes WHERE tenant_id=$1 AND status=\'active\' ORDER BY name', [tid]);
 
     let h = '<div class="bro-wrap">' + CSS + nav('Assignments');
     h += '<div class="bro-flex" style="margin-bottom:16px">';
@@ -857,10 +857,10 @@ module.exports = function(app, pool, opts) {
 
     if (id) {
       await pool.query(
-        `UPDATE bus_student_assignments SET student_id=?, student_name=?, route_id=?, pickup_stop_id=?,
-         dropoff_stop_id=?, pickup_time=?, dropoff_time=?, parent_name=?, parent_phone=?, parent_email=?,
-         status=?, change_request_reason=?
-         WHERE id=? AND tenant_id=?`,
+        `UPDATE bus_student_assignments SET student_id=$1, student_name=$2, route_id=$3, pickup_stop_id=$4,
+         dropoff_stop_id=$5, pickup_time=$6, dropoff_time=$7, parent_name=$8, parent_phone=$9, parent_email=$10,
+         status=$11, change_request_reason=$12
+         WHERE id=$13 AND tenant_id=$14`,
         [student_id, student_name || '', parseInt(route_id), pickup_stop_id || null,
          dropoff_stop_id || null, pickup_time || null, dropoff_time || null,
          parent_name || '', parent_phone || '', parent_email || '',
@@ -869,7 +869,7 @@ module.exports = function(app, pool, opts) {
     } else {
       // Check for duplicate
       const dup = await pool.query(
-        'SELECT id FROM bus_student_assignments WHERE tenant_id=? AND student_id=? AND route_id=? AND status="active"',
+        'SELECT id FROM bus_student_assignments WHERE tenant_id=$1 AND student_id=$2 AND route_id=$3 AND status=\'active\'',
         [tid, student_id, parseInt(route_id)]);
       if (dup.length) {
         return res.send('<div class="bro-alert warn">Student is already assigned to this route.</div><a href="javascript:history.back()">Go back</a>');
@@ -877,7 +877,7 @@ module.exports = function(app, pool, opts) {
       await pool.query(
         `INSERT INTO bus_student_assignments (tenant_id, student_id, student_name, route_id, pickup_stop_id,
          dropoff_stop_id, pickup_time, dropoff_time, parent_name, parent_phone, parent_email, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [tid, student_id, student_name || '', parseInt(route_id), pickup_stop_id || null,
          dropoff_stop_id || null, pickup_time || null, dropoff_time || null,
          parent_name || '', parent_phone || '', parent_email || '', status || 'active']);
@@ -918,12 +918,12 @@ module.exports = function(app, pool, opts) {
     for (const s of students) {
       if (!s.student_id) { skipped++; continue; }
       const dup = await pool.query(
-        'SELECT id FROM bus_student_assignments WHERE tenant_id=? AND student_id=? AND route_id=? AND status="active"',
+        'SELECT id FROM bus_student_assignments WHERE tenant_id=$1 AND student_id=$2 AND route_id=$3 AND status=\'active\'',
         [tid, s.student_id, parseInt(route_id)]);
       if (dup.length) { skipped++; continue; }
       await pool.query(
         `INSERT INTO bus_student_assignments (tenant_id, student_id, student_name, route_id, parent_name, parent_phone, status)
-         VALUES (?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
         [tid, s.student_id, s.student_name || '', parseInt(route_id), s.parent_name || '', s.parent_phone || '', 'active']);
       added++;
     }
@@ -943,15 +943,15 @@ module.exports = function(app, pool, opts) {
       `SELECT sa.*, ps.name AS nearest_stop, ps.latitude, ps.longitude
        FROM bus_student_assignments sa
        LEFT JOIN bus_stops ps ON ps.id=sa.pickup_stop_id
-       WHERE sa.tenant_id=? AND (sa.route_id IS NULL OR sa.route_id=0) AND sa.status='active'`, [tid]);
+       WHERE sa.tenant_id=$1 AND (sa.route_id IS NULL OR sa.route_id=0) AND sa.status='active'`, [tid]);
 
     const activeRoutes = await pool.query(
       `SELECT r.*, f.registration_number, f.capacity
        FROM bus_routes r LEFT JOIN bus_fleet f ON f.id=r.assigned_bus_id
-       WHERE r.tenant_id=? AND r.status='active'`, [tid]);
+       WHERE r.tenant_id=$1 AND r.status='active'`, [tid]);
 
     const allStops = await pool.query(
-      'SELECT * FROM bus_stops WHERE tenant_id=? AND status="active" ORDER BY route_id, stop_order', [tid]);
+      'SELECT * FROM bus_stops WHERE tenant_id=$1 AND status=\'active\' ORDER BY route_id, stop_order', [tid]);
 
     let h = '<div class="bro-wrap">' + CSS + nav('Optimize');
     h += '<h2 style="margin-bottom:16px">🧠 Route Optimization</h2>';
@@ -1008,7 +1008,7 @@ module.exports = function(app, pool, opts) {
       h += '<table class="bro-table"><tr><th>Route</th><th>Bus</th><th>Capacity</th><th>Assigned</th><th>Available</th><th>Utilization</th></tr>';
       for (const r of activeRoutes) {
         const cntR = await pool.query(
-          'SELECT COUNT(*) AS c FROM bus_student_assignments WHERE tenant_id=? AND route_id=? AND status="active"',
+          'SELECT COUNT(*) AS c FROM bus_student_assignments WHERE tenant_id=$1 AND route_id=$2 AND status=\'active\'',
           [tid, r.id]);
         const assigned = cntR[0][0].c;
         const available = (r.capacity || 50) - assigned;
@@ -1045,7 +1045,7 @@ module.exports = function(app, pool, opts) {
     // Get all students needing assignment (active without route)
     const students = await pool.query(
       `SELECT * FROM bus_student_assignments
-       WHERE tenant_id=? AND status='active' AND (route_id IS NULL OR route_id=0)`, [tid]);
+       WHERE tenant_id=$1 AND status='active' AND (route_id IS NULL OR route_id=0)`, [tid]);
 
     if (!students.length) {
       return res.redirect(BASE + '/optimize');
@@ -1057,7 +1057,7 @@ module.exports = function(app, pool, opts) {
         WHERE sa.route_id=r.id AND sa.status='active') AS current_count
        FROM bus_routes r
        LEFT JOIN bus_fleet f ON f.id=r.assigned_bus_id
-       WHERE r.tenant_id=? AND r.status='active' AND f.id IS NOT NULL`, [tid]);
+       WHERE r.tenant_id=$1 AND r.status='active' AND f.id IS NOT NULL`, [tid]);
 
     if (!routes.length) {
       return res.send('<div class="bro-alert warn">No active routes with assigned buses. Create routes and assign buses first.</div><a href="javascript:history.back()">Go back</a>');
@@ -1065,7 +1065,7 @@ module.exports = function(app, pool, opts) {
 
     // Get all stops with coordinates
     const stops = await pool.query(
-      'SELECT * FROM bus_stops WHERE tenant_id=? AND status="active" AND latitude != 0 AND longitude != 0', [tid]);
+      'SELECT * FROM bus_stops WHERE tenant_id=$1 AND status=\'active\' AND latitude != 0 AND longitude != 0', [tid]);
 
     let assignments = 0;
     const routeCapacities = {};
@@ -1131,7 +1131,7 @@ module.exports = function(app, pool, opts) {
 
           // Assign student to route
           await pool.query(
-            'UPDATE bus_student_assignments SET route_id=?, pickup_stop_id=?, status="active" WHERE id=? AND tenant_id=?',
+            'UPDATE bus_student_assignments SET route_id=$1, pickup_stop_id=$2, status=\'active\' WHERE id=$3 AND tenant_id=$4',
             [bestRoute.id, nearestStop ? nearestStop.id : null, student.id, tid]);
           routeCapacities[bestRoute.id].current++;
           assignments++;
@@ -1157,7 +1157,7 @@ module.exports = function(app, pool, opts) {
 
         if (bestRoute) {
           await pool.query(
-            'UPDATE bus_student_assignments SET route_id=? WHERE id=? AND tenant_id=?',
+            'UPDATE bus_student_assignments SET route_id=$1 WHERE id=$2 AND tenant_id=$3',
             [bestRoute.id, student.id, tid]);
           routeCapacities[bestRoute.id].current++;
           assignments++;
@@ -1191,14 +1191,14 @@ module.exports = function(app, pool, opts) {
       `SELECT r.*, f.registration_number, f.driver_name, f.driver_phone, f.capacity,
               (SELECT COUNT(*) FROM bus_student_assignments sa WHERE sa.route_id=r.id AND sa.status='active') AS stu_count
        FROM bus_routes r LEFT JOIN bus_fleet f ON f.id=r.assigned_bus_id
-       WHERE r.tenant_id=? AND r.status='active' ORDER BY r.name`, [tid]);
+       WHERE r.tenant_id=$1 AND r.status='active' ORDER BY r.name`, [tid]);
 
     const inProgressTrips = await pool.query(
       `SELECT t.*, r.name AS route_name, f.registration_number
        FROM bus_trips t
        LEFT JOIN bus_routes r ON r.id=t.route_id
        LEFT JOIN bus_fleet f ON f.id=t.bus_id
-       WHERE t.tenant_id=? AND t.status='in_progress'`, [tid]);
+       WHERE t.tenant_id=$1 AND t.status='in_progress'`, [tid]);
 
     // Generate simulated bus positions for display
     const busPositions = activeRoutes.map(r => {
@@ -1284,10 +1284,10 @@ module.exports = function(app, pool, opts) {
                FROM bus_trips t
                LEFT JOIN bus_routes r ON r.id=t.route_id
                LEFT JOIN bus_fleet f ON f.id=t.bus_id
-               WHERE t.tenant_id=?`;
+               WHERE t.tenant_id=$1`;
     const params = [tid];
-    if (dateFilter) { sql += ' AND t.trip_date=?'; params.push(dateFilter); }
-    if (statusFilter) { sql += ' AND t.status=?'; params.push(statusFilter); }
+    if (dateFilter) { sql += ' AND t.trip_date=$2'; params.push(dateFilter); }
+    if (statusFilter) { sql += ' AND t.status=$3'; params.push(statusFilter); }
     sql += ' ORDER BY t.trip_date DESC, t.planned_departure DESC LIMIT 50';
 
     const trips = await pool.query(sql, params);
@@ -1300,7 +1300,7 @@ module.exports = function(app, pool, opts) {
               SUM(t.distance_km) AS total_km,
               SUM(t.fuel_used_litres) AS total_fuel,
               AVG(t.delay_minutes) AS avg_delay
-       FROM bus_trips t WHERE t.tenant_id=? AND t.trip_date = CURDATE()`, [tid]);
+       FROM bus_trips t WHERE t.tenant_id=$1 AND t.trip_date = CURRENT_DATE`, [tid]);
 
     const s = summary[0] ? summary[0] : {};
 
@@ -1374,11 +1374,11 @@ module.exports = function(app, pool, opts) {
 
     if (id) {
       await pool.query(
-        `UPDATE bus_trips SET route_id=?, bus_id=?, driver_name=?, trip_type=?, trip_date=?,
-         planned_departure=?, actual_departure=?, planned_arrival=?, actual_arrival=?,
-         distance_km=?, fuel_used_litres=?, students_onboard=?, incidents=?,
-         delay_minutes=?, status=?, notes=?
-         WHERE id=? AND tenant_id=?`,
+        `UPDATE bus_trips SET route_id=$1, bus_id=$2, driver_name=$3, trip_type=$4, trip_date=$5,
+         planned_departure=$6, actual_departure=$7, planned_arrival=$8, actual_arrival=$9,
+         distance_km=$10, fuel_used_litres=$11, students_onboard=$12, incidents=$13,
+         delay_minutes=$14, status=$15, notes=$16
+         WHERE id=$17 AND tenant_id=$18`,
         [route_id || null, bus_id || null, driver_name || '', trip_type || 'morning', trip_date,
          planned_departure || null, actual_departure || null, planned_arrival || null, actual_arrival || null,
          parseFloat(distance_km) || 0, parseFloat(fuel_used_litres) || 0, parseInt(students_onboard) || 0,
@@ -1390,7 +1390,7 @@ module.exports = function(app, pool, opts) {
         `INSERT INTO bus_trips (tenant_id, route_id, bus_id, driver_name, trip_type, trip_date,
          planned_departure, actual_departure, planned_arrival, actual_arrival,
          distance_km, fuel_used_litres, students_onboard, incidents, delay_minutes, status, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [tid, route_id || null, bus_id || null, driver_name || '', trip_type || 'morning', trip_date,
          planned_departure || null, actual_departure || null, planned_arrival || null, actual_arrival || null,
          parseFloat(distance_km) || 0, parseFloat(fuel_used_litres) || 0, parseInt(students_onboard) || 0,
@@ -1411,13 +1411,13 @@ module.exports = function(app, pool, opts) {
     let sql = `SELECT m.*, f.registration_number, f.model, f.current_mileage
                FROM bus_maintenance m
                LEFT JOIN bus_fleet f ON f.id=m.bus_id
-               WHERE m.tenant_id=?`;
+               WHERE m.tenant_id=$1`;
     const params = [tid];
-    if (statusFilter) { sql += ' AND m.status=?'; params.push(statusFilter); }
+    if (statusFilter) { sql += ' AND m.status=$2'; params.push(statusFilter); }
     sql += ' ORDER BY m.scheduled_date DESC';
 
     const records = await pool.query(sql, params);
-    const buses = await pool.query('SELECT id, registration_number, model FROM bus_fleet WHERE tenant_id=? ORDER BY registration_number', [tid]);
+    const buses = await pool.query('SELECT id, registration_number, model FROM bus_fleet WHERE tenant_id=$1 ORDER BY registration_number', [tid]);
 
     // Stats
     const stats = await pool.query(
@@ -1426,7 +1426,7 @@ module.exports = function(app, pool, opts) {
               SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END) AS in_progress,
               SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
               SUM(cost) AS total_cost
-       FROM bus_maintenance WHERE tenant_id=?`, [tid]);
+       FROM bus_maintenance WHERE tenant_id=$1`, [tid]);
     const st = stats[0] ? stats[0] : {};
 
     let h = '<div class="bro-wrap">' + CSS + nav('Maintenance');
@@ -1493,10 +1493,10 @@ module.exports = function(app, pool, opts) {
 
     if (id) {
       await pool.query(
-        `UPDATE bus_maintenance SET bus_id=?, maintenance_type=?, description=?, scheduled_date=?,
-         completed_date=?, mileage_at_service=?, cost=?, vendor=?, status=?,
-         next_service_mileage=?, next_service_date=?, notes=?
-         WHERE id=? AND tenant_id=?`,
+        `UPDATE bus_maintenance SET bus_id=$1, maintenance_type=$2, description=$3, scheduled_date=$4,
+         completed_date=$5, mileage_at_service=$6, cost=$7, vendor=$8, status=$9,
+         next_service_mileage=$10, next_service_date=$11, notes=$12
+         WHERE id=$13 AND tenant_id=$14`,
         [parseInt(bus_id), maintenance_type || 'oil_change', description || '', scheduled_date || null,
          completed_date || null, parseInt(mileage_at_service) || 0, parseFloat(cost) || 0, vendor || '',
          status || 'scheduled', parseInt(next_service_mileage) || 0, next_service_date || null,
@@ -1504,7 +1504,7 @@ module.exports = function(app, pool, opts) {
 
       // Update bus mileage if completed
       if (status === 'completed' && mileage_at_service) {
-        await pool.query('UPDATE bus_fleet SET current_mileage=?, last_service_mileage=? WHERE id=? AND tenant_id=?',
+        await pool.query('UPDATE bus_fleet SET current_mileage=$1, last_service_mileage=$2 WHERE id=$3 AND tenant_id=$4',
           [parseInt(mileage_at_service), parseInt(mileage_at_service), parseInt(bus_id), tid]);
       }
       audit(req, 'maintenance_update', { maintenanceId: id });
@@ -1512,7 +1512,7 @@ module.exports = function(app, pool, opts) {
       await pool.query(
         `INSERT INTO bus_maintenance (tenant_id, bus_id, maintenance_type, description, scheduled_date,
          completed_date, mileage_at_service, cost, vendor, status, next_service_mileage, next_service_date, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [tid, parseInt(bus_id), maintenance_type || 'oil_change', description || '', scheduled_date || null,
          completed_date || null, parseInt(mileage_at_service) || 0, parseFloat(cost) || 0, vendor || '',
          status || 'scheduled', parseInt(next_service_mileage) || 0, next_service_date || null, notes || '']);
@@ -1531,15 +1531,15 @@ module.exports = function(app, pool, opts) {
     // Core metrics
     const metrics = await pool.query(`
       SELECT
-        (SELECT COUNT(*) FROM bus_routes WHERE tenant_id=? AND status='active') AS active_routes,
-        (SELECT COUNT(*) FROM bus_fleet WHERE tenant_id=? AND status='active') AS active_buses,
-        (SELECT COUNT(*) FROM bus_student_assignments WHERE tenant_id=? AND status='active') AS total_students,
-        (SELECT COUNT(*) FROM bus_stops WHERE tenant_id=? AND status='active') AS total_stops,
-        (SELECT AVG(t.delay_minutes) FROM bus_trips t WHERE t.tenant_id=? AND t.status='completed' AND t.trip_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS avg_delay,
-        (SELECT SUM(t.distance_km) FROM bus_trips t WHERE t.tenant_id=? AND t.status='completed' AND t.trip_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS total_km_30d,
-        (SELECT SUM(t.fuel_used_litres) FROM bus_trips t WHERE t.tenant_id=? AND t.status='completed' AND t.trip_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS total_fuel_30d,
-        (SELECT SUM(m.cost) FROM bus_maintenance m WHERE m.tenant_id=? AND m.status='completed' AND m.completed_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)) AS maint_cost_90d,
-        (SELECT COUNT(*) FROM bus_trips t WHERE t.tenant_id=? AND t.status='completed' AND t.trip_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS trips_30d
+        (SELECT COUNT(*) FROM bus_routes WHERE tenant_id=$1 AND status='active') AS active_routes,
+        (SELECT COUNT(*) FROM bus_fleet WHERE tenant_id=$2 AND status='active') AS active_buses,
+        (SELECT COUNT(*) FROM bus_student_assignments WHERE tenant_id=$3 AND status='active') AS total_students,
+        (SELECT COUNT(*) FROM bus_stops WHERE tenant_id=$4 AND status='active') AS total_stops,
+        (SELECT AVG(t.delay_minutes) FROM bus_trips t WHERE t.tenant_id=$5 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS avg_delay,
+        (SELECT SUM(t.distance_km) FROM bus_trips t WHERE t.tenant_id=$6 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS total_km_30d,
+        (SELECT SUM(t.fuel_used_litres) FROM bus_trips t WHERE t.tenant_id=$7 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS total_fuel_30d,
+        (SELECT SUM(m.cost) FROM bus_maintenance m WHERE m.tenant_id=$8 AND m.status='completed' AND m.completed_date >= CURRENT_DATE - INTERVAL '90 days') AS maint_cost_90d,
+        (SELECT COUNT(*) FROM bus_trips t WHERE t.tenant_id=$9 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS trips_30d
     `, [tid, tid, tid, tid, tid, tid, tid, tid, tid]);
 
     const m = metrics[0] ? metrics[0] : {};
@@ -1550,11 +1550,11 @@ module.exports = function(app, pool, opts) {
       `SELECT r.id, r.name, r.distance_km, r.estimated_time_min,
               f.registration_number, f.capacity,
               (SELECT COUNT(*) FROM bus_student_assignments sa WHERE sa.route_id=r.id AND sa.status='active') AS stu_count,
-              (SELECT AVG(t.delay_minutes) FROM bus_trips t WHERE t.route_id=r.id AND t.tenant_id=? AND t.status='completed' AND t.trip_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS avg_delay,
-              (SELECT COUNT(*) FROM bus_trips t WHERE t.route_id=r.id AND t.tenant_id=? AND t.status='completed' AND t.trip_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS trip_count_30d
+              (SELECT AVG(t.delay_minutes) FROM bus_trips t WHERE t.route_id=r.id AND t.tenant_id=$1 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS avg_delay,
+              (SELECT COUNT(*) FROM bus_trips t WHERE t.route_id=r.id AND t.tenant_id=$2 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS trip_count_30d
        FROM bus_routes r
        LEFT JOIN bus_fleet f ON f.id=r.assigned_bus_id
-       WHERE r.tenant_id=? AND r.status='active'
+       WHERE r.tenant_id=$3 AND r.status='active'
        ORDER BY r.name`, [tid, tid, tid]);
 
     // Daily trip counts (last 14 days)
@@ -1562,22 +1562,22 @@ module.exports = function(app, pool, opts) {
       `SELECT trip_date, COUNT(*) AS trip_count, SUM(distance_km) AS total_km,
               AVG(delay_minutes) AS avg_delay, SUM(fuel_used_litres) AS fuel
        FROM bus_trips
-       WHERE tenant_id=? AND status='completed' AND trip_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+       WHERE tenant_id=$1 AND status='completed' AND trip_date >= CURRENT_DATE - INTERVAL '14 days'
        GROUP BY trip_date ORDER BY trip_date`, [tid]);
 
     // Bus utilization
     const busUtil = await pool.query(
       `SELECT f.id, f.registration_number, f.model, f.capacity, f.current_mileage, f.status,
               (SELECT COUNT(*) FROM bus_routes r WHERE r.assigned_bus_id=f.id AND r.status='active') AS route_count,
-              (SELECT COUNT(*) FROM bus_trips t WHERE t.bus_id=f.id AND t.tenant_id=? AND t.status='completed' AND t.trip_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS trips_30d
-       FROM bus_fleet f WHERE f.tenant_id=? ORDER BY f.registration_number`, [tid, tid]);
+              (SELECT COUNT(*) FROM bus_trips t WHERE t.bus_id=f.id AND t.tenant_id=$1 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS trips_30d
+       FROM bus_fleet f WHERE f.tenant_id=$2 ORDER BY f.registration_number`, [tid, tid]);
 
     // Notification stats
     const notifStats = await pool.query(
       `SELECT notification_type, COUNT(*) AS cnt,
               SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END) AS delivered,
               SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed
-       FROM bus_notifications_log WHERE tenant_id=?
+       FROM bus_notifications_log WHERE tenant_id=$1
        GROUP BY notification_type ORDER BY cnt DESC`, [tid]);
 
     let h = '<div class="bro-wrap">' + CSS + nav('Analytics');
@@ -1690,7 +1690,7 @@ module.exports = function(app, pool, opts) {
     let settings = {};
     try {
       const settingsRows = await pool.query(
-        "SELECT setting_key, setting_value FROM bus_settings WHERE tenant_id=?", [tid]);
+        "SELECT setting_key, setting_value FROM bus_settings WHERE tenant_id=$1", [tid]);
       if (settingsRows && settingsRows.length) {
         settingsRows.forEach(row => { settings[row.setting_key] = row.setting_value; });
       }
@@ -1809,9 +1809,9 @@ module.exports = function(app, pool, opts) {
     for (const key of fields) {
       const value = req.body[key] || '';
       await pool.query(
-        `INSERT INTO bus_settings (tenant_id, setting_key, setting_value) VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE setting_value=?, updated_at=NOW()`,
-        [tid, key, value, value]);
+        `INSERT INTO bus_settings (tenant_id, setting_key, setting_value) VALUES ($1, $2, $3)
+         ON CONFLICT (tenant_id, setting_key) DO UPDATE SET setting_value=EXCLUDED.setting_value, updated_at=NOW()`,
+        [tid, key, value]);
     }
 
     audit(req, 'settings_save', { section });
@@ -1825,7 +1825,7 @@ module.exports = function(app, pool, opts) {
     try {
       await pool.query(
         `INSERT INTO bus_notifications_log (tenant_id, student_assignment_id, route_id, parent_phone, parent_email, notification_type, message, sent_via, status, sent_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())`,
         [tid, data.assignment_id || null, data.route_id || null,
          data.parent_phone || null, data.parent_email || null,
          data.notification_type || 'general', data.message || '',
@@ -1840,14 +1840,14 @@ module.exports = function(app, pool, opts) {
   // ═══════════════════════════════════════════════════════════════════════════
   async function sendDelayNotifications(tid, tripId, delayMinutes) {
     try {
-      const trip = await pool.query('SELECT route_id FROM bus_trips WHERE id=? AND tenant_id=?', [tripId, tid]);
+      const trip = await pool.query('SELECT route_id FROM bus_trips WHERE id=$1 AND tenant_id=$2', [tripId, tid]);
       if (!trip.length) return;
       const routeId = trip[0].route_id;
 
       const assignments = await pool.query(
         `SELECT id, student_name, parent_phone, parent_email
          FROM bus_student_assignments
-         WHERE tenant_id=? AND route_id=? AND status='active'`, [tid, routeId]);
+         WHERE tenant_id=$1 AND route_id=$2 AND status='active'`, [tid, routeId]);
 
       for (const a of assignments) {
         await logParentNotification(tid, {

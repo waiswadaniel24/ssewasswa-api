@@ -2,7 +2,7 @@
 // AI-TUTOR MODULE — School SaaS Portal
 // AI-powered tutoring sessions, doubt clearing, concept maps,
 // practice problems, learning style adaptation, progress tracking.
-// 12+ routes, MySQL-backed, tenant-aware.
+// 12+ routes, PostgreSQL-backed, tenant-aware.
 // ============================================================
 module.exports = function(app, pool, opts) {
   const { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT } = opts;
@@ -83,12 +83,12 @@ module.exports = function(app, pool, opts) {
   app.get('/school/ai-tutor', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [totalSess] = await pool.query('SELECT COUNT(*) as c FROM ai_tutor_sessions WHERE tenant_id=? AND student_id=?', [tid, uid]);
-    const [activeSess] = await pool.query('SELECT COUNT(*) as c FROM ai_tutor_sessions WHERE tenant_id=? AND student_id=? AND status="active"', [tid, uid]);
-    const [concepts] = await pool.query('SELECT COUNT(*) as c FROM ai_concepts WHERE tenant_id=?', [tid, uid]);
-    const [totalProg] = await pool.query('SELECT COALESCE(SUM(total_sessions),0) as c FROM ai_tutor_progress WHERE tenant_id=? AND student_id=?', [tid, uid]);
-    const [recentSess] = await pool.query('SELECT * FROM ai_tutor_sessions WHERE tenant_id=? AND student_id=? ORDER BY created_at DESC LIMIT 5', [tid, uid]);
-    const [subjects] = await pool.query('SELECT DISTINCT subject FROM ai_tutor_sessions WHERE tenant_id=? AND student_id=? AND subject IS NOT NULL', [tid, uid]);
+    const { rows: totalSess } = await pool.query('SELECT COUNT(*) as c FROM ai_tutor_sessions WHERE tenant_id=$1 AND student_id=$2', [tid, uid]);
+    const { rows: activeSess } = await pool.query("SELECT COUNT(*) as c FROM ai_tutor_sessions WHERE tenant_id=$1 AND student_id=$2 AND status='active'", [tid, uid]);
+    const { rows: concepts } = await pool.query('SELECT COUNT(*) as c FROM ai_concepts WHERE tenant_id=$1', [tid]);
+    const { rows: totalProg } = await pool.query('SELECT COALESCE(SUM(total_sessions),0) as c FROM ai_tutor_progress WHERE tenant_id=$1 AND student_id=$2', [tid, uid]);
+    const { rows: recentSess } = await pool.query('SELECT * FROM ai_tutor_sessions WHERE tenant_id=$1 AND student_id=$2 ORDER BY created_at DESC LIMIT 5', [tid, uid]);
+    const { rows: subjects } = await pool.query('SELECT DISTINCT subject FROM ai_tutor_sessions WHERE tenant_id=$1 AND student_id=$2 AND subject IS NOT NULL', [tid, uid]);
 
     res.send(renderPage('AI Tutor', SKIP + `<div style="max-width:1200px;margin:0 auto;padding:20px">
       ${nav('dash')}
@@ -198,27 +198,27 @@ module.exports = function(app, pool, opts) {
       { role: 'tutor', text: `Welcome! I'm your AI tutor for ${esc(subject)}. Today we'll explore "${esc(topic)}". Let me know what you'd like to understand better!`, time: new Date().toISOString() }
     ];
 
-    const [result] = await pool.query(
-      'INSERT INTO ai_tutor_sessions (tenant_id, student_id, subject, topic, messages, learning_style, status) VALUES (?, ?, ?, ?, ?, ?, "active")',
+    const { rows: [newSession] } = await pool.query(
+      "INSERT INTO ai_tutor_sessions (tenant_id, student_id, subject, topic, messages, learning_style, status) VALUES ($1, $2, $3, $4, $5, $6, 'active') RETURNING id",
       [tid, uid, subject, topic, JSON.stringify(initialMessages), learning_style || 'visual']
     );
 
-    audit({ action: 'ai_tutor_session_start', subject, topic, sessionId: result.insertId, user: req.session.user });
-    res.redirect('/school/ai-tutor/session/' + result.insertId);
+    audit({ action: 'ai_tutor_session_start', subject, topic, sessionId: newSession.id, user: req.session.user });
+    res.redirect('/school/ai-tutor/session/' + newSession.id);
   }));
 
   // ─── ROUTE 4: View Session / Chat Interface ──────────────
   app.get('/school/ai-tutor/session/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [sess] = await pool.query('SELECT * FROM ai_tutor_sessions WHERE id=? AND tenant_id=? AND student_id=?', [req.params.id, tid, uid]);
+    const { rows: sess } = await pool.query('SELECT * FROM ai_tutor_sessions WHERE id=$1 AND tenant_id=$2 AND student_id=$3', [req.params.id, tid, uid]);
     if (!sess[0]) return res.redirect('/school/ai-tutor');
 
     const s = sess[0];
     const messages = Array.isArray(s.messages) ? s.messages : [];
 
     // Simulate AI explanation generation for available concepts
-    const [relatedConcepts] = await pool.query('SELECT * FROM ai_concepts WHERE tenant_id=? AND subject=? LIMIT 5', [tid, s.subject]);
+    const { rows: relatedConcepts } = await pool.query('SELECT * FROM ai_concepts WHERE tenant_id=$1 AND subject=$2 LIMIT 5', [tid, s.subject]);
 
     res.send(renderPage('AI Session', SKIP + `<div style="max-width:800px;margin:0 auto;padding:20px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
@@ -295,7 +295,7 @@ module.exports = function(app, pool, opts) {
     const { message } = req.body;
     const sid = req.params.id;
 
-    const [sess] = await pool.query('SELECT * FROM ai_tutor_sessions WHERE id=? AND tenant_id=? AND student_id=? AND status="active"', [sid, tid, uid]);
+    const { rows: sess } = await pool.query("SELECT * FROM ai_tutor_sessions WHERE id=$1 AND tenant_id=$2 AND student_id=$3 AND status='active'", [sid, tid, uid]);
     if (!sess[0]) return res.redirect('/school/ai-tutor');
 
     const messages = Array.isArray(sess[0].messages) ? sess[0].messages : [];
@@ -313,7 +313,7 @@ module.exports = function(app, pool, opts) {
     const aiResponse = responses[Math.floor(Math.random() * responses.length)];
     messages.push({ role: 'tutor', text: aiResponse, time: new Date().toISOString() });
 
-    await pool.query('UPDATE ai_tutor_sessions SET messages=? WHERE id=? AND tenant_id=?', [JSON.stringify(messages), sid, tid]);
+    await pool.query('UPDATE ai_tutor_sessions SET messages=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(messages), sid, tid]);
     res.redirect('/school/ai-tutor/session/' + sid);
   }));
 
@@ -323,19 +323,19 @@ module.exports = function(app, pool, opts) {
     const uid = req.session.user.id;
     const sid = req.params.id;
 
-    const [sess] = await pool.query('SELECT * FROM ai_tutor_sessions WHERE id=? AND tenant_id=? AND student_id=? AND status="active"', [sid, tid, uid]);
+    const { rows: sess } = await pool.query("SELECT * FROM ai_tutor_sessions WHERE id=$1 AND tenant_id=$2 AND student_id=$3 AND status='active'", [sid, tid, uid]);
     if (!sess[0]) return res.json({ ok: false });
 
     const created = new Date(sess[0].created_at);
     const now = new Date();
     const duration = Math.round((now - created) / 60000);
 
-    await pool.query('UPDATE ai_tutor_sessions SET status="completed", duration_min=?, completed_at=NOW() WHERE id=? AND tenant_id=?', [duration, sid, tid]);
+    await pool.query("UPDATE ai_tutor_sessions SET status='completed', duration_min=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3", [duration, sid, tid]);
 
     // Update progress
     await pool.query(`INSERT INTO ai_tutor_progress (tenant_id, student_id, subject, total_sessions, last_session_at)
-      VALUES (?, ?, ?, 1, NOW())
-      ON DUPLICATE KEY UPDATE total_sessions = total_sessions + 1, last_session_at = NOW()`,
+      VALUES ($1, $2, $3, 1, NOW())
+      ON CONFLICT (tenant_id, student_id, subject) DO UPDATE SET total_sessions = ai_tutor_progress.total_sessions + 1, last_session_at = NOW()`,
       [tid, uid, sess[0].subject]);
 
     audit({ action: 'ai_tutor_session_end', sessionId: sid, duration, user: req.session.user });
@@ -347,7 +347,7 @@ module.exports = function(app, pool, opts) {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
     const { rating } = req.body;
-    await pool.query('UPDATE ai_tutor_sessions SET rating=? WHERE id=? AND tenant_id=? AND student_id=?', [parseInt(rating), req.params.id, tid, uid]);
+    await pool.query('UPDATE ai_tutor_sessions SET rating=$1 WHERE id=$2 AND tenant_id=$3 AND student_id=$4', [parseInt(rating), req.params.id, tid, uid]);
     res.redirect('/school/ai-tutor/session/' + req.params.id);
   }));
 
@@ -355,7 +355,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/ai-tutor/session/:id/explanation', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [sess] = await pool.query('SELECT * FROM ai_tutor_sessions WHERE id=? AND tenant_id=? AND student_id=?', [req.params.id, tid, uid]);
+    const { rows: sess } = await pool.query('SELECT * FROM ai_tutor_sessions WHERE id=$1 AND tenant_id=$2 AND student_id=$3', [req.params.id, tid, uid]);
     if (!sess[0]) return res.redirect('/school/ai-tutor');
 
     const s = sess[0];
@@ -432,16 +432,17 @@ module.exports = function(app, pool, opts) {
     const limit = 15;
     const offset = (page - 1) * limit;
 
-    let whereClause = 'WHERE tenant_id=? AND student_id=?';
+    let whereIdx = 2;
+    let whereClause = 'WHERE tenant_id=$1 AND student_id=$2';
     const params = [tid, uid];
     if (subjectFilter) {
-      whereClause += ' AND subject=?';
+      whereClause += ` AND subject=$${++whereIdx}`;
       params.push(subjectFilter);
     }
 
-    const [total] = await pool.query(`SELECT COUNT(*) as c FROM ai_tutor_sessions ${whereClause}`, params);
-    const [sessions] = await pool.query(`SELECT * FROM ai_tutor_sessions ${whereClause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`, params);
-    const [subjects] = await pool.query('SELECT DISTINCT subject, COUNT(*) as cnt FROM ai_tutor_sessions WHERE tenant_id=? AND student_id=? AND subject IS NOT NULL GROUP BY subject ORDER BY cnt DESC', [tid, uid]);
+    const { rows: total } = await pool.query(`SELECT COUNT(*) as c FROM ai_tutor_sessions ${whereClause}`, params);
+    const { rows: sessions } = await pool.query(`SELECT * FROM ai_tutor_sessions ${whereClause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`, params);
+    const { rows: subjects } = await pool.query('SELECT DISTINCT subject, COUNT(*) as cnt FROM ai_tutor_sessions WHERE tenant_id=$1 AND student_id=$2 AND subject IS NOT NULL GROUP BY subject ORDER BY cnt DESC', [tid, uid]);
     const totalPages = Math.ceil(total[0].c / limit);
 
     res.send(renderPage('Session History', SKIP + `<div style="max-width:1000px;margin:0 auto;padding:20px">
@@ -492,13 +493,14 @@ module.exports = function(app, pool, opts) {
     const subjectFilter = req.query.subject || '';
     const difficultyFilter = req.query.difficulty || '';
 
-    let whereClause = 'WHERE tenant_id=?';
+    let whereIdx = 1;
+    let whereClause = 'WHERE tenant_id=$1';
     const params = [tid];
-    if (subjectFilter) { whereClause += ' AND subject=?'; params.push(subjectFilter); }
-    if (difficultyFilter) { whereClause += ' AND difficulty=?'; params.push(difficultyFilter); }
+    if (subjectFilter) { whereClause += ` AND subject=$${++whereIdx}`; params.push(subjectFilter); }
+    if (difficultyFilter) { whereClause += ` AND difficulty=$${++whereIdx}`; params.push(difficultyFilter); }
 
-    const [concepts] = await pool.query(`SELECT * FROM ai_concepts ${whereClause} ORDER BY subject, topic`, params);
-    const [subjects] = await pool.query('SELECT DISTINCT subject FROM ai_concepts WHERE tenant_id=? ORDER BY subject', [tid]);
+    const { rows: concepts } = await pool.query(`SELECT * FROM ai_concepts ${whereClause} ORDER BY subject, topic`, params);
+    const { rows: subjects } = await pool.query('SELECT DISTINCT subject FROM ai_concepts WHERE tenant_id=$1 ORDER BY subject', [tid]);
 
     res.send(renderPage('Concept Library', SKIP + `<div style="max-width:1100px;margin:0 auto;padding:20px">
       ${nav('concepts')}
@@ -546,7 +548,7 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 11: Add Concept ───────────────────────────────
   app.get('/school/ai-tutor/concepts/new', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [existing] = await pool.query('SELECT id, topic FROM ai_concepts WHERE tenant_id=? ORDER BY subject, topic', [tid]);
+    const { rows: existing } = await pool.query('SELECT id, topic FROM ai_concepts WHERE tenant_id=$1 ORDER BY subject, topic', [tid]);
     const subjects = ['Mathematics','Science','English','Physics','Chemistry','Biology','History','Geography','Computer Science','Economics'];
 
     res.send(renderPage('Add Concept', SKIP + `<div style="max-width:700px;margin:0 auto;padding:20px">
@@ -602,11 +604,11 @@ module.exports = function(app, pool, opts) {
     const tagArr = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [];
 
     if (id) {
-      await pool.query('UPDATE ai_concepts SET subject=?, topic=?, difficulty=?, explanation=?, prerequisite_ids=?, tags=? WHERE id=? AND tenant_id=?',
+      await pool.query('UPDATE ai_concepts SET subject=$1, topic=$2, difficulty=$3, explanation=$4, prerequisite_ids=$5, tags=$6 WHERE id=$7 AND tenant_id=$8',
         [subject, topic, difficulty, explanation, JSON.stringify(prereqs.map(Number)), JSON.stringify(tagArr), id, tid]);
       audit({ action: 'update_concept', conceptId: id, user: req.session.user });
     } else {
-      await pool.query('INSERT INTO ai_concepts (tenant_id, subject, topic, difficulty, explanation, prerequisite_ids, tags) VALUES (?,?,?,?,?,?,?)',
+      await pool.query('INSERT INTO ai_concepts (tenant_id, subject, topic, difficulty, explanation, prerequisite_ids, tags) VALUES ($1,$2,$3,$4,$5,$6,$7)',
         [tid, subject, topic, difficulty, explanation, JSON.stringify(prereqs.map(Number)), JSON.stringify(tagArr)]);
       audit({ action: 'create_concept', topic, subject, user: req.session.user });
     }
@@ -616,7 +618,7 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 13: View Concept Detail ───────────────────────
   app.get('/school/ai-tutor/concepts/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [concept] = await pool.query('SELECT * FROM ai_concepts WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const { rows: concept } = await pool.query('SELECT * FROM ai_concepts WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!concept[0]) return res.redirect('/school/ai-tutor/concepts');
 
     const c = concept[0];
@@ -625,7 +627,7 @@ module.exports = function(app, pool, opts) {
 
     let prereqNames = [];
     if (prereqs.length) {
-      const [pr] = await pool.query('SELECT id, topic FROM ai_concepts WHERE id IN (?) AND tenant_id=?', [prereqs, tid]);
+      const { rows: pr } = await pool.query('SELECT id, topic FROM ai_concepts WHERE id = ANY($1) AND tenant_id=$2', [prereqs, tid]);
       prereqNames = pr;
     }
 
@@ -660,11 +662,11 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 14: Edit Concept ──────────────────────────────
   app.get('/school/ai-tutor/concepts/:id/edit', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const [concept] = await pool.query('SELECT * FROM ai_concepts WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const { rows: concept } = await pool.query('SELECT * FROM ai_concepts WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!concept[0]) return res.redirect('/school/ai-tutor/concepts');
 
     const c = concept[0];
-    const [existing] = await pool.query('SELECT id, topic FROM ai_concepts WHERE tenant_id=? AND id!=? ORDER BY topic', [tid, c.id]);
+    const { rows: existing } = await pool.query('SELECT id, topic FROM ai_concepts WHERE tenant_id=$1 AND id!=$2 ORDER BY topic', [tid, c.id]);
     const subjects = ['Mathematics','Science','English','Physics','Chemistry','Biology','History','Geography','Computer Science','Economics'];
     const prereqs = Array.isArray(c.prerequisite_ids) ? c.prerequisite_ids : [];
     const tags = Array.isArray(c.tags) ? c.tags.join(', ') : '';
@@ -716,7 +718,7 @@ module.exports = function(app, pool, opts) {
   // ─── ROUTE 15: Delete Concept ────────────────────────────
   app.post('/school/ai-tutor/concepts/:id/delete', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM ai_concepts WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    await pool.query('DELETE FROM ai_concepts WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     audit({ action: 'delete_concept', conceptId: req.params.id, user: req.session.user });
     res.redirect('/school/ai-tutor/concepts');
   }));
@@ -725,10 +727,10 @@ module.exports = function(app, pool, opts) {
   app.get('/school/ai-tutor/progress', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    const [progress] = await pool.query('SELECT * FROM ai_tutor_progress WHERE tenant_id=? AND student_id=? ORDER BY total_sessions DESC', [tid, uid]);
-    const [totalSessions] = await pool.query('SELECT COUNT(*) as c FROM ai_tutor_sessions WHERE tenant_id=? AND student_id=? AND status="completed"', [tid, uid]);
-    const [totalMinutes] = await pool.query('SELECT COALESCE(SUM(duration_min),0) as c FROM ai_tutor_sessions WHERE tenant_id=? AND student_id=?', [tid, uid]);
-    const [avgRating] = await pool.query('SELECT COALESCE(AVG(rating),0) as c FROM ai_tutor_sessions WHERE tenant_id=? AND student_id=? AND rating>0', [tid, uid]);
+    const { rows: progress } = await pool.query('SELECT * FROM ai_tutor_progress WHERE tenant_id=$1 AND student_id=$2 ORDER BY total_sessions DESC', [tid, uid]);
+    const { rows: totalSessions } = await pool.query("SELECT COUNT(*) as c FROM ai_tutor_sessions WHERE tenant_id=$1 AND student_id=$2 AND status='completed'", [tid, uid]);
+    const { rows: totalMinutes } = await pool.query('SELECT COALESCE(SUM(duration_min),0) as c FROM ai_tutor_sessions WHERE tenant_id=$1 AND student_id=$2', [tid, uid]);
+    const { rows: avgRating } = await pool.query('SELECT COALESCE(AVG(rating),0) as c FROM ai_tutor_sessions WHERE tenant_id=$1 AND student_id=$2 AND rating>0', [tid, uid]);
 
     res.send(renderPage('Learning Progress', SKIP + `<div style="max-width:1000px;margin:0 auto;padding:20px">
       ${nav('progress')}
@@ -858,8 +860,8 @@ module.exports = function(app, pool, opts) {
     // Update progress
     if (subject) {
       await pool.query(`INSERT INTO ai_tutor_progress (tenant_id, student_id, subject, avg_score, total_sessions, last_session_at)
-        VALUES (?, ?, ?, ?, 0, NOW())
-        ON DUPLICATE KEY UPDATE avg_score = (avg_score * total_sessions + ?) / (total_sessions + 1)`,
+        VALUES ($1, $2, $3, $4, 0, NOW())
+        ON CONFLICT (tenant_id, student_id, subject) DO UPDATE SET avg_score = (ai_tutor_progress.avg_score * ai_tutor_progress.total_sessions + $5) / (ai_tutor_progress.total_sessions + 1)`,
         [tid, uid, subject, score, score]);
     }
 
@@ -892,13 +894,14 @@ module.exports = function(app, pool, opts) {
   app.get('/school/ai-tutor/concept-map', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const subjectFilter = req.query.subject || '';
-    const [subjects] = await pool.query('SELECT DISTINCT subject FROM ai_concepts WHERE tenant_id=? ORDER BY subject', [tid]);
+    const { rows: subjects } = await pool.query('SELECT DISTINCT subject FROM ai_concepts WHERE tenant_id=$1 ORDER BY subject', [tid]);
 
-    let whereClause = 'WHERE tenant_id=?';
+    let whereIdx = 1;
+    let whereClause = 'WHERE tenant_id=$1';
     const params = [tid];
-    if (subjectFilter) { whereClause += ' AND subject=?'; params.push(subjectFilter); }
+    if (subjectFilter) { whereClause += ` AND subject=$${++whereIdx}`; params.push(subjectFilter); }
 
-    const [concepts] = await pool.query(`SELECT * FROM ai_concepts ${whereClause} ORDER BY topic`, params);
+    const { rows: concepts } = await pool.query(`SELECT * FROM ai_concepts ${whereClause} ORDER BY topic`, params);
 
     // Build concept map visualization
     const colors = ['#4f46e5','#059669','#d97706','#dc2626','#7c3aed','#0891b2'];
@@ -947,7 +950,7 @@ module.exports = function(app, pool, opts) {
   app.post('/school/ai-tutor/session/:id/delete', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const uid = req.session.user.id;
-    await pool.query('DELETE FROM ai_tutor_sessions WHERE id=? AND tenant_id=? AND student_id=?', [req.params.id, tid, uid]);
+    await pool.query('DELETE FROM ai_tutor_sessions WHERE id=$1 AND tenant_id=$2 AND student_id=$3', [req.params.id, tid, uid]);
     audit({ action: 'delete_ai_session', sessionId: req.params.id, user: req.session.user });
     res.redirect('/school/ai-tutor/history');
   }));

@@ -194,7 +194,7 @@ module.exports = function(app, pool, opts) {
   const audit = opts.audit || (() => {});
 
   // ============================================================
-  // DATABASE MIGRATIONS (MySQL)
+  // DATABASE MIGRATIONS (PostgreSQL)
   // ============================================================
   const migrations = [
     `CREATE TABLE IF NOT EXISTS virtual_meetings (
@@ -213,11 +213,7 @@ module.exports = function(app, pool, opts) {
       recurring_config JSON,
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT uk_meeting_code UNIQUE (meeting_code),
-      KEY idx_vm_tenant (tenant_id),
-      KEY idx_vm_host (tenant_id, host_id),
-      KEY idx_vm_status (tenant_id, status),
-      KEY idx_vm_scheduled (tenant_id, scheduled_at)
+      CONSTRAINT uk_meeting_code UNIQUE (meeting_code)
     )`,
     `CREATE TABLE IF NOT EXISTS meeting_participants (
       id SERIAL PRIMARY KEY,
@@ -230,10 +226,7 @@ module.exports = function(app, pool, opts) {
       joined_at TIMESTAMPTZ,
       left_at TIMESTAMPTZ,
       duration_seconds INT DEFAULT 0,
-      is_present SMALLINT DEFAULT 0,
-      KEY idx_mp_meeting (meeting_id),
-      KEY idx_mp_user (tenant_id, user_id),
-      KEY idx_mp_tenant (tenant_id)
+      is_present SMALLINT DEFAULT 0
     )`,
     `CREATE TABLE IF NOT EXISTS meeting_recordings (
       id SERIAL PRIMARY KEY,
@@ -245,9 +238,7 @@ module.exports = function(app, pool, opts) {
       recorded_by INT DEFAULT 0,
       thumbnail_url VARCHAR(500),
       retention_delete_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      KEY idx_mr_tenant (tenant_id),
-      KEY idx_mr_meeting (meeting_id)
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS meeting_templates (
       id SERIAL PRIMARY KEY,
@@ -258,9 +249,7 @@ module.exports = function(app, pool, opts) {
       default_duration INT DEFAULT 60,
       default_settings JSON,
       is_system SMALLINT DEFAULT 0,
-      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      KEY idx_mt_tenant (tenant_id),
-      KEY idx_mt_category (tenant_id, category)
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS meeting_notes (
       id SERIAL PRIMARY KEY,
@@ -271,9 +260,7 @@ module.exports = function(app, pool, opts) {
       action_items JSON,
       created_by INT DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      KEY idx_mn_meeting (meeting_id),
-      KEY idx_mn_tenant (tenant_id)
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS meeting_attendance_logs (
       id SERIAL PRIMARY KEY,
@@ -283,10 +270,23 @@ module.exports = function(app, pool, opts) {
       participant_name VARCHAR(255),
       join_time TIMESTAMPTZ,
       leave_time TIMESTAMPTZ,
-      duration_seconds INT DEFAULT 0,
-      KEY idx_mal_meeting (meeting_id),
-      KEY idx_mal_participant (tenant_id, participant_id)
-    )`
+      duration_seconds INT DEFAULT 0
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_vm_tenant ON virtual_meetings (tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_vm_host ON virtual_meetings (tenant_id, host_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_vm_status ON virtual_meetings (tenant_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_vm_scheduled ON virtual_meetings (tenant_id, scheduled_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_mp_meeting ON meeting_participants (meeting_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mp_user ON meeting_participants (tenant_id, user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mp_tenant ON meeting_participants (tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mr_tenant ON meeting_recordings (tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mr_meeting ON meeting_recordings (meeting_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mt_tenant ON meeting_templates (tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mt_category ON meeting_templates (tenant_id, category)`,
+    `CREATE INDEX IF NOT EXISTS idx_mn_meeting ON meeting_notes (meeting_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mn_tenant ON meeting_notes (tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mal_meeting ON meeting_attendance_logs (meeting_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_mal_participant ON meeting_attendance_logs (tenant_id, participant_id)`
   ];
 
   (async () => {
@@ -295,7 +295,7 @@ module.exports = function(app, pool, opts) {
         try { await pool.query(sql); } catch (e) { /* column may exist */ }
       }
       // Seed system templates
-      const [existing] = await pool.query("SELECT COUNT(*) as cnt FROM meeting_templates WHERE tenant_id=0 AND is_system=1");
+      const { rows: existing } = await pool.query("SELECT COUNT(*) as cnt FROM meeting_templates WHERE tenant_id=0 AND is_system=1");
       if (existing[0].cnt === 0) {
         const systemTemplates = [
           ['Daily Class', 'Regular classroom session for daily lessons', 'class', 45, '{"recording":true,"waiting_room":false,"mute_on_join":true,"screen_share":true,"breakout_rooms":false}'],
@@ -306,7 +306,7 @@ module.exports = function(app, pool, opts) {
           ['One-on-One Tutoring', 'Individual student tutoring session', 'tutoring', 30, '{"recording":true,"waiting_room":true,"mute_on_join":false,"screen_share":true,"breakout_rooms":false}']
         ];
         for (const [name, desc, cat, dur, settings] of systemTemplates) {
-          await pool.query("INSERT INTO meeting_templates (tenant_id,name,description,category,default_duration,default_settings,is_system) VALUES (0,?,?,?,?,?,1)", [name, desc, cat, dur, settings]);
+          await pool.query("INSERT INTO meeting_templates (tenant_id,name,description,category,default_duration,default_settings,is_system) VALUES (0,$1,$2,$3,$4,$5,1)", [name, desc, cat, dur, settings]);
         }
       }
       console.log('[VideoConf] Migrations applied');
@@ -344,7 +344,7 @@ module.exports = function(app, pool, opts) {
   async function getUserName(pool, userId) {
     if (!userId) return 'Unknown';
     try {
-      const [rows] = await pool.query('SELECT name FROM users WHERE id = ? LIMIT 1', [userId]);
+      const { rows } = await pool.query('SELECT name FROM users WHERE id = $1 LIMIT 1', [userId]);
       if (rows.length) return rows[0].name || 'Unknown';
     } catch (e) { /* ignore */ }
     return 'User #' + userId;
@@ -352,14 +352,14 @@ module.exports = function(app, pool, opts) {
 
   async function getTeachers(pool, tid) {
     try {
-      const [rows] = await pool.query("SELECT id, name FROM users WHERE tenant_id = ? AND role IN ('teacher','admin','staff') AND is_active = 1 ORDER BY name", [tid]);
+      const { rows } = await pool.query("SELECT id, name FROM users WHERE tenant_id = $1 AND role IN ('teacher','admin','staff') AND is_active = 1 ORDER BY name", [tid]);
       return rows;
     } catch (e) { return []; }
   }
 
   async function getClasses(pool, tid) {
     try {
-      const [rows] = await pool.query("SELECT id, name FROM classes WHERE tenant_id = ? ORDER BY name", [tid]);
+      const { rows } = await pool.query("SELECT id, name FROM classes WHERE tenant_id = $1 ORDER BY name", [tid]);
       return rows;
     } catch (e) { return []; }
   }
@@ -372,33 +372,33 @@ module.exports = function(app, pool, opts) {
     const now = new Date();
 
     // Stats
-    const [statRows] = await pool.query(
-      "SELECT COUNT(*) as total, SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) as active, SUM(CASE WHEN status='scheduled' THEN 1 ELSE 0 END) as scheduled, SUM(CASE WHEN status='ended' THEN 1 ELSE 0 END) as ended FROM virtual_meetings WHERE tenant_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+    const { rows: statRows } = await pool.query(
+      "SELECT COUNT(*) as total, SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) as active, SUM(CASE WHEN status='scheduled' THEN 1 ELSE 0 END) as scheduled, SUM(CASE WHEN status='ended' THEN 1 ELSE 0 END) as ended FROM virtual_meetings WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '30 days'",
       [tid]
     );
     const stats = statRows[0] || { total: 0, active: 0, scheduled: 0, ended: 0 };
 
-    const [recRows] = await pool.query(
-      "SELECT COUNT(*) as cnt FROM meeting_recordings WHERE tenant_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+    const { rows: recRows } = await pool.query(
+      "SELECT COUNT(*) as cnt FROM meeting_recordings WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '30 days'",
       [tid]
     );
     const totalRecordings = recRows[0]?.cnt || 0;
 
     // Active meetings
-    const [activeMeetings] = await pool.query(
-      "SELECT * FROM virtual_meetings WHERE tenant_id = ? AND status = 'active' ORDER BY scheduled_at DESC LIMIT 10",
+    const { rows: activeMeetings } = await pool.query(
+      "SELECT * FROM virtual_meetings WHERE tenant_id = $1 AND status = 'active' ORDER BY scheduled_at DESC LIMIT 10",
       [tid]
     );
 
     // Upcoming meetings
-    const [upcomingMeetings] = await pool.query(
-      "SELECT * FROM virtual_meetings WHERE tenant_id = ? AND status = 'scheduled' AND scheduled_at >= NOW() ORDER BY scheduled_at ASC LIMIT 10",
+    const { rows: upcomingMeetings } = await pool.query(
+      "SELECT * FROM virtual_meetings WHERE tenant_id = $1 AND status = 'scheduled' AND scheduled_at >= NOW() ORDER BY scheduled_at ASC LIMIT 10",
       [tid]
     );
 
     // Recent recordings
-    const [recentRec] = await pool.query(
-      "SELECT r.*, m.title as meeting_title FROM meeting_recordings r JOIN virtual_meetings m ON m.id = r.meeting_id WHERE r.tenant_id = ? ORDER BY r.created_at DESC LIMIT 5",
+    const { rows: recentRec } = await pool.query(
+      "SELECT r.*, m.title as meeting_title FROM meeting_recordings r JOIN virtual_meetings m ON m.id = r.meeting_id WHERE r.tenant_id = $1 ORDER BY r.created_at DESC LIMIT 5",
       [tid]
     );
 
@@ -487,13 +487,13 @@ module.exports = function(app, pool, opts) {
     const classes = await getClasses(pool, tid);
 
     // Templates
-    const [templates] = await pool.query(
-      "SELECT * FROM meeting_templates WHERE tenant_id IN (0, ?) ORDER BY is_system DESC, name ASC",
+    const { rows: templates } = await pool.query(
+      "SELECT * FROM meeting_templates WHERE tenant_id IN (0, $1) ORDER BY is_system DESC, name ASC",
       [tid]
     );
 
-    const [conflicts] = await pool.query(
-      "SELECT m.title, m.scheduled_at, m.duration_minutes FROM virtual_meetings m WHERE m.tenant_id = ? AND m.status IN ('scheduled','active') AND m.host_id = ? AND m.scheduled_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR) AND m.scheduled_at <= DATE_ADD(NOW(), INTERVAL 24 HOUR) ORDER BY m.scheduled_at ASC",
+    const { rows: conflicts } = await pool.query(
+      "SELECT m.title, m.scheduled_at, m.duration_minutes FROM virtual_meetings m WHERE m.tenant_id = $1 AND m.status IN ('scheduled','active') AND m.host_id = $2 AND m.scheduled_at >= NOW() - INTERVAL '1 hour' AND m.scheduled_at <= NOW() + INTERVAL '24 hours' ORDER BY m.scheduled_at ASC",
       [tid, user.id]
     );
 
@@ -642,23 +642,23 @@ module.exports = function(app, pool, opts) {
       ? JSON.stringify({ type: recurring_type, end_date: recurring_end || null })
       : null;
 
-    const [result] = await pool.query(
+    const { rows: result } = await pool.query(
       `INSERT INTO virtual_meetings (tenant_id, title, description, host_id, host_name, meeting_code, scheduled_at, duration_minutes, max_participants, status, settings, recurring_config)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'scheduled', $10, $11) RETURNING id`,
       [tid, title, description, parseInt(host_id) || user.id, hostName, code, scheduled_at, parseInt(duration_minutes) || 60, parseInt(max_participants) || 50, settings, recurringConfig]
     );
-    const meetingId = result.insertId;
+    const meetingId = result[0].id;
 
     // If class_id, auto-add class students as participants
     if (class_id) {
       try {
-        const [students] = await pool.query(
-          "SELECT s.user_id, u.name FROM students s JOIN users u ON u.id = s.user_id WHERE s.class_id = ? AND s.tenant_id = ?",
+        const { rows: students } = await pool.query(
+          "SELECT s.user_id, u.name FROM students s JOIN users u ON u.id = s.user_id WHERE s.class_id = $1 AND s.tenant_id = $2",
           [parseInt(class_id), tid]
         );
         for (const s of students) {
           await pool.query(
-            "INSERT INTO meeting_participants (tenant_id, meeting_id, user_id, user_name, user_type, role) VALUES (?, ?, ?, ?, 'student', 'participant')",
+            "INSERT INTO meeting_participants (tenant_id, meeting_id, user_id, user_name, user_type, role) VALUES ($1, $2, $3, $4, 'student', 'participant')",
             [tid, meetingId, s.user_id, s.name]
           );
         }
@@ -674,8 +674,8 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.get('/school/video-conferencing/upcoming', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
-    const [meetings] = await pool.query(
-      "SELECT * FROM virtual_meetings WHERE tenant_id = ? AND status IN ('scheduled','active') ORDER BY scheduled_at ASC",
+    const { rows: meetings } = await pool.query(
+      "SELECT * FROM virtual_meetings WHERE tenant_id = $1 AND status IN ('scheduled','active') ORDER BY scheduled_at ASC",
       [tid]
     );
     const html = VC_CSS + `<div class="vc-wrap">
@@ -709,20 +709,20 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.get('/school/video-conferencing/room/:id', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
-    const [meetingRows] = await pool.query("SELECT * FROM virtual_meetings WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    const { rows: meetingRows } = await pool.query("SELECT * FROM virtual_meetings WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     const meeting = meetingRows[0];
     if (!meeting) return res.send(renderPage('Not Found', '<div class="vc-empty"><h3>Meeting not found</h3><a href="/school/video-conferencing" class="vc-btn vc-btn-primary" style="margin-top:12px">← Back</a></div>', user, req));
 
-    const [participants] = await pool.query(
-      "SELECT * FROM meeting_participants WHERE meeting_id = ? AND tenant_id = ? ORDER BY role DESC, user_name ASC",
+    const { rows: participants } = await pool.query(
+      "SELECT * FROM meeting_participants WHERE meeting_id = $1 AND tenant_id = $2 ORDER BY role DESC, user_name ASC",
       [meetingId, tid]
     );
-    const [notesRows] = await pool.query(
-      "SELECT * FROM meeting_notes WHERE meeting_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT 5",
+    const { rows: notesRows } = await pool.query(
+      "SELECT * FROM meeting_notes WHERE meeting_id = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 5",
       [meetingId, tid]
     );
-    const [logs] = await pool.query(
-      "SELECT * FROM meeting_attendance_logs WHERE meeting_id = ? AND tenant_id = ? ORDER BY join_time ASC",
+    const { rows: logs } = await pool.query(
+      "SELECT * FROM meeting_attendance_logs WHERE meeting_id = $1 AND tenant_id = $2 ORDER BY join_time ASC",
       [meetingId, tid]
     );
     const settings = typeof meeting.settings === 'string' ? JSON.parse(meeting.settings || '{}') : (meeting.settings || {});
@@ -914,11 +914,11 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.post('/school/video-conferencing/room/:id/start', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
-    const [rows] = await pool.query("SELECT * FROM virtual_meetings WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    const { rows } = await pool.query("SELECT * FROM virtual_meetings WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     const meeting = rows[0];
     if (!meeting) return res.redirect('/school/video-conferencing');
     if (meeting.host_id !== user.id) return res.send('Only the host can start this meeting.', 403);
-    await pool.query("UPDATE virtual_meetings SET status = 'active', updated_at = NOW() WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    await pool.query("UPDATE virtual_meetings SET status = 'active', updated_at = NOW() WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     audit('start_meeting', { tenant_id: tid, user_id: user.id, meeting_id: meetingId });
     res.redirect('/school/video-conferencing/room/' + meetingId);
   }));
@@ -928,17 +928,17 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.post('/school/video-conferencing/room/:id/end', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
-    const [rows] = await pool.query("SELECT * FROM virtual_meetings WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    const { rows } = await pool.query("SELECT * FROM virtual_meetings WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     const meeting = rows[0];
     if (!meeting) return res.redirect('/school/video-conferencing');
     if (meeting.host_id !== user.id) return res.send('Only the host can end this meeting.', 403);
 
     const now = new Date();
-    await pool.query("UPDATE virtual_meetings SET status = 'ended', updated_at = NOW() WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    await pool.query("UPDATE virtual_meetings SET status = 'ended', updated_at = NOW() WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     // Update participant leave times
-    await pool.query("UPDATE meeting_participants SET left_at = NOW(), duration_seconds = TIMESTAMPDIFF(SECOND, joined_at, NOW()) WHERE meeting_id = ? AND tenant_id = ? AND left_at IS NULL AND joined_at IS NOT NULL", [meetingId, tid]);
+    await pool.query("UPDATE meeting_participants SET left_at = NOW(), duration_seconds = EXTRACT(EPOCH FROM (NOW() - joined_at))::INT WHERE meeting_id = $1 AND tenant_id = $2 AND left_at IS NULL AND joined_at IS NOT NULL", [meetingId, tid]);
     // Update attendance logs
-    await pool.query("UPDATE meeting_attendance_logs SET leave_time = NOW(), duration_seconds = TIMESTAMPDIFF(SECOND, join_time, NOW()) WHERE meeting_id = ? AND tenant_id = ? AND leave_time IS NULL", [meetingId, tid]);
+    await pool.query("UPDATE meeting_attendance_logs SET leave_time = NOW(), duration_seconds = EXTRACT(EPOCH FROM (NOW() - join_time))::INT WHERE meeting_id = $1 AND tenant_id = $2 AND leave_time IS NULL", [meetingId, tid]);
     audit('end_meeting', { tenant_id: tid, user_id: user.id, meeting_id: meetingId });
     res.redirect('/school/video-conferencing/room/' + meetingId);
   }));
@@ -952,16 +952,16 @@ module.exports = function(app, pool, opts) {
     const limit = 20;
     const offset = (page - 1) * limit;
 
-    const [totalRows] = await pool.query("SELECT COUNT(*) as cnt FROM meeting_recordings WHERE tenant_id = ?", [tid]);
+    const { rows: totalRows } = await pool.query("SELECT COUNT(*) as cnt FROM meeting_recordings WHERE tenant_id = $1", [tid]);
     const total = totalRows[0]?.cnt || 0;
     const totalPages = Math.ceil(total / limit);
 
-    const [recordings] = await pool.query(
+    const { rows: recordings } = await pool.query(
       `SELECT r.*, m.title as meeting_title, m.host_name
        FROM meeting_recordings r
        JOIN virtual_meetings m ON m.id = r.meeting_id
-       WHERE r.tenant_id = ?
-       ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+       WHERE r.tenant_id = $1
+       ORDER BY r.created_at DESC LIMIT $2 OFFSET $3`,
       [tid, limit, offset]
     );
 
@@ -1013,15 +1013,15 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.get('/school/video-conferencing/recordings/:id', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, recId = parseInt(req.params.id);
-    const [rows] = await pool.query(
-      "SELECT r.*, m.title as meeting_title, m.host_name, m.meeting_code FROM meeting_recordings r JOIN virtual_meetings m ON m.id = r.meeting_id WHERE r.id = ? AND r.tenant_id = ?",
+    const { rows } = await pool.query(
+      "SELECT r.*, m.title as meeting_title, m.host_name, m.meeting_code FROM meeting_recordings r JOIN virtual_meetings m ON m.id = r.meeting_id WHERE r.id = $1 AND r.tenant_id = $2",
       [recId, tid]
     );
     const rec = rows[0];
     if (!rec) return res.send(renderPage('Not Found', '<div class="vc-empty"><h3>Recording not found</h3><a href="/school/video-conferencing/recordings" class="vc-btn vc-btn-primary" style="margin-top:12px">← Back</a></div>', user, req));
 
-    const [participants] = await pool.query(
-      "SELECT * FROM meeting_participants WHERE meeting_id = ? AND tenant_id = ? AND is_present = 1",
+    const { rows: participants } = await pool.query(
+      "SELECT * FROM meeting_participants WHERE meeting_id = $1 AND tenant_id = $2 AND is_present = 1",
       [rec.meeting_id, tid]
     );
 
@@ -1060,7 +1060,7 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.delete('/school/video-conferencing/recordings/:id', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, recId = parseInt(req.params.id);
-    await pool.query("DELETE FROM meeting_recordings WHERE id = ? AND tenant_id = ?", [recId, tid]);
+    await pool.query("DELETE FROM meeting_recordings WHERE id = $1 AND tenant_id = $2", [recId, tid]);
     audit('delete_recording', { tenant_id: tid, user_id: user.id, recording_id: recId });
     res.json({ success: true });
   }));
@@ -1070,8 +1070,8 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.get('/school/video-conferencing/templates', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
-    const [templates] = await pool.query(
-      "SELECT * FROM meeting_templates WHERE tenant_id IN (0, ?) ORDER BY is_system DESC, name ASC",
+    const { rows: templates } = await pool.query(
+      "SELECT * FROM meeting_templates WHERE tenant_id IN (0, $1) ORDER BY is_system DESC, name ASC",
       [tid]
     );
 
@@ -1150,7 +1150,7 @@ module.exports = function(app, pool, opts) {
       screen_share: !!screen_share, breakout_rooms: !!breakout_rooms
     });
     await pool.query(
-      "INSERT INTO meeting_templates (tenant_id, name, description, category, default_duration, default_settings, is_system) VALUES (?, ?, ?, ?, ?, ?, 0)",
+      "INSERT INTO meeting_templates (tenant_id, name, description, category, default_duration, default_settings, is_system) VALUES ($1, $2, $3, $4, $5, $6, 0)",
       [tid, name, description, category || 'other', parseInt(default_duration) || 60, settings]
     );
     audit('create_template', { tenant_id: tid, user_id: user.id, name });
@@ -1162,16 +1162,16 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.get('/school/video-conferencing/attendance/:id', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
-    const [meetingRows] = await pool.query("SELECT * FROM virtual_meetings WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    const { rows: meetingRows } = await pool.query("SELECT * FROM virtual_meetings WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     const meeting = meetingRows[0];
     if (!meeting) return res.redirect('/school/video-conferencing');
 
-    const [participants] = await pool.query(
-      "SELECT * FROM meeting_participants WHERE meeting_id = ? AND tenant_id = ? ORDER BY user_name ASC",
+    const { rows: participants } = await pool.query(
+      "SELECT * FROM meeting_participants WHERE meeting_id = $1 AND tenant_id = $2 ORDER BY user_name ASC",
       [meetingId, tid]
     );
-    const [logs] = await pool.query(
-      "SELECT * FROM meeting_attendance_logs WHERE meeting_id = ? AND tenant_id = ? ORDER BY join_time ASC",
+    const { rows: logs } = await pool.query(
+      "SELECT * FROM meeting_attendance_logs WHERE meeting_id = $1 AND tenant_id = $2 ORDER BY join_time ASC",
       [meetingId, tid]
     );
 
@@ -1236,32 +1236,32 @@ module.exports = function(app, pool, opts) {
     const days = parseInt(req.query.days) || 30;
 
     // Overall stats
-    const [statsRows] = await pool.query(
+    const { rows: statsRows } = await pool.query(
       `SELECT
         COUNT(*) as total_meetings,
         SUM(CASE WHEN status='ended' THEN 1 ELSE 0 END) as completed,
         SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled,
         SUM(duration_minutes) as total_duration,
         AVG(duration_minutes) as avg_duration
-       FROM virtual_meetings WHERE tenant_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
+       FROM virtual_meetings WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '1 day' * $2`,
       [tid, days]
     );
     const stats = statsRows[0] || {};
 
     // Participation stats
-    const [partRows] = await pool.query(
+    const { rows: partRows } = await pool.query(
       `SELECT COUNT(DISTINCT mp.user_id) as unique_participants, COUNT(*) as total_joins, AVG(mp.duration_seconds) as avg_stay
        FROM meeting_participants mp
        JOIN virtual_meetings m ON m.id = mp.meeting_id
-       WHERE mp.tenant_id = ? AND m.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
+       WHERE mp.tenant_id = $1 AND m.created_at >= NOW() - INTERVAL '1 day' * $2`,
       [tid, days]
     );
     const partStats = partRows[0] || {};
 
     // Meetings by day (last 14 days)
-    const [dailyRows] = await pool.query(
+    const { rows: dailyRows } = await pool.query(
       `SELECT DATE(created_at) as day, COUNT(*) as cnt
-       FROM virtual_meetings WHERE tenant_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+       FROM virtual_meetings WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '14 days'
        GROUP BY DATE(created_at) ORDER BY day ASC`,
       [tid]
     );
@@ -1276,9 +1276,9 @@ module.exports = function(app, pool, opts) {
     }).join('');
 
     // Hourly distribution
-    const [hourlyRows] = await pool.query(
+    const { rows: hourlyRows } = await pool.query(
       `SELECT HOUR(scheduled_at) as hour, COUNT(*) as cnt
-       FROM virtual_meetings WHERE tenant_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+       FROM virtual_meetings WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '1 day' * $2
        GROUP BY HOUR(scheduled_at) ORDER BY hour ASC`,
       [tid, days]
     );
@@ -1294,18 +1294,18 @@ module.exports = function(app, pool, opts) {
     }).join('');
 
     // Top hosts
-    const [hostRows] = await pool.query(
+    const { rows: hostRows } = await pool.query(
       `SELECT host_name, COUNT(*) as meeting_count, SUM(duration_minutes) as total_duration
-       FROM virtual_meetings WHERE tenant_id = ? AND status != 'cancelled' AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+       FROM virtual_meetings WHERE tenant_id = $1 AND status != 'cancelled' AND created_at >= NOW() - INTERVAL '1 day' * $2
        GROUP BY host_id, host_name ORDER BY meeting_count DESC LIMIT 10`,
       [tid, days]
     );
     const maxHost = Math.max(...hostRows.map(r => r.meeting_count), 1);
 
     // Recordings stats
-    const [recStats] = await pool.query(
+    const { rows: recStats } = await pool.query(
       `SELECT COUNT(*) as total, SUM(file_size_mb) as total_size, AVG(duration_seconds) as avg_duration
-       FROM meeting_recordings WHERE tenant_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
+       FROM meeting_recordings WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '1 day' * $2`,
       [tid, days]
     );
 
@@ -1380,15 +1380,15 @@ module.exports = function(app, pool, opts) {
     const { agenda, notes_text, action_items } = req.body;
     const items = (action_items || '').split('\n').filter(l => l.trim()).map(text => ({ text: text.trim(), done: false }));
 
-    const [existing] = await pool.query("SELECT id FROM meeting_notes WHERE meeting_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT 1", [meetingId, tid]);
+    const { rows: existing } = await pool.query("SELECT id FROM meeting_notes WHERE meeting_id = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 1", [meetingId, tid]);
     if (existing.length > 0) {
       await pool.query(
-        "UPDATE meeting_notes SET agenda = ?, notes_text = ?, action_items = ?, created_by = ?, updated_at = NOW() WHERE id = ?",
+        "UPDATE meeting_notes SET agenda = $1, notes_text = $2, action_items = $3, created_by = $4, updated_at = NOW() WHERE id = $5",
         [agenda || '', notes_text || '', JSON.stringify(items), user.id, existing[0].id]
       );
     } else {
       await pool.query(
-        "INSERT INTO meeting_notes (tenant_id, meeting_id, agenda, notes_text, action_items, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO meeting_notes (tenant_id, meeting_id, agenda, notes_text, action_items, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
         [tid, meetingId, agenda || '', notes_text || '', JSON.stringify(items), user.id]
       );
     }
@@ -1406,23 +1406,32 @@ module.exports = function(app, pool, opts) {
     const offset = (page - 1) * limit;
     const search = req.query.q || '';
 
-    let where = "WHERE m.tenant_id = ? AND m.status IN ('ended','cancelled')";
+    let where = "WHERE m.tenant_id = $1 AND m.status IN ('ended','cancelled')";
     const params = [tid];
+    let paramIdx = 1;
     if (search) {
-      where += " AND (m.title LIKE ? OR m.host_name LIKE ?)";
+      paramIdx++;
+      const titleParam = '$' + paramIdx;
+      paramIdx++;
+      const hostParam = '$' + paramIdx;
+      where += ` AND (m.title LIKE ${titleParam} OR m.host_name LIKE ${hostParam})`;
       params.push('%' + search + '%', '%' + search + '%');
     }
+    paramIdx++;
+    const limitParam = '$' + paramIdx;
+    paramIdx++;
+    const offsetParam = '$' + paramIdx;
 
-    const [totalRows] = await pool.query("SELECT COUNT(*) as cnt FROM virtual_meetings m " + where, params);
+    const { rows: totalRows } = await pool.query("SELECT COUNT(*) as cnt FROM virtual_meetings m " + where, params);
     const total = totalRows[0]?.cnt || 0;
     const totalPages = Math.ceil(total / limit);
 
-    const [meetings] = await pool.query(
+    const { rows: meetings } = await pool.query(
       `SELECT m.*,
         (SELECT COUNT(*) FROM meeting_participants mp WHERE mp.meeting_id = m.id AND mp.is_present = 1) as present_count,
         (SELECT COUNT(*) FROM meeting_participants mp WHERE mp.meeting_id = m.id) as total_participants,
         (SELECT COUNT(*) FROM meeting_recordings r WHERE r.meeting_id = m.id) as recording_count
-       FROM virtual_meetings m ${where} ORDER BY m.scheduled_at DESC LIMIT ? OFFSET ?`,
+       FROM virtual_meetings m ${where} ORDER BY m.scheduled_at DESC LIMIT ${limitParam} OFFSET ${offsetParam}`,
       [...params, limit, offset]
     );
 
@@ -1463,8 +1472,8 @@ module.exports = function(app, pool, opts) {
     const numRooms = Math.min(Math.max(parseInt(num_rooms) || 3, 2), 20);
     const timer = parseInt(timer_minutes) || 10;
 
-    const [participants] = await pool.query(
-      "SELECT user_id, user_name FROM meeting_participants WHERE meeting_id = ? AND tenant_id = ? AND role = 'participant' AND user_id != ?",
+    const { rows: participants } = await pool.query(
+      "SELECT user_id, user_name FROM meeting_participants WHERE meeting_id = $1 AND tenant_id = $2 AND role = 'participant' AND user_id != $3",
       [meetingId, tid, user.id]
     );
 
@@ -1524,8 +1533,8 @@ module.exports = function(app, pool, opts) {
   app.get('/school/video-conferencing/settings', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     // Get tenant settings (stored as a simple config approach)
-    const [configRows] = await pool.query(
-      "SELECT * FROM meeting_templates WHERE tenant_id = ? AND is_system = 0 LIMIT 1",
+    const { rows: configRows } = await pool.query(
+      "SELECT * FROM meeting_templates WHERE tenant_id = $1 AND is_system = 0 LIMIT 1",
       [tid]
     );
     const html = VC_CSS + `<div class="vc-wrap" style="max-width:700px">
@@ -1639,11 +1648,11 @@ module.exports = function(app, pool, opts) {
       default_max_participants: parseInt(default_max_participants) || 50, whiteboard_type: whiteboard_type || 'basic'
     });
     // Upsert as a system config template
-    const [existing] = await pool.query("SELECT id FROM meeting_templates WHERE tenant_id = ? AND category = '_config' LIMIT 1", [tid]);
+    const { rows: existing } = await pool.query("SELECT id FROM meeting_templates WHERE tenant_id = $1 AND category = '_config' LIMIT 1", [tid]);
     if (existing.length > 0) {
-      await pool.query("UPDATE meeting_templates SET default_settings = ?, name = 'School Config', category = '_config' WHERE id = ?", [config, existing[0].id]);
+      await pool.query("UPDATE meeting_templates SET default_settings = $1, name = 'School Config', category = '_config' WHERE id = $2", [config, existing[0].id]);
     } else {
-      await pool.query("INSERT INTO meeting_templates (tenant_id, name, description, category, default_duration, default_settings, is_system) VALUES (?, 'School Config', 'Auto-generated school config', '_config', 0, ?, 0)", [tid, config]);
+      await pool.query("INSERT INTO meeting_templates (tenant_id, name, description, category, default_duration, default_settings, is_system) VALUES ($1, 'School Config', 'Auto-generated school config', '_config', 0, $2, 0)", [tid, config]);
     }
     audit('update_conference_settings', { tenant_id: tid, user_id: user.id });
     res.redirect('/school/video-conferencing/settings');
@@ -1654,25 +1663,25 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.post('/school/video-conferencing/room/:id/join', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
-    const [meetingRows] = await pool.query("SELECT * FROM virtual_meetings WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    const { rows: meetingRows } = await pool.query("SELECT * FROM virtual_meetings WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     const meeting = meetingRows[0];
     if (!meeting) return res.json({ error: 'Meeting not found' }, 404);
     if (meeting.status !== 'active') return res.json({ error: 'Meeting is not active' }, 400);
 
     // Check max participants
-    const [countRows] = await pool.query("SELECT COUNT(*) as cnt FROM meeting_participants WHERE meeting_id = ? AND tenant_id = ? AND joined_at IS NOT NULL AND left_at IS NULL", [meetingId, tid]);
+    const { rows: countRows } = await pool.query("SELECT COUNT(*) as cnt FROM meeting_participants WHERE meeting_id = $1 AND tenant_id = $2 AND joined_at IS NOT NULL AND left_at IS NULL", [meetingId, tid]);
     if (countRows[0].cnt >= meeting.max_participants) return res.json({ error: 'Meeting is full' }, 400);
 
     const now = new Date();
     await pool.query(
       `INSERT INTO meeting_participants (tenant_id, meeting_id, user_id, user_name, user_type, role, joined_at, is_present)
-       VALUES (?, ?, ?, ?, ?, 'participant', NOW(), 1)
-       ON DUPLICATE KEY UPDATE joined_at = IFNULL(joined_at, NOW()), is_present = 1, left_at = NULL`,
+       VALUES ($1, $2, $3, $4, $5, 'participant', NOW(), 1)
+       ON CONFLICT (meeting_id, tenant_id, user_id) DO UPDATE SET joined_at = COALESCE(meeting_participants.joined_at, NOW()), is_present = 1, left_at = NULL`,
       [tid, meetingId, user.id, user.name || 'User', user.role === 'teacher' ? 'teacher' : 'student']
     );
     await pool.query(
       `INSERT INTO meeting_attendance_logs (tenant_id, meeting_id, participant_id, participant_name, join_time)
-       VALUES (?, ?, ?, ?, NOW())`,
+       VALUES ($1, $2, $3, $4, NOW())`,
       [tid, meetingId, user.id, user.name || 'User']
     );
     audit('join_meeting', { tenant_id: tid, user_id: user.id, meeting_id: meetingId });
@@ -1685,11 +1694,11 @@ module.exports = function(app, pool, opts) {
   app.post('/school/video-conferencing/room/:id/leave', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
     await pool.query(
-      `UPDATE meeting_participants SET left_at = NOW(), duration_seconds = TIMESTAMPDIFF(SECOND, joined_at, NOW()) WHERE meeting_id = ? AND tenant_id = ? AND user_id = ? AND left_at IS NULL`,
+      `UPDATE meeting_participants SET left_at = NOW(), duration_seconds = EXTRACT(EPOCH FROM (NOW() - joined_at))::INT WHERE meeting_id = $1 AND tenant_id = $2 AND user_id = $3 AND left_at IS NULL`,
       [meetingId, tid, user.id]
     );
     await pool.query(
-      `UPDATE meeting_attendance_logs SET leave_time = NOW(), duration_seconds = TIMESTAMPDIFF(SECOND, join_time, NOW()) WHERE meeting_id = ? AND tenant_id = ? AND participant_id = ? AND leave_time IS NULL ORDER BY id DESC LIMIT 1`,
+      `UPDATE meeting_attendance_logs SET leave_time = NOW(), duration_seconds = EXTRACT(EPOCH FROM (NOW() - join_time))::INT WHERE meeting_id = $1 AND tenant_id = $2 AND participant_id = $3 AND leave_time IS NULL`,
       [meetingId, tid, user.id]
     );
     audit('leave_meeting', { tenant_id: tid, user_id: user.id, meeting_id: meetingId });
@@ -1701,8 +1710,8 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.get('/school/video-conferencing/api/participants/:id', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
-    const [rows] = await pool.query(
-      "SELECT user_id, user_name, user_type, role, joined_at, left_at, duration_seconds, is_present FROM meeting_participants WHERE meeting_id = ? AND tenant_id = ? ORDER BY role DESC, user_name ASC",
+    const { rows } = await pool.query(
+      "SELECT user_id, user_name, user_type, role, joined_at, left_at, duration_seconds, is_present FROM meeting_participants WHERE meeting_id = $1 AND tenant_id = $2 ORDER BY role DESC, user_name ASC",
       [meetingId, tid]
     );
     res.json({ participants: rows });
@@ -1713,7 +1722,7 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.post('/school/video-conferencing/room/:id/mute-all', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
-    const [meetingRows] = await pool.query("SELECT * FROM virtual_meetings WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    const { rows: meetingRows } = await pool.query("SELECT * FROM virtual_meetings WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     if (!meetingRows[0] || meetingRows[0].host_id !== user.id) return res.json({ error: 'Unauthorized' }, 403);
     audit('mute_all_participants', { tenant_id: tid, user_id: user.id, meeting_id: meetingId });
     res.json({ success: true, message: 'All participants muted' });
@@ -1727,7 +1736,7 @@ module.exports = function(app, pool, opts) {
     const { action } = req.body; // 'start' or 'stop'
     if (action === 'stop') {
       await pool.query(
-        "INSERT INTO meeting_recordings (tenant_id, meeting_id, recording_url, file_size_mb, duration_seconds, recorded_by, retention_delete_at) VALUES (?, ?, ?, 0, 0, ?, DATE_ADD(NOW(), INTERVAL 90 DAY))",
+        "INSERT INTO meeting_recordings (tenant_id, meeting_id, recording_url, file_size_mb, duration_seconds, recorded_by, retention_delete_at) VALUES ($1, $2, $3, 0, 0, $4, NOW() + INTERVAL '90 days')",
         [tid, meetingId, '/recordings/meeting-' + meetingId + '-' + Date.now() + '.mp4', user.id]
       );
       audit('stop_recording', { tenant_id: tid, user_id: user.id, meeting_id: meetingId });
@@ -1742,11 +1751,11 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.post('/school/video-conferencing/room/:id/cancel', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id, meetingId = parseInt(req.params.id);
-    const [meetingRows] = await pool.query("SELECT * FROM virtual_meetings WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    const { rows: meetingRows } = await pool.query("SELECT * FROM virtual_meetings WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     const meeting = meetingRows[0];
     if (!meeting) return res.redirect('/school/video-conferencing');
     if (meeting.host_id !== user.id && user.role !== 'admin') return res.send('Unauthorized', 403);
-    await pool.query("UPDATE virtual_meetings SET status = 'cancelled', updated_at = NOW() WHERE id = ? AND tenant_id = ?", [meetingId, tid]);
+    await pool.query("UPDATE virtual_meetings SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND tenant_id = $2", [meetingId, tid]);
     audit('cancel_meeting', { tenant_id: tid, user_id: user.id, meeting_id: meetingId });
     res.redirect('/school/video-conferencing/upcoming');
   }));
