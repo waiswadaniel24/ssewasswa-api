@@ -4584,6 +4584,7 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       </div>
       <div class="card"><h3>Finance</h3>
         <a href="/org/finance" class="btn btn-sm">Income/Expense</a>
+        <a href="/org/finance/categories" class="btn btn-sm" style="margin-top:8px">Budget vs Actual</a>
         <a href="/org/reports" class="btn btn-sm" style="margin-top:8px">Reports</a>
       </div>
       <div class="card"><h3>Meetings</h3>
@@ -4619,6 +4620,9 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Assets</h3><a href="/org/assets" class="btn btn-sm">Fixed Assets</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Partners</h3><a href="/org/partners" class="btn btn-sm">Donor Mgmt</a></div>
       <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: Ticketing</h3><a href="/org/ticketing" class="btn btn-sm">Event Tickets</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Committees</h3><a href="/org/committees" class="btn btn-sm">Working Groups</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Budget</h3><a href="/org/finance/categories" class="btn btn-sm">Budget vs Actual</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">Import</h3><a href="/org/members/import" class="btn btn-sm">CSV Import</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid for staff & visitors</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a></div>
     </div>
@@ -4659,15 +4663,39 @@ app.get('/org/charts/members', requireAuth, requireNotBanned, ah(async (req, res
 // === ORG: MEMBERS (with edit/delete) ===
 app.get('/org/members', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const members = (await pool.query('SELECT * FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const search = req.query.search || '';
+  const roleFilter = req.query.role || '';
+  let whereClauses = ['m.tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (search) { whereClauses.push(`(m.name ILIKE $${paramIdx} OR m.email ILIKE $${paramIdx} OR m.phone ILIKE $${paramIdx})`); params.push('%'+search+'%'); paramIdx++; }
+  if (roleFilter) { whereClauses.push(`m.role=$${paramIdx}`); params.push(roleFilter); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM members m WHERE ${whereStr}`, params)).rows[0].count;
+  const members = (await pool.query(`SELECT m.* FROM members m WHERE ${whereStr} ORDER BY m.name LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
+  const roles = (await pool.query('SELECT DISTINCT role FROM members WHERE tenant_id=$1 AND role IS NOT NULL ORDER BY role', [t])).rows.map(r => r.role);
   res.send(renderPage('Members', `
-    <div class="card"><h3>Member Database</h3>
-      <a href="/org/register" class="btn btn-sm" style="margin-bottom:15px">+ Register New Member</a>
+    <div class="card"><h3>Member Database (${total} total)</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;align-items:center">
+        <a href="/org/register" class="btn btn-sm btn-green">+ Register New Member</a>
+        <a href="/org/members/import" class="btn btn-sm">Import CSV</a>
+        <a href="/org/reports/export?type=members" class="btn btn-sm">Export CSV</a>
+      </div>
+      <form method="GET" action="/org/members" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="search" placeholder="Search name, email, phone..." value="${esc(search)}" style="flex:2;min-width:200px;padding:8px">
+        <select name="role" style="flex:1;min-width:120px;padding:8px"><option value="">All Roles</option>${roles.map(r => `<option value="${esc(r)}" ${roleFilter===r?'selected':''}>${esc(r)}</option>`).join('')}</select>
+        <button class="btn btn-sm">Search</button>
+      </form>
       <table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Joined</th><th>Actions</th></tr>
-      ${members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${esc(m.phone)}</td><td>${esc(m.role)}</td><td>${new Date(m.joined_at).toLocaleDateString()}</td>
-        <td><a href="/org/members/${m.id}/edit" class="btn btn-sm">Edit</a> <a href="/org/members/${m.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete ${esc(m.name)}?')">Del</a></td>
-      </tr>`).join('') || '<tr><td colspan="6">No members yet</td></tr>'}
+      ${members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${esc(m.phone)}</td><td><span class="tag">${esc(m.role)}</span></td><td>${new Date(m.joined_at).toLocaleDateString()}</td>
+        <td><a href="/org/members/${m.id}/edit" class="btn btn-sm">Edit</a> <form method="POST" action="/org/members/${m.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete ${esc(m.name)}?')">Del</button></form></td>
+      </tr>`).join('') || '<tr><td colspan="6">No members found</td></tr>'}
       </table>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/members?page=${i+1}&search=${esc(search)}&role=${esc(roleFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4715,10 +4743,11 @@ app.get('/org/members/:id/edit', requireAuth, requireNotBanned, ah(async (req, r
 app.post('/org/members/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, email, phone, role } = req.body;
   await pool.query('UPDATE members SET name=$1,email=$2,phone=$3,role=$4 WHERE id=$5 AND tenant_id=$6', [name, email, phone, role, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'update_member', `Updated member: ${name}`);
   res.redirect('/org/members');
 }));
 
-app.get('/org/members/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/members/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM members WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   await audit(req.session.user.email, 'delete_member', `Deleted member ID: ${req.params.id}`);
   res.redirect('/org/members');
@@ -4771,18 +4800,21 @@ app.get('/org/projects/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/projects/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, description, budget, status } = req.body;
   await pool.query('INSERT INTO projects(tenant_id,name,description,budget,status) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, name, description, budget, status]);
+  await audit(req.session.user.email, 'create_project', `Created project: ${name}`);
   res.redirect('/org/projects');
 }));
 
 app.post('/org/projects/:id/spend', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { amount } = req.body;
   await pool.query('UPDATE projects SET spent=spent+$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'update_project_spend', `Added UGX ${amount} spent to project ID: ${req.params.id}`);
   res.redirect('/org/projects');
 }));
 
 app.post('/org/projects/:id/status', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { status } = req.body;
   await pool.query('UPDATE projects SET status=$1 WHERE id=$2 AND tenant_id=$3', [status, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'update_project_status', `Set project ID ${req.params.id} status to ${status}`);
   res.redirect('/org/projects');
 }));
 
@@ -4800,6 +4832,7 @@ app.get('/org/events', requireAuth, requireNotBanned, ah(async (req, res) => {
             <p class="muted">${e.event_date ? new Date(e.event_date).toLocaleDateString() : 'TBD'} ${e.venue ? '@ ' + esc(e.venue) : ''}</p>
             ${e.description ? `<p>${esc(e.description)}</p>` : ''}
             <p>Budget: UGX ${parseInt(e.budget).toLocaleString()}</p>
+            <div style="margin-top:8px"><a href="/org/events/rsvp/${e.id}" class="btn btn-sm btn-green">RSVP</a></div>
           </div>
         `).join('') || '<p>No events yet</p>'}
       </div>
@@ -4825,6 +4858,7 @@ app.get('/org/events/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/events/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, event_date, venue, description, budget } = req.body;
   await pool.query('INSERT INTO events(tenant_id,name,event_date,venue,description,budget) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, name, event_date, venue, description, budget || 0]);
+  await audit(req.session.user.email, 'create_event', `Created event: ${name}`);
   res.redirect('/org/events');
 }));
 
@@ -4837,7 +4871,7 @@ app.get('/org/meetings', requireAuth, requireNotBanned, ah(async (req, res) => {
       <a href="/org/meetings/new" class="btn btn-sm" style="margin-bottom:15px">+ New Minutes</a>
       <table><tr><th>Title</th><th>Date</th><th>Actions</th></tr>
       ${meetings.map(m => `<tr><td>${esc(m.title)}</td><td>${m.meeting_date ? new Date(m.meeting_date).toLocaleDateString() : ''}</td>
-        <td><a href="/org/meetings/${m.id}" class="btn btn-sm">View</a> <a href="/org/meetings/${m.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
+        <td><a href="/org/meetings/${m.id}" class="btn btn-sm">View</a> <form method="POST" action="/org/meetings/${m.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</button></form></td>
       </tr>`).join('') || '<tr><td colspan="3">No meetings yet</td></tr>'}
       </table>
     </div>
@@ -4860,6 +4894,7 @@ app.get('/org/meetings/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/meetings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { title, meeting_date, content } = req.body;
   await pool.query('INSERT INTO meeting_minutes(tenant_id,title,meeting_date,content) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, title, meeting_date, content]);
+  await audit(req.session.user.email, 'create_meeting', `Created meeting: ${title}`);
   res.redirect('/org/meetings');
 }));
 
@@ -4875,8 +4910,9 @@ app.get('/org/meetings/:id', requireAuth, requireNotBanned, ah(async (req, res) 
   `, req.session.user));
 }));
 
-app.get('/org/meetings/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/meetings/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'delete_meeting', `Deleted meeting ID: ${req.params.id}`);
   res.redirect('/org/meetings');
 }));
 
@@ -4892,7 +4928,7 @@ app.get('/org/notices', requireAuth, requireNotBanned, ah(async (req, res) => {
           <h3>${esc(n.title)} <span class="tag">${esc(n.priority)}</span></h3>
           <p style="margin-top:8px;white-space:pre-wrap">${esc(n.content)}</p>
           <p class="muted" style="margin-top:8px">${new Date(n.created_at).toLocaleString()}</p>
-          <a href="/org/notices/${n.id}/delete" class="btn btn-red btn-sm" style="margin-top:8px" onclick="return confirm('Delete?')">Delete</a>
+          <form method="POST" action="/org/notices/${n.id}/delete" style="display:inline;margin-top:8px"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Delete</button></form>
         </div>
       `).join('') || '<p>No notices yet</p>'}
     </div>
@@ -4915,11 +4951,13 @@ app.get('/org/notices/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/notices/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { title, content, priority } = req.body;
   await pool.query('INSERT INTO notice_board(tenant_id,title,content,priority) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, title, content, priority]);
+  await audit(req.session.user.email, 'create_notice', `Posted notice: ${title}`);
   res.redirect('/org/notices');
 }));
 
-app.get('/org/notices/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/notices/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM notice_board WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'delete_notice', `Deleted notice ID: ${req.params.id}`);
   res.redirect('/org/notices');
 }));
 
@@ -4929,6 +4967,11 @@ app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
   const records = (await pool.query('SELECT * FROM org_finance WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t])).rows;
   const income = records.filter(r => r.type === 'income').reduce((a, b) => a + parseInt(b.amount), 0);
   const expense = records.filter(r => r.type === 'expense').reduce((a, b) => a + parseInt(b.amount), 0);
+  // Get finance categories for dropdown
+  await pool.query(`ALTER TABLE org_finance ADD COLUMN IF NOT EXISTS category VARCHAR(255)`).catch(() => {});
+  const finCats = (await pool.query('SELECT * FROM finance_categories WHERE tenant_id=$1 ORDER BY type, name', [t])).rows;
+  const incomeCats = finCats.filter(c => c.type === 'income').map(c => c.name);
+  const expenseCats = finCats.filter(c => c.type === 'expense').map(c => c.name);
   res.send(renderPage('Org Finance', `
     <div class="stats">
       <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${income.toLocaleString()}</div><div>Total Income</div></div>
@@ -4937,25 +4980,37 @@ app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
     </div>
     <div class="card"><h3>Record Transaction</h3>
       <form method="POST" action="/org/finance/save">
-        <div class="grid" style="grid-template-columns:1fr 1fr 2fr">
-          <select name="type" required><option value="">Type</option><option value="income">Income</option><option value="expense">Expense</option></select>
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr 2fr">
+          <select name="type" required id="finType" onchange="updateCatOpts()"><option value="">Type</option><option value="income">Income</option><option value="expense">Expense</option></select>
+          <select name="category" id="finCat"><option value="">Category</option></select>
           <input name="amount" type="number" placeholder="Amount UGX" required>
           <input name="description" placeholder="Description" required>
         </div>
         <button class="btn">Save Record</button>
       </form>
+      <a href="/org/finance/categories" class="btn btn-sm" style="margin-top:8px">Manage Categories & Budget</a>
     </div>
     <div class="card"><h3>Recent Transactions</h3>
-      <table><tr><th>Type</th><th>Amount</th><th>Description</th><th>Date</th></tr>
-      ${records.map(r => `<tr><td><span style="color:${r.type === 'income' ? '#059669' : '#dc2626'}">${r.type}</span></td><td>UGX ${parseInt(r.amount).toLocaleString()}</td><td>${esc(r.description)}</td><td>${new Date(r.created_at).toLocaleDateString()}</td></tr>`).join('')}
+      <table><tr><th>Type</th><th>Category</th><th>Amount</th><th>Description</th><th>Date</th></tr>
+      ${records.map(r => `<tr><td><span style="color:${r.type === 'income' ? '#059669' : '#dc2626'}">${r.type}</span></td><td>${esc(r.category||'-')}</td><td>UGX ${parseInt(r.amount).toLocaleString()}</td><td>${esc(r.description)}</td><td>${new Date(r.created_at).toLocaleDateString()}</td></tr>`).join('')}
       </table>
     </div>
+    <script>
+    var incomeCats = ${JSON.stringify(incomeCats)};
+    var expenseCats = ${JSON.stringify(expenseCats)};
+    function updateCatOpts(){
+      var sel=document.getElementById('finType');var cat=document.getElementById('finCat');
+      var cats=sel.value==='income'?incomeCats:sel.value==='expense'?expenseCats:[];
+      cat.innerHTML='<option value="">Category</option>'+cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('');
+    }
+    </script>
   `, req.session.user));
 }));
 
 app.post('/org/finance/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const { type, amount, description } = req.body;
-  await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, amount, type, description]);
+  const { type, amount, description, category } = req.body;
+  await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description,category) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, amount, type, description, category || null]);
+  await audit(req.session.user.email, 'record_finance', `Recorded ${type}: UGX ${amount} - ${description}${category ? ' ['+category+']' : ''}`);
   res.redirect('/org/finance');
 }));
 
@@ -4986,6 +5041,7 @@ app.post('/org/attendance/save', requireAuth, requireNotBanned, ah(async (req, r
     const status = present.includes(String(m.id)) ? 'present' : 'absent';
     await pool.query('INSERT INTO attendance(tenant_id,student_id,date,status) VALUES($1,$2,$3,$4) ON CONFLICT (student_id,date) DO UPDATE SET status=$4', [t, m.id, date, status]);
   }
+  await audit(req.session.user.email, 'mark_attendance', `Marked attendance for ${date}`);
   res.redirect('/org/attendance');
 }));
 
@@ -11865,7 +11921,7 @@ app.get('/org/meetings/:id/agenda', requireAuth, requireNotBanned, ah(async (req
   res.send(renderPage('Meeting Agenda', `
     <div class="card"><h2>Agenda: ${esc(meeting.title)}</h2><p class="muted">${meeting.meeting_date?new Date(meeting.meeting_date).toLocaleDateString():''}</p>
       <a href="/org/meetings/${meeting.id}/agenda/new" class="btn btn-sm" style="margin:10px 0">+ Add Agenda Item</a>
-      ${agendaItems.length ? `<table><tr><th>#</th><th>Item</th><th>Status</th><th>Actions</th></tr>${agendaItems.map(a => `<tr><td>${a.order_no}</td><td>${esc(a.item_text)}</td><td><span class="tag" style="background:${a.completed?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${a.completed?'Done':'Pending'}</span></td><td><a href="/org/meetings/agenda/${a.id}/toggle" class="btn btn-sm">Toggle</a> <a href="/org/meetings/agenda/${a.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No agenda items yet</p>'}
+      ${agendaItems.length ? `<table><tr><th>#</th><th>Item</th><th>Status</th><th>Actions</th></tr>${agendaItems.map(a => `<tr><td>${a.order_no}</td><td>${esc(a.item_text)}</td><td><span class="tag" style="background:${a.completed?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${a.completed?'Done':'Pending'}</span></td><td><form method="POST" action="/org/meetings/agenda/${a.id}/toggle" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm">Toggle</button></form> <form method="POST" action="/org/meetings/agenda/${a.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No agenda items yet</p>'}
     </div>
   `, req.session.user));
 }));
@@ -11881,12 +11937,12 @@ app.post('/org/meetings/:id/agenda/save', requireAuth, requireNotBanned, ah(asyn
   res.redirect(`/org/meetings/${req.params.id}/agenda`);
 }));
 
-app.get('/org/meetings/agenda/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/meetings/agenda/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('UPDATE meeting_agendas SET completed=NOT completed WHERE id=$1', [req.params.id]);
   res.redirect('back');
 }));
 
-app.get('/org/meetings/agenda/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/meetings/agenda/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM meeting_agendas WHERE id=$1', [req.params.id]);
   res.redirect('back');
 }));
@@ -15893,7 +15949,7 @@ app.get('/org/resolutions', requireAuth, requireNotBanned, requireFeature('board
   res.send(renderPage('Board Resolutions', `
     <div class="hero" style="background:linear-gradient(135deg,#1e40af,#1e3a8a)"><h1>Board Resolutions</h1><p>Decisions, votes and meeting minutes</p></div>
     <div class="card"><a href="/org/resolutions/new" class="btn" style="margin-bottom:15px">+ New Resolution</a>
-      ${resolutions.length?`<table><tr><th>Title</th><th>Proposed By</th><th>Meeting Date</th><th>Votes (For/Against/Abstain)</th><th>Status</th><th>Actions</th></tr>${resolutions.map(r=>`<tr><td><strong>${esc(r.title)}</strong></td><td>${esc(r.proposed_by||'-')}</td><td>${r.meeting_date||'-'}</td><td>${r.vote_for}/${r.vote_against}/${r.vote_abstain}</td><td><span class="tag">${esc(r.status)}</span></td><td><a href="/org/resolutions/${r.id}/vote" class="btn btn-sm">Vote</a> <a href="/org/resolutions/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No resolutions</p>'}
+      ${resolutions.length?`<table><tr><th>Title</th><th>Proposed By</th><th>Meeting Date</th><th>Votes (For/Against/Abstain)</th><th>Status</th><th>Actions</th></tr>${resolutions.map(r=>`<tr><td><strong>${esc(r.title)}</strong></td><td>${esc(r.proposed_by||'-')}</td><td>${r.meeting_date||'-'}</td><td>${r.vote_for}/${r.vote_against}/${r.vote_abstain}</td><td><span class="tag">${esc(r.status)}</span></td><td><a href="/org/resolutions/${r.id}/vote" class="btn btn-sm">Vote</a> <form method="POST" action="/org/resolutions/${r.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No resolutions</p>'}
     </div>
   `, req.session.user));
 }));
@@ -15913,6 +15969,7 @@ app.get('/org/resolutions/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/resolutions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO board_resolutions(tenant_id,title,resolution_text,proposed_by,seconded_by,meeting_date) VALUES($1,$2,$3,$4,$5,$6)', [t, req.body.title, req.body.resolution_text, req.body.proposed_by, req.body.seconded_by, req.body.meeting_date]);
+  await audit(req.session.user.email, 'create_resolution', `Created resolution: ${req.body.title}`);
   res.redirect('/org/resolutions');
 }));
 
@@ -15923,25 +15980,34 @@ app.get('/org/resolutions/:id/vote', requireAuth, requireNotBanned, ah(async (re
   res.send(renderPage('Vote on Resolution', `<div class="card" style="max-width:600px;margin:0 auto"><h2>${esc(res_.title)}</h2><p>${esc(res_.resolution_text||'')}</p>
     <p class="muted">Proposed: ${esc(res_.proposed_by||'')} | Seconded: ${esc(res_.seconded_by||'')} | Date: ${res_.meeting_date||''}</p>
     <div style="margin-top:20px;display:flex;gap:10px">
-      <a href="/org/resolutions/${res_.id}/vote/for" class="btn btn-green" style="flex:1">Vote For (${res_.vote_for})</a>
-      <a href="/org/resolutions/${res_.id}/vote/against" class="btn btn-red" style="flex:1">Vote Against (${res_.vote_against})</a>
-      <a href="/org/resolutions/${res_.id}/vote/abstain" class="btn" style="flex:1">Abstain (${res_.vote_abstain})</a>
+      <form method="POST" action="/org/resolutions/${res_.id}/vote/for" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-green" style="width:100%">Vote For (${res_.vote_for})</button></form>
+      <form method="POST" action="/org/resolutions/${res_.id}/vote/against" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red" style="width:100%">Vote Against (${res_.vote_against})</button></form>
+      <form method="POST" action="/org/resolutions/${res_.id}/vote/abstain" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn" style="width:100%">Abstain (${res_.vote_abstain})</button></form>
     </div>
     <a href="/org/resolutions" class="btn" style="margin-top:15px">Back</a></div>
   `, req.session.user));
 }));
 
-app.get('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, ah(async (req, res) => {
   const VALID_COLS = ['vote_for','vote_against','vote_abstain'];
   const col = VALID_COLS.includes(req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain') ? (req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain') : null;
   if (!col) return res.status(400).send('Invalid vote direction');
-  await pool.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.session.user.tenant_id]);
+  // Race condition fix: use transaction with FOR UPDATE
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM board_resolutions WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.params.id, req.session.user.tenant_id]);
+    await client.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.session.user.tenant_id]);
+    await client.query('COMMIT');
+  } catch(e) { await client.query('ROLLBACK'); } finally { client.release(); }
+  await audit(req.session.user.email, 'resolution_vote', `Voted ${req.params.direction} on resolution ID: ${req.params.id}`);
   res.redirect(`/org/resolutions/${req.params.id}/vote`);
 }));
 
-app.get('/org/resolutions/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/resolutions/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM board_resolutions WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_resolution', `Deleted resolution ID: ${req.params.id}`);
   res.redirect('/org/resolutions');
 }));
 
@@ -15957,7 +16023,7 @@ app.get('/org/assets', requireAuth, requireNotBanned, requireFeature('asset_mana
     <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Asset Management</h1><p>Fixed assets, depreciation and locations</p></div>
     <div class="stats"><div class="stat-card"><div class="stat-num">${assets.length}</div><div>Total Assets</div></div><div class="stat-card"><div class="stat-num">UGX ${totalValue.toLocaleString()}</div><div>Current Value</div></div><div class="stat-card"><div class="stat-num">${cats.length}</div><div>Categories</div></div></div>
     <div class="card"><a href="/org/assets/new" class="btn" style="margin-bottom:15px">+ Add Asset</a>
-      ${assets.length?`<table><tr><th>Name</th><th>Category</th><th>Purchase Value</th><th>Current Value</th><th>Location</th><th>Condition</th><th>Actions</th></tr>${assets.map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.category||'-')}</td><td>UGX ${parseInt(a.purchase_value).toLocaleString()}</td><td>UGX ${parseInt(a.current_value).toLocaleString()}</td><td>${esc(a.location||'-')}</td><td><span class="tag">${esc(a.condition)}</span></td><td><a href="/org/assets/${a.id}/depreciate" class="btn btn-sm">Depreciate</a> <a href="/org/assets/${a.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No assets recorded</p>'}
+      ${assets.length?`<table><tr><th>Name</th><th>Category</th><th>Purchase Value</th><th>Current Value</th><th>Location</th><th>Condition</th><th>Actions</th></tr>${assets.map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.category||'-')}</td><td>UGX ${parseInt(a.purchase_value).toLocaleString()}</td><td>UGX ${parseInt(a.current_value).toLocaleString()}</td><td>${esc(a.location||'-')}</td><td><span class="tag">${esc(a.condition)}</span></td><td><form method="POST" action="/org/assets/${a.id}/depreciate" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm">Depreciate</button></form> <form method="POST" action="/org/assets/${a.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No assets recorded</p>'}
     </div>
   `, req.session.user));
 }));
@@ -15979,20 +16045,24 @@ app.get('/org/assets/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/assets/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO assets(tenant_id,name,category,purchase_date,purchase_value,current_value,depreciation_rate,location,custodian,condition,serial_number,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [t, req.body.name, req.body.category, req.body.purchase_date||null, req.body.purchase_value||0, req.body.current_value||0, req.body.depreciation_rate||0, req.body.location, req.body.custodian, req.body.condition||'good', req.body.serial_number, req.body.notes]);
+  await audit(req.session.user.email, 'create_asset', `Added asset: ${req.body.name}`);
   res.redirect('/org/assets');
 }));
 
-app.get('/org/assets/:id/depreciate', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const asset = (await pool.query('SELECT * FROM assets WHERE id=$1', [req.params.id])).rows[0];
+app.post('/org/assets/:id/depreciate', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const asset = (await pool.query('SELECT * FROM assets WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!asset) return res.status(404).send('Not found');
   const newVal = Math.max(0, Math.round(asset.current_value * (1 - (asset.depreciation_rate||10)/100)));
-  await pool.query('UPDATE assets SET current_value=$1 WHERE id=$2', [newVal, req.params.id]);
+  await pool.query('UPDATE assets SET current_value=$1 WHERE id=$2 AND tenant_id=$3', [newVal, req.params.id, t]);
+  await audit(req.session.user.email, 'depreciate_asset', `Depreciated asset: ${asset.name} to UGX ${newVal}`);
   res.redirect('/org/assets');
 }));
 
-app.get('/org/assets/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/assets/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM assets WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_asset', `Deleted asset ID: ${req.params.id}`);
   res.redirect('/org/assets');
 }));
 
@@ -16009,7 +16079,7 @@ app.get('/org/partners', requireAuth, requireNotBanned, requireFeature('partners
     <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Partners & Donors</h1><p>Donor profiles and engagement</p></div>
     <div class="stats"><div class="stat-card"><div class="stat-num">${donors.length}</div><div>Donors</div></div><div class="stat-card"><div class="stat-num">${sponsors.length}</div><div>Sponsors</div></div><div class="stat-card"><div class="stat-num">${partners_.length}</div><div>Partners</div></div><div class="stat-card"><div class="stat-num">UGX ${partners.reduce((a,p)=>a+(p.total_contributions||0),0).toLocaleString()}</div><div>Total Contributions</div></div></div>
     <div class="card"><a href="/org/partners/new" class="btn" style="margin-bottom:15px">+ Add Partner/Donor</a>
-      ${partners.length?`<table><tr><th>Name</th><th>Type</th><th>Organization</th><th>Engagement</th><th>Total Given</th><th>Last Contact</th><th>Actions</th></tr>${partners.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.email||'')} ${esc(p.phone||'')}</span></td><td><span class="tag">${esc(p.type)}</span></td><td>${esc(p.organization||'-')}</td><td>${p.engagement_score||0}/100</td><td>UGX ${parseInt(p.total_contributions).toLocaleString()}</td><td>${p.last_contact||'-'}</td><td><a href="/org/partners/${p.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No partners yet</p>'}
+      ${partners.length?`<table><tr><th>Name</th><th>Type</th><th>Organization</th><th>Engagement</th><th>Total Given</th><th>Last Contact</th><th>Actions</th></tr>${partners.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.email||'')} ${esc(p.phone||'')}</span></td><td><span class="tag">${esc(p.type)}</span></td><td>${esc(p.organization||'-')}</td><td>${p.engagement_score||0}/100</td><td>UGX ${parseInt(p.total_contributions).toLocaleString()}</td><td>${p.last_contact||'-'}</td><td><form method="POST" action="/org/partners/${p.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No partners yet</p>'}
     </div>
   `, req.session.user));
 }));
@@ -16030,12 +16100,14 @@ app.get('/org/partners/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/partners/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO partners(tenant_id,name,type,email,phone,organization,engagement_score,last_contact,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.name, req.body.type, req.body.email, req.body.phone, req.body.organization, req.body.engagement_score||0, req.body.last_contact||null, req.body.notes]);
+  await audit(req.session.user.email, 'create_partner', `Added partner: ${req.body.name} (${req.body.type})`);
   res.redirect('/org/partners');
 }));
 
-app.get('/org/partners/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/partners/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM partners WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_partner', `Deleted partner ID: ${req.params.id}`);
   res.redirect('/org/partners');
 }));
 
@@ -16048,7 +16120,7 @@ app.get('/org/ticketing', requireAuth, requireNotBanned, requireFeature('event_t
   res.send(renderPage('Event Ticketing', `
     <div class="hero" style="background:linear-gradient(135deg,#e11d48,#be123c)"><h1>Event Ticketing</h1><p>Paid events, QR tickets and check-in</p></div>
     <div class="card"><a href="/org/ticketing/new" class="btn" style="margin-bottom:15px">+ Create Event</a>
-      ${events.length?`<table><tr><th>Event</th><th>Date</th><th>Venue</th><th>Price</th><th>Sold/Capacity</th><th>Actions</th></tr>${events.map(e=>`<tr><td><strong>${esc(e.title)}</strong></td><td>${e.event_date||'-'}</td><td>${esc(e.venue||'-')}</td><td>UGX ${parseInt(e.price).toLocaleString()}</td><td>${e.tickets_sold}/${e.capacity}</td><td><a href="/org/ticketing/${e.id}/tickets" class="btn btn-sm">Tickets</a> <a href="/org/ticketing/${e.id}/register" class="btn btn-sm btn-green">Register</a> <a href="/org/ticketing/${e.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No events</p>'}
+      ${events.length?`<table><tr><th>Event</th><th>Date</th><th>Venue</th><th>Price</th><th>Sold/Capacity</th><th>Actions</th></tr>${events.map(e=>`<tr><td><strong>${esc(e.title)}</strong></td><td>${e.event_date||'-'}</td><td>${esc(e.venue||'-')}</td><td>UGX ${parseInt(e.price).toLocaleString()}</td><td>${e.tickets_sold}/${e.capacity}</td><td><a href="/org/ticketing/${e.id}/tickets" class="btn btn-sm">Tickets</a> <a href="/org/ticketing/${e.id}/register" class="btn btn-sm btn-green">Register</a> <form method="POST" action="/org/ticketing/${e.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No events</p>'}
     </div>
   `, req.session.user));
 }));
@@ -16068,6 +16140,7 @@ app.get('/org/ticketing/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/ticketing/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO ticketed_events(tenant_id,title,description,event_date,venue,capacity,price,qr_enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, req.body.title, req.body.description, req.body.event_date, req.body.venue, req.body.capacity||100, req.body.price||0, req.body.qr_enabled==='on']);
+  await audit(req.session.user.email, 'create_ticketed_event', `Created ticketed event: ${req.body.title}`);
   res.redirect('/org/ticketing');
 }));
 
@@ -16087,9 +16160,19 @@ app.get('/org/ticketing/:id/register', requireAuth, requireNotBanned, ah(async (
 
 app.post('/org/ticketing/:id/register/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const code = 'TKT-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-  await pool.query('INSERT INTO event_tickets(tenant_id,event_id,attendee_name,attendee_email,attendee_phone,ticket_code) VALUES($1,$2,$3,$4,$5,$6)', [t, req.params.id, req.body.attendee_name, req.body.attendee_email, req.body.attendee_phone, code]);
-  await pool.query('UPDATE ticketed_events SET tickets_sold=tickets_sold+1 WHERE id=$1', [req.params.id]);
+  // Race condition fix: use transaction with capacity check
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const ev = (await client.query('SELECT * FROM ticketed_events WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.params.id, t])).rows[0];
+    if (!ev) { await client.query('ROLLBACK'); client.release(); return res.status(404).send('Event not found'); }
+    if (ev.tickets_sold >= ev.capacity) { await client.query('ROLLBACK'); client.release(); return res.status(400).send('Sold out! No more tickets available.'); }
+    const code = 'TKT-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+    await client.query('INSERT INTO event_tickets(tenant_id,event_id,attendee_name,attendee_email,attendee_phone,ticket_code) VALUES($1,$2,$3,$4,$5,$6)', [t, req.params.id, req.body.attendee_name, req.body.attendee_email, req.body.attendee_phone, code]);
+    await client.query('UPDATE ticketed_events SET tickets_sold=tickets_sold+1 WHERE id=$1', [req.params.id]);
+    await client.query('COMMIT');
+  } catch(e) { await client.query('ROLLBACK'); } finally { client.release(); }
+  await audit(req.session.user.email, 'ticket_register', `Registered ${req.body.attendee_name} for event ID: ${req.params.id}`);
   res.redirect(`/org/ticketing/${req.params.id}/tickets`);
 }));
 
@@ -16099,21 +16182,268 @@ app.get('/org/ticketing/:id/tickets', requireAuth, requireNotBanned, ah(async (r
   if (!event) return res.status(404).send('Not found');
   const tickets = (await pool.query('SELECT * FROM event_tickets WHERE event_id=$1 ORDER BY created_at DESC', [event.id])).rows;
   res.send(renderPage('Event Tickets', `<div class="card"><h2>${esc(event.title)} - Tickets</h2>
-    ${tickets.length?`<table><tr><th>Code</th><th>Name</th><th>Email</th><th>Status</th><th>Check-in</th></tr>${tickets.map(tk=>`<tr><td><code>${esc(tk.ticket_code)}</code></td><td>${esc(tk.attendee_name)}</td><td>${esc(tk.attendee_email||'-')}</td><td>${tk.checked_in?'<span class="tag" style="background:#d1fae5">Checked In</span>':'<span class="tag">Active</span>'}</td><td>${!tk.checked_in?`<a href="/org/ticketing/ticket/${tk.id}/checkin" class="btn btn-sm btn-green">Check In</a>`:'-'}</td></tr>`).join('')}</table>`:'<p class="muted">No tickets sold</p>'}
+    ${tickets.length?`<table><tr><th>Code</th><th>Name</th><th>Email</th><th>Status</th><th>Check-in</th></tr>${tickets.map(tk=>`<tr><td><code>${esc(tk.ticket_code)}</code></td><td>${esc(tk.attendee_name)}</td><td>${esc(tk.attendee_email||'-')}</td><td>${tk.checked_in?'<span class="tag" style="background:#d1fae5">Checked In</span>':'<span class="tag">Active</span>'}</td><td>${!tk.checked_in?`<form method="POST" action="/org/ticketing/ticket/${tk.id}/checkin" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-green">Check In</button></form>`:'-'}</td></tr>`).join('')}</table>`:'<p class="muted">No tickets sold</p>'}
     <a href="/org/ticketing" class="btn" style="margin-top:10px">Back</a></div>
   `, req.session.user));
 }));
 
-app.get('/org/ticketing/ticket/:id/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/ticketing/ticket/:id/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('UPDATE event_tickets SET checked_in=true, checked_in_at=NOW() WHERE id=$1', [req.params.id]);
+  await audit(req.session.user.email, 'ticket_checkin', `Checked in ticket ID: ${req.params.id}`);
   res.redirect('back');
 }));
 
-app.get('/org/ticketing/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/ticketing/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM event_tickets WHERE event_id=$1', [req.params.id]);
   await pool.query('DELETE FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_ticketed_event', `Deleted ticketed event ID: ${req.params.id}`);
   res.redirect('/org/ticketing');
+}));
+
+
+// =============================================
+// ORG: CSV IMPORT FOR MEMBERS
+// =============================================
+app.get('/org/members/import', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Import Members', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Import Members from CSV</h2>
+    <p class="muted">Upload a CSV file with columns: <code>name,email,phone,role</code>. Role must be one of: Member, Volunteer, Staff, Board.</p>
+    <form method="POST" action="/org/members/import/save" enctype="multipart/form-data">
+      <input type="file" name="csvfile" accept=".csv" required style="margin:15px 0">
+      <button class="btn btn-green">Import Members</button>
+    </form>
+    <a href="/org/members" class="btn" style="margin-top:10px">Back to Members</a>
+  </div>`, req.session.user));
+});
+
+app.post('/org/members/import/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  if (!req.files || !req.files.csvfile) return res.status(400).send('No file uploaded');
+  const raw = req.files.csvfile.data.toString('utf8');
+  const lines = raw.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return res.status(400).send('CSV must have a header row and at least one data row');
+  const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const nameIdx = header.indexOf('name');
+  const emailIdx = header.indexOf('email');
+  const phoneIdx = header.indexOf('phone');
+  const roleIdx = header.indexOf('role');
+  if (nameIdx === -1) return res.status(400).send('CSV must have a "name" column');
+  const VALID_ROLES = ['Member','Volunteer','Staff','Board'];
+  let imported = 0, skipped = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    const name = cols[nameIdx];
+    if (!name) { skipped++; continue; }
+    const email = emailIdx >= 0 ? cols[emailIdx] || null : null;
+    const phone = phoneIdx >= 0 ? cols[phoneIdx] || null : null;
+    let role = roleIdx >= 0 ? cols[roleIdx] : 'Member';
+    if (!VALID_ROLES.includes(role)) role = 'Member';
+    try {
+      await pool.query('INSERT INTO members(tenant_id,name,email,phone,role) VALUES($1,$2,$3,$4,$5)', [t, name, email, phone, role]);
+      imported++;
+    } catch(e) { skipped++; }
+  }
+  await audit(req.session.user.email, 'import_members', `Imported ${imported} members (${skipped} skipped)`);
+  res.send(renderPage('Import Results', `<div class="card" style="max-width:500px;margin:0 auto;text-align:center"><h2>Import Complete</h2>
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">${imported}</div><div>Imported</div></div><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${skipped}</div><div>Skipped</div></div></div>
+    <a href="/org/members" class="btn" style="margin-top:15px">View Members</a></div>
+  `, req.session.user));
+}));
+
+// =============================================
+// ORG: COMMITTEES & WORKING GROUPS
+// =============================================
+app.get('/org/committees', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query(`CREATE TABLE IF NOT EXISTS committees (
+    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(255) NOT NULL,
+    description TEXT, chairperson VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW()
+  )`).catch(() => {});
+  await pool.query(`CREATE TABLE IF NOT EXISTS committee_members (
+    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, committee_id INT NOT NULL,
+    member_id INT NOT NULL, role VARCHAR(100) DEFAULT 'member',
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(committee_id, member_id)
+  )`).catch(() => {});
+  const committees = (await pool.query('SELECT c.*, (SELECT COUNT(*) FROM committee_members cm WHERE cm.committee_id=c.id) as member_count FROM committees c WHERE c.tenant_id=$1 ORDER BY c.name', [t])).rows;
+  res.send(renderPage('Committees', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>Committees & Groups</h1><p>Organize members into working groups and committees</p></div>
+    <div class="card"><a href="/org/committees/new" class="btn" style="margin-bottom:15px">+ Create Committee</a>
+      ${committees.length ? `<table><tr><th>Name</th><th>Chairperson</th><th>Members</th><th>Created</th><th>Actions</th></tr>${committees.map(c => `<tr><td><strong>${esc(c.name)}</strong>${c.description ? `<br><span class="muted">${esc(c.description)}</span>` : ''}</td><td>${esc(c.chairperson||'-')}</td><td>${c.member_count}</td><td>${new Date(c.created_at).toLocaleDateString()}</td><td><a href="/org/committees/${c.id}" class="btn btn-sm">Manage</a> <form method="POST" action="/org/committees/${c.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No committees yet. Create one to organize your members.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/committees/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Committee', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Create Committee</h2>
+    <form method="POST" action="/org/committees/save">
+      <label>Name</label><input name="name" required placeholder="Finance Committee">
+      <label>Description</label><textarea name="description" rows="3" placeholder="Committee purpose and mandate..."></textarea>
+      <label>Chairperson</label><input name="chairperson" placeholder="Chairperson name">
+      <button class="btn btn-green">Create Committee</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/committees/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, description, chairperson } = req.body;
+  await pool.query('INSERT INTO committees(tenant_id,name,description,chairperson) VALUES($1,$2,$3,$4)', [t, name, description, chairperson]);
+  await audit(req.session.user.email, 'create_committee', `Created committee: ${name}`);
+  res.redirect('/org/committees');
+}));
+
+app.get('/org/committees/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const committee = (await pool.query('SELECT * FROM committees WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!committee) return res.status(404).send('Not found');
+  const cMembers = (await pool.query('SELECT cm.*, m.name, m.email, m.phone FROM committee_members cm JOIN members m ON m.id=cm.member_id WHERE cm.committee_id=$1 AND cm.tenant_id=$2 ORDER BY m.name', [committee.id, t])).rows;
+  const allMembers = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const available = allMembers.filter(m => !cMembers.find(cm => cm.member_id === m.id));
+  res.send(renderPage(committee.name, `
+    <div class="card"><h2>${esc(committee.name)}</h2>
+      <p class="muted">${esc(committee.description||'')} ${committee.chairperson ? '| Chair: '+esc(committee.chairperson) : ''}</p>
+      <h3 style="margin-top:20px">Members (${cMembers.length})</h3>
+      ${cMembers.length ? `<table><tr><th>Name</th><th>Role</th><th>Joined</th><th>Actions</th></tr>${cMembers.map(cm => `<tr><td>${esc(cm.name)}</td><td><span class="tag">${esc(cm.role)}</span></td><td>${new Date(cm.joined_at).toLocaleDateString()}</td><td><form method="POST" action="/org/committees/${committee.id}/remove/${cm.member_id}" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Remove</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No members in this committee</p>'}
+      ${available.length ? `<h3 style="margin-top:20px">Add Member</h3><form method="POST" action="/org/committees/${committee.id}/add" style="display:flex;gap:8px;flex-wrap:wrap"><select name="member_id" style="flex:2;padding:8px">${available.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select><select name="role" style="flex:1;padding:8px"><option value="member">Member</option><option value="secretary">Secretary</option><option value="treasurer">Treasurer</option><option value="vice_chair">Vice Chair</option></select><button class="btn btn-sm btn-green">Add</button></form>` : ''}
+      <a href="/org/committees" class="btn" style="margin-top:15px">Back</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/committees/:id/add', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { member_id, role } = req.body;
+  await pool.query('INSERT INTO committee_members(tenant_id,committee_id,member_id,role) VALUES($1,$2,$3,$4) ON CONFLICT (committee_id,member_id) DO NOTHING', [t, req.params.id, member_id, role || 'member']);
+  await audit(req.session.user.email, 'add_committee_member', `Added member ${member_id} to committee ${req.params.id}`);
+  res.redirect(`/org/committees/${req.params.id}`);
+}));
+
+app.post('/org/committees/:id/remove/:memberId', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM committee_members WHERE committee_id=$1 AND member_id=$2 AND tenant_id=$3', [req.params.id, req.params.memberId, t]);
+  await audit(req.session.user.email, 'remove_committee_member', `Removed member ${req.params.memberId} from committee ${req.params.id}`);
+  res.redirect(`/org/committees/${req.params.id}`);
+}));
+
+app.post('/org/committees/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM committee_members WHERE committee_id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await pool.query('DELETE FROM committees WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_committee', `Deleted committee ID: ${req.params.id}`);
+  res.redirect('/org/committees');
+}));
+
+// =============================================
+// ORG: FINANCE CATEGORIES & BUDGET
+// =============================================
+app.get('/org/finance/categories', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query(`CREATE TABLE IF NOT EXISTS finance_categories (
+    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(255) NOT NULL,
+    type VARCHAR(20) NOT NULL, budget_amount NUMERIC DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`).catch(() => {});
+  const categories = (await pool.query('SELECT fc.*, (SELECT COALESCE(SUM(amount),0) FROM org_finance WHERE tenant_id=fc.tenant_id AND category=fc.name) as actual FROM finance_categories fc WHERE fc.tenant_id=$1 ORDER BY fc.type, fc.name', [t])).rows;
+  const incomeCats = categories.filter(c => c.type === 'income');
+  const expenseCats = categories.filter(c => c.type === 'expense');
+  const totalBudgetIncome = incomeCats.reduce((a,c) => a + parseFloat(c.budget_amount||0), 0);
+  const totalActualIncome = incomeCats.reduce((a,c) => a + parseFloat(c.actual||0), 0);
+  const totalBudgetExpense = expenseCats.reduce((a,c) => a + parseFloat(c.budget_amount||0), 0);
+  const totalActualExpense = expenseCats.reduce((a,c) => a + parseFloat(c.actual||0), 0);
+  res.send(renderPage('Finance Categories & Budget', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Budget vs Actual</h1><p>Track spending against your budget</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalBudgetIncome.toLocaleString()}</div><div>Budget Income</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${totalActualIncome>=totalBudgetIncome?'#059669':'#f59e0b'}">UGX ${totalActualIncome.toLocaleString()}</div><div>Actual Income</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${totalBudgetExpense.toLocaleString()}</div><div>Budget Expense</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${totalActualExpense<=totalBudgetExpense?'#059669':'#dc2626'}">UGX ${totalActualExpense.toLocaleString()}</div><div>Actual Expense</div></div>
+    </div>
+    <div class="card"><a href="/org/finance/categories/new" class="btn" style="margin-bottom:15px">+ Add Category</a>
+      <h3>Income Categories</h3>
+      ${incomeCats.length ? `<table><tr><th>Category</th><th>Budget</th><th>Actual</th><th>Variance</th><th>%</th><th>Actions</th></tr>${incomeCats.map(c => { const variance = parseFloat(c.budget_amount||0) - parseFloat(c.actual||0); const pct = parseFloat(c.budget_amount||0) > 0 ? Math.round(parseFloat(c.actual||0)/parseFloat(c.budget_amount)*100) : 0; return `<tr><td><strong>${esc(c.name)}</strong></td><td>UGX ${parseFloat(c.budget_amount||0).toLocaleString()}</td><td>UGX ${parseFloat(c.actual||0).toLocaleString()}</td><td style="color:${variance>=0?'#059669':'#dc2626'}">UGX ${variance.toLocaleString()}</td><td>${pct}%</td><td><form method="POST" action="/org/finance/categories/${c.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`; }).join('')}</table>` : '<p class="muted">No income categories</p>'}
+      <h3 style="margin-top:20px">Expense Categories</h3>
+      ${expenseCats.length ? `<table><tr><th>Category</th><th>Budget</th><th>Actual</th><th>Variance</th><th>%</th><th>Actions</th></tr>${expenseCats.map(c => { const variance = parseFloat(c.budget_amount||0) - parseFloat(c.actual||0); const pct = parseFloat(c.budget_amount||0) > 0 ? Math.round(parseFloat(c.actual||0)/parseFloat(c.budget_amount)*100) : 0; return `<tr><td><strong>${esc(c.name)}</strong></td><td>UGX ${parseFloat(c.budget_amount||0).toLocaleString()}</td><td>UGX ${parseFloat(c.actual||0).toLocaleString()}</td><td style="color:${variance>=0?'#059669':'#dc2626'}">UGX ${variance.toLocaleString()}</td><td>${pct}%</td><td><form method="POST" action="/org/finance/categories/${c.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`; }).join('')}</table>` : '<p class="muted">No expense categories</p>'}
+    </div>
+    <a href="/org/finance" class="btn" style="margin-top:10px">Back to Finance</a>
+  `, req.session.user));
+}));
+
+app.get('/org/finance/categories/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Finance Category', `<div class="card" style="max-width:500px;margin:0 auto"><h2>Add Category</h2>
+    <form method="POST" action="/org/finance/categories/save">
+      <label>Name</label><input name="name" required placeholder="Rent, Salaries, Donations...">
+      <label>Type</label><select name="type"><option value="income">Income</option><option value="expense">Expense</option></select>
+      <label>Budget Amount (UGX)</label><input name="budget_amount" type="number" value="0">
+      <button class="btn btn-green">Save Category</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/finance/categories/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, type, budget_amount } = req.body;
+  await pool.query('INSERT INTO finance_categories(tenant_id,name,type,budget_amount) VALUES($1,$2,$3,$4)', [t, name, type, budget_amount || 0]);
+  await audit(req.session.user.email, 'create_finance_category', `Added category: ${name} (${type})`);
+  res.redirect('/org/finance/categories');
+}));
+
+app.post('/org/finance/categories/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM finance_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_finance_category', `Deleted category ID: ${req.params.id}`);
+  res.redirect('/org/finance/categories');
+}));
+
+// =============================================
+// ORG: EVENT RSVP (Non-Ticketed)
+// =============================================
+app.get('/org/events/rsvp/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const event = (await pool.query('SELECT * FROM events WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!event) return res.status(404).send('Not found');
+  await pool.query(`CREATE TABLE IF NOT EXISTS event_rsvps (
+    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, event_id INT NOT NULL,
+    member_id INT, name VARCHAR(255) NOT NULL, response VARCHAR(20) DEFAULT 'yes',
+    responded_at TIMESTAMPTZ DEFAULT NOW()
+  )`).catch(() => {});
+  const rsvps = (await pool.query('SELECT r.*, m.email, m.phone FROM event_rsvps r LEFT JOIN members m ON m.id=r.member_id WHERE r.event_id=$1 AND r.tenant_id=$2 ORDER BY r.responded_at DESC', [event.id, t])).rows;
+  const yesCount = rsvps.filter(r => r.response === 'yes').length;
+  const noCount = rsvps.filter(r => r.response === 'no').length;
+  const maybeCount = rsvps.filter(r => r.response === 'maybe').length;
+  const allMembers = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const rsvpedIds = rsvps.filter(r => r.member_id).map(r => r.member_id);
+  const available = allMembers.filter(m => !rsvpedIds.includes(m.id));
+  res.send(renderPage('RSVP: ' + event.name, `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>RSVP: ${esc(event.name)}</h1><p>${event.event_date ? new Date(event.event_date).toLocaleDateString() : ''} ${event.venue ? '@ '+esc(event.venue) : ''}</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${yesCount}</div><div>Attending</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${maybeCount}</div><div>Maybe</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${noCount}</div><div>Not Attending</div></div>
+    </div>
+    <div class="card"><h3>Record RSVP</h3>
+      <form method="POST" action="/org/events/rsvp/${event.id}/save" style="display:flex;gap:8px;flex-wrap:wrap">
+        <select name="member_id" style="flex:2;padding:8px"><option value="">Select member...</option>${available.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
+        <input name="name" placeholder="Or type name" style="flex:2;padding:8px">
+        <select name="response" style="flex:1;padding:8px"><option value="yes">Yes</option><option value="maybe">Maybe</option><option value="no">No</option></select>
+        <button class="btn btn-sm btn-green">RSVP</button>
+      </form>
+    </div>
+    <div class="card"><h3>Responses (${rsvps.length})</h3>
+      ${rsvps.length ? `<table><tr><th>Name</th><th>Response</th><th>Date</th></tr>${rsvps.map(r => `<tr><td>${esc(r.name)}</td><td><span class="tag" style="background:${r.response==='yes'?'#d1fae5;color:#065f46':r.response==='maybe'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b'}">${r.response}</span></td><td>${new Date(r.responded_at).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No RSVPs yet</p>'}
+    </div>
+    <a href="/org/events" class="btn" style="margin-top:10px">Back to Events</a>
+  `, req.session.user));
+}));
+
+app.post('/org/events/rsvp/:id/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { member_id, name, response } = req.body;
+  const rsvpName = name || (member_id ? (await pool.query('SELECT name FROM members WHERE id=$1 AND tenant_id=$2', [member_id, t])).rows[0]?.name : null);
+  if (!rsvpName) return res.status(400).send('Name or member required');
+  await pool.query('INSERT INTO event_rsvps(tenant_id,event_id,member_id,name,response) VALUES($1,$2,$3,$4,$5)', [t, req.params.id, member_id || null, rsvpName, response || 'yes']);
+  await audit(req.session.user.email, 'event_rsvp', `RSVP ${response} for ${rsvpName} on event ${req.params.id}`);
+  res.redirect(`/org/events/rsvp/${req.params.id}`);
 }));
 
 
