@@ -25,7 +25,9 @@ if (!process.env.NODE_NO_WARNINGS) process.env.NODE_NO_WARNINGS = '1';
 process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
 const express = require('express');
 const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session);
+// TEMPORARY: Skip connect-pg-simple — using memory store to debug Render crash
+// const pgSession = require('connect-pg-simple')(session);
+const pgSession = null;
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
