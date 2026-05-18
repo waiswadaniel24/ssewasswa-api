@@ -303,7 +303,7 @@ app.use((req, res, next) => {
 
 // Validate CSRF token on ALL state-changing requests
 // Skip only: webhook callbacks, API endpoints (use API key auth), USSD, opt-out, payment callbacks
-const CSRF_SKIP_PREFIXES = ['/webhook', '/api/', '/ussd', '/opt-out', '/pay/', '/momo/'];
+const CSRF_SKIP_PREFIXES = ['/webhook', '/api/', '/ussd', '/opt-out', '/pay/', '/momo/', '/login', '/register', '/forgot-password', '/student/login', '/parent/login', '/worker/login', '/church/login', '/auth/'];
 app.use((req, res, next) => {
   if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
     const path = req.path;
