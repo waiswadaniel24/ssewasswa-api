@@ -5,7 +5,8 @@
 module.exports = function(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger) {
 
   // === WHATSAPP CONFIG ===
-  const WHATSAPP_NUMBER = process.env.WHATSAPP_NUMBER || '256700000000';
+  // Check both env vars — WHATSAPP_NUMBE (typo key) has the correct number
+  const WHATSAPP_NUMBER = process.env.WHATSAPP_NUMBE || process.env.WHATSAPP_NUMBER || '256752971118';
   const WHATSAPP_LINK = 'https://wa.me/' + WHATSAPP_NUMBER;
   const WHATSAPP_DISPLAY = '+' + WHATSAPP_NUMBER.replace(/^256/, '256 ').replace(/(\d{3})(\d{3})(\d{3})$/, '$1 $2 $3');
 
@@ -591,13 +592,33 @@ ul { list-style: none; }
 <div class="cookie-banner" id="cookieBanner">
   <span>We use cookies to improve your experience. By continuing, you agree to our <a href="/privacy">Privacy Policy</a>.</span>
   <div class="cookie-actions">
-    <button class="cookie-accept">Accept</button>
-    <button class="cookie-dismiss">Dismiss</button>
+    <button class="cookie-accept" onclick="handleCookieAccept()" type="button">Accept</button>
+    <button class="cookie-dismiss" onclick="handleCookieDismiss()" type="button">Dismiss</button>
   </div>
 </div>
 
 <script>
-if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+// === GLOBAL COOKIE HANDLERS (must be at global scope for onclick to work) ===
+function handleCookieAccept() {
+  try { localStorage.setItem('cookieAccepted','1'); } catch(e) {}
+  var b = document.getElementById('cookieBanner');
+  if(b) b.style.display = 'none';
+}
+function handleCookieDismiss() {
+  try { localStorage.setItem('cookieDismissed','1'); } catch(e) {}
+  var b = document.getElementById('cookieBanner');
+  if(b) b.style.display = 'none';
+}
+
+// === HIDE COOKIE BANNER IF ALREADY ACCEPTED ===
+try {
+  if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')) {
+    var _cb = document.getElementById('cookieBanner');
+    if(_cb) _cb.style.display = 'none';
+  }
+} catch(e) {}
+
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js?v=3').catch(function(){});}
 (function(){
   var navbar = document.getElementById('navbar');
   if(!navbar) return;
@@ -675,15 +696,6 @@ document.querySelectorAll('a[href^="/#"]').forEach(function(a){
     if(window.scrollY > 600) btn.classList.add('visible');
     else btn.classList.remove('visible');
   });
-})();
-(function(){
-  var banner = document.getElementById('cookieBanner');
-  if(!banner) return;
-  if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){ banner.style.display = 'none'; }
-  var acceptBtn = banner.querySelector('.cookie-accept');
-  var dismissBtn = banner.querySelector('.cookie-dismiss');
-  if(acceptBtn) acceptBtn.addEventListener('click', function(){ localStorage.setItem('cookieAccepted','1'); banner.style.display='none'; });
-  if(dismissBtn) dismissBtn.addEventListener('click', function(){ localStorage.setItem('cookieDismissed','1'); banner.style.display='none'; });
 })();
 document.querySelectorAll('.faq-item').forEach(function(item){
   item.addEventListener('click', function(){

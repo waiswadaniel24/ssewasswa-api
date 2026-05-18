@@ -10,10 +10,10 @@
 //   - Periodic background sync (if supported)
 // ============================================================
 
-const CACHE_NAME = 'comfort-v2.0';
-const STATIC_CACHE = 'comfort-static-v2.0';
-const DATA_CACHE = 'comfort-data-v2.0';
-const OFFLINE_CACHE = 'comfort-offline-v2.0';
+const CACHE_NAME = 'comfort-v3.0';
+const STATIC_CACHE = 'comfort-static-v3.0';
+const DATA_CACHE = 'comfort-data-v3.0';
+const OFFLINE_CACHE = 'comfort-offline-v3.0';
 
 // Assets to pre-cache on install
 const PRECACHE_URLS = [
@@ -42,7 +42,7 @@ const SWR_PREFIXES = ['/dashboard', '/students', '/fees'];
 // INSTALL EVENT
 // ============================================================
 self.addEventListener('install', event => {
-  console.log('[SW] Installing service worker v2.0...');
+  console.log('[SW] Installing service worker v3.0...');
   event.waitUntil(
     caches.open(STATIC_CACHE).then(cache => {
       return cache.addAll(PRECACHE_URLS).catch(err => {
@@ -61,7 +61,7 @@ self.addEventListener('install', event => {
 // ACTIVATE EVENT
 // ============================================================
 self.addEventListener('activate', event => {
-  console.log('[SW] Activating service worker v2.0...');
+  console.log('[SW] Activating service worker v3.0...');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
