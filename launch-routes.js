@@ -1409,7 +1409,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ${getStructuredData()}
     `;
 
-    res.send(renderPage('Comfort - The Operating System for African Institutions', content, null, '/'));
+    res.send(renderPage('Comfort - The Operating System for African Institutions', content, req.session.user || null, '/'));
   }));
 
   // =========================================================================
