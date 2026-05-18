@@ -78,7 +78,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
             // If 100%, auto-close campaign
             if (m === 100) {
-              await pool.query("UPDATE fundraising_campaigns SET status='completed' WHERE id=$1", [campaignId]);
+              await pool.query("UPDATE fundraising_campaigns SET status='completed' WHERE id=$1 AND tenant_id=$2", [campaignId, tenantId]);
             }
           }
         }
@@ -341,7 +341,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     // Get donations with donor profiles (check if anonymous)
     const donations = (await pool.query(`SELECT cd.*, dp.is_anonymous, dp.display_name as profile_name
       FROM campaign_donations cd
-      LEFT JOIN donor_profiles dp ON cd.donor_name = dp.display_name AND dp.tenant_id = fc_tenant_id
+      LEFT JOIN donor_profiles dp ON cd.donor_name = dp.display_name AND dp.tenant_id = fc.tenant_id
       JOIN fundraising_campaigns fc ON cd.campaign_id = fc.id
       WHERE cd.campaign_id = $1
       ORDER BY cd.amount DESC, cd.donated_at DESC LIMIT 100`, [c.id])).rows;
@@ -458,7 +458,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     await pool.query("UPDATE investment_transactions SET status='refunded' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
     // Deduct from investor total
     if (tx.investor_email) {
-      await pool.query('UPDATE fundraising_investors SET total_invested=GREATEST(0,total_invested-$1), campaigns_supported=GREATEST(0,campaigns_supported-1) WHERE user_email=$2', [tx.amount, tx.investor_email]);
+      await pool.query('UPDATE fundraising_investors SET total_invested=GREATEST(0,total_invested-$1), campaigns_supported=GREATEST(0,campaigns_supported-1) WHERE user_email=$2 AND tenant_id=$3', [tx.amount, tx.investor_email, tenantId]);
     }
     // Deduct platform fee back
     if (tx.platform_fee > 0) {

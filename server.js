@@ -121,9 +121,9 @@ const pool = new Pool({
   // Always use rejectUnauthorized:false — Render/Heroku/Neon managed PostgreSQL uses self-signed CA certs.
   // Using NODE_ENV check breaks when Render doesn't set NODE_ENV=production by default.
   ssl: { rejectUnauthorized: false },
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000
+  max: 10,
+  idleTimeoutMillis: 60000,
+  connectionTimeoutMillis: 30000
 });
 
 // === SECURITY ===

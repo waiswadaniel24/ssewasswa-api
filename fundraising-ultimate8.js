@@ -221,7 +221,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!amount || amount <= 0) return res.status(400).json({ error: 'positive amount required' });
     const page = await pool.query('SELECT * FROM memorial_pages WHERE tenant_id=$1 AND id=$2 AND is_active=true', [req.session.user.tenant_id, req.params.id]);
     if (!page.rows.length) return res.status(404).json({ error: 'Memorial page not found or inactive' });
-    await pool.query('UPDATE memorial_pages SET total_raised=total_raised+$1 WHERE id=$2', [amount, req.params.id]);
+    await pool.query('UPDATE memorial_pages SET total_raised=total_raised+$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
     await audit(req, 'update', 'memorial_pages', req.params.id); res.json({ ok: true, amount, page: page.rows[0].honoree_name });
   }));
   app.get('/tribute-memorial', requireAuth, ah(async (req, res) => {
@@ -270,7 +270,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const p = perk.rows[0];
     if (p.quantity_available !== null && parseInt(p.quantity_claimed) >= parseInt(p.quantity_available)) return res.status(400).json({ error: 'Perk sold out' });
     const r = await pool.query('INSERT INTO perk_claims (tenant_id,perk_id,donor_name,donor_email,shipping_address) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(donor_name), esc(donor_email||''), esc(shipping_address||'')]);
-    await pool.query('UPDATE crowdfunding_perks SET quantity_claimed=quantity_claimed+1 WHERE id=$1', [req.params.id]);
+    await pool.query('UPDATE crowdfunding_perks SET quantity_claimed=quantity_claimed+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
     await audit(req, 'create', 'perk_claims', r.rows[0].id); res.json(r.rows[0]);
   }));
   app.get('/api/perk-claims', requireAuth, ah(async (req, res) => {
@@ -537,7 +537,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       await pool.query('INSERT INTO direct_mail_recipients (tenant_id,campaign_id,donor_name,address_line1,city,state,postal_code,country) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [req.session.user.tenant_id, req.params.id, esc(r.donor_name||''), esc(r.address_line1||''), esc(r.city||''), esc(r.state||''), esc(r.postal_code||''), esc(r.country||'')]);
       added++;
     }
-    await pool.query('UPDATE direct_mail_campaigns SET total_recipients=total_recipients+$1 WHERE id=$2', [added, req.params.id]);
+    await pool.query('UPDATE direct_mail_campaigns SET total_recipients=total_recipients+$1 WHERE id=$2 AND tenant_id=$3', [added, req.params.id, req.session.user.tenant_id]);
     await audit(req, 'update', 'direct_mail_campaigns', req.params.id); res.json({ ok: true, added });
   }));
   app.post('/api/direct-mail-campaigns/:id/send', requireAuth, ah(async (req, res) => {

@@ -335,17 +335,6 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     )`,
 
     // ===== FEATURE 15: Plugin Marketplace =====
-    `CREATE TABLE IF NOT EXISTS platform_plugins (
-      id SERIAL PRIMARY KEY,
-      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
-      plugin_id INTEGER REFERENCES plugin_marketplace(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      version TEXT NOT NULL,
-      description TEXT,
-      config_json JSONB DEFAULT '{}',
-      is_installed BOOLEAN DEFAULT true,
-      is_active BOOLEAN DEFAULT false
-    )`,
     `CREATE TABLE IF NOT EXISTS plugin_marketplace (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -357,6 +346,17 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       downloads INTEGER DEFAULT 0,
       rating NUMERIC(3,2) DEFAULT 0,
       is_verified BOOLEAN DEFAULT false
+    )`,
+    `CREATE TABLE IF NOT EXISTS platform_plugins (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      plugin_id INTEGER REFERENCES plugin_marketplace(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      description TEXT,
+      config_json JSONB DEFAULT '{}',
+      is_installed BOOLEAN DEFAULT true,
+      is_active BOOLEAN DEFAULT false
     )`,
 
     // ===== INDEXES =====

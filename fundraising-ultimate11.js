@@ -612,7 +612,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const report = await pool.query('SELECT * FROM donation_impact_reports WHERE id=$1 AND is_published=true', [req.params.id]);
     if (!report.rows.length) return res.status(404).json({ error: 'Report not found' });
     const sections = await pool.query('SELECT * FROM impact_report_sections WHERE report_id=$1 ORDER BY sort_order', [req.params.id]);
-    await pool.query('UPDATE donation_impact_reports SET view_count=view_count+1 WHERE id=$1', [req.params.id]);
+    await pool.query('UPDATE donation_impact_reports SET view_count=view_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
     res.json({ report: report.rows[0], sections: sections.rows });
   }));
   // Sections
@@ -691,7 +691,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const existing = JSON.parse(collab.rows[0].invited_emails || '[]');
     if (!existing.includes(email)) {
       existing.push(email);
-      await pool.query('UPDATE campaign_collaboration SET invited_emails=$1 WHERE id=$2', [JSON.stringify(existing), req.params.id]);
+      await pool.query('UPDATE campaign_collaboration SET invited_emails=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(existing), req.params.id, req.session.user.tenant_id]);
     }
     try { await notify(email, 'You have been invited to collaborate on: ' + collab.rows[0].campaign_name); } catch(e) {}
     await audit(req, 'update', 'campaign_collaboration', req.params.id); res.json({ ok: true, invited: email });
@@ -871,7 +871,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/communication-templates/:id/use', requireAuth, ah(async (req, res) => {
     const tmpl = await pool.query('SELECT * FROM communication_templates WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!tmpl.rows.length) return res.status(404).json({ error: 'Template not found' });
-    await pool.query('UPDATE communication_templates SET usage_count=usage_count+1 WHERE id=$1', [req.params.id]);
+    await pool.query('UPDATE communication_templates SET usage_count=usage_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
     const { recipient, variables } = req.body;
     if (!recipient) return res.status(400).json({ error: 'recipient required' });
     let body = tmpl.rows[0].body_template;

@@ -249,6 +249,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     // Campaign shares tracking
     `CREATE TABLE IF NOT EXISTS campaign_shares (
       id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
       campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
       shared_by TEXT,
       platform TEXT CHECK (platform IN ('whatsapp','twitter','facebook','linkedin','email','link_copy','telegram','other')),
@@ -278,6 +279,7 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     // Campaign followers - users who want updates
     `CREATE TABLE IF NOT EXISTS campaign_followers (
       id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
       campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
       user_email TEXT NOT NULL,
       notify_on_update BOOLEAN DEFAULT true,
@@ -285,6 +287,20 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
       notify_on_comment BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(campaign_id, user_email)
+    )`,
+
+    // Peer fundraisers - individual fundraising pages for campaigns
+    `CREATE TABLE IF NOT EXISTS peer_fundraisers (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      goal INTEGER DEFAULT 0,
+      raised INTEGER DEFAULT 0,
+      message TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
     // Campaign testimonials
@@ -1154,6 +1170,8 @@ module.exports = function(app, pool, ah, requireAuth, requireNotBanned, requireF
     `INSERT INTO exchange_rates (from_currency, to_currency, rate, source) VALUES ('USD', 'UGX', 3700, 'manual') ON CONFLICT (from_currency, to_currency) DO UPDATE SET rate=EXCLUDED.rate, updated_at=NOW()`,
     `ALTER TABLE investor_offers ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `ALTER TABLE investment_transactions ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
+    `ALTER TABLE campaign_shares ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE`,
+    `ALTER TABLE campaign_followers ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE`,
     `ALTER TABLE payout_requests ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `ALTER TABLE matching_donations ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
     `ALTER TABLE campaign_comments ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
@@ -2644,7 +2662,7 @@ Sitemap: ${BASE_URL}/sitemap.xml
         ${peers.length > 0 ? '<div class="grid">'+peers.map(p => {
           const pct = p.goal > 0 ? Math.round(parseInt(p.raised||0)/parseInt(p.goal)*100) : 0;
           return '<div class="card" style="padding:20px;border-top:4px solid #ec4899"><h4 style="margin:0 0 4px">'+esc(p.name)+'</h4>'+(p.message?'<p class="muted" style="font-size:13px;margin:0 0 12px">'+esc(p.message)+'</p>':'')+'<div class="progress-bar" style="height:10px;margin:8px 0"><div class="progress-fill" style="width:'+pct+'%;background:#ec4899">'+pct+'%</div></div><div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#059669;font-weight:700">UGX '+(parseInt(p.raised)||0).toLocaleString()+'</span><span class="muted">of UGX '+(parseInt(p.goal)||0).toLocaleString()+'</span></div></div>';
-        }).join('')+'</div>' : '<div style="text-align:center;padding:40px"><p class="muted">No peer fundraisers yet. Be the first to create your own fundraising page!</p>'+(req.session_user?'<a href="/campaigns/'+c.id+'/peer/new" class="btn btn-green" style="margin-top:16px">Start Fundraising</a>':'')+'</div>'}
+        }).join('')+'</div>' : '<div style="text-align:center;padding:40px"><p class="muted">No peer fundraisers yet. Be the first to create your own fundraising page!</p>'+(req.session.user?'<a href="/campaigns/'+c.id+'/peer/new" class="btn btn-green" style="margin-top:16px">Start Fundraising</a>':'')+'</div>'}
       </div>
     `, req.session.user || null));
   }));
@@ -5046,5 +5064,3 @@ Sitemap: ${BASE_URL}/sitemap.xml
   // V5 links added to the existing enhanced dashboard
   console.log('[Fundraising Enhancements] All V5 routes registered successfully');
 };
-
-module.exports.processDonationEffects = processDonationEffects;

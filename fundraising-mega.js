@@ -365,10 +365,10 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!subject || !subject.trim()) return res.status(400).json({ error: 'Subject is required' });
     const result = await pool.query(
       'INSERT INTO donor_crm_interactions(tenant_id,contact_id,type,subject,notes,interaction_date) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-      [t, contactId, esc(type || 'call'), esc(subject), esc(notes || ''), interaction_date || 'CURRENT_DATE']
+      [t, contactId, esc(type || 'call'), esc(subject), esc(notes || ''), interaction_date || new Date().toISOString().split('T')[0]]
     );
     // Update last_contacted
-    await pool.query('UPDATE donor_crm_contacts SET last_contacted=NOW() WHERE id=$1', [contactId]);
+    await pool.query('UPDATE donor_crm_contacts SET last_contacted=NOW() WHERE id=$1 AND tenant_id=$2', [contactId, t]);
     await audit(req.session.user.email, 'donor_crm_interaction_added', 'Added interaction for contact: ' + contact.name, t);
     res.json(result.rows[0]);
   }));
@@ -1250,7 +1250,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!donor_name || !donor_name.trim()) return res.status(400).json({ error: 'Donor name is required' });
     const result = await pool.query(
       'INSERT INTO gift_tax_declarations(tenant_id,donor_name,donor_email,tax_number,declaration_date,is_eligible) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-      [t, esc(donor_name), esc(donor_email || ''), esc(tax_number || ''), declaration_date || 'CURRENT_DATE', !!is_eligible]
+      [t, esc(donor_name), esc(donor_email || ''), esc(tax_number || ''), declaration_date || new Date().toISOString().split('T')[0], !!is_eligible]
     );
     await audit(req.session.user.email, 'tax_declaration_created', 'Created tax declaration for: ' + donor_name, t);
     res.json(result.rows[0]);

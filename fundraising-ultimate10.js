@@ -564,13 +564,13 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
   // Track view (public, no auth)
   app.post('/api/landing-pages/:id/track-view', ah(async (req, res) => {
-    await pool.query('UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1', [req.params.id]);
+    await pool.query('UPDATE landing_pages SET view_count=view_count+1 WHERE id=$1 AND tenant_id=(SELECT tenant_id FROM landing_pages WHERE id=$1)', [req.params.id]);
     res.json({ ok: true });
   }));
 
   // Track conversion (public, no auth)
   app.post('/api/landing-pages/:id/track-conversion', ah(async (req, res) => {
-    await pool.query('UPDATE landing_pages SET conversion_count=conversion_count+1 WHERE id=$1', [req.params.id]);
+    await pool.query('UPDATE landing_pages SET conversion_count=conversion_count+1 WHERE id=$1 AND tenant_id=(SELECT tenant_id FROM landing_pages WHERE id=$1)', [req.params.id]);
     res.json({ ok: true });
   }));
 
@@ -935,7 +935,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO renewal_reminders (tenant_id,campaign_id,donor_email,donor_name,donor_phone,reminder_type,message,sent_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()) RETURNING *',
       [req.session.user.tenant_id, req.params.id, esc(donor_email), esc(donor_name||''), esc(donor_phone||''), esc(reminder_type||'email'), esc(message||'')]
     );
-    await pool.query('UPDATE renewal_reminders SET status=$1 WHERE id=$2', ['sent', r.rows[0].id]);
+    await pool.query('UPDATE renewal_reminders SET status=$1 WHERE id=$2 AND tenant_id=$3', ['sent', r.rows[0].id, req.session.user.tenant_id]);
     // Try sending via email or SMS
     if (reminder_type === 'email' && donor_email) {
       try { await sendEmail(donor_email, 'Renew Your Support', message || 'We miss your support! Please consider renewing your gift.'); } catch(e) {}
@@ -1117,7 +1117,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
             }
           } else if (existing.rows[0].club_id !== c.id) {
             // Promote to new tier
-            await pool.query('UPDATE gift_club_members SET club_id=$1, total_donated=$2 WHERE id=$3', [c.id, total, existing.rows[0].id]);
+            await pool.query('UPDATE gift_club_members SET club_id=$1, total_donated=$2 WHERE id=$3 AND tenant_id=$4', [c.id, total, existing.rows[0].id, req.session.user.tenant_id]);
             promoted++;
           }
           break;
@@ -1179,7 +1179,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (m.welcome_email_subject && m.welcome_email_body && m.donor_email) {
       try { await sendEmail(m.donor_email, m.welcome_email_subject, m.welcome_email_body.replace('{name}', m.donor_name).replace('{club}', m.club_name)); } catch(e) {}
     }
-    await pool.query('UPDATE gift_club_members SET welcome_sent=true WHERE id=$1', [m.id]);
+    await pool.query('UPDATE gift_club_members SET welcome_sent=true WHERE id=$1 AND tenant_id=$2', [m.id, req.session.user.tenant_id]);
     await audit(req, 'update', 'gift_club_members', m.id);
     res.json({ ok: true, sent: true });
   }));
@@ -1323,9 +1323,9 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       'INSERT INTO video_engagement (tenant_id,video_id,viewer_email,viewer_ip,watch_time_seconds,completed,liked,shared,source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
       [tid, req.params.id, esc(viewer_email||''), esc(viewer_ip||''), watch_time_seconds||0, completed||false, liked||false, shared||false, esc(source||'direct')]
     );
-    await pool.query('UPDATE campaign_videos SET view_count=view_count+1 WHERE id=$1', [req.params.id]);
-    if (liked) await pool.query('UPDATE campaign_videos SET like_count=like_count+1 WHERE id=$1', [req.params.id]);
-    if (shared) await pool.query('UPDATE campaign_videos SET share_count=share_count+1 WHERE id=$1', [req.params.id]);
+    await pool.query('UPDATE campaign_videos SET view_count=view_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
+    if (liked) await pool.query('UPDATE campaign_videos SET like_count=like_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
+    if (shared) await pool.query('UPDATE campaign_videos SET share_count=share_count+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     res.json({ ok: true });
   }));
 

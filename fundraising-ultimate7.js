@@ -207,7 +207,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const qty = quantity || 1; const total = qty * parseFloat(tier.rows[0].price);
     const qr = 'TKT-' + Math.random().toString(36).substring(2,10);
     const r = await pool.query('INSERT INTO ticket_purchases (tenant_id,tier_id,buyer_name,buyer_email,buyer_phone,quantity,total_amount,payment_method,qr_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [req.session.user.tenant_id, tier_id, esc(buyer_name||''), esc(buyer_email||''), esc(buyer_phone||''), qty, total, esc(payment_method||'online'), qr]);
-    await pool.query('UPDATE ticket_tiers SET quantity_sold=quantity_sold+$1 WHERE id=$2', [qty, tier_id]);
+    await pool.query('UPDATE ticket_tiers SET quantity_sold=quantity_sold+$1 WHERE id=$2 AND tenant_id=$3', [qty, tier_id, req.session.user.tenant_id]);
     await audit(req, 'create', 'ticket_purchases', r.rows[0].id); res.json(r.rows[0]);
   }));
   app.post('/api/ticket-purchases/:id/checkin', requireAuth, ah(async (req, res) => {
@@ -234,7 +234,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (parseFloat(amount) <= parseFloat(item.rows[0].current_bid)) return res.status(400).json({ error: 'Bid must exceed current bid' });
     await pool.query('UPDATE auction_bids SET is_winning=false WHERE item_id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
     const r = await pool.query('INSERT INTO auction_bids (tenant_id,item_id,bidder_name,bidder_email,amount,is_winning) VALUES ($1,$2,$3,$4,$5,true) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(bidder_name||''), esc(bidder_email||''), amount]);
-    await pool.query('UPDATE auction_items SET current_bid=$1 WHERE id=$2', [amount, req.params.id]);
+    await pool.query('UPDATE auction_items SET current_bid=$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
     await audit(req, 'create', 'auction_bids', r.rows[0].id); res.json(r.rows[0]);
   }));
   app.get('/api/auction-items/:id/bids', requireAuth, ah(async (req, res) => { const r = await pool.query('SELECT * FROM auction_bids WHERE tenant_id=$1 AND item_id=$2 ORDER BY amount DESC', [req.session.user.tenant_id, req.params.id]); res.json(r.rows); }));
@@ -242,7 +242,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const { bidder_name, bidder_email } = req.body;
     const item = await pool.query('SELECT * FROM auction_items WHERE tenant_id=$1 AND id=$2', [req.session.user.tenant_id, req.params.id]);
     if (!item.rows.length || !item.rows[0].buy_now_price) return res.status(400).json({ error: 'Buy now not available' });
-    await pool.query('UPDATE auction_items SET current_bid=buy_now_price, status=$1, winner_id=NULL WHERE id=$2', ['sold', req.params.id]);
+    await pool.query('UPDATE auction_items SET current_bid=buy_now_price, status=$1, winner_id=NULL WHERE id=$2 AND tenant_id=$3', ['sold', req.params.id, req.session.user.tenant_id]);
     await audit(req, 'update', 'auction_items', req.params.id); res.json({ message: 'Item purchased!', price: item.rows[0].buy_now_price });
   }));
   app.post('/api/auction-items/:id/close', requireAuth, ah(async (req, res) => {
@@ -265,7 +265,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   app.post('/api/sponsorship-purchases', requireAuth, ah(async (req, res) => {
     const { package_id, sponsor_name, sponsor_email, sponsor_phone, company, amount, payment_method } = req.body;
     const r = await pool.query('INSERT INTO sponsorship_purchases (tenant_id,package_id,sponsor_name,sponsor_email,sponsor_phone,company,amount,payment_status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [req.session.user.tenant_id, package_id, esc(sponsor_name||''), esc(sponsor_email||''), esc(sponsor_phone||''), esc(company||''), amount||0, 'pending']);
-    await pool.query('UPDATE sponsorship_packages SET quantity_sold=quantity_sold+1 WHERE id=$1', [package_id]);
+    await pool.query('UPDATE sponsorship_packages SET quantity_sold=quantity_sold+1 WHERE id=$1 AND tenant_id=$2', [package_id, req.session.user.tenant_id]);
     await audit(req, 'create', 'sponsorship_purchases', r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/sponsorship-purchases/:id/fulfill', requireAuth, ah(async (req, res) => { const r = await pool.query('UPDATE sponsorship_purchases SET fulfillment_status=$1 WHERE tenant_id=$2 AND id=$3 RETURNING *', ['fulfilled', req.session.user.tenant_id, req.params.id]); await audit(req, 'update', 'sponsorship_purchases', req.params.id); res.json(r.rows[0]); }));
@@ -288,7 +288,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!fund.rows.length) return res.status(404).json({ error: 'Fund not found' });
     if (parseFloat(amount) > parseFloat(fund.rows[0].current_balance)) return res.status(400).json({ error: 'Insufficient balance' });
     const r = await pool.query('INSERT INTO daf_grants (tenant_id,fund_id,grant_to,purpose,amount) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.session.user.tenant_id, req.params.id, esc(grant_to), esc(purpose||''), amount]);
-    await pool.query('UPDATE donor_advised_funds SET current_balance=current_balance-$1, total_granted=total_granted+$1 WHERE id=$2', [amount, req.params.id]);
+    await pool.query('UPDATE donor_advised_funds SET current_balance=current_balance-$1, total_granted=total_granted+$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
     await audit(req, 'create', 'daf_grants', r.rows[0].id); res.json(r.rows[0]);
   }));
   app.put('/api/daf/grants/:id/approve', requireAuth, ah(async (req, res) => { const r = await pool.query('UPDATE daf_grants SET status=$1, granted_at=NOW() WHERE tenant_id=$2 AND id=$3 RETURNING *', ['approved', req.session.user.tenant_id, req.params.id]); await audit(req, 'update', 'daf_grants', req.params.id); res.json(r.rows[0]); }));
