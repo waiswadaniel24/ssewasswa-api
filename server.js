@@ -271,9 +271,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// DEBUG: Test route to verify session middleware works
+// DEBUG: Test route to verify session middleware works — minimal response
 app.get('/test-session', (req, res) => {
-  res.send('Session OK: ' + JSON.stringify({ session: !!req.session, csrf: !!req.session?.csrfToken }));
+  res.type('text').send('OK');
+});
+
+// DEBUG: Test route that uses renderPage
+app.get('/test-render', (req, res) => {
+  res.send(renderPage('Test', '<div class="card"><h2>Render OK</h2></div>', null, req));
 });
 
 // Generate CSRF token and store in session (AFTER session middleware)
