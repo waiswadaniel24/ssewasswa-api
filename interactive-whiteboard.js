@@ -68,9 +68,8 @@ module.exports = function(app, pool, opts) {
   // ══════════════════════════════════════════════════════════════════════════
 
   async function ensureTables() {
-    const conn = await pool.getConnection();
     try {
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_sessions (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -81,8 +80,8 @@ module.exports = function(app, pool, opts) {
           lesson_plan_id INT DEFAULT NULL,
           mode TEXT NOT NULL DEFAULT 'live',
           status TEXT NOT NULL DEFAULT 'draft',
-          background_config JSON DEFAULT NULL,
-          thumbnail MEDIUMTEXT DEFAULT NULL,
+          background_config JSONB DEFAULT NULL,
+          thumbnail TEXT DEFAULT NULL,
           created_by INT NOT NULL,
           presenter_id INT DEFAULT NULL,
           auto_save_interval INT DEFAULT 30,
@@ -92,16 +91,16 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_pages (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
           session_id INT NOT NULL,
           page_number INT NOT NULL DEFAULT 1,
           title VARCHAR(255) DEFAULT '',
-          background_config JSON DEFAULT NULL,
-          canvas_data MEDIUMTEXT DEFAULT NULL,
-          thumbnail MEDIUMTEXT DEFAULT NULL,
+          background_config JSONB DEFAULT NULL,
+          canvas_data TEXT DEFAULT NULL,
+          thumbnail TEXT DEFAULT NULL,
           width INT DEFAULT 1920,
           height INT DEFAULT 1080,
           created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -111,13 +110,13 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_content (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
           page_id INT NOT NULL,
           content_type TEXT NOT NULL DEFAULT 'freehand',
-          content_data JSON NOT NULL,
+          content_data JSONB NOT NULL,
           z_index INT DEFAULT 0,
           locked SMALLINT DEFAULT 0,
           created_by INT DEFAULT NULL,
@@ -127,15 +126,15 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_templates (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL DEFAULT 0,
           name VARCHAR(255) NOT NULL,
           description TEXT,
           category VARCHAR(100) DEFAULT 'general',
-          thumbnail MEDIUMTEXT DEFAULT NULL,
-          config JSON NOT NULL,
+          thumbnail TEXT DEFAULT NULL,
+          config JSONB NOT NULL,
           is_builtin SMALLINT DEFAULT 0,
           is_public SMALLINT DEFAULT 1,
           created_by INT DEFAULT NULL,
@@ -144,7 +143,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_collaborators (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -162,7 +161,7 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_submissions (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
@@ -182,14 +181,14 @@ module.exports = function(app, pool, opts) {
         )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_version_history (
           id SERIAL PRIMARY KEY,
           tenant_id INT NOT NULL,
           session_id INT NOT NULL,
           page_id INT DEFAULT NULL,
           version_label VARCHAR(255) DEFAULT '',
-          snapshot_data MEDIUMTEXT NOT NULL,
+          snapshot_data TEXT NOT NULL,
           created_by INT DEFAULT NULL,
           created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
@@ -197,20 +196,20 @@ module.exports = function(app, pool, opts) {
 
       // Seed built-in templates (tenant_id=0 means shared across all tenants)
       for (const tpl of BUILTIN_TEMPLATES) {
-        const [existing] = await conn.query(
-          'SELECT id FROM whiteboard_templates WHERE tenant_id=0 AND name=? AND is_builtin=1 LIMIT 1',
+        const existing = await pool.query(
+          'SELECT id FROM whiteboard_templates WHERE tenant_id=0 AND name=$1 AND is_builtin=1 LIMIT 1',
           [tpl.name]
         );
-        if (!existing.length) {
-          await conn.query(
+        if (!existing.rows.length) {
+          await pool.query(
             `INSERT INTO whiteboard_templates (tenant_id, name, description, category, config, is_builtin, is_public)
-             VALUES (0, ?, ?, ?, ?, 1, 1)`,
+             VALUES (0, $1, $2, $3, $4, 1, 1)`,
             [tpl.name, tpl.description, tpl.category, tpl.config]
           );
         }
       }
-    } finally {
-      conn.release();
+    } catch(err) {
+      console.error('[whiteboard] Table init error:', err.message);
     }
   }
 
