@@ -270,6 +270,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// DEBUG: Test route to verify session middleware works
+app.get('/test-session', (req, res) => {
+  res.send('Session OK: ' + JSON.stringify({ session: !!req.session, csrf: !!req.session?.csrfToken }));
+});
+
 // Generate CSRF token and store in session (AFTER session middleware)
 app.use((req, res, next) => {
   if (!req.session) return next();
