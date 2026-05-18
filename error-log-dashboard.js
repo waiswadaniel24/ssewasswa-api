@@ -413,7 +413,7 @@ module.exports = function(app, pool, opts) {
           FROM error_logs WHERE first_seen >= CURRENT_DATE - INTERVAL '6 days'
           GROUP BY first_seen::date
         ) sub ON sub.fd = d
-        ORDER BY d
+        ORDER BY d)
       `);
       const trendData = trendRes.rows.map(r => ({
         label: (r.day || '').substring(5),

@@ -135,7 +135,7 @@ module.exports = function securityOps(app, pool, requireAuth, logger, audit, ren
 
   // ── NEW MIGRATIONS ──
   const newMigrations = [
-    // Session management table for tracking active sessions
+    // Session management table for tracking active sessions)
     `CREATE TABLE IF NOT EXISTS user_sessions (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,

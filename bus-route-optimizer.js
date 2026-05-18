@@ -1539,7 +1539,7 @@ module.exports = function(app, pool, opts) {
         (SELECT SUM(t.distance_km) FROM bus_trips t WHERE t.tenant_id=$6 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS total_km_30d,
         (SELECT SUM(t.fuel_used_litres) FROM bus_trips t WHERE t.tenant_id=$7 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS total_fuel_30d,
         (SELECT SUM(m.cost) FROM bus_maintenance m WHERE m.tenant_id=$8 AND m.status='completed' AND m.completed_date >= CURRENT_DATE - INTERVAL '90 days') AS maint_cost_90d,
-        (SELECT COUNT(*) FROM bus_trips t WHERE t.tenant_id=$9 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS trips_30d
+        (SELECT COUNT(*) FROM bus_trips t WHERE t.tenant_id=$9 AND t.status='completed' AND t.trip_date >= CURRENT_DATE - INTERVAL '30 days') AS trips_30d)
     `, [tid, tid, tid, tid, tid, tid, tid, tid, tid]);
 
     const m = metrics[0] ? metrics[0] : {};

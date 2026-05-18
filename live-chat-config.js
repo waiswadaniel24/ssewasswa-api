@@ -186,7 +186,7 @@ module.exports = function(app, pool, opts) {
       is_active BOOLEAN DEFAULT true,
       school_id INT DEFAULT 1
     )`,
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_cwc_school ON chat_widget_config(school_id)`,
     `CREATE INDEX IF NOT EXISTS idx_ccr_school ON chat_canned_responses(school_id)`,
     `CREATE INDEX IF NOT EXISTS idx_ccr_category ON chat_canned_responses(category)`,

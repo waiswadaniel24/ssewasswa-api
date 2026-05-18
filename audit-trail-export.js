@@ -274,7 +274,7 @@ module.exports = function(app, pool, opts) {
           COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
           COALESCE(SUM(file_size), 0)::bigint AS total_size,
           COALESCE(SUM(record_count), 0)::int AS total_records
-        FROM audit_exports WHERE school_id = $1
+        FROM audit_exports WHERE school_id = $1)
       `, [schoolId]);
       const stats = statsRes.rows[0];
 

@@ -37,7 +37,7 @@ module.exports = function(app, pool, opts) {
         total_chapters INT DEFAULT 0,
         status TEXT DEFAULT 'draft',
         created_by INT,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
       `);
       console.log('[SmartTextbook] textbooks OK');
     } catch(e) { console.warn('[SmartTextbook] Warn:', e.message); }
@@ -55,7 +55,7 @@ module.exports = function(app, pool, opts) {
         glossary JSONB DEFAULT NULL,
         related_resources JSONB DEFAULT NULL,
         status TEXT DEFAULT 'draft',
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
       `);
       console.log('[SmartTextbook] textbook_chapters OK');
     } catch(e) { console.warn('[SmartTextbook] Warn:', e.message); }

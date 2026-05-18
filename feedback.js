@@ -129,7 +129,7 @@ module.exports = function feedback(app, db, pool, renderPage, esc) {
       name VARCHAR(100) NOT NULL, color VARCHAR(20) DEFAULT '#3b82f6',
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // ALTER TABLE for all columns — feedback_forms
+    // ALTER TABLE for all columns — feedback_forms)
     `ALTER TABLE IF EXISTS feedback_forms ADD COLUMN IF NOT EXISTS description TEXT`,
     `ALTER TABLE IF EXISTS feedback_forms ADD COLUMN IF NOT EXISTS type VARCHAR(30) DEFAULT 'satisfaction'`,
     `ALTER TABLE IF EXISTS feedback_forms ADD COLUMN IF NOT EXISTS target_audience VARCHAR(50) DEFAULT 'all'`,

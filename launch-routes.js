@@ -93,7 +93,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       ('pro', 'Professional Plan', 'Full features for established institutions', 150000, 'UGX', 'monthly', 'Unlimited admins, unlimited students, all features', 20, 5000, true, 2),
       ('enterprise', 'Enterprise Plan', 'Custom solutions for large organizations', 500000, 'UGX', 'monthly', 'Everything in Pro + custom domain, white-label, API', 999, 99999, true, 3)
     ON CONFLICT (name) DO NOTHING`,
-    // Drop legacy plan_key column if it exists from older schema
+    // Drop legacy plan_key column if it exists from older schema)
     `ALTER TABLE subscription_plans DROP COLUMN IF EXISTS plan_key`,
     // Seed external links
     `INSERT INTO external_links (title, url, category, description, sort_order) VALUES
@@ -2242,7 +2242,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
       SELECT s.*, t.name as tenant_name, t.email as tenant_email
       FROM subscriptions s
       JOIN tenants t ON s.tenant_id = t.id
-      ORDER BY s.created_at DESC LIMIT 50
+      ORDER BY s.created_at DESC LIMIT 50)
     `)).rows;
 
     // Get user count

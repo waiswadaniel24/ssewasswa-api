@@ -22,7 +22,7 @@ const FEATURE_MIGRATIONS = [
     last_reward_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(tenant_id, user_email)
   )`,
-  // Viral share tracking
+  // Viral share tracking)
   `CREATE TABLE IF NOT EXISTS viral_shares (
     id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     user_email TEXT, content_id INTEGER, content_type TEXT DEFAULT 'scraped',
@@ -34,7 +34,7 @@ const FEATURE_MIGRATIONS = [
     ip_address TEXT, user_agent TEXT, country TEXT DEFAULT 'UG',
     converted BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Job board
+  // Job board)
   `CREATE TABLE IF NOT EXISTS jobs (
     id SERIAL PRIMARY KEY, tenant_id INTEGER DEFAULT NULL,
     title TEXT NOT NULL, company TEXT NOT NULL, location TEXT DEFAULT 'Uganda',
@@ -52,7 +52,7 @@ const FEATURE_MIGRATIONS = [
     phone TEXT, cover_letter TEXT, resume_url TEXT,
     status TEXT DEFAULT 'pending', created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Trending content
+  // Trending content)
   `CREATE TABLE IF NOT EXISTS trending_content (
     id SERIAL PRIMARY KEY, content_id INTEGER, content_type TEXT DEFAULT 'scraped',
     category TEXT, title TEXT, score NUMERIC DEFAULT 0,
@@ -61,7 +61,7 @@ const FEATURE_MIGRATIONS = [
     calculated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(content_id, content_type)
   )`,
-  // SEO pages
+  // SEO pages)
   `CREATE TABLE IF NOT EXISTS seo_pages (
     id SERIAL PRIMARY KEY, slug TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
     meta_description TEXT, meta_keywords TEXT, heading TEXT,
@@ -69,7 +69,7 @@ const FEATURE_MIGRATIONS = [
     is_published BOOLEAN DEFAULT true, view_count INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Email digest
+  // Email digest)
   `CREATE TABLE IF NOT EXISTS email_digests (
     id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     user_email TEXT NOT NULL, digest_type TEXT DEFAULT 'daily',
@@ -83,7 +83,7 @@ const FEATURE_MIGRATIONS = [
     frequency TEXT DEFAULT 'daily', is_active BOOLEAN DEFAULT true,
     subscribed_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Affiliate links
+  // Affiliate links)
   `CREATE TABLE IF NOT EXISTS affiliate_links (
     id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     original_url TEXT NOT NULL, affiliate_slug TEXT UNIQUE NOT NULL,
@@ -96,7 +96,7 @@ const FEATURE_MIGRATIONS = [
     ip_address TEXT, user_agent TEXT, referred_from TEXT,
     converted BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Content bookmarks & likes
+  // Content bookmarks & likes)
   `CREATE TABLE IF NOT EXISTS content_likes (
     id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, content_id INTEGER NOT NULL,
     content_type TEXT DEFAULT 'scraped', created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -107,21 +107,21 @@ const FEATURE_MIGRATIONS = [
     content_type TEXT DEFAULT 'scraped', created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_email, content_id, content_type)
   )`,
-  // User engagement tracking
+  // User engagement tracking)
   `CREATE TABLE IF NOT EXISTS page_views (
     id SERIAL PRIMARY KEY, url TEXT NOT NULL, user_email TEXT,
     ip_address TEXT, country TEXT DEFAULT 'UG',
     referrer TEXT, time_on_page INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Newsletter subscribers
+  // Newsletter subscribers)
   `CREATE TABLE IF NOT EXISTS newsletter_subscribers (
     id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL,
     name TEXT, source TEXT DEFAULT 'organic',
     is_verified BOOLEAN DEFAULT false, verification_token TEXT,
     subscribed_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Daily rewards / gamification
+  // Daily rewards / gamification)
   `CREATE TABLE IF NOT EXISTS user_points (
     id SERIAL PRIMARY KEY, user_email TEXT UNIQUE NOT NULL,
     points INTEGER DEFAULT 0, level INTEGER DEFAULT 1,
@@ -133,7 +133,7 @@ const FEATURE_MIGRATIONS = [
     points INTEGER NOT NULL, reason TEXT, source TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Scholarship / Grant opportunities
+  // Scholarship / Grant opportunities)
   `CREATE TABLE IF NOT EXISTS opportunities (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, organization TEXT,
     description TEXT, category TEXT DEFAULT 'scholarship',
@@ -312,7 +312,7 @@ async function calculateTrending() {
       WHERE sc.scraped_at >= NOW() - INTERVAL '7 days'
       ON CONFLICT (content_id, content_type) DO UPDATE
       SET score = EXCLUDED.score, views_24h = EXCLUDED.views_24h, clicks_24h = EXCLUDED.clicks_24h, calculated_at = NOW()
-      ORDER BY score DESC LIMIT 100
+      ORDER BY score DESC LIMIT 100)
     `);
   } catch(e) { console.warn('[ViralEngine] Trending calc error:', e.message); }
 }

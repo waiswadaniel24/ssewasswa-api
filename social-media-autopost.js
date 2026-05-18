@@ -112,7 +112,7 @@ module.exports = function(app, pool, opts) {
       avatar_url VARCHAR(500),
       is_active BOOLEAN DEFAULT true,
       connected_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      last_used TIMESTAMPTZ
+      last_used TIMESTAMPTZ)
     `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS social_posts (
@@ -134,7 +134,7 @@ module.exports = function(app, pool, opts) {
       timezone VARCHAR(50) DEFAULT 'UTC',
       created_by INT DEFAULT NULL,
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
     `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS post_templates (
@@ -148,7 +148,7 @@ module.exports = function(app, pool, opts) {
       hashtags JSONB,
       is_system BOOLEAN DEFAULT false,
       usage_count INT DEFAULT 0,
-      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
     `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS social_post_rules (
@@ -162,7 +162,7 @@ module.exports = function(app, pool, opts) {
       is_active BOOLEAN DEFAULT true,
       last_triggered TIMESTAMPTZ,
       run_count INT DEFAULT 0,
-      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
     `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS social_hashtags (
@@ -185,7 +185,7 @@ module.exports = function(app, pool, opts) {
       status TEXT DEFAULT 'pending',
       comments TEXT,
       decided_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
     `);
 
     // Seed system templates

@@ -135,7 +135,7 @@ module.exports = function helpdesk(app, db, pool, renderPage, esc) {
       sla_hours INTEGER DEFAULT 48, is_active BOOLEAN DEFAULT true,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // ALTER TABLE columns
+    // ALTER TABLE columns)
     `ALTER TABLE IF EXISTS support_tickets ADD COLUMN IF NOT EXISTS ticket_number VARCHAR(20) UNIQUE`,
     `ALTER TABLE IF EXISTS support_tickets ADD COLUMN IF NOT EXISTS subject VARCHAR(255) NOT NULL DEFAULT ''`,
     `ALTER TABLE IF EXISTS support_tickets ADD COLUMN IF NOT EXISTS description TEXT`,

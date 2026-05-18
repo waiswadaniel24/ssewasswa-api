@@ -25,7 +25,7 @@ const featureMigrations = [
     passed BOOLEAN, started_at TIMESTAMPTZ DEFAULT NOW(), submitted_at TIMESTAMPTZ,
     time_spent_seconds INTEGER DEFAULT 0
   )`,
-  // FEATURE 2: WhatsApp Integration
+  // FEATURE 2: WhatsApp Integration)
   `CREATE TABLE IF NOT EXISTS whatsapp_config (
     id SERIAL PRIMARY KEY, tenant_id INTEGER UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
     phone_number_id VARCHAR(255), business_account_id VARCHAR(255),
@@ -46,7 +46,7 @@ const featureMigrations = [
     template_body TEXT NOT NULL, sample_params TEXT,
     is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // FEATURE 3: Scheduled Reports
+  // FEATURE 3: Scheduled Reports)
   `CREATE TABLE IF NOT EXISTS scheduled_reports (
     id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL, report_type VARCHAR(100) NOT NULL,
@@ -61,7 +61,7 @@ const featureMigrations = [
     report_type VARCHAR(100), generated_at TIMESTAMPTZ DEFAULT NOW(),
     recipients TEXT, status VARCHAR(20) DEFAULT 'sent', error_message TEXT
   )`,
-  // FEATURE 4: Multi-Branch Management
+  // FEATURE 4: Multi-Branch Management)
   `CREATE TABLE IF NOT EXISTS branches (
     id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL, code VARCHAR(50), location TEXT,
@@ -76,7 +76,7 @@ const featureMigrations = [
     quantity INTEGER DEFAULT 1, status VARCHAR(20) DEFAULT 'pending',
     notes TEXT, created_by VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // FEATURE 5: Enhanced Clinic Portal
+  // FEATURE 5: Enhanced Clinic Portal)
   `CREATE TABLE IF NOT EXISTS clinic_patients (
     id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     patient_id VARCHAR(50) NOT NULL UNIQUE, full_name VARCHAR(255) NOT NULL,
@@ -227,7 +227,7 @@ app.get('/exams', requireAuth, requireNotBanned, ah(async (req, res) => {
     FROM quizzes q
     LEFT JOIN quiz_questions qq ON qq.quiz_id = q.id
     LEFT JOIN quiz_attempts qa ON qa.quiz_id = q.id
-    WHERE q.tenant_id = $1 GROUP BY q.id ORDER BY q.created_at DESC
+    WHERE q.tenant_id = $1 GROUP BY q.id ORDER BY q.created_at DESC)
   `, [tid])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#3b82f6,#2563eb);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>📝 Online Exams & Quizzes</h1><p style="opacity:0.9;margin-top:4px">Create, publish, and auto-grade assessments</p>

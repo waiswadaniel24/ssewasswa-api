@@ -392,7 +392,7 @@ module.exports = function staffAppraisals(app, db, pool, renderPage, esc) {
           AND review_period = to_char(CURRENT_DATE, '"Q"Q YYYY')) as completed_this_period,
         (SELECT COALESCE(AVG(overall_score), 0) FROM staff_appraisals WHERE tenant_id=$1 AND status='completed') as avg_score,
         (SELECT COUNT(*) FROM staff_appraisals WHERE tenant_id=$1) as total_appraisals,
-        (SELECT COUNT(*) FROM appraisal_criteria WHERE tenant_id=$1 AND is_active=true) as active_criteria
+        (SELECT COUNT(*) FROM appraisal_criteria WHERE tenant_id=$1 AND is_active=true) as active_criteria)
     `, [tid])).rows[0];
 
     // Distribution chart

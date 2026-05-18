@@ -22,7 +22,7 @@ const VG_MIGRATIONS = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(poll_id, ip_address)
   )`,
-  // Quizzes
+  // Quizzes)
   `CREATE TABLE IF NOT EXISTS quizzes (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT,
     category TEXT DEFAULT 'general', questions JSONB NOT NULL DEFAULT '[]',
@@ -35,7 +35,7 @@ const VG_MIGRATIONS = [
     user_email TEXT, user_name TEXT, score INTEGER, total INTEGER,
     ip_address TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Testimonials Wall
+  // Testimonials Wall)
   `CREATE TABLE IF NOT EXISTS testimonials (
     id SERIAL PRIMARY KEY, user_name TEXT NOT NULL, user_title TEXT,
     organization TEXT, avatar_url TEXT, rating INTEGER DEFAULT 5,
@@ -44,7 +44,7 @@ const VG_MIGRATIONS = [
     video_url TEXT, country TEXT DEFAULT 'Uganda',
     likes INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Community Forums
+  // Community Forums)
   `CREATE TABLE IF NOT EXISTS forum_topics (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
     category TEXT DEFAULT 'general', author_name TEXT, author_email TEXT,
@@ -59,7 +59,7 @@ const VG_MIGRATIONS = [
     likes INTEGER DEFAULT 0, is_approved BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Viral Countdown / Waitlist
+  // Viral Countdown / Waitlist)
   `CREATE TABLE IF NOT EXISTS viral_countdowns (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT,
     target_date TIMESTAMPTZ NOT NULL, cta_text TEXT DEFAULT 'Join Waitlist',
@@ -73,7 +73,7 @@ const VG_MIGRATIONS = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(countdown_id, email)
   )`,
-  // Share Contests
+  // Share Contests)
   `CREATE TABLE IF NOT EXISTS share_contests (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT,
     prize TEXT, rules TEXT, start_date TIMESTAMPTZ, end_date TIMESTAMPTZ,
@@ -85,7 +85,7 @@ const VG_MIGRATIONS = [
     user_email TEXT, user_name TEXT, shares INTEGER DEFAULT 0,
     is_winner BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // User Stories / Success Stories
+  // User Stories / Success Stories)
   `CREATE TABLE IF NOT EXISTS user_stories (
     id SERIAL PRIMARY KEY, user_name TEXT, user_email TEXT,
     title TEXT NOT NULL, story TEXT NOT NULL, image_url TEXT,
@@ -93,20 +93,20 @@ const VG_MIGRATIONS = [
     likes INTEGER DEFAULT 0, views INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Feedback Widget
+  // Feedback Widget)
   `CREATE TABLE IF NOT EXISTS quick_feedback (
     id SERIAL PRIMARY KEY, page_url TEXT NOT NULL,
     rating INTEGER, feedback_text TEXT, email TEXT,
     emoji TEXT DEFAULT '👍', ip_address TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Hashtag Trends
+  // Hashtag Trends)
   `CREATE TABLE IF NOT EXISTS trending_hashtags (
     id SERIAL PRIMARY KEY, tag TEXT UNIQUE NOT NULL,
     use_count INTEGER DEFAULT 0, category TEXT DEFAULT 'general',
     last_trended TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Notification Badges
+  // Notification Badges)
   `CREATE TABLE IF NOT EXISTS notification_badges (
     id SERIAL PRIMARY KEY, user_email TEXT NOT NULL,
     badge_type TEXT NOT NULL, badge_name TEXT NOT NULL,
@@ -114,7 +114,7 @@ const VG_MIGRATIONS = [
     earned_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_email, badge_type)
   )`,
-  // Invite-only Access
+  // Invite-only Access)
   `CREATE TABLE IF NOT EXISTS invite_codes (
     id SERIAL PRIMARY KEY, code TEXT UNIQUE NOT NULL,
     created_by TEXT, max_uses INTEGER DEFAULT 50, used_count INTEGER DEFAULT 0,

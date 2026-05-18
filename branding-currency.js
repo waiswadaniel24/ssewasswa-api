@@ -267,7 +267,7 @@ ${safeContent}
             name   = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             base_currency = EXCLUDED.base_currency
-          -- only update exchange_rate if the row was just inserted
+          -- only update exchange_rate if the row was just inserted)
         `, [c.code, c.name, c.symbol, c.exchange_rate, c.base_currency]);
       }
       logger.info('currencies_seeded', { count: SEED_CURRENCIES.length });

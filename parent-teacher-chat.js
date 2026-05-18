@@ -249,7 +249,7 @@ module.exports = function parentTeacherChat(app, pool, opts) {
       read_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(announcement_id, user_id)
     )`,
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_cc_tenant ON chat_conversations(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_cc_p1 ON chat_conversations(tenant_id, participant1_id)`,
     `CREATE INDEX IF NOT EXISTS idx_cc_p2 ON chat_conversations(tenant_id, participant2_id)`,

@@ -18,7 +18,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE TABLE IF NOT EXISTS donor_profiles (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, display_name TEXT, is_anonymous BOOLEAN DEFAULT false, total_donated INTEGER DEFAULT 0, donation_count INTEGER DEFAULT 0, campaigns_supported INTEGER DEFAULT 0, joined_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, user_email))`,
     `CREATE TABLE IF NOT EXISTS campaign_milestones (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, milestone_type TEXT NOT NULL, percentage INTEGER, message TEXT, triggered_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS campaign_deadline_reminders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER REFERENCES fundraising_campaigns(id) ON DELETE CASCADE, reminder_type TEXT, sent_at TIMESTAMPTZ DEFAULT NOW())`,
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_campaign_comments_campaign ON campaign_comments(campaign_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_comments_tenant ON campaign_comments(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_payouts_campaign ON campaign_payouts(campaign_id)`,

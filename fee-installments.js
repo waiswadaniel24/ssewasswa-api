@@ -238,7 +238,7 @@ module.exports = function feeInstallments(app, db, pool, renderPage, esc) {
       `ALTER TABLE IF EXISTS installment_plans ADD COLUMN IF NOT EXISTS notes TEXT`,
       `ALTER TABLE IF EXISTS installment_plans ADD COLUMN IF NOT EXISTS created_by INTEGER`,
       `ALTER TABLE IF EXISTS installment_plans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
-      // installment_payments
+      // installment_payments)
       `ALTER TABLE IF EXISTS installment_payments ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
       `ALTER TABLE IF EXISTS installment_payments ADD COLUMN IF NOT EXISTS plan_id INTEGER`,
       `ALTER TABLE IF EXISTS installment_payments ADD COLUMN IF NOT EXISTS installment_number INTEGER DEFAULT 1`,

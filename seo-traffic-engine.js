@@ -21,7 +21,7 @@ const SEOT_MIGRATIONS = [
     canonical_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Keyword Tracker
+  // Keyword Tracker)
   `CREATE TABLE IF NOT EXISTS keyword_rankings (
     id SERIAL PRIMARY KEY, keyword TEXT NOT NULL,
     target_url TEXT, current_rank INTEGER DEFAULT 0,
@@ -31,7 +31,7 @@ const SEOT_MIGRATIONS = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(keyword, target_url)
   )`,
-  // Search Pings
+  // Search Pings)
   `CREATE TABLE IF NOT EXISTS search_pings (
     id SERIAL PRIMARY KEY, url TEXT NOT NULL, engine TEXT DEFAULT 'google',
     status TEXT DEFAULT 'pending', response_code INTEGER,
@@ -43,13 +43,13 @@ const SEOT_MIGRATIONS = [
     referrer TEXT, ip_address TEXT, user_agent TEXT,
     suggested_url TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Auto Internal Links
+  // Auto Internal Links)
   `CREATE TABLE IF NOT EXISTS internal_link_suggestions (
     id SERIAL PRIMARY KEY, source_slug TEXT, target_slug TEXT,
     anchor_text TEXT, relevance_score NUMERIC DEFAULT 0,
     is_applied BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // SEO Audit Log
+  // SEO Audit Log)
   `CREATE TABLE IF NOT EXISTS seo_audit_log (
     id SERIAL PRIMARY KEY, audit_type TEXT NOT NULL,
     page_url TEXT, issue TEXT, severity TEXT DEFAULT 'warning',

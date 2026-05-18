@@ -121,7 +121,7 @@ ${safeContent}
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // installed_plugins — tenant-specific installations with config
+    // installed_plugins — tenant-specific installations with config)
     `CREATE TABLE IF NOT EXISTS installed_plugins (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -131,7 +131,7 @@ ${safeContent}
       installed_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(tenant_id, plugin_id)
     )`,
-    // plugin_reviews — one review per tenant per plugin
+    // plugin_reviews — one review per tenant per plugin)
     `CREATE TABLE IF NOT EXISTS plugin_reviews (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id),
@@ -141,7 +141,7 @@ ${safeContent}
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(tenant_id, plugin_id)
     )`,
-    // developer_revenue — revenue tracking for plugin developers
+    // developer_revenue — revenue tracking for plugin developers)
     `CREATE TABLE IF NOT EXISTS developer_revenue (
       id SERIAL PRIMARY KEY,
       developer_id INTEGER,
@@ -151,7 +151,7 @@ ${safeContent}
       period VARCHAR(20),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // Index for fast slug lookups
+    // Index for fast slug lookups)
     `CREATE INDEX IF NOT EXISTS idx_mp_slug ON marketplace_plugins(slug)`,
     `CREATE INDEX IF NOT EXISTS idx_mp_category ON marketplace_plugins(category)`,
     `CREATE INDEX IF NOT EXISTS idx_mp_active ON marketplace_plugins(is_active) WHERE is_active = true`,

@@ -37,7 +37,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Feature 3: Donor Retention Tracker
+    // Feature 3: Donor Retention Tracker)
     `CREATE TABLE IF NOT EXISTS donor_retention_metrics (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -51,7 +51,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       calculated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Feature 4: Social Proof Notifications
+    // Feature 4: Social Proof Notifications)
     `CREATE TABLE IF NOT EXISTS social_proof_events (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -65,7 +65,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Feature 5: Campaign Endorsements
+    // Feature 5: Campaign Endorsements)
     `CREATE TABLE IF NOT EXISTS campaign_endorsements_mega2 (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -78,7 +78,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Feature 6: Donation Wish List
+    // Feature 6: Donation Wish List)
     `CREATE TABLE IF NOT EXISTS donation_wishlists (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -101,7 +101,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       fulfilled_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Feature 7: Corporate Matching Portal
+    // Feature 7: Corporate Matching Portal)
     `CREATE TABLE IF NOT EXISTS corporate_matchers (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -126,7 +126,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       claimed_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Feature 8: Multi-Currency Display
+    // Feature 8: Multi-Currency Display)
     `CREATE TABLE IF NOT EXISTS currency_display_settings (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
@@ -137,7 +137,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Feature 10: Donor Thank-You Videos
+    // Feature 10: Donor Thank-You Videos)
     `CREATE TABLE IF NOT EXISTS thank_you_videos (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -156,7 +156,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       viewed_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_campaign_ab_tests_tenant ON campaign_ab_tests(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_ab_tests_campaign ON campaign_ab_tests(campaign_id)`,
     `CREATE INDEX IF NOT EXISTS idx_donor_retention_metrics_tenant ON donor_retention_metrics(tenant_id)`,

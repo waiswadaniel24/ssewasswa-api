@@ -16,7 +16,7 @@ const EAM_MIGRATIONS = [
     opened BOOLEAN DEFAULT false, clicked BOOLEAN DEFAULT false,
     error_message TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Email templates
+  // Email templates)
   `CREATE TABLE IF NOT EXISTS email_templates (
     id SERIAL PRIMARY KEY, template_name TEXT UNIQUE NOT NULL,
     subject TEXT NOT NULL, html_template TEXT NOT NULL,
@@ -25,7 +25,7 @@ const EAM_MIGRATIONS = [
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Email automation rules
+  // Email automation rules)
   `CREATE TABLE IF NOT EXISTS email_automations (
     id SERIAL PRIMARY KEY, automation_name TEXT NOT NULL,
     trigger_type TEXT NOT NULL, trigger_data JSONB,
@@ -33,12 +33,12 @@ const EAM_MIGRATIONS = [
     is_active BOOLEAN DEFAULT true, sent_count INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Unsubscribe tracking
+  // Unsubscribe tracking)
   `CREATE TABLE IF NOT EXISTS email_unsubscribes (
     id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL,
     reason TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Email stats
+  // Email stats)
   `CREATE TABLE IF NOT EXISTS email_stats (
     id SERIAL PRIMARY KEY, date DATE DEFAULT CURRENT_DATE,
     sent INTEGER DEFAULT 0, opened INTEGER DEFAULT 0,

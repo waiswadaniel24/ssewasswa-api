@@ -31,7 +31,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_giving_days_tenant ON giving_days(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_install_plans_tenant ON installment_plans(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_engagement_tenant ON donor_engagement_scores(tenant_id)`,
-    // Seeds
+    // Seeds)
     `INSERT INTO grant_writing_templates (tenant_id,name,funder_name,category,sections_json,tips) SELECT t.id,'Education Grant Template','Ministry of Education','education','["Executive Summary","Needs Assessment","Goals","Budget","Evaluation"]','Focus on measurable outcomes and community impact' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM grant_writing_templates WHERE tenant_id=t.id AND name='Education Grant Template')`,
     `INSERT INTO grant_writing_templates (tenant_id,name,funder_name,category,sections_json,tips) SELECT t.id,'Community Development Template','UNDP','community','["Problem Statement","Approach","Timeline","Budget","Sustainability"]','Emphasize sustainability and local ownership' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM grant_writing_templates WHERE tenant_id=t.id AND name='Community Development Template')`,
     `INSERT INTO grant_writing_templates (tenant_id,name,funder_name,category,sections_json,tips) SELECT t.id,'Health Initiative Template','WHO','health','["Background","Methodology","Expected Outcomes","Budget Justification"]','Include evidence-based approaches' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM grant_writing_templates WHERE tenant_id=t.id AND name='Health Initiative Template')`,

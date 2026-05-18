@@ -417,7 +417,7 @@ const VALID_TABLES = new Set([
   'subjects', 'results', 'members', 'donations', 'events', 'campaigns', 'inventory',
   'invoices', 'payments', 'subscriptions', 'notifications', 'audit_logs', 'sms_logs',
   'email_queue', 'webhooks', 'webhook_logs', 'automation_rules', 'role_permissions',
-  'feature_flags', 'chart_of_accounts', 'journal_entries', 'student_accounts',
+  'feature_flags', 'feature_access_overrides', 'chart_of_accounts', 'journal_entries', 'student_accounts',
   'church_accounts', 'student_health', 'meal_attendance', 'parent_links',
   'church_attendance', 'choir_members', 'cell_group_members', 'channel_members',
   'custom_pages', 'document_templates', 'educational_resources', 'scraped_content',
@@ -682,6 +682,13 @@ async function getTenantPlanInfo(tenantId) {
     const minIdx = PLAN_HIERARCHY.indexOf(f.min_plan || 'free');
     if (planIdx >= minIdx) accessible.add(f.feature_key);
   }
+  // v19: Add manually granted feature overrides — bypasses plan requirements
+  try {
+    const overrides = (await pool.query('SELECT feature_key FROM feature_access_overrides WHERE tenant_id=$1', [tenantId])).rows;
+    for (const o of overrides) {
+      accessible.add(o.feature_key);
+    }
+  } catch(e) { /* table may not exist yet during migration */ }
   const info = { plan, planIdx, accessible, ts: now };
   _planCache.set(tenantId, info);
   return info;
@@ -1468,6 +1475,10 @@ const migrations = [
   // Feature Activation System (Coming Soon toggle)
   `CREATE TABLE IF NOT EXISTS feature_flags (id SERIAL PRIMARY KEY, feature_key TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT, version TEXT, category TEXT, requirements TEXT, is_active BOOLEAN DEFAULT false, activated_by TEXT, activated_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
   `ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS min_plan TEXT DEFAULT 'free'`,
+  `ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS portal TEXT DEFAULT 'platform'`,
+  // Feature Access Overrides — admin can grant any tenant access to any feature regardless of plan
+  `CREATE TABLE IF NOT EXISTS feature_access_overrides (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, feature_key TEXT NOT NULL, granted_by TEXT NOT NULL, reason TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, feature_key))`,
+  `CREATE INDEX IF NOT EXISTS idx_feature_overrides_tenant ON feature_access_overrides(tenant_id)`,
   // Custom Pages (user-editable with stamps/headers/footers)
   `CREATE TABLE IF NOT EXISTS custom_pages (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, slug TEXT NOT NULL, content TEXT, header_html TEXT, footer_html TEXT, stamp_url TEXT, stamp_position TEXT DEFAULT 'bottom-right', badge_text TEXT, badge_color TEXT DEFAULT '#4f46e5', signature_name TEXT, signature_image_url TEXT, signature_position TEXT DEFAULT 'bottom-left', is_published BOOLEAN DEFAULT false, created_by TEXT, updated_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, slug))`,
   // Document Templates (receipts, reports, certificates with headers/footers/stamps/signatures)
@@ -2791,6 +2802,24 @@ var _ib=document.getElementById('install-btn');if(_ib&&!_isStandalone){_ib.style
 document.addEventListener('DOMContentLoaded',function(){var imgs=document.querySelectorAll('img:not([loading])');imgs.forEach(function(img){img.setAttribute('loading','lazy')});});
 </script>
 
+${user ? `<script>
+// v19 — Subscription feature gating (client-side)
+(function(){
+  if(document.querySelector('[data-skip-gating]')) return;
+  fetch('/api/subscription/status').then(r=>r.json()).then(function(data){
+    if(!data||!data.accessible) return;
+    var allowed=new Set(data.accessible);
+    document.querySelectorAll('[data-feature-key]').forEach(function(card){
+      var key=card.getAttribute('data-feature-key');
+      if(key&&!allowed.has(key)){
+        card.style.opacity='0.55';card.style.position='relative';card.style.overflow='hidden';card.style.border='1px dashed #f59e0b';
+        var badge=document.createElement('div');badge.style.cssText='position:absolute;top:8px;right:8px;background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700';badge.textContent='🔒 '+(data.plan||'Free')+' Plan';card.appendChild(badge);
+        card.querySelectorAll('a.btn,button.btn').forEach(function(b){if(b.href&&!b.href.includes('/billing')){b.href='/billing';b.textContent='Upgrade Plan';b.className='btn btn-sm';b.style.background='#f59e0b';b.style.color='#fff';}});
+      }
+    });
+  }).catch(function(){});
+})();
+</script>` : ''}
 </body></html>`;
 };
 
@@ -14034,6 +14063,9 @@ const requireFeature = (featureKey) => async (req, res, next) => {
     // Check subscription plan requirement
     const minPlan = flag.min_plan || 'free';
     if (minPlan !== 'free') {
+      // v19: Check feature_access_overrides first — manual grants bypass plan requirements
+      const override = (await pool.query('SELECT id FROM feature_access_overrides WHERE tenant_id=$1 AND feature_key=$2', [req.session.user.tenant_id, featureKey])).rows[0];
+      if (override) return next(); // Manually granted — allow access regardless of plan
       const planHierarchy = ['free', 'basic', 'pro', 'enterprise'];
       const sub = (await pool.query('SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status=\'active\'', [req.session.user.tenant_id])).rows[0];
       const currentPlan = sub?.plan || 'free';
@@ -37095,6 +37127,9 @@ try { const m = require('./user-segmentation'); m(app, pool, _newModOpts); conso
 // --- Content & Moderation ---
 try { const m = require('./content-moderation'); m(app, pool, _newModOpts); console.log('[ContentMod] Content moderation loaded — routes'); } catch(e) { console.warn('[ContentMod] Error:', e.message); }
 
+// ── v19: Cross-portal subscription feature gating ──
+try { const m = require('./subscription-gating'); m(app, pool, renderPage, esc); console.log('[SubGating] Cross-portal subscription gating loaded'); } catch(e) { console.warn('[SubGating] Error:', e.message); }
+
 console.log('[Deferred] All deferred modules loaded successfully');
 }; // end _deferModules
 
@@ -38248,3 +38283,4 @@ server.listen(PORT, () => {
 // Phase 4 deploy trigger: 27 additional modules — 2026-05-18
 // Redeploy trigger: 2026-05-18T113500Z
 // Redeploy trigger: 2026-05-19 webhooks-fix-pwa-update-v4
+// v19.2 deploy trigger: fix 278 SQL migration errors + subscription gating + admin feature overrides — 2026-05-19

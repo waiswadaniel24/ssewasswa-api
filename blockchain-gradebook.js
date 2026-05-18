@@ -55,7 +55,7 @@ module.exports = function(app, pool, opts) {
         verified_by INT,
         attestation_count INT DEFAULT 0,
         dispute_status TEXT DEFAULT 'none',
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
       `);
       console.log('[BlockchainGradebook] blockchain_grades OK');
     } catch(e) { console.warn('[BlockchainGradebook] Warn:', e.message); }
@@ -69,7 +69,7 @@ module.exports = function(app, pool, opts) {
         attester_role VARCHAR(50),
         signature VARCHAR(255),
         verified_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        comments TEXT
+        comments TEXT)
       `);
       console.log('[BlockchainGradebook] grade_attestations OK');
     } catch(e) { console.warn('[BlockchainGradebook] Warn:', e.message); }
@@ -87,7 +87,7 @@ module.exports = function(app, pool, opts) {
         expires_at TIMESTAMPTZ,
         sent_at TIMESTAMPTZ,
         processed_by INT,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
       `);
       console.log('[BlockchainGradebook] transcript_requests OK');
     } catch(e) { console.warn('[BlockchainGradebook] Warn:', e.message); }

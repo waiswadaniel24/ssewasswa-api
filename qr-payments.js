@@ -248,7 +248,7 @@ module.exports = function qrPayments(app, db, pool, renderPage, esc) {
       ip_address VARCHAR(45),
       user_agent TEXT
     )`,
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_qrp_tenant ON qr_payments(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_qrp_tenant_status ON qr_payments(tenant_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_qrp_code ON qr_payments(qr_code)`,

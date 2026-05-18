@@ -29,21 +29,21 @@ const MONETIZATION_MIGRATIONS = [
     ip_address TEXT, page_url TEXT, user_agent TEXT,
     country TEXT DEFAULT 'UG', created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Exit Intent Popup Captures
+  // Exit Intent Popup Captures)
   `CREATE TABLE IF NOT EXISTS exit_captures (
     id SERIAL PRIMARY KEY, email TEXT NOT NULL, name TEXT,
     page_url TEXT, ip_address TEXT, source TEXT DEFAULT 'exit_intent',
     converted BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(email, source)
   )`,
-  // Social Proof Notifications
+  // Social Proof Notifications)
   `CREATE TABLE IF NOT EXISTS social_proof_events (
     id SERIAL PRIMARY KEY, event_type TEXT NOT NULL,
     user_name TEXT, user_location TEXT, action TEXT,
     display_text TEXT, is_active BOOLEAN DEFAULT true,
     weight INTEGER DEFAULT 1, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Affiliate Link Cloaker
+  // Affiliate Link Cloaker)
   `CREATE TABLE IF NOT EXISTS cloaked_links (
     id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     slug TEXT UNIQUE NOT NULL, destination_url TEXT NOT NULL,
@@ -53,7 +53,7 @@ const MONETIZATION_MIGRATIONS = [
     utm_medium TEXT DEFAULT 'affiliate', utm_campaign TEXT DEFAULT 'organic',
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Featured/Promoted Listings
+  // Featured/Promoted Listings)
   `CREATE TABLE IF NOT EXISTS featured_listings (
     id SERIAL PRIMARY KEY, tenant_id INTEGER DEFAULT NULL,
     title TEXT NOT NULL, description TEXT, category TEXT DEFAULT 'general',
@@ -63,7 +63,7 @@ const MONETIZATION_MIGRATIONS = [
     views INTEGER DEFAULT 0, clicks INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Donation/Tips System
+  // Donation/Tips System)
   `CREATE TABLE IF NOT EXISTS donations (
     id SERIAL PRIMARY KEY, tenant_id INTEGER DEFAULT NULL,
     donor_name TEXT, donor_email TEXT, donor_phone TEXT,
@@ -73,7 +73,7 @@ const MONETIZATION_MIGRATIONS = [
     is_anonymous BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Premium Content Lock
+  // Premium Content Lock)
   `CREATE TABLE IF NOT EXISTS premium_content (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, slug TEXT UNIQUE NOT NULL,
     excerpt TEXT, full_content TEXT, category TEXT DEFAULT 'general',
@@ -88,7 +88,7 @@ const MONETIZATION_MIGRATIONS = [
     ip_address TEXT, created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(content_id, user_email)
   )`,
-  // Promo Codes
+  // Promo Codes)
   `CREATE TABLE IF NOT EXISTS promo_codes (
     id SERIAL PRIMARY KEY, code TEXT UNIQUE NOT NULL,
     discount_type TEXT DEFAULT 'percentage', discount_value NUMERIC DEFAULT 10,
@@ -100,7 +100,7 @@ const MONETIZATION_MIGRATIONS = [
     id SERIAL PRIMARY KEY, promo_id INTEGER REFERENCES promo_codes(id) ON DELETE CASCADE,
     user_email TEXT, used_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Custom Landing Pages
+  // Custom Landing Pages)
   `CREATE TABLE IF NOT EXISTS landing_pages (
     id SERIAL PRIMARY KEY, slug TEXT UNIQUE NOT NULL,
     title TEXT NOT NULL, headline TEXT, subheadline TEXT,
@@ -111,7 +111,7 @@ const MONETIZATION_MIGRATIONS = [
     is_published BOOLEAN DEFAULT true, view_count INTEGER DEFAULT 0,
     conversion_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Comment System
+  // Comment System)
   `CREATE TABLE IF NOT EXISTS comments (
     id SERIAL PRIMARY KEY, content_type TEXT NOT NULL, content_id INTEGER NOT NULL,
     user_name TEXT NOT NULL, user_email TEXT,
@@ -119,7 +119,7 @@ const MONETIZATION_MIGRATIONS = [
     is_approved BOOLEAN DEFAULT true, likes INTEGER DEFAULT 0,
     ip_address TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Engagement Scoring
+  // Engagement Scoring)
   `CREATE TABLE IF NOT EXISTS engagement_scores (
     id SERIAL PRIMARY KEY, user_email TEXT UNIQUE NOT NULL,
     profile_score INTEGER DEFAULT 0, activity_score INTEGER DEFAULT 0,
@@ -127,7 +127,7 @@ const MONETIZATION_MIGRATIONS = [
     total_score INTEGER DEFAULT 0, tier TEXT DEFAULT 'bronze',
     last_calculated TIMESTAMPTZ DEFAULT NOW(), created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Lead Magnets
+  // Lead Magnets)
   `CREATE TABLE IF NOT EXISTS lead_magnets (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT,
     file_url TEXT, download_type TEXT DEFAULT 'pdf',
@@ -140,7 +140,7 @@ const MONETIZATION_MIGRATIONS = [
     name TEXT, email TEXT NOT NULL, phone TEXT,
     downloaded_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Push Notification Subscriptions
+  // Push Notification Subscriptions)
   `CREATE TABLE IF NOT EXISTS push_subscriptions (
     id SERIAL PRIMARY KEY, endpoint TEXT UNIQUE NOT NULL,
     keys_json JSONB, user_email TEXT,
@@ -154,7 +154,7 @@ const MONETIZATION_MIGRATIONS = [
     description TEXT, reference_id INTEGER,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Page Visit Analytics
+  // Page Visit Analytics)
   `CREATE TABLE IF NOT EXISTS visit_analytics (
     id SERIAL PRIMARY KEY, page_url TEXT NOT NULL,
     ip_address TEXT, country TEXT DEFAULT 'UG',
@@ -163,7 +163,7 @@ const MONETIZATION_MIGRATIONS = [
     is_bounce BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // A/B Tests
+  // A/B Tests)
   `CREATE TABLE IF NOT EXISTS ab_tests (
     id SERIAL PRIMARY KEY, test_name TEXT NOT NULL, page_url TEXT,
     variant_a TEXT, variant_b TEXT, metric TEXT DEFAULT 'click_rate',

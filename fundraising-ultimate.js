@@ -33,7 +33,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 2. Impact Calculator
+    // 2. Impact Calculator)
     `CREATE TABLE IF NOT EXISTS impact_items (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -55,7 +55,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 3. Donor Loyalty Tiers
+    // 3. Donor Loyalty Tiers)
     `CREATE TABLE IF NOT EXISTS donor_loyalty_tiers (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -75,7 +75,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 4. Campaign Performance Grader
+    // 4. Campaign Performance Grader)
     `CREATE TABLE IF NOT EXISTS campaign_grades (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -86,7 +86,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       graded_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 5. Emergency/Urgent Mode
+    // 5. Emergency/Urgent Mode)
     `CREATE TABLE IF NOT EXISTS emergency_campaigns (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -99,7 +99,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       activated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 6. Harambee Mode
+    // 6. Harambee Mode)
     `CREATE TABLE IF NOT EXISTS harambee_pools (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -130,7 +130,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       distributed_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 7. WhatsApp Donate Bot
+    // 7. WhatsApp Donate Bot)
     `CREATE TABLE IF NOT EXISTS whatsapp_donate_config (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -152,7 +152,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 8. Mobile Money Auto-Detect
+    // 8. Mobile Money Auto-Detect)
     `CREATE TABLE IF NOT EXISTS mobile_money_providers (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -174,7 +174,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       completed_at TIMESTAMPTZ
     )`,
 
-    // 9. Funeral/Burial Fund
+    // 9. Funeral/Burial Fund)
     `CREATE TABLE IF NOT EXISTS funeral_funds (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -196,7 +196,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 10. AI Campaign Story Writer
+    // 10. AI Campaign Story Writer)
     `CREATE TABLE IF NOT EXISTS ai_campaign_stories (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -206,7 +206,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       generated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_recurring_donations_tenant ON recurring_donations(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_recurring_donations_status ON recurring_donations(status)`,
     `CREATE INDEX IF NOT EXISTS idx_impact_items_tenant ON impact_items(tenant_id)`,

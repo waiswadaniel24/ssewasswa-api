@@ -127,7 +127,7 @@ module.exports = function inventoryPro(app, db, pool, renderPage, esc) {
       `ALTER TABLE IF EXISTS inventory_categories ADD COLUMN IF NOT EXISTS color VARCHAR(20) DEFAULT '#3b82f6'`,
       `ALTER TABLE IF EXISTS inventory_categories ADD COLUMN IF NOT EXISTS parent_id INTEGER`
     ],
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_inv_items_tenant ON inventory_items(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_inv_items_sku ON inventory_items(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_inv_items_category ON inventory_items(category)`,

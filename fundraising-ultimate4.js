@@ -43,7 +43,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       notes TEXT
     )`,
 
-    // 2. Budget vs Actual
+    // 2. Budget vs Actual)
     `CREATE TABLE IF NOT EXISTS fundraising_budgets (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -63,7 +63,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       variance NUMERIC(15,2) GENERATED ALWAYS AS (budgeted - actual) STORED
     )`,
 
-    // 3. Financial Reconciliation
+    // 3. Financial Reconciliation)
     `CREATE TABLE IF NOT EXISTS reconciliation_batches (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -88,7 +88,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       notes TEXT
     )`,
 
-    // 4. Grant Management
+    // 4. Grant Management)
     `CREATE TABLE IF NOT EXISTS grants_ult4 (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -112,7 +112,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       notes TEXT
     )`,
 
-    // 5. Endowment Management
+    // 5. Endowment Management)
     `CREATE TABLE IF NOT EXISTS endowments (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -132,7 +132,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       description TEXT
     )`,
 
-    // 6. Multi-Currency Wallet
+    // 6. Multi-Currency Wallet)
     `CREATE TABLE IF NOT EXISTS currency_wallets (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -152,7 +152,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 7. Receipt Batch Processing
+    // 7. Receipt Batch Processing)
     `CREATE TABLE IF NOT EXISTS receipt_batches (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -172,7 +172,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       sent BOOLEAN DEFAULT false
     )`,
 
-    // 8. Donation Split Manager
+    // 8. Donation Split Manager)
     `CREATE TABLE IF NOT EXISTS donation_splits (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -190,7 +190,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       percentage NUMERIC(5,2) NOT NULL DEFAULT 0
     )`,
 
-    // 9. Fund Category Management
+    // 9. Fund Category Management)
     `CREATE TABLE IF NOT EXISTS fund_categories (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -206,7 +206,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       amount NUMERIC(15,2) NOT NULL DEFAULT 0
     )`,
 
-    // 10. Donation Anonymity
+    // 10. Donation Anonymity)
     `CREATE TABLE IF NOT EXISTS donation_anonymity_settings (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE,
@@ -225,7 +225,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 11. Payment Method Router
+    // 11. Payment Method Router)
     `CREATE TABLE IF NOT EXISTS payment_routing_rules (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -244,7 +244,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       routed_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 12. Financial Dashboard Pro
+    // 12. Financial Dashboard Pro)
     `CREATE TABLE IF NOT EXISTS financial_dashboard_config (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE,
@@ -262,7 +262,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       snapshot_date DATE NOT NULL DEFAULT CURRENT_DATE
     )`,
 
-    // 13. Compliance Document Vault
+    // 13. Compliance Document Vault)
     `CREATE TABLE IF NOT EXISTS compliance_docs (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -282,7 +282,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 14. Audit Trail Pro
+    // 14. Audit Trail Pro)
     `CREATE TABLE IF NOT EXISTS enhanced_audit_trail (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -305,7 +305,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       generated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 15. Fund Balance Calculator
+    // 15. Fund Balance Calculator)
     `CREATE TABLE IF NOT EXISTS fund_balances (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -320,7 +320,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       calculated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_fund_allocations_tenant ON fund_allocations(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_fund_allocation_entries_alloc ON fund_allocation_entries(allocation_id)`,
     `CREATE INDEX IF NOT EXISTS idx_fundraising_budgets_tenant ON fundraising_budgets(tenant_id)`,

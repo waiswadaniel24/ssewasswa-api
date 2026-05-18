@@ -23,7 +23,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 2. Donor Capacity Scoring
+    // 2. Donor Capacity Scoring)
     `CREATE TABLE IF NOT EXISTS donor_capacity_scores (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -36,7 +36,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       UNIQUE(tenant_id, donor_email)
     )`,
 
-    // 3a. Major Gift Pipeline
+    // 3a. Major Gift Pipeline)
     `CREATE TABLE IF NOT EXISTS major_gift_pipeline (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -50,7 +50,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 3b. Major Gift Activities
+    // 3b. Major Gift Activities)
     `CREATE TABLE IF NOT EXISTS major_gift_activities (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -60,7 +60,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       completed_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 4. Prospect Research
+    // 4. Prospect Research)
     `CREATE TABLE IF NOT EXISTS prospect_research (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -75,7 +75,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       UNIQUE(tenant_id, donor_email)
     )`,
 
-    // 5. Moves Management
+    // 5. Moves Management)
     `CREATE TABLE IF NOT EXISTS moves_management (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -89,7 +89,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 6a. Stewardship Plans
+    // 6a. Stewardship Plans)
     `CREATE TABLE IF NOT EXISTS stewardship_plans (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -100,7 +100,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 6b. Stewardship Actions
+    // 6b. Stewardship Actions)
     `CREATE TABLE IF NOT EXISTS stewardship_actions (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -113,7 +113,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 7a. Donor Surveys
+    // 7a. Donor Surveys)
     `CREATE TABLE IF NOT EXISTS donor_surveys (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -124,7 +124,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 7b. Donor Survey Responses
+    // 7b. Donor Survey Responses)
     `CREATE TABLE IF NOT EXISTS donor_survey_responses (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -134,7 +134,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       completed_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 8. Donor Churn Predictor
+    // 8. Donor Churn Predictor)
     `CREATE TABLE IF NOT EXISTS donor_churn_scores (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -147,7 +147,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       UNIQUE(tenant_id, donor_email)
     )`,
 
-    // 9. Smart Donor Recommendations
+    // 9. Smart Donor Recommendations)
     `CREATE TABLE IF NOT EXISTS donor_recommendations (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -159,7 +159,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 10. Donor Communication Preferences
+    // 10. Donor Communication Preferences)
     `CREATE TABLE IF NOT EXISTS donor_comm_prefs (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -173,7 +173,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       UNIQUE(tenant_id, donor_email)
     )`,
 
-    // 11. Donor Relationship Mapping
+    // 11. Donor Relationship Mapping)
     `CREATE TABLE IF NOT EXISTS donor_relationships (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -184,7 +184,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 12. Next Best Action Engine
+    // 12. Next Best Action Engine)
     `CREATE TABLE IF NOT EXISTS donor_next_actions (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -197,7 +197,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 13. Donor Lifetime Value Calculator
+    // 13. Donor Lifetime Value Calculator)
     `CREATE TABLE IF NOT EXISTS donor_ltv (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -212,7 +212,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       UNIQUE(tenant_id, donor_email)
     )`,
 
-    // 14a. Re-engagement Campaigns
+    // 14a. Re-engagement Campaigns)
     `CREATE TABLE IF NOT EXISTS reengagement_campaigns (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -225,7 +225,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 14b. Re-engagement Logs
+    // 14b. Re-engagement Logs)
     `CREATE TABLE IF NOT EXISTS reengagement_logs (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -236,7 +236,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 15. Annual Giving Predictor
+    // 15. Annual Giving Predictor)
     `CREATE TABLE IF NOT EXISTS annual_giving_forecasts (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -249,7 +249,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       UNIQUE(tenant_id, year)
     )`,
 
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_donor_journeys_tenant ON donor_journeys(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_donor_journeys_email ON donor_journeys(donor_email)`,
     `CREATE INDEX IF NOT EXISTS idx_donor_capacity_tenant ON donor_capacity_scores(tenant_id)`,

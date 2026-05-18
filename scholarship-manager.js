@@ -403,7 +403,7 @@ module.exports = function scholarshipManager(app, db, pool, renderPage, esc) {
         (SELECT COALESCE(SUM(awarded_amount), 0) FROM scholarships WHERE tenant_id=$1) as total_awarded,
         (SELECT COALESCE(SUM(remaining_amount), 0) FROM scholarships WHERE tenant_id=$1 AND status='open') as funds_remaining,
         (SELECT COALESCE(SUM(total_fund_amount), 0) FROM scholarships WHERE tenant_id=$1) as total_funds,
-        (SELECT COALESCE(SUM(disbursed_amount), 0) FROM scholarship_disbursements WHERE tenant_id=$1 AND status='disbursed') as total_disbursed
+        (SELECT COALESCE(SUM(disbursed_amount), 0) FROM scholarship_disbursements WHERE tenant_id=$1 AND status='disbursed') as total_disbursed)
     `, [tid])).rows[0];
 
     // Recent applications

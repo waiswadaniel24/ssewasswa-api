@@ -120,7 +120,7 @@ module.exports = function inventoryReorder(app, db, pool, renderPage, esc) {
       acknowledged_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // Ensure purchase_orders table exists for auto-PO feature
+    // Ensure purchase_orders table exists for auto-PO feature)
     `CREATE TABLE IF NOT EXISTS purchase_orders (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -147,7 +147,7 @@ module.exports = function inventoryReorder(app, db, pool, renderPage, esc) {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
     `ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS tenant_id INTEGER`,
-    // ALTER fallbacks
+    // ALTER fallbacks)
     `ALTER TABLE IF EXISTS reorder_rules ADD COLUMN IF NOT EXISTS item_id INTEGER`,
     `ALTER TABLE IF EXISTS reorder_rules ADD COLUMN IF NOT EXISTS current_stock INTEGER DEFAULT 0`,
     `ALTER TABLE IF EXISTS reorder_rules ADD COLUMN IF NOT EXISTS unit_cost INTEGER`,

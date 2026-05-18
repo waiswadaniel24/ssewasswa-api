@@ -201,7 +201,7 @@ module.exports = function (app, pool, opts) {
         COUNT(*) FILTER (WHERE success=false) as failed,
         ROUND(AVG(score) FILTER (WHERE score IS NOT NULL)::numeric, 2) as avg_score,
         ROUND(AVG(response_time_ms)::numeric, 0) as avg_ms
-      FROM captcha_verification_log WHERE school_id=$1 AND created_at > NOW() - INTERVAL '7 days'
+      FROM captcha_verification_log WHERE school_id=$1 AND created_at > NOW() - INTERVAL '7 days')
     `, [schoolId]);
     const st = statsRes.rows[0];
 

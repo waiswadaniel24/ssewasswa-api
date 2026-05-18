@@ -140,7 +140,7 @@ module.exports = function visitorLog(app, db, pool, renderPage, esc) {
       expected_date DATE, expected_time TIME, status VARCHAR(20) DEFAULT 'pending',
       created_by INTEGER, created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // ALTER TABLE visitors
+    // ALTER TABLE visitors)
     `ALTER TABLE IF EXISTS visitors ADD COLUMN IF NOT EXISTS full_name VARCHAR(255) NOT NULL DEFAULT ''`,
     `ALTER TABLE IF EXISTS visitors ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,
     `ALTER TABLE IF EXISTS visitors ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`,

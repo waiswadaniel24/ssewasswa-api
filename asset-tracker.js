@@ -127,7 +127,7 @@ module.exports = function assetTracker(app, db, pool, renderPage, esc) {
       maintenance_date DATE, next_due DATE,
       status VARCHAR(20) DEFAULT 'completed', created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // ALTER TABLE assets
+    // ALTER TABLE assets)
     `ALTER TABLE IF EXISTS assets ADD COLUMN IF NOT EXISTS asset_tag VARCHAR(50)`,
     `ALTER TABLE IF EXISTS assets ADD COLUMN IF NOT EXISTS name VARCHAR(255) NOT NULL DEFAULT ''`,
     `ALTER TABLE IF EXISTS assets ADD COLUMN IF NOT EXISTS category VARCHAR(100)`,

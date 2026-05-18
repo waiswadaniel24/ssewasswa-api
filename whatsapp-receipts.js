@@ -562,7 +562,7 @@ Contact: {{school_phone}}`
         COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
         COUNT(*) FILTER (WHERE sent_at >= date_trunc('day', NOW()))::int AS today,
         COUNT(*) FILTER (WHERE sent_at >= date_trunc('week', NOW()))::int AS this_week
-      FROM whatsapp_receipt_log WHERE tenant_id = $1
+      FROM whatsapp_receipt_log WHERE tenant_id = $1)
     `, [tid])).rows[0];
 
     // By type breakdown for chart

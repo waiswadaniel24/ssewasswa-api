@@ -24,7 +24,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 1b. Scheduling Insights
+    // 1b. Scheduling Insights)
     `CREATE TABLE IF NOT EXISTS scheduling_insights (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -35,7 +35,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       UNIQUE(tenant_id, day_of_week, hour)
     )`,
 
-    // 2a. Campaign Co-Creators
+    // 2a. Campaign Co-Creators)
     `CREATE TABLE IF NOT EXISTS campaign_co_creators (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -46,7 +46,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       accepted_at TIMESTAMPTZ
     )`,
 
-    // 2b. Campaign Edit History
+    // 2b. Campaign Edit History)
     `CREATE TABLE IF NOT EXISTS campaign_edit_history (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -58,7 +58,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       edited_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 3a. Campaign Bundle Packs
+    // 3a. Campaign Bundle Packs)
     `CREATE TABLE IF NOT EXISTS campaign_bundles (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -69,7 +69,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 3b. Campaign Bundle Items
+    // 3b. Campaign Bundle Items)
     `CREATE TABLE IF NOT EXISTS campaign_bundle_items (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -78,7 +78,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       allocation_percentage NUMERIC(5,2) DEFAULT 100
     )`,
 
-    // 4. Campaign Health Monitor
+    // 4. Campaign Health Monitor)
     `CREATE TABLE IF NOT EXISTS campaign_health_scores (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -90,7 +90,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       checked_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 5. Fundraising Calendar
+    // 5. Fundraising Calendar)
     `CREATE TABLE IF NOT EXISTS fundraising_calendar (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -103,7 +103,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 6. Smart Goal Recommender
+    // 6. Smart Goal Recommender)
     `CREATE TABLE IF NOT EXISTS goal_recommendations (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -114,7 +114,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 7a. Campaign Storyboard Builder
+    // 7a. Campaign Storyboard Builder)
     `CREATE TABLE IF NOT EXISTS campaign_storyboards (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -124,7 +124,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 7b. Storyboard Sections
+    // 7b. Storyboard Sections)
     `CREATE TABLE IF NOT EXISTS storyboard_sections (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -136,7 +136,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       image_url TEXT
     )`,
 
-    // 8a. Donation Form Builder
+    // 8a. Donation Form Builder)
     `CREATE TABLE IF NOT EXISTS donation_forms (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -149,7 +149,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 8b. Donation Form Submissions
+    // 8b. Donation Form Submissions)
     `CREATE TABLE IF NOT EXISTS donation_form_submissions (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -160,7 +160,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       submitted_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 9. Campaign Success Blueprint
+    // 9. Campaign Success Blueprint)
     `CREATE TABLE IF NOT EXISTS campaign_blueprints (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -172,7 +172,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 10a. Smart Thank You Templates
+    // 10a. Smart Thank You Templates)
     `CREATE TABLE IF NOT EXISTS thank_you_templates (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -183,7 +183,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       is_default BOOLEAN DEFAULT false
     )`,
 
-    // 10b. Thank You Log
+    // 10b. Thank You Log)
     `CREATE TABLE IF NOT EXISTS thank_you_log (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -194,7 +194,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       opened BOOLEAN DEFAULT false
     )`,
 
-    // 11a. Micro-Donation Round-Up Settings
+    // 11a. Micro-Donation Round-Up Settings)
     `CREATE TABLE IF NOT EXISTS micro_roundup_settings (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
@@ -203,7 +203,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       max_monthly INTEGER DEFAULT 10000
     )`,
 
-    // 11b. Micro-Donation Round-Up Transactions
+    // 11b. Micro-Donation Round-Up Transactions)
     `CREATE TABLE IF NOT EXISTS micro_roundup_transactions (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -215,7 +215,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 12. Donation Day Scheduler
+    // 12. Donation Day Scheduler)
     `CREATE TABLE IF NOT EXISTS scheduled_donations (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -229,7 +229,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 13. Campaign Seasonality Adjuster
+    // 13. Campaign Seasonality Adjuster)
     `CREATE TABLE IF NOT EXISTS seasonality_profiles (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -241,7 +241,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       UNIQUE(tenant_id, month, year)
     )`,
 
-    // 14a. Smart Amount Suggestions
+    // 14a. Smart Amount Suggestions)
     `CREATE TABLE IF NOT EXISTS amount_suggestions (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
@@ -250,7 +250,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       based_on TEXT
     )`,
 
-    // 14b. Amount Suggestion Settings
+    // 14b. Amount Suggestion Settings)
     `CREATE TABLE IF NOT EXISTS amount_suggestion_settings (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
@@ -270,7 +270,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_campaign_schedules_tenant ON campaign_schedules(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_scheduling_insights_tenant ON scheduling_insights(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_campaign_co_creators_tenant ON campaign_co_creators(tenant_id)`,

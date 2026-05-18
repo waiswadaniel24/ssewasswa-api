@@ -16,7 +16,7 @@ const ENG_MIGRATIONS = [
     user_email TEXT, completed_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(challenge_id, user_email)
   )`,
-  // Achievements / Badges
+  // Achievements / Badges)
   `CREATE TABLE IF NOT EXISTS achievements (
     id SERIAL PRIMARY KEY, badge_name TEXT UNIQUE NOT NULL,
     description TEXT, icon TEXT DEFAULT '🏆',
@@ -29,7 +29,7 @@ const ENG_MIGRATIONS = [
     earned_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_email, achievement_id)
   )`,
-  // Rewards Store
+  // Rewards Store)
   `CREATE TABLE IF NOT EXISTS rewards_store (
     id SERIAL PRIMARY KEY, reward_name TEXT NOT NULL,
     description TEXT, icon TEXT DEFAULT '🎁',
@@ -44,7 +44,7 @@ const ENG_MIGRATIONS = [
     user_email TEXT, points_spent INTEGER,
     status TEXT DEFAULT 'pending', redeemed_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // User Streaks
+  // User Streaks)
   `CREATE TABLE IF NOT EXISTS user_streaks (
     id SERIAL PRIMARY KEY, user_email TEXT UNIQUE NOT NULL,
     current_streak INTEGER DEFAULT 0, longest_streak INTEGER DEFAULT 0,
@@ -58,7 +58,7 @@ const ENG_MIGRATIONS = [
     level INTEGER DEFAULT 1, rank INTEGER DEFAULT 0,
     category TEXT DEFAULT 'overall', updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Gamification Events
+  // Gamification Events)
   `CREATE TABLE IF NOT EXISTS gamification_events (
     id SERIAL PRIMARY KEY, user_email TEXT NOT NULL,
     event_type TEXT NOT NULL, event_data JSONB,
@@ -369,7 +369,7 @@ app.get('/leaderboard', ah(async (req, res) => {
   const leaders = (await pool.query(`
     SELECT user_email, SUM(points) as total_score, COUNT(*) as activities
     FROM point_transactions ${dateFilter}
-    GROUP BY user_email ORDER BY total_score DESC LIMIT 50
+    GROUP BY user_email ORDER BY total_score DESC LIMIT 50)
   `)).rows;
 
   const medals = ['🥇', '🥈', '🥉'];

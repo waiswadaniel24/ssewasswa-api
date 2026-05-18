@@ -334,9 +334,9 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 1 - DASHBOARD
   // ====================================================================
   app.get('/school/green-campus/', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
-    var uid = req.session.user.id;
-    var html = SKIP;
+    const tid = req.session.user.tenant_id;
+    const uid = req.session.user.id;
+    const html = SKIP;
 
     // Navigation tabs
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
@@ -346,23 +346,23 @@ module.exports = function (app, pool, opts) {
     html += '</div>';
 
     // KPI cards
-    var [initCount] = await pool.query(
-      'SELECT COUNT(*) AS total, SUM(CASE WHEN status=\'active\' THEN 1 ELSE 0 END) AS active FROM green_initiatives WHERE tenant_id = ?', [tid]
+    const { rows: initCount } = await pool.query(
+      'SELECT COUNT(*) AS total, SUM(CASE WHEN status=\'active\' THEN 1 ELSE 0 END) AS active FROM green_initiatives WHERE tenant_id = $1', [tid]
     );
-    var [energyMonth] = await pool.query(
-      'SELECT COALESCE(SUM(value),0) AS total_kwh FROM energy_readings WHERE tenant_id = ? AND reading_type=\'electricity\' AND recorded_at >= DATE_FORMAT(NOW(),\'%Y-%m-01\')', [tid]
+    const { rows: energyMonth } = await pool.query(
+      'SELECT COALESCE(SUM(value),0) AS total_kwh FROM energy_readings WHERE tenant_id = $1 AND reading_type=\'electricity\' AND recorded_at >= DATE_FORMAT(NOW(),\'%Y-%m-01\')', [tid]
     );
-    var [wasteMonth] = await pool.query(
-      'SELECT COALESCE(SUM(weight_kg),0) AS total_kg, SUM(CASE WHEN disposal_method=\'recycled\' THEN weight_kg ELSE 0 END) AS recycled_kg FROM waste_records WHERE tenant_id = ? AND recorded_at >= DATE_FORMAT(NOW(),\'%Y-%m-01\')', [tid]
+    const { rows: wasteMonth } = await pool.query(
+      'SELECT COALESCE(SUM(weight_kg),0) AS total_kg, SUM(CASE WHEN disposal_method=\'recycled\' THEN weight_kg ELSE 0 END) AS recycled_kg FROM waste_records WHERE tenant_id = $1 AND recorded_at >= DATE_FORMAT(NOW(),\'%Y-%m-01\')', [tid]
     );
-    var [waterMonth] = await pool.query(
-      'SELECT COALESCE(SUM(value),0) AS total_litres FROM water_readings WHERE tenant_id = ? AND recorded_at >= DATE_FORMAT(NOW(),\'%Y-%m-01\')', [tid]
+    const { rows: waterMonth } = await pool.query(
+      'SELECT COALESCE(SUM(value),0) AS total_litres FROM water_readings WHERE tenant_id = $1 AND recorded_at >= DATE_FORMAT(NOW(),\'%Y-%m-01\')', [tid]
     );
-    var [treeCount] = await pool.query(
-      'SELECT COALESCE(SUM(quantity),0) AS total_trees, COALESCE(SUM(co2_offset_kg),0) AS total_co2 FROM tree_planting WHERE tenant_id = ? AND status IN (\'planted\',\'growing\',\'mature\')', [tid]
+    const { rows: treeCount } = await pool.query(
+      'SELECT COALESCE(SUM(quantity),0) AS total_trees, COALESCE(SUM(co2_offset_kg),0) AS total_co2 FROM tree_planting WHERE tenant_id = $1 AND status IN (\'planted\',\'growing\',\'mature\')', [tid]
     );
-    var [challengeCount] = await pool.query(
-      'SELECT COUNT(*) AS total FROM green_challenges WHERE tenant_id = ? AND status = \'active\'', [tid]
+    const { rows: challengeCount } = await pool.query(
+      'SELECT COUNT(*) AS total FROM green_challenges WHERE tenant_id = $1 AND status = \'active\'', [tid]
     );
 
     var init = initCount[0] || {};
@@ -387,16 +387,16 @@ module.exports = function (app, pool, opts) {
     html += '</div>';
 
     // Energy trend chart (last 12 months)
-    var [energyTrend] = await pool.query(
-      'SELECT DATE_FORMAT(recorded_at,\'%b %Y\') AS label, SUM(value) AS value FROM energy_readings WHERE tenant_id = ? AND reading_type=\'electricity\' AND recorded_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH) GROUP BY DATE_FORMAT(recorded_at,\'%Y-%m\') ORDER BY MIN(recorded_at) ASC LIMIT 12', [tid]
+    const { rows: energyTrend } = await pool.query(
+      'SELECT DATE_FORMAT(recorded_at,\'%b %Y\') AS label, SUM(value) AS value FROM energy_readings WHERE tenant_id = $1 AND reading_type=\'electricity\' AND recorded_at >= NOW() - INTERVAL \'12 MONTH\' GROUP BY DATE_FORMAT(recorded_at,\'%Y-%m\') ORDER BY MIN(recorded_at) ASC LIMIT 12', [tid]
     );
     html += '<div class="card"><h3 style="color:#1f2937">Energy Consumption Trend (12 months)</h3>';
     html += svgBarChart(energyTrend, 700, 220, '#16a34a');
     html += '</div>';
 
     // Waste breakdown donut
-    var [wasteBreakdown] = await pool.query(
-      'SELECT waste_type, SUM(weight_kg) AS value FROM waste_records WHERE tenant_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH) GROUP BY waste_type ORDER BY value DESC', [tid]
+    const { rows: wasteBreakdown } = await pool.query(
+      'SELECT waste_type, SUM(weight_kg) AS value FROM waste_records WHERE tenant_id = $1 AND recorded_at >= NOW() - INTERVAL \'6 MONTH\' GROUP BY waste_type ORDER BY value DESC', [tid]
     );
     var wasteColors = { 'recyclable': '#16a34a', 'organic': '#92400e', 'general': '#6b7280', 'hazardous': '#dc2626', 'e_waste': '#7c3aed', 'construction': '#f59e0b' };
     var wasteLegend = wasteBreakdown.map(function (w) { return { label: w.waste_type, value: w.value, color: wasteColors[w.waste_type] || P }; });
@@ -411,8 +411,8 @@ module.exports = function (app, pool, opts) {
     html += '</div></div></div>';
 
     // Active initiatives
-    var [activeInit] = await pool.query(
-      'SELECT gi.*, u.display_name AS coordinator_name FROM green_initiatives gi LEFT JOIN users u ON u.id = gi.coordinator_id WHERE gi.tenant_id = ? AND gi.status = \'active\' ORDER BY gi.created_at DESC LIMIT 5', [tid]
+    const { rows: activeInit } = await pool.query(
+      'SELECT gi.*, u.display_name AS coordinator_name FROM green_initiatives gi LEFT JOIN users u ON u.id = gi.coordinator_id WHERE gi.tenant_id = $1 AND gi.status = \'active\' ORDER BY gi.created_at DESC LIMIT 5', [tid]
     );
     if (activeInit.length) {
       html += '<div class="card"><h3 style="color:#1f2937">Active Green Initiatives</h3><table><tr><th>Title</th><th>Category</th><th>Progress</th><th>Coordinator</th></tr>';
@@ -427,8 +427,8 @@ module.exports = function (app, pool, opts) {
     }
 
     // Active challenges
-    var [activeCh] = await pool.query(
-      'SELECT * FROM green_challenges WHERE tenant_id = ? AND status = \'active\' ORDER BY end_date ASC LIMIT 3', [tid]
+    const { rows: activeCh } = await pool.query(
+      'SELECT * FROM green_challenges WHERE tenant_id = $1 AND status = \'active\' ORDER BY end_date ASC LIMIT 3', [tid]
     );
     if (activeCh.length) {
       html += '<div class="card"><h3 style="color:#1f2937">&#127942; Active Green Challenges</h3>';
@@ -449,23 +449,24 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 2 - INITIATIVES (List, Create, View, Edit, Delete)
   // ====================================================================
   app.get('/school/green-campus/initiatives', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var pg = paginate(req);
     var statusFilter = req.query.status || '';
     var catFilter = req.query.category || '';
 
-    var where = 'WHERE gi.tenant_id = ?';
+    let pIdx = 1;
+    var where = 'WHERE gi.tenant_id = $$' + pIdx++;
     var params = [tid];
-    if (statusFilter) { where += ' AND gi.status = ?'; params.push(statusFilter); }
-    if (catFilter) { where += ' AND gi.category = ?'; params.push(catFilter); }
+    if (statusFilter) { where += ' AND gi.status = $$' + pIdx++; params.push(statusFilter); }
+    if (catFilter) { where += ' AND gi.category = $$' + pIdx++; params.push(catFilter); }
 
-    var [initiatives] = await pool.query(
-      'SELECT gi.*, u.display_name AS coordinator_name FROM green_initiatives gi LEFT JOIN users u ON u.id = gi.coordinator_id ' + where + ' ORDER BY gi.created_at DESC LIMIT ? OFFSET ?',
+    const { rows: initiatives } = await pool.query(
+      'SELECT gi.*, u.display_name AS coordinator_name FROM green_initiatives gi LEFT JOIN users u ON u.id = gi.coordinator_id ' + where + ' ORDER BY gi.created_at DESC LIMIT $$' + pIdx++ + ' OFFSET $$' + pIdx++,
       params.concat([pg.limit, pg.offset])
     );
-    var [total] = await pool.query('SELECT COUNT(*) AS cnt FROM green_initiatives gi ' + where, params);
+    const { rows: total } = await pool.query('SELECT COUNT(*) AS cnt FROM green_initiatives gi ' + where, params);
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('initiatives').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -504,7 +505,7 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.get('/school/green-campus/initiatives/create', requireAuth, ah(async function (req, res) {
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('initiatives').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -526,12 +527,12 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/initiatives/create', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
-    var uid = req.session.user.id;
-    var body = req.body;
+    const tid = req.session.user.tenant_id;
+    const uid = req.session.user.id;
+    const body = req.body;
     if (!body.title) { return res.redirect('/school/green-campus/initiatives/create'); }
     await pool.query(
-      'INSERT INTO green_initiatives (tenant_id, title, description, category, target, current_progress, unit, start_date, end_date, status, coordinator_id) VALUES (?,?,?,?,?,0,?,?,?,?,?)',
+      'INSERT INTO green_initiatives (tenant_id, title, description, category, target, current_progress, unit, start_date, end_date, status, coordinator_id) VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8,$9,$10)',
       [tid, body.title, body.description || '', body.category || 'energy', parseFloat(body.target) || 0, body.unit || 'units', body.start_date || null, body.end_date || null, body.status || 'planned', uid]
     );
     audit(req, 'green_initiative_create', 'Created initiative: ' + body.title);
@@ -539,16 +540,16 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.get('/school/green-campus/initiatives/:id', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var initId = parseInt(req.params.id, 10);
-    var [rows] = await pool.query(
-      'SELECT gi.*, u.display_name AS coordinator_name FROM green_initiatives gi LEFT JOIN users u ON u.id = gi.coordinator_id WHERE gi.tenant_id = ? AND gi.id = ?', [tid, initId]
+    const { rows } = await pool.query(
+      'SELECT gi.*, u.display_name AS coordinator_name FROM green_initiatives gi LEFT JOIN users u ON u.id = gi.coordinator_id WHERE gi.tenant_id = $1 AND gi.id = $2', [tid, initId]
     );
     if (!rows.length) { return res.redirect('/school/green-campus/initiatives'); }
     var init = rows[0];
     var pct = init.target > 0 ? Math.min(100, ((init.current_progress / init.target) * 100)).toFixed(1) : 0;
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('initiatives').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -580,12 +581,12 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/initiatives/:id/progress', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var initId = parseInt(req.params.id, 10);
     var progress = parseFloat(req.body.progress) || 0;
     var status = req.body.status || 'active';
     await pool.query(
-      'UPDATE green_initiatives SET current_progress = ?, status = ? WHERE tenant_id = ? AND id = ?',
+      'UPDATE green_initiatives SET current_progress = $1, status = $2 WHERE tenant_id = $3 AND id = $4',
       [progress, status, tid, initId]
     );
     audit(req, 'green_initiative_progress', 'Updated progress to ' + progress + ' for initiative ' + initId);
@@ -593,12 +594,12 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.get('/school/green-campus/initiatives/:id/edit', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var initId = parseInt(req.params.id, 10);
-    var [rows] = await pool.query('SELECT * FROM green_initiatives WHERE tenant_id = ? AND id = ?', [tid, initId]);
+    const { rows } = await pool.query('SELECT * FROM green_initiatives WHERE tenant_id = $1 AND id = $2', [tid, initId]);
     if (!rows.length) { return res.redirect('/school/green-campus/initiatives'); }
     var i = rows[0];
-    var html = SKIP;
+    const html = SKIP;
     html += '<h2 style="color:#1f2937">Edit Initiative</h2>';
     html += '<div class="card"><form method="post" action="/school/green-campus/initiatives/' + initId + '/edit">';
     html += '<div class="form-row"><div><label>Title *</label><input name="title" value="' + esc(i.title) + '" required></div>';
@@ -623,11 +624,11 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/initiatives/:id/edit', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var initId = parseInt(req.params.id, 10);
     var b = req.body;
     await pool.query(
-      'UPDATE green_initiatives SET title=?, description=?, category=?, target=?, unit=?, start_date=?, end_date=?, status=? WHERE tenant_id = ? AND id = ?',
+      'UPDATE green_initiatives SET title=$1, description=$2, category=$3, target=$4, unit=$5, start_date=$6, end_date=$7, status=$8 WHERE tenant_id = $9 AND id = $10',
       [b.title, b.description || '', b.category || 'energy', parseFloat(b.target) || 0, b.unit || 'units', b.start_date || null, b.end_date || null, b.status || 'planned', tid, initId]
     );
     audit(req, 'green_initiative_update', 'Updated initiative ' + initId);
@@ -635,9 +636,9 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/initiatives/:id/delete', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var initId = parseInt(req.params.id, 10);
-    await pool.query('DELETE FROM green_initiatives WHERE tenant_id = ? AND id = ?', [tid, initId]);
+    await pool.query('DELETE FROM green_initiatives WHERE tenant_id = $1 AND id = $2', [tid, initId]);
     audit(req, 'green_initiative_delete', 'Deleted initiative ' + initId);
     res.redirect('/school/green-campus/initiatives');
   }));
@@ -646,28 +647,29 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 3 - ENERGY TRACKING
   // ====================================================================
   app.get('/school/green-campus/energy', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var meterFilter = req.query.meter_id || '';
 
-    var whereClause = 'WHERE er.tenant_id = ?';
+    let pIdx = 1;
+    var whereClause = 'WHERE er.tenant_id = $$' + pIdx++;
     var params = [tid];
-    if (meterFilter) { whereClause += ' AND er.meter_id = ?'; params.push(meterFilter); }
+    if (meterFilter) { whereClause += ' AND er.meter_id = $$' + pIdx++; params.push(meterFilter); }
 
-    var [readings] = await pool.query(
+    const { rows: readings } = await pool.query(
       'SELECT er.* FROM energy_readings er ' + whereClause + ' ORDER BY er.recorded_at DESC LIMIT 50', params
     );
 
     // Monthly totals for chart
-    var [monthlyData] = await pool.query(
-      'SELECT DATE_FORMAT(recorded_at,\'%b %Y\') AS label, SUM(CASE WHEN reading_type=\'electricity\' THEN value ELSE 0 END) AS electricity, SUM(CASE WHEN reading_type=\'gas\' THEN value ELSE 0 END) AS gas, SUM(CASE WHEN reading_type=\'solar_generation\' THEN value ELSE 0 END) AS solar FROM energy_readings WHERE tenant_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH) GROUP BY DATE_FORMAT(recorded_at,\'%Y-%m\') ORDER BY MIN(recorded_at) LIMIT 12', [tid]
+    const { rows: monthlyData } = await pool.query(
+      'SELECT DATE_FORMAT(recorded_at,\'%b %Y\') AS label, SUM(CASE WHEN reading_type=\'electricity\' THEN value ELSE 0 END) AS electricity, SUM(CASE WHEN reading_type=\'gas\' THEN value ELSE 0 END) AS gas, SUM(CASE WHEN reading_type=\'solar_generation\' THEN value ELSE 0 END) AS solar FROM energy_readings WHERE tenant_id = $1 AND recorded_at >= NOW() - INTERVAL \'12 MONTH\' GROUP BY DATE_FORMAT(recorded_at,\'%Y-%m\') ORDER BY MIN(recorded_at) LIMIT 12', [tid]
     );
 
     // Meters list
-    var [meters] = await pool.query(
-      'SELECT DISTINCT meter_id FROM energy_readings WHERE tenant_id = ? ORDER BY meter_id', [tid]
+    const { rows: meters } = await pool.query(
+      'SELECT DISTINCT meter_id FROM energy_readings WHERE tenant_id = $1 ORDER BY meter_id', [tid]
     );
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('energy').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -719,11 +721,11 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/energy/add', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var b = req.body;
     if (!b.meter_id || !b.value) { return res.redirect('/school/green-campus/energy'); }
     await pool.query(
-      'INSERT INTO energy_readings (tenant_id, meter_id, reading_type, value, unit, cost, recorded_at, notes) VALUES (?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO energy_readings (tenant_id, meter_id, reading_type, value, unit, cost, recorded_at, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
       [tid, b.meter_id, b.reading_type || 'electricity', parseFloat(b.value) || 0, b.unit || 'kWh', parseFloat(b.cost) || 0, b.recorded_at || nowStr(), b.notes || '']
     );
     audit(req, 'energy_reading_add', 'Added energy reading for meter ' + b.meter_id);
@@ -731,8 +733,8 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/energy/:id/delete', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM energy_readings WHERE tenant_id = ? AND id = ?', [tid, parseInt(req.params.id, 10)]);
+    const tid = req.session.user.tenant_id;
+    await pool.query('DELETE FROM energy_readings WHERE tenant_id = $1 AND id = $2', [tid, parseInt(req.params.id, 10)]);
     res.redirect('/school/green-campus/energy');
   }));
 
@@ -740,25 +742,25 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 4 - WASTE MANAGEMENT
   // ====================================================================
   app.get('/school/green-campus/waste', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
 
-    var [records] = await pool.query(
-      'SELECT wr.*, u.display_name AS recorded_by_name FROM waste_records wr LEFT JOIN users u ON u.id = wr.recorded_by WHERE wr.tenant_id = ? ORDER BY wr.recorded_at DESC LIMIT 50', [tid]
+    const { rows: records } = await pool.query(
+      'SELECT wr.*, u.display_name AS recorded_by_name FROM waste_records wr LEFT JOIN users u ON u.id = wr.recorded_by WHERE wr.tenant_id = $1 ORDER BY wr.recorded_at DESC LIMIT 50', [tid]
     );
 
     // Monthly waste trend
-    var [wasteTrend] = await pool.query(
-      'SELECT DATE_FORMAT(recorded_at,\'%b %Y\') AS label, SUM(weight_kg) AS value FROM waste_records WHERE tenant_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH) GROUP BY DATE_FORMAT(recorded_at,\'%Y-%m\') ORDER BY MIN(recorded_at) LIMIT 12', [tid]
+    const { rows: wasteTrend } = await pool.query(
+      'SELECT DATE_FORMAT(recorded_at,\'%b %Y\') AS label, SUM(weight_kg) AS value FROM waste_records WHERE tenant_id = $1 AND recorded_at >= NOW() - INTERVAL \'12 MONTH\' GROUP BY DATE_FORMAT(recorded_at,\'%Y-%m\') ORDER BY MIN(recorded_at) LIMIT 12', [tid]
     );
 
     // Disposal breakdown
-    var [disposalStats] = await pool.query(
-      'SELECT disposal_method, SUM(weight_kg) AS total FROM waste_records WHERE tenant_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH) GROUP BY disposal_method ORDER BY total DESC', [tid]
+    const { rows: disposalStats } = await pool.query(
+      'SELECT disposal_method, SUM(weight_kg) AS total FROM waste_records WHERE tenant_id = $1 AND recorded_at >= NOW() - INTERVAL \'6 MONTH\' GROUP BY disposal_method ORDER BY total DESC', [tid]
     );
     var disposalColors = { 'recycled': '#16a34a', 'composted': '#92400e', 'landfill': '#6b7280', 'incinerated': '#dc2626', 'specialized': '#7c3aed' };
     var disposalLegend = disposalStats.map(function (d) { return { label: d.disposal_method, value: d.total, color: disposalColors[d.disposal_method] || P }; });
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('waste').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -810,11 +812,11 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/waste/add', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var b = req.body;
     if (!b.weight_kg) { return res.redirect('/school/green-campus/waste'); }
     await pool.query(
-      'INSERT INTO waste_records (tenant_id, waste_type, weight_kg, disposal_method, recorded_at, recorded_by, location, notes) VALUES (?,?,?,?,?,?,?,?)',
+      'INSERT INTO waste_records (tenant_id, waste_type, weight_kg, disposal_method, recorded_at, recorded_by, location, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
       [tid, b.waste_type || 'general', parseFloat(b.weight_kg) || 0, b.disposal_method || 'landfill', b.recorded_at || nowStr(), req.session.user.id, b.location || '', b.notes || '']
     );
     audit(req, 'waste_record_add', 'Recorded ' + b.weight_kg + 'kg ' + (b.waste_type || 'general') + ' waste');
@@ -825,26 +827,27 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 5 - WATER USAGE
   // ====================================================================
   app.get('/school/green-campus/water', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var meterFilter = req.query.meter_id || '';
 
-    var whereClause = 'WHERE wr.tenant_id = ?';
+    let pIdx = 1;
+    var whereClause = 'WHERE wr.tenant_id = $$' + pIdx++;
     var wparams = [tid];
-    if (meterFilter) { whereClause += ' AND wr.meter_id = ?'; wparams.push(meterFilter); }
+    if (meterFilter) { whereClause += ' AND wr.meter_id = $$' + pIdx++; wparams.push(meterFilter); }
 
-    var [readings] = await pool.query(
+    const { rows: readings } = await pool.query(
       'SELECT wr.* FROM water_readings wr ' + whereClause + ' ORDER BY wr.recorded_at DESC LIMIT 50', wparams
     );
 
-    var [monthlyData] = await pool.query(
-      'SELECT DATE_FORMAT(recorded_at,\'%b %Y\') AS label, SUM(value) AS value FROM water_readings WHERE tenant_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH) GROUP BY DATE_FORMAT(recorded_at,\'%Y-%m\') ORDER BY MIN(recorded_at) LIMIT 12', [tid]
+    const { rows: monthlyData } = await pool.query(
+      'SELECT DATE_FORMAT(recorded_at,\'%b %Y\') AS label, SUM(value) AS value FROM water_readings WHERE tenant_id = $1 AND recorded_at >= NOW() - INTERVAL \'12 MONTH\' GROUP BY DATE_FORMAT(recorded_at,\'%Y-%m\') ORDER BY MIN(recorded_at) LIMIT 12', [tid]
     );
 
-    var [meters] = await pool.query(
-      'SELECT DISTINCT meter_id FROM water_readings WHERE tenant_id = ? ORDER BY meter_id', [tid]
+    const { rows: meters } = await pool.query(
+      'SELECT DISTINCT meter_id FROM water_readings WHERE tenant_id = $1 ORDER BY meter_id', [tid]
     );
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('water').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -900,11 +903,11 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/water/add', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var b = req.body;
     if (!b.meter_id || !b.value) { return res.redirect('/school/green-campus/water'); }
     await pool.query(
-      'INSERT INTO water_readings (tenant_id, meter_id, value, unit, recorded_at, notes) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO water_readings (tenant_id, meter_id, value, unit, recorded_at, notes) VALUES ($1,$2,$3,$4,$5,$6)',
       [tid, b.meter_id, parseFloat(b.value) || 0, b.unit || 'litres', b.recorded_at || nowStr(), b.notes || '']
     );
     audit(req, 'water_reading_add', 'Added water reading for meter ' + b.meter_id);
@@ -915,14 +918,14 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 6 - GREEN CHALLENGES
   // ====================================================================
   app.get('/school/green-campus/challenges', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
-    var uid = req.session.user.id;
+    const tid = req.session.user.tenant_id;
+    const uid = req.session.user.id;
 
-    var [challenges] = await pool.query(
-      'SELECT gc.*, u.display_name AS creator_name FROM green_challenges gc LEFT JOIN users u ON u.id = gc.created_by WHERE gc.tenant_id = ? ORDER BY gc.created_at DESC', [tid]
+    const { rows: challenges } = await pool.query(
+      'SELECT gc.*, u.display_name AS creator_name FROM green_challenges gc LEFT JOIN users u ON u.id = gc.created_by WHERE gc.tenant_id = $1 ORDER BY gc.created_at DESC', [tid]
     );
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('challenges').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -969,7 +972,7 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.get('/school/green-campus/challenges/create', requireAuth, ah(async function (req, res) {
-    var html = SKIP;
+    const html = SKIP;
     html += '<h2 style="color:#1f2937">Create Green Challenge</h2>';
     html += '<div class="card"><form method="post" action="/school/green-campus/challenges/create">';
     html += '<div class="form-row"><div><label>Title *</label><input name="title" required></div>';
@@ -983,11 +986,11 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/challenges/create', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var b = req.body;
     if (!b.title || !b.start_date || !b.end_date) { return res.redirect('/school/green-campus/challenges/create'); }
     await pool.query(
-      'INSERT INTO green_challenges (tenant_id, title, description, start_date, end_date, metric, created_by, status, participants) VALUES (?,?,?,?,?,?,' + req.session.user.id + ',\'active\',\'[]\')',
+      'INSERT INTO green_challenges (tenant_id, title, description, start_date, end_date, metric, created_by, status, participants) VALUES ($1,$2,$3,$4,$5,$6,' + req.session.user.id + ',\'active\',\'[]\')',
       [tid, b.title, b.description || '', b.start_date, b.end_date, b.metric || 'points']
     );
     audit(req, 'green_challenge_create', 'Created challenge: ' + b.title);
@@ -995,27 +998,27 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/challenges/:id/join', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
-    var uid = req.session.user.id;
+    const tid = req.session.user.tenant_id;
+    const uid = req.session.user.id;
     var chId = parseInt(req.params.id, 10);
-    var [rows] = await pool.query('SELECT participants FROM green_challenges WHERE tenant_id = ? AND id = ?', [tid, chId]);
+    const { rows } = await pool.query('SELECT participants FROM green_challenges WHERE tenant_id = $1 AND id = $2', [tid, chId]);
     if (!rows.length) { return res.redirect('/school/green-campus/challenges'); }
     var parts = rows[0].participants ? (typeof rows[0].participants === 'string' ? JSON.parse(rows[0].participants) : rows[0].participants) : [];
     if (parts.indexOf(uid) === -1) { parts.push(uid); }
-    await pool.query('UPDATE green_challenges SET participants = ? WHERE tenant_id = ? AND id = ?', [JSON.stringify(parts), tid, chId]);
+    await pool.query('UPDATE green_challenges SET participants = $1 WHERE tenant_id = $2 AND id = $3', [JSON.stringify(parts), tid, chId]);
     audit(req, 'green_challenge_join', 'Joined challenge ' + chId);
     res.redirect('/school/green-campus/challenges');
   }));
 
   app.post('/school/green-campus/challenges/:id/leave', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
-    var uid = req.session.user.id;
+    const tid = req.session.user.tenant_id;
+    const uid = req.session.user.id;
     var chId = parseInt(req.params.id, 10);
-    var [rows] = await pool.query('SELECT participants FROM green_challenges WHERE tenant_id = ? AND id = ?', [tid, chId]);
+    const { rows } = await pool.query('SELECT participants FROM green_challenges WHERE tenant_id = $1 AND id = $2', [tid, chId]);
     if (!rows.length) { return res.redirect('/school/green-campus/challenges'); }
     var parts = rows[0].participants ? (typeof rows[0].participants === 'string' ? JSON.parse(rows[0].participants) : rows[0].participants) : [];
     parts = parts.filter(function (p) { return p !== uid; });
-    await pool.query('UPDATE green_challenges SET participants = ? WHERE tenant_id = ? AND id = ?', [JSON.stringify(parts), tid, chId]);
+    await pool.query('UPDATE green_challenges SET participants = $1 WHERE tenant_id = $2 AND id = $3', [JSON.stringify(parts), tid, chId]);
     res.redirect('/school/green-campus/challenges');
   }));
 
@@ -1023,17 +1026,17 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 7 - TREE PLANTING
   // ====================================================================
   app.get('/school/green-campus/trees', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
 
-    var [trees] = await pool.query(
-      'SELECT tp.*, u.display_name AS planted_by_name FROM tree_planting tp LEFT JOIN users u ON u.id = tp.planted_by WHERE tp.tenant_id = ? ORDER BY tp.planted_at DESC', [tid]
+    const { rows: trees } = await pool.query(
+      'SELECT tp.*, u.display_name AS planted_by_name FROM tree_planting tp LEFT JOIN users u ON u.id = tp.planted_by WHERE tp.tenant_id = $1 ORDER BY tp.planted_at DESC', [tid]
     );
 
-    var [summary] = await pool.query(
-      'SELECT status, SUM(quantity) AS total, SUM(co2_offset_kg) AS co2 FROM tree_planting WHERE tenant_id = ? GROUP BY status', [tid]
+    const { rows: summary } = await pool.query(
+      'SELECT status, SUM(quantity) AS total, SUM(co2_offset_kg) AS co2 FROM tree_planting WHERE tenant_id = $1 GROUP BY status', [tid]
     );
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('trees').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -1086,13 +1089,13 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/trees/add', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var b = req.body;
     if (!b.species) { return res.redirect('/school/green-campus/trees'); }
     var qty = parseInt(b.quantity, 10) || 1;
     var co2PerTree = parseFloat(b.co2_offset_kg) || 21;
     await pool.query(
-      'INSERT INTO tree_planting (tenant_id, species, quantity, location, planted_by, planted_at, status, co2_offset_kg, notes) VALUES (?,?,?,?,?,?,\'planted\',?,?)',
+      'INSERT INTO tree_planting (tenant_id, species, quantity, location, planted_by, planted_at, status, co2_offset_kg, notes) VALUES ($1,$2,$3,$4,$5,$6,\'planted\',$7,$8)',
       [tid, b.species, qty, b.location || '', req.session.user.id, b.planted_at || todayStr(), co2PerTree * qty, b.notes || '']
     );
     audit(req, 'tree_planting_add', 'Recorded ' + qty + ' ' + b.species + ' trees');
@@ -1100,10 +1103,10 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/trees/:id/update', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var treeId = parseInt(req.params.id, 10);
     await pool.query(
-      'UPDATE tree_planting SET status = ?, survival_rate = ?, notes = ? WHERE tenant_id = ? AND id = ?',
+      'UPDATE tree_planting SET status = $1, survival_rate = $2, notes = $3 WHERE tenant_id = $4 AND id = $5',
       [req.body.status || 'planted', parseFloat(req.body.survival_rate) || 100, req.body.notes || '', tid, treeId]
     );
     audit(req, 'tree_planting_update', 'Updated tree record ' + treeId);
@@ -1114,27 +1117,27 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 8 - REPORTS
   // ====================================================================
   app.get('/school/green-campus/reports', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var month = req.query.month || monthStr();
 
     var startDate = month + '-01';
-    var [energyData] = await pool.query(
-      'SELECT reading_type, SUM(value) AS total, SUM(cost) AS total_cost FROM energy_readings WHERE tenant_id = ? AND recorded_at >= ? AND recorded_at < DATE_ADD(?, INTERVAL 1 MONTH) GROUP BY reading_type', [tid, startDate, startDate]
+    const { rows: energyData } = await pool.query(
+      'SELECT reading_type, SUM(value) AS total, SUM(cost) AS total_cost FROM energy_readings WHERE tenant_id = $1 AND recorded_at >= $2 AND recorded_at < ($3::date + INTERVAL \'1 MONTH\') GROUP BY reading_type', [tid, startDate, startDate]
     );
-    var [wasteData] = await pool.query(
-      'SELECT waste_type, SUM(weight_kg) AS total FROM waste_records WHERE tenant_id = ? AND recorded_at >= ? AND recorded_at < DATE_ADD(?, INTERVAL 1 MONTH) GROUP BY waste_type', [tid, startDate, startDate]
+    const { rows: wasteData } = await pool.query(
+      'SELECT waste_type, SUM(weight_kg) AS total FROM waste_records WHERE tenant_id = $1 AND recorded_at >= $2 AND recorded_at < ($3::date + INTERVAL \'1 MONTH\') GROUP BY waste_type', [tid, startDate, startDate]
     );
-    var [waterData] = await pool.query(
-      'SELECT SUM(value) AS total FROM water_readings WHERE tenant_id = ? AND recorded_at >= ? AND recorded_at < DATE_ADD(?, INTERVAL 1 MONTH)', [tid, startDate, startDate]
+    const { rows: waterData } = await pool.query(
+      'SELECT SUM(value) AS total FROM water_readings WHERE tenant_id = $1 AND recorded_at >= $2 AND recorded_at < ($3::date + INTERVAL \'1 MONTH\')', [tid, startDate, startDate]
     );
-    var [treeData] = await pool.query(
-      'SELECT SUM(quantity) AS new_trees, SUM(co2_offset_kg) AS new_co2 FROM tree_planting WHERE tenant_id = ? AND planted_at >= ? AND planted_at < DATE_ADD(?, INTERVAL 1 MONTH)', [tid, startDate, startDate]
+    const { rows: treeData } = await pool.query(
+      'SELECT SUM(quantity) AS new_trees, SUM(co2_offset_kg) AS new_co2 FROM tree_planting WHERE tenant_id = $1 AND planted_at >= $2 AND planted_at < ($3::date + INTERVAL \'1 MONTH\')', [tid, startDate, startDate]
     );
-    var [initData] = await pool.query(
-      'SELECT COUNT(*) AS total, SUM(CASE WHEN status=\'completed\' THEN 1 ELSE 0 END) AS completed, SUM(CASE WHEN status=\'active\' THEN 1 ELSE 0 END) AS active FROM green_initiatives WHERE tenant_id = ?', [tid]
+    const { rows: initData } = await pool.query(
+      'SELECT COUNT(*) AS total, SUM(CASE WHEN status=\'completed\' THEN 1 ELSE 0 END) AS completed, SUM(CASE WHEN status=\'active\' THEN 1 ELSE 0 END) AS active FROM green_initiatives WHERE tenant_id = $1', [tid]
     );
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('reports').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -1204,9 +1207,9 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 9 - EDUCATION RESOURCES
   // ====================================================================
   app.get('/school/green-campus/education', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('education').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -1263,13 +1266,13 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 10 - ECO CLUBS
   // ====================================================================
   app.get('/school/green-campus/clubs', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
 
-    var [clubs] = await pool.query(
-      'SELECT ec.*, u1.display_name AS president_name, u2.display_name AS advisor_name FROM eco_clubs ec LEFT JOIN users u1 ON u1.id = ec.president_id LEFT JOIN users u2 ON u2.id = ec.teacher_advisor_id WHERE ec.tenant_id = ? ORDER BY ec.name ASC', [tid]
+    const { rows: clubs } = await pool.query(
+      'SELECT ec.*, u1.display_name AS president_name, u2.display_name AS advisor_name FROM eco_clubs ec LEFT JOIN users u1 ON u1.id = ec.president_id LEFT JOIN users u2 ON u2.id = ec.teacher_advisor_id WHERE ec.tenant_id = $1 ORDER BY ec.name ASC', [tid]
     );
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('clubs').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -1298,7 +1301,7 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.get('/school/green-campus/clubs/create', requireAuth, ah(async function (req, res) {
-    var html = SKIP;
+    const html = SKIP;
     html += '<h2 style="color:#1f2937">Create Eco Club</h2>';
     html += '<div class="card"><form method="post" action="/school/green-campus/clubs/create">';
     html += '<div class="form-row"><div><label>Club Name *</label><input name="name" required></div>';
@@ -1312,11 +1315,11 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/clubs/create', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var b = req.body;
     if (!b.name) { return res.redirect('/school/green-campus/clubs/create'); }
     await pool.query(
-      'INSERT INTO eco_clubs (tenant_id, name, description, president_id, teacher_advisor_id, meeting_schedule, member_count, status) VALUES (?,?,?,?,?,?,' + (parseInt(b.member_count, 10) || 0) + ',\'active\')',
+      'INSERT INTO eco_clubs (tenant_id, name, description, president_id, teacher_advisor_id, meeting_schedule, member_count, status) VALUES ($1,$2,$3,$4,$5,$6,' + (parseInt(b.member_count, 10) || 0) + ',\'active\')',
       [tid, b.name, b.description || '', b.president_id || null, b.teacher_advisor_id || null, b.meeting_schedule || '']
     );
     audit(req, 'eco_club_create', 'Created eco club: ' + b.name);
@@ -1324,8 +1327,8 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/clubs/:id/delete', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM eco_clubs WHERE tenant_id = ? AND id = ?', [tid, parseInt(req.params.id, 10)]);
+    const tid = req.session.user.tenant_id;
+    await pool.query('DELETE FROM eco_clubs WHERE tenant_id = $1 AND id = $2', [tid, parseInt(req.params.id, 10)]);
     audit(req, 'eco_club_delete', 'Deleted eco club ' + req.params.id);
     res.redirect('/school/green-campus/clubs');
   }));
@@ -1334,20 +1337,20 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 11 - CARBON FOOTPRINT CALCULATOR
   // ====================================================================
   app.get('/school/green-campus/carbon', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
 
     // Get last 12 months aggregated data
-    var [energyCO2] = await pool.query(
-      'SELECT SUM(value) AS total_kwh FROM energy_readings WHERE tenant_id = ? AND reading_type=\'electricity\' AND recorded_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)', [tid]
+    const { rows: energyCO2 } = await pool.query(
+      'SELECT SUM(value) AS total_kwh FROM energy_readings WHERE tenant_id = $1 AND reading_type=\'electricity\' AND recorded_at >= NOW() - INTERVAL \'12 MONTH\'', [tid]
     );
-    var [gasCO2] = await pool.query(
-      'SELECT SUM(value) AS total_m3 FROM energy_readings WHERE tenant_id = ? AND reading_type=\'gas\' AND recorded_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)', [tid]
+    const { rows: gasCO2 } = await pool.query(
+      'SELECT SUM(value) AS total_m3 FROM energy_readings WHERE tenant_id = $1 AND reading_type=\'gas\' AND recorded_at >= NOW() - INTERVAL \'12 MONTH\'', [tid]
     );
-    var [wasteCO2] = await pool.query(
-      'SELECT disposal_method, SUM(weight_kg) AS total_kg FROM waste_records WHERE tenant_id = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH) GROUP BY disposal_method', [tid]
+    const { rows: wasteCO2 } = await pool.query(
+      'SELECT disposal_method, SUM(weight_kg) AS total_kg FROM waste_records WHERE tenant_id = $1 AND recorded_at >= NOW() - INTERVAL \'12 MONTH\' GROUP BY disposal_method', [tid]
     );
-    var [treeOffset] = await pool.query(
-      'SELECT SUM(co2_offset_kg) AS total_offset FROM tree_planting WHERE tenant_id = ? AND status IN (\'planted\',\'growing\',\'mature\')', [tid]
+    const { rows: treeOffset } = await pool.query(
+      'SELECT SUM(co2_offset_kg) AS total_offset FROM tree_planting WHERE tenant_id = $1 AND status IN (\'planted\',\'growing\',\'mature\')', [tid]
     );
 
     // Emission factors (kg CO2 per unit)
@@ -1369,7 +1372,7 @@ module.exports = function (app, pool, opts) {
 
     var level = netEmissions < 5000 ? 'excellent' : netEmissions < 15000 ? 'good' : netEmissions < 30000 ? 'moderate' : 'poor';
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('carbon').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -1420,13 +1423,13 @@ module.exports = function (app, pool, opts) {
   //  ROUTE 12 - CERTIFICATIONS
   // ====================================================================
   app.get('/school/green-campus/certifications', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
 
-    var [certs] = await pool.query(
-      'SELECT * FROM green_certifications WHERE tenant_id = ? ORDER BY achieved_date DESC', [tid]
+    const { rows: certs } = await pool.query(
+      'SELECT * FROM green_certifications WHERE tenant_id = $1 ORDER BY achieved_date DESC', [tid]
     );
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<div style="margin-bottom:20px;overflow-x:auto">';
     navTabs('certifications').forEach(function (t) {
       html += '<a href="' + t.href + '" class="nav-tab' + (t.active ? ' active' : '') + '">' + t.label + '</a>';
@@ -1457,7 +1460,7 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.get('/school/green-campus/certifications/create', requireAuth, ah(async function (req, res) {
-    var html = SKIP;
+    const html = SKIP;
     html += '<h2 style="color:#1f2937">Add Green Certification</h2>';
     html += '<div class="card"><form method="post" action="/school/green-campus/certifications/create">';
     html += '<div class="form-row"><div><label>Certification Name *</label><input name="cert_name" required placeholder="e.g. Green Flag Award"></div>';
@@ -1474,11 +1477,11 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/certifications/create', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var b = req.body;
     if (!b.cert_name) { return res.redirect('/school/green-campus/certifications/create'); }
     await pool.query(
-      'INSERT INTO green_certifications (tenant_id, cert_name, issuing_body, cert_level, achieved_date, expiry_date, status, audit_score, notes) VALUES (?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO green_certifications (tenant_id, cert_name, issuing_body, cert_level, achieved_date, expiry_date, status, audit_score, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
       [tid, b.cert_name, b.issuing_body || '', b.cert_level || '', b.achieved_date || null, b.expiry_date || null, b.status || 'pending', parseFloat(b.audit_score) || 0, b.notes || '']
     );
     audit(req, 'green_certification_add', 'Added certification: ' + b.cert_name);
@@ -1486,8 +1489,8 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/certifications/:id/delete', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM green_certifications WHERE tenant_id = ? AND id = ?', [tid, parseInt(req.params.id, 10)]);
+    const tid = req.session.user.tenant_id;
+    await pool.query('DELETE FROM green_certifications WHERE tenant_id = $1 AND id = $2', [tid, parseInt(req.params.id, 10)]);
     audit(req, 'green_certification_delete', 'Deleted certification ' + req.params.id);
     res.redirect('/school/green-campus/certifications');
   }));
@@ -1496,13 +1499,13 @@ module.exports = function (app, pool, opts) {
   //  SUSTAINABILITY GOALS (sub-route under dashboard)
   // ====================================================================
   app.get('/school/green-campus/goals', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
 
-    var [goals] = await pool.query(
-      'SELECT * FROM sustainability_goals WHERE tenant_id = ? ORDER BY deadline ASC', [tid]
+    const { rows: goals } = await pool.query(
+      'SELECT * FROM sustainability_goals WHERE tenant_id = $1 ORDER BY deadline ASC', [tid]
     );
 
-    var html = SKIP;
+    const html = SKIP;
     html += '<h2 style="color:#1f2937">&#127919; Sustainability Goals</h2>';
     html += '<div class="card" style="text-align:right"><a href="/school/green-campus/goals/create" class="btn">+ New Goal</a></div>';
 
@@ -1532,7 +1535,7 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.get('/school/green-campus/goals/create', requireAuth, ah(async function (req, res) {
-    var html = SKIP;
+    const html = SKIP;
     html += '<h2 style="color:#1f2937">Set Sustainability Goal</h2>';
     html += '<div class="card"><form method="post" action="/school/green-campus/goals/create">';
     html += '<div class="form-row"><div><label>Goal Title *</label><input name="title" required></div>';
@@ -1547,11 +1550,11 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/goals/create', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var b = req.body;
     if (!b.title) { return res.redirect('/school/green-campus/goals/create'); }
     await pool.query(
-      'INSERT INTO sustainability_goals (tenant_id, title, description, category, target_value, current_value, unit, deadline, status) VALUES (?,?,?,?,?,0,?,?,\'on_track\')',
+      'INSERT INTO sustainability_goals (tenant_id, title, description, category, target_value, current_value, unit, deadline, status) VALUES ($1,$2,$3,$4,$5,0,$6,$7,\'on_track\')',
       [tid, b.title, b.description || '', b.category || 'energy', parseFloat(b.target_value) || 0, b.unit || '', b.deadline || null]
     );
     audit(req, 'sustainability_goal_create', 'Created goal: ' + b.title);
@@ -1559,12 +1562,12 @@ module.exports = function (app, pool, opts) {
   }));
 
   app.post('/school/green-campus/goals/:id/update', requireAuth, ah(async function (req, res) {
-    var tid = req.session.user.tenant_id;
+    const tid = req.session.user.tenant_id;
     var goalId = parseInt(req.params.id, 10);
     var newVal = parseFloat(req.body.current_value) || 0;
     var status = req.body.status || 'on_track';
     await pool.query(
-      'UPDATE sustainability_goals SET current_value = ?, status = ? WHERE tenant_id = ? AND id = ?',
+      'UPDATE sustainability_goals SET current_value = $1, status = $2 WHERE tenant_id = $3 AND id = $4',
       [newVal, status, tid, goalId]
     );
     audit(req, 'sustainability_goal_update', 'Updated goal ' + goalId + ' to ' + newVal);

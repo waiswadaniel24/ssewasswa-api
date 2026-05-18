@@ -45,7 +45,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 2. Pledge Management
+    // 2. Pledge Management)
     `CREATE TABLE IF NOT EXISTS campaign_pledges_mega (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL,
@@ -60,7 +60,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 3. Campaign Templates
+    // 3. Campaign Templates)
     `CREATE TABLE IF NOT EXISTS campaign_templates (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL,
@@ -75,7 +75,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 4. Donation Tipping
+    // 4. Donation Tipping)
     `CREATE TABLE IF NOT EXISTS donation_tips (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL,
@@ -93,7 +93,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 5. Crowdfunding Stretch Goals
+    // 5. Crowdfunding Stretch Goals)
     `CREATE TABLE IF NOT EXISTS campaign_stretch_goals (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL,
@@ -105,7 +105,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 6. Donor Segmentation
+    // 6. Donor Segmentation)
     `CREATE TABLE IF NOT EXISTS donor_segments (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL,
@@ -125,7 +125,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       added_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 8. Bulk Donations
+    // 8. Bulk Donations)
     `CREATE TABLE IF NOT EXISTS bulk_donation_batches (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL,
@@ -148,7 +148,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 9. Gift Aid / Tax Deductions
+    // 9. Gift Aid / Tax Deductions)
     `CREATE TABLE IF NOT EXISTS gift_tax_declarations (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL,
@@ -171,7 +171,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       issued_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // 10. Donation Goals & Challenges
+    // 10. Donation Goals & Challenges)
     `CREATE TABLE IF NOT EXISTS donation_challenges (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL,
@@ -195,7 +195,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       joined_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_donor_crm_contacts_tenant ON donor_crm_contacts(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_donor_crm_interactions_tenant ON donor_crm_interactions(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_donor_crm_interactions_contact ON donor_crm_interactions(contact_id)`,

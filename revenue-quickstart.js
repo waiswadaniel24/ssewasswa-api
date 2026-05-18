@@ -15,7 +15,7 @@ const REV_MIGRATIONS = [
     is_active BOOLEAN DEFAULT true, start_date DATE, end_date DATE,
     tenant_id INTEGER, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Tip/donations
+  // Tip/donations)
   `CREATE TABLE IF NOT EXISTS tips (
     id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     from_name TEXT, from_email TEXT, from_phone TEXT,
@@ -23,7 +23,7 @@ const REV_MIGRATIONS = [
     method TEXT DEFAULT 'momo', status TEXT DEFAULT 'pending',
     message TEXT, reference TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Sponsored content
+  // Sponsored content)
   `CREATE TABLE IF NOT EXISTS sponsored_posts (
     id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     title TEXT NOT NULL, content TEXT NOT NULL, image_url TEXT,
@@ -33,7 +33,7 @@ const REV_MIGRATIONS = [
     is_active BOOLEAN DEFAULT true, start_date DATE, end_date DATE,
     approved BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Marketplace commissions
+  // Marketplace commissions)
   `CREATE TABLE IF NOT EXISTS platform_commissions (
     id SERIAL PRIMARY KEY, order_id INTEGER, tenant_id INTEGER,
     order_amount INTEGER NOT NULL, commission_rate NUMERIC DEFAULT 5.0,
@@ -41,14 +41,14 @@ const REV_MIGRATIONS = [
     status TEXT DEFAULT 'pending', paid_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // SMS revenue
+  // SMS revenue)
   `CREATE TABLE IF NOT EXISTS sms_revenue (
     id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     sms_count INTEGER DEFAULT 0, cost_per_sms INTEGER DEFAULT 50,
     total_cost INTEGER DEFAULT 0, currency TEXT DEFAULT 'UGX',
     date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Paid content / paywall
+  // Paid content / paywall)
   `CREATE TABLE IF NOT EXISTS premium_content (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, excerpt TEXT,
     full_content TEXT, category TEXT, image_url TEXT,
@@ -63,7 +63,7 @@ const REV_MIGRATIONS = [
     reference TEXT, status TEXT DEFAULT 'pending',
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Affiliate revenue
+  // Affiliate revenue)
   `CREATE TABLE IF NOT EXISTS affiliate_revenue (
     id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
     affiliate_id INTEGER REFERENCES affiliate_links(id),
@@ -142,7 +142,7 @@ app.get('/support', ah(async (req, res) => {
   const stats = (await pool.query(`SELECT
     (SELECT COUNT(*) FROM tips WHERE status='completed') as total_tips,
     (SELECT COALESCE(SUM(amount),0) FROM tips WHERE status='completed') as total_raised,
-    (SELECT COUNT(DISTINCT from_email) FROM tips WHERE status='completed') as supporters
+    (SELECT COUNT(DISTINCT from_email) FROM tips WHERE status='completed') as supporters)
   `)).rows[0];
   const baseUrl = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
   res.send(`<!DOCTYPE html><html><head><title>Support Comfort Zone</title>

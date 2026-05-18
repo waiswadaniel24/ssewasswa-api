@@ -14,7 +14,7 @@ const GLOBAL_VIRAL_MIGRATIONS = [
     ip_address TEXT, user_agent TEXT, country TEXT DEFAULT 'UG',
     clicked_result TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Link Shortener
+  // Link Shortener)
   `CREATE TABLE IF NOT EXISTS short_links (
     id SERIAL PRIMARY KEY, code TEXT UNIQUE NOT NULL, original_url TEXT NOT NULL,
     title TEXT, clicks INTEGER DEFAULT 0, created_by TEXT, is_active BOOLEAN DEFAULT true,
@@ -26,13 +26,13 @@ const GLOBAL_VIRAL_MIGRATIONS = [
     ip_address TEXT, country TEXT DEFAULT 'UG', referrer TEXT, user_agent TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Embeddable Widgets
+  // Embeddable Widgets)
   `CREATE TABLE IF NOT EXISTS embed_widgets (
     id SERIAL PRIMARY KEY, widget_type TEXT NOT NULL, resource_id INTEGER,
     code TEXT UNIQUE, views INTEGER DEFAULT 0, clicks INTEGER DEFAULT 0,
     domains TEXT[] DEFAULT '{}', created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Live Chat Rooms
+  // Live Chat Rooms)
   `CREATE TABLE IF NOT EXISTS chat_rooms (
     id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, description TEXT,
     category TEXT DEFAULT 'general', is_active BOOLEAN DEFAULT true,
@@ -44,7 +44,7 @@ const GLOBAL_VIRAL_MIGRATIONS = [
     message_type TEXT DEFAULT 'text', is_pinned BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Referral Contests
+  // Referral Contests)
   `CREATE TABLE IF NOT EXISTS referral_contests (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT,
     start_date DATE, end_date DATE, prize TEXT, prize_value INTEGER DEFAULT 0,
@@ -57,13 +57,13 @@ const GLOBAL_VIRAL_MIGRATIONS = [
     auth_key TEXT, ip_address TEXT, country TEXT DEFAULT 'UG',
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Trending Topics
+  // Trending Topics)
   `CREATE TABLE IF NOT EXISTS trending_topics (
     id SERIAL PRIMARY KEY, tag TEXT UNIQUE NOT NULL, mention_count INTEGER DEFAULT 0,
     category TEXT DEFAULT 'general', last_mentioned TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // UGC Gallery
+  // UGC Gallery)
   `CREATE TABLE IF NOT EXISTS ugc_gallery (
     id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT,
     image_url TEXT, category TEXT DEFAULT 'general', submitted_by TEXT,
@@ -71,13 +71,13 @@ const GLOBAL_VIRAL_MIGRATIONS = [
     is_approved BOOLEAN DEFAULT false, is_featured BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Social Share Tracking
+  // Social Share Tracking)
   `CREATE TABLE IF NOT EXISTS social_shares (
     id SERIAL PRIMARY KEY, content_type TEXT, content_id INTEGER,
     platform TEXT NOT NULL, share_url TEXT, ip_address TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Badge Embeds
+  // Badge Embeds)
   `CREATE TABLE IF NOT EXISTS badge_embeds (
     id SERIAL PRIMARY KEY, badge_type TEXT NOT NULL, tenant_name TEXT,
     style TEXT DEFAULT 'light', domain TEXT, impressions INTEGER DEFAULT 0,

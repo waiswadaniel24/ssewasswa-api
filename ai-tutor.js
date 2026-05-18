@@ -38,7 +38,7 @@ module.exports = function(app, pool, opts) {
         learning_style VARCHAR(50) DEFAULT 'visual',
         status TEXT DEFAULT 'active',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        completed_at TIMESTAMPTZ
+        completed_at TIMESTAMPTZ)
       `);
       console.log('[AI-Tutor] ai_tutor_sessions OK');
     } catch(e) { console.warn('[AI-Tutor] Warn:', e.message); }
@@ -53,7 +53,7 @@ module.exports = function(app, pool, opts) {
         difficulty TEXT DEFAULT 'beginner',
         explanation TEXT,
         tags JSONB DEFAULT NULL,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
       `);
       console.log('[AI-Tutor] ai_concepts OK');
     } catch(e) { console.warn('[AI-Tutor] Warn:', e.message); }

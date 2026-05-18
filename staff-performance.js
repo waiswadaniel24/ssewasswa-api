@@ -319,7 +319,7 @@ module.exports = function staffPerformance(app, pool, opts) {
         )), 0) FROM staff_student_feedback WHERE tenant_id=$1) as avg_feedback,
         (SELECT COUNT(*) FROM staff_classroom_observations WHERE tenant_id=$1) as total_observations,
         (SELECT COALESCE(SUM(duration_hours), 0) FROM staff_professional_development WHERE tenant_id=$1) as total_pd_hours,
-        (SELECT COUNT(DISTINCT staff_id) FROM staff_student_feedback WHERE tenant_id=$1) as teachers_with_feedback
+        (SELECT COUNT(DISTINCT staff_id) FROM staff_student_feedback WHERE tenant_id=$1) as teachers_with_feedback)
     `, [tid])).rows[0];
 
     // Top / Bottom performers

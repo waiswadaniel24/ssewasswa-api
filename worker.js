@@ -132,7 +132,7 @@ async function processFeeReminders() {
       FROM tenants t
       JOIN bill_reminders br ON br.tenant_id = t.id
       JOIN fee_reminder_settings frs ON frs.tenant_id = t.id
-      WHERE br.auto_notify = true AND t.type = 'school' AND frs.auto_notify = true
+      WHERE br.auto_notify = true AND t.type = 'school' AND frs.auto_notify = true)
     `)).rows;
 
     if (tenants.length === 0) return;

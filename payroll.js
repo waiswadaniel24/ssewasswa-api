@@ -147,7 +147,7 @@ module.exports = function payroll(app, db, pool, renderPage, esc) {
       `ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending'`,
       `ALTER TABLE IF EXISTS payroll_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
     ],
-    // Indexes
+    // Indexes)
     `CREATE INDEX IF NOT EXISTS idx_payroll_emp_tenant ON payroll_employees(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_emp_status ON payroll_employees(tenant_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_emp_dept ON payroll_employees(tenant_id, department)`,

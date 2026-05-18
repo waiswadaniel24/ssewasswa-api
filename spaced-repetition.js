@@ -313,7 +313,7 @@ module.exports = function(app, pool, opts) {
       FROM flashcard_progress p
       JOIN flashcards c ON c.id = p.card_id AND c.tenant_id = p.tenant_id
       WHERE p.tenant_id=? AND c.deck_id=? AND c.tenant_id=?
-      GROUP BY p.status
+      GROUP BY p.status)
     `, [tid, deckId, tid]);
 
     const counts = { new: 0, learning: 0, mastered: 0, suspended: 0 };

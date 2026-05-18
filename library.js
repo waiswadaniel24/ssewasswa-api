@@ -104,7 +104,7 @@ module.exports = function library(app, db, pool, renderPage, esc) {
       member_name VARCHAR(255), priority INTEGER DEFAULT 1,
       status VARCHAR(20) DEFAULT 'waiting', created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // ALTER TABLE — books
+    // ALTER TABLE — books)
     `ALTER TABLE IF EXISTS books ADD COLUMN IF NOT EXISTS title VARCHAR(255) NOT NULL DEFAULT ''`,
     `ALTER TABLE IF EXISTS books ADD COLUMN IF NOT EXISTS author VARCHAR(255)`,
     `ALTER TABLE IF EXISTS books ADD COLUMN IF NOT EXISTS isbn VARCHAR(20)`,

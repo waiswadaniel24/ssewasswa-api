@@ -118,7 +118,7 @@ module.exports = function crm(app, db, pool, renderPage, esc) {
       due_date DATE, completed BOOLEAN DEFAULT false,
       created_by INTEGER, created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // ALTER TABLE — crm_contacts columns
+    // ALTER TABLE — crm_contacts columns)
     `ALTER TABLE IF EXISTS crm_contacts ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)`,
     `ALTER TABLE IF EXISTS crm_contacts ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)`,
     `ALTER TABLE IF EXISTS crm_contacts ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,

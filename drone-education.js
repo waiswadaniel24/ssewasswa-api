@@ -39,7 +39,7 @@ module.exports = function(app, pool, opts) {
         category VARCHAR(100) DEFAULT 'general',
         status TEXT DEFAULT 'draft',
         created_by INT,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
       `);
       console.log('[DroneEducation] drone_modules OK');
     } catch(e) { console.warn('[DroneEducation] Warn:', e.message); }
@@ -60,7 +60,7 @@ module.exports = function(app, pool, opts) {
         notes TEXT,
         last_maintenance TIMESTAMPTZ,
         purchased_date DATE,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
       `);
       console.log('[DroneEducation] drone_fleet OK');
     } catch(e) { console.warn('[DroneEducation] Warn:', e.message); }
@@ -81,7 +81,7 @@ module.exports = function(app, pool, opts) {
         weather_conditions VARCHAR(200),
         status TEXT DEFAULT 'planned',
         date DATE,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)
       `);
       console.log('[DroneEducation] flight_logs OK');
     } catch(e) { console.warn('[DroneEducation] Warn:', e.message); }
@@ -99,7 +99,7 @@ module.exports = function(app, pool, opts) {
         certified_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         expires_at TIMESTAMPTZ,
         certifier_id INT,
-        notes TEXT
+        notes TEXT)
       `);
       console.log('[DroneEducation] drone_certifications OK');
     } catch(e) { console.warn('[DroneEducation] Warn:', e.message); }

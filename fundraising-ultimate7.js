@@ -34,7 +34,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE TABLE IF NOT EXISTS donor_advised_funds (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, fund_name TEXT NOT NULL, advisor_name TEXT, advisor_email TEXT, advisor_phone TEXT, initial_contribution NUMERIC DEFAULT 0, current_balance NUMERIC DEFAULT 0, total_granted NUMERIC DEFAULT 0, status TEXT DEFAULT 'active', created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS daf_grants (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, fund_id INTEGER REFERENCES donor_advised_funds(id), grant_to TEXT NOT NULL, purpose TEXT, amount NUMERIC NOT NULL, status TEXT DEFAULT 'pending', granted_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE INDEX IF NOT EXISTS idx_daf_tenant ON donor_advised_funds(tenant_id)`,
-    // Seeds
+    // Seeds)
     `INSERT INTO crypto_wallets (tenant_id, wallet_address, network, label) SELECT t.id, 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', 'bitcoin', 'Bitcoin Wallet' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM crypto_wallets WHERE tenant_id=t.id AND network='bitcoin')`,
     `INSERT INTO crypto_wallets (tenant_id, wallet_address, network, label) SELECT t.id, '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', 'ethereum', 'Ethereum Wallet' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM crypto_wallets WHERE tenant_id=t.id AND network='ethereum')`,
     `INSERT INTO inkind_categories (tenant_id, name, description, icon) SELECT t.id, 'Clothing', 'Clothes, shoes, textiles', 'shirt' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM inkind_categories WHERE tenant_id=t.id AND name='Clothing')`,

@@ -53,7 +53,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_landing_page_versions_tenant ON landing_page_versions(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_landing_page_sections_tenant ON landing_page_sections(tenant_id)`,
 
-    // F2: Payment Gateway Hub
+    // F2: Payment Gateway Hub)
     `CREATE TABLE IF NOT EXISTS payment_gateways (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -104,7 +104,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_gateway_transactions_tenant ON gateway_transactions(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_gateway_payouts_tenant ON gateway_payouts(tenant_id)`,
 
-    // F3: Donor Renewal
+    // F3: Donor Renewal)
     `CREATE TABLE IF NOT EXISTS donor_renewal_campaigns (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -154,7 +154,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_renewal_reminders_tenant ON renewal_reminders(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_donor_renewal_segments_tenant ON donor_renewal_segments(tenant_id)`,
 
-    // F4: Gift Clubs
+    // F4: Gift Clubs)
     `CREATE TABLE IF NOT EXISTS donor_gift_clubs (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -201,7 +201,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_gift_club_members_tenant ON gift_club_members(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_gift_club_events_tenant ON gift_club_events(tenant_id)`,
 
-    // F5: Video Integration
+    // F5: Video Integration)
     `CREATE TABLE IF NOT EXISTS campaign_videos (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -247,7 +247,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_video_engagement_tenant ON video_engagement(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_video_playlists_tenant ON video_playlists(tenant_id)`,
 
-    // F6: Stock/Securities
+    // F6: Stock/Securities)
     `CREATE TABLE IF NOT EXISTS stock_donations (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -298,7 +298,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_stock_valuations_tenant ON stock_valuations(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_stock_transfer_docs_tenant ON stock_transfer_docs(tenant_id)`,
 
-    // F7: Real Estate
+    // F7: Real Estate)
     `CREATE TABLE IF NOT EXISTS real_estate_donations (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -356,7 +356,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `CREATE INDEX IF NOT EXISTS idx_real_estate_documents_tenant ON real_estate_documents(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_real_estate_appraisals_tenant ON real_estate_appraisals(tenant_id)`,
 
-    // F8: IRA Rollovers
+    // F8: IRA Rollovers)
     `CREATE TABLE IF NOT EXISTS ira_rollovers (
       id SERIAL PRIMARY KEY,
       tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

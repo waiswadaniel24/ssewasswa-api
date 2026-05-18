@@ -19,27 +19,27 @@ const AN_MIGRATIONS = [
     started_at TIMESTAMPTZ DEFAULT NOW(), last_active TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(session_id)
   )`,
-  // Page analytics detail
+  // Page analytics detail)
   `CREATE TABLE IF NOT EXISTS analytics_pages (
     id SERIAL PRIMARY KEY, session_id TEXT, page_url TEXT NOT NULL,
     title TEXT, time_spent INTEGER DEFAULT 0,
     scroll_depth INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Custom events
+  // Custom events)
   `CREATE TABLE IF NOT EXISTS analytics_events (
     id SERIAL PRIMARY KEY, session_id TEXT,
     event_name TEXT NOT NULL, event_data JSONB,
     page_url TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Conversion funnels
+  // Conversion funnels)
   `CREATE TABLE IF NOT EXISTS analytics_funnels (
     id SERIAL PRIMARY KEY, name TEXT NOT NULL,
     steps JSONB NOT NULL DEFAULT '[]',
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  // Goal tracking
+  // Goal tracking)
   `CREATE TABLE IF NOT EXISTS analytics_goals (
     id SERIAL PRIMARY KEY, goal_name TEXT NOT NULL,
     goal_type TEXT DEFAULT 'page_view',
@@ -57,7 +57,7 @@ const AN_MIGRATIONS = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(date)
   )`,
-  // Geographic data
+  // Geographic data)
   `CREATE TABLE IF NOT EXISTS analytics_geo (
     id SERIAL PRIMARY KEY, date DATE DEFAULT CURRENT_DATE,
     country TEXT DEFAULT 'UG', city TEXT DEFAULT '',

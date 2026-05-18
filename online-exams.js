@@ -166,7 +166,7 @@ module.exports = function onlineExams(app, db, pool, renderPage, esc) {
       status VARCHAR(20) DEFAULT 'in_progress', attempt_number INTEGER DEFAULT 1,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
-    // ALTER TABLE exams columns
+    // ALTER TABLE exams columns)
     `ALTER TABLE IF EXISTS exams ADD COLUMN IF NOT EXISTS title VARCHAR(255) NOT NULL DEFAULT ''`,
     `ALTER TABLE IF EXISTS exams ADD COLUMN IF NOT EXISTS description TEXT`,
     `ALTER TABLE IF EXISTS exams ADD COLUMN IF NOT EXISTS subject VARCHAR(100)`,
