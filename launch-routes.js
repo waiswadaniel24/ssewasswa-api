@@ -585,8 +585,18 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
   // =========================================================================
 
   app.get('/', ah(async (req, res) => {
-    // If logged in, redirect to dashboard
-    if (req.session.user) return res.redirect('/dashboard');
+    const loggedIn = !!req.session.user;
+    const currentType = loggedIn ? (req.session.user.tenant_type || 'school') : '';
+    // Helper: portal card button — Switch for logged-in, Register for anonymous
+    const portalBtn = (type, color, label) => {
+      if (loggedIn) {
+        const isCurrent = currentType === type;
+        return isCurrent
+          ? `<span style="display:inline-block;margin-top:12px;padding:10px 24px;background:#f0fdf4;color:#059669;border-radius:10px;font-weight:700;font-size:14px;border:2px solid #059669">&#10003; Current Portal</span>`
+          : `<form method="POST" action="/switch-portal" style="display:inline-block;margin-top:12px"><input type="hidden" name="type" value="${type}"><button type="submit" style="padding:10px 24px;background:${color};color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px;border:none;cursor:pointer">Switch to ${label}</button></form>`;
+      }
+      return `<a href="/register?type=${type}" style="display:inline-block;margin-top:12px;padding:10px 24px;background:${color};color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>`;
+    };
 
     const adverts = await getActiveAdverts();
     const entertainment = await getScrapedContent('entertainment', 6);
@@ -661,8 +671,13 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
             One platform. All your operations. Built for Uganda, designed for Africa.
           </p>
           <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
-            <a href="/register" style="display:inline-block;padding:16px 36px;background:white;color:#059669;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;transition:0.3s;box-shadow:0 8px 30px rgba(0,0,0,0.2)">Start Free &rarr;</a>
-            <a href="/login" style="display:inline-block;padding:16px 36px;background:rgba(255,255,255,0.15);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;border:2px solid rgba(255,255,255,0.4);transition:0.3s">Login</a>
+            ${loggedIn ? `
+              <a href="/portal/${currentType}" style="display:inline-block;padding:16px 36px;background:white;color:#059669;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;transition:0.3s;box-shadow:0 8px 30px rgba(0,0,0,0.2)">My Dashboard (${currentType.charAt(0).toUpperCase()+currentType.slice(1)}) &rarr;</a>
+              <a href="/switch-portal" style="display:inline-block;padding:16px 36px;background:rgba(255,255,255,0.15);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;border:2px solid rgba(255,255,255,0.4);transition:0.3s">Switch Portal</a>
+            ` : `
+              <a href="/register" style="display:inline-block;padding:16px 36px;background:white;color:#059669;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;transition:0.3s;box-shadow:0 8px 30px rgba(0,0,0,0.2)">Start Free &rarr;</a>
+              <a href="/login" style="display:inline-block;padding:16px 36px;background:rgba(255,255,255,0.15);color:white;border-radius:12px;font-weight:700;font-size:18px;text-decoration:none;border:2px solid rgba(255,255,255,0.4);transition:0.3s">Login</a>
+            `}
             <button id="install-btn" style="display:none;padding:16px 36px;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border-radius:12px;font-weight:700;font-size:18px;border:none;cursor:pointer;transition:0.3s">Install App</button>
           </div>
           <div style="margin-top:24px;display:flex;gap:24px;justify-content:center;flex-wrap:wrap">
@@ -727,7 +742,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Library &amp; Digital Resources</li>
               <li>&#10003; Staff Payroll &amp; HR</li>
             </ul>
-            <a href="/register?type=school" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#059669;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+            ${portalBtn('school', '#059669', 'School')}
           </div>
 
           <!-- CLINICS -->
@@ -747,7 +762,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; SMS Reminders to Patients</li>
               <li>&#10003; HMIS Reports (MOH Compliant)</li>
             </ul>
-            <a href="/register?type=health" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#0891b2;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+            ${portalBtn('health', '#0891b2', 'Health')}
           </div>
 
           <!-- CHURCHES -->
@@ -767,7 +782,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Church Attendance Tracking</li>
               <li>&#10003; SMS &amp; Email Broadcast</li>
             </ul>
-            <a href="/register?type=church" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#7c3aed;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+            ${portalBtn('church', '#7c3aed', 'Church')}
           </div>
 
           <!-- BUSINESSES -->
@@ -787,7 +802,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Purchase Orders &amp; Suppliers</li>
               <li>&#10003; Multi-branch Support</li>
             </ul>
-            <a href="/register?type=business" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#d97706;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+            ${portalBtn('business', '#d97706', 'Business')}
           </div>
         </div>
 
@@ -808,7 +823,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Insurance Claims & Billing</li>
               <li>&#10003; Electronic Health Records (EHR)</li>
             </ul>
-            <a href="/register?type=health" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#ef4444;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+            ${portalBtn('health', '#ef4444', 'Health')}
           </div>
 
           <!-- PUBLIC PORTAL -->
@@ -825,7 +840,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Newsletter Subscriptions</li>
               <li>&#10003; SEO-Optimized Public Profiles</li>
             </ul>
-            <a href="/register?type=public" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#0ea5e9;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Get Started Free</a>
+            ${portalBtn('public', '#0ea5e9', 'Public')}
           </div>
 
           <!-- ORGANIZATION / NGO -->
@@ -842,7 +857,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Fundraising & Donor Tracking</li>
               <li>&#10003; Impact Reports & Analytics</li>
             </ul>
-            <a href="/register?type=organization" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#10b981;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Free Trial</a>
+            ${portalBtn('organization', '#10b981', 'Organization')}
           </div>
 
           <!-- INDIVIDUAL / PERSONAL -->
@@ -859,7 +874,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Document Storage</li>
               <li>&#10003; Entertainment & News Feed</li>
             </ul>
-            <a href="/register?type=individual" style="display:inline-block;margin-top:12px;padding:10px 24px;background:#8b5cf6;color:white;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Get Started Free</a>
+            ${portalBtn('individual', '#8b5cf6', 'Individual')}
           </div>
         </div>
 
@@ -879,7 +894,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; News Aggregation (Local & International)</li>
               <li>&#10003; Auto-Scraped Content (No manual work)</li>
             </ul>
-            <a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#7c3aed;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Sign Up to Access</a>
+            ${loggedIn ? `<a href="/entertainment" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#7c3aed;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Open Entertainment &rarr;</a>` : `<a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#7c3aed;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Sign Up to Access</a>`}
           </div>
 
           <!-- FUNDRAISING -->
@@ -895,7 +910,7 @@ module.exports = function (app, pool, bcrypt, ah, esc, renderPage, audit, notify
               <li>&#10003; Public Discovery Page</li>
               <li>&#10003; Automated Donor Receipts</li>
             </ul>
-            <a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#059669;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Fundraising</a>
+            ${loggedIn ? `<a href="/fundraising" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#059669;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Open Fundraising &rarr;</a>` : `<a href="/register" style="display:inline-block;margin-top:12px;padding:10px 24px;background:white;color:#059669;border-radius:10px;font-weight:600;text-decoration:none;font-size:14px">Start Fundraising</a>`}
           </div>
         </div>
       </div>
