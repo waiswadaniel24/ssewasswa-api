@@ -214,38 +214,16 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   console.error('FATAL: SESSION_SECRET must be set in production');
   process.exit(1);
 }
-// Session store — use memory store by default, upgrade to PG when DB is confirmed ready
-let sessionStore;
-let _dbReady = false;
-// Start with memory store immediately (no DB dependency for startup)
-console.log('[Session] Starting with memory store (will upgrade to PG when DB ready)');
-
-// Test DB and upgrade session store in background
-pool.query('SELECT 1').then(() => {
-  _dbReady = true;
-  if (pgSession) {
-    try {
-      pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true });
-      console.log('[Session] Upgraded to PG session store');
-    } catch (e) { console.warn('[Session] PG store creation failed:', e.message); }
-  } else {
-    console.log('[Session] PG store not available, continuing with memory store');
-  }
-}).catch(e => {
-  console.warn('[Session] DB not ready yet, will retry:', e.message);
-  const retry = setInterval(() => {
-    pool.query('SELECT 1').then(() => {
-      _dbReady = true;
-      if (pgSession) {
-        try {
-          pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true });
-          console.log('[Session] Upgraded to PG session store');
-        } catch (e2) { console.warn('[Session] PG store upgrade failed:', e2.message); }
-      }
-      clearInterval(retry);
-    }).catch(() => {});
-  }, 5000);
-});
+// Session store — use PG session store for production (memory sessions break on multi-instance hosts like Render)
+// Create PG store immediately (connect-pg-simple handles DB not ready gracefully)
+if (pgSession) {
+  try {
+    pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true });
+    console.log('[Session] Using PG session store for persistent sessions');
+  } catch (e) { console.warn('[Session] PG store creation failed, using memory store:', e.message); }
+} else {
+  console.log('[Session] PG store not available, using memory store');
+}
 
 // Add request timeout BEFORE session to prevent hung DB connections from blocking all requests
 app.use((req, res, next) => {
@@ -261,6 +239,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'dev-session-secret-local-only',
   resave: false,
   saveUninitialized: false,
+  store: pgSessionStore || undefined,  // Use PG session store if available, memory store otherwise
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
