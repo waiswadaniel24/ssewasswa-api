@@ -8427,164 +8427,274 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
   const balance = parseInt(wal.rows[0]?.b || 0);
   const totalRev = parseInt(rev.rows[0].t || 0);
   const impersonating = req.session._impersonate_tenant_id;
+  const totalUsers = uCount.rows[0].count;
+  const totalTenants = tCount.rows[0].count;
+  const activeUsers7d = activeTenants.rows[0].active;
+  const payments30d = paymentStats.rows[0].count;
+  const payments30dTotal = parseInt(paymentStats.rows[0].total || 0);
+  const activeSubs = pendingSubs.rows[0].count;
+  const activeAds = adCount.rows[0].count;
+  const blogPosts = blogCount.rows[0].count;
+  const DEV_PORTAL_TYPES = [
+    { type: 'school', label: 'School', icon: '\u{1F3EB}', desc: 'Students, fees, exams, attendance, report cards' },
+    { type: 'church', label: 'Church', icon: '\u{26EA}', desc: 'Members, tithes, sermons, events, groups' },
+    { type: 'organization', label: 'Organization', icon: '\u{1F91D}', desc: 'Projects, members, documents, meetings' },
+    { type: 'health', label: 'Health', icon: '\u{1F3E5}', desc: 'Hospital, clinic, pharmacy, patients, lab' },
+    { type: 'business', label: 'Business', icon: '\u{1F3E2}', desc: 'POS, invoices, payroll, inventory' },
+    { type: 'individual', label: 'Individual', icon: '\u{1F464}', desc: 'Personal notes, goals, finance, tasks' },
+    { type: 'public', label: 'Public', icon: '\u{1F310}', desc: 'Blog, shop, community, entertainment' }
+  ];
 
-  const navItem = (href, label, icon, color) =>
-    `<a href="${href}" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;text-decoration:none;font-weight:600;font-size:13px;background:${color};color:white;transition:0.2s" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'" onmouseout="this.style.transform='';this.style.boxShadow=''">${icon} ${label}</a>`;
-
-  const statCard = (value, label, color) =>
-    `<div style="background:white;border-radius:12px;padding:20px;text-align:center;border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,0.04)"><div style="font-size:30px;font-weight:900;color:${color}">${value}</div><div style="color:#64748b;font-size:13px;margin-top:4px">${label}</div></div>`;
-
-  const moneyCard = (label, amount, bg, link, linkText) =>
-    `<div style="background:${bg};color:white;padding:24px;border-radius:16px;text-align:center"><div style="font-size:13px;opacity:0.85">${label}</div><div style="font-size:32px;font-weight:900;margin:8px 0">${amount}</div>${link ? `<a href="${link}" style="display:inline-block;margin-top:6px;padding:6px 16px;background:rgba(255,255,255,0.2);color:white;border-radius:8px;font-weight:600;font-size:12px;text-decoration:none">${linkText || 'Open'}</a>` : ''}</div>`;
-
-  const section = (title, content, extraStyle) =>
-    `<div style="background:white;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.04);border:1px solid #e2e8f0;${extraStyle || ''}"><h2 style="font-size:18px;margin-bottom:16px;display:flex;align-items:center;gap:8px">${title}</h2>${content}</div>`;
-
-  const actionCard = (href, icon, iconBg, title, desc) =>
-    `<a href="${href}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;border:1px solid #e2e8f0;text-decoration:none;color:inherit;transition:0.2s" onmouseover="this.style.borderColor='#4f46e5';this.style.background='#f8f7ff'" onmouseout="this.style.borderColor='#e2e8f0';this.style.background='white'"><div style="width:40px;height:40px;border-radius:10px;background:${iconBg};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${icon}</div><div><div style="font-size:14px;font-weight:600">${title}</div><div style="font-size:12px;color:#64748b">${desc}</div></div></a>`;
-
-  res.send(renderPage('Dev Master', `
+  res.send(renderPage('Developer Hub', `
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.nav-wrap{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}</style>
+    <style>
+      .dev-section{background:white;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.04);border:1px solid #e2e8f0}
+      .dev-section h2{font-size:17px;margin:0 0 16px;display:flex;align-items:center;gap:8px;color:#1e293b}
+      .dev-section h3{font-size:14px;margin:0 0 10px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;font-weight:700}
+      .metric-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+      .metric-card{background:white;border-radius:14px;padding:20px;text-align:center;border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,0.04);transition:0.2s}
+      .metric-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,0.08)}
+      .metric-card .value{font-size:28px;font-weight:900;line-height:1.2}
+      .metric-card .label{color:#64748b;font-size:12px;margin-top:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+      .finance-card{border-radius:16px;padding:22px;color:white;position:relative;overflow:hidden}
+      .finance-card::after{content:'';position:absolute;top:-30px;right:-30px;width:80px;height:80px;background:rgba(255,255,255,0.1);border-radius:50%}
+      .finance-card .fc-label{font-size:12px;opacity:0.85;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+      .finance-card .fc-value{font-size:28px;font-weight:900;margin:6px 0 0}
+      .finance-card .fc-link{display:inline-block;margin-top:8px;padding:5px 14px;background:rgba(255,255,255,0.2);color:white;border-radius:8px;font-weight:600;font-size:11px;text-decoration:none}
+      .finance-card .fc-link:hover{background:rgba(255,255,255,0.3);text-decoration:none}
+      .nav-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+      .nav-tile{display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;border-radius:12px;border:1px solid #e2e8f0;text-decoration:none;color:inherit;transition:0.2s;text-align:center}
+      .nav-tile:hover{border-color:#4f46e5;background:#f8f7ff;transform:translateY(-2px);box-shadow:0 4px 12px rgba(79,70,229,0.1);text-decoration:none}
+      .nav-tile .nt-icon{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px}
+      .nav-tile .nt-label{font-size:12px;font-weight:700;color:#1e293b}
+      .action-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+      .action-item{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;border:1px solid #e2e8f0;text-decoration:none;color:inherit;transition:0.2s}
+      .action-item:hover{border-color:#4f46e5;background:#f8f7ff;text-decoration:none}
+      .action-item .ai-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+      .action-item .ai-title{font-size:13px;font-weight:700;color:#1e293b}
+      .action-item .ai-desc{font-size:11px;color:#64748b;margin-top:1px}
+      .tab-bar-dev{display:flex;gap:0;margin-bottom:20px;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;background:#f8fafc}
+      .tab-bar-dev button{flex:1;padding:12px 16px;text-align:center;background:transparent;color:#64748b;font-weight:700;text-decoration:none;transition:0.2s;border:none;cursor:pointer;font-size:13px}
+      .tab-bar-dev button:hover{background:#e2e8f0}
+      .tab-bar-dev button.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
+      .tab-content{display:none}.tab-content.active{display:block}
+      .portal-mini{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:12px;border:2px solid #e2e8f0;cursor:pointer;transition:0.2s;text-decoration:none;color:inherit}
+      .portal-mini:hover{border-color:#4f46e5;transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.08);text-decoration:none}
+      .portal-mini.current{border-color:#22c55e;background:#f0fdf4}
+      .portal-mini .pm-icon{font-size:28px}.portal-mini .pm-info{flex:1}
+      .portal-mini .pm-name{font-size:14px;font-weight:700}.portal-mini .pm-desc{font-size:11px;color:#64748b}
+      @media(max-width:768px){.metric-row{grid-template-columns:repeat(2,1fr)}.nav-grid{grid-template-columns:repeat(3,1fr)}.action-grid{grid-template-columns:1fr}.tab-bar-dev button{padding:10px 8px;font-size:11px}}
+      @media(max-width:480px){.nav-grid{grid-template-columns:repeat(2,1fr)}.metric-card .value{font-size:22px}.finance-card .fc-value{font-size:22px}}
+    </style>
 
-    <!-- Impersonation Banner -->
-    ${impersonating ? `<div style="background:#4f46e5;color:#fff;padding:12px 20px;border-radius:12px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><span>You are viewing as: <strong>${esc(req.session.user.tenant_name || 'Unknown')}</strong></span><div style="display:flex;gap:8px"><a href="/dev/exit-tenant" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Exit Impersonation</a><a href="/switch-portal" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Switch Portal</a></div></div>` : ''}
+    ${impersonating ? `<div style="background:linear-gradient(135deg,#dc2626,#ef4444);color:#fff;padding:12px 20px;border-radius:12px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px"><span><strong>DEV MODE</strong> — Viewing as: <strong>${esc(req.session.user.tenant_name || 'Unknown')}</strong></span><div style="display:flex;gap:8px"><a href="/switch-portal" style="background:rgba(255,255,255,0.2);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Switch Portal</a><a href="/dev/exit-tenant" style="background:rgba(255,255,255,0.3);color:#fff;padding:6px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">Exit Dev Mode</a></div></div>` : ''}
     ${flashHtml}
 
     <!-- Hero -->
-    <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px;border-radius:16px;margin-bottom:20px;color:white">
-      <h1 style="margin:0">Comfort Developer Hub</h1>
-      <p style="opacity:0.9;margin-top:6px">Platform management, analytics, and earnings</p>
-    </div>
-
-    <!-- Revenue Cards -->
-    <div class="grid2" style="margin-bottom:20px">
-      ${moneyCard('Available Balance', 'UGX ' + balance.toLocaleString(), 'linear-gradient(135deg,#4f46e5,#7c3aed)', '/dev/withdraw', 'Withdraw')}
-      ${moneyCard('30-Day Revenue', 'UGX ' + totalRev.toLocaleString(), 'linear-gradient(135deg,#059669,#10b981)')}
-      ${moneyCard('Active Subscribers', pendingSubs.rows[0].count, 'linear-gradient(135deg,#f59e0b,#d97706)')}
-      ${moneyCard('Total Users', uCount.rows[0].count, 'linear-gradient(135deg,#0ea5e9,#38bdf8)')}
-    </div>
-
-    <!-- Platform Stats -->
-    <div class="grid2" style="margin-bottom:20px">
-      ${statCard(tCount.rows[0].count, 'Total Tenants', '#4f46e5')}
-      ${statCard(activeTenants.rows[0].active, 'Active (7 days)', '#059669')}
-      ${statCard(paymentStats.rows[0].count, 'Payments (30d)', '#d97706')}
-      ${statCard(blogCount.rows[0].count, 'Blog Posts', '#7c3aed')}
-      ${statCard(adCount.rows[0].count, 'Active Adverts', '#ec4899')}
-    </div>
-
-    <!-- Navigation - Organized by Category -->
-    <div style="background:white;border-radius:16px;padding:20px;margin-bottom:20px;border:1px solid #e2e8f0">
-      <h3 style="margin:0 0 12px;font-size:14px;color:#64748b;text-transform:uppercase;letter-spacing:1px">Quick Navigation</h3>
-      <div class="nav-wrap">
-        <!-- Portal -->
-        ${navItem('/switch-portal', 'Portal Switcher', '&#127760;', 'linear-gradient(135deg,#6366f1,#8b5cf6)')}
-        ${navItem('/dev/settings', 'Settings', '&#9881;', '#475569')}
-        ${navItem('/dev/api-health', 'System Health', '&#128737;', '#059669')}
-        ${navItem('/dev/api-analytics', 'Analytics', '&#128200;', '#0ea5e9')}
-        ${navItem('/dev/activity', 'Activity Logs', '&#128196;', '#6366f1')}
-        <!-- Content -->
-        ${navItem('/dev/blog', 'Blog', '&#128221;', '#7c3aed')}
-        ${navItem('/dev/posts', 'Public Posts', '&#128227;', '#f97316')}
-        ${navItem('/dev/resources', 'Books & Papers', '&#128214;', '#14b8a6')}
-        ${navItem('/dev/adverts', 'Adverts', '&#127918;', '#d97706')}
-        <!-- Money -->
-        ${navItem('/dev/withdraw', 'Withdraw', '&#128176;', '#059669')}
-        ${navItem('/dev/plans', 'Plans & Pricing', '&#128179;', '#e11d48')}
-        ${navItem('/dev/features', 'Feature Flags', '&#127991;', '#64748b')}
-        ${navItem('/dev/subscription-access', 'Subscription Access', '&#128274;', '#6366f1')}
-        <!-- Tools -->
-        ${navItem('/dev/api-playground', 'API Playground', '&#128736;', '#7c3aed')}
-        ${navItem('/dev/onboarding', 'Onboarding', '&#127919;', '#22c55e')}
-        ${navItem('/dev/cleanup', 'DB Cleanup', '&#9888;', '#dc2626')}
-        ${navItem('/status/admin', 'Status Page', '&#128994;', '#db2777')}
-        <!-- Portal Features -->
-        ${navItem('/fundraising', 'Fundraising', '&#127873;', '#059669')}
-        ${navItem('/backup', 'Backup', '&#128190;', '#64748b')}
-        ${navItem('/webhooks', 'Webhooks', '&#128279;', '#8b5cf6')}
-        ${navItem('/marketplace', 'Plugins', '&#128268;', '#d97706')}
+    <div style="background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 50%,#6366f1 100%);padding:32px 28px;border-radius:20px;margin-bottom:20px;color:white;position:relative;overflow:hidden">
+      <div style="position:absolute;top:-40px;right:-40px;width:120px;height:120px;background:rgba(255,255,255,0.06);border-radius:50%"></div>
+      <div style="position:absolute;bottom:-20px;left:60%;width:80px;height:80px;background:rgba(255,255,255,0.04);border-radius:50%"></div>
+      <h1 style="margin:0;font-size:clamp(24px,5vw,32px);font-weight:900">Comfort Developer Hub</h1>
+      <p style="opacity:0.9;margin-top:8px;font-size:clamp(14px,2.5vw,16px)">Platform management, analytics, and earnings at a glance</p>
+      <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+        <a href="/switch-portal" style="background:rgba(255,255,255,0.2);color:white;padding:8px 18px;border-radius:10px;font-weight:700;font-size:13px;text-decoration:none;backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.15)">Switch Portal</a>
+        <a href="/dev/api-health" style="background:rgba(255,255,255,0.2);color:white;padding:8px 18px;border-radius:10px;font-weight:700;font-size:13px;text-decoration:none;backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.15)">System Health</a>
+        <a href="/dev/settings" style="background:rgba(255,255,255,0.2);color:white;padding:8px 18px;border-radius:10px;font-weight:700;font-size:13px;text-decoration:none;backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.15)">Settings</a>
       </div>
     </div>
 
-    <!-- Charts Row -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-      ${section('&#128200; Revenue Trend (30 Days)', '<canvas id="revChart"></canvas>')}
-      ${section('&#128200; User Growth (30 Days)', '<canvas id="userGrowthChart" height="200"></canvas>')}
+    <!-- Financial Overview -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:20px">
+      <div class="finance-card" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)">
+        <div class="fc-label">Available Balance</div>
+        <div class="fc-value">UGX ${balance.toLocaleString()}</div>
+        <a href="/dev/withdraw" class="fc-link">Withdraw</a>
+      </div>
+      <div class="finance-card" style="background:linear-gradient(135deg,#059669,#10b981)">
+        <div class="fc-label">30-Day Revenue</div>
+        <div class="fc-value">UGX ${totalRev.toLocaleString()}</div>
+      </div>
+      <div class="finance-card" style="background:linear-gradient(135deg,#d97706,#f59e0b)">
+        <div class="fc-label">Active Subscribers</div>
+        <div class="fc-value">${activeSubs}</div>
+      </div>
+      <div class="finance-card" style="background:linear-gradient(135deg,#0ea5e9,#38bdf8)">
+        <div class="fc-label">Total Users</div>
+        <div class="fc-value">${totalUsers}</div>
+      </div>
     </div>
 
-    <!-- Quick Actions Grid -->
-    ${section('Quick Actions', `
-      <div class="grid3">
-        ${actionCard('/dev/settings', '&#9881;', '#fce7f3', 'Platform Settings', 'Contacts, site name, social links')}
-        ${actionCard('/dev/withdraw', '&#128176;', '#dcfce7', 'Withdraw Money', 'Send earnings to mobile money')}
-        ${actionCard('/dev/posts', '&#128227;', '#ffedd5', 'Public Posts', 'Announcements & updates')}
-        ${actionCard('/dev/blog', '&#128221;', '#ede9fe', 'Write Blog Posts', blogCount.rows[0].count + ' posts published')}
-        ${actionCard('/dev/adverts', '&#127918;', '#fef3c7', 'Manage Adverts', adCount.rows[0].count + ' active')}
-        ${actionCard('/dev/features', '&#127991;', '#f1f5f9', 'Feature Flags', 'Toggle features on/off')}
-        ${actionCard('/status/admin', '&#128994;', '#fce7f3', 'Platform Status', 'Service incidents')}
-        ${actionCard('/dev/cleanup', '&#9888;', '#fee2e2', 'Database Cleanup', 'Erase test data')}
-        ${actionCard('/fundraising', '&#127873;', '#dcfce7', 'Fundraising', 'Campaigns & donations')}
-        ${actionCard('/switch-portal', '&#127760;', '#eef2ff', 'Switch Portal', 'Change your portal type')}
-        ${actionCard('/dev/api-health', '&#128737;', '#ecfdf5', 'System Health', 'Database & server status')}
-        ${actionCard('/dev/api-playground', '&#128736;', '#f5f3ff', 'API Playground', 'Test endpoints')}
+    <!-- Platform Metrics -->
+    <div class="metric-row" style="margin-bottom:20px">
+      <div class="metric-card"><div class="value" style="color:#4f46e5">${totalTenants}</div><div class="label">Tenants</div></div>
+      <div class="metric-card"><div class="value" style="color:#059669">${activeUsers7d}</div><div class="label">Active (7d)</div></div>
+      <div class="metric-card"><div class="value" style="color:#d97706">${payments30d}</div><div class="label">Payments (30d)</div></div>
+      <div class="metric-card"><div class="value" style="color:#7c3aed">${blogPosts}</div><div class="label">Blog Posts</div></div>
+      <div class="metric-card"><div class="value" style="color:#ec4899">${activeAds}</div><div class="label">Active Ads</div></div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tab-bar-dev" id="devTabBar">
+      <button class="active" onclick="showDevTab('overview')">Overview</button>
+      <button onclick="showDevTab('portal')">Switch Portal</button>
+      <button onclick="showDevTab('manage')">Manage</button>
+      <button onclick="showDevTab('finance')">Finance</button>
+    </div>
+    <script>
+    function showDevTab(tab){
+      document.querySelectorAll('.tab-content').forEach(function(el){el.classList.remove('active')});
+      document.getElementById('tab-'+tab).classList.add('active');
+      document.querySelectorAll('#devTabBar button').forEach(function(b){b.classList.remove('active')});
+      event.target.classList.add('active');
+    }
+    </script>
+
+    <!-- TAB: Overview -->
+    <div id="tab-overview" class="tab-content active">
+
+      <!-- Quick Navigation by Category -->
+      <div class="dev-section">
+        <h2>Quick Navigation</h2>
+
+        <h3>Portal &amp; Switching</h3>
+        <div class="nav-grid" style="margin-bottom:16px">
+          <a href="/switch-portal" class="nav-tile"><div class="nt-icon" style="background:#eef2ff">&#127760;</div><div class="nt-label">Switch Portal</div></a>
+          <a href="/dev/settings" class="nav-tile"><div class="nt-icon" style="background:#f1f5f9">&#9881;</div><div class="nt-label">Settings</div></a>
+          <a href="/dev/api-health" class="nav-tile"><div class="nt-icon" style="background:#ecfdf5">&#128737;</div><div class="nt-label">System Health</div></a>
+          <a href="/dev/api-analytics" class="nav-tile"><div class="nt-icon" style="background:#eff6ff">&#128200;</div><div class="nt-label">Analytics</div></a>
+        </div>
+
+        <h3>Content &amp; Publishing</h3>
+        <div class="nav-grid" style="margin-bottom:16px">
+          <a href="/dev/blog" class="nav-tile"><div class="nt-icon" style="background:#ede9fe">&#128221;</div><div class="nt-label">Blog</div></a>
+          <a href="/dev/posts" class="nav-tile"><div class="nt-icon" style="background:#ffedd5">&#128227;</div><div class="nt-label">Public Posts</div></a>
+          <a href="/dev/resources" class="nav-tile"><div class="nt-icon" style="background:#ccfbf1">&#128214;</div><div class="nt-label">Resources</div></a>
+          <a href="/dev/adverts" class="nav-tile"><div class="nt-icon" style="background:#fef3c7">&#127918;</div><div class="nt-label">Adverts</div></a>
+        </div>
+
+        <h3>Billing &amp; Subscriptions</h3>
+        <div class="nav-grid" style="margin-bottom:16px">
+          <a href="/dev/withdraw" class="nav-tile"><div class="nt-icon" style="background:#dcfce7">&#128176;</div><div class="nt-label">Withdraw</div></a>
+          <a href="/dev/plans" class="nav-tile"><div class="nt-icon" style="background:#fce7f3">&#128179;</div><div class="nt-label">Plans</div></a>
+          <a href="/dev/features" class="nav-tile"><div class="nt-icon" style="background:#f1f5f9">&#127991;</div><div class="nt-label">Feature Flags</div></a>
+          <a href="/dev/subscription-access" class="nav-tile"><div class="nt-icon" style="background:#eef2ff">&#128274;</div><div class="nt-label">Sub Access</div></a>
+        </div>
+
+        <h3>Developer Tools</h3>
+        <div class="nav-grid" style="margin-bottom:16px">
+          <a href="/dev/api-playground" class="nav-tile"><div class="nt-icon" style="background:#f5f3ff">&#128736;</div><div class="nt-label">API Playground</div></a>
+          <a href="/dev/onboarding" class="nav-tile"><div class="nt-icon" style="background:#dcfce7">&#127919;</div><div class="nt-label">Onboarding</div></a>
+          <a href="/dev/cleanup" class="nav-tile"><div class="nt-icon" style="background:#fee2e2">&#9888;</div><div class="nt-label">DB Cleanup</div></a>
+          <a href="/status/admin" class="nav-tile"><div class="nt-icon" style="background:#fce7f3">&#128994;</div><div class="nt-label">Status Page</div></a>
+        </div>
+
+        <h3>Portal Features</h3>
+        <div class="nav-grid">
+          <a href="/fundraising" class="nav-tile"><div class="nt-icon" style="background:#dcfce7">&#127873;</div><div class="nt-label">Fundraising</div></a>
+          <a href="/backup" class="nav-tile"><div class="nt-icon" style="background:#f1f5f9">&#128190;</div><div class="nt-label">Backup</div></a>
+          <a href="/webhooks" class="nav-tile"><div class="nt-icon" style="background:#ede9fe">&#128279;</div><div class="nt-label">Webhooks</div></a>
+          <a href="/marketplace" class="nav-tile"><div class="nt-icon" style="background:#fef3c7">&#128268;</div><div class="nt-label">Plugins</div></a>
+        </div>
       </div>
-    `)}
 
-    <!-- Revenue Breakdown -->
-    ${section('Revenue Breakdown (30 Days)', `
-      ${revBreakdown.rows.length > 0 ? `<table><tr><th>Source</th><th>Amount</th></tr>${revBreakdown.rows.map(r => '<tr><td><span class="tag">' + esc(r.source) + '</span></td><td style="font-weight:700">UGX ' + parseInt(r.total).toLocaleString() + '</td></tr>').join('')}</table>` : '<p class="muted">No revenue recorded</p>'}
-    `)}
-
-    ${withdrawalHistory.rows.length > 0 ? section('Recent Withdrawals', `
-      <table><tr><th>Amount</th><th>Details</th><th>Date</th></tr>${withdrawalHistory.rows.map(w => { let m = {}; try { m = JSON.parse(w.details || '{}'); } catch(e){} return '<tr><td style="color:#dc2626;font-weight:700">UGX ' + Math.abs(parseInt(w.amount)).toLocaleString() + '</td><td>' + esc(m.phone||'') + ' (' + esc(m.network||'') + ')</td><td>' + new Date(w.created_at).toLocaleString() + '</td></tr>'; }).join('')}</table>
-    `) : ''}
-
-    <!-- Record Revenue -->
-    ${section('Record Revenue', `
-      <form method="POST" action="/dev/inject-revenue" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
-        <div style="flex:1;min-width:150px"><label>Amount (UGX)</label><input name="amount" placeholder="50000" type="number" required></div>
-        <div style="flex:1;min-width:150px"><label>Source</label><input name="source" placeholder="Subscription, Ads..." required></div>
-        <button class="btn btn-gold">Record</button>
-      </form>
-    `)}
-
-    <!-- Tenant Management -->
-    ${section('Tenant Management (' + tCount.rows[0].count + ' total)', `
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;font-weight:600">
-          <input type="checkbox" id="showDemoTenants" onchange="this.checked?document.querySelectorAll('.demo-row').forEach(function(r){r.style.display=''}):document.querySelectorAll('.demo-row').forEach(function(r){r.style.display='none'})">
-          Show Dev Demo Tenants
-        </label>
-        <span class="muted" style="font-size:12px">(Demo tenants are hidden by default)</span>
+      <!-- Charts -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+        <div class="dev-section" style="margin-bottom:0"><h2>Revenue Trend (30 Days)</h2><canvas id="revChart"></canvas></div>
+        <div class="dev-section" style="margin-bottom:0"><h2>User Growth (30 Days)</h2><canvas id="userGrowthChart" height="200"></canvas></div>
       </div>
-      <form method="POST" action="/dev/execute" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:16px">
-        <div style="flex:1;min-width:150px"><label>Action</label>
-          <select name="action" required><option value="">Select...</option>
-            <option value="add_balance">Add Balance</option><option value="verify_tenant">Verify</option>
-            <option value="approve_tenant">Approve</option><option value="ban_tenant">Ban</option>
-            <option value="unban_tenant">Unban</option><option value="grant_free_access">Grant Free Access</option>
-            <option value="switch_to_tenant" style="color:#4f46e5;font-weight:700">Switch to Tenant</option>
-          </select></div>
-        <div style="min-width:100px"><label>Tenant ID</label><input name="target_id" placeholder="ID" type="number" required></div>
-        <div style="min-width:100px"><label>Amount</label><input name="amount" placeholder="UGX" type="number"></div>
-        <button class="btn btn-red">Execute</button>
-      </form>
-      <div style="overflow-x:auto"><table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Status</th><th>Action</th></tr>
-      ${tenants.rows.map(t => {
-        var isDemo = t.name && t.name.startsWith('Dev ');
-        var rowClass = isDemo ? ' class="demo-row" style="display:none;background:#fef9c3"' : '';
-        var demoBadge = isDemo ? ' <span style="background:#fbbf24;color:#78350f;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700">DEMO</span>' : '';
-        return '<tr' + rowClass + '><td>' + t.id + '</td><td>' + esc(t.name) + demoBadge + '</td><td>' + esc(t.type) + '</td><td>UGX ' + parseInt(t.wallet_balance || 0).toLocaleString() + '</td><td>' + (t.approved ? (t.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>') : '<span style="color:#d97706">Pending</span>') + '</td><td><form method="POST" action="/dev/execute" style="display:inline"><input type="hidden" name="action" value="switch_to_tenant"><input type="hidden" name="target_id" value="' + t.id + '"><button type="submit" style="background:#4f46e5;color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Switch To</button></form></td></tr>';
-      }).join('')}
-      </table></div>
-    `)}
 
-    <!-- Recent Logs -->
-    ${section('Recent Activity', `
-      <table><tr><th>User</th><th>Action</th><th>Time</th></tr>${logs.rows.map(l => '<tr><td>' + esc(l.user_email || '') + '</td><td><span class="tag">' + esc(l.action || '') + '</span></td><td style="font-size:12px">' + (l.created_at ? new Date(l.created_at).toLocaleString() : '') + '</td></tr>').join('')}</table>
-      <a href="/dev/activity" class="btn btn-sm" style="margin-top:10px">View All Activity</a>
-    `)}
+      <!-- Quick Actions -->
+      <div class="dev-section">
+        <h2>Quick Actions</h2>
+        <div class="action-grid">
+          <a href="/dev/settings" class="action-item"><div class="ai-icon" style="background:#fce7f3">&#9881;</div><div><div class="ai-title">Platform Settings</div><div class="ai-desc">Contacts, site name, social links</div></div></a>
+          <a href="/dev/withdraw" class="action-item"><div class="ai-icon" style="background:#dcfce7">&#128176;</div><div><div class="ai-title">Withdraw Money</div><div class="ai-desc">Send earnings to mobile money</div></div></a>
+          <a href="/dev/posts" class="action-item"><div class="ai-icon" style="background:#ffedd5">&#128227;</div><div><div class="ai-title">Public Posts</div><div class="ai-desc">Announcements &amp; updates</div></div></a>
+          <a href="/dev/blog" class="action-item"><div class="ai-icon" style="background:#ede9fe">&#128221;</div><div><div class="ai-title">Blog Posts</div><div class="ai-desc">${blogPosts} posts published</div></div></a>
+          <a href="/dev/adverts" class="action-item"><div class="ai-icon" style="background:#fef3c7">&#127918;</div><div><div class="ai-title">Adverts</div><div class="ai-desc">${activeAds} active</div></div></a>
+          <a href="/switch-portal" class="action-item"><div class="ai-icon" style="background:#eef2ff">&#127760;</div><div><div class="ai-title">Switch Portal</div><div class="ai-desc">Change your portal type</div></div></a>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="dev-section">
+        <h2>Recent Activity</h2>
+        ${logs.rows.length > 0 ? `<div style="overflow-x:auto"><table><tr><th>User</th><th>Action</th><th>Time</th></tr>${logs.rows.map(l => '<tr><td>' + esc(l.user_email || '') + '</td><td><span class="tag">' + esc(l.action || '') + '</span></td><td style="font-size:12px">' + (l.created_at ? new Date(l.created_at).toLocaleString() : '') + '</td></tr>').join('')}</table></div><a href="/dev/activity" class="btn btn-sm" style="margin-top:10px">View All Activity</a>` : '<p class="muted">No recent activity</p>'}
+      </div>
+    </div>
+
+    <!-- TAB: Switch Portal -->
+    <div id="tab-portal" class="tab-content">
+      <div class="dev-section">
+        <h2>Switch Portal Type</h2>
+        <p class="muted" style="margin-bottom:16px">Change your organization type. All your data stays — you will just see different dashboard modules. Current: <strong style="color:#4f46e5">${esc((req.session.user.tenant_type || 'school').charAt(0).toUpperCase() + (req.session.user.tenant_type || 'school').slice(1))}</strong></p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-bottom:20px">
+          ${DEV_PORTAL_TYPES.map(p => {
+            const isCurrent = (req.session.user.tenant_type || 'school') === p.type;
+            return `<a href="/switch-portal" class="portal-mini${isCurrent ? ' current' : ''}">
+              <div class="pm-icon">${p.icon}</div>
+              <div class="pm-info"><div class="pm-name">${esc(p.label)}${isCurrent ? ' <span style="color:#22c55e;font-size:11px">&#10003; Current</span>' : ''}</div><div class="pm-desc">${esc(p.desc)}</div></div>
+            </a>`;
+          }).join('')}
+        </div>
+        <div style="text-align:center"><a href="/switch-portal" class="btn" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">Go to Full Portal Switcher</a></div>
+      </div>
+    </div>
+
+    <!-- TAB: Manage Tenants -->
+    <div id="tab-manage" class="tab-content">
+      <div class="dev-section">
+        <h2>Tenant Management (${totalTenants} total)</h2>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;font-weight:600">
+            <input type="checkbox" id="showDemoTenants" onchange="this.checked?document.querySelectorAll('.demo-row').forEach(function(r){r.style.display=''}):document.querySelectorAll('.demo-row').forEach(function(r){r.style.display='none'})">
+            Show Demo Tenants
+          </label>
+          <span class="muted" style="font-size:12px">(Demo tenants are hidden by default)</span>
+        </div>
+        <form method="POST" action="/dev/execute" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:16px">
+          <div style="flex:1;min-width:150px"><label>Action</label>
+            <select name="action" required><option value="">Select...</option>
+              <option value="add_balance">Add Balance</option><option value="verify_tenant">Verify</option>
+              <option value="approve_tenant">Approve</option><option value="ban_tenant">Ban</option>
+              <option value="unban_tenant">Unban</option><option value="grant_free_access">Grant Free Access</option>
+              <option value="switch_to_tenant" style="color:#4f46e5;font-weight:700">Switch to Tenant</option>
+            </select></div>
+          <div style="min-width:100px"><label>Tenant ID</label><input name="target_id" placeholder="ID" type="number" required></div>
+          <div style="min-width:100px"><label>Amount</label><input name="amount" placeholder="UGX" type="number"></div>
+          <button class="btn btn-red">Execute</button>
+        </form>
+        <div style="overflow-x:auto"><table><tr><th>ID</th><th>Name</th><th>Type</th><th>Wallet</th><th>Status</th><th>Action</th></tr>
+        ${tenants.rows.map(t => {
+          var isDemo = t.name && t.name.startsWith('Dev ');
+          var rowClass = isDemo ? ' class="demo-row" style="display:none;background:#fef9c3"' : '';
+          var demoBadge = isDemo ? ' <span style="background:#fbbf24;color:#78350f;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700">DEMO</span>' : '';
+          return '<tr' + rowClass + '><td>' + t.id + '</td><td>' + esc(t.name) + demoBadge + '</td><td>' + esc(t.type) + '</td><td>UGX ' + parseInt(t.wallet_balance || 0).toLocaleString() + '</td><td>' + (t.approved ? (t.banned ? '<span style="color:#dc2626">Banned</span>' : '<span style="color:#059669">Active</span>') : '<span style="color:#d97706">Pending</span>') + '</td><td><form method="POST" action="/dev/execute" style="display:inline"><input type="hidden" name="action" value="switch_to_tenant"><input type="hidden" name="target_id" value="' + t.id + '"><button type="submit" style="background:#4f46e5;color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Switch To</button></form></td></tr>';
+        }).join('')}
+        </table></div>
+      </div>
+    </div>
+
+    <!-- TAB: Finance -->
+    <div id="tab-finance" class="tab-content">
+      <!-- Revenue Breakdown -->
+      <div class="dev-section">
+        <h2>Revenue Breakdown (30 Days)</h2>
+        ${revBreakdown.rows.length > 0 ? `<div style="overflow-x:auto"><table><tr><th>Source</th><th>Amount</th></tr>${revBreakdown.rows.map(r => '<tr><td><span class="tag">' + esc(r.source) + '</span></td><td style="font-weight:700">UGX ' + parseInt(r.total).toLocaleString() + '</td></tr>').join('')}</table></div>` : '<p class="muted">No revenue recorded in the last 30 days</p>'}
+      </div>
+
+      ${withdrawalHistory.rows.length > 0 ? `<div class="dev-section"><h2>Recent Withdrawals</h2><div style="overflow-x:auto"><table><tr><th>Amount</th><th>Details</th><th>Date</th></tr>${withdrawalHistory.rows.map(w => { let m = {}; try { m = JSON.parse(w.details || '{}'); } catch(e){} return '<tr><td style="color:#dc2626;font-weight:700">UGX ' + Math.abs(parseInt(w.amount)).toLocaleString() + '</td><td>' + esc(m.phone||'') + ' (' + esc(m.network||'') + ')</td><td>' + new Date(w.created_at).toLocaleString() + '</td></tr>'; }).join('')}</table></div></div>` : ''}
+
+      <!-- Record Revenue -->
+      <div class="dev-section">
+        <h2>Record Revenue</h2>
+        <form method="POST" action="/dev/inject-revenue" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+          <div style="flex:1;min-width:150px"><label>Amount (UGX)</label><input name="amount" placeholder="50000" type="number" required></div>
+          <div style="flex:1;min-width:150px"><label>Source</label><input name="source" placeholder="Subscription, Ads..." required></div>
+          <button class="btn btn-gold">Record</button>
+        </form>
+      </div>
+    </div>
 
     <script>
     new Chart(document.getElementById('revChart'),{type:'line',data:{labels:['${chartLabels}'],datasets:[{label:'Revenue',data:[${chartValues}],borderColor:'#4f46e5',tension:0.3,fill:true,backgroundColor:'rgba(79,70,229,0.1)'}]},options:{responsive:true,plugins:{legend:{display:false}}}});
