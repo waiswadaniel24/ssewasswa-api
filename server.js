@@ -2538,13 +2538,32 @@ if ('serviceWorker' in navigator) {
     }).catch(function(err){console.warn('[PWA] Service Worker registration failed:',err)});
   });
 }
-// PWA Install Banner
-var _dp;window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_dp=e;setTimeout(function(){if(_dp){var b=document.createElement('div');b.id='pwab';b.style.cssText='position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;z-index:10000;box-shadow:0 -4px 20px rgba(0,0,0,.2);font-family:sans-serif';b.innerHTML='<div><strong style=font-size:15px>Install Comfort App</strong><p style=font-size:12px;margin:2px 0 0;opacity:.9>Add to home screen for faster access &amp; offline</p></div><div style=display:flex;gap:8px><button onclick=_ip() style=padding:8px 20px;border:2px solid white;background:white;color:#059669;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer>Install</button><button onclick=_dp=null;document.getElementById(\"pwab\").remove() style=padding:8px 12px;border:2px solid rgba(255,255,255,.5);background:transparent;color:white;border-radius:8px;font-size:13px;cursor:pointer>Later</button></div>';document.body.appendChild(b)}},3000)});
-function _ip(){if(_dp){_dp.prompt();_dp.userChoice.then(function(c){if(c.outcome==='accepted')console.log('[PWA] Installed');_dp=null});}var b=document.getElementById('pwab');if(b)b.remove();}
-window.addEventListener('appinstalled',function(){_dp=null;var b=document.getElementById('pwab');if(b)b.remove();});
+// PWA Install — Smart download link + install prompt
+var _dp=null,_isStandalone=window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone===true;
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_dp=e;
+var navBtn=document.getElementById('nav-install-btn');if(navBtn)navBtn.style.display='inline-flex';
+var btmBtn=document.getElementById('install-btn');if(btmBtn)btmBtn.style.display='flex';
+var floatBtn=document.getElementById('float-install-btn');if(floatBtn)floatBtn.style.display='flex';
+});
+function _installApp(){
+if(_dp){_dp.prompt();_dp.userChoice.then(function(c){if(c.outcome==='accepted'){console.log('[PWA] App installed');_hideInstallBtns()}_dp=null});}
+else{window.location.href='/install';}
+}
+function _hideInstallBtns(){
+_dp=null;
+var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='none';
+var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='none';
+var bb=document.getElementById('pwab');if(bb)bb.remove();
+}
+window.addEventListener('appinstalled',function(){_hideInstallBtns();});
+if(!_isStandalone){setTimeout(function(){if(_dp){var nb=document.getElementById('nav-install-btn');if(nb)nb.style.display='inline-flex';var fb=document.getElementById('float-install-btn');if(fb)fb.style.display='flex';}},2000);}
 </script>
 </head><body>
 <a href="#main" style="position:absolute;top:-100px;left:0;background:#4f46e5;color:white;padding:8px;z-index:9999" onfocus="this.style.top=\"0\"" onblur="this.style.top=\"-100px\"">Skip to main content</a>
+<div id="float-install-btn" style="display:none;position:fixed;bottom:20px;right:20px;z-index:9999;flex-direction:column;align-items:center;gap:4px">
+<a href="#" onclick="_installApp();return false" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:12px 20px;border-radius:50px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 20px rgba(5,150,105,0.4);font-family:sans-serif;animation:pulse-glow 2s ease-in-out infinite">&#128241; Install App</a>
+<style>@keyframes pulse-glow{0%,100%{box-shadow:0 4px 20px rgba(5,150,105,0.4)}50%{box-shadow:0 4px 30px rgba(5,150,105,0.7)}}</style>
+</div>
 <nav class="nav" role="navigation" aria-label="Main navigation">
   <div style="display:flex;align-items:center;gap:12px"><button onclick="document.querySelector('.nav').classList.toggle('open')" style="display:none;background:none;border:none;color:white;font-size:24px;cursor:pointer;padding:4px" id="menuBtn">☰</button><a href="/" style="font-size:20px;font-weight:800">${esc(platformSettings.site_name)}</a></div>
   <div class="nav-links" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -2583,6 +2602,7 @@ window.addEventListener('appinstalled',function(){_dp=null;var b=document.getEle
       <a href="/search">${esc(uiT('nav.search'))}</a>
       <a href="/switch-portal" style="color:#c084fc;font-weight:600" title="Switch Portal Type">&#127760; ${esc(uiT('nav.portal'))}</a>
       <a href="/settings/profile">${esc(uiT('nav.settings'))}</a>
+      <a href="/install" id="nav-install-btn" style="display:none;font-size:13px;color:#10b981;font-weight:600;background:rgba(16,185,129,0.1);padding:4px 10px;border-radius:8px;text-decoration:none;align-items:center;gap:4px">&#128241; Install</a>
       <a href="/parent/login" style="font-size:12px">${esc(uiT('nav.parent'))}</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <select onchange="fetch('/settings/language',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'${esc(csrfToken || '')}'},body:JSON.stringify({language:this.value})}).then(function(){location.reload()})" style="background:${dark ? '#334155' : '#f1f5f9'};border:1px solid ${dark ? '#475569' : '#e2e8f0'};color:${dark ? '#e2e8f0' : '#1e293b'};border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer" title="Language">
@@ -2592,11 +2612,11 @@ window.addEventListener('appinstalled',function(){_dp=null;var b=document.getEle
         <option value="fr" ${user.language==='fr'?'selected':''}>FR</option>
       </select>
       <a href="/logout">${esc(uiT('nav.logout'))}</a>
-    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
+    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/install" style="font-size:13px;color:#10b981;font-weight:600">&#128241; Get App</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
-${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? '#1e293b' : 'white'};border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};padding:8px 0;z-index:1000;justify-content:space-around"><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🏠</span>${esc(uiT('bottom.home'))}</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔍</span>${esc(uiT('bottom.search'))}</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔔</span>${esc(uiT('bottom.alerts'))}</a><a href="#" id="install-btn" style="display:none;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">&#128241;</span>${esc(uiT('bottom.install'))}</a><a href="/settings/profile" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">👤</span>${esc(uiT('bottom.me'))}</a></nav>` : ''}
+${user ? `<nav class="bottom-nav" style="position:fixed;bottom:0;display:none;left:0;right:0;background:${dark ? '#1e293b' : 'white'};border-top:1px solid ${dark ? '#334155' : '#e2e8f0'};padding:8px 0;z-index:1000;justify-content:space-around"><a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🏠</span>${esc(uiT('bottom.home'))}</a><a href="/search" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔍</span>${esc(uiT('bottom.search'))}</a><a href="/notifications" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">🔔</span>${esc(uiT('bottom.alerts'))}</a><a href="#" onclick="_installApp();return false" id="install-btn" style="display:none;flex-direction:column;align-items:center;font-size:10px;color:#10b981;text-decoration:none;padding:4px;font-weight:600"><span style="font-size:20px">&#128241;</span>Install</a><a href="/settings/profile" style="display:flex;flex-direction:column;align-items:center;font-size:10px;color:${dark ? '#94a3b8' : '#64748b'};text-decoration:none;padding:4px"><span style="font-size:20px">👤</span>${esc(uiT('bottom.me'))}</a></nav>` : ''}
 <footer style="background:${dark ? '#1e293b' : '#f1f5f9'};padding:30px 20px;margin-top:40px;border-top:1px solid ${dark ? '#334155' : '#e2e8f0'}">
   <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px">
     <div><strong style="font-size:16px">${esc(platformSettings.site_name)} Platform</strong><p class="muted" style="margin-top:8px">${esc(platformSettings.site_tagline)} - ${esc(uiT('footer.tagline'))}</p></div>
@@ -2671,7 +2691,7 @@ function markRead(id){fetch('/notifications/mark-read',{method:'POST',headers:{'
 function markAllRead(){fetch('/notifications/mark-all-read',{method:'POST'}).then(function(){toggleNotifPanel()}).then(function(){updateNotifBadge()})}
 ` : ''}
 ${user ? `
-window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();var b=document.getElementById('install-btn');if(b){b.style.display='flex';b.addEventListener('click',function(){e.prompt();e.userChoice.then(function(c){if(c.outcome==='accepted')b.style.display='none'});});}
+window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();_dp=e;var b=document.getElementById('install-btn');if(b){b.style.display='flex';b.addEventListener('click',function(e){e.preventDefault();_installApp();});}
 });
 ` : ''}
 </script>
@@ -13227,7 +13247,7 @@ ${process.env.GA_TRACKING_ID ? `
       <a href="/worker/login" style="font-size:12px">${esc(uiT('nav.worker'))}</a>
       <a href="/toggle-dark" style="font-size:18px" title="Toggle Dark Mode">${dark ? '☀️' : '🌙'}</a>
       <a href="/logout">${esc(uiT('nav.logout'))}</a>
-    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
+    ` : `<a href="/login">${esc(uiT('nav.login'))}</a><a href="/register">${esc(uiT('nav.register'))}</a><a href="/install" style="font-size:13px;color:#10b981;font-weight:600">&#128241; Get App</a><a href="/#pricing" style="font-size:13px">${esc(uiT('nav.pricing'))}</a><a href="/#faq" style="font-size:13px">${esc(uiT('nav.faq'))}</a><a href="/blog" style="font-size:13px">${esc(uiT('nav.blog'))}</a><a href="/library" style="font-size:13px">${esc(uiT('nav.library'))}</a>`}
   </div>
 </nav>
 <main id="main" role="main"><div class="container">${safeContent}</div></main>
@@ -15034,25 +15054,62 @@ const trackEvent = (eventType, entityType, entityId) => async (req, res, next) =
 // PWA INSTALL PROMPT ENHANCEMENT
 // =============================================
 app.get('/install', (req, res) => {
-  res.send(renderPage('Install App', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Install Comfort App</h1><p>Use Comfort like a native app on any device</p></div>
-    <div style="text-align:center;margin:20px 0"><div id="ist" style="display:inline-block;padding:12px 24px;border-radius:12px;font-weight:600;font-size:14px"></div></div>
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-bottom:24px">
-      <div class="card" style="text-align:center;padding:30px 20px"><div style="font-size:56px;margin-bottom:15px">📱</div><h2 style="color:#1e293b;margin-bottom:12px">Android</h2><ol style="text-align:left;padding-left:20px;font-size:14px;line-height:2"><li>Open this site in <strong>Chrome</strong></li><li>Tap the <strong>3-dot menu</strong></li><li>Select <strong>"Add to Home Screen"</strong></li><li>Tap <strong>"Add"</strong> to confirm</li></ol></div>
-      <div class="card" style="text-align:center;padding:30px 20px"><div style="font-size:56px;margin-bottom:15px">🍎</div><h2 style="color:#1e293b;margin-bottom:12px">iPhone / iPad</h2><ol style="text-align:left;padding-left:20px;font-size:14px;line-height:2"><li>Open this site in <strong>Safari</strong></li><li>Tap the <strong>Share button</strong></li><li>Select <strong>"Add to Home Screen"</strong></li><li>Tap <strong>"Add"</strong> to confirm</li></ol></div>
-      <div class="card" style="text-align:center;padding:30px 20px"><div style="font-size:56px;margin-bottom:15px">💻</div><h2 style="color:#1e293b;margin-bottom:12px">Desktop</h2><ol style="text-align:left;padding-left:20px;font-size:14px;line-height:2"><li>Open in <strong>Chrome or Edge</strong></li><li>Click the <strong>install icon</strong> in address bar</li><li>Or click <strong>Menu > "Install"</strong></li><li>Click <strong>"Install"</strong> to confirm</li></ol></div>
-    </div>
-    <div class="card" style="text-align:center;border:2px solid #10b981">
-      <h3 style="color:#059669;margin-bottom:8px">Why Install?</h3>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-top:16px">
-        <div><div style="font-size:28px">⚡</div><strong style="font-size:13px">Faster Access</strong><p style="font-size:11px;color:#64748b">Opens instantly</p></div>
-        <div><div style="font-size:28px">📡</div><strong style="font-size:13px">Offline Support</strong><p style="font-size:11px;color:#64748b">Works without internet</p></div>
-        <div><div style="font-size:28px">🔔</div><strong style="font-size:13px">Push Notifications</strong><p style="font-size:11px;color:#64748b">Real-time alerts</p></div>
-        <div><div style="font-size:28px">🔒</div><strong style="font-size:13px">Secure</strong><p style="font-size:11px;color:#64748b">Full HTTPS encryption</p></div>
+  const isStandalone = req.headers['sec-ch-ua-mode'] === 'standalone';
+  res.send(renderPage('Install Comfort App', `
+    <div style="max-width:600px;margin:40px auto;padding:0 20px">
+      <div style="text-align:center;margin-bottom:40px">
+        <div style="width:80px;height:80px;background:linear-gradient(135deg,#059669,#10b981);border-radius:20px;display:inline-flex;align-items:center;justify-content:center;font-size:40px;margin-bottom:16px">&#128241;</div>
+        <h1 style="font-size:28px;margin-bottom:8px">Install Comfort Zone</h1>
+        <p style="color:#64748b;font-size:16px">Use Comfort Zone like a native app on your phone or computer. No app store needed.</p>
+      </div>
+      ${isStandalone ? '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;text-align:center;margin-bottom:24px"><strong style="color:#166534">You already have Comfort Zone installed!</strong><p style="color:#166534;font-size:14px;margin-top:4px">You are using the app version right now.</p></div>' : '<div style="text-align:center;margin-bottom:24px"><button onclick="_installApp()" style="background:linear-gradient(135deg,#059669,#10b981);color:white;padding:16px 40px;border-radius:12px;font-weight:700;font-size:18px;border:none;cursor:pointer;box-shadow:0 4px 20px rgba(5,150,105,0.4)">&#128241; Install Now</button><p style="color:#94a3b8;font-size:12px;margin-top:8px">One-tap install for Chrome and Android users</p></div>'}
+      <div style="background:#f8fafc;border-radius:16px;padding:24px;margin-bottom:24px">
+        <h2 style="font-size:18px;margin-bottom:16px">Step-by-Step Instructions</h2>
+        <div style="margin-bottom:24px">
+          <h3 style="font-size:15px;color:#059669;margin-bottom:8px">&#127822; iPhone / iPad (Safari)</h3>
+          <ol style="padding-left:20px;color:#475569;font-size:14px;line-height:2.2">
+            <li>Open this page in <strong>Safari</strong> (required on iOS)</li>
+            <li>Tap the <strong>Share button</strong> (square with arrow at bottom of screen)</li>
+            <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
+            <li>Tap <strong>"Add"</strong> in the top right corner</li>
+            <li>The Comfort Zone icon will appear on your home screen</li>
+          </ol>
+        </div>
+        <div style="margin-bottom:24px">
+          <h3 style="font-size:15px;color:#059669;margin-bottom:8px">&#129302; Android Phone (Chrome)</h3>
+          <ol style="padding-left:20px;color:#475569;font-size:14px;line-height:2.2">
+            <li>Open this page in <strong>Chrome</strong></li>
+            <li>Tap the <strong>three-dot menu</strong> (top right corner)</li>
+            <li>Tap <strong>"Install app"</strong> or <strong>"Add to Home Screen"</strong></li>
+            <li>Tap <strong>"Install"</strong> to confirm</li>
+            <li>Find the Comfort Zone app in your app drawer and home screen</li>
+          </ol>
+        </div>
+        <div style="margin-bottom:8px">
+          <h3 style="font-size:15px;color:#059669;margin-bottom:8px">&#128187; Computer (Chrome / Edge)</h3>
+          <ol style="padding-left:20px;color:#475569;font-size:14px;line-height:2.2">
+            <li>Open this page in <strong>Chrome</strong> or <strong>Edge</strong></li>
+            <li>Click the <strong>install icon</strong> in the address bar (or the "Install Now" button above)</li>
+            <li>Click <strong>"Install"</strong> to confirm</li>
+            <li>The app will open in its own window, separate from your browser</li>
+          </ol>
+        </div>
+      </div>
+      <div style="background:#eff6ff;border-radius:16px;padding:24px;margin-bottom:24px">
+        <h3 style="font-size:16px;margin-bottom:12px">Why Install the App?</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="background:white;border-radius:10px;padding:16px;text-align:center"><span style="font-size:28px;display:block;margin-bottom:4px">&#9889;</span><strong style="font-size:13px">Faster Access</strong><p style="font-size:11px;color:#64748b;margin-top:4px">Opens instantly like a native app</p></div>
+          <div style="background:white;border-radius:10px;padding:16px;text-align:center"><span style="font-size:28px;display:block;margin-bottom:4px">&#128274;</span><strong style="font-size:13px">Works Offline</strong><p style="font-size:11px;color:#64748b;margin-top:4px">View cached data without internet</p></div>
+          <div style="background:white;border-radius:10px;padding:16px;text-align:center"><span style="font-size:28px;display:block;margin-bottom:4px">&#128276;</span><strong style="font-size:13px">Push Alerts</strong><p style="font-size:11px;color:#64748b;margin-top:4px">Get notified about important updates</p></div>
+          <div style="background:white;border-radius:10px;padding:16px;text-align:center"><span style="font-size:28px;display:block;margin-bottom:4px">&#127760;</span><strong style="font-size:13px">No App Store</strong><p style="font-size:11px;color:#64748b;margin-top:4px">Install directly, no downloads needed</p></div>
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:24px;padding:20px;background:#f1f5f9;border-radius:12px">
+        <p style="color:#64748b;font-size:13px">&#128274; Your data is always synced and secure across the web and installed app.</p>
+        <a href="/" style="color:#059669;font-weight:600;text-decoration:none">Back to Home</a>
       </div>
     </div>
-    <script>var s=document.getElementById('ist');if(window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone){s.textContent='App is already installed!';s.style.background='#dcfce7';s.style.color='#16a34a'}else if('serviceWorker' in navigator){s.innerHTML='Ready to install &mdash; follow the steps below';s.style.background='#dbeafe';s.style.color='#2563eb'}else{s.textContent='Browser not supported';s.style.background='#fef3c7';s.style.color='#92400e'}</script>
-  `, req.session?.user));
+  `, req.session?.user || null));
 });
 
 // =============================================
@@ -36933,6 +36990,7 @@ app.get('/pricing', ah(async (req, res) => {
     </div>
   `, req.session.user || null));
 }));
+
 
 // ============================================================
 // === 4. PWA MANIFEST & SERVICE WORKER ===
