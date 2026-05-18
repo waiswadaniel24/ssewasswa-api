@@ -134,9 +134,9 @@ app.get('/portal/individual', ipAuth, ah(async (req, res) => {
     pool.query('SELECT COUNT(*) as c, COALESCE(SUM(current_amount),0) as v FROM ind_savings_goals WHERE tenant_id=$1 AND user_email=$2', [t, u]),
     pool.query('SELECT COUNT(*) as c, COALESCE(SUM(amount),0) as v FROM ind_expenses WHERE tenant_id=$1 AND user_email=$2', [t, u]),
     pool.query('SELECT COUNT(*) as c FROM ind_habits WHERE tenant_id=$1 AND user_email=$2', [t, u]),
-    pool.query('SELECT COUNT(*) as c FROM ind_tasks WHERE tenant_id=$1 AND user_email=$2 AND status!=%27done%27', [t, u]),
+    pool.query('SELECT COUNT(*) as c FROM ind_tasks WHERE tenant_id=$1 AND user_email=$2 AND status!=\'done\'', [t, u]),
     pool.query('SELECT COUNT(*) as c FROM ind_books WHERE tenant_id=$1 AND user_email=$2', [t, u]),
-    pool.query('SELECT COUNT(*) as c, COALESCE(SUM(outstanding),0) as v FROM ind_loans WHERE tenant_id=$1 AND user_email=$2 AND status=%27active%27', [t, u]),
+    pool.query('SELECT COUNT(*) as c, COALESCE(SUM(outstanding),0) as v FROM ind_loans WHERE tenant_id=$1 AND user_email=$2 AND status=\'active\'', [t, u]),
     pool.query('SELECT COUNT(*) as c FROM ind_medications WHERE tenant_id=$1 AND user_email=$2 AND is_active=true', [t, u]),
   ]);
   const sec = (title, icon, items) => `<div class="ip-card"><h3 style="margin-bottom:12px">${icon} ${title}</h3><div style="display:flex;flex-wrap:wrap;gap:8px">${items.map(i=>`<a href="${i[1]}" class="ip-btn ip-btn-secondary" style="font-size:12px">${i[0]}</a>`).join('')}</div></div>`;
@@ -171,7 +171,7 @@ app.get('/individual/investments', ipAuth, ah(async (req, res) => {
       <div class="ip-stat"><div class="num">${cost.toLocaleString()}</div><div class="lbl">Total Cost</div></div>
       <div class="ip-stat"><div class="num" style="color:${returns>=0?'#059669':'#dc2626'}">${returns}%</div><div class="lbl">Returns</div></div>
     </div>
-    ${rows.length ? `<table class="ip-table"><tr><th>Name</th><th>Type</th><th>Buy Price</th><th>Current</th><th>Returns</th><th>Actions</th></tr>${rows.map(r=>{const ret=r.buy_price>0?((r.current_value-r.buy_price)/r.buy_price*100).toFixed(1):0;return `<tr><td><strong>${esc(r.name)}</strong></td><td><span class="ip-badge ip-badge-pink">${esc(r.type||'N/A')}</span></td><td>${Number(r.buy_price||0).toLocaleString()}</td><td>${Number(r.current_value||0).toLocaleString()}</td><td style="color:${ret>=0?'#059669':'#dc2626'};font-weight:600">${ret}%</td><td><a href="/individual/investments/${r.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Delete</a></td></tr>`}).join('')}</table>` : '<div class="ip-empty"><span>📈</span>No investments yet. Add your first investment!</div>'}
+    ${rows.length ? `<table class="ip-table"><tr><th>Name</th><th>Type</th><th>Buy Price</th><th>Current</th><th>Returns</th><th>Actions</th></tr>${rows.map(r=>{const ret=r.buy_price>0?((r.current_value-r.buy_price)/r.buy_price*100).toFixed(1):0;return `<tr><td><strong>${esc(r.name)}</strong></td><td><span class="ip-badge ip-badge-pink">${esc(r.type||'N/A')}</span></td><td>${Number(r.buy_price||0).toLocaleString()}</td><td>${Number(r.current_value||0).toLocaleString()}</td><td style="color:${ret>=0?'#059669':'#dc2626'};font-weight:600">${ret}%</td><td><a href="/individual/investments/${r.id}" class="ip-btn ip-btn-secondary" style="font-size:11px">View</a> <a href="/individual/investments/${r.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Delete</a></td></tr>`}).join('')}</table>` : '<div class="ip-empty"><span>📈</span>No investments yet. Add your first investment!</div>'}
   `, req.session.user));
 }));
 
@@ -195,6 +195,36 @@ app.get('/individual/investments/new', ipAuth, (req, res) => {
 app.post('/individual/investments', ipAuth, ah(async (req, res) => {
   const {name, type, buy_price, current_value, quantity, purchase_date, notes} = req.body;
   await pool.query('INSERT INTO ind_investments(tenant_id,user_email,name,type,buy_price,current_value,quantity,purchase_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [tid(req),uem(req),name,type,buy_price||0,current_value||0,quantity||1,purchase_date||null,notes||'']);
+  res.redirect('/individual/investments');
+}));
+
+app.get('/individual/investments/:id', ipAuth, ah(async (req, res) => {
+  const inv = (await pool.query('SELECT * FROM ind_investments WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
+  if (!inv) return res.redirect('/individual/investments');
+  const ret = inv.buy_price > 0 ? ((Number(inv.current_value) - Number(inv.buy_price)) / Number(inv.buy_price) * 100).toFixed(1) : 0;
+  const gainLoss = Number(inv.current_value) - Number(inv.buy_price);
+  res.send(renderPage('Investment Details', `${ipCSS}${ipNav('invest')}
+    <div class="ip-card" style="max-width:600px;margin:0 auto"><h2>${esc(inv.name)}</h2>
+    <div class="ip-grid" style="grid-template-columns:repeat(2,1fr);margin:16px 0">
+      <div class="ip-stat"><div class="num" style="font-size:20px">${esc(inv.type||'N/A')}</div><div class="lbl">Type</div></div>
+      <div class="ip-stat"><div class="num" style="font-size:20px">${Number(inv.quantity||1)}</div><div class="lbl">Quantity</div></div>
+      <div class="ip-stat"><div class="num" style="font-size:20px">${Number(inv.buy_price||0).toLocaleString()}</div><div class="lbl">Buy Price</div></div>
+      <div class="ip-stat"><div class="num" style="font-size:20px">${Number(inv.current_value||0).toLocaleString()}</div><div class="lbl">Current Value</div></div>
+    </div>
+    <div style="text-align:center;padding:16px;background:${gainLoss>=0?'#f0fdf4':'#fef2f2'};border-radius:12px;margin:12px 0">
+      <p style="font-size:24px;font-weight:800;color:${gainLoss>=0?'#059669':'#dc2626'}">${gainLoss>=0?'+':''}${gainLoss.toLocaleString()} (${ret}%)</p>
+      <p style="color:#64748b;font-size:13px">${gainLoss>=0?'Profit':'Loss'}</p>
+    </div>
+    ${inv.purchase_date?`<p style="color:#64748b;font-size:13px">Purchased: ${inv.purchase_date}</p>`:''}
+    ${inv.notes?`<p style="color:#64748b;font-size:14px;margin-top:8px">${esc(inv.notes)}</p>`:''}
+    <div style="margin-top:16px;display:flex;gap:8px"><a href="/individual/investments" class="ip-btn ip-btn-secondary">Back</a><a href="/individual/investments/${inv.id}/delete" class="ip-btn ip-btn-danger" onclick="return confirm('Delete this investment?')">Delete</a></div>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/individual/investments/:id/update', ipAuth, ah(async (req, res) => {
+  const {name, type, buy_price, current_value, quantity, purchase_date, notes} = req.body;
+  await pool.query('UPDATE ind_investments SET name=$1,type=$2,buy_price=$3,current_value=$4,quantity=$5,purchase_date=$6,notes=$7 WHERE id=$8 AND tenant_id=$9 AND user_email=$10', [name,type,buy_price||0,current_value||0,quantity||1,purchase_date||null,notes||'',req.params.id,tid(req),uem(req)]);
   res.redirect('/individual/investments');
 }));
 
@@ -312,7 +342,7 @@ app.get('/individual/loans/:id/payment', ipAuth, (req, res) => {
 app.post('/individual/loans/:id/payment', ipAuth, ah(async (req, res) => {
   const {amount, note} = req.body;
   await pool.query('UPDATE ind_loans SET outstanding=GREATEST(0,outstanding-$1) WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [amount, req.params.id, tid(req), uem(req)]);
-  await pool.query('UPDATE ind_loans SET status=CASE WHEN outstanding<=0 THEN %27paid%27 ELSE status END WHERE id=$1', [req.params.id]);
+  await pool.query('UPDATE ind_loans SET status=CASE WHEN outstanding<=0 THEN \'paid\' ELSE status END WHERE id=$1', [req.params.id]);
   await pool.query('INSERT INTO ind_loan_payments(tenant_id,loan_id,amount,note) VALUES($1,$2,$3,$4)', [tid(req), req.params.id, amount, note||'']);
   res.redirect('/individual/loans');
 }));
@@ -390,6 +420,11 @@ app.post('/individual/networth/save', ipAuth, ah(async (req, res) => {
   res.redirect('/individual/networth');
 }));
 
+app.get('/individual/networth/:id/delete', ipAuth, ah(async (req, res) => {
+  await pool.query('DELETE FROM ind_networth_snapshots WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
+  res.redirect('/individual/networth');
+}));
+
 // ============================================================
 // FEATURE 6: RECURRING TRANSACTIONS
 // ============================================================
@@ -442,8 +477,8 @@ app.get('/individual/finance-report', ipAuth, ah(async (req, res) => {
   const period = req.query.period || 'month';
   const exp = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM ind_expenses WHERE tenant_id=$1 AND user_email=$2', [tid(req), uem(req)])).rows[0].t;
   const inv = (await pool.query('SELECT COALESCE(SUM(current_value),0) as t FROM ind_investments WHERE tenant_id=$1 AND user_email=$2', [tid(req), uem(req)])).rows[0].t;
-  const rec = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM ind_recurring_txns WHERE tenant_id=$1 AND user_email=$2 AND is_active=true AND type=%27expense%27', [tid(req), uem(req)])).rows[0].t;
-  const loan = (await pool.query('SELECT COALESCE(SUM(outstanding),0) as t FROM ind_loans WHERE tenant_id=$1 AND user_email=$2 AND status=%27active%27', [tid(req), uem(req)])).rows[0].t;
+  const rec = (await pool.query('SELECT COALESCE(SUM(amount),0) as t FROM ind_recurring_txns WHERE tenant_id=$1 AND user_email=$2 AND is_active=true AND type=\'expense\'', [tid(req), uem(req)])).rows[0].t;
+  const loan = (await pool.query('SELECT COALESCE(SUM(outstanding),0) as t FROM ind_loans WHERE tenant_id=$1 AND user_email=$2 AND status=\'active\'', [tid(req), uem(req)])).rows[0].t;
   const sav = (await pool.query('SELECT COALESCE(SUM(current_amount),0) as t FROM ind_savings_goals WHERE tenant_id=$1 AND user_email=$2', [tid(req), uem(req)])).rows[0].t;
   res.send(renderPage('Financial Report', `${ipCSS}${ipNav('report')}
     <h2>Financial Summary</h2>
@@ -494,7 +529,7 @@ app.get('/individual/habits', ipAuth, ah(async (req, res) => {
   const habits = (await pool.query('SELECT h.*, (SELECT COUNT(*) FROM ind_habit_checkins WHERE habit_id=h.id AND checkin_date=CURRENT_DATE) as today_done FROM ind_habits h WHERE h.tenant_id=$1 AND h.user_email=$2 ORDER BY h.created_at DESC', [tid(req), uem(req)])).rows;
   res.send(renderPage('Habits', `${ipCSS}${ipNav('habits')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Habit Tracker</h2><a href="/individual/habits/new" class="ip-btn ip-btn-primary">+ New Habit</a></div>
-    ${habits.length ? `<div class="ip-grid">${habits.map(h=>`<div class="ip-card" style="border-left:4px solid ${esc(h.color||'#ec4899')}"><h3>${esc(h.name)}</h3><p style="font-size:12px;color:#64748b">${esc(h.frequency)} &middot; Target: ${h.target_count}/day</p><div style="margin-top:10px;display:flex;gap:6px">${h.today_done>0?'<span class="ip-badge ip-badge-green">Done Today</span>':`<a href="/individual/habits/${h.id}/checkin" class="ip-btn ip-btn-success" style="font-size:11px">Check In</a>`}<a href="/individual/habits/${h.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Del</a></div></div>`).join('')}</div>` : '<div class="ip-empty"><span>🔄</span>No habits yet. Start building good habits!</div>'}
+    ${habits.length ? `<div class="ip-grid">${habits.map(h=>`<div class="ip-card" style="border-left:4px solid ${esc(h.color||'#ec4899')}"><h3>${esc(h.name)}</h3><p style="font-size:12px;color:#64748b">${esc(h.frequency)} &middot; Target: ${h.target_count}/day</p><div style="margin-top:10px;display:flex;gap:6px">${h.today_done>0?'<span class="ip-badge ip-badge-green">Done Today</span>':`<a href="/individual/habits/${h.id}/checkin" class="ip-btn ip-btn-success" style="font-size:11px">Check In</a>`}<a href="/individual/habits/${h.id}/streak" class="ip-btn ip-btn-secondary" style="font-size:11px">Streak</a><a href="/individual/habits/${h.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Del</a></div></div>`).join('')}</div>` : '<div class="ip-empty"><span>🔄</span>No habits yet. Start building good habits!</div>'}
   `, req.session.user));
 }));
 
@@ -524,6 +559,35 @@ app.get('/individual/habits/:id/checkin', ipAuth, ah(async (req, res) => {
   res.redirect('/individual/habits');
 }));
 
+app.get('/individual/habits/:id/streak', ipAuth, ah(async (req, res) => {
+  const habit = (await pool.query('SELECT * FROM ind_habits WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
+  if (!habit) return res.redirect('/individual/habits');
+  const checkins = (await pool.query('SELECT checkin_date FROM ind_habit_checkins WHERE habit_id=$1 AND tenant_id=$2 ORDER BY checkin_date DESC', [req.params.id, tid(req)])).rows;
+  let streak = 0, prev = null;
+  for (const c of checkins) {
+    const d = new Date(c.checkin_date);
+    if (!prev) { streak = 1; prev = d; continue; }
+    const diff = (prev - d) / 86400000;
+    if (diff <= 1.5) { streak++; prev = d; } else break;
+  }
+  const total = checkins.length;
+  const last30 = (await pool.query('SELECT COUNT(*) as c FROM ind_habit_checkins WHERE habit_id=$1 AND tenant_id=$2 AND checkin_date >= CURRENT_DATE - INTERVAL \'30 days\'', [req.params.id, tid(req)])).rows[0].c;
+  const pct = last30 > 0 ? Math.round(last30 / 30 * 100) : 0;
+  res.send(renderPage('Habit Streak', `${ipCSS}${ipNav('habits')}
+    <div style="text-align:center;max-width:500px;margin:0 auto">
+      <h2>${esc(habit.name)}</h2>
+      <div style="font-size:72px;font-weight:800;color:#ec4899;margin:20px 0">${streak}</div>
+      <p style="color:#64748b;font-size:16px;font-weight:600">Day Streak</p>
+      <div class="ip-grid" style="grid-template-columns:repeat(3,1fr);margin-top:24px">
+        <div class="ip-stat"><div class="num">${total}</div><div class="lbl">Total Check-ins</div></div>
+        <div class="ip-stat"><div class="num">${last30}</div><div class="lbl">Last 30 Days</div></div>
+        <div class="ip-stat"><div class="num">${pct}%</div><div class="lbl">Completion Rate</div></div>
+      </div>
+      <a href="/individual/habits" class="ip-btn ip-btn-secondary" style="margin-top:20px">Back to Habits</a>
+    </div>
+  `, req.session.user));
+}));
+
 app.get('/individual/habits/:id/delete', ipAuth, ah(async (req, res) => {
   await pool.query('DELETE FROM ind_habits WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/habits');
@@ -533,7 +597,7 @@ app.get('/individual/habits/:id/delete', ipAuth, ah(async (req, res) => {
 // FEATURE 10: TASK MANAGER (KANBAN)
 // ============================================================
 app.get('/individual/tasks', ipAuth, ah(async (req, res) => {
-  const tasks = (await pool.query('SELECT * FROM ind_tasks WHERE tenant_id=$1 AND user_email=$2 ORDER BY CASE priority WHEN %27high%27 THEN 1 WHEN %27medium%27 THEN 2 ELSE 3 END, due_date NULLS LAST', [tid(req), uem(req)])).rows;
+  const tasks = (await pool.query('SELECT * FROM ind_tasks WHERE tenant_id=$1 AND user_email=$2 ORDER BY CASE priority WHEN \'high\' THEN 1 WHEN \'medium\' THEN 2 ELSE 3 END, due_date NULLS LAST', [tid(req), uem(req)])).rows;
   const todo = tasks.filter(t=>t.status==='todo');
   const prog = tasks.filter(t=>t.status==='in_progress');
   const done = tasks.filter(t=>t.status==='done');
@@ -583,7 +647,7 @@ app.get('/individual/timelog', ipAuth, ah(async (req, res) => {
   const logs = (await pool.query('SELECT * FROM ind_time_logs WHERE tenant_id=$1 AND user_email=$2 ORDER BY created_at DESC LIMIT 30', [tid(req), uem(req)])).rows;
   const totalMin = logs.reduce((s,r)=>s+Number(r.duration_minutes||0),0);
   res.send(renderPage('Time Log', `${ipCSS}${ipNav('timelog')}
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Time Logger</h2><a href="/individual/timelog/start" class="ip-btn ip-btn-primary">+ Start Timer</a></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Time Logger</h2><div style="display:flex;gap:8px"><a href="/individual/timelog/summary" class="ip-btn ip-btn-secondary">Summary</a><a href="/individual/timelog/start" class="ip-btn ip-btn-primary">+ Start Timer</a></div></div>
     <div class="ip-stat" style="max-width:300px;margin-bottom:20px"><div class="num">${(totalMin/60).toFixed(1)}h</div><div class="lbl">Total Hours</div></div>
     ${logs.length ? `<table class="ip-table"><tr><th>Date</th><th>Project</th><th>Activity</th><th>Duration</th><th>Actions</th></tr>${logs.map(r=>`<tr><td>${r.start_time?.split('T')[0]||'-'}</td><td>${esc(r.project||'-')}</td><td>${esc(r.activity||'-')}</td><td style="font-weight:600">${r.duration_minutes||'?'} min</td><td><a href="/individual/timelog/${r.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Del</a></td></tr>`).join('')}</table>` : '<div class="ip-empty"><span>⏱️</span>No time logs yet</div>'}
   `, req.session.user));
@@ -605,13 +669,24 @@ app.get('/individual/timelog/start', ipAuth, (req, res) => {
 
 app.post('/individual/timelog/stop', ipAuth, ah(async (req, res) => {
   const {project, activity, duration, note} = req.body;
-  await pool.query('INSERT INTO ind_time_logs(tenant_id,user_email,project,activity,start_time,NOW(),duration_minutes,note) VALUES($1,$2,$3,$4,NOW(),$5,$6)', [tid(req),uem(req),project||'',activity||'',duration||0,note||'']);
+  await pool.query('INSERT INTO ind_time_logs(tenant_id,user_email,project,activity,start_time,duration_minutes,note) VALUES($1,$2,$3,$4,NOW(),$5,$6)', [tid(req),uem(req),project||'',activity||'',duration||0,note||'']);
   res.redirect('/individual/timelog');
 }));
 
 app.get('/individual/timelog/:id/delete', ipAuth, ah(async (req, res) => {
   await pool.query('DELETE FROM ind_time_logs WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/timelog');
+}));
+
+app.get('/individual/timelog/summary', ipAuth, ah(async (req, res) => {
+  const summary = (await pool.query('SELECT project, COUNT(*) as entries, SUM(duration_minutes) as total_min, MIN(start_time) as first_entry, MAX(start_time) as last_entry FROM ind_time_logs WHERE tenant_id=$1 AND user_email=$2 GROUP BY project ORDER BY total_min DESC NULLS LAST', [tid(req), uem(req)])).rows;
+  const totalHours = summary.reduce((s,r)=>s+Number(r.total_min||0),0);
+  res.send(renderPage('Time Summary', `${ipCSS}${ipNav('timelog')}
+    <h2>Time Log Summary</h2>
+    <div class="ip-stat" style="max-width:300px;margin:20px auto"><div class="num">${(totalHours/60).toFixed(1)}h</div><div class="lbl">Total Hours Logged</div></div>
+    ${summary.length ? `<table class="ip-table"><tr><th>Project</th><th>Entries</th><th>Total Time</th></tr>${summary.map(r=>`<tr><td><strong>${esc(r.project||'Unassigned')}</strong></td><td>${r.entries}</td><td style="font-weight:600">${(Number(r.total_min)/60).toFixed(1)}h (${r.total_min} min)</td></tr>`).join('')}</table>` : '<div class="ip-empty"><span>📊</span>No time data to summarize</div>'}
+    <a href="/individual/timelog" class="ip-btn ip-btn-secondary" style="margin-top:16px">Back to Time Log</a>
+  `, req.session.user));
 }));
 
 // ============================================================
@@ -651,7 +726,7 @@ app.get('/individual/calendar', ipAuth, ah(async (req, res) => {
   const events = (await pool.query('SELECT * FROM ind_calendar_events WHERE tenant_id=$1 AND user_email=$2 ORDER BY event_date, event_time NULLS LAST', [tid(req), uem(req)])).rows;
   res.send(renderPage('Calendar', `${ipCSS}${ipNav('calendar')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Calendar & Events</h2><a href="/individual/calendar/new" class="ip-btn ip-btn-primary">+ New Event</a></div>
-    ${events.length ? `<div class="ip-grid">${events.map(e=>`<div class="ip-card"><h3>${esc(e.title)}</h3><p style="color:#64748b;font-size:13px">${e.event_date||'No date'}${e.event_time?' at '+e.event_time:''}</p>${e.location?`<p style="font-size:12px;color:#94a3b8">📍 ${esc(e.location)}</p>`:''}<span class="ip-badge ip-badge-pink">${esc(e.category||'personal')}</span><div style="margin-top:8px"><a href="/individual/calendar/${e.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Delete</a></div></div>`).join('')}</div>` : '<div class="ip-empty"><span>📅</span>No events scheduled</div>'}
+    ${events.length ? `<div class="ip-grid">${events.map(e=>`<div class="ip-card"><h3>${esc(e.title)}</h3><p style="color:#64748b;font-size:13px">${e.event_date||'No date'}${e.event_time?' at '+e.event_time:''}</p>${e.location?`<p style="font-size:12px;color:#94a3b8">📍 ${esc(e.location)}</p>`:''}<span class="ip-badge ip-badge-pink">${esc(e.category||'personal')}</span><div style="margin-top:8px;display:flex;gap:4px"><a href="/individual/calendar/${e.id}/edit" class="ip-btn ip-btn-secondary" style="font-size:11px">Edit</a><a href="/individual/calendar/${e.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Delete</a></div></div>`).join('')}</div>` : '<div class="ip-empty"><span>📅</span>No events scheduled</div>'}
   `, req.session.user));
 }));
 
@@ -674,6 +749,30 @@ app.get('/individual/calendar/new', ipAuth, (req, res) => {
 app.post('/individual/calendar/save', ipAuth, ah(async (req, res) => {
   const {title,event_date,event_time,category,location,description} = req.body;
   await pool.query('INSERT INTO ind_calendar_events(tenant_id,user_email,title,description,event_date,event_time,category,location) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [tid(req),uem(req),title,description||'',event_date,event_time||null,category||'personal',location||'']);
+  res.redirect('/individual/calendar');
+}));
+
+app.get('/individual/calendar/:id/edit', ipAuth, ah(async (req, res) => {
+  const e = (await pool.query('SELECT * FROM ind_calendar_events WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
+  if (!e) return res.redirect('/individual/calendar');
+  res.send(renderPage('Edit Event', `${ipCSS}${ipNav('calendar')}
+    <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Edit Event</h2>
+    <form method="POST" action="/individual/calendar/${e.id}/update" class="ip-form">
+      <label>Title</label><input name="title" value="${esc(e.title)}" required>
+      <label>Date</label><input name="event_date" type="date" value="${e.event_date||''}" required>
+      <label>Time</label><input name="event_time" type="time" value="${e.event_time||''}">
+      <label>Category</label><select name="category"><option value="personal" ${e.category==='personal'?'selected':''}>Personal</option><option value="work" ${e.category==='work'?'selected':''}>Work</option><option value="health" ${e.category==='health'?'selected':''}>Health</option><option value="social" ${e.category==='social'?'selected':''}>Social</option><option value="other" ${e.category==='other'?'selected':''}>Other</option></select>
+      <label>Location</label><input name="location" value="${esc(e.location||'')}">
+      <label>Description</label><textarea name="description" rows="3">${esc(e.description||'')}</textarea>
+      <button type="submit" class="ip-btn ip-btn-primary">Update Event</button>
+      <a href="/individual/calendar" class="ip-btn ip-btn-secondary">Cancel</a>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/individual/calendar/:id/update', ipAuth, ah(async (req, res) => {
+  const {title,event_date,event_time,category,location,description} = req.body;
+  await pool.query('UPDATE ind_calendar_events SET title=$1,description=$2,event_date=$3,event_time=$4,category=$5,location=$6 WHERE id=$7 AND tenant_id=$8 AND user_email=$9', [title,description||'',event_date,event_time||null,category||'personal',location||'',req.params.id,tid(req),uem(req)]);
   res.redirect('/individual/calendar');
 }));
 
@@ -951,7 +1050,7 @@ app.get('/individual/wellness', ipAuth, ah(async (req, res) => {
   const recent = (await pool.query('SELECT * FROM ind_wellness_checkins WHERE tenant_id=$1 AND user_email=$2 ORDER BY checkin_date DESC LIMIT 14', [tid(req), uem(req)])).rows;
   const moods = {great:'😊',good:'🙂',okay:'😐',low:'😞',bad:'😢'};
   res.send(renderPage('Wellness', `${ipCSS}${ipNav('health')}
-    <h2>Mental Wellness</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Mental Wellness</h2><a href="/individual/wellness/history" class="ip-btn ip-btn-secondary">History</a></div>
     <div class="ip-card" style="max-width:500px;margin:20px auto"><h3>How are you feeling?</h3>
     <form method="POST" action="/individual/wellness/checkin" class="ip-form">
       <label>Mood</label><select name="mood"><option value="great">😊 Great</option><option value="good">🙂 Good</option><option value="okay">😐 Okay</option><option value="low">😞 Low</option><option value="bad">😢 Bad</option></select>
@@ -968,6 +1067,26 @@ app.post('/individual/wellness/checkin', ipAuth, ah(async (req, res) => {
   const {mood,stress_level,energy_level,gratitude} = req.body;
   await pool.query('INSERT INTO ind_wellness_checkins(tenant_id,user_email,mood,stress_level,energy_level,gratitude) VALUES($1,$2,$3,$4,$5,$6)', [tid(req),uem(req),mood||'okay',stress_level||5,energy_level||5,gratitude||'']);
   res.redirect('/individual/wellness');
+}));
+
+app.get('/individual/wellness/history', ipAuth, ah(async (req, res) => {
+  const checkins = (await pool.query('SELECT * FROM ind_wellness_checkins WHERE tenant_id=$1 AND user_email=$2 ORDER BY checkin_date DESC LIMIT 90', [tid(req), uem(req)])).rows;
+  const moods = {great:'😊',good:'🙂',okay:'😐',low:'😞',bad:'😢'};
+  const moodCounts = {};
+  checkins.forEach(c => { moodCounts[c.mood] = (moodCounts[c.mood]||0) + 1; });
+  const avgStress = checkins.length ? (checkins.reduce((s,c)=>s+Number(c.stress_level||0),0)/checkins.length).toFixed(1) : '-';
+  const avgEnergy = checkins.length ? (checkins.reduce((s,c)=>s+Number(c.energy_level||0),0)/checkins.length).toFixed(1) : '-';
+  res.send(renderPage('Wellness History', `${ipCSS}${ipNav('health')}
+    <h2>Wellness History</h2>
+    <div class="ip-grid" style="grid-template-columns:repeat(3,1fr);margin:16px 0">
+      <div class="ip-stat"><div class="num">${checkins.length}</div><div class="lbl">Total Check-ins</div></div>
+      <div class="ip-stat"><div class="num">${avgStress}</div><div class="lbl">Avg Stress</div></div>
+      <div class="ip-stat"><div class="num">${avgEnergy}</div><div class="lbl">Avg Energy</div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${Object.entries(moodCounts).map(([m,c])=>`<span class="ip-badge ip-badge-pink">${moods[m]||'😐'} ${m}: ${c}x</span>`).join('')}</div>
+    ${checkins.length ? `<table class="ip-table"><tr><th>Date</th><th>Mood</th><th>Stress</th><th>Energy</th><th>Gratitude</th></tr>${checkins.map(r=>`<tr><td>${r.checkin_date}</td><td>${moods[r.mood]||'😐'} ${esc(r.mood)}</td><td>${r.stress_level}/10</td><td>${r.energy_level}/10</td><td>${esc((r.gratitude||'').substring(0,50))}</td></tr>`).join('')}</table>` : '<div class="ip-empty"><span>📊</span>No wellness data yet</div>'}
+    <a href="/individual/wellness" class="ip-btn ip-btn-secondary" style="margin-top:16px">Back to Check-in</a>
+  `, req.session.user));
 }));
 
 
@@ -1090,7 +1209,7 @@ app.post('/individual/courses/save', ipAuth, ah(async (req, res) => {
 
 app.get('/individual/courses/:id/progress', ipAuth, ah(async (req, res) => {
   const add = Number(req.query.add || 10);
-  await pool.query('UPDATE ind_courses SET progress=LEAST(100,progress+$1), status=CASE WHEN progress+$1>=100 THEN %27completed%27 ELSE status END WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [add, req.params.id, tid(req), uem(req)]);
+  await pool.query('UPDATE ind_courses SET progress=LEAST(100,progress+$1), status=CASE WHEN progress+$1>=100 THEN \'completed\' ELSE status END WHERE id=$2 AND tenant_id=$3 AND user_email=$4', [add, req.params.id, tid(req), uem(req)]);
   res.redirect('/individual/courses');
 }));
 
@@ -1202,12 +1321,18 @@ app.get('/individual/flashcards/:id/delete', ipAuth, ah(async (req, res) => {
   res.redirect('/individual/flashcards');
 }));
 
+app.post('/individual/flashcards/:id/study', ipAuth, ah(async (req, res) => {
+  const {confidence} = req.body;
+  await pool.query('UPDATE ind_flashcards SET last_studied=NOW(), confidence=$1 WHERE id=$2 AND tenant_id=$3', [confidence||0, req.params.id, tid(req)]);
+  res.redirect('back');
+}));
+
 // FEATURE 27: Contact Book
 app.get('/individual/contacts', ipAuth, ah(async (req, res) => {
   const rows = (await pool.query('SELECT * FROM ind_contacts WHERE tenant_id=$1 AND user_email=$2 ORDER BY name', [tid(req), uem(req)])).rows;
   res.send(renderPage('Contacts', `${ipCSS}${ipNav('contacts')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2>Contact Book</h2><a href="/individual/contacts/new" class="ip-btn ip-btn-primary">+ Add Contact</a></div>
-    ${rows.length ? `<table class="ip-table"><tr><th>Name</th><th>Phone</th><th>Email</th><th>Company</th><th>Actions</th></tr>${rows.map(r=>`<tr><td><strong>${esc(r.name)}</strong></td><td>${esc(r.phone||'-')}</td><td>${esc(r.email||'-')}</td><td>${esc(r.company||'-')}</td><td><a href="/individual/contacts/${r.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Del</a></td></tr>`).join('')}</table>` : '<div class="ip-empty"><span>👤</span>No contacts yet</div>'}
+    ${rows.length ? `<table class="ip-table"><tr><th>Name</th><th>Phone</th><th>Email</th><th>Company</th><th>Actions</th></tr>${rows.map(r=>`<tr><td><strong>${esc(r.name)}</strong></td><td>${esc(r.phone||'-')}</td><td>${esc(r.email||'-')}</td><td>${esc(r.company||'-')}</td><td><a href="/individual/contacts/${r.id}/edit" class="ip-btn ip-btn-secondary" style="font-size:11px">Edit</a> <a href="/individual/contacts/${r.id}/delete" class="ip-btn ip-btn-danger" style="font-size:11px" onclick="return confirm('Delete?')">Del</a></td></tr>`).join('')}</table>` : '<div class="ip-empty"><span>👤</span>No contacts yet</div>'}
   `, req.session.user));
 }));
 
@@ -1231,6 +1356,31 @@ app.get('/individual/contacts/new', ipAuth, (req, res) => {
 app.post('/individual/contacts/save', ipAuth, ah(async (req, res) => {
   const {name,phone,email,company,category,address,notes} = req.body;
   await pool.query('INSERT INTO ind_contacts(tenant_id,user_email,name,phone,email,company,category,address,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [tid(req),uem(req),name,phone||'',email||'',company||'',category||'',address||'',notes||'']);
+  res.redirect('/individual/contacts');
+}));
+
+app.get('/individual/contacts/:id/edit', ipAuth, ah(async (req, res) => {
+  const c = (await pool.query('SELECT * FROM ind_contacts WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, tid(req), uem(req)])).rows[0];
+  if (!c) return res.redirect('/individual/contacts');
+  res.send(renderPage('Edit Contact', `${ipCSS}${ipNav('contacts')}
+    <div class="ip-card" style="max-width:500px;margin:0 auto"><h2>Edit Contact</h2>
+    <form method="POST" action="/individual/contacts/${c.id}/update" class="ip-form">
+      <label>Full Name</label><input name="name" value="${esc(c.name)}" required>
+      <label>Phone</label><input name="phone" value="${esc(c.phone||'')}">
+      <label>Email</label><input name="email" type="email" value="${esc(c.email||'')}">
+      <label>Company</label><input name="company" value="${esc(c.company||'')}">
+      <label>Category</label><input name="category" value="${esc(c.category||'')}">
+      <label>Address</label><input name="address" value="${esc(c.address||'')}">
+      <label>Notes</label><textarea name="notes" rows="2">${esc(c.notes||'')}</textarea>
+      <button type="submit" class="ip-btn ip-btn-primary">Update</button>
+      <a href="/individual/contacts" class="ip-btn ip-btn-secondary">Cancel</a>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/individual/contacts/:id/update', ipAuth, ah(async (req, res) => {
+  const {name,phone,email,company,category,address,notes} = req.body;
+  await pool.query('UPDATE ind_contacts SET name=$1,phone=$2,email=$3,company=$4,category=$5,address=$6,notes=$7 WHERE id=$8 AND tenant_id=$9 AND user_email=$10', [name,phone||'',email||'',company||'',category||'',address||'',notes||'',req.params.id,tid(req),uem(req)]);
   res.redirect('/individual/contacts');
 }));
 
