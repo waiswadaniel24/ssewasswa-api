@@ -249,7 +249,6 @@ app.use((req, res, next) => {
   next();
 });
 app.use(session({
-  store: sessionStore || undefined, // undefined = default memory store
   secret: process.env.SESSION_SECRET || 'dev-session-secret-local-only',
   resave: false,
   saveUninitialized: false,
