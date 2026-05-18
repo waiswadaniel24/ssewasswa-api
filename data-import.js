@@ -844,9 +844,17 @@ ${job.error_count > 0 ? `
       </select>
     </div>
     <div>
-      <label style="font-weight:600;display:block;margin-bottom:6px">Filter (WHERE clause, optional)</label>
-      <input type="text" name="filter" placeholder='e.g. status = \'active\'' style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;width:100%">
-      <p class="muted" style="font-size:12px;margin-top:4px">Leave empty to export all rows. Use SQL WHERE syntax.</p>
+      <label style="font-weight:600;display:block;margin-bottom:6px">Filter (optional)</label>
+      <select name="filter_col" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;width:45%;display:inline-block">
+        <option value="">-- No filter --</option>
+        ${t.columns ? TARGETS[Object.keys(TARGETS)[0]].columns.map(c => `<option value="${esc(c.name)}">${esc(c.label)}</option>`).join('') : ''}
+      </select>
+      <select name="filter_op" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;width:20%;display:inline-block">
+        <option value="eq">=</option><option value="neq">!=</option><option value="gt">&gt;</option><option value="lt">&lt;</option>
+        <option value="like">contains</option><option value="is_null">is empty</option><option value="not_null">not empty</option>
+      </select>
+      <input type="text" name="filter_val" placeholder="Filter value" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;width:30%;display:inline-block">
+      <p class="muted" style="font-size:12px;margin-top:4px">Leave column empty to export all rows.</p>
     </div>
     <div>
       <label style="font-weight:600;display:block;margin-bottom:6px">Max Rows</label>
@@ -870,7 +878,7 @@ ${job.error_count > 0 ? `
   // 11. POST /export/generate — Generate and download export
   app.post('/export/generate', requireAuth, requireNotBanned, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const { target, format, filter, limit } = req.body;
+    const { target, format, filter_col, filter_op, filter_val, limit } = req.body;
 
     if (!target || !TARGETS[target]) {
       return res.send(renderPage('Export Error', `${navBar('export')}<div class="card"><div class="alert alert-error">Invalid target selected.</div><a href="/export" class="btn">Back</a></div>`, req.session.user, req));
@@ -882,13 +890,23 @@ ${job.error_count > 0 ? `
     const params = [tid];
     let pIdx = 2;
 
-    if (filter && filter.trim()) {
-      // Validate filter: only allow safe SQL
-      const forbidden = /(;|\bDROP\b|\bDELETE\b|\bINSERT\b|\bUPDATE\b|\bALTER\b|\bCREATE\b|\bGRANT\b|\bEXEC\b)/i;
-      if (forbidden.test(filter)) {
-        return res.send(renderPage('Export Error', `${navBar('export')}<div class="card"><div class="alert alert-error">Invalid filter expression. Only WHERE clause conditions are allowed.</div></div>`, req.session.user, req));
+    // Structured filter builder: whitelist column names and operators
+    if (filter_col && filter_col.trim()) {
+      const safeCol = t.columns.find(c => c.name === filter_col.trim());
+      if (safeCol) {
+        const colName = `"${safeCol.name}"`;
+        const safeOps = { eq: '=', neq: '!=', gt: '>', lt: '<', like: 'ILIKE', is_null: 'IS NULL', not_null: 'IS NOT NULL' };
+        const op = safeOps[filter_op] || '=';
+        if (op === 'IS NULL' || op === 'IS NOT NULL') {
+          where += ` AND ${colName} ${op}`;
+        } else if (op === 'ILIKE') {
+          where += ` AND ${colName} ${op} $${pIdx++}`;
+          params.push('%' + (filter_val || '') + '%');
+        } else {
+          where += ` AND ${colName} ${op} $${pIdx++}`;
+          params.push(filter_val || '');
+        }
       }
-      where += ` AND (${filter.trim()})`;
     }
 
     const rowLimit = Math.min(parseInt(limit) || 10000, 100000);

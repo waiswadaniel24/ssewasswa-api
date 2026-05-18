@@ -1,23 +1,78 @@
 ---
 Task ID: 1
-Agent: Main Agent
-Task: V18 School Portal Upgrade — Add 20 missing school features + monetization engine
+Agent: Super Z (Main)
+Task: Build public portal missing features — blog, SEO, newsletter modules + UI enhancements
 
 Work Log:
-- Audited entire codebase: 2,920 routes, 230+ tables, 60+ modules, server.js 30K+ lines
-- Identified 20 missing school features needed for V17+ upgrade
-- Created monetization-engine.js (1,441 lines): revenue tracking, developer revenue split, subscription plans, usage metering, invoicing, pricing page, webhooks
-- Created school-v18-upgrade.js (1,865 lines, 42 routes): Teacher dashboard, student rankings, transfer/leaving/character certificates, clubs & societies, field trips, counselling, special needs, academic terms, newsletter, continuous assessments
-- Created school-v18-b.js (1,677 lines, 43 routes): Public school pages, SEO meta tags + sitemap + robots.txt, WCAG accessibility, online admission form, bus GPS tracking, meal plans, sickbay tracking, API docs, PWA manifest, analytics insights dashboard
-- Wired all 3 modules into server.js with proper opts injection
-- Resolved git merge conflicts with remote (scope bridge pattern + our V18 additions)
-- All files pass node -c syntax check
-- Pushed to GitHub: commit 5289fcc
+- Read current state: public-blog.js exists (210 lines, complete), public-seo.js and public-newsletter.js do NOT exist
+- Confirmed public-portal.js is 1,032 lines with 8 routes, server.js is 34,084 lines
+- Confirmed server.js loads public-portal at line 27214 with try/catch pattern
+- Wrote public-seo.js (181 lines): /sitemap.xml, /robots.txt, /privacy, /terms, /help-center (10 FAQs), /pricing (4 plans), /features (4 categories), /health-check (JSON), custom 404
+- Wrote public-newsletter.js (326 lines): double opt-in subscribe, email confirmation, unsubscribe, preferences, admin dashboard, campaign create/send, CSV export, embed form, rate limiting
+- Enhanced public-portal.js (1,032→1,120 lines): mobile hamburger menu, WhatsApp floating button, cookie consent banner, back-to-top button, animated counters with IntersectionObserver
+- Edited server.js to register 3 new modules (public-blog, public-seo, public-newsletter) with try/catch pattern
+- Committed and pushed to origin/main (rebased on remote changes first)
 
 Stage Summary:
-- 3 new files: school-v18-upgrade.js, school-v18-b.js, monetization-engine.js
-- 21 new database tables created
-- 108 new routes added (42 + 43 + 23)
-- Server.js updated with module loading and VALID_TABLES entries
-- All features: parameterized SQL, XSS protection, tenant isolation, WCAG accessibility, SVG charts
-- Git push successful: main -> main (dec9e2f..5289fcc)
+- All 4 public portal modules complete and deployed
+- Commit: d003a49 on main branch
+- Render.com will auto-deploy from this push
+- Total new/modified: public-seo.js (181 lines), public-newsletter.js (326 lines), public-blog.js (210 lines), public-portal.js (+88 lines), server.js (+25 lines)
+
+---
+Task ID: 2
+Agent: Super Z (Main)
+Task: Assess Dev Portal for ALL missing features and undeployed features for the upgrade
+
+Work Log:
+- Listed all 135 root-level .js files in the project
+- Extracted all require() statements from server.js (33,968 lines)
+- Identified 98 registered modules in server.js (with try/catch pattern)
+- Identified 34 UNREGISTERED modules that exist on disk but are NOT loaded
+- Cross-referenced module line counts to identify stubs vs real modules
+- Compared against standard SaaS admin/dev portal feature checklists
+- Identified 55+ completely missing features (no module exists)
+- Compiled comprehensive assessment with 89+ total items
+
+Stage Summary:
+- PART A: 34 Undeployed Modules (exist on disk, not in server.js)
+- PART B: 55+ Missing Features (no module at all)
+- Total: 89+ features/modules identified for the upgrade
+- Key findings: security-ops.js has partial 2FA (needs MFA/TOTP), no RBAC UI, no GDPR center, no feature flags, no A/B testing
+
+---
+Task ID: 3
+Agent: Super Z (Main)
+Task: Phase 1 — Register 24 undeployed modules in server.js
+
+Work Log:
+- Identified 24 modules on disk that were never require()'d in server.js
+- Verified each module's export signature (old-style vs new opts pattern)
+- Extended _newModOpts with queueEmail and uiT
+- Added 130+ table allowlists covering all 24 modules
+- Registered all 24 with try/catch pattern
+- Syntax check passed
+- Committed d5baa5c, pushed after rebase → 91ebc18
+
+Stage Summary:
+- 24 undeployed modules activated (+135 lines to server.js)
+- Total: 34,102 lines, 122+ active modules
+- Modules include: interactive-whiteboard, spaced-repetition, carpool, bus-routes, blockchain-certs, video-conferencing, peer-review, omr-scanner, social-media, green-campus, podcast, newsletter, pocket-money, parent-workshop, student-banking, ai-tutor, virtual-lab, smart-textbook, blockchain-gradebook, adaptive-learning, cross-school, smart-classroom, drone-education, supply-chain
+
+---
+Task ID: 4
+Agent: Super Z (Main)
+Task: Phase 2 — Build 10 brand-new Dev Portal features from scratch
+
+Work Log:
+- Built 10 new modules totaling 7,341 lines of production code
+- All modules use (app, pool, opts) pattern with _newModOpts bridge
+- Added 45+ table allowlists for new module tables
+- Registered all 10 in server.js with try/catch
+- Syntax check passed on all modules and server.js
+- Committed 2883a76, pushed after rebase → fb637bb
+
+Stage Summary:
+- 10 new modules: mfa-totp(930), rbac-manager(760), system-health(956), api-webhook-manager(706), gdpr-compliance(852), feature-flags(757), dashboard-builder(668), user-onboarding(723), announcement-system(321), data-archive(668)
+- server.js: 34,152 lines, 132+ active modules
+- Total upgrade: 34 new features/modules deployed across Phase 1+2

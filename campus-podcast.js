@@ -41,7 +41,7 @@ module.exports = function(app, pool, opts) {
   async function ensureTables() {
     const tables = [
       `CREATE TABLE IF NOT EXISTS podcast_channels (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         name VARCHAR(200) NOT NULL,
         slug VARCHAR(220),
@@ -50,24 +50,22 @@ module.exports = function(app, pool, opts) {
         category VARCHAR(100) DEFAULT 'general',
         author_name VARCHAR(150),
         owner_id INT,
-        is_public TINYINT(1) DEFAULT 1,
+        is_public SMALLINT DEFAULT 1,
         sort_order INT DEFAULT 0,
         episode_count INT DEFAULT 0,
         total_plays INT DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_tenant (tenant_id),
-        INDEX idx_slug (tenant_id, slug)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )`,
 
       `CREATE TABLE IF NOT EXISTS podcast_episodes (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         channel_id INT NOT NULL,
         title VARCHAR(300) NOT NULL,
         slug VARCHAR(320),
         description TEXT,
-        show_notes LONGTEXT,
+        show_notes TEXT,
         audio_url VARCHAR(500),
         audio_size BIGINT DEFAULT 0,
         duration_sec INT DEFAULT 0,
@@ -75,10 +73,10 @@ module.exports = function(app, pool, opts) {
         season_number INT,
         tags VARCHAR(500),
         category VARCHAR(100),
-        status ENUM('draft','scheduled','published','archived') DEFAULT 'draft',
-        scheduled_at DATETIME,
-        published_at DATETIME,
-        explicit TINYINT(1) DEFAULT 0,
+        status TEXT DEFAULT 'draft',
+        scheduled_at TIMESTAMPTZ,
+        published_at TIMESTAMPTZ,
+        explicit SMALLINT DEFAULT 0,
         chapter_data TEXT,
         waveform_data TEXT,
         play_count INT DEFAULT 0,
@@ -86,66 +84,54 @@ module.exports = function(app, pool, opts) {
         avg_listen_pct DECIMAL(5,2) DEFAULT 0,
         rating_avg DECIMAL(3,2) DEFAULT 0,
         rating_count INT DEFAULT 0,
-        featured TINYINT(1) DEFAULT 0,
+        featured SMALLINT DEFAULT 0,
         created_by INT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_tenant (tenant_id),
-        INDEX idx_channel (tenant_id, channel_id),
-        INDEX idx_status (tenant_id, status),
-        INDEX idx_published (tenant_id, published_at),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         FULLTEXT idx_search (title, description, show_notes, tags)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`,
+      )`,
 
       `CREATE TABLE IF NOT EXISTS podcast_listens (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         episode_id INT NOT NULL,
         user_id INT NOT NULL,
         listened_sec INT DEFAULT 0,
-        completed TINYINT(1) DEFAULT 0,
+        completed SMALLINT DEFAULT 0,
         pct_completed DECIMAL(5,2) DEFAULT 0,
         ip_address VARCHAR(45),
         user_agent VARCHAR(500),
-        listened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_tenant (tenant_id),
-        INDEX idx_episode (tenant_id, episode_id),
-        INDEX idx_user (tenant_id, user_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`,
+        listened_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )`,
 
       `CREATE TABLE IF NOT EXISTS podcast_comments (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         episode_id INT NOT NULL,
         user_id INT NOT NULL,
         user_name VARCHAR(150),
         user_role VARCHAR(50),
         comment_text TEXT NOT NULL,
-        rating TINYINT DEFAULT 0,
-        is_featured TINYINT(1) DEFAULT 0,
-        is_approved TINYINT(1) DEFAULT 1,
+        rating SMALLINT DEFAULT 0,
+        is_featured SMALLINT DEFAULT 0,
+        is_approved SMALLINT DEFAULT 1,
         parent_id INT DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_tenant (tenant_id),
-        INDEX idx_episode (tenant_id, episode_id),
-        INDEX idx_user (tenant_id, user_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )`,
 
       `CREATE TABLE IF NOT EXISTS podcast_subscriptions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         user_id INT NOT NULL,
         channel_id INT NOT NULL,
-        notification_enabled TINYINT(1) DEFAULT 1,
-        subscribed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY uk_user_channel (tenant_id, user_id, channel_id),
-        INDEX idx_tenant (tenant_id),
-        INDEX idx_user (tenant_id, user_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`,
+        notification_enabled SMALLINT DEFAULT 1,
+        subscribed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uk_user_channel UNIQUE (tenant_id, user_id, channel_id)
+      )`,
 
       `CREATE TABLE IF NOT EXISTS podcast_student_submissions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT NOT NULL,
         student_name VARCHAR(150),
@@ -154,17 +140,14 @@ module.exports = function(app, pool, opts) {
         description TEXT,
         audio_url VARCHAR(500),
         duration_sec INT DEFAULT 0,
-        status ENUM('pending','approved','rejected','revision') DEFAULT 'pending',
+        status TEXT DEFAULT 'pending',
         teacher_notes TEXT,
         reviewed_by INT,
-        reviewed_at DATETIME,
+        reviewed_at TIMESTAMPTZ,
         host_profile TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_tenant (tenant_id),
-        INDEX idx_student (tenant_id, student_id),
-        INDEX idx_status (tenant_id, status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )`
     ];
     for (const sql of tables) {
       try { await pool.query(sql); } catch(e) { /* table may already exist */ }

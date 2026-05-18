@@ -454,8 +454,6 @@ module.exports = function canteen(app, db, pool, renderPage, esc) {
       [tid, orderNum, customer_name.trim(), orderItems, totalAmount,
         payment_method || 'cash', notes || null]);
 
-    try { await global.trackRevenue('canteen_order', totalAmount, `Canteen order ${orderNum} by ${customer_name.trim()}`, orderNum); } catch(e) {}
-
     res.redirect(navUrl('/orders'));
   });
 

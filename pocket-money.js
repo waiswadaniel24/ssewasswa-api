@@ -179,10 +179,12 @@ module.exports = function(app, pool, opts) {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_tenant ON wallet_transactions(tenant_id, student_id);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_type ON wallet_transactions(tenant_id, type);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_date ON wallet_transactions(tenant_id, created_at);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_ws_account ON wallet_savings(tenant_id, account_id);`);
+    // Ensure student_id column exists (in case table was created without it)
+    try { await pool.query(`ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS student_id INT`); } catch(e) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_tenant ON wallet_transactions(tenant_id, student_id);`); } catch(e) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_type ON wallet_transactions(tenant_id, type);`); } catch(e) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_wt_date ON wallet_transactions(tenant_id, created_at);`); } catch(e) {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_ws_account ON wallet_savings(tenant_id, account_id);`); } catch(e) {}
   })().catch(e => console.error('pocket-money table init error:', e));
 
   // ── Helper: get or create wallet ──

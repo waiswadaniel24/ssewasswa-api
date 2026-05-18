@@ -740,24 +740,24 @@ module.exports = function notificationCenter(app, db, pool, renderPage, esc) {
       `SELECT id FROM users WHERE ${userWhere}`, params);
 
     if (users.length > 0) {
-      const notifVals = users.map((u, i) =>
-        `($1, $2, '${type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info'}', $3, $4, '📢', NULL, false, '${priority}', 'announcement', '{}')`
-      ).join(', ');
+      // Whitelist type and priority to prevent injection
+      const safeType = ['info', 'success', 'warning', 'error'].includes(type) ? type : 'info';
+      const safePriority = ['low', 'normal', 'high', 'urgent'].includes(priority) ? priority : 'normal';
 
       // Insert notifications in batches of 500 for safety
       const batchSize = 500;
       for (let i = 0; i < users.length; i += batchSize) {
         const batch = users.slice(i, i + batchSize);
+        // $1=tenant_id, $2=safeType, $3=title, $4=message, $5=safePriority, $6+ = user_ids
         const placeholders = batch.map((_, j) => {
-          const base = j * 2;
-          return `($1, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, '📢', NULL, false, $${base + 6}, 'announcement', '{}')`;
+          return `($1, $${j + 6}, $2, $3, $4, '📢', NULL, false, $5, 'announcement', '{}')`;
         }).join(', ');
 
-        const flatParams = batch.flatMap(u => [tenantId, u.id, title, message, priority]);
+        const userIds = batch.map(u => u.id);
         await pool.query(`
           INSERT INTO notifications (tenant_id, user_id, type, title, message, icon, action_url, is_read, priority, category, metadata)
           ${placeholders}`,
-          [tenantId, ...flatParams]);
+          [tenantId, safeType, title, message, safePriority, ...userIds]);
       }
     }
 

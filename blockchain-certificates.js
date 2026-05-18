@@ -164,7 +164,7 @@ module.exports = function(app, pool, opts) {
     try {
       // cert_templates
       await pool.query(`CREATE TABLE IF NOT EXISTS cert_templates (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         name VARCHAR(255) NOT NULL,
         category VARCHAR(50) DEFAULT 'academic',
@@ -174,14 +174,13 @@ module.exports = function(app, pool, opts) {
         logo_url TEXT,
         placeholder_fields JSON DEFAULT '{"student_name":true,"date":true,"description":true,"signatures":true}',
         qr_position VARCHAR(20) DEFAULT 'bottom-right',
-        is_default TINYINT(1) DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_ct_tenant (tenant_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+        is_default SMALLINT DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      `);
 
       // blockchain_certificates
       await pool.query(`CREATE TABLE IF NOT EXISTS blockchain_certificates (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT,
         template_id INT,
@@ -190,63 +189,53 @@ module.exports = function(app, pool, opts) {
         description TEXT,
         issue_date DATE,
         expiry_date DATE,
-        status ENUM('draft','approved','issued','revoked') DEFAULT 'draft',
-        revoked_at DATETIME,
+        status TEXT DEFAULT 'draft',
+        revoked_at TIMESTAMPTZ,
         revoke_reason TEXT,
         issued_by INT,
         signature_data JSON DEFAULT NULL,
         metadata JSON DEFAULT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_bc_tenant (tenant_id),
-        INDEX idx_bc_code (cert_code),
-        INDEX idx_bc_status (tenant_id, status),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         UNIQUE INDEX idx_bc_unique_code (cert_code)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      `);
 
       // blockchain_ledger
       await pool.query(`CREATE TABLE IF NOT EXISTS blockchain_ledger (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         cert_id INT NOT NULL,
         block_number INT NOT NULL,
         cert_hash VARCHAR(64) NOT NULL,
         previous_hash VARCHAR(64) NOT NULL,
-        timestamp DATETIME NOT NULL,
+        timestamp TIMESTAMPTZ NOT NULL,
         miner VARCHAR(255) DEFAULT 'system',
         nonce VARCHAR(20) DEFAULT '0',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_bl_tenant (tenant_id),
-        INDEX idx_bl_cert (cert_id),
-        INDEX idx_bl_block (tenant_id, block_number)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      `);
 
       // cert_requests
       await pool.query(`CREATE TABLE IF NOT EXISTS cert_requests (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT,
         request_type VARCHAR(100) DEFAULT 'general',
         description TEXT,
-        status ENUM('pending','approved','rejected') DEFAULT 'pending',
+        status TEXT DEFAULT 'pending',
         admin_notes TEXT,
         processed_by INT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        processed_at DATETIME,
-        INDEX idx_cr_tenant (tenant_id),
-        INDEX idx_cr_status (tenant_id, status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        processed_at TIMESTAMPTZ
+      `);
 
       // cert_verification_log
       await pool.query(`CREATE TABLE IF NOT EXISTS cert_verification_log (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         cert_id INT,
         verifier_ip VARCHAR(45),
-        verified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        is_valid TINYINT(1) DEFAULT 1,
-        INDEX idx_cvl_tenant (tenant_id),
-        INDEX idx_cvl_cert (cert_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+        verified_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        is_valid SMALLINT DEFAULT 1
+      `);
 
       console.log('[Blockchain-Certs] Migrations applied successfully');
     } catch (e) {
@@ -261,11 +250,11 @@ module.exports = function(app, pool, opts) {
     const user = req.session.user, tid = user.tenant_id;
 
     const [totalCerts, issuedCerts, revokedCerts, pendingReqs, chainBlocks] = await Promise.all([
-      pool.query('SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=?', [tid]),
-      pool.query("SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=? AND status='issued'", [tid]),
-      pool.query("SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=? AND status='revoked'", [tid]),
-      pool.query("SELECT COUNT(*) as cnt FROM cert_requests WHERE tenant_id=? AND status='pending'", [tid]),
-      pool.query('SELECT COUNT(*) as cnt FROM blockchain_ledger WHERE tenant_id=?', [tid]),
+      pool.query('SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=$1', [tid]),
+      pool.query("SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=$1 AND status='issued'", [tid]),
+      pool.query("SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=$1 AND status='revoked'", [tid]),
+      pool.query("SELECT COUNT(*) as cnt FROM cert_requests WHERE tenant_id=$1 AND status='pending'", [tid]),
+      pool.query('SELECT COUNT(*) as cnt FROM blockchain_ledger WHERE tenant_id=$1', [tid]),
     ]);
 
     const total = totalCerts[0][0].cnt;
@@ -275,7 +264,7 @@ module.exports = function(app, pool, opts) {
     const blocks = chainBlocks[0][0].cnt;
 
     const recentCerts = await pool.query(
-      'SELECT bc.*, t.name as tpl_name FROM blockchain_certificates bc LEFT JOIN cert_templates t ON t.id=bc.template_id WHERE bc.tenant_id=? ORDER BY bc.created_at DESC LIMIT 6',
+      'SELECT bc.*, t.name as tpl_name FROM blockchain_certificates bc LEFT JOIN cert_templates t ON t.id=bc.template_id WHERE bc.tenant_id=$1 ORDER BY bc.created_at DESC LIMIT 6',
       [tid]
     );
 
@@ -346,7 +335,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/blockchain-certs/templates', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const templates = await pool.query(
-      'SELECT t.*, (SELECT COUNT(*) FROM blockchain_certificates bc WHERE bc.template_id=t.id) as issued_count FROM cert_templates t WHERE t.tenant_id=? ORDER BY t.is_default DESC, t.name',
+      'SELECT t.*, (SELECT COUNT(*) FROM blockchain_certificates bc WHERE bc.template_id=t.id) as issued_count FROM cert_templates t WHERE t.tenant_id=$1 ORDER BY t.is_default DESC, t.name',
       [tid]
     );
 
@@ -486,17 +475,17 @@ module.exports = function(app, pool, opts) {
 
     if (id) {
       await pool.query(
-        `UPDATE cert_templates SET name=?, category=?, layout_style=?, background_color=?, border_style=?, logo_url=?, qr_position=?, placeholder_fields=?, is_default=? WHERE id=? AND tenant_id=?`,
+        `UPDATE cert_templates SET name=$1, category=$2, layout_style=$3, background_color=$4, border_style=$5, logo_url=$6, qr_position=$7, placeholder_fields=$8, is_default=$9 WHERE id=$10 AND tenant_id=$11`,
         [name.trim(), category||'academic', layout_style||'classic', background_color||'#ffffff', border_style||'double', logo_url||null, qr_position||'bottom-right', placeholders, is_default?1:0, id, tid]
       );
       audit({ action: 'update_cert_template', templateId: id, user });
       req.session.flash = { type: 'success', icon: '✅', msg: `Template "${name.trim()}" updated` };
     } else {
       if (is_default) {
-        await pool.query('UPDATE cert_templates SET is_default=0 WHERE tenant_id=?', [tid]);
+        await pool.query('UPDATE cert_templates SET is_default=0 WHERE tenant_id=$1', [tid]);
       }
       await pool.query(
-        `INSERT INTO cert_templates (tenant_id,name,category,layout_style,background_color,border_style,logo_url,qr_position,placeholder_fields,is_default) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO cert_templates (tenant_id,name,category,layout_style,background_color,border_style,logo_url,qr_position,placeholder_fields,is_default) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [tid, name.trim(), category||'academic', layout_style||'classic', background_color||'#ffffff', border_style||'double', logo_url||null, qr_position||'bottom-right', placeholders, is_default?1:0]
       );
       audit({ action: 'create_cert_template', name: name.trim(), user });
@@ -510,7 +499,7 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.delete('/school/blockchain-certs/templates/:id', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM cert_templates WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    await pool.query('DELETE FROM cert_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     audit({ action: 'delete_cert_template', templateId: req.params.id, user: req.session.user });
     res.json({ success: true });
   }));
@@ -518,7 +507,7 @@ module.exports = function(app, pool, opts) {
   // Template delete via POST (for form compatibility)
   app.post('/school/blockchain-certs/templates/:id/delete', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM cert_templates WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    await pool.query('DELETE FROM cert_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     audit({ action: 'delete_cert_template', templateId: req.params.id, user: req.session.user });
     req.session.flash = { type: 'success', icon: '🗑️', msg: 'Template deleted' };
     res.redirect('/school/blockchain-certs/templates');
@@ -527,7 +516,7 @@ module.exports = function(app, pool, opts) {
   // Template JSON endpoint (for edit form)
   app.get('/school/blockchain-certs/templates/:id/json', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const tpl = await pool.query('SELECT * FROM cert_templates WHERE id=? AND tenant_id=?', [req.params.id, tid]);
+    const tpl = await pool.query('SELECT * FROM cert_templates WHERE id=$1 AND tenant_id=$2', [req.params.id, tid]);
     if (!tpl[0][0]) return res.status(404).json({ error: 'Template not found' });
     res.json(tpl[0][0]);
   }));
@@ -538,12 +527,12 @@ module.exports = function(app, pool, opts) {
   app.get('/school/blockchain-certs/issue', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const preTpl = req.query.template || '';
-    const templates = await pool.query('SELECT * FROM cert_templates WHERE tenant_id=? ORDER BY is_default DESC, name', [tid]);
+    const templates = await pool.query('SELECT * FROM cert_templates WHERE tenant_id=$1 ORDER BY is_default DESC, name', [tid]);
 
     // Fetch students for selection
     let students = [];
     try {
-      students = await pool.query('SELECT id, name, email, class FROM students WHERE tenant_id=? ORDER BY name LIMIT 500', [tid]);
+      students = await pool.query('SELECT id, name, email, class FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 500', [tid]);
     } catch (e) { /* students table may not exist */ }
 
     const tplOpts = templates[0].map(t => `<option value="${t.id}" ${preTpl==t.id?'selected':''}>${esc(t.name)} (${esc(t.category)})</option>`).join('');
@@ -686,7 +675,7 @@ module.exports = function(app, pool, opts) {
     let issued = 0;
 
     // Get previous hash for blockchain chain
-    const lastBlock = await pool.query('SELECT block_number, cert_hash FROM blockchain_ledger WHERE tenant_id=? ORDER BY block_number DESC LIMIT 1', [tid]);
+    const lastBlock = await pool.query('SELECT block_number, cert_hash FROM blockchain_ledger WHERE tenant_id=$1 ORDER BY block_number DESC LIMIT 1', [tid]);
     let prevHash = '0000000000000000000000000000000000000000000000000000000000000000';
     let prevBlockNum = 0;
     if (lastBlock[0].length > 0) {
@@ -701,7 +690,7 @@ module.exports = function(app, pool, opts) {
 
       const result = await pool.query(
         `INSERT INTO blockchain_certificates (tenant_id, student_id, template_id, cert_code, title, description, issue_date, expiry_date, status, issued_by, signature_data)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [tid, student_id || null, template_id || null, certCode, title.trim(), description || null, iDate, eDate, 'issued', user.id, JSON.stringify(signatures)]
       );
 
@@ -717,7 +706,7 @@ module.exports = function(app, pool, opts) {
 
       await pool.query(
         `INSERT INTO blockchain_ledger (tenant_id, cert_id, block_number, cert_hash, previous_hash, timestamp, miner, nonce)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [tid, certId, prevBlockNum + 1, hash, prevHash, now(), user.name || 'admin', String(nonce)]
       );
 
@@ -753,7 +742,7 @@ module.exports = function(app, pool, opts) {
     let studentNames = [];
     if (batch_source === 'class' && batch_class) {
       try {
-        const rows = await pool.query('SELECT name FROM students WHERE tenant_id=? AND class=?', [tid, batch_class]);
+        const rows = await pool.query('SELECT name FROM students WHERE tenant_id=$1 AND class=$2', [tid, batch_class]);
         studentNames = rows[0].map(r => r.name);
       } catch (e) { /* fallback */ }
     }
@@ -763,7 +752,7 @@ module.exports = function(app, pool, opts) {
 
     const secret = process.env.BC_CERT_SECRET || 'blockchain-certs-salt-2024';
     let issued = 0;
-    const lastBlock = await pool.query('SELECT block_number, cert_hash FROM blockchain_ledger WHERE tenant_id=? ORDER BY block_number DESC LIMIT 1', [tid]);
+    const lastBlock = await pool.query('SELECT block_number, cert_hash FROM blockchain_ledger WHERE tenant_id=$1 ORDER BY block_number DESC LIMIT 1', [tid]);
     let prevHash = lastBlock[0].length > 0 ? lastBlock[0][0].cert_hash : '0'.repeat(64);
     let prevBlockNum = lastBlock[0].length > 0 ? lastBlock[0][0].block_number : 0;
 
@@ -771,13 +760,13 @@ module.exports = function(app, pool, opts) {
       const certCode = generateCertCode(tid);
       const result = await pool.query(
         `INSERT INTO blockchain_certificates (tenant_id, template_id, cert_code, title, description, issue_date, expiry_date, status, issued_by, signature_data)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [tid, template_id || null, certCode, title.trim(), description || null, batch_issue_date || today(), batch_expiry_date || null, 'issued', user.id, JSON.stringify(signatures)]
       );
       const certId = result[0].insertId;
       let nonce = 0, hash = '';
       do { hash = generateBlockHash({ certId, certCode, title, name }, prevHash, String(nonce), secret); nonce++; } while (!hash.startsWith('00'));
-      await pool.query('INSERT INTO blockchain_ledger (tenant_id,cert_id,block_number,cert_hash,previous_hash,timestamp,miner,nonce) VALUES (?,?,?,?,?,?,?,?)',
+      await pool.query('INSERT INTO blockchain_ledger (tenant_id,cert_id,block_number,cert_hash,previous_hash,timestamp,miner,nonce) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
         [tid, certId, prevBlockNum + 1, hash, prevHash, now(), user.name || 'admin', String(nonce)]);
       prevHash = hash; prevBlockNum++; issued++;
     }
@@ -875,7 +864,7 @@ module.exports = function(app, pool, opts) {
        FROM blockchain_certificates bc
        LEFT JOIN cert_templates t ON t.id=bc.template_id
        LEFT JOIN blockchain_ledger bl ON bl.cert_id=bc.id
-       WHERE bc.id=? AND bc.tenant_id=?`,
+       WHERE bc.id=$1 AND bc.tenant_id=$2`,
       [certId, tid]
     );
 
@@ -982,7 +971,7 @@ module.exports = function(app, pool, opts) {
        FROM blockchain_certificates bc
        LEFT JOIN cert_templates t ON t.id=bc.template_id
        LEFT JOIN blockchain_ledger bl ON bl.cert_id=bc.id
-       WHERE bc.id=? AND bc.tenant_id=?`, [certId, tid]
+       WHERE bc.id=$1 AND bc.tenant_id=$2`, [certId, tid]
     );
 
     if (!cert[0][0]) return res.status(404).send('Certificate not found');
@@ -1036,7 +1025,7 @@ module.exports = function(app, pool, opts) {
     const user = req.session.user, tid = user.tenant_id, certId = req.params.id;
     const { revoke_reason } = req.body;
 
-    const cert = await pool.query('SELECT * FROM blockchain_certificates WHERE id=? AND tenant_id=?', [certId, tid]);
+    const cert = await pool.query('SELECT * FROM blockchain_certificates WHERE id=$1 AND tenant_id=$2', [certId, tid]);
     if (!cert[0][0]) {
       req.session.flash = { type: 'error', msg: 'Certificate not found' };
       return res.redirect('/school/blockchain-certs/list');
@@ -1047,12 +1036,12 @@ module.exports = function(app, pool, opts) {
     }
 
     await pool.query(
-      "UPDATE blockchain_certificates SET status='revoked', revoked_at=?, revoke_reason=? WHERE id=? AND tenant_id=?",
+      "UPDATE blockchain_certificates SET status='revoked', revoked_at=$1, revoke_reason=$2 WHERE id=$3 AND tenant_id=$4",
       [now(), revoke_reason || 'No reason provided', certId, tid]
     );
 
     // Record revocation on blockchain
-    const lastBlock = await pool.query('SELECT block_number, cert_hash FROM blockchain_ledger WHERE tenant_id=? ORDER BY block_number DESC LIMIT 1', [tid]);
+    const lastBlock = await pool.query('SELECT block_number, cert_hash FROM blockchain_ledger WHERE tenant_id=$1 ORDER BY block_number DESC LIMIT 1', [tid]);
     const prevHash = lastBlock[0].length > 0 ? lastBlock[0][0].cert_hash : '0'.repeat(64);
     const prevBlockNum = lastBlock[0].length > 0 ? lastBlock[0][0].block_number : 0;
     const secret = process.env.BC_CERT_SECRET || 'blockchain-certs-salt-2024';
@@ -1063,7 +1052,7 @@ module.exports = function(app, pool, opts) {
     } while (!hash.startsWith('00'));
 
     await pool.query(
-      'INSERT INTO blockchain_ledger (tenant_id,cert_id,block_number,cert_hash,previous_hash,timestamp,miner,nonce) VALUES (?,?,?,?,?,?,?,?)',
+      'INSERT INTO blockchain_ledger (tenant_id,cert_id,block_number,cert_hash,previous_hash,timestamp,miner,nonce) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
       [tid, certId, prevBlockNum + 1, hash, prevHash, now(), user.name || 'admin', String(nonce)]
     );
 
@@ -1083,7 +1072,7 @@ module.exports = function(app, pool, opts) {
        FROM blockchain_certificates bc
        LEFT JOIN cert_templates t ON t.id=bc.template_id
        LEFT JOIN blockchain_ledger bl ON bl.cert_id=bc.id
-       WHERE bc.cert_code=?`, [certCode]
+       WHERE bc.cert_code=$1`, [certCode]
     );
 
     const verifyUrl = `${req.protocol}://${req.get('host')}/public/verify/${certCode}`;
@@ -1092,7 +1081,7 @@ module.exports = function(app, pool, opts) {
     if (cert[0].length > 0) {
       try {
         await pool.query(
-          'INSERT INTO cert_verification_log (tenant_id, cert_id, verifier_ip, is_valid) VALUES (?,?,?,?)',
+          'INSERT INTO cert_verification_log (tenant_id, cert_id, verifier_ip, is_valid) VALUES ($1,$2,$3,$4)',
           [cert[0][0].tenant_id, cert[0][0].id, req.ip || 'unknown', cert[0][0].status === 'issued' ? 1 : 0]
         );
       } catch (e) { /* log table may not exist for this tenant */ }
@@ -1222,7 +1211,7 @@ module.exports = function(app, pool, opts) {
        FROM blockchain_certificates bc
        LEFT JOIN cert_templates t ON t.id=bc.template_id
        LEFT JOIN blockchain_ledger bl ON bl.cert_id=bc.id
-       WHERE bc.tenant_id=? AND bc.status='issued'
+       WHERE bc.tenant_id=$1 AND bc.status='issued'
        ORDER BY bc.issue_date DESC LIMIT 50`,
       [tid]
     );
@@ -1268,7 +1257,7 @@ module.exports = function(app, pool, opts) {
   app.get('/school/blockchain-certs/requests', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
     const requests = await pool.query(
-      'SELECT cr.* FROM cert_requests cr WHERE cr.tenant_id=? ORDER BY cr.created_at DESC LIMIT 100',
+      'SELECT cr.* FROM cert_requests cr WHERE cr.tenant_id=$1 ORDER BY cr.created_at DESC LIMIT 100',
       [tid]
     );
 
@@ -1331,7 +1320,7 @@ module.exports = function(app, pool, opts) {
     const { request_type, description } = req.body;
 
     await pool.query(
-      'INSERT INTO cert_requests (tenant_id, student_id, request_type, description) VALUES (?,?,?,?)',
+      'INSERT INTO cert_requests (tenant_id, student_id, request_type, description) VALUES ($1,$2,$3,$4)',
       [tid, user.id || null, request_type || 'general', description || null]
     );
 
@@ -1349,7 +1338,7 @@ module.exports = function(app, pool, opts) {
 
     const status = action === 'reject' ? 'rejected' : 'approved';
     await pool.query(
-      'UPDATE cert_requests SET status=?, processed_by=?, processed_at=?, admin_notes=? WHERE id=? AND tenant_id=?',
+      'UPDATE cert_requests SET status=$1, processed_by=$2, processed_at=$3, admin_notes=$4 WHERE id=$5 AND tenant_id=$6',
       [status, user.id, now(), action === 'reject' ? 'Rejected by admin' : 'Approved', reqId, tid]
     );
 
@@ -1368,36 +1357,37 @@ module.exports = function(app, pool, opts) {
     const offset = (page - 1) * perPage;
 
     const [countResult, blocks] = await Promise.all([
-      pool.query('SELECT COUNT(*) as cnt FROM blockchain_ledger WHERE tenant_id=?', [tid]),
+      pool.query('SELECT COUNT(*) as cnt FROM blockchain_ledger WHERE tenant_id=$1', [tid]),
       pool.query(
         `SELECT bl.*, bc.title, bc.cert_code, bc.status as cert_status
          FROM blockchain_ledger bl
          LEFT JOIN blockchain_certificates bc ON bc.id=bl.cert_id
-         WHERE bl.tenant_id=? ORDER BY bl.block_number DESC LIMIT ${perPage} OFFSET ${offset}`,
-        [tid]
+         WHERE bl.tenant_id=$1 ORDER BY bl.block_number DESC LIMIT $2 OFFSET $3`,
+        [tid, perPage, offset]
       )
     ]);
 
-    const total = countResult[0][0].cnt;
+    const total = countResult.rows[0].cnt;
     const totalPages = Math.ceil(total / perPage);
 
     // Verify chain integrity
     const allBlocks = await pool.query(
-      'SELECT block_number, cert_hash, previous_hash FROM blockchain_ledger WHERE tenant_id=? ORDER BY block_number ASC',
+      'SELECT block_number, cert_hash, previous_hash FROM blockchain_ledger WHERE tenant_id=$1 ORDER BY block_number ASC',
       [tid]
     );
+    const ab = allBlocks.rows;
     let chainValid = true;
     let brokenAt = null;
-    for (let i = 1; i < allBlocks[0].length; i++) {
-      if (allBlocks[0][i].previous_hash !== allBlocks[0][i-1].cert_hash) {
+    for (let i = 1; i < ab.length; i++) {
+      if (ab[i].previous_hash !== ab[i-1].cert_hash) {
         chainValid = false;
-        brokenAt = allBlocks[0][i].block_number;
+        brokenAt = ab[i].block_number;
         break;
       }
     }
 
-    const chainHtml = blocks[0].map((b, idx) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap">
-      ${idx < blocks[0].length - 1 ? `<div class="bc-chain-link">🔗</div>` : '<div style="width:40px"></div>'}
+    const chainHtml = blocks.rows.map((b, idx) => `<div style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap">
+      ${idx < blocks.rows.length - 1 ? `<div class="bc-chain-link">🔗</div>` : '<div style="width:40px"></div>'}
       <div class="bc-chain-block">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span style="font-size:13px;font-weight:700;color:#1e3a5f">Block #${b.block_number}</span>
@@ -1444,11 +1434,11 @@ module.exports = function(app, pool, opts) {
     const user = req.session.user, tid = user.tenant_id;
 
     const [byMonth, byStatus, byCategory, verificationLogs, topVerified] = await Promise.all([
-      pool.query(`SELECT DATE_FORMAT(issue_date,'%Y-%m') as month, COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=? AND issue_date IS NOT NULL GROUP BY month ORDER BY month DESC LIMIT 12`, [tid]),
-      pool.query(`SELECT status, COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=? GROUP BY status`, [tid]),
-      pool.query(`SELECT t.category, COUNT(*) as cnt FROM blockchain_certificates bc LEFT JOIN cert_templates t ON t.id=bc.template_id WHERE bc.tenant_id=? GROUP BY t.category ORDER BY cnt DESC`, [tid]),
-      pool.query('SELECT COUNT(*) as cnt FROM cert_verification_log WHERE tenant_id=?', [tid]),
-      pool.query(`SELECT bc.title, bc.cert_code, COUNT(v.id) as verify_count FROM cert_verification_log v JOIN blockchain_certificates bc ON bc.id=v.cert_id WHERE bc.tenant_id=? GROUP BY bc.id ORDER BY verify_count DESC LIMIT 10`, [tid]),
+      pool.query(`SELECT TO_CHAR(issue_date, 'YYYY-MM') as month, COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=$1 AND issue_date IS NOT NULL GROUP BY month ORDER BY month DESC LIMIT 12`, [tid]),
+      pool.query(`SELECT status, COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=$1 GROUP BY status`, [tid]),
+      pool.query(`SELECT t.category, COUNT(*) as cnt FROM blockchain_certificates bc LEFT JOIN cert_templates t ON t.id=bc.template_id WHERE bc.tenant_id=$1 GROUP BY t.category ORDER BY cnt DESC`, [tid]),
+      pool.query('SELECT COUNT(*) as cnt FROM cert_verification_log WHERE tenant_id=$1', [tid]),
+      pool.query(`SELECT bc.title, bc.cert_code, COUNT(v.id) as verify_count FROM cert_verification_log v JOIN blockchain_certificates bc ON bc.id=v.cert_id WHERE bc.tenant_id=$1 GROUP BY bc.id ORDER BY verify_count DESC LIMIT 10`, [tid]),
     ]);
 
     // Monthly chart (simple bar chart with CSS)
@@ -1534,7 +1524,7 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.get('/school/blockchain-certs/settings', requireAuth, ah(async (req, res) => {
     const user = req.session.user, tid = user.tenant_id;
-    const templates = await pool.query('SELECT id,name,is_default FROM cert_templates WHERE tenant_id=? ORDER BY is_default DESC,name', [tid]);
+    const templates = await pool.query('SELECT id,name,is_default FROM cert_templates WHERE tenant_id=$1 ORDER BY is_default DESC,name', [tid]);
     const tplOpts = templates[0].map(t => `<option value="${t.id}" ${t.is_default?'selected':''}>${esc(t.name)}</option>`).join('');
 
     const html = BC_CSS + `<div style="max-width:700px;margin:0 auto">
@@ -1597,8 +1587,8 @@ module.exports = function(app, pool, opts) {
 
     // Set default template
     if (default_template) {
-      await pool.query('UPDATE cert_templates SET is_default=0 WHERE tenant_id=?', [tid]);
-      await pool.query('UPDATE cert_templates SET is_default=1 WHERE id=? AND tenant_id=?', [default_template, tid]);
+      await pool.query('UPDATE cert_templates SET is_default=0 WHERE tenant_id=$1', [tid]);
+      await pool.query('UPDATE cert_templates SET is_default=1 WHERE id=$1 AND tenant_id=$2', [default_template, tid]);
     }
 
     // Store settings in metadata or a settings table
@@ -1607,12 +1597,12 @@ module.exports = function(app, pool, opts) {
       await pool.query(`CREATE TABLE IF NOT EXISTS cert_settings (
         tenant_id INT PRIMARY KEY,
         settings JSON DEFAULT '{}',
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      `);
     } catch (e) { /* table may already exist */ }
 
     await pool.query(
-      `INSERT INTO cert_settings (tenant_id, settings, updated_at) VALUES (?,?,?) ON DUPLICATE KEY UPDATE settings=?, updated_at=?`,
+      `INSERT INTO cert_settings (tenant_id, settings, updated_at) VALUES ($1,$2,$3) ON DUPLICATE KEY UPDATE settings=$4, updated_at=$5`,
       [tid, JSON.stringify({ institution_name, seal_text, difficulty, auto_approve, verify_footer, email_template }), now(),
        JSON.stringify({ institution_name, seal_text, difficulty, auto_approve, verify_footer, email_template }), now()]
     );
@@ -1625,7 +1615,7 @@ module.exports = function(app, pool, opts) {
   // Purge revoked certificates
   app.post('/school/blockchain-certs/settings/purge-revoked', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    const result = await pool.query("DELETE FROM blockchain_certificates WHERE tenant_id=? AND status='revoked'", [tid]);
+    const result = await pool.query("DELETE FROM blockchain_certificates WHERE tenant_id=$1 AND status='revoked'", [tid]);
     const count = result[0].affectedRows;
     audit({ action: 'purge_revoked', count, user: req.session.user });
     req.session.flash = { type: 'success', icon: '🗑️', msg: `${count} revoked certificates purged` };
@@ -1635,7 +1625,7 @@ module.exports = function(app, pool, opts) {
   // Reset blockchain
   app.post('/school/blockchain-certs/settings/reset-chain', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
-    await pool.query('DELETE FROM blockchain_ledger WHERE tenant_id=?', [tid]);
+    await pool.query('DELETE FROM blockchain_ledger WHERE tenant_id=$1', [tid]);
     audit({ action: 'reset_blockchain', user: req.session.user });
     req.session.flash = { type: 'success', icon: '⛓️', msg: 'Blockchain ledger has been reset' };
     res.redirect('/school/blockchain-certs/settings');
@@ -1647,10 +1637,10 @@ module.exports = function(app, pool, opts) {
   app.get('/school/blockchain-certs/api/stats', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id;
     const [total, issued, revoked, blocks] = await Promise.all([
-      pool.query('SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=?', [tid]),
-      pool.query("SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=? AND status='issued'", [tid]),
-      pool.query("SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=? AND status='revoked'", [tid]),
-      pool.query('SELECT COUNT(*) as cnt FROM blockchain_ledger WHERE tenant_id=?', [tid]),
+      pool.query('SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=$1', [tid]),
+      pool.query("SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=$1 AND status='issued'", [tid]),
+      pool.query("SELECT COUNT(*) as cnt FROM blockchain_certificates WHERE tenant_id=$1 AND status='revoked'", [tid]),
+      pool.query('SELECT COUNT(*) as cnt FROM blockchain_ledger WHERE tenant_id=$1', [tid]),
     ]);
     res.json({
       total: total[0][0].cnt,
@@ -1665,7 +1655,7 @@ module.exports = function(app, pool, opts) {
   // ============================================================
   app.get('/school/blockchain-certs/:id/revoke', requireAuth, ah(async (req, res) => {
     const tid = req.session.user.tenant_id, certId = req.params.id;
-    const cert = await pool.query('SELECT id, cert_code, title, status FROM blockchain_certificates WHERE id=? AND tenant_id=?', [certId, tid]);
+    const cert = await pool.query('SELECT id, cert_code, title, status FROM blockchain_certificates WHERE id=$1 AND tenant_id=$2', [certId, tid]);
     if (!cert[0][0] || cert[0][0].status === 'revoked') return res.redirect('/school/blockchain-certs/' + certId);
 
     const c = cert[0][0];
@@ -1713,7 +1703,7 @@ module.exports = function(app, pool, opts) {
     }
     const revoke_reason = reasonArr.join(' — ') || 'No reason provided';
 
-    const cert = await pool.query('SELECT * FROM blockchain_certificates WHERE id=? AND tenant_id=?', [certId, tid]);
+    const cert = await pool.query('SELECT * FROM blockchain_certificates WHERE id=$1 AND tenant_id=$2', [certId, tid]);
     if (!cert[0][0]) {
       req.session.flash = { type: 'error', msg: 'Certificate not found' };
       return res.redirect('/school/blockchain-certs/list');
@@ -1724,12 +1714,12 @@ module.exports = function(app, pool, opts) {
     }
 
     await pool.query(
-      "UPDATE blockchain_certificates SET status='revoked', revoked_at=?, revoke_reason=? WHERE id=? AND tenant_id=?",
+      "UPDATE blockchain_certificates SET status='revoked', revoked_at=$1, revoke_reason=$2 WHERE id=$3 AND tenant_id=$4",
       [now(), revoke_reason, certId, tid]
     );
 
     // Record revocation on blockchain
-    const lastBlock = await pool.query('SELECT block_number, cert_hash FROM blockchain_ledger WHERE tenant_id=? ORDER BY block_number DESC LIMIT 1', [tid]);
+    const lastBlock = await pool.query('SELECT block_number, cert_hash FROM blockchain_ledger WHERE tenant_id=$1 ORDER BY block_number DESC LIMIT 1', [tid]);
     const prevHash = lastBlock[0].length > 0 ? lastBlock[0][0].cert_hash : '0'.repeat(64);
     const prevBlockNum = lastBlock[0].length > 0 ? lastBlock[0][0].block_number : 0;
     const secret = process.env.BC_CERT_SECRET || 'blockchain-certs-salt-2024';
@@ -1740,7 +1730,7 @@ module.exports = function(app, pool, opts) {
     } while (!hash.startsWith('00'));
 
     await pool.query(
-      'INSERT INTO blockchain_ledger (tenant_id,cert_id,block_number,cert_hash,previous_hash,timestamp,miner,nonce) VALUES (?,?,?,?,?,?,?,?)',
+      'INSERT INTO blockchain_ledger (tenant_id,cert_id,block_number,cert_hash,previous_hash,timestamp,miner,nonce) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
       [tid, certId, prevBlockNum + 1, hash, prevHash, now(), user.name || 'admin', String(nonce)]
     );
 

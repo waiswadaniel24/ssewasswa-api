@@ -1083,9 +1083,13 @@ Select language:
   }));
 
   // ═══════════════════════════════════════════════════════
-  //  8. POST /ussd/admin/tester — Handle Tester Input
+  //  8. POST /ussd/admin/tester — Handle Tester Input (requires auth + admin)
   // ═══════════════════════════════════════════════════════
-  app.post('/ussd/admin/tester', ah(async (req, res) => {
+  app.post('/ussd/admin/tester', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).json({ error: 'Admin access required' });
+    next();
+  }, ah(async (req, res) => {
     try {
       const { sessionId, phoneNumber, text, eventType, serviceCode } = req.body;
       if (!sessionId || !phoneNumber) {

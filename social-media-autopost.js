@@ -102,7 +102,7 @@ module.exports = function(app, pool, opts) {
   /* ───────── Database Tables ───────── */
   async function initTables() {
     await pool.query(`CREATE TABLE IF NOT EXISTS social_accounts (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       platform VARCHAR(50) NOT NULL,
       account_name VARCHAR(200),
@@ -110,101 +110,86 @@ module.exports = function(app, pool, opts) {
       refresh_token_encrypted TEXT,
       profile_url VARCHAR(500),
       avatar_url VARCHAR(500),
-      is_active TINYINT(1) DEFAULT 1,
-      connected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      last_used DATETIME,
-      INDEX idx_tenant (tenant_id),
-      INDEX idx_platform (platform)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      is_active BOOLEAN DEFAULT true,
+      connected_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      last_used TIMESTAMPTZ
+    `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS social_posts (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       account_id INT DEFAULT NULL,
       title VARCHAR(300),
       content TEXT,
-      media_urls JSON,
-      platforms JSON,
-      status ENUM('draft','scheduled','publishing','published','failed') DEFAULT 'draft',
-      scheduled_at DATETIME,
-      published_at DATETIME,
+      media_urls JSONB,
+      platforms JSONB,
+      status TEXT DEFAULT 'draft',
+      scheduled_at TIMESTAMPTZ,
+      published_at TIMESTAMPTZ,
       priority INT DEFAULT 0,
-      approval_status ENUM('none','pending','approved','rejected') DEFAULT 'none',
+      approval_status TEXT DEFAULT 'none',
       approved_by INT DEFAULT NULL,
       rejection_reason TEXT,
-      performance_data JSON,
+      performance_data JSONB,
       timezone VARCHAR(50) DEFAULT 'UTC',
       created_by INT DEFAULT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_tenant (tenant_id),
-      INDEX idx_status (status),
-      INDEX idx_scheduled (scheduled_at),
-      INDEX idx_approval (approval_status)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS post_templates (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       name VARCHAR(200) NOT NULL,
       category VARCHAR(100),
       content_template TEXT,
       media_placeholder VARCHAR(500),
-      platforms JSON,
-      hashtags JSON,
-      is_system TINYINT(1) DEFAULT 0,
+      platforms JSONB,
+      hashtags JSONB,
+      is_system BOOLEAN DEFAULT false,
       usage_count INT DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_tenant (tenant_id),
-      INDEX idx_category (category)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS social_post_rules (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       rule_name VARCHAR(200),
       trigger_type VARCHAR(100) NOT NULL,
-      trigger_config JSON,
+      trigger_config JSONB,
       template_id INT DEFAULT NULL,
-      platforms JSON,
-      is_active TINYINT(1) DEFAULT 1,
-      last_triggered DATETIME,
+      platforms JSONB,
+      is_active BOOLEAN DEFAULT true,
+      last_triggered TIMESTAMPTZ,
       run_count INT DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_tenant (tenant_id),
-      INDEX idx_trigger (trigger_type)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS social_hashtags (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       tag VARCHAR(200) NOT NULL,
       category VARCHAR(100),
       usage_count INT DEFAULT 0,
-      is_trending TINYINT(1) DEFAULT 0,
+      is_trending BOOLEAN DEFAULT false,
       trend_score DECIMAL(5,2) DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE KEY uk_tag_tenant (tenant_id, tag),
-      INDEX idx_tenant (tenant_id),
-      INDEX idx_category (category)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT uk_tag_tenant UNIQUE (tenant_id, tag)
+    `);
 
     await pool.query(`CREATE TABLE IF NOT EXISTS post_approvals (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       tenant_id INT NOT NULL DEFAULT 0,
       post_id INT NOT NULL,
       approver_id INT,
-      status ENUM('pending','approved','rejected') DEFAULT 'pending',
+      status TEXT DEFAULT 'pending',
       comments TEXT,
-      decided_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_tenant (tenant_id),
-      INDEX idx_post (post_id),
-      INDEX idx_status (status)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      decided_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    `);
 
     // Seed system templates
-    const [rows] = await pool.query(`SELECT COUNT(*) as c FROM post_templates WHERE tenant_id=0 AND is_system=1`);
+    const { rows } = await pool.query(`SELECT COUNT(*) as c FROM post_templates WHERE tenant_id=0 AND is_system=true`);
     if (rows[0].c === 0) {
       const sysTemplates = [
         { name: 'Exam Results Announcement', category: 'academics', content_template: '🎓 Proud to announce our outstanding exam results!\n\n🏆 Topper: {{topper_name}} — {{score}}%\n📊 Class Average: {{class_avg}}%\n💡 Students scoring above 90%: {{distinction_count}}\n\nCongratulations to all our brilliant students! Keep shining! ✨', platforms: JSON.stringify(['facebook','twitter','instagram','linkedin']), hashtags: JSON.stringify(['#ExamResults','#ProudSchool','#StudentSuccess','#AcademicExcellence']) },
@@ -217,33 +202,33 @@ module.exports = function(app, pool, opts) {
         { name: 'Parent-Teacher Meeting', category: 'events', content_template: '🤝 Parent-Teacher Meeting\n\n📅 Date: {{date}}\n⏰ Time: {{time}}\n📍 Venue: {{venue}}\n\nWe cordially invite all parents to discuss their child\'s progress. Your involvement matters!\n\nPlease bring the progress report card. See you there! 📚', platforms: JSON.stringify(['facebook','twitter']), hashtags: JSON.stringify(['#PTM','#ParentTeacherMeeting','#SchoolCommunication']) },
       ];
       for (const t of sysTemplates) {
-        await pool.query(`INSERT INTO post_templates (tenant_id,name,category,content_template,platforms,hashtags,is_system) VALUES (0,?,?,?,?,?,1)`,
+        await pool.query(`INSERT INTO post_templates (tenant_id,name,category,content_template,platforms,hashtags,is_system) VALUES (0,$1,$2,$3,$4,$5,true)`,
           [t.name, t.category, t.content_template, t.platforms, t.hashtags]);
       }
     }
 
     // Seed trending education hashtags
-    const [htagRows] = await pool.query(`SELECT COUNT(*) as c FROM social_hashtags WHERE tenant_id=0`);
+    const { rows: htagRows } = await pool.query(`SELECT COUNT(*) as c FROM social_hashtags WHERE tenant_id=0`);
     if (htagRows[0].c === 0) {
       const htags = [
-        { tag:'#Education', category:'general', is_trending:1, trend_score:95 },
-        { tag:'#SchoolLife', category:'school', is_trending:1, trend_score:88 },
-        { tag:'#StudentSuccess', category:'achievement', is_trending:1, trend_score:82 },
-        { tag:'#Learning', category:'general', is_trending:0, trend_score:78 },
-        { tag:'#EdChat', category:'general', is_trending:1, trend_score:91 },
-        { tag:'#FutureLeaders', category:'achievement', is_trending:0, trend_score:72 },
-        { tag:'#TeachersOfInstagram', category:'staff', is_trending:1, trend_score:86 },
-        { tag:'#BackToSchool', category:'seasonal', is_trending:0, trend_score:65 },
-        { tag:'#STEM', category:'academics', is_trending:1, trend_score:84 },
-        { tag:'#Classroom', category:'general', is_trending:0, trend_score:70 },
-        { tag:'#ProudSchool', category:'school', is_trending:0, trend_score:76 },
-        { tag:'#SchoolEvents', category:'events', is_trending:0, trend_score:68 },
-        { tag:'#DigitalLearning', category:'general', is_trending:1, trend_score:80 },
-        { tag:'#CodingInSchool', category:'academics', is_trending:1, trend_score:77 },
-        { tag:'#Parenting', category:'general', is_trending:0, trend_score:73 },
+        { tag:'#Education', category:'general', is_trending:true, trend_score:95 },
+        { tag:'#SchoolLife', category:'school', is_trending:true, trend_score:88 },
+        { tag:'#StudentSuccess', category:'achievement', is_trending:true, trend_score:82 },
+        { tag:'#Learning', category:'general', is_trending:false, trend_score:78 },
+        { tag:'#EdChat', category:'general', is_trending:true, trend_score:91 },
+        { tag:'#FutureLeaders', category:'achievement', is_trending:false, trend_score:72 },
+        { tag:'#TeachersOfInstagram', category:'staff', is_trending:true, trend_score:86 },
+        { tag:'#BackToSchool', category:'seasonal', is_trending:false, trend_score:65 },
+        { tag:'#STEM', category:'academics', is_trending:true, trend_score:84 },
+        { tag:'#Classroom', category:'general', is_trending:false, trend_score:70 },
+        { tag:'#ProudSchool', category:'school', is_trending:false, trend_score:76 },
+        { tag:'#SchoolEvents', category:'events', is_trending:false, trend_score:68 },
+        { tag:'#DigitalLearning', category:'general', is_trending:true, trend_score:80 },
+        { tag:'#CodingInSchool', category:'academics', is_trending:true, trend_score:77 },
+        { tag:'#Parenting', category:'general', is_trending:false, trend_score:73 },
       ];
       for (const h of htags) {
-        await pool.query(`INSERT INTO social_hashtags (tenant_id,tag,category,usage_count,is_trending,trend_score) VALUES (0,?,?,0,?,?)`,
+        await pool.query(`INSERT INTO social_hashtags (tenant_id,tag,category,usage_count,is_trending,trend_score) VALUES (0,$1,$2,0,$3,$4)`,
           [h.tag, h.category, h.is_trending, h.trend_score]);
       }
     }
@@ -254,12 +239,12 @@ module.exports = function(app, pool, opts) {
   /* ───────── Route: Dashboard ───────── */
   app.get('/school/social-media', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [accounts] = await pool.query(`SELECT * FROM social_accounts WHERE tenant_id=? AND is_active=1`, [tid]);
-    const [upcoming] = await pool.query(`SELECT * FROM social_posts WHERE tenant_id=? AND status='scheduled' AND scheduled_at >= NOW() ORDER BY scheduled_at ASC LIMIT 10`, [tid]);
-    const [recent] = await pool.query(`SELECT * FROM social_posts WHERE tenant_id=? AND status='published' ORDER BY published_at DESC LIMIT 5`, [tid]);
-    const [[stats]] = await pool.query(`SELECT COUNT(*) as total, SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) as published, SUM(CASE WHEN status='scheduled' THEN 1 ELSE 0 END) as scheduled, SUM(CASE WHEN status='draft' THEN 1 ELSE 0 END) as drafts, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed FROM social_posts WHERE tenant_id=?`, [tid]);
-    const [pendingApprovals] = await pool.query(`SELECT COUNT(*) as c FROM social_posts WHERE tenant_id=? AND approval_status='pending'`, [tid]);
-    const [activeRules] = await pool.query(`SELECT COUNT(*) as c FROM social_post_rules WHERE tenant_id=? AND is_active=1`, [tid]);
+    const { rows: accounts } = await pool.query(`SELECT * FROM social_accounts WHERE tenant_id=$1 AND is_active=true`, [tid]);
+    const { rows: upcoming } = await pool.query(`SELECT * FROM social_posts WHERE tenant_id=$1 AND status='scheduled' AND scheduled_at >= NOW() ORDER BY scheduled_at ASC LIMIT 10`, [tid]);
+    const { rows: recent } = await pool.query(`SELECT * FROM social_posts WHERE tenant_id=$1 AND status='published' ORDER BY published_at DESC LIMIT 5`, [tid]);
+    const { rows: [stats] } = await pool.query(`SELECT COUNT(*) as total, SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) as published, SUM(CASE WHEN status='scheduled' THEN 1 ELSE 0 END) as scheduled, SUM(CASE WHEN status='draft' THEN 1 ELSE 0 END) as drafts, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed FROM social_posts WHERE tenant_id=$1`, [tid]);
+    const { rows: pendingApprovals } = await pool.query(`SELECT COUNT(*) as c FROM social_posts WHERE tenant_id=$1 AND approval_status='pending'`, [tid]);
+    const { rows: activeRules } = await pool.query(`SELECT COUNT(*) as c FROM social_post_rules WHERE tenant_id=$1 AND is_active=true`, [tid]);
 
     let upcomingHTML = '';
     if (upcoming.length === 0) {
@@ -333,7 +318,7 @@ module.exports = function(app, pool, opts) {
   /* ───────── Route: Social Accounts ───────── */
   app.get('/school/social-media/accounts', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [accounts] = await pool.query(`SELECT * FROM social_accounts WHERE tenant_id=? ORDER BY platform, is_active DESC`, [tid]);
+    const { rows: accounts } = await pool.query(`SELECT * FROM social_accounts WHERE tenant_id=$1 ORDER BY platform, is_active DESC`, [tid]);
 
     let tableHTML = '';
     if (accounts.length === 0) {
@@ -399,7 +384,7 @@ module.exports = function(app, pool, opts) {
     if (!platform || !account_name || !access_token) return res.status(400).send('Platform, account name, and access token are required.');
     const encToken = simpleEncrypt(access_token);
     const encRefresh = simpleEncrypt(refresh_token || '');
-    await pool.query(`INSERT INTO social_accounts (tenant_id, platform, account_name, access_token_encrypted, refresh_token_encrypted, profile_url) VALUES (?,?,?,?,?,?)`,
+    await pool.query(`INSERT INTO social_accounts (tenant_id, platform, account_name, access_token_encrypted, refresh_token_encrypted, profile_url) VALUES ($1,$2,$3,$4,$5,$6)`,
       [tid, platform, account_name, encToken, encRefresh, profile_url || null]);
     audit(req, 'social_account_connect', { platform, account_name });
     res.redirect('/school/social-media/accounts');
@@ -407,7 +392,7 @@ module.exports = function(app, pool, opts) {
 
   app.delete('/school/social-media/accounts/:id', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    await pool.query(`DELETE FROM social_accounts WHERE id=? AND tenant_id=?`, [req.params.id, tid]);
+    await pool.query(`DELETE FROM social_accounts WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     audit(req, 'social_account_disconnect', { account_id: req.params.id });
     res.redirect('/school/social-media/accounts');
   }));
@@ -415,14 +400,14 @@ module.exports = function(app, pool, opts) {
   app.post('/school/social-media/accounts/:id/toggle', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
     const { is_active } = req.body;
-    await pool.query(`UPDATE social_accounts SET is_active=? WHERE id=? AND tenant_id=?`, [is_active ? 1 : 0, req.params.id, tid]);
+    await pool.query(`UPDATE social_accounts SET is_active=$1 WHERE id=$2 AND tenant_id=$3`, [is_active ? true : false, req.params.id, tid]);
     res.json({ ok: true });
   }));
 
   // Handle DELETE from form (method override)
   app.post('/school/social-media/accounts/:id/delete', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    await pool.query(`DELETE FROM social_accounts WHERE id=? AND tenant_id=?`, [req.params.id, tid]);
+    await pool.query(`DELETE FROM social_accounts WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     audit(req, 'social_account_disconnect', { account_id: req.params.id });
     res.redirect('/school/social-media/accounts');
   }));
@@ -430,14 +415,14 @@ module.exports = function(app, pool, opts) {
   /* ───────── Route: Post Composer ───────── */
   app.get('/school/social-media/compose', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [accounts] = await pool.query(`SELECT * FROM social_accounts WHERE tenant_id=? AND is_active=1`, [tid]);
-    const [templates] = await pool.query(`SELECT id, name, category FROM post_templates WHERE (tenant_id=0 OR tenant_id=?) AND is_system=1 ORDER BY category, name`, [tid]);
-    const [customTemplates] = await pool.query(`SELECT id, name, category FROM post_templates WHERE tenant_id=? AND is_system=0 ORDER BY name`, [tid]);
-    const [hashtags] = await pool.query(`SELECT tag, is_trending FROM social_hashtags WHERE tenant_id IN (0,?) ORDER BY usage_count DESC LIMIT 50`, [tid]);
+    const { rows: accounts } = await pool.query(`SELECT * FROM social_accounts WHERE tenant_id=$1 AND is_active=true`, [tid]);
+    const { rows: templates } = await pool.query(`SELECT id, name, category FROM post_templates WHERE (tenant_id=0 OR tenant_id=$1) AND is_system=true ORDER BY category, name`, [tid]);
+    const { rows: customTemplates } = await pool.query(`SELECT id, name, category FROM post_templates WHERE tenant_id=$1 AND is_system=false ORDER BY name`, [tid]);
+    const { rows: hashtags } = await pool.query(`SELECT tag, is_trending FROM social_hashtags WHERE tenant_id IN (0,$1) ORDER BY usage_count DESC LIMIT 50`, [tid]);
 
     let editData = null;
     if (req.query.edit) {
-      const [rows] = await pool.query(`SELECT * FROM social_posts WHERE id=? AND tenant_id=?`, [req.query.edit, tid]);
+      const { rows } = await pool.query(`SELECT * FROM social_posts WHERE id=$1 AND tenant_id=$2`, [req.query.edit, tid]);
       if (rows.length) editData = rows[0];
     }
 
@@ -573,9 +558,9 @@ module.exports = function(app, pool, opts) {
     const isCustom = req.query.custom === '1';
     let row;
     if (isCustom) {
-      [row] = await pool.query(`SELECT * FROM post_templates WHERE id=? AND tenant_id=?`, [req.params.id, tid]);
+      row = (await pool.query(`SELECT * FROM post_templates WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid])).rows;
     } else {
-      [row] = await pool.query(`SELECT * FROM post_templates WHERE id=? AND (tenant_id=0 OR tenant_id=?)`, [req.params.id, tid]);
+      row = (await pool.query(`SELECT * FROM post_templates WHERE id=$1 AND (tenant_id=0 OR tenant_id=$2)`, [req.params.id, tid])).rows;
     }
     if (!row.length) return res.json({ content: '', hashtags: [] });
     const t = row[0];
@@ -593,21 +578,21 @@ module.exports = function(app, pool, opts) {
     const hashtagsArr = (hashtags || '').split(' ').filter(h => h.startsWith('#'));
 
     if (post_id) {
-      await pool.query(`UPDATE social_posts SET title=?, content=?, media_urls=?, platforms=?, priority=?, timezone=?, status=?, approval_status=?, updated_at=? WHERE id=? AND tenant_id=?`,
+      await pool.query(`UPDATE social_posts SET title=$1, content=$2, media_urls=$3, platforms=$4, priority=$5, timezone=$6, status=$7, approval_status=$8, updated_at=$9 WHERE id=$10 AND tenant_id=$11`,
         [title, content, JSON.stringify(media), JSON.stringify(platformArr), priority || 0, timezone || 'UTC', action === 'draft' ? 'draft' : 'draft', 'none', now(), post_id, tid]);
       audit(req, 'social_post_update', { post_id, action });
     } else {
       const status = action === 'publish' ? 'published' : (action === 'submit_approval' ? 'draft' : 'draft');
       const approvalStatus = action === 'submit_approval' ? 'pending' : 'none';
-      const [result] = await pool.query(`INSERT INTO social_posts (tenant_id, title, content, media_urls, platforms, status, priority, timezone, created_by, approval_status, published_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      const { rows: [result] } = await pool.query(`INSERT INTO social_posts (tenant_id, title, content, media_urls, platforms, status, priority, timezone, created_by, approval_status, published_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
         [tid, title, content, JSON.stringify(media), JSON.stringify(platformArr), status, priority || 0, timezone || 'UTC', req.session.user?.id || null, approvalStatus, action === 'publish' ? now() : null]);
 
       if (action === 'publish') {
-        await pool.query(`UPDATE social_posts SET published_at=? WHERE id=?`, [now(), result.insertId]);
+        await pool.query(`UPDATE social_posts SET published_at=$1 WHERE id=$2`, [now(), result.id]);
       }
 
       if (action === 'submit_approval') {
-        await pool.query(`INSERT INTO post_approvals (tenant_id, post_id, approver_id, status) VALUES (?,?,NULL,'pending')`, [tid, result.insertId]);
+        await pool.query(`INSERT INTO post_approvals (tenant_id, post_id, approver_id, status) VALUES ($1,$2,NULL,'pending')`, [tid, result.id]);
       }
 
       audit(req, 'social_post_create', { status: action, platforms: platformArr });
@@ -620,7 +605,7 @@ module.exports = function(app, pool, opts) {
     const { post_id } = req.body;
     if (!post_id) return res.status(400).send('Post ID required');
 
-    const [posts] = await pool.query(`SELECT * FROM social_posts WHERE id=? AND tenant_id=?`, [post_id, tid]);
+    const { rows: posts } = await pool.query(`SELECT * FROM social_posts WHERE id=$1 AND tenant_id=$2`, [post_id, tid]);
     if (!posts.length) return res.status(404).send('Post not found');
     const post = posts[0];
 
@@ -633,7 +618,7 @@ module.exports = function(app, pool, opts) {
       results[p] = { status: 'success', published_at: now() };
     }
 
-    await pool.query(`UPDATE social_posts SET status='published', published_at=?, performance_data=? WHERE id=? AND tenant_id=?`,
+    await pool.query(`UPDATE social_posts SET status='published', published_at=$1, performance_data=$2 WHERE id=$3 AND tenant_id=$4`,
       [now(), JSON.stringify({ ...results, initial_reach: Math.floor(Math.random() * 500) + 50 }), post_id, tid]);
 
     audit(req, 'social_post_publish', { post_id, platforms });
@@ -652,7 +637,7 @@ module.exports = function(app, pool, opts) {
 
     const platformArr = Array.isArray(platforms) ? platforms : (platforms ? [platforms] : []);
 
-    await pool.query(`INSERT INTO social_posts (tenant_id, title, content, media_urls, platforms, status, scheduled_at, priority, timezone, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    await pool.query(`INSERT INTO social_posts (tenant_id, title, content, media_urls, platforms, status, scheduled_at, priority, timezone, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [tid, title, content, JSON.stringify(media), JSON.stringify(platformArr), 'scheduled', scheduled_at, priority || 0, timezone || 'UTC', req.session.user?.id || null]);
 
     audit(req, 'social_post_schedule', { scheduled_at, platforms: platformArr });
@@ -662,7 +647,7 @@ module.exports = function(app, pool, opts) {
   /* ───────── Route: Scheduled Posts Queue ───────── */
   app.get('/school/social-media/scheduled', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [posts] = await pool.query(`SELECT p.*, GROUP_CONCAT(sa.platform) as acct_platforms FROM social_posts p LEFT JOIN social_accounts sa ON sa.id=p.account_id AND sa.tenant_id=p.tenant_id WHERE p.tenant_id=? AND p.status='scheduled' ORDER BY p.scheduled_at ASC`, [tid]);
+    const { rows: posts } = await pool.query(`SELECT p.*, STRING_AGG(sa.platform, ',') as acct_platforms FROM social_posts p LEFT JOIN social_accounts sa ON sa.id=p.account_id AND sa.tenant_id=p.tenant_id WHERE p.tenant_id=$1 AND p.status='scheduled' GROUP BY p.id ORDER BY p.scheduled_at ASC`, [tid]);
 
     let tableHTML = '';
     if (posts.length === 0) {
@@ -728,27 +713,27 @@ module.exports = function(app, pool, opts) {
     const tid = TID(req);
     const { scheduled_at } = req.body;
     if (!scheduled_at) return res.status(400).send('Date required');
-    await pool.query(`UPDATE social_posts SET scheduled_at=? WHERE id=? AND tenant_id=? AND status='scheduled'`, [scheduled_at, req.params.id, tid]);
+    await pool.query(`UPDATE social_posts SET scheduled_at=$1 WHERE id=$2 AND tenant_id=$3 AND status='scheduled'`, [scheduled_at, req.params.id, tid]);
     audit(req, 'social_post_reschedule', { post_id: req.params.id, scheduled_at });
     res.json({ ok: true });
   }));
 
   app.post('/school/social-media/scheduled/:id', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    await pool.query(`DELETE FROM social_posts WHERE id=? AND tenant_id=? AND status='scheduled'`, [req.params.id, tid]);
+    await pool.query(`DELETE FROM social_posts WHERE id=$1 AND tenant_id=$2 AND status='scheduled'`, [req.params.id, tid]);
     audit(req, 'social_post_cancel', { post_id: req.params.id });
     res.redirect('/school/social-media/scheduled');
   }));
 
   app.post('/school/social-media/scheduled/:id/publish', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [posts] = await pool.query(`SELECT * FROM social_posts WHERE id=? AND tenant_id=? AND status='scheduled'`, [req.params.id, tid]);
+    const { rows: posts } = await pool.query(`SELECT * FROM social_posts WHERE id=$1 AND tenant_id=$2 AND status='scheduled'`, [req.params.id, tid]);
     if (!posts.length) return res.redirect('/school/social-media/scheduled');
     const post = posts[0];
     const platforms = JSON.parse(post.platforms || '[]');
     const results = {};
     for (const p of platforms) results[p] = { status: 'success', published_at: now() };
-    await pool.query(`UPDATE social_posts SET status='published', published_at=?, performance_data=? WHERE id=? AND tenant_id=?`,
+    await pool.query(`UPDATE social_posts SET status='published', published_at=$1, performance_data=$2 WHERE id=$3 AND tenant_id=$4`,
       [now(), JSON.stringify({ ...results, initial_reach: Math.floor(Math.random() * 500) + 50 }), req.params.id, tid]);
     audit(req, 'social_post_publish_now', { post_id: req.params.id });
     res.redirect('/school/social-media/history');
@@ -757,8 +742,8 @@ module.exports = function(app, pool, opts) {
   /* ───────── Route: Post Templates ───────── */
   app.get('/school/social-media/templates', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [systemTemplates] = await pool.query(`SELECT * FROM post_templates WHERE (tenant_id=0 OR tenant_id=?) AND is_system=1 ORDER BY category, name`, [tid]);
-    const [customTemplates] = await pool.query(`SELECT * FROM post_templates WHERE tenant_id=? AND is_system=0 ORDER BY name`, [tid]);
+    const { rows: systemTemplates } = await pool.query(`SELECT * FROM post_templates WHERE (tenant_id=0 OR tenant_id=$1) AND is_system=true ORDER BY category, name`, [tid]);
+    const { rows: customTemplates } = await pool.query(`SELECT * FROM post_templates WHERE tenant_id=$1 AND is_system=false ORDER BY name`, [tid]);
     const categories = [...new Set([...systemTemplates, ...customTemplates].map(t => t.category).filter(Boolean))];
 
     function renderTemplateCard(t) {
@@ -834,7 +819,7 @@ module.exports = function(app, pool, opts) {
     const { name, category, content_template, hashtags, platforms } = req.body;
     const platformArr = Array.isArray(platforms) ? platforms : (platforms ? [platforms] : []);
     const hashtagArr = (hashtags || '').split(',').map(h => h.trim()).filter(Boolean);
-    await pool.query(`INSERT INTO post_templates (tenant_id, name, category, content_template, platforms, hashtags, is_system) VALUES (?,?,?,?,?,?,0)`,
+    await pool.query(`INSERT INTO post_templates (tenant_id, name, category, content_template, platforms, hashtags, is_system) VALUES ($1,$2,$3,$4,$5,$6,false)`,
       [tid, name, category || 'general', content_template, JSON.stringify(platformArr), JSON.stringify(hashtagArr)]);
     audit(req, 'template_create', { name, category });
     res.redirect('/school/social-media/templates');
@@ -842,7 +827,7 @@ module.exports = function(app, pool, opts) {
 
   app.delete('/school/social-media/templates/:id', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    await pool.query(`DELETE FROM post_templates WHERE id=? AND tenant_id=? AND is_system=0`, [req.params.id, tid]);
+    await pool.query(`DELETE FROM post_templates WHERE id=$1 AND tenant_id=$2 AND is_system=false`, [req.params.id, tid]);
     res.json({ ok: true });
   }));
 
@@ -854,7 +839,7 @@ module.exports = function(app, pool, opts) {
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = `${year}-${String(month).padStart(2,'0')}-31`;
 
-    const [posts] = await pool.query(`SELECT id, title, content, platforms, status, scheduled_at, published_at, priority FROM social_posts WHERE tenant_id=? AND ((status='scheduled' AND scheduled_at BETWEEN ? AND ?) OR (status='published' AND published_at BETWEEN ? AND ?))`, [tid, startDate, endDate, startDate, endDate]);
+    const { rows: posts } = await pool.query(`SELECT id, title, content, platforms, status, scheduled_at, published_at, priority FROM social_posts WHERE tenant_id=$1 AND ((status='scheduled' AND scheduled_at BETWEEN $2 AND $3) OR (status='published' AND published_at BETWEEN $4 AND $5))`, [tid, startDate, endDate, startDate, endDate]);
 
     const daysInMonth = new Date(year, month, 0).getDate();
     const firstDay = new Date(year, month - 1, 1).getDay();
@@ -938,15 +923,15 @@ module.exports = function(app, pool, opts) {
     const tid = TID(req);
     const date = req.query.date;
     if (!date) return res.json([]);
-    const [posts] = await pool.query(`SELECT id, title, content, platforms, status, scheduled_at, published_at FROM social_posts WHERE tenant_id=? AND ((status='scheduled' AND DATE(scheduled_at)=?) OR (status='published' AND DATE(published_at)=?)) ORDER BY scheduled_at, published_at`, [tid, date, date]);
+    const { rows: posts } = await pool.query(`SELECT id, title, content, platforms, status, scheduled_at, published_at FROM social_posts WHERE tenant_id=$1 AND ((status='scheduled' AND DATE(scheduled_at)=$2) OR (status='published' AND DATE(published_at)=$3)) ORDER BY scheduled_at, published_at`, [tid, date, date]);
     res.json(posts);
   }));
 
   /* ───────── Route: Approvals ───────── */
   app.get('/school/social-media/approvals', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [pendingPosts] = await pool.query(`SELECT p.*, a.comments as approval_comments, a.id as approval_id FROM social_posts p LEFT JOIN post_approvals a ON a.post_id=p.id AND a.tenant_id=p.tenant_id WHERE p.tenant_id=? AND p.approval_status='pending' ORDER BY p.created_at DESC`, [tid]);
-    const [recentDecisions] = await pool.query(`SELECT p.title, p.content, p.platforms, p.status, a.status as approval_status, a.comments, a.decided_at FROM post_approvals a JOIN social_posts p ON p.id=a.post_id AND p.tenant_id=a.tenant_id WHERE a.tenant_id=? AND a.status IN ('approved','rejected') ORDER BY a.decided_at DESC LIMIT 10`, [tid]);
+    const { rows: pendingPosts } = await pool.query(`SELECT p.*, a.comments as approval_comments, a.id as approval_id FROM social_posts p LEFT JOIN post_approvals a ON a.post_id=p.id AND a.tenant_id=p.tenant_id WHERE p.tenant_id=$1 AND p.approval_status='pending' ORDER BY p.created_at DESC`, [tid]);
+    const { rows: recentDecisions } = await pool.query(`SELECT p.title, p.content, p.platforms, p.status, a.status as approval_status, a.comments, a.decided_at FROM post_approvals a JOIN social_posts p ON p.id=a.post_id AND p.tenant_id=a.tenant_id WHERE a.tenant_id=$1 AND a.status IN ('approved','rejected') ORDER BY a.decided_at DESC LIMIT 10`, [tid]);
 
     let pendingHTML = '';
     if (pendingPosts.length === 0) {
@@ -1006,21 +991,21 @@ module.exports = function(app, pool, opts) {
     const { comments } = req.body;
     // Find the post via approval or direct
     let post;
-    const [approvalRows] = await pool.query(`SELECT * FROM post_approvals WHERE id=? AND tenant_id=?`, [req.params.id, tid]);
+    const { rows: approvalRows } = await pool.query(`SELECT * FROM post_approvals WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     if (approvalRows.length) {
-      const [postRows] = await pool.query(`SELECT * FROM social_posts WHERE id=? AND tenant_id=?`, [approvalRows[0].post_id, tid]);
+      const { rows: postRows } = await pool.query(`SELECT * FROM social_posts WHERE id=$1 AND tenant_id=$2`, [approvalRows[0].post_id, tid]);
       if (postRows.length) post = postRows[0];
-      await pool.query(`UPDATE post_approvals SET status='approved', approver_id=?, comments=?, decided_at=? WHERE id=?`, [req.session.user?.id, comments, now(), req.params.id]);
+      await pool.query(`UPDATE post_approvals SET status='approved', approver_id=$1, comments=$2, decided_at=$3 WHERE id=$4`, [req.session.user?.id, comments, now(), req.params.id]);
     }
     if (!post) {
-      const [directRows] = await pool.query(`SELECT * FROM social_posts WHERE id=? AND tenant_id=? AND approval_status='pending'`, [req.params.id, tid]);
+      const { rows: directRows } = await pool.query(`SELECT * FROM social_posts WHERE id=$1 AND tenant_id=$2 AND approval_status='pending'`, [req.params.id, tid]);
       if (directRows.length) post = directRows[0];
     }
     if (post) {
       const platforms = JSON.parse(post.platforms || '[]');
       const results = {};
       for (const p of platforms) results[p] = { status: 'success', published_at: now() };
-      await pool.query(`UPDATE social_posts SET status='published', approval_status='approved', approved_by=?, published_at=?, performance_data=? WHERE id=? AND tenant_id=?`,
+      await pool.query(`UPDATE social_posts SET status='published', approval_status='approved', approved_by=$1, published_at=$2, performance_data=$3 WHERE id=$4 AND tenant_id=$5`,
         [req.session.user?.id, now(), JSON.stringify({ ...results, initial_reach: Math.floor(Math.random() * 500) + 50 }), post.id, tid]);
     }
     audit(req, 'social_post_approve', { post_id: req.params.id });
@@ -1031,12 +1016,12 @@ module.exports = function(app, pool, opts) {
     const tid = TID(req);
     const { comments, rejection_reason } = req.body;
     let postId = req.params.id;
-    const [approvalRows] = await pool.query(`SELECT * FROM post_approvals WHERE id=? AND tenant_id=?`, [req.params.id, tid]);
+    const { rows: approvalRows } = await pool.query(`SELECT * FROM post_approvals WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     if (approvalRows.length) {
       postId = approvalRows[0].post_id;
-      await pool.query(`UPDATE post_approvals SET status='rejected', approver_id=?, comments=?, decided_at=? WHERE id=?`, [req.session.user?.id, comments || rejection_reason, now(), req.params.id]);
+      await pool.query(`UPDATE post_approvals SET status='rejected', approver_id=$1, comments=$2, decided_at=$3 WHERE id=$4`, [req.session.user?.id, comments || rejection_reason, now(), req.params.id]);
     }
-    await pool.query(`UPDATE social_posts SET approval_status='rejected', rejection_reason=? WHERE id=? AND tenant_id=?`, [comments || rejection_reason, postId, tid]);
+    await pool.query(`UPDATE social_posts SET approval_status='rejected', rejection_reason=$1 WHERE id=$2 AND tenant_id=$3`, [comments || rejection_reason, postId, tid]);
     audit(req, 'social_post_reject', { post_id: postId, reason: comments });
     res.redirect('/school/social-media/approvals');
   }));
@@ -1047,8 +1032,8 @@ module.exports = function(app, pool, opts) {
     const days = parseInt(req.query.days) || 30;
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0,10);
 
-    const [published] = await pool.query(`SELECT * FROM social_posts WHERE tenant_id=? AND status='published' AND published_at >= ?`, [tid, since]);
-    const [byPlatform] = await pool.query(`SELECT platforms, performance_data FROM social_posts WHERE tenant_id=? AND status='published' AND published_at >= ?`, [tid, since]);
+    const { rows: published } = await pool.query(`SELECT * FROM social_posts WHERE tenant_id=$1 AND status='published' AND published_at >= $2`, [tid, since]);
+    const { rows: byPlatform } = await pool.query(`SELECT platforms, performance_data FROM social_posts WHERE tenant_id=$1 AND status='published' AND published_at >= $2`, [tid, since]);
 
     // Aggregate stats
     let totalReach = 0, totalLikes = 0, totalShares = 0, totalComments = 0, totalEngagement = 0;
@@ -1190,15 +1175,16 @@ module.exports = function(app, pool, opts) {
     const status = req.query.status || '';
     const platform = req.query.platform || '';
 
-    let where = `p.tenant_id=?`;
+    let paramIdx = 1;
+    let where = `p.tenant_id=$${paramIdx++}`;
     const params = [tid];
-    if (status) { where += ` AND p.status=?`; params.push(status); }
-    if (platform) { where += ` AND JSON_CONTAINS(p.platforms, ?)`; params.push(JSON.stringify(platform)); }
+    if (status) { where += ` AND p.status=$${paramIdx++}`; params.push(status); }
+    if (platform) { where += ` AND p.platforms::jsonb @> $${paramIdx++}::jsonb`; params.push(JSON.stringify(platform)); }
 
-    const [totalRows] = await pool.query(`SELECT COUNT(*) as c FROM social_posts p WHERE ${where}`, params);
+    const { rows: totalRows } = await pool.query(`SELECT COUNT(*) as c FROM social_posts p WHERE ${where}`, params);
     const totalPages = Math.ceil(totalRows[0].c / limit);
 
-    const [posts] = await pool.query(`SELECT p.* FROM social_posts p WHERE ${where} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
+    const { rows: posts } = await pool.query(`SELECT p.* FROM social_posts p WHERE ${where} ORDER BY p.created_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`, [...params, limit, offset]);
 
     const statusFilter = ['draft','scheduled','published','failed'].map(s =>
       `<a href="/school/social-media/history?status=${s}&platform=${platform}" class="sm-chip ${status===s?'active':''}">${statusBadge(s)}</a>`
@@ -1260,8 +1246,8 @@ module.exports = function(app, pool, opts) {
   /* ───────── Route: Auto-Post Rules ───────── */
   app.get('/school/social-media/rules', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [rules] = await pool.query(`SELECT r.*, t.name as template_name FROM social_post_rules r LEFT JOIN post_templates t ON t.id=r.template_id WHERE r.tenant_id=? ORDER BY r.is_active DESC, r.created_at DESC`, [tid]);
-    const [templates] = await pool.query(`SELECT id, name, category FROM post_templates WHERE (tenant_id=0 OR tenant_id=?) ORDER BY name`, [tid]);
+    const { rows: rules } = await pool.query(`SELECT r.*, t.name as template_name FROM social_post_rules r LEFT JOIN post_templates t ON t.id=r.template_id WHERE r.tenant_id=$1 ORDER BY r.is_active DESC, r.created_at DESC`, [tid]);
+    const { rows: templates } = await pool.query(`SELECT id, name, category FROM post_templates WHERE (tenant_id=0 OR tenant_id=$1) ORDER BY name`, [tid]);
 
     const triggerTypes = [
       { value: 'exam_results', label: 'After Exam Results Published', icon: '📝', desc: 'Auto-post topper announcements when exam results are published' },
@@ -1373,7 +1359,7 @@ module.exports = function(app, pool, opts) {
     if (config_threshold) config.threshold = parseInt(config_threshold);
     if (config_frequency) config.frequency = config_frequency;
 
-    await pool.query(`INSERT INTO social_post_rules (tenant_id, rule_name, trigger_type, trigger_config, template_id, platforms, is_active) VALUES (?,?,?,?,?,?,1)`,
+    await pool.query(`INSERT INTO social_post_rules (tenant_id, rule_name, trigger_type, trigger_config, template_id, platforms, is_active) VALUES ($1,$2,$3,$4,$5,$6,true)`,
       [tid, rule_name || trigger_type, trigger_type, JSON.stringify(config), template_id || null, JSON.stringify(platformArr)]);
 
     audit(req, 'social_rule_create', { trigger_type, rule_name });
@@ -1383,22 +1369,22 @@ module.exports = function(app, pool, opts) {
   app.post('/school/social-media/rules/:id/toggle', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
     const { is_active } = req.body;
-    await pool.query(`UPDATE social_post_rules SET is_active=? WHERE id=? AND tenant_id=?`, [is_active ? 1 : 0, req.params.id, tid]);
+    await pool.query(`UPDATE social_post_rules SET is_active=$1 WHERE id=$2 AND tenant_id=$3`, [is_active ? true : false, req.params.id, tid]);
     res.json({ ok: true });
   }));
 
   app.delete('/school/social-media/rules/:id', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    await pool.query(`DELETE FROM social_post_rules WHERE id=? AND tenant_id=?`, [req.params.id, tid]);
+    await pool.query(`DELETE FROM social_post_rules WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     res.json({ ok: true });
   }));
 
   /* ───────── Route: Hashtag Manager ───────── */
   app.get('/school/social-media/hashtags', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [hashtags] = await pool.query(`SELECT * FROM social_hashtags WHERE tenant_id IN (0,?) ORDER BY is_trending DESC, usage_count DESC`, [tid]);
-    const [schoolHashtags] = await pool.query(`SELECT * FROM social_hashtags WHERE tenant_id=? ORDER BY usage_count DESC`, [tid]);
-    const [trendingHashtags] = await pool.query(`SELECT * FROM social_hashtags WHERE tenant_id IN (0,?) AND is_trending=1 ORDER BY trend_score DESC LIMIT 20`, [tid]);
+    const { rows: hashtags } = await pool.query(`SELECT * FROM social_hashtags WHERE tenant_id IN (0,$1) ORDER BY is_trending DESC, usage_count DESC`, [tid]);
+    const { rows: schoolHashtags } = await pool.query(`SELECT * FROM social_hashtags WHERE tenant_id=$1 ORDER BY usage_count DESC`, [tid]);
+    const { rows: trendingHashtags } = await pool.query(`SELECT * FROM social_hashtags WHERE tenant_id IN (0,$1) AND is_trending=true ORDER BY trend_score DESC LIMIT 20`, [tid]);
     const categories = [...new Set(hashtags.map(h => h.category).filter(Boolean))];
 
     let trendingHTML = trendingHashtags.map(h => `
@@ -1471,9 +1457,9 @@ module.exports = function(app, pool, opts) {
     if (!tag.startsWith('#')) tag = '#' + tag;
     const category = req.body.category || 'general';
     try {
-      await pool.query(`INSERT INTO social_hashtags (tenant_id, tag, category) VALUES (?,?,?)`, [tid, tag, category]);
+      await pool.query(`INSERT INTO social_hashtags (tenant_id, tag, category) VALUES ($1,$2,$3)`, [tid, tag, category]);
     } catch(e) {
-      if (e.code === 'ER_DUP_ENTRY') {
+      if (e.code === '23505') {
         return res.redirect('/school/social-media/hashtags?msg=exists');
       }
       throw e;
@@ -1484,13 +1470,13 @@ module.exports = function(app, pool, opts) {
 
   app.post('/school/social-media/hashtags/:id/increment', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    await pool.query(`UPDATE social_hashtags SET usage_count = usage_count + 1 WHERE id=? AND tenant_id=?`, [req.params.id, tid]);
+    await pool.query(`UPDATE social_hashtags SET usage_count = usage_count + 1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     res.json({ ok: true });
   }));
 
   app.post('/school/social-media/hashtags/:id/delete', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    await pool.query(`DELETE FROM social_hashtags WHERE id=? AND tenant_id=?`, [req.params.id, tid]);
+    await pool.query(`DELETE FROM social_hashtags WHERE id=$1 AND tenant_id=$2`, [req.params.id, tid]);
     res.redirect('/school/social-media/hashtags');
   }));
 
@@ -1520,7 +1506,7 @@ module.exports = function(app, pool, opts) {
       const media = [];
       if (p.image_urls) p.image_urls.split('\n').map(u=>u.trim()).filter(Boolean).forEach(u => media.push({type:'image',url:u}));
 
-      await pool.query(`INSERT INTO social_posts (tenant_id, title, content, media_urls, platforms, status, scheduled_at, priority, timezone, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      await pool.query(`INSERT INTO social_posts (tenant_id, title, content, media_urls, platforms, status, scheduled_at, priority, timezone, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [tid, p.title||null, p.content, JSON.stringify(media), JSON.stringify(platformArr), 'scheduled', schedAt.toISOString().slice(0,19).replace('T',' '), p.priority||0, default_timezone||'UTC', req.session.user?.id||null]);
       scheduled++;
     }
@@ -1533,7 +1519,7 @@ module.exports = function(app, pool, opts) {
   // This would typically be called by a cron job, but we also expose an admin endpoint
   app.post('/school/social-media/process-queue', requireAuth, ah(async (req, res) => {
     const tid = TID(req);
-    const [duePosts] = await pool.query(`SELECT p.*, sa.platform, sa.access_token_encrypted FROM social_posts p JOIN social_accounts sa ON sa.tenant_id=p.tenant_id AND JSON_CONTAINS(p.platforms, JSON_QUOTE(sa.platform)) AND sa.is_active=1 WHERE p.tenant_id=? AND p.status='scheduled' AND p.scheduled_at <= NOW() AND p.approval_status IN ('none','approved')`, [tid]);
+    const { rows: duePosts } = await pool.query(`SELECT p.*, sa.platform, sa.access_token_encrypted FROM social_posts p JOIN social_accounts sa ON sa.tenant_id=p.tenant_id AND p.platforms::jsonb @> to_jsonb(sa.platform) AND sa.is_active=true WHERE p.tenant_id=$1 AND p.status='scheduled' AND p.scheduled_at <= NOW() AND p.approval_status IN ('none','approved')`, [tid]);
 
     let processed = 0;
     const processedIds = [];
@@ -1556,12 +1542,12 @@ module.exports = function(app, pool, opts) {
       }
 
       const newStatus = failed ? 'failed' : 'published';
-      await pool.query(`UPDATE social_posts SET status=?, published_at=?, performance_data=? WHERE id=?`, [newStatus, failed ? null : now(), JSON.stringify(results), post.id]);
+      await pool.query(`UPDATE social_posts SET status=$1, published_at=$2, performance_data=$3 WHERE id=$4`, [newStatus, failed ? null : now(), JSON.stringify(results), post.id]);
       processed++;
     }
 
     // Process auto-post rules
-    const [rules] = await pool.query(`SELECT * FROM social_post_rules WHERE tenant_id=? AND is_active=1`, [tid]);
+    const { rows: rules } = await pool.query(`SELECT * FROM social_post_rules WHERE tenant_id=$1 AND is_active=true`, [tid]);
     for (const rule of rules) {
       const trigger = rule.trigger_type;
       const config = JSON.parse(rule.trigger_config || '{}');
@@ -1577,9 +1563,9 @@ module.exports = function(app, pool, opts) {
         }
       }
       if (shouldTrigger && content) {
-        await pool.query(`INSERT INTO social_posts (tenant_id, title, content, platforms, status, scheduled_at, priority, timezone) VALUES (?,?,?,?,'scheduled',DATE_ADD(NOW(), INTERVAL 1 HOUR),1,'UTC')`,
+        await pool.query(`INSERT INTO social_posts (tenant_id, title, content, platforms, status, scheduled_at, priority, timezone) VALUES ($1,$2,$3,$4,'scheduled',NOW() + INTERVAL '1 hour',1,'UTC')`,
           [tid, `Auto: ${rule.rule_name}`, content, JSON.stringify(platforms)]);
-        await pool.query(`UPDATE social_post_rules SET last_triggered=NOW(), run_count=run_count+1 WHERE id=?`, [rule.id]);
+        await pool.query(`UPDATE social_post_rules SET last_triggered=NOW(), run_count=run_count+1 WHERE id=$1`, [rule.id]);
       }
     }
 

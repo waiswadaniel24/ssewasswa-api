@@ -1031,8 +1031,6 @@ module.exports = function feeInstallments(app, db, pool, renderPage, esc) {
       await client.query('COMMIT');
       console.log(`[FeeInstallments] Payment recorded: Plan #${planId}, Installment #${payment.installment_number}, ${fmtMoney(actualPay)} (${payment_method})`);
 
-      try { await global.trackRevenue('fee_installment', actualPay / 3700, `Fee installment #${payment.installment_number} payment of ${fmtMoney(actualPay)} for plan #${planId}`, `installment-${payment_id}-${Date.now()}`); } catch(e) {}
-
       // Send payment confirmation SMS
       if (payment.guardian_phone) {
         try {

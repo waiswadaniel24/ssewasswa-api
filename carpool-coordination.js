@@ -2309,7 +2309,7 @@ module.exports = function (app, pool, opts) {
 
   /**
    * CREATE TABLE carpool_groups (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   name VARCHAR(200) NOT NULL,
    *   description TEXT,
@@ -2319,56 +2319,56 @@ module.exports = function (app, pool, opts) {
    *   morning_departure TIME DEFAULT '07:30:00',
    *   afternoon_departure TIME DEFAULT '15:30:00',
    *   notes TEXT,
-   *   status ENUM('active','archived','inactive') DEFAULT 'active',
+   *   status TEXT DEFAULT 'active',
    *   created_by INT,
-   *   created_at DATETIME,
-   *   updated_at DATETIME,
+   *   created_at TIMESTAMPTZ,
+   *   updated_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_area (tenant_id, area),
    *   INDEX idx_status (tenant_id, status)
    * );
    *
    * CREATE TABLE carpool_members (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   group_id INT NOT NULL,
    *   user_id INT NOT NULL,
-   *   role ENUM('admin','driver','rider') DEFAULT 'rider',
-   *   status ENUM('active','inactive') DEFAULT 'active',
-   *   joined_at DATETIME,
+   *   role TEXT DEFAULT 'rider',
+   *   status TEXT DEFAULT 'active',
+   *   joined_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_group (tenant_id, group_id),
    *   INDEX idx_user (tenant_id, user_id)
    * );
    *
    * CREATE TABLE carpool_schedules (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   group_id INT NOT NULL,
-   *   day_of_week TINYINT NOT NULL COMMENT '0=Monday...4=Friday',
-   *   direction ENUM('morning','afternoon') DEFAULT 'morning',
+   *   day_of_week SMALLINT NOT NULL COMMENT '0=Monday...4=Friday',
+   *   direction TEXT DEFAULT 'morning',
    *   departure_time TIME,
-   *   recurrence ENUM('weekly','biweekly','once') DEFAULT 'weekly',
+   *   recurrence TEXT DEFAULT 'weekly',
    *   created_by INT,
-   *   created_at DATETIME,
+   *   created_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_group (tenant_id, group_id)
    * );
    *
    * CREATE TABLE carpool_rides (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   group_id INT NOT NULL,
    *   ride_date DATE NOT NULL,
-   *   direction ENUM('morning','afternoon') DEFAULT 'morning',
+   *   direction TEXT DEFAULT 'morning',
    *   departure_time TIME,
    *   driver_id INT,
    *   distance_km DECIMAL(8,1) DEFAULT 0,
-   *   status ENUM('scheduled','in_progress','completed','cancelled') DEFAULT 'scheduled',
+   *   status TEXT DEFAULT 'scheduled',
    *   notes TEXT,
    *   created_by INT,
-   *   created_at DATETIME,
-   *   completed_at DATETIME,
+   *   created_at TIMESTAMPTZ,
+   *   completed_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_group_date (tenant_id, group_id, ride_date),
    *   INDEX idx_driver (tenant_id, driver_id),
@@ -2376,7 +2376,7 @@ module.exports = function (app, pool, opts) {
    * );
    *
    * CREATE TABLE carpool_stops (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   ride_id INT NOT NULL,
    *   passenger_id INT,
@@ -2385,14 +2385,14 @@ module.exports = function (app, pool, opts) {
    *   longitude DECIMAL(10,7),
    *   pickup_time TIME,
    *   stop_order INT DEFAULT 0,
-   *   created_at DATETIME,
-   *   updated_at DATETIME,
+   *   created_at TIMESTAMPTZ,
+   *   updated_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_ride (tenant_id, ride_id)
    * );
    *
    * CREATE TABLE carpool_emergency_contacts (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   parent_id INT NOT NULL,
    *   name VARCHAR(200),
@@ -2403,40 +2403,40 @@ module.exports = function (app, pool, opts) {
    *   address TEXT,
    *   medical_notes TEXT,
    *   priority INT DEFAULT 1,
-   *   is_primary TINYINT DEFAULT 0,
-   *   created_at DATETIME,
-   *   updated_at DATETIME,
+   *   is_primary SMALLINT DEFAULT 0,
+   *   created_at TIMESTAMPTZ,
+   *   updated_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_parent (tenant_id, parent_id)
    * );
    *
    * CREATE TABLE carpool_messages (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   group_id INT NOT NULL,
    *   sender_id INT NOT NULL,
    *   recipient_id INT,
-   *   msg_type ENUM('general','delay','absence','emergency','confirmation') DEFAULT 'general',
+   *   msg_type TEXT DEFAULT 'general',
    *   content TEXT,
-   *   is_read TINYINT DEFAULT 0,
-   *   created_at DATETIME,
+   *   is_read SMALLINT DEFAULT 0,
+   *   created_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_group (tenant_id, group_id),
    *   INDEX idx_recipient (tenant_id, recipient_id, is_read)
    * );
    *
    * CREATE TABLE carpool_ride_logs (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   ride_id INT,
    *   user_id INT,
    *   action VARCHAR(50) COMMENT 'check_in,check_out,absence,delay,late_alert,cancelled,confirmed,rating,fuel_log,webhook_*',
    *   detail TEXT,
-   *   rating TINYINT,
+   *   rating SMALLINT,
    *   fuel_liters DECIMAL(8,2),
    *   fuel_cost DECIMAL(10,2),
    *   created_by INT,
-   *   created_at DATETIME,
+   *   created_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_ride (tenant_id, ride_id),
    *   INDEX idx_user (tenant_id, user_id),
@@ -2444,7 +2444,7 @@ module.exports = function (app, pool, opts) {
    * );
    *
    * CREATE TABLE carpool_parent_profiles (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   user_id INT NOT NULL UNIQUE,
    *   full_name VARCHAR(200),
@@ -2466,31 +2466,31 @@ module.exports = function (app, pool, opts) {
    *   insurance_expiry DATE,
    *   latitude DECIMAL(10,7),
    *   longitude DECIMAL(10,7),
-   *   preferred_role ENUM('driver','rider','both') DEFAULT 'rider',
+   *   preferred_role TEXT DEFAULT 'rider',
    *   availability_notes TEXT,
-   *   created_at DATETIME,
-   *   updated_at DATETIME,
+   *   created_at TIMESTAMPTZ,
+   *   updated_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id),
    *   INDEX idx_area (tenant_id, area)
    * );
    *
    * CREATE TABLE carpool_settings (
-   *   id INT AUTO_INCREMENT PRIMARY KEY,
+   *   id SERIAL PRIMARY KEY,
    *   tenant_id INT NOT NULL,
    *   user_id INT NOT NULL UNIQUE,
-   *   notify_ride_reminder TINYINT DEFAULT 1,
-   *   notify_delay TINYINT DEFAULT 1,
-   *   notify_absence TINYINT DEFAULT 1,
-   *   notify_checkin TINYINT DEFAULT 1,
-   *   notify_message TINYINT DEFAULT 1,
-   *   notify_late_alert TINYINT DEFAULT 1,
-   *   notify_weekly_summary TINYINT DEFAULT 0,
+   *   notify_ride_reminder SMALLINT DEFAULT 1,
+   *   notify_delay SMALLINT DEFAULT 1,
+   *   notify_absence SMALLINT DEFAULT 1,
+   *   notify_checkin SMALLINT DEFAULT 1,
+   *   notify_message SMALLINT DEFAULT 1,
+   *   notify_late_alert SMALLINT DEFAULT 1,
+   *   notify_weekly_summary SMALLINT DEFAULT 0,
    *   reminder_minutes_before INT DEFAULT 15,
    *   late_threshold_minutes INT DEFAULT 10,
-   *   default_group_visibility ENUM('school','group','private') DEFAULT 'group',
-   *   auto_join_matching TINYINT DEFAULT 0,
-   *   created_at DATETIME,
-   *   updated_at DATETIME,
+   *   default_group_visibility TEXT DEFAULT 'group',
+   *   auto_join_matching SMALLINT DEFAULT 0,
+   *   created_at TIMESTAMPTZ,
+   *   updated_at TIMESTAMPTZ,
    *   INDEX idx_tenant (tenant_id)
    * );
    */

@@ -1,6 +1,3 @@
-// Pool reference: available via global._scopeBridge during loadSelfExec
-const _gv_pool = (typeof pool !== 'undefined') ? pool : (typeof global.pool !== 'undefined') ? global.pool : null;
-
 // ============================================================
 // === GLOBAL VIRAL ENGINE — Make Comfort Zone Go Worldwide ===
 // ============================================================
@@ -200,7 +197,7 @@ app.get('/shorten', (req, res) => {
     </div>`, req.session.user));
 });
 
-app.post('/shorten', ah(async (req, res) => {
+app.post('/shorten', (req, res, next) => { if (!req.session || !req.session.user) return res.status(401).send('Login required to create short links'); next(); }, ah(async (req, res) => {
   const { url, title, custom_code } = req.body;
   if (!url) return res.redirect('/shorten');
   let code = custom_code ? custom_code.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 20) : null;
@@ -240,6 +237,15 @@ app.get('/s/:code', ah(async (req, res) => {
   if (link.utm_source) {
     const sep = redirectUrl.includes('?') ? '&' : '?';
     redirectUrl += sep + 'utm_source=' + link.utm_source + '&utm_medium=' + (link.utm_medium || 'shortlink');
+  }
+  // Validate URL: only allow http/https, block javascript: and data: URLs
+  try {
+    const parsed = new URL(redirectUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return res.status(400).send('Invalid redirect URL');
+    }
+  } catch (e) {
+    return res.status(400).send('Invalid redirect URL');
   }
   res.redirect(redirectUrl);
 }));
@@ -398,7 +404,7 @@ app.get('/chat/:roomId', ah(async (req, res) => {
     </script>`, req.session.user));
 }));
 
-app.post('/chat/:roomId/send', ah(async (req, res) => {
+app.post('/chat/:roomId/send', (req, res, next) => { if (!req.session || !req.session.user) return res.status(401).json({error:'Login required to send messages'}); next(); }, ah(async (req, res) => {
   const { message, username, email } = req.body;
   if (!message || !message.trim()) return res.json({error:'Empty message'});
   const room = (await pool.query('SELECT id FROM chat_rooms WHERE id=$1 AND is_active=true', [req.params.roomId])).rows[0];

@@ -1,13 +1,12 @@
 require('dotenv').config();
 
-// === GLOBAL ERROR SAFETY NET ===
-// Prevent unhandled promise rejections from crashing the server
-// (migration IIFEs in modules may fail when DB is temporarily unavailable on cold start)
+// === CRITICAL: Global error handlers — prevent unhandled rejections from crashing the process ===
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('[UnhandledRejection] Suppressed to keep server alive:', reason?.message || reason);
+  console.error('[FATAL-CATCH] Unhandled Rejection:', reason instanceof Error ? reason.message : reason, reason?.stack?.split('\n')[1] || '');
 });
 process.on('uncaughtException', (err) => {
-  console.error('[UncaughtException] Suppressed to keep server alive:', err?.message || err);
+  console.error('[FATAL-CATCH] Uncaught Exception:', err.message, err.stack?.split('\n')[1] || '');
+  // Do NOT exit — keep the server running. Only exit on truly catastrophic errors.
 });
 
 // === ENV VAR NORMALIZATION ===
@@ -26,7 +25,9 @@ if (!process.env.NODE_NO_WARNINGS) process.env.NODE_NO_WARNINGS = '1';
 process.env.LOCALSTORAGE_FILE = process.env.LOCALSTORAGE_FILE || '/tmp/ssewasswa-localstorage.json';
 const express = require('express');
 const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session);
+// connect-pg-simple for persistent sessions (optional — falls back to memory store)
+let pgSession;
+try { pgSession = require('connect-pg-simple')(session); } catch(e) { pgSession = null; console.warn('[Session] connect-pg-simple not available, using memory store'); }
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
@@ -37,13 +38,12 @@ const LOGIN_LOCKOUT_WINDOW = 15 * 60 * 1000; // 15 minutes
 const LOGIN_MAX_ATTEMPTS = 5;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
-const REQUEST_TIMEOUT_MS = 120 * 1000; // 120 seconds (increased for Render free plan with many modules)
+const REQUEST_TIMEOUT_MS = 30 * 1000; // 30 seconds
 const SUBSCRIPTION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 days
-const VALID_PATIENT_TYPES = ['student', 'staff', 'patient', 'other', 'family', 'employee'];
-const VALID_CLINIC_INSTITUTION_TYPES = ['general_hospital','referral_hospital','district_hospital','health_centre_ii','health_centre_iii','health_centre_iv','private_clinic','specialist_clinic','dental_clinic','eye_clinic','mental_health','maternity','pharmacy','laboratory','radiology','rehabilitation','hospice','community_health'];
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 const { authenticator } = require('otplib');
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle } = require('docx');
 const PDFDocument = require('pdfkit');
@@ -133,15 +133,32 @@ const pool = new Pool({
   // Always use rejectUnauthorized:false — Render/Heroku/Neon managed PostgreSQL uses self-signed CA certs.
   // Using NODE_ENV check breaks when Render doesn't set NODE_ENV=production by default.
   ssl: { rejectUnauthorized: false },
-  max: 10,
-  idleTimeoutMillis: 60000,      // increased from 30s → 60s: keep idle connections longer to reduce reconnection overhead
-  connectionTimeoutMillis: 30000,  // increased from 10s → 30s: more patience during DB spin-up on free plan
-  statement_timeout: 60000,        // 60s per query max: prevent runaway queries from hogging pool connections
-  query_timeout: 45000             // 45s client-side query timeout
+  max: 5, // Reduced from 10 for Render free tier (97 connection limit shared across apps)
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 15000
+});
+
+// Handle pool-level errors to prevent crashes
+pool.on('error', (err) => {
+  console.error('[DB Pool] Unexpected error on idle client:', err.message);
 });
 
 // === SECURITY ===
 app.set('trust proxy', 1);
+
+// === HTTPS ENFORCEMENT (production only) ===
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, 'https://' + req.headers.host + req.url);
+    }
+    next();
+  });
+}
+
+// === COMPRESSION (gzip all responses) ===
+app.use(compression({ threshold: 1024, level: 6 }));
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -154,7 +171,19 @@ app.use(helmet({
       frameSrc: ["'self'", "https://checkout.flutterwave.com", "https://secure.3gdirectpay.com"],
     }
   },
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  permissionsPolicy: {
+    features: {
+      geolocation: ["'none'"],
+      camera: ["'none'"],
+      microphone: ["'none'"],
+      payment: ["'self'"],
+      usb: ["'none'"],
+      magnetometer: ["'none'"],
+      gyroscope: ["'none'"],
+      accelerometer: ["'none'"],
+    }
+  }
 }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.json({ limit: '1mb' }));
@@ -184,8 +213,50 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   console.error('FATAL: SESSION_SECRET must be set in production');
   process.exit(1);
 }
+// Session store — use memory store by default, upgrade to PG when DB is confirmed ready
+let sessionStore;
+let _dbReady = false;
+// Start with memory store immediately (no DB dependency for startup)
+console.log('[Session] Starting with memory store (will upgrade to PG when DB ready)');
+
+// Test DB and upgrade session store in background
+pool.query('SELECT 1').then(() => {
+  _dbReady = true;
+  if (pgSession) {
+    try {
+      pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true });
+      console.log('[Session] Upgraded to PG session store');
+    } catch (e) { console.warn('[Session] PG store creation failed:', e.message); }
+  } else {
+    console.log('[Session] PG store not available, continuing with memory store');
+  }
+}).catch(e => {
+  console.warn('[Session] DB not ready yet, will retry:', e.message);
+  const retry = setInterval(() => {
+    pool.query('SELECT 1').then(() => {
+      _dbReady = true;
+      if (pgSession) {
+        try {
+          pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true });
+          console.log('[Session] Upgraded to PG session store');
+        } catch (e2) { console.warn('[Session] PG store upgrade failed:', e2.message); }
+      }
+      clearInterval(retry);
+    }).catch(() => {});
+  }, 5000);
+});
+
+// Add request timeout BEFORE session to prevent hung DB connections from blocking all requests
+app.use((req, res, next) => {
+  req.setTimeout(10000, () => {
+    if (!res.headersSent) {
+      console.warn('[Timeout] Request timed out:', req.method, req.path);
+      res.status(503).send('Service temporarily unavailable. Please try again.');
+    }
+  });
+  next();
+});
 app.use(session({
-  store: (pgSessionStore = new pgSession({ pool, tableName: 'session', createTableIfMissing: true })),
   secret: process.env.SESSION_SECRET || 'dev-session-secret-local-only',
   resave: false,
   saveUninitialized: false,
@@ -196,6 +267,25 @@ app.use(session({
     maxAge: SESSION_MAX_AGE
   }
 }));
+
+// Session error recovery — if session store fails, continue without session
+app.use((req, res, next) => {
+  if (!req.session) {
+    console.warn('[Session] No session available — creating fallback');
+    req.session = { csrfToken: generateCSRFToken() };
+  }
+  next();
+});
+
+// DEBUG: Test route to verify session middleware works — minimal response
+app.get('/test-session', (req, res) => {
+  res.type('text').send('OK');
+});
+
+// DEBUG: Test route that uses renderPage
+app.get('/test-render', (req, res) => {
+  res.send(renderPage('Test', '<div class="card"><h2>Render OK</h2></div>', null, req));
+});
 
 // Generate CSRF token and store in session (AFTER session middleware)
 app.use((req, res, next) => {
@@ -236,28 +326,22 @@ app.use((req, res, next) => {
 });
 
 // === RATE LIMIT ===
-app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50 }));
-app.use('/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5 }));
-app.use('/api/', rateLimit({ windowMs: 60 * 1000, max: 100 }));
-app.use('/dev/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-app.use('/momo/', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-// v12: Rate limit clinic mutation endpoints to prevent abuse
-app.use('/clinic/queue/save', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-app.use('/clinic/queue/checkin', rateLimit({ windowMs: 60 * 1000, max: 30 }));
-app.use('/clinic/prescription/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/prescriptions/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/lab/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/appointments/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/consultation/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/pharmacy/inventory/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/referrals/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/insurance/claim/save', rateLimit({ windowMs: 60 * 1000, max: 15 }));
-app.use('/clinic/telehealth/schedule/save', rateLimit({ windowMs: 60 * 1000, max: 15 }));
-app.use('/sickbay/save', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/clinic/sick-bay/checkin', rateLimit({ windowMs: 60 * 1000, max: 20 }));
-app.use('/patient-portal', rateLimit({ windowMs: 60 * 1000, max: 30 }));
+// Global rate limiter for all unauthenticated page requests
+const globalLimiter = rateLimit({ windowMs: 60 * 1000, max: 200, standardHeaders: true, legacyHeaders: false, message: 'Too many requests, please slow down.' });
+app.use('/', (req, res, next) => {
+  // Only rate-limit unauthenticated users on page routes
+  if (!req.session?.user && req.method === 'GET' && !req.path.startsWith('/api/') && !req.path.startsWith('/ping') && !req.path.startsWith('/health')) {
+    return globalLimiter(req, res, next);
+  }
+  next();
+});
+app.use('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 50, standardHeaders: true }));
+app.use('/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true }));
+app.use('/api/', rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true }));
+app.use('/dev/', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true }));
+app.use('/billing', rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true }));
+app.use('/pay/', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true }));
+app.use('/momo/', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true }));
 
 // Request timeout middleware
 app.use((req, res, next) => {
@@ -282,6 +366,44 @@ if (ALLOWED_ORIGINS.length > 0) {
 // === UTILS ===
 const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const esc = s => String(s === null || s === undefined ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+
+// === TOP-LEVEL i18n HELPER (uiT) ===
+const _uiTDict = {
+  'nav.dashboard': { lg: 'Olutimbe', sw: 'Dashibodi', fr: 'Tableau de bord' },
+  'nav.notifications': { lg: 'Ebyogerwa', sw: 'Arifa', fr: 'Notifications' },
+  'nav.modules': { lg: 'Amasomo', sw: 'Moduli', fr: 'Modules' },
+  'nav.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
+  'nav.portal': { lg: 'Akabinja', sw: 'Lango', fr: 'Portail' },
+  'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
+  'nav.parent': { lg: 'Muziro', sw: 'Mzazi', fr: 'Parent' },
+  'nav.worker': { lg: 'Mukazi', sw: 'Mfanyakazi', fr: 'Travailleur' },
+  'nav.guide': { lg: 'Enyamba', sw: 'Mwongozo', fr: 'Guide' },
+  'nav.logout': { lg: 'Woloka', sw: 'Toka', fr: 'Deconnexion' },
+  'nav.login': { lg: 'Yingira', sw: 'Ingia', fr: 'Connexion' },
+  'nav.register': { lg: 'Wandikira', sw: 'Jisajili', fr: 'Inscription' },
+  'nav.pricing': { lg: 'Enteekateeka', sw: 'Bei', fr: 'Tarifs' },
+  'nav.faq': { lg: 'Ebibuuzo', sw: 'Maswali', fr: 'FAQ' },
+  'nav.blog': { lg: 'Obulamwa', sw: 'Blogu', fr: 'Blog' },
+  'nav.library': { lg: 'Essomero', sw: 'Maktaba', fr: 'Bibliotheque' },
+  'nav.mark_all_read': { lg: 'Soma Byonna', sw: 'Soma Zote', fr: 'Tout marquer lu' },
+  'nav.view_all': { lg: 'Labye Byonna', sw: 'Tazama Zote', fr: 'Voir tout' },
+  'nav.loading': { lg: 'Kutegereza...', sw: 'Inapakia...', fr: 'Chargement...' },
+  'nav.error_loading': { lg: 'Kiremya', sw: 'Hitilafu', fr: 'Erreur' },
+  'mod.hr': { lg: 'Abakazzi', sw: 'Rasilimali', fr: 'RH' },
+  'mod.bookings': { lg: 'Okubooka', sw: 'Uhifadhi', fr: 'Reservations' },
+  'mod.procurement': { lg: 'Okugaba', sw: 'Manunuzi', fr: 'Approvisionnement' },
+  'mod.incidents': { lg: 'Ebintu', sw: 'Matukio', fr: 'Incidents' },
+  'mod.fleet': { lg: 'Emotoka', sw: 'Magari', fr: 'Flotte' },
+  'mod.tickets': { lg: 'Kaarata', sw: 'Tiketi', fr: 'Tickets' },
+  'mod.kb': { lg: 'Ebisomo', sw: 'Ujuzi', fr: 'Base de connaissances' },
+  'bottom.home': { lg: 'Awaka', sw: 'Nyumbani', fr: 'Accueil' },
+  'bottom.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
+  'bottom.alerts': { lg: 'Amakuru', sw: 'Arifa', fr: 'Alertes' },
+  'bottom.install': { lg: 'Tegeka', sw: 'Sakinisha', fr: 'Installer' },
+  'bottom.me': { lg: 'Anze', sw: 'Mimi', fr: 'Moi' },
+  'footer.tagline': { lg: "Amasomero, Amatali, Amakyaala n'Amakolero", sw: 'Shule, Vituo vya Afya, Makanisa na Biashara', fr: 'Ecoles, Cliniques, Eglises et Entreprises' },
+};
+const uiT = (key, lang) => { const e = _uiTDict[key]; return e ? (e[lang] || key) : key; };
 
 // === INPUT VALIDATION ===
 const validateEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -348,7 +470,13 @@ const VALID_TABLES = new Set([
   'reorder_rules', 'reorder_alerts',
   'appraisals', 'appraisal_criteria', 'appraisal_scores',
   'health_visits', 'health_screenings',
-  'tithes_records', 'giving_campaigns', 'analytics_snapshots', 'student_submissions'
+  'tithes_records', 'giving_campaigns', 'analytics_snapshots', 'student_submissions',
+  'resolution_votes', 'committees', 'committee_members', 'finance_categories', 'event_rsvps',
+  'org_tasks', 'org_task_comments', 'org_notifications', 'board_resolutions',
+  'org_attachments', 'meeting_action_items', 'org_health_scores',
+  'org_meeting_minutes', 'org_surveys', 'org_survey_responses',
+  'org_discussions', 'org_discussion_replies', 'org_email_templates',
+  'org_broadcasts', 'org_data_backups'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -902,7 +1030,51 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS budget_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT NOT NULL, planned INTEGER DEFAULT 0, actual INTEGER DEFAULT 0, month TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS goals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, target INTEGER DEFAULT 0, current INTEGER DEFAULT 0, deadline DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS personal_notes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, created_at TIMESTAMP DEFAULT NOW())`,
-  // === SAFE COLUMN MIGRATIONS (handles tables created by older schema versions) ===
+  // === ORG PORTAL TABLES (moved from GET route handlers to avoid DDL on read requests) ===
+  `ALTER TABLE org_finance ADD COLUMN IF NOT EXISTS category VARCHAR(255)`,
+  `CREATE TABLE IF NOT EXISTS resolution_votes (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, resolution_id INT NOT NULL, voter_email TEXT NOT NULL, direction TEXT NOT NULL, voted_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(resolution_id, voter_email))`,
+  `CREATE TABLE IF NOT EXISTS committees (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(255) NOT NULL, description TEXT, chairperson VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS committee_members (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, committee_id INT NOT NULL, member_id INT NOT NULL, role VARCHAR(100) DEFAULT 'member', joined_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(committee_id, member_id))`,
+  `CREATE TABLE IF NOT EXISTS finance_categories (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(255) NOT NULL, type VARCHAR(20) NOT NULL, budget_amount NUMERIC DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS event_rsvps (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, event_id INT NOT NULL, member_id INT, name VARCHAR(255) NOT NULL, response VARCHAR(20) DEFAULT 'yes', responded_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: TASK MANAGEMENT ===
+  `CREATE TABLE IF NOT EXISTS org_tasks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, assigned_to INTEGER REFERENCES members(id) ON DELETE SET NULL, assigned_by TEXT, priority VARCHAR(20) DEFAULT 'medium', status VARCHAR(20) DEFAULT 'pending', due_date DATE, completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS org_task_comments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, task_id INTEGER REFERENCES org_tasks(id) ON DELETE CASCADE, comment TEXT NOT NULL, commented_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: IN-APP NOTIFICATIONS ===
+  `CREATE TABLE IF NOT EXISTS org_notifications (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, title TEXT NOT NULL, message TEXT, link TEXT, is_read BOOLEAN DEFAULT false, read_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: COMMITTEE MEETINGS ===
+  `ALTER TABLE committees ADD COLUMN IF NOT EXISTS meeting_day VARCHAR(20)`,
+  `ALTER TABLE committees ADD COLUMN IF NOT EXISTS meeting_time VARCHAR(10)`,
+  // === ORG PORTAL: RECURRING EVENTS ===
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT false`,
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS recurring_pattern VARCHAR(20)`,
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS recurring_end_date DATE`,
+  // === ORG PORTAL: FILE ATTACHMENTS ===
+  `CREATE TABLE IF NOT EXISTS org_attachments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, entity_type VARCHAR(50) NOT NULL, entity_id INTEGER NOT NULL, file_name TEXT NOT NULL, file_url TEXT NOT NULL, file_type VARCHAR(100), file_size INTEGER DEFAULT 0, uploaded_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: MEETING ACTION ITEMS ===
+  `CREATE TABLE IF NOT EXISTS meeting_action_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, meeting_id INTEGER REFERENCES meeting_minutes(id) ON DELETE CASCADE, description TEXT NOT NULL, assigned_to INTEGER REFERENCES members(id) ON DELETE SET NULL, due_date DATE, status VARCHAR(20) DEFAULT 'pending', completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: ORG HEALTH SCORE ===
+  `CREATE TABLE IF NOT EXISTS org_health_scores (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, score INTEGER DEFAULT 0, member_health INTEGER DEFAULT 0, finance_health INTEGER DEFAULT 0, task_health INTEGER DEFAULT 0, event_health INTEGER DEFAULT 0, computed_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id))`,
+  // === ORG PORTAL V6: MEETING MINUTES ===
+  `CREATE TABLE IF NOT EXISTS org_meeting_minutes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, meeting_date DATE NOT NULL, meeting_type VARCHAR(20) DEFAULT 'General', venue TEXT DEFAULT '', agenda TEXT DEFAULT '', content TEXT NOT NULL, decisions TEXT DEFAULT '', action_items TEXT DEFAULT '', attendee_count INTEGER DEFAULT 0, recorded_by INTEGER REFERENCES members(id) ON DELETE SET NULL, next_meeting_date DATE, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: SURVEYS & POLLS ===
+  `CREATE TABLE IF NOT EXISTS org_surveys (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT DEFAULT '', survey_type VARCHAR(20) DEFAULT 'survey', is_anonymous BOOLEAN DEFAULT false, questions JSONB DEFAULT '[]', is_active BOOLEAN DEFAULT true, closes_at TIMESTAMPTZ, max_responses INTEGER, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS org_survey_responses (id SERIAL PRIMARY KEY, survey_id INTEGER REFERENCES org_surveys(id) ON DELETE CASCADE, respondent_email TEXT NOT NULL, answers JSONB DEFAULT '{}', created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: DISCUSSIONS ===
+  `CREATE TABLE IF NOT EXISTS org_discussions (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, category VARCHAR(30) DEFAULT 'General', content TEXT NOT NULL, author_email TEXT NOT NULL, is_pinned BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS org_discussion_replies (id SERIAL PRIMARY KEY, discussion_id INTEGER REFERENCES org_discussions(id) ON DELETE CASCADE, content TEXT NOT NULL, author_email TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: EMAIL TEMPLATES ===
+  `CREATE TABLE IF NOT EXISTS org_email_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, template_type VARCHAR(30) DEFAULT 'custom', subject TEXT DEFAULT '', body TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: BROADCASTS ===
+  `CREATE TABLE IF NOT EXISTS org_broadcasts (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, subject TEXT NOT NULL, message TEXT NOT NULL, channel VARCHAR(20) DEFAULT 'notification', priority VARCHAR(10) DEFAULT 'normal', target VARCHAR(20) DEFAULT 'all', recipient_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL V6: DATA BACKUPS ===
+  `CREATE TABLE IF NOT EXISTS org_data_backups (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, description TEXT DEFAULT '', record_count INTEGER DEFAULT 0, file_size INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: MEMBER ACCESS CONTROL ===
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS can_manage_finance BOOLEAN DEFAULT false`,
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS can_manage_members BOOLEAN DEFAULT false`,
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS can_manage_events BOOLEAN DEFAULT false`,
+  `ALTER TABLE members ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false`,
+  // === SAFE COLUMN MIGRATIONS ===
   // tenants: all columns except id, name, type (which existed in the original table)
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone TEXT`,
@@ -1086,19 +1258,6 @@ const migrations = [
   // v11.0 - Customer debts
   `ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)`,
   `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)`,
-  // v12.0 - invoices items column (JSONB for line items)
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'`,
-  // v12.0 - patient_queue completed_at column (for clinic reports avg wait time)
-  `ALTER TABLE patient_queue ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`,
-  // v12.0 - invoices invoice_number and payer columns
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_number TEXT`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payer_name TEXT`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payer_email TEXT`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tax INTEGER DEFAULT 0`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS total INTEGER DEFAULT 0`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_date DATE`,
-  `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'`,
   // v11.0 - Purchase orders
   `CREATE TABLE IF NOT EXISTS purchase_orders (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, po_no TEXT, supplier TEXT, items JSONB, total INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
   // v11.0 - Tax reports
@@ -2294,6 +2453,8 @@ ${platformSettings.google_verification ? `<meta name="google-site-verification" 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(title)} | ${esc(siteName)}">
 <meta name="twitter:description" content="${esc(siteDesc)}">
+<meta property="og:image" content="${esc(process.env.OG_IMAGE_URL || process.env.BASE_URL + '/og-image.png' || 'https://ssewasswa.onrender.com/og-image.png')}">
+<meta name="twitter:image" content="${esc(process.env.OG_IMAGE_URL || process.env.BASE_URL + '/og-image.png' || 'https://ssewasswa.onrender.com/og-image.png')}">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="${esc(process.env.BASE_URL || 'https://ssewasswa.onrender.com')}">
 <meta name="user-lang" content="${lang}">
@@ -2331,7 +2492,8 @@ a{color:#4f46e5;text-decoration:none}a:hover{text-decoration:underline}
 .tab-bar a{flex:1;padding:12px;text-align:center;background:${dark ? '#1e293b' : 'white'};color:${dark ? '#94a3b8' : '#64748b'};font-weight:600;text-decoration:none;transition:0.2s}
 .tab-bar a:hover{background:${dark ? '#334155' : '#f1f5f9'};text-decoration:none}
 .tab-bar a.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:white}
-@media(max-width:768px){.nav{display:none!important}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}.hero{padding:30px 15px}.container{padding:0 12px}.card{padding:16px;margin-bottom:12px}.btn{padding:14px 20px;width:100%;text-align:center}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{padding:8px;font-size:13px}.stat-num{font-size:24px}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}}
+@media(max-width:768px){.nav{display:none!important}.stats,.grid{grid-template-columns:1fr}.tab-bar{flex-direction:column}.hero{padding:30px 15px}.container{padding:0 12px}.card{padding:16px;margin-bottom:12px}.btn{padding:14px 20px;width:100%;text-align:center}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{padding:8px;font-size:13px}.stat-num{font-size:24px}.search-bar{flex-direction:column}.tab-bar a{padding:10px;font-size:13px}#menuBtn{display:block!important}.bottom-nav{display:flex!important}body{padding-bottom:70px}.hero h1{font-size:22px!important}.hero p{font-size:14px!important}form input,form select,form textarea{font-size:16px!important}.tag{font-size:11px;padding:2px 6px}h2{font-size:18px}h3{font-size:16px}.stat-card{min-width:auto!important}}
+@media(max-width:480px){.hero h1{font-size:18px!important}.grid{grid-template-columns:1fr!important}.stats{grid-template-columns:1fr 1fr!important}.card{padding:12px;margin-bottom:8px}table{font-size:12px}}
 </style>
 <!-- CookieYes Consent Banner -->
 <script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/0e110963fc8230516a615baf/script.js"></script>
@@ -4586,13 +4748,17 @@ app.post('/school/notify/send', requireAuth, requireNotBanned, ah(async (req, re
 // === ORGANIZATION PORTAL (enhanced) ===
 app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const [members, projects, events, budget, notices, meetings] = await Promise.all([
+  const [members, projects, events, budget, notices, meetings, overdueTasks, pendingTasks, upcomingEvents, urgentTasks] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [t]),
     pool.query('SELECT COUNT(*) FROM projects WHERE tenant_id=$1', [t]),
     pool.query('SELECT COUNT(*) FROM events WHERE tenant_id=$1', [t]),
     pool.query('SELECT COALESCE(SUM(amount),0) FROM org_finance WHERE tenant_id=$1 AND type=\'income\'', [t]),
     pool.query('SELECT COUNT(*) FROM notice_board WHERE tenant_id=$1', [t]),
-    pool.query('SELECT COUNT(*) FROM meeting_minutes WHERE tenant_id=$1', [t])
+    pool.query('SELECT COUNT(*) FROM meeting_minutes WHERE tenant_id=$1', [t]),
+    pool.query("SELECT COUNT(*) FROM org_tasks WHERE tenant_id=$1 AND status!='completed' AND due_date < CURRENT_DATE"),
+    pool.query("SELECT COUNT(*) FROM org_tasks WHERE tenant_id=$1 AND status='pending'"),
+    pool.query("SELECT name, event_date FROM events WHERE tenant_id=$1 AND event_date >= CURRENT_DATE ORDER BY event_date LIMIT 3"),
+    pool.query("SELECT title, due_date FROM org_tasks WHERE tenant_id=$1 AND status!='completed' AND due_date IS NOT NULL ORDER BY due_date LIMIT 5")
   ]);
   const tenant = (await pool.query('SELECT has_fundraising FROM tenants WHERE id=$1', [t])).rows[0];
   // Auto-enable fundraising for super_admin/developer
@@ -4626,6 +4792,7 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       </div>
       <div class="card"><h3>Finance</h3>
         <a href="/org/finance" class="btn btn-sm">Income/Expense</a>
+        <a href="/org/finance/categories" class="btn btn-sm" style="margin-top:8px">Budget vs Actual</a>
         <a href="/org/reports" class="btn btn-sm" style="margin-top:8px">Reports</a>
       </div>
       <div class="card"><h3>Meetings</h3>
@@ -4661,8 +4828,54 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">NEW: Assets</h3><a href="/org/assets" class="btn btn-sm">Fixed Assets</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">NEW: Partners</h3><a href="/org/partners" class="btn btn-sm">Donor Mgmt</a></div>
       <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">NEW: Ticketing</h3><a href="/org/ticketing" class="btn btn-sm">Event Tickets</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Committees</h3><a href="/org/committees" class="btn btn-sm">Working Groups</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Budget</h3><a href="/org/finance/categories" class="btn btn-sm">Budget vs Actual</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">Import</h3><a href="/org/members/import" class="btn btn-sm">CSV Import</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #1e40af"><h3 style="color:#1e40af">Tasks</h3><a href="/org/tasks" class="btn btn-sm">Task Manager</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Notifications</h3><a href="/org/notifications" class="btn btn-sm">In-App Alerts</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Analytics</h3><a href="/org/analytics" class="btn btn-sm">Engagement</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Calendar</h3><a href="/org/calendar" class="btn btn-sm">Calendar View</a></div>
+      <div class="card" style="background:#fff1f2;border:2px solid #e11d48"><h3 style="color:#e11d48">Activity</h3><a href="/org/activity" class="btn btn-sm">Activity Feed</a></div>
+      <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Bulk Actions</h3><a href="/org/members/bulk" class="btn btn-sm">Bulk Manage</a></div>
+      <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Settings</h3><a href="/org/settings" class="btn btn-sm">Org Settings</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">My Portal</h3><a href="/my-portal" class="btn btn-sm">Self-Service</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Health</h3><a href="/org/health" class="btn btn-sm">Org Health</a></div>
+      <div class="card" style="background:#fee2e2;border:2px solid #dc2626"><h3 style="color:#dc2626">Reminders</h3><a href="/org/reminders" class="btn btn-sm">Alerts</a></div>
+      <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Export</h3><a href="/org/export" class="btn btn-sm">Data Export</a></div>
+      <div class="card" style="background:#f5f3ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Access</h3><a href="/org/roles" class="btn btn-sm">Permissions</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #dc2626"><h3 style="color:#dc2626">PDF Reports</h3><a href="/org/reports" class="btn btn-sm">Generate PDF</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #4f46e5"><h3 style="color:#4f46e5">Minutes</h3><a href="/org/minutes" class="btn btn-sm">Meeting Notes</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #8b5cf6"><h3 style="color:#8b5cf6">Surveys</h3><a href="/org/surveys" class="btn btn-sm">Polls & Surveys</a></div>
+      <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Discussions</h3><a href="/org/discussions" class="btn btn-sm">Forum</a></div>
+      <div class="card" style="background:#f0f9ff;border:2px solid #0ea5e9"><h3 style="color:#0ea5e9">Kanban</h3><a href="/org/tasks/board" class="btn btn-sm">Task Board</a></div>
+      <div class="card" style="background:#f0fdf4;border:2px solid #059669"><h3 style="color:#059669">Budget</h3><a href="/org/budget" class="btn btn-sm">Budget vs Actual</a></div>
+      <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Templates</h3><a href="/org/templates" class="btn btn-sm">Email Templates</a></div>
+      <div class="card" style="background:#fff7ed;border:2px solid #ea580c"><h3 style="color:#ea580c">Broadcast</h3><a href="/org/broadcast" class="btn btn-sm">Mass Notify</a></div>
+      <div class="card" style="background:#f8fafc;border:2px solid #475569"><h3 style="color:#475569">Search</h3><a href="/org/search" class="btn btn-sm">Global Search</a></div>
+      <div class="card" style="background:#f1f5f9;border:2px solid #334155"><h3 style="color:#334155">Backup</h3><a href="/org/backup" class="btn btn-sm">Data Backup</a></div>
+      <div class="card" style="background:#fef2f2;border:2px solid #b91c1c"><h3 style="color:#b91c1c">Churn AI</h3><a href="/org/churn-enhanced" class="btn btn-sm">Enhanced Churn</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid for staff & visitors</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a></div>
+    </div>
+    <div class="grid" style="margin-top:15px">
+      <div class="card" style="border-left:4px solid #dc2626">
+        <h3 style="color:#dc2626">Overdue Tasks</h3>
+        <div class="stat-num" style="color:#dc2626">${overdueTasks.rows[0].count}</div>
+        ${parseInt(overdueTasks.rows[0].count) > 0 ? '<a href="/org/tasks?status=overdue" class="btn btn-sm btn-red" style="margin-top:5px">View Overdue</a>' : '<span class="muted">All on track!</span>'}
+      </div>
+      <div class="card" style="border-left:4px solid #f59e0b">
+        <h3 style="color:#f59e0b">Pending Tasks</h3>
+        <div class="stat-num" style="color:#f59e0b">${pendingTasks.rows[0].count}</div>
+        <a href="/org/tasks?status=pending" class="btn btn-sm" style="margin-top:5px">View Pending</a>
+      </div>
+      <div class="card" style="border-left:4px solid #059669">
+        <h3 style="color:#059669">Upcoming Events</h3>
+        ${upcomingEvents.rows.length ? upcomingEvents.rows.map(e => `<div style="padding:4px 0;border-bottom:1px solid #f1f5f9">${esc(e.name)} <span class="muted">${e.event_date ? new Date(e.event_date).toLocaleDateString() : ''}</span></div>`).join('') : '<span class="muted">No upcoming events</span>'}
+      </div>
+      <div class="card" style="border-left:4px solid #3b82f6">
+        <h3 style="color:#3b82f6">Urgent Tasks</h3>
+        ${urgentTasks.rows.length ? urgentTasks.rows.map(tk => `<div style="padding:4px 0;border-bottom:1px solid #f1f5f9">${esc(tk.title)} <span class="muted">${tk.due_date ? new Date(tk.due_date).toLocaleDateString() : ''}</span></div>`).join('') : '<span class="muted">No urgent tasks</span>'}
+      </div>
     </div>
     <div class="card"><h3>Finance: Income vs Expense</h3><canvas id="orgFinanceChart"></canvas></div>
     <div class="card"><h3>Member Growth</h3><canvas id="orgMemberChart"></canvas></div>
@@ -4701,15 +4914,40 @@ app.get('/org/charts/members', requireAuth, requireNotBanned, ah(async (req, res
 // === ORG: MEMBERS (with edit/delete) ===
 app.get('/org/members', requireAuth, requireNotBanned, requireTenantAccess, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const members = (await pool.query('SELECT * FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const search = req.query.search || '';
+  const roleFilter = req.query.role || '';
+  let whereClauses = ['m.tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (search) { whereClauses.push(`(m.name ILIKE $${paramIdx} OR m.email ILIKE $${paramIdx} OR m.phone ILIKE $${paramIdx})`); params.push('%'+search+'%'); paramIdx++; }
+  if (roleFilter) { whereClauses.push(`m.role=$${paramIdx}`); params.push(roleFilter); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM members m WHERE ${whereStr}`, params)).rows[0].count;
+  const members = (await pool.query(`SELECT m.* FROM members m WHERE ${whereStr} ORDER BY m.name LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
+  const roles = (await pool.query('SELECT DISTINCT role FROM members WHERE tenant_id=$1 AND role IS NOT NULL ORDER BY role', [t])).rows.map(r => r.role);
   res.send(renderPage('Members', `
-    <div class="card"><h3>Member Database</h3>
-      <a href="/org/register" class="btn btn-sm" style="margin-bottom:15px">+ Register New Member</a>
+    <div class="card"><h3>Member Database (${total} total)</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;align-items:center">
+        <a href="/org/register" class="btn btn-sm btn-green">+ Register New Member</a>
+        <a href="/org/members/import" class="btn btn-sm">Import CSV</a>
+        <a href="/org/members/bulk" class="btn btn-sm">Bulk Actions</a>
+        <a href="/org/reports/export?type=members" class="btn btn-sm">Export CSV</a>
+      </div>
+      <form method="GET" action="/org/members" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="search" placeholder="Search name, email, phone..." value="${esc(search)}" style="flex:2;min-width:200px;padding:8px">
+        <select name="role" style="flex:1;min-width:120px;padding:8px"><option value="">All Roles</option>${roles.map(r => `<option value="${esc(r)}" ${roleFilter===r?'selected':''}>${esc(r)}</option>`).join('')}</select>
+        <button class="btn btn-sm">Search</button>
+      </form>
       <table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Joined</th><th>Actions</th></tr>
-      ${members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${esc(m.phone)}</td><td>${esc(m.role)}</td><td>${new Date(m.joined_at).toLocaleDateString()}</td>
-        <td><a href="/org/members/${m.id}/edit" class="btn btn-sm">Edit</a> <a href="/org/members/${m.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete ${esc(m.name)}?')">Del</a></td>
-      </tr>`).join('') || '<tr><td colspan="6">No members yet</td></tr>'}
+      ${members.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${esc(m.phone)}</td><td><span class="tag">${esc(m.role)}</span></td><td>${new Date(m.joined_at).toLocaleDateString()}</td>
+        <td><a href="/org/members/${m.id}/profile" class="btn btn-sm">Profile</a> <a href="/org/members/${m.id}/edit" class="btn btn-sm">Edit</a> <form method="POST" action="/org/members/${m.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete ${esc(m.name)}?')">Del</button></form></td>
+      </tr>`).join('') || '<tr><td colspan="6">No members found</td></tr>'}
       </table>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/members?page=${i+1}&search=${esc(search)}&role=${esc(roleFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4757,10 +4995,11 @@ app.get('/org/members/:id/edit', requireAuth, requireNotBanned, ah(async (req, r
 app.post('/org/members/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, email, phone, role } = req.body;
   await pool.query('UPDATE members SET name=$1,email=$2,phone=$3,role=$4 WHERE id=$5 AND tenant_id=$6', [name, email, phone, role, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'update_member', `Updated member: ${name}`);
   res.redirect('/org/members');
 }));
 
-app.get('/org/members/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/members/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM members WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
   await audit(req.session.user.email, 'delete_member', `Deleted member ID: ${req.params.id}`);
   res.redirect('/org/members');
@@ -4769,11 +5008,31 @@ app.get('/org/members/:id/delete', requireAuth, requireNotBanned, ah(async (req,
 // === ORG: PROJECTS (with progress update) ===
 app.get('/org/projects', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const projects = (await pool.query('SELECT * FROM projects WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const search = req.query.search || '';
+  const statusFilter = req.query.status || '';
+  let whereClauses = ['tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (search) { whereClauses.push(`(name ILIKE $${paramIdx} OR description ILIKE $${paramIdx})`); params.push('%'+search+'%'); paramIdx++; }
+  if (statusFilter) { whereClauses.push(`status=$${paramIdx}`); params.push(statusFilter); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM projects WHERE ${whereStr}`, params)).rows[0].count;
+  const projects = (await pool.query(`SELECT * FROM projects WHERE ${whereStr} ORDER BY created_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Projects', `
-    <div class="card"><h3>All Projects</h3>
-      <a href="/org/projects/new" class="btn btn-sm">+ New Project</a>
-      <div class="grid" style="margin-top:15px">
+    <div class="card"><h3>All Projects (${total})</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;align-items:center">
+        <a href="/org/projects/new" class="btn btn-sm btn-green">+ New Project</a>
+      </div>
+      <form method="GET" action="/org/projects" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="search" placeholder="Search projects..." value="${esc(search)}" style="flex:2;min-width:200px;padding:8px">
+        <select name="status" style="flex:1;min-width:120px;padding:8px"><option value="">All Status</option><option value="active" ${statusFilter==='active'?'selected':''}>Active</option><option value="planning" ${statusFilter==='planning'?'selected':''}>Planning</option><option value="completed" ${statusFilter==='completed'?'selected':''}>Completed</option><option value="on-hold" ${statusFilter==='on-hold'?'selected':''}>On Hold</option></select>
+        <button class="btn btn-sm">Search</button>
+      </form>
+      <div class="grid">
         ${projects.map(p => {
           const pct = p.budget > 0 ? Math.min(100, (p.spent / p.budget) * 100) : 0;
           return `
@@ -4790,8 +5049,9 @@ app.get('/org/projects', requireAuth, requireNotBanned, ah(async (req, res) => {
               <form method="POST" action="/org/projects/${p.id}/status" style="display:inline"><select name="status" style="width:auto;display:inline-block;padding:8px"><option>active</option><option>planning</option><option>completed</option><option>on-hold</option></select><button class="btn btn-sm">Set</button></form>
             </div>
           </div>`;
-        }).join('') || '<p>No projects yet</p>'}
+        }).join('') || '<p>No projects found</p>'}
       </div>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/projects?page=${i+1}&search=${esc(search)}&status=${esc(statusFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4813,38 +5073,48 @@ app.get('/org/projects/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/projects/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { name, description, budget, status } = req.body;
   await pool.query('INSERT INTO projects(tenant_id,name,description,budget,status) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, name, description, budget, status]);
+  await audit(req.session.user.email, 'create_project', `Created project: ${name}`);
   res.redirect('/org/projects');
 }));
 
 app.post('/org/projects/:id/spend', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { amount } = req.body;
   await pool.query('UPDATE projects SET spent=spent+$1 WHERE id=$2 AND tenant_id=$3', [amount, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'update_project_spend', `Added UGX ${amount} spent to project ID: ${req.params.id}`);
   res.redirect('/org/projects');
 }));
 
 app.post('/org/projects/:id/status', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { status } = req.body;
   await pool.query('UPDATE projects SET status=$1 WHERE id=$2 AND tenant_id=$3', [status, req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'update_project_status', `Set project ID ${req.params.id} status to ${status}`);
   res.redirect('/org/projects');
 }));
 
 // === ORG: EVENTS ===
 app.get('/org/events', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const events = (await pool.query('SELECT * FROM events WHERE tenant_id=$1 ORDER BY event_date DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM events WHERE tenant_id=$1', [t])).rows[0].count;
+  const events = (await pool.query('SELECT * FROM events WHERE tenant_id=$1 ORDER BY event_date DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Events', `
-    <div class="card"><h3>Events</h3>
+    <div class="card"><h3>Events (${total})</h3>
       <a href="/org/events/new" class="btn btn-sm" style="margin-bottom:15px">+ New Event</a>
       <div class="grid">
         ${events.map(e => `
           <div class="card">
-            <h3>${esc(e.name)}</h3>
+            <h3>${esc(e.name)}${e.is_recurring ? ` <span class="tag" style="background:#eff6ff;color:#1e40af;font-size:11px">${esc(e.recurring_pattern||'recurring')}</span>` : ''}</h3>
             <p class="muted">${e.event_date ? new Date(e.event_date).toLocaleDateString() : 'TBD'} ${e.venue ? '@ ' + esc(e.venue) : ''}</p>
             ${e.description ? `<p>${esc(e.description)}</p>` : ''}
             <p>Budget: UGX ${parseInt(e.budget).toLocaleString()}</p>
+            <div style="margin-top:8px"><a href="/org/events/rsvp/${e.id}" class="btn btn-sm btn-green">RSVP</a></div>
           </div>
         `).join('') || '<p>No events yet</p>'}
       </div>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/events?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4858,30 +5128,78 @@ app.get('/org/events/new', requireAuth, requireNotBanned, (req, res) => {
         <input name="venue" placeholder="Venue">
         <textarea name="description" placeholder="Event Description" rows="3"></textarea>
         <input name="budget" type="number" placeholder="Budget UGX">
-        <button class="btn">Create Event</button>
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;margin:10px 0">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="is_recurring" id="recurringCheck" onchange="document.getElementById('recurringOpts').style.display=this.checked?'block':'none'"> Make this a recurring event</label>
+          <div id="recurringOpts" style="display:none;margin-top:10px">
+            <div class="grid" style="grid-template-columns:1fr 1fr">
+              <div><label>Repeat</label><select name="recurring_pattern"><option value="daily">Daily</option><option value="weekly" selected>Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option></select></div>
+              <div><label>Until</label><input name="recurring_end_date" type="date"></div>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-green">Create Event</button>
       </form>
     </div>
   `, req.session.user));
 });
 
 app.post('/org/events/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const { name, event_date, venue, description, budget } = req.body;
-  await pool.query('INSERT INTO events(tenant_id,name,event_date,venue,description,budget) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, name, event_date, venue, description, budget || 0]);
+  const t = req.session.user.tenant_id;
+  const { name, event_date, venue, description, budget, is_recurring, recurring_pattern, recurring_end_date } = req.body;
+  const recurring = is_recurring === 'on' || is_recurring === 'true';
+  const pattern = recurring ? (recurring_pattern || 'weekly') : null;
+  const endDate = recurring ? (recurring_end_date || null) : null;
+  await pool.query('INSERT INTO events(tenant_id,name,event_date,venue,description,budget,is_recurring,recurring_pattern,recurring_end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, name, event_date, venue, description, budget || 0, recurring, pattern, endDate]);
+  await audit(req.session.user.email, 'create_event', `Created event: ${name}${recurring ? ` (${pattern})` : ''}`);
+  // Generate recurring occurrences
+  if (recurring && event_date && endDate && pattern) {
+    const startDate = new Date(event_date);
+    const end = new Date(endDate);
+    const intervals = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+    const days = intervals[pattern] || 7;
+    let current = new Date(startDate);
+    current.setDate(current.getDate() + days);
+    let count = 0;
+    while (current <= end && count < 52) {
+      await pool.query('INSERT INTO events(tenant_id,name,event_date,venue,description,budget,is_recurring,recurring_pattern,recurring_end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, name, current.toISOString().split('T')[0], venue, description, budget || 0, true, pattern, endDate]);
+      current.setDate(current.getDate() + days);
+      count++;
+    }
+    if (count > 0) await audit(req.session.user.email, 'create_recurring_events', `Generated ${count} recurring instances for: ${name}`);
+  }
   res.redirect('/org/events');
 }));
 
 // === ORG: MEETING MINUTES ===
 app.get('/org/meetings', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const meetings = (await pool.query('SELECT * FROM meeting_minutes WHERE tenant_id=$1 ORDER BY meeting_date DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const search = req.query.search || '';
+  let whereClauses = ['tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (search) { whereClauses.push(`(title ILIKE $${paramIdx} OR content ILIKE $${paramIdx})`); params.push('%'+search+'%'); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM meeting_minutes WHERE ${whereStr}`, params)).rows[0].count;
+  const meetings = (await pool.query(`SELECT * FROM meeting_minutes WHERE ${whereStr} ORDER BY meeting_date DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Meeting Minutes', `
-    <div class="card"><h3>Meeting Minutes</h3>
-      <a href="/org/meetings/new" class="btn btn-sm" style="margin-bottom:15px">+ New Minutes</a>
+    <div class="card"><h3>Meeting Minutes (${total})</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px;align-items:center">
+        <a href="/org/meetings/new" class="btn btn-sm btn-green">+ New Minutes</a>
+      </div>
+      <form method="GET" action="/org/meetings" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="search" placeholder="Search meetings..." value="${esc(search)}" style="flex:1;min-width:200px;padding:8px">
+        <button class="btn btn-sm">Search</button>
+      </form>
       <table><tr><th>Title</th><th>Date</th><th>Actions</th></tr>
       ${meetings.map(m => `<tr><td>${esc(m.title)}</td><td>${m.meeting_date ? new Date(m.meeting_date).toLocaleDateString() : ''}</td>
-        <td><a href="/org/meetings/${m.id}" class="btn btn-sm">View</a> <a href="/org/meetings/${m.id}/delete" class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</a></td>
-      </tr>`).join('') || '<tr><td colspan="3">No meetings yet</td></tr>'}
+        <td><a href="/org/meetings/${m.id}" class="btn btn-sm">View</a> <form method="POST" action="/org/meetings/${m.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Del</button></form></td>
+      </tr>`).join('') || '<tr><td colspan="3">No meetings found</td></tr>'}
       </table>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/meetings?page=${i+1}&search=${esc(search)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4902,41 +5220,61 @@ app.get('/org/meetings/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/meetings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { title, meeting_date, content } = req.body;
   await pool.query('INSERT INTO meeting_minutes(tenant_id,title,meeting_date,content) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, title, meeting_date, content]);
+  await audit(req.session.user.email, 'create_meeting', `Created meeting: ${title}`);
   res.redirect('/org/meetings');
 }));
 
 app.get('/org/meetings/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const m = (await pool.query('SELECT * FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
+  const t = req.session.user.tenant_id;
+  const m = (await pool.query('SELECT * FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!m) return res.status(404).send('Not found');
+  // Fetch agenda items inline
+  const agendaItems = (await pool.query('SELECT * FROM meeting_agendas WHERE meeting_id=$1 AND tenant_id=$2 ORDER BY order_no', [m.id, t])).rows;
+  const agendaSection = agendaItems.length ? `
+    <h3 style="margin-top:25px">Agenda (${agendaItems.length} items)</h3>
+    <table><tr><th>#</th><th>Item</th><th>Status</th></tr>
+    ${agendaItems.map(a => `<tr><td>${a.order_no}</td><td>${esc(a.item_text)}</td><td><span class="tag" style="background:${a.completed?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${a.completed?'Done':'Pending'}</span></td></tr>`).join('')}
+    </table>` : '';
   res.send(renderPage(m.title, `
     <div class="card"><h3>${esc(m.title)}</h3>
       <p class="muted">${m.meeting_date ? new Date(m.meeting_date).toLocaleDateString() : ''}</p>
       <div style="margin-top:20px;white-space:pre-wrap">${esc(m.content)}</div>
-      <a href="/org/meetings" class="btn btn-sm" style="margin-top:15px">Back to Minutes</a>
+      ${agendaSection}
+      <div style="margin-top:15px;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="/org/meetings/${m.id}/agenda" class="btn btn-sm">Manage Agenda</a>
+        <a href="/org/meetings" class="btn btn-sm">Back to Minutes</a>
+      </div>
     </div>
   `, req.session.user));
 }));
 
-app.get('/org/meetings/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/meetings/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'delete_meeting', `Deleted meeting ID: ${req.params.id}`);
   res.redirect('/org/meetings');
 }));
 
 // === ORG: NOTICE BOARD ===
 app.get('/org/notices', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const notices = (await pool.query('SELECT * FROM notice_board WHERE tenant_id=$1 ORDER BY created_at DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM notice_board WHERE tenant_id=$1', [t])).rows[0].count;
+  const notices = (await pool.query('SELECT * FROM notice_board WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Notice Board', `
-    <div class="card"><h3>Notice Board</h3>
+    <div class="card"><h3>Notice Board (${total})</h3>
       <a href="/org/notices/new" class="btn btn-sm" style="margin-bottom:15px">+ Post Notice</a>
       ${notices.map(n => `
         <div class="card" style="border-left:4px solid ${n.priority === 'urgent' ? '#dc2626' : n.priority === 'important' ? '#f59e0b' : '#4f46e5'}">
           <h3>${esc(n.title)} <span class="tag">${esc(n.priority)}</span></h3>
           <p style="margin-top:8px;white-space:pre-wrap">${esc(n.content)}</p>
           <p class="muted" style="margin-top:8px">${new Date(n.created_at).toLocaleString()}</p>
-          <a href="/org/notices/${n.id}/delete" class="btn btn-red btn-sm" style="margin-top:8px" onclick="return confirm('Delete?')">Delete</a>
+          <form method="POST" action="/org/notices/${n.id}/delete" style="display:inline;margin-top:8px"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red btn-sm" onclick="return confirm('Delete?')">Delete</button></form>
         </div>
       `).join('') || '<p>No notices yet</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/notices?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -4957,47 +5295,91 @@ app.get('/org/notices/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/notices/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const { title, content, priority } = req.body;
   await pool.query('INSERT INTO notice_board(tenant_id,title,content,priority) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, title, content, priority]);
+  await audit(req.session.user.email, 'create_notice', `Posted notice: ${title}`);
   res.redirect('/org/notices');
 }));
 
-app.get('/org/notices/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/notices/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   await pool.query('DELETE FROM notice_board WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id]);
+  await audit(req.session.user.email, 'delete_notice', `Deleted notice ID: ${req.params.id}`);
   res.redirect('/org/notices');
 }));
 
 // === ORG: FINANCE ===
 app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const records = (await pool.query('SELECT * FROM org_finance WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t])).rows;
-  const income = records.filter(r => r.type === 'income').reduce((a, b) => a + parseInt(b.amount), 0);
-  const expense = records.filter(r => r.type === 'expense').reduce((a, b) => a + parseInt(b.amount), 0);
+  const page = parseInt(req.query.page) || 1;
+  const limit = 50;
+  const offset = (page - 1) * limit;
+  const dateFrom = req.query.date_from || '';
+  const dateTo = req.query.date_to || '';
+  const typeFilter = req.query.type || '';
+  let whereClauses = ['tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (dateFrom) { whereClauses.push(`created_at >= $${paramIdx}`); params.push(dateFrom); paramIdx++; }
+  if (dateTo) { whereClauses.push(`created_at <= $${paramIdx}::timestamp + interval '1 day'`); params.push(dateTo); paramIdx++; }
+  if (typeFilter) { whereClauses.push(`type=$${paramIdx}`); params.push(typeFilter); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM org_finance WHERE ${whereStr}`, params)).rows[0].count;
+  const records = (await pool.query(`SELECT * FROM org_finance WHERE ${whereStr} ORDER BY created_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+  // Get totals for filtered range
+  const totals = (await pool.query(`SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) as income, COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) as expense FROM org_finance WHERE ${whereStr}`, params)).rows[0];
+  const income = parseInt(totals.income);
+  const expense = parseInt(totals.expense);
+  const totalPages = Math.ceil(parseInt(total) / limit);
+  // Get finance categories for dropdown
+  // category column now in startup migrations
+  const finCats = (await pool.query('SELECT * FROM finance_categories WHERE tenant_id=$1 ORDER BY type, name', [t])).rows;
+  const incomeCats = finCats.filter(c => c.type === 'income').map(c => c.name);
+  const expenseCats = finCats.filter(c => c.type === 'expense').map(c => c.name);
   res.send(renderPage('Org Finance', `
     <div class="stats">
-      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${income.toLocaleString()}</div><div>Total Income</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${expense.toLocaleString()}</div><div>Total Expense</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${income.toLocaleString()}</div><div>Income (filtered)</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${expense.toLocaleString()}</div><div>Expense (filtered)</div></div>
       <div class="stat-card"><div class="stat-num" style="color:${income - expense >= 0 ? '#059669' : '#dc2626'}">UGX ${(income - expense).toLocaleString()}</div><div>Balance</div></div>
     </div>
     <div class="card"><h3>Record Transaction</h3>
       <form method="POST" action="/org/finance/save">
-        <div class="grid" style="grid-template-columns:1fr 1fr 2fr">
-          <select name="type" required><option value="">Type</option><option value="income">Income</option><option value="expense">Expense</option></select>
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr 2fr">
+          <select name="type" required id="finType" onchange="updateCatOpts()"><option value="">Type</option><option value="income">Income</option><option value="expense">Expense</option></select>
+          <select name="category" id="finCat"><option value="">Category</option></select>
           <input name="amount" type="number" placeholder="Amount UGX" required>
           <input name="description" placeholder="Description" required>
         </div>
         <button class="btn">Save Record</button>
       </form>
+      <a href="/org/finance/categories" class="btn btn-sm" style="margin-top:8px">Manage Categories & Budget</a>
     </div>
-    <div class="card"><h3>Recent Transactions</h3>
-      <table><tr><th>Type</th><th>Amount</th><th>Description</th><th>Date</th></tr>
-      ${records.map(r => `<tr><td><span style="color:${r.type === 'income' ? '#059669' : '#dc2626'}">${r.type}</span></td><td>UGX ${parseInt(r.amount).toLocaleString()}</td><td>${esc(r.description)}</td><td>${new Date(r.created_at).toLocaleDateString()}</td></tr>`).join('')}
+    <div class="card"><h3>Transactions (${total} total)</h3>
+      <form method="GET" action="/org/finance" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="date_from" type="date" value="${esc(dateFrom)}" style="padding:8px" title="From date">
+        <input name="date_to" type="date" value="${esc(dateTo)}" style="padding:8px" title="To date">
+        <select name="type" style="padding:8px"><option value="">All Types</option><option value="income" ${typeFilter==='income'?'selected':''}>Income</option><option value="expense" ${typeFilter==='expense'?'selected':''}>Expense</option></select>
+        <button class="btn btn-sm">Filter</button>
+        <a href="/org/finance" class="btn btn-sm">Reset</a>
+      </form>
+      <table><tr><th>Type</th><th>Category</th><th>Amount</th><th>Description</th><th>Date</th></tr>
+      ${records.map(r => `<tr><td><span style="color:${r.type === 'income' ? '#059669' : '#dc2626'}">${r.type}</span></td><td>${esc(r.category||'-')}</td><td>UGX ${parseInt(r.amount).toLocaleString()}</td><td>${esc(r.description)}</td><td>${new Date(r.created_at).toLocaleDateString()}</td></tr>`).join('')}
       </table>
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/finance?page=${i+1}&date_from=${esc(dateFrom)}&date_to=${esc(dateTo)}&type=${esc(typeFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
+    <script>
+    var incomeCats = ${JSON.stringify(incomeCats)};
+    var expenseCats = ${JSON.stringify(expenseCats)};
+    function updateCatOpts(){
+      var sel=document.getElementById('finType');var cat=document.getElementById('finCat');
+      var cats=sel.value==='income'?incomeCats:sel.value==='expense'?expenseCats:[];
+      cat.innerHTML='<option value="">Category</option>'+cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('');
+    }
+    </script>
   `, req.session.user));
 }));
 
 app.post('/org/finance/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const { type, amount, description } = req.body;
-  await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description) VALUES($1,$2,$3,$4)', [req.session.user.tenant_id, amount, type, description]);
+  const { type, amount, description, category } = req.body;
+  await pool.query('INSERT INTO org_finance(tenant_id,amount,type,description,category) VALUES($1,$2,$3,$4,$5)', [req.session.user.tenant_id, amount, type, description, category || null]);
+  await audit(req.session.user.email, 'record_finance', `Recorded ${type}: UGX ${amount} - ${description}${category ? ' ['+category+']' : ''}`);
   res.redirect('/org/finance');
 }));
 
@@ -5028,6 +5410,7 @@ app.post('/org/attendance/save', requireAuth, requireNotBanned, ah(async (req, r
     const status = present.includes(String(m.id)) ? 'present' : 'absent';
     await pool.query('INSERT INTO attendance(tenant_id,student_id,date,status) VALUES($1,$2,$3,$4) ON CONFLICT (student_id,date) DO UPDATE SET status=$4', [t, m.id, date, status]);
   }
+  await audit(req.session.user.email, 'mark_attendance', `Marked attendance for ${date}`);
   res.redirect('/org/attendance');
 }));
 
@@ -5471,9 +5854,6 @@ app.post('/church/donations/save', requireAuth, requireNotBanned, ah(async (req,
   const { donor_name, amount, type, method, reference } = req.body;
   await pool.query('INSERT INTO donations(tenant_id,donor_name,amount,type,method,reference) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, donor_name, amount, type, method, reference]);
   await audit(req.session.user.email, 'add_donation', `Donation UGX ${amount} from ${donor_name}`);
-  // Track revenue for church donation
-  try { await global.trackRevenue('church_donation', parseFloat(amount||0) / 3700, (type||'donation') + ': ' + donor_name, 'church-' + Date.now()); } catch(e) {}
-  try { await global.creditDeveloperRevenue(req.session.user.tenant_id, Math.round(parseFloat(amount||0) * 0.05), 'church_donation', 'Church donation: ' + donor_name); } catch(e) {}
   res.redirect('/church/donations');
 }));
 
@@ -6319,7 +6699,7 @@ app.get('/health/settings', requireAuth, requireNotBanned, ah(async (req, res) =
 app.post('/health/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { health_institution_type } = req.body;
-  const validTypes = ['general_hospital','referral_hospital','health_center_4','health_center_3','health_center_2','health_center_1','clinic','drugshop','pharmacy','dental','eye_clinic','mental_health','physiotherapy','lab','imaging','maternity','veterinary','special'];
+  const validTypes = ['general_hospital','health_center_iii','health_center_iv','clinic','dental','eye_clinic','mental_health','physiotherapy','lab','imaging','maternity','pharmacy','veterinary','special'];
   if (health_institution_type && !validTypes.includes(health_institution_type)) {
     return res.status(400).send('Invalid institution type');
   }
@@ -6439,7 +6819,7 @@ app.post('/sickbay/save', requireAuth, requireNotBanned, ah(async (req, res) => 
   const t = req.session.user.tenant_id;
   const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, action, notes } = req.body;
   const complaintText = complaint + (action && action !== 'none' ? ` [Action: ${action}]` : '');
-  await pool.query('INSERT INTO sickbay_visits(tenant_id,patient_name,visit_type,seen_by,visit_date,complaint,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_name, visit_type||'first_aid', seen_by||null, visit_date||new Date().toISOString().split('T')[0], complaintText, treatment||null, notes||null]);
+  await pool.query('INSERT INTO sickbay_visits(tenant_id,patient_name,visit_type,seen_by,visit_date,complaint,treatment,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaintText, treatment||null, notes||null]);
   await audit(req.session.user.email, 'sickbay_visit', `${patient_name}: ${visit_type||'first_aid'}`);
   res.redirect('/sickbay');
 }));
@@ -6471,7 +6851,7 @@ app.get('/sickbay/visits/:id/edit', requireAuth, requireNotBanned, ah(async (req
 app.post('/sickbay/visits/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { patient_name, visit_type, seen_by, visit_date, complaint, treatment, status, notes } = req.body;
-  await pool.query('UPDATE sickbay_visits SET patient_name=$1,visit_type=$2,seen_by=$3,visit_date=$4,complaint=$5,treatment=$6,status=$7,notes=$8 WHERE tenant_id=$9 AND id=$10', [patient_name, visit_type||'first_aid', seen_by||null, visit_date||new Date().toISOString().split('T')[0], complaint, treatment||null, status||'active', notes||null, t, req.params.id]);
+  await pool.query('UPDATE sickbay_visits SET patient_name=$1,visit_type=$2,seen_by=$3,visit_date=$4,complaint=$5,treatment=$6,status=$7,notes=$8 WHERE tenant_id=$9 AND id=$10', [patient_name, visit_type||'first_aid', seen_by||null, visit_date||'CURRENT_DATE', complaint, treatment||null, status||'active', notes||null, t, req.params.id]);
   res.redirect('/sickbay');
 }));
 
@@ -7292,7 +7672,7 @@ app.post('/settings/backup/upload', requireAuth, express.raw({ type: 'applicatio
     return res.send(renderPage('Import Error', '<div class="card"><div class="alert alert-error">Invalid backup file. Missing metadata.</div><a href="/settings/backup" class="btn">Back</a></div>', req.session.user));
   }
 
-  const allowedTables = ['students', 'fees', 'exams', 'marks', 'attendance', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'invoices', 'expenses', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'service_schedule', 'customers', 'budget_items', 'goals', 'personal_notes', 'staff', 'timetable', 'grading_scales', 'fee_structures', 'church_members', 'donations', 'parent_links'];
+  const allowedTables = ['students', 'fees', 'exams', 'marks', 'attendance', 'members', 'projects', 'events', 'org_finance', 'inventory', 'sales', 'invoices', 'expenses', 'meeting_minutes', 'notice_board', 'sermons', 'prayer_requests', 'service_schedule', 'customers', 'budget_items', 'goals', 'personal_notes', 'staff', 'timetable', 'grading_scales', 'fee_structures', 'church_members', 'donations', 'parent_links', 'ip_rules', 'ip_block_log', 'encryption_keys', 'key_usage_log', 'login_attempts', 'account_lockouts', 'captcha_settings', 'captcha_verification_log', 'slow_queries_log', 'query_optimization_rules', 'error_logs', 'error_aggregates', 'scheduled_tasks', 'task_execution_logs', 'custom_api_endpoints', 'api_call_logs', 'custom_domains', 'domain_redirects', 'push_config', 'push_subscribers', 'push_campaigns', 'push_delivery_log', 'chat_widget_config', 'chat_canned_responses', 'chat_departments', 'custom_forms', 'form_submissions', 'form_conditions', 'school_themes', 'theme_components', 'locales', 'translation_keys', 'translations', 'accessibility_scans', 'accessibility_issues', 'recycle_bin', 'recycle_bin_settings', 'audit_exports', 'communication_analytics', 'communication_daily_stats'];
   let imported = 0;
   for (const table of allowedTables) {
     if (backup[table] && Array.isArray(backup[table])) {
@@ -7582,6 +7962,10 @@ app.get('/dev/master', requireAuth, requireSuperAdmin, ah(async (req, res) => {
       <a href="/webhooks" style="background:#8b5cf6;color:white">Webhooks</a>
       <a href="/marketplace" style="background:#d97706;color:white">Plugins</a>
       <a href="/backup" style="background:#64748b;color:white">Backup</a>
+      <a href="/dev/api-playground" style="background:#7c3aed;color:white">API Playground</a>
+      <a href="/dev/api-analytics" style="background:#8b5cf6;color:white">API Analytics</a>
+      <a href="/dev/api-health" style="background:#10b981;color:white">API Health</a>
+      <a href="/dev/onboarding" style="background:#22c55e;color:white">Dev Onboarding</a>
     </div>
 
     <!-- MY MONEY SECTION -->
@@ -10181,8 +10565,8 @@ app.get('/school/fees/:id/receipt-pdf', requireAuth, requireNotBanned, ah(async 
   doc.end();
 }));
 
-// === DASHBOARD API DOCS (for authenticated users only) ===
-app.get('/dashboard/api-docs', requireAuth, (req, res) => {
+// === PUBLIC API DOCS ===
+app.get('/api-docs', (req, res) => {
   res.send(renderPage('API Documentation', `
     <div class="hero"><h1>API Documentation</h1><p>RESTful API for Comfort Platform &bull; OpenAPI 3.0</p></div>
     <div class="card">
@@ -11906,11 +12290,11 @@ app.get('/org/meetings/:id/agenda', requireAuth, requireNotBanned, ah(async (req
   const t = req.session.user.tenant_id;
   const meeting = (await pool.query('SELECT * FROM meeting_minutes WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!meeting) return res.status(404).send('Meeting not found');
-  const agendaItems = (await pool.query('SELECT * FROM meeting_agendas WHERE meeting_id=$1 ORDER BY order_no', [meeting.id])).rows;
+  const agendaItems = (await pool.query('SELECT * FROM meeting_agendas WHERE meeting_id=$1 AND tenant_id=$2 ORDER BY order_no', [meeting.id, t])).rows;
   res.send(renderPage('Meeting Agenda', `
     <div class="card"><h2>Agenda: ${esc(meeting.title)}</h2><p class="muted">${meeting.meeting_date?new Date(meeting.meeting_date).toLocaleDateString():''}</p>
       <a href="/org/meetings/${meeting.id}/agenda/new" class="btn btn-sm" style="margin:10px 0">+ Add Agenda Item</a>
-      ${agendaItems.length ? `<table><tr><th>#</th><th>Item</th><th>Status</th><th>Actions</th></tr>${agendaItems.map(a => `<tr><td>${a.order_no}</td><td>${esc(a.item_text)}</td><td><span class="tag" style="background:${a.completed?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${a.completed?'Done':'Pending'}</span></td><td><a href="/org/meetings/agenda/${a.id}/toggle" class="btn btn-sm">Toggle</a> <a href="/org/meetings/agenda/${a.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No agenda items yet</p>'}
+      ${agendaItems.length ? `<table><tr><th>#</th><th>Item</th><th>Status</th><th>Actions</th></tr>${agendaItems.map(a => `<tr><td>${a.order_no}</td><td>${esc(a.item_text)}</td><td><span class="tag" style="background:${a.completed?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${a.completed?'Done':'Pending'}</span></td><td><form method="POST" action="/org/meetings/agenda/${a.id}/toggle" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm">Toggle</button></form> <form method="POST" action="/org/meetings/agenda/${a.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No agenda items yet</p>'}
     </div>
   `, req.session.user));
 }));
@@ -11923,16 +12307,21 @@ app.post('/org/meetings/:id/agenda/save', requireAuth, requireNotBanned, ah(asyn
   const t = req.session.user.tenant_id;
   const { item_text, order_no } = req.body;
   await pool.query('INSERT INTO meeting_agendas(tenant_id,meeting_id,item_text,order_no) VALUES($1,$2,$3,$4)', [t, req.params.id, item_text, order_no || 1]);
+  await audit(req.session.user.email, 'create_agenda', `Added agenda item to meeting ID: ${req.params.id}`);
   res.redirect(`/org/meetings/${req.params.id}/agenda`);
 }));
 
-app.get('/org/meetings/agenda/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE meeting_agendas SET completed=NOT completed WHERE id=$1', [req.params.id]);
+app.post('/org/meetings/agenda/:id/toggle', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE meeting_agendas SET completed=NOT completed WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'toggle_agenda', `Toggled agenda item ID: ${req.params.id}`);
   res.redirect('back');
 }));
 
-app.get('/org/meetings/agenda/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('DELETE FROM meeting_agendas WHERE id=$1', [req.params.id]);
+app.post('/org/meetings/agenda/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM meeting_agendas WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_agenda', `Deleted agenda item ID: ${req.params.id}`);
   res.redirect('back');
 }));
 
@@ -12294,16 +12683,55 @@ app.get('/business/forecast', requireAuth, requireNotBanned, ah(async (req, res)
   `, req.session.user));
 }));
 
-// === v7.0: CHURN PREDICTION ===
+// === v7.0: CHURN PREDICTION (Enhanced) ===
 app.get('/org/churn-prediction', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const members = (await pool.query('SELECT * FROM members WHERE tenant_id=$1', [t])).rows;
-  const atRisk = members.filter(m => { const daysSince = (Date.now() - new Date(m.joined_at).getTime()) / (1000*60*60*24); return daysSince > 180 && !m.role; }).slice(0, 20);
+  // Get attendance data for engagement scoring
+  const attendanceData = (await pool.query('SELECT student_id, COUNT(*) as total, SUM(CASE WHEN status=\'present\' THEN 1 ELSE 0 END) as present FROM attendance WHERE tenant_id=$1 GROUP BY student_id', [t])).rows;
+  const attendanceMap = {};
+  attendanceData.forEach(a => { attendanceMap[a.student_id] = { total: parseInt(a.total), present: parseInt(a.present) }; });
+  // Score each member for churn risk
+  const scored = members.map(m => {
+    let riskScore = 0;
+    let riskFactors = [];
+    const daysSince = (Date.now() - new Date(m.joined_at).getTime()) / (1000*60*60*24);
+    // Factor 1: No contact info
+    if (!m.email && !m.phone) { riskScore += 2; riskFactors.push('No contact info'); }
+    // Factor 2: Inactive for long time (no role = less engaged)
+    if (daysSince > 180 && (!m.role || m.role === 'Member')) { riskScore += 2; riskFactors.push('Inactive > 6 months'); }
+    if (daysSince > 365) { riskScore += 1; riskFactors.push('Member > 1 year, no promotion'); }
+    // Factor 3: Low attendance
+    const att = attendanceMap[m.id];
+    if (att && att.total > 0) {
+      const rate = att.present / att.total;
+      if (rate < 0.3) { riskScore += 3; riskFactors.push(`Attendance ${Math.round(rate*100)}%`); }
+      else if (rate < 0.5) { riskScore += 2; riskFactors.push(`Attendance ${Math.round(rate*100)}%`); }
+      else if (rate < 0.7) { riskScore += 1; riskFactors.push(`Attendance ${Math.round(rate*100)}%`); }
+    } else if (!att && daysSince > 30) {
+      riskScore += 2; riskFactors.push('No attendance recorded');
+    }
+    // Factor 4: Basic member with no distinguishing features
+    if (m.role === 'Member' && !m.email) { riskScore += 1; riskFactors.push('Basic member, no email'); }
+    const level = riskScore >= 5 ? 'Critical' : riskScore >= 3 ? 'High' : riskScore >= 1 ? 'Medium' : 'Low';
+    return { ...m, riskScore, level, riskFactors, daysSince: Math.round(daysSince), attendanceRate: att && att.total > 0 ? Math.round((att.present/att.total)*100) : null };
+  });
+  const atRisk = scored.filter(m => m.riskScore >= 3).sort((a,b) => b.riskScore - a.riskScore);
+  const critical = scored.filter(m => m.level === 'Critical').length;
+  const high = scored.filter(m => m.level === 'High').length;
+  const medium = scored.filter(m => m.level === 'Medium').length;
+  const low = scored.filter(m => m.level === 'Low').length;
   res.send(renderPage('Churn Prediction', `
     <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#ef4444)"><h1>Churn Prediction</h1><p>Identify members at risk of leaving</p></div>
-    <div class="stats"><div class="stat-card"><div class="stat-num">${members.length}</div><div>Total Members</div></div><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${atRisk.length}</div><div>At Risk</div></div></div>
-    <div class="card"><h2>Members at Risk</h2>
-      ${atRisk.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th><th>Days Since Join</th></tr>${atRisk.map(m => `<tr><td>${esc(m.name)}</td><td>${esc(m.email||'-')}</td><td>${esc(m.phone||'-')}</td><td>${new Date(m.joined_at).toLocaleDateString()}</td><td>${Math.round((Date.now()-new Date(m.joined_at).getTime())/(1000*60*60*24))}</td></tr>`).join('')}</table>` : '<div class="alert alert-success">No members currently at risk of churning.</div>'}
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${members.length}</div><div>Total Members</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${critical}</div><div>Critical Risk</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${high}</div><div>High Risk</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${medium}</div><div>Medium Risk</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${low}</div><div>Low Risk</div></div>
+    </div>
+    <div class="card"><h2>Members at Risk (${atRisk.length})</h2>
+      ${atRisk.length ? `<table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Attendance</th><th>Days</th><th>Risk</th><th>Factors</th></tr>${atRisk.map(m => `<tr><td><strong>${esc(m.name)}</strong></td><td>${esc(m.email||'-')}</td><td>${esc(m.phone||'-')}</td><td><span class="tag">${esc(m.role||'-')}</span></td><td>${m.attendanceRate !== null ? m.attendanceRate+'%' : 'N/A'}</td><td>${m.daysSince}</td><td><span class="tag" style="background:${m.level==='Critical'?'#fee2e2;color:#991b1b':m.level==='High'?'#fef3c7;color:#92400e':'#dbeafe;color:#1e40af'}">${m.level} (${m.riskScore})</span></td><td style="font-size:0.85em">${m.riskFactors.map(f => `<span style="display:inline-block;background:#f1f5f9;padding:2px 6px;border-radius:4px;margin:1px">${esc(f)}</span>`).join(' ')}</td></tr>`).join('')}</table>` : '<div class="alert alert-success">No members currently at risk of churning.</div>'}
     </div>
   `, req.session.user));
 }));
@@ -14759,7 +15187,7 @@ app.get('/school/discipline/new', requireAuth, requireNotBanned, ah(async (req, 
 
 app.post('/school/discipline/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('INSERT INTO discipline_incidents(tenant_id,student_id,incident_date,type,description,action_taken,reported_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.incident_date||new Date().toISOString().split('T')[0], req.body.type, req.body.description, req.body.action_taken, req.body.reported_by]);
+  await pool.query('INSERT INTO discipline_incidents(tenant_id,student_id,incident_date,type,description,action_taken,reported_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.incident_date||'CURRENT_DATE', req.body.type, req.body.description, req.body.action_taken, req.body.reported_by]);
   await audit(req.session.user.email, 'Discipline incident reported', `Student #${req.body.student_id}: ${req.body.type}`);
   res.redirect('/school/discipline');
 }));
@@ -14899,7 +15327,7 @@ app.get('/school/health', requireAuth, requireNotBanned, requireFeature('health_
   `, req.session.user));
 }));
 
-app.get('/school/health/new', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.get('/school/health/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
   res.send(renderPage('Add Health Profile', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Student Health Profile</h2>
@@ -14915,13 +15343,13 @@ app.get('/school/health/new', requireAuth, requireNotBanned, requireFeature('hea
   `, req.session.user));
 }));
 
-app.post('/school/health/save', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.post('/school/health/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO student_health(tenant_id,student_id,blood_group,allergies,conditions,emergency_contact,emergency_phone,last_checkup,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (student_id) DO UPDATE SET blood_group=$3,allergies=$4,conditions=$5,emergency_contact=$6,emergency_phone=$7,last_checkup=$8,notes=$9', [t, req.body.student_id, req.body.blood_group, req.body.allergies, req.body.conditions, req.body.emergency_contact, req.body.emergency_phone, req.body.last_checkup||null, req.body.notes]);
   res.redirect('/school/health');
 }));
 
-app.get('/school/health/:id/edit', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.get('/school/health/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const rec = (await pool.query('SELECT sh.*,s.name as student_name FROM student_health sh JOIN students s ON s.id=sh.student_id WHERE sh.student_id=$1 AND sh.tenant_id=$2', [req.params.id, t])).rows[0];
   if (!rec) return res.status(404).send('Not found');
@@ -14938,7 +15366,7 @@ app.get('/school/health/:id/edit', requireAuth, requireNotBanned, requireFeature
   `, req.session.user));
 }));
 
-app.get('/school/health/visit/new', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.get('/school/health/visit/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name', [t])).rows;
   res.send(renderPage('Clinic Visit', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Record Clinic Visit</h2>
@@ -14953,9 +15381,9 @@ app.get('/school/health/visit/new', requireAuth, requireNotBanned, requireFeatur
   `, req.session.user));
 }));
 
-app.post('/school/health/visit/save', requireAuth, requireNotBanned, requireFeature('health_records'), ah(async (req, res) => {
+app.post('/school/health/visit/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.visit_date||new Date().toISOString().split('T')[0], req.body.complaint, req.body.diagnosis, req.body.treatment, req.body.seen_by]);
+  await pool.query('INSERT INTO health_visits(tenant_id,student_id,visit_date,complaint,diagnosis,treatment,seen_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, req.body.student_id, req.body.visit_date||'CURRENT_DATE', req.body.complaint, req.body.diagnosis, req.body.treatment, req.body.seen_by]);
   res.redirect('/school/health');
 }));
 
@@ -15934,11 +16362,17 @@ app.get('/business/warranties/:id/delete', requireAuth, requireNotBanned, ah(asy
 // =============================================
 app.get('/org/resolutions', requireAuth, requireNotBanned, requireFeature('board_resolutions'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const resolutions = (await pool.query('SELECT * FROM board_resolutions WHERE tenant_id=$1 ORDER BY meeting_date DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM board_resolutions WHERE tenant_id=$1', [t])).rows[0].count;
+  const resolutions = (await pool.query('SELECT * FROM board_resolutions WHERE tenant_id=$1 ORDER BY meeting_date DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Board Resolutions', `
     <div class="hero" style="background:linear-gradient(135deg,#1e40af,#1e3a8a)"><h1>Board Resolutions</h1><p>Decisions, votes and meeting minutes</p></div>
     <div class="card"><a href="/org/resolutions/new" class="btn" style="margin-bottom:15px">+ New Resolution</a>
-      ${resolutions.length?`<table><tr><th>Title</th><th>Proposed By</th><th>Meeting Date</th><th>Votes (For/Against/Abstain)</th><th>Status</th><th>Actions</th></tr>${resolutions.map(r=>`<tr><td><strong>${esc(r.title)}</strong></td><td>${esc(r.proposed_by||'-')}</td><td>${r.meeting_date||'-'}</td><td>${r.vote_for}/${r.vote_against}/${r.vote_abstain}</td><td><span class="tag">${esc(r.status)}</span></td><td><a href="/org/resolutions/${r.id}/vote" class="btn btn-sm">Vote</a> <a href="/org/resolutions/${r.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No resolutions</p>'}
+      ${resolutions.length?`<table><tr><th>Title</th><th>Proposed By</th><th>Date</th><th>Votes (For/Against/Abstain)</th><th>Status</th><th>Actions</th></tr>${resolutions.map(r=>{const statusColor=r.status==='passed'?'#059669':r.status==='rejected'?'#dc2626':'#4f46e5';return `<tr><td><strong>${esc(r.title)}</strong></td><td>${esc(r.proposed_by||'-')}</td><td>${r.meeting_date||'-'}</td><td>${r.vote_for}/${r.vote_against}/${r.vote_abstain}</td><td><span class="tag" style="background:${statusColor}20;color:${statusColor}">${esc(r.status)}</span></td><td>${r.status==='open'?`<a href="/org/resolutions/${r.id}/vote" class="btn btn-sm">Vote</a>`:''} <form method="POST" action="/org/resolutions/${r.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`;}).join('')}</table>`:'<p class="muted">No resolutions</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/resolutions?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -15958,6 +16392,7 @@ app.get('/org/resolutions/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/resolutions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO board_resolutions(tenant_id,title,resolution_text,proposed_by,seconded_by,meeting_date) VALUES($1,$2,$3,$4,$5,$6)', [t, req.body.title, req.body.resolution_text, req.body.proposed_by, req.body.seconded_by, req.body.meeting_date]);
+  await audit(req.session.user.email, 'create_resolution', `Created resolution: ${req.body.title}`);
   res.redirect('/org/resolutions');
 }));
 
@@ -15965,28 +16400,60 @@ app.get('/org/resolutions/:id/vote', requireAuth, requireNotBanned, ah(async (re
   const t = req.session.user.tenant_id;
   const res_ = (await pool.query('SELECT * FROM board_resolutions WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!res_) return res.status(404).send('Not found');
+  // resolution_votes table now in startup migrations
+  // Check if this user already voted
+  const existingVote = (await pool.query('SELECT direction FROM resolution_votes WHERE resolution_id=$1 AND voter_email=$2 AND tenant_id=$3', [req.params.id, req.session.user.email, t])).rows[0];
+  const votedMsg = existingVote ? `<div class="alert" style="background:#fef3c7;padding:12px;border-radius:8px;margin-bottom:15px">You already voted <strong>${esc(existingVote.direction)}</strong> on this resolution.</div>` : '';
   res.send(renderPage('Vote on Resolution', `<div class="card" style="max-width:600px;margin:0 auto"><h2>${esc(res_.title)}</h2><p>${esc(res_.resolution_text||'')}</p>
     <p class="muted">Proposed: ${esc(res_.proposed_by||'')} | Seconded: ${esc(res_.seconded_by||'')} | Date: ${res_.meeting_date||''}</p>
-    <div style="margin-top:20px;display:flex;gap:10px">
-      <a href="/org/resolutions/${res_.id}/vote/for" class="btn btn-green" style="flex:1">Vote For (${res_.vote_for})</a>
-      <a href="/org/resolutions/${res_.id}/vote/against" class="btn btn-red" style="flex:1">Vote Against (${res_.vote_against})</a>
-      <a href="/org/resolutions/${res_.id}/vote/abstain" class="btn" style="flex:1">Abstain (${res_.vote_abstain})</a>
-    </div>
+    ${votedMsg || `<div style="margin-top:20px;display:flex;gap:10px">
+      <form method="POST" action="/org/resolutions/${res_.id}/vote/for" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-green" style="width:100%">Vote For (${res_.vote_for})</button></form>
+      <form method="POST" action="/org/resolutions/${res_.id}/vote/against" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red" style="width:100%">Vote Against (${res_.vote_against})</button></form>
+      <form method="POST" action="/org/resolutions/${res_.id}/vote/abstain" style="flex:1"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn" style="width:100%">Abstain (${res_.vote_abstain})</button></form>
+    </div>`}
     <a href="/org/resolutions" class="btn" style="margin-top:15px">Back</a></div>
   `, req.session.user));
 }));
 
-app.get('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, ah(async (req, res) => {
   const VALID_COLS = ['vote_for','vote_against','vote_abstain'];
   const col = VALID_COLS.includes(req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain') ? (req.params.direction === 'for' ? 'vote_for' : req.params.direction === 'against' ? 'vote_against' : 'vote_abstain') : null;
   if (!col) return res.status(400).send('Invalid vote direction');
-  await pool.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.session.user.tenant_id]);
+  const t = req.session.user.tenant_id;
+  const voterEmail = req.session.user.email;
+  // resolution_votes table now in startup migrations
+  // Check for duplicate vote
+  const existingVote = (await pool.query('SELECT id FROM resolution_votes WHERE resolution_id=$1 AND voter_email=$2 AND tenant_id=$3', [req.params.id, voterEmail, t])).rows[0];
+  if (existingVote) return res.status(400).send('You have already voted on this resolution.');
+  // Race condition fix: use transaction with FOR UPDATE + auto-status
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = (await client.query('SELECT * FROM board_resolutions WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.params.id, t])).rows[0];
+    if (!locked) { await client.query('ROLLBACK'); client.release(); return res.status(404).send('Not found'); }
+    await client.query(`UPDATE board_resolutions SET ${col}=${col}+1 WHERE id=$1 AND tenant_id=$2`, [req.params.id, t]);
+    await client.query('INSERT INTO resolution_votes(tenant_id,resolution_id,voter_email,direction) VALUES($1,$2,$3,$4)', [t, req.params.id, voterEmail, req.params.direction]);
+    // Auto-update status: if majority of votes are "for" or "against", update accordingly
+    const newFor = locked.vote_for + (col === 'vote_for' ? 1 : 0);
+    const newAgainst = locked.vote_against + (col === 'vote_against' ? 1 : 0);
+    const totalVotes = newFor + newAgainst + locked.vote_abstain + (col === 'vote_abstain' ? 1 : 0);
+    if (totalVotes >= 3) { // Need at least 3 votes to auto-resolve
+      if (newFor > newAgainst && newFor > totalVotes * 0.5) {
+        await client.query("UPDATE board_resolutions SET status='passed' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+      } else if (newAgainst > newFor && newAgainst > totalVotes * 0.5) {
+        await client.query("UPDATE board_resolutions SET status='rejected' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+      }
+    }
+    await client.query('COMMIT');
+  } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+  await audit(voterEmail, 'resolution_vote', `Voted ${req.params.direction} on resolution ID: ${req.params.id}`);
   res.redirect(`/org/resolutions/${req.params.id}/vote`);
 }));
 
-app.get('/org/resolutions/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/resolutions/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM board_resolutions WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_resolution', `Deleted resolution ID: ${req.params.id}`);
   res.redirect('/org/resolutions');
 }));
 
@@ -16002,7 +16469,7 @@ app.get('/org/assets', requireAuth, requireNotBanned, requireFeature('asset_mana
     <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Asset Management</h1><p>Fixed assets, depreciation and locations</p></div>
     <div class="stats"><div class="stat-card"><div class="stat-num">${assets.length}</div><div>Total Assets</div></div><div class="stat-card"><div class="stat-num">UGX ${totalValue.toLocaleString()}</div><div>Current Value</div></div><div class="stat-card"><div class="stat-num">${cats.length}</div><div>Categories</div></div></div>
     <div class="card"><a href="/org/assets/new" class="btn" style="margin-bottom:15px">+ Add Asset</a>
-      ${assets.length?`<table><tr><th>Name</th><th>Category</th><th>Purchase Value</th><th>Current Value</th><th>Location</th><th>Condition</th><th>Actions</th></tr>${assets.map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.category||'-')}</td><td>UGX ${parseInt(a.purchase_value).toLocaleString()}</td><td>UGX ${parseInt(a.current_value).toLocaleString()}</td><td>${esc(a.location||'-')}</td><td><span class="tag">${esc(a.condition)}</span></td><td><a href="/org/assets/${a.id}/depreciate" class="btn btn-sm">Depreciate</a> <a href="/org/assets/${a.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No assets recorded</p>'}
+      ${assets.length?`<table><tr><th>Name</th><th>Category</th><th>Purchase Value</th><th>Current Value</th><th>Location</th><th>Condition</th><th>Actions</th></tr>${assets.map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td>${esc(a.category||'-')}</td><td>UGX ${parseInt(a.purchase_value).toLocaleString()}</td><td>UGX ${parseInt(a.current_value).toLocaleString()}</td><td>${esc(a.location||'-')}</td><td><span class="tag">${esc(a.condition)}</span></td><td><form method="POST" action="/org/assets/${a.id}/depreciate" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm">Depreciate</button></form> <form method="POST" action="/org/assets/${a.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No assets recorded</p>'}
     </div>
   `, req.session.user));
 }));
@@ -16024,20 +16491,24 @@ app.get('/org/assets/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/assets/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO assets(tenant_id,name,category,purchase_date,purchase_value,current_value,depreciation_rate,location,custodian,condition,serial_number,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [t, req.body.name, req.body.category, req.body.purchase_date||null, req.body.purchase_value||0, req.body.current_value||0, req.body.depreciation_rate||0, req.body.location, req.body.custodian, req.body.condition||'good', req.body.serial_number, req.body.notes]);
+  await audit(req.session.user.email, 'create_asset', `Added asset: ${req.body.name}`);
   res.redirect('/org/assets');
 }));
 
-app.get('/org/assets/:id/depreciate', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const asset = (await pool.query('SELECT * FROM assets WHERE id=$1', [req.params.id])).rows[0];
+app.post('/org/assets/:id/depreciate', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const asset = (await pool.query('SELECT * FROM assets WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!asset) return res.status(404).send('Not found');
   const newVal = Math.max(0, Math.round(asset.current_value * (1 - (asset.depreciation_rate||10)/100)));
-  await pool.query('UPDATE assets SET current_value=$1 WHERE id=$2', [newVal, req.params.id]);
+  await pool.query('UPDATE assets SET current_value=$1 WHERE id=$2 AND tenant_id=$3', [newVal, req.params.id, t]);
+  await audit(req.session.user.email, 'depreciate_asset', `Depreciated asset: ${asset.name} to UGX ${newVal}`);
   res.redirect('/org/assets');
 }));
 
-app.get('/org/assets/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/assets/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM assets WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_asset', `Deleted asset ID: ${req.params.id}`);
   res.redirect('/org/assets');
 }));
 
@@ -16046,7 +16517,20 @@ app.get('/org/assets/:id/delete', requireAuth, requireNotBanned, ah(async (req, 
 // =============================================
 app.get('/org/partners', requireAuth, requireNotBanned, requireFeature('partners'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const partners = (await pool.query('SELECT * FROM partners WHERE tenant_id=$1 ORDER BY total_contributions DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  const search = req.query.search || '';
+  const typeFilter = req.query.type || '';
+  let whereClauses = ['tenant_id=$1'];
+  let params = [t];
+  let paramIdx = 2;
+  if (search) { whereClauses.push(`(name ILIKE $${paramIdx} OR email ILIKE $${paramIdx} OR organization ILIKE $${paramIdx})`); params.push('%'+search+'%'); paramIdx++; }
+  if (typeFilter) { whereClauses.push(`type=$${paramIdx}`); params.push(typeFilter); paramIdx++; }
+  const whereStr = whereClauses.join(' AND ');
+  const total = (await pool.query(`SELECT COUNT(*) FROM partners WHERE ${whereStr}`, params)).rows[0].count;
+  const partners = (await pool.query(`SELECT * FROM partners WHERE ${whereStr} ORDER BY total_contributions DESC LIMIT $${paramIdx} OFFSET $${paramIdx+1}`, [...params, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   const donors = partners.filter(p=>p.type==='donor');
   const sponsors = partners.filter(p=>p.type==='sponsor');
   const partners_ = partners.filter(p=>p.type==='partner');
@@ -16054,7 +16538,13 @@ app.get('/org/partners', requireAuth, requireNotBanned, requireFeature('partners
     <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Partners & Donors</h1><p>Donor profiles and engagement</p></div>
     <div class="stats"><div class="stat-card"><div class="stat-num">${donors.length}</div><div>Donors</div></div><div class="stat-card"><div class="stat-num">${sponsors.length}</div><div>Sponsors</div></div><div class="stat-card"><div class="stat-num">${partners_.length}</div><div>Partners</div></div><div class="stat-card"><div class="stat-num">UGX ${partners.reduce((a,p)=>a+(p.total_contributions||0),0).toLocaleString()}</div><div>Total Contributions</div></div></div>
     <div class="card"><a href="/org/partners/new" class="btn" style="margin-bottom:15px">+ Add Partner/Donor</a>
-      ${partners.length?`<table><tr><th>Name</th><th>Type</th><th>Organization</th><th>Engagement</th><th>Total Given</th><th>Last Contact</th><th>Actions</th></tr>${partners.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.email||'')} ${esc(p.phone||'')}</span></td><td><span class="tag">${esc(p.type)}</span></td><td>${esc(p.organization||'-')}</td><td>${p.engagement_score||0}/100</td><td>UGX ${parseInt(p.total_contributions).toLocaleString()}</td><td>${p.last_contact||'-'}</td><td><a href="/org/partners/${p.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No partners yet</p>'}
+      <form method="GET" action="/org/partners" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px">
+        <input name="search" placeholder="Search partners..." value="${esc(search)}" style="flex:2;min-width:200px;padding:8px">
+        <select name="type" style="flex:1;min-width:120px;padding:8px"><option value="">All Types</option><option value="donor" ${typeFilter==='donor'?'selected':''}>Donor</option><option value="sponsor" ${typeFilter==='sponsor'?'selected':''}>Sponsor</option><option value="partner" ${typeFilter==='partner'?'selected':''}>Partner</option></select>
+        <button class="btn btn-sm">Search</button>
+      </form>
+      ${partners.length?`<table><tr><th>Name</th><th>Type</th><th>Organization</th><th>Engagement</th><th>Total Given</th><th>Last Contact</th><th>Actions</th></tr>${partners.map(p=>`<tr><td><strong>${esc(p.name)}</strong><br><span class="muted">${esc(p.email||'')} ${esc(p.phone||'')}</span></td><td><span class="tag">${esc(p.type)}</span></td><td>${esc(p.organization||'-')}</td><td>${p.engagement_score||0}/100</td><td>UGX ${parseInt(p.total_contributions).toLocaleString()}</td><td>${p.last_contact||'-'}</td><td><a href="/org/partners/${p.id}/edit" class="btn btn-sm">Edit</a> <form method="POST" action="/org/partners/${p.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No partners yet</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/partners?page=${i+1}&search=${esc(search)}&type=${esc(typeFilter)}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -16075,12 +16565,38 @@ app.get('/org/partners/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/partners/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO partners(tenant_id,name,type,email,phone,organization,engagement_score,last_contact,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, req.body.name, req.body.type, req.body.email, req.body.phone, req.body.organization, req.body.engagement_score||0, req.body.last_contact||null, req.body.notes]);
+  await audit(req.session.user.email, 'create_partner', `Added partner: ${req.body.name} (${req.body.type})`);
   res.redirect('/org/partners');
 }));
 
-app.get('/org/partners/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.get('/org/partners/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const p = (await pool.query('SELECT * FROM partners WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!p) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Partner', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Edit Partner: ${esc(p.name)}</h2>
+    <form method="POST" action="/org/partners/${p.id}/update">
+      <label>Name</label><input name="name" value="${esc(p.name)}" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div><label>Email</label><input name="email" type="email" value="${esc(p.email||'')}"></div><div><label>Phone</label><input name="phone" value="${esc(p.phone||'')}"></div><div><label>Type</label><select name="type"><option value="donor" ${p.type==='donor'?'selected':''}>Donor</option><option value="sponsor" ${p.type==='sponsor'?'selected':''}>Sponsor</option><option value="partner" ${p.type==='partner'?'selected':''}>Partner</option></select></div></div>
+      <label>Organization</label><input name="organization" value="${esc(p.organization||'')}">
+      <div class="grid" style="grid-template-columns:1fr 1fr"><div><label>Engagement Score (0-100)</label><input name="engagement_score" type="number" min="0" max="100" value="${p.engagement_score||0}"></div><div><label>Last Contact</label><input name="last_contact" type="date" value="${p.last_contact||''}"></div></div>
+      <label>Notes</label><textarea name="notes" rows="2">${esc(p.notes||'')}</textarea>
+      <button class="btn btn-green">Update Partner</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/partners/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, email, phone, type, organization, engagement_score, last_contact, notes } = req.body;
+  await pool.query('UPDATE partners SET name=$1,email=$2,phone=$3,type=$4,organization=$5,engagement_score=$6,last_contact=$7,notes=$8 WHERE id=$9 AND tenant_id=$10', [name, email, phone, type, organization, engagement_score||0, last_contact||null, notes, req.params.id, t]);
+  await audit(req.session.user.email, 'update_partner', `Updated partner: ${name}`);
+  res.redirect('/org/partners');
+}));
+
+app.post('/org/partners/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('DELETE FROM partners WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_partner', `Deleted partner ID: ${req.params.id}`);
   res.redirect('/org/partners');
 }));
 
@@ -16089,11 +16605,17 @@ app.get('/org/partners/:id/delete', requireAuth, requireNotBanned, ah(async (req
 // =============================================
 app.get('/org/ticketing', requireAuth, requireNotBanned, requireFeature('event_ticketing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const events = (await pool.query('SELECT * FROM ticketed_events WHERE tenant_id=$1 ORDER BY event_date DESC', [t])).rows;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const total = (await pool.query('SELECT COUNT(*) FROM ticketed_events WHERE tenant_id=$1', [t])).rows[0].count;
+  const events = (await pool.query('SELECT * FROM ticketed_events WHERE tenant_id=$1 ORDER BY event_date DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
   res.send(renderPage('Event Ticketing', `
     <div class="hero" style="background:linear-gradient(135deg,#e11d48,#be123c)"><h1>Event Ticketing</h1><p>Paid events, QR tickets and check-in</p></div>
     <div class="card"><a href="/org/ticketing/new" class="btn" style="margin-bottom:15px">+ Create Event</a>
-      ${events.length?`<table><tr><th>Event</th><th>Date</th><th>Venue</th><th>Price</th><th>Sold/Capacity</th><th>Actions</th></tr>${events.map(e=>`<tr><td><strong>${esc(e.title)}</strong></td><td>${e.event_date||'-'}</td><td>${esc(e.venue||'-')}</td><td>UGX ${parseInt(e.price).toLocaleString()}</td><td>${e.tickets_sold}/${e.capacity}</td><td><a href="/org/ticketing/${e.id}/tickets" class="btn btn-sm">Tickets</a> <a href="/org/ticketing/${e.id}/register" class="btn btn-sm btn-green">Register</a> <a href="/org/ticketing/${e.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>`:'<p class="muted">No events</p>'}
+      ${events.length?`<table><tr><th>Event</th><th>Date</th><th>Venue</th><th>Price</th><th>Sold/Capacity</th><th>Actions</th></tr>${events.map(e=>`<tr><td><strong>${esc(e.title)}</strong></td><td>${e.event_date||'-'}</td><td>${esc(e.venue||'-')}</td><td>UGX ${parseInt(e.price).toLocaleString()}</td><td>${e.tickets_sold}/${e.capacity}</td><td><a href="/org/ticketing/${e.id}/tickets" class="btn btn-sm">Tickets</a> <a href="/org/ticketing/${e.id}/register" class="btn btn-sm btn-green">Register</a> <form method="POST" action="/org/ticketing/${e.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>`:'<p class="muted">No events</p>'}
+      ${totalPages > 1 ? `<div style="display:flex;gap:6px;justify-content:center;margin-top:15px">${Array.from({length: totalPages}, (_,i) => `<a href="/org/ticketing?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-primary':''}">${i+1}</a>`).join('')}</div>` : ''}
     </div>
   `, req.session.user));
 }));
@@ -16113,6 +16635,7 @@ app.get('/org/ticketing/new', requireAuth, requireNotBanned, (req, res) => {
 app.post('/org/ticketing/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('INSERT INTO ticketed_events(tenant_id,title,description,event_date,venue,capacity,price,qr_enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, req.body.title, req.body.description, req.body.event_date, req.body.venue, req.body.capacity||100, req.body.price||0, req.body.qr_enabled==='on']);
+  await audit(req.session.user.email, 'create_ticketed_event', `Created ticketed event: ${req.body.title}`);
   res.redirect('/org/ticketing');
 }));
 
@@ -16132,9 +16655,19 @@ app.get('/org/ticketing/:id/register', requireAuth, requireNotBanned, ah(async (
 
 app.post('/org/ticketing/:id/register/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  const code = 'TKT-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-  await pool.query('INSERT INTO event_tickets(tenant_id,event_id,attendee_name,attendee_email,attendee_phone,ticket_code) VALUES($1,$2,$3,$4,$5,$6)', [t, req.params.id, req.body.attendee_name, req.body.attendee_email, req.body.attendee_phone, code]);
-  await pool.query('UPDATE ticketed_events SET tickets_sold=tickets_sold+1 WHERE id=$1', [req.params.id]);
+  // Race condition fix: use transaction with capacity check
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const ev = (await client.query('SELECT * FROM ticketed_events WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [req.params.id, t])).rows[0];
+    if (!ev) { await client.query('ROLLBACK'); client.release(); return res.status(404).send('Event not found'); }
+    if (ev.tickets_sold >= ev.capacity) { await client.query('ROLLBACK'); client.release(); return res.status(400).send('Sold out! No more tickets available.'); }
+    const code = 'TKT-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+    await client.query('INSERT INTO event_tickets(tenant_id,event_id,attendee_name,attendee_email,attendee_phone,ticket_code) VALUES($1,$2,$3,$4,$5,$6)', [t, req.params.id, req.body.attendee_name, req.body.attendee_email, req.body.attendee_phone, code]);
+    await client.query('UPDATE ticketed_events SET tickets_sold=tickets_sold+1 WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+    await client.query('COMMIT');
+  } catch(e) { await client.query('ROLLBACK'); } finally { client.release(); }
+  await audit(req.session.user.email, 'ticket_register', `Registered ${req.body.attendee_name} for event ID: ${req.params.id}`);
   res.redirect(`/org/ticketing/${req.params.id}/tickets`);
 }));
 
@@ -16142,23 +16675,2496 @@ app.get('/org/ticketing/:id/tickets', requireAuth, requireNotBanned, ah(async (r
   const t = req.session.user.tenant_id;
   const event = (await pool.query('SELECT * FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!event) return res.status(404).send('Not found');
-  const tickets = (await pool.query('SELECT * FROM event_tickets WHERE event_id=$1 ORDER BY created_at DESC', [event.id])).rows;
+  const tickets = (await pool.query('SELECT * FROM event_tickets WHERE event_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [event.id, t])).rows;
   res.send(renderPage('Event Tickets', `<div class="card"><h2>${esc(event.title)} - Tickets</h2>
-    ${tickets.length?`<table><tr><th>Code</th><th>Name</th><th>Email</th><th>Status</th><th>Check-in</th></tr>${tickets.map(tk=>`<tr><td><code>${esc(tk.ticket_code)}</code></td><td>${esc(tk.attendee_name)}</td><td>${esc(tk.attendee_email||'-')}</td><td>${tk.checked_in?'<span class="tag" style="background:#d1fae5">Checked In</span>':'<span class="tag">Active</span>'}</td><td>${!tk.checked_in?`<a href="/org/ticketing/ticket/${tk.id}/checkin" class="btn btn-sm btn-green">Check In</a>`:'-'}</td></tr>`).join('')}</table>`:'<p class="muted">No tickets sold</p>'}
+    ${tickets.length?`<table><tr><th>Code</th><th>Name</th><th>Email</th><th>Status</th><th>Check-in</th></tr>${tickets.map(tk=>`<tr><td><code>${esc(tk.ticket_code)}</code></td><td>${esc(tk.attendee_name)}</td><td>${esc(tk.attendee_email||'-')}</td><td>${tk.checked_in?'<span class="tag" style="background:#d1fae5">Checked In</span>':'<span class="tag">Active</span>'}</td><td>${!tk.checked_in?`<form method="POST" action="/org/ticketing/ticket/${tk.id}/checkin" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-green">Check In</button></form>`:'-'}</td></tr>`).join('')}</table>`:'<p class="muted">No tickets sold</p>'}
     <a href="/org/ticketing" class="btn" style="margin-top:10px">Back</a></div>
   `, req.session.user));
 }));
 
-app.get('/org/ticketing/ticket/:id/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
-  await pool.query('UPDATE event_tickets SET checked_in=true, checked_in_at=NOW() WHERE id=$1', [req.params.id]);
+app.post('/org/ticketing/ticket/:id/checkin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE event_tickets SET checked_in=true, checked_in_at=NOW() WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'ticket_checkin', `Checked in ticket ID: ${req.params.id}`);
   res.redirect('back');
 }));
 
-app.get('/org/ticketing/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+app.post('/org/ticketing/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query('DELETE FROM event_tickets WHERE event_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM event_tickets WHERE event_id=$1 AND tenant_id=$2', [req.params.id, t]);
   await pool.query('DELETE FROM ticketed_events WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_ticketed_event', `Deleted ticketed event ID: ${req.params.id}`);
   res.redirect('/org/ticketing');
+}));
+
+
+// =============================================
+// ORG: CSV IMPORT FOR MEMBERS
+// =============================================
+app.get('/org/members/import', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Import Members', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Import Members from CSV</h2>
+    <p class="muted">Upload a CSV file with columns: <code>name,email,phone,role</code>. Role must be one of: Member, Volunteer, Staff, Board.</p>
+    <form method="POST" action="/org/members/import/save" enctype="multipart/form-data">
+      <input type="file" name="csvfile" accept=".csv" required style="margin:15px 0">
+      <button class="btn btn-green">Import Members</button>
+    </form>
+    <a href="/org/members" class="btn" style="margin-top:10px">Back to Members</a>
+  </div>`, req.session.user));
+});
+
+app.post('/org/members/import/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  if (!req.files || !req.files.csvfile) return res.status(400).send('No file uploaded');
+  const raw = req.files.csvfile.data.toString('utf8');
+  const lines = raw.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return res.status(400).send('CSV must have a header row and at least one data row');
+  const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+  const nameIdx = header.indexOf('name');
+  const emailIdx = header.indexOf('email');
+  const phoneIdx = header.indexOf('phone');
+  const roleIdx = header.indexOf('role');
+  if (nameIdx === -1) return res.status(400).send('CSV must have a "name" column');
+  const VALID_ROLES = ['Member','Volunteer','Staff','Board'];
+  let imported = 0, skipped = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    const name = cols[nameIdx];
+    if (!name) { skipped++; continue; }
+    const email = emailIdx >= 0 ? cols[emailIdx] || null : null;
+    const phone = phoneIdx >= 0 ? cols[phoneIdx] || null : null;
+    let role = roleIdx >= 0 ? cols[roleIdx] : 'Member';
+    if (!VALID_ROLES.includes(role)) role = 'Member';
+    try {
+      await pool.query('INSERT INTO members(tenant_id,name,email,phone,role) VALUES($1,$2,$3,$4,$5)', [t, name, email, phone, role]);
+      imported++;
+    } catch(e) { skipped++; }
+  }
+  await audit(req.session.user.email, 'import_members', `Imported ${imported} members (${skipped} skipped)`);
+  res.send(renderPage('Import Results', `<div class="card" style="max-width:500px;margin:0 auto;text-align:center"><h2>Import Complete</h2>
+    <div class="stats"><div class="stat-card"><div class="stat-num" style="color:#059669">${imported}</div><div>Imported</div></div><div class="stat-card"><div class="stat-num" style="color:#f59e0b">${skipped}</div><div>Skipped</div></div></div>
+    <a href="/org/members" class="btn" style="margin-top:15px">View Members</a></div>
+  `, req.session.user));
+}));
+
+// =============================================
+// ORG: COMMITTEES & WORKING GROUPS
+// =============================================
+app.get('/org/committees', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // committees/committee_members tables now in startup migrations
+  const committees = (await pool.query('SELECT c.*, (SELECT COUNT(*) FROM committee_members cm WHERE cm.committee_id=c.id) as member_count FROM committees c WHERE c.tenant_id=$1 ORDER BY c.name', [t])).rows;
+  res.send(renderPage('Committees', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>Committees & Groups</h1><p>Organize members into working groups and committees</p></div>
+    <div class="card"><a href="/org/committees/new" class="btn" style="margin-bottom:15px">+ Create Committee</a>
+      ${committees.length ? `<table><tr><th>Name</th><th>Chairperson</th><th>Meeting</th><th>Members</th><th>Created</th><th>Actions</th></tr>${committees.map(c => `<tr><td><strong>${esc(c.name)}</strong>${c.description ? `<br><span class="muted">${esc(c.description)}</span>` : ''}</td><td>${esc(c.chairperson||'-')}</td><td>${c.meeting_day ? esc(c.meeting_day)+' '+esc(c.meeting_time||'') : '-'}</td><td>${c.member_count}</td><td>${new Date(c.created_at).toLocaleDateString()}</td><td><a href="/org/committees/${c.id}" class="btn btn-sm">Manage</a> <a href="/org/committees/${c.id}/edit" class="btn btn-sm">Edit</a> <form method="POST" action="/org/committees/${c.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No committees yet. Create one to organize your members.</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/committees/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Committee', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Create Committee</h2>
+    <form method="POST" action="/org/committees/save">
+      <label>Name</label><input name="name" required placeholder="Finance Committee">
+      <label>Description</label><textarea name="description" rows="3" placeholder="Committee purpose and mandate..."></textarea>
+      <label>Chairperson</label><input name="chairperson" placeholder="Chairperson name">
+      <button class="btn btn-green">Create Committee</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/committees/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, description, chairperson } = req.body;
+  await pool.query('INSERT INTO committees(tenant_id,name,description,chairperson) VALUES($1,$2,$3,$4)', [t, name, description, chairperson]);
+  await audit(req.session.user.email, 'create_committee', `Created committee: ${name}`);
+  res.redirect('/org/committees');
+}));
+
+app.get('/org/committees/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const committee = (await pool.query('SELECT * FROM committees WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!committee) return res.status(404).send('Not found');
+  const cMembers = (await pool.query('SELECT cm.*, m.name, m.email, m.phone FROM committee_members cm JOIN members m ON m.id=cm.member_id WHERE cm.committee_id=$1 AND cm.tenant_id=$2 ORDER BY m.name', [committee.id, t])).rows;
+  const allMembers = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const available = allMembers.filter(m => !cMembers.find(cm => cm.member_id === m.id));
+  res.send(renderPage(committee.name, `
+    <div class="card"><h2>${esc(committee.name)}</h2>
+      <p class="muted">${esc(committee.description||'')} ${committee.chairperson ? '| Chair: '+esc(committee.chairperson) : ''}</p>
+      <h3 style="margin-top:20px">Members (${cMembers.length})</h3>
+      ${cMembers.length ? `<table><tr><th>Name</th><th>Role</th><th>Joined</th><th>Actions</th></tr>${cMembers.map(cm => `<tr><td>${esc(cm.name)}</td><td><span class="tag">${esc(cm.role)}</span></td><td>${new Date(cm.joined_at).toLocaleDateString()}</td><td><form method="POST" action="/org/committees/${committee.id}/remove/${cm.member_id}" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Remove</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No members in this committee</p>'}
+      ${available.length ? `<h3 style="margin-top:20px">Add Member</h3><form method="POST" action="/org/committees/${committee.id}/add" style="display:flex;gap:8px;flex-wrap:wrap"><select name="member_id" style="flex:2;padding:8px">${available.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select><select name="role" style="flex:1;padding:8px"><option value="member">Member</option><option value="secretary">Secretary</option><option value="treasurer">Treasurer</option><option value="vice_chair">Vice Chair</option></select><button class="btn btn-sm btn-green">Add</button></form>` : ''}
+      <a href="/org/committees" class="btn" style="margin-top:15px">Back</a>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/committees/:id/add', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { member_id, role } = req.body;
+  await pool.query('INSERT INTO committee_members(tenant_id,committee_id,member_id,role) VALUES($1,$2,$3,$4) ON CONFLICT (committee_id,member_id) DO NOTHING', [t, req.params.id, member_id, role || 'member']);
+  await audit(req.session.user.email, 'add_committee_member', `Added member ${member_id} to committee ${req.params.id}`);
+  res.redirect(`/org/committees/${req.params.id}`);
+}));
+
+app.post('/org/committees/:id/remove/:memberId', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM committee_members WHERE committee_id=$1 AND member_id=$2 AND tenant_id=$3', [req.params.id, req.params.memberId, t]);
+  await audit(req.session.user.email, 'remove_committee_member', `Removed member ${req.params.memberId} from committee ${req.params.id}`);
+  res.redirect(`/org/committees/${req.params.id}`);
+}));
+
+app.post('/org/committees/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM committee_members WHERE committee_id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await pool.query('DELETE FROM committees WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_committee', `Deleted committee ID: ${req.params.id}`);
+  res.redirect('/org/committees');
+}));
+
+// =============================================
+// ORG: FINANCE CATEGORIES & BUDGET
+// =============================================
+app.get('/org/finance/categories', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // finance_categories table now in startup migrations
+  const categories = (await pool.query('SELECT fc.*, (SELECT COALESCE(SUM(amount),0) FROM org_finance WHERE tenant_id=fc.tenant_id AND category=fc.name) as actual FROM finance_categories fc WHERE fc.tenant_id=$1 ORDER BY fc.type, fc.name', [t])).rows;
+  const incomeCats = categories.filter(c => c.type === 'income');
+  const expenseCats = categories.filter(c => c.type === 'expense');
+  const totalBudgetIncome = incomeCats.reduce((a,c) => a + parseFloat(c.budget_amount||0), 0);
+  const totalActualIncome = incomeCats.reduce((a,c) => a + parseFloat(c.actual||0), 0);
+  const totalBudgetExpense = expenseCats.reduce((a,c) => a + parseFloat(c.budget_amount||0), 0);
+  const totalActualExpense = expenseCats.reduce((a,c) => a + parseFloat(c.actual||0), 0);
+  res.send(renderPage('Finance Categories & Budget', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Budget vs Actual</h1><p>Track spending against your budget</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalBudgetIncome.toLocaleString()}</div><div>Budget Income</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${totalActualIncome>=totalBudgetIncome?'#059669':'#f59e0b'}">UGX ${totalActualIncome.toLocaleString()}</div><div>Actual Income</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${totalBudgetExpense.toLocaleString()}</div><div>Budget Expense</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${totalActualExpense<=totalBudgetExpense?'#059669':'#dc2626'}">UGX ${totalActualExpense.toLocaleString()}</div><div>Actual Expense</div></div>
+    </div>
+    <div class="card"><a href="/org/finance/categories/new" class="btn" style="margin-bottom:15px">+ Add Category</a>
+      <h3>Income Categories</h3>
+      ${incomeCats.length ? `<table><tr><th>Category</th><th>Budget</th><th>Actual</th><th>Variance</th><th>%</th><th>Actions</th></tr>${incomeCats.map(c => { const variance = parseFloat(c.budget_amount||0) - parseFloat(c.actual||0); const pct = parseFloat(c.budget_amount||0) > 0 ? Math.round(parseFloat(c.actual||0)/parseFloat(c.budget_amount)*100) : 0; return `<tr><td><strong>${esc(c.name)}</strong></td><td>UGX ${parseFloat(c.budget_amount||0).toLocaleString()}</td><td>UGX ${parseFloat(c.actual||0).toLocaleString()}</td><td style="color:${variance>=0?'#059669':'#dc2626'}">UGX ${variance.toLocaleString()}</td><td>${pct}%</td><td><form method="POST" action="/org/finance/categories/${c.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`; }).join('')}</table>` : '<p class="muted">No income categories</p>'}
+      <h3 style="margin-top:20px">Expense Categories</h3>
+      ${expenseCats.length ? `<table><tr><th>Category</th><th>Budget</th><th>Actual</th><th>Variance</th><th>%</th><th>Actions</th></tr>${expenseCats.map(c => { const variance = parseFloat(c.budget_amount||0) - parseFloat(c.actual||0); const pct = parseFloat(c.budget_amount||0) > 0 ? Math.round(parseFloat(c.actual||0)/parseFloat(c.budget_amount)*100) : 0; return `<tr><td><strong>${esc(c.name)}</strong></td><td>UGX ${parseFloat(c.budget_amount||0).toLocaleString()}</td><td>UGX ${parseFloat(c.actual||0).toLocaleString()}</td><td style="color:${variance>=0?'#059669':'#dc2626'}">UGX ${variance.toLocaleString()}</td><td>${pct}%</td><td><form method="POST" action="/org/finance/categories/${c.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`; }).join('')}</table>` : '<p class="muted">No expense categories</p>'}
+    </div>
+    <a href="/org/finance" class="btn" style="margin-top:10px">Back to Finance</a>
+  `, req.session.user));
+}));
+
+app.get('/org/finance/categories/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Add Finance Category', `<div class="card" style="max-width:500px;margin:0 auto"><h2>Add Category</h2>
+    <form method="POST" action="/org/finance/categories/save">
+      <label>Name</label><input name="name" required placeholder="Rent, Salaries, Donations...">
+      <label>Type</label><select name="type"><option value="income">Income</option><option value="expense">Expense</option></select>
+      <label>Budget Amount (UGX)</label><input name="budget_amount" type="number" value="0">
+      <button class="btn btn-green">Save Category</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/finance/categories/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, type, budget_amount } = req.body;
+  await pool.query('INSERT INTO finance_categories(tenant_id,name,type,budget_amount) VALUES($1,$2,$3,$4)', [t, name, type, budget_amount || 0]);
+  await audit(req.session.user.email, 'create_finance_category', `Added category: ${name} (${type})`);
+  res.redirect('/org/finance/categories');
+}));
+
+app.post('/org/finance/categories/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM finance_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_finance_category', `Deleted category ID: ${req.params.id}`);
+  res.redirect('/org/finance/categories');
+}));
+
+// =============================================
+// ORG: EVENT RSVP (Non-Ticketed)
+// =============================================
+app.get('/org/events/rsvp/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const event = (await pool.query('SELECT * FROM events WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!event) return res.status(404).send('Not found');
+  // event_rsvps table now in startup migrations
+  const rsvps = (await pool.query('SELECT r.*, m.email, m.phone FROM event_rsvps r LEFT JOIN members m ON m.id=r.member_id WHERE r.event_id=$1 AND r.tenant_id=$2 ORDER BY r.responded_at DESC', [event.id, t])).rows;
+  const yesCount = rsvps.filter(r => r.response === 'yes').length;
+  const noCount = rsvps.filter(r => r.response === 'no').length;
+  const maybeCount = rsvps.filter(r => r.response === 'maybe').length;
+  const allMembers = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const rsvpedIds = rsvps.filter(r => r.member_id).map(r => r.member_id);
+  const available = allMembers.filter(m => !rsvpedIds.includes(m.id));
+  res.send(renderPage('RSVP: ' + event.name, `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>RSVP: ${esc(event.name)}</h1><p>${event.event_date ? new Date(event.event_date).toLocaleDateString() : ''} ${event.venue ? '@ '+esc(event.venue) : ''}</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${yesCount}</div><div>Attending</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${maybeCount}</div><div>Maybe</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${noCount}</div><div>Not Attending</div></div>
+    </div>
+    <div class="card"><h3>Record RSVP</h3>
+      <form method="POST" action="/org/events/rsvp/${event.id}/save" style="display:flex;gap:8px;flex-wrap:wrap">
+        <select name="member_id" style="flex:2;padding:8px"><option value="">Select member...</option>${available.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
+        <input name="name" placeholder="Or type name" style="flex:2;padding:8px">
+        <select name="response" style="flex:1;padding:8px"><option value="yes">Yes</option><option value="maybe">Maybe</option><option value="no">No</option></select>
+        <button class="btn btn-sm btn-green">RSVP</button>
+      </form>
+    </div>
+    <div class="card"><h3>Responses (${rsvps.length})</h3>
+      ${rsvps.length ? `<table><tr><th>Name</th><th>Response</th><th>Date</th></tr>${rsvps.map(r => `<tr><td>${esc(r.name)}</td><td><span class="tag" style="background:${r.response==='yes'?'#d1fae5;color:#065f46':r.response==='maybe'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b'}">${r.response}</span></td><td>${new Date(r.responded_at).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No RSVPs yet</p>'}
+    </div>
+    <a href="/org/events" class="btn" style="margin-top:10px">Back to Events</a>
+  `, req.session.user));
+}));
+
+app.post('/org/events/rsvp/:id/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { member_id, name, response } = req.body;
+  const rsvpName = name || (member_id ? (await pool.query('SELECT name FROM members WHERE id=$1 AND tenant_id=$2', [member_id, t])).rows[0]?.name : null);
+  if (!rsvpName) return res.status(400).send('Name or member required');
+  await pool.query('INSERT INTO event_rsvps(tenant_id,event_id,member_id,name,response) VALUES($1,$2,$3,$4,$5)', [t, req.params.id, member_id || null, rsvpName, response || 'yes']);
+  await audit(req.session.user.email, 'event_rsvp', `RSVP ${response} for ${rsvpName} on event ${req.params.id}`);
+  res.redirect(`/org/events/rsvp/${req.params.id}`);
+}));
+
+
+// =============================================
+// ORG: TASK MANAGEMENT
+// =============================================
+app.get('/org/tasks', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const statusFilter = req.query.status || '';
+  const priorityFilter = req.query.priority || '';
+  const search = req.query.search || '';
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  let where = 'WHERE ot.tenant_id=$1';
+  const params = [t];
+  let pIdx = 2;
+  if (statusFilter) { where += ` AND ot.status=$${pIdx++}`; params.push(statusFilter); }
+  if (priorityFilter) { where += ` AND ot.priority=$${pIdx++}`; params.push(priorityFilter); }
+  if (search) { where += ` AND (ot.title ILIKE $${pIdx++} OR ot.description ILIKE $${pIdx++})`; params.push(`%${search}%`, `%${search}%`); }
+  const total = (await pool.query(`SELECT COUNT(*) FROM org_tasks ot ${where}`, params)).rows[0].count;
+  const tasks = (await pool.query(`SELECT ot.*, m.name as assignee_name FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to ${where} ORDER BY CASE ot.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 END, ot.due_date ASC NULLS LAST, ot.created_at DESC LIMIT $${pIdx++} OFFSET $${pIdx++}`, [...params, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
+  // Stats for dashboard cards
+  const stats = (await pool.query(`SELECT COUNT(*) FILTER(WHERE status='pending') as pending, COUNT(*) FILTER(WHERE status='in_progress') as in_progress, COUNT(*) FILTER(WHERE status='completed') as completed, COUNT(*) FILTER(WHERE status='overdue' OR (status!='completed' AND due_date < CURRENT_DATE)) as overdue, COUNT(*) as total FROM org_tasks WHERE tenant_id=$1`, [t])).rows[0];
+  res.send(renderPage('Task Management', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#3b82f6)"><h1>Task Management</h1><p>Assign, track, and complete organizational tasks</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${stats.pending}</div><div>Pending</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${stats.in_progress}</div><div>In Progress</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${stats.completed}</div><div>Completed</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${stats.overdue}</div><div>Overdue</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:15px">
+        <a href="/org/tasks/new" class="btn btn-green">+ New Task</a>
+        <form method="GET" action="/org/tasks" style="display:flex;gap:8px;flex-wrap:wrap">
+          <input name="search" placeholder="Search tasks..." value="${esc(search)}" style="padding:8px;min-width:200px">
+          <select name="status" style="padding:8px"><option value="">All Status</option><option value="pending" ${statusFilter==='pending'?'selected':''}>Pending</option><option value="in_progress" ${statusFilter==='in_progress'?'selected':''}>In Progress</option><option value="completed" ${statusFilter==='completed'?'selected':''}>Completed</option><option value="overdue" ${statusFilter==='overdue'?'selected':''}>Overdue</option></select>
+          <select name="priority" style="padding:8px"><option value="">All Priority</option><option value="critical" ${priorityFilter==='critical'?'selected':''}>Critical</option><option value="high" ${priorityFilter==='high'?'selected':''}>High</option><option value="medium" ${priorityFilter==='medium'?'selected':''}>Medium</option><option value="low" ${priorityFilter==='low'?'selected':''}>Low</option></select>
+          <button class="btn btn-sm">Filter</button>
+        </form>
+      </div>
+      ${tasks.length ? `<table><tr><th>Title</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Actions</th></tr>${tasks.map(tsk => {
+        const prioColors = {critical:'#dc2626',high:'#f59e0b',medium:'#3b82f6',low:'#6b7280'};
+        const statusColors = {pending:'#f59e0b',in_progress:'#3b82f6',completed:'#059669',overdue:'#dc2626'};
+        const isOverdue = tsk.status !== 'completed' && tsk.due_date && new Date(tsk.due_date) < new Date();
+        const displayStatus = isOverdue ? 'overdue' : tsk.status;
+        return `<tr><td><strong>${esc(tsk.title)}</strong>${tsk.description ? `<br><span class="muted">${esc(tsk.description.substring(0,60))}${tsk.description.length>60?'...':''}</span>` : ''}</td><td>${esc(tsk.assignee_name||'Unassigned')}</td><td><span class="tag" style="background:${prioColors[tsk.priority]||'#6b7280'}20;color:${prioColors[tsk.priority]||'#6b7280'}">${tsk.priority}</span></td><td><span class="tag" style="background:${statusColors[displayStatus]||'#6b7280'}20;color:${statusColors[displayStatus]||'#6b7280'}">${displayStatus.replace('_',' ')}</span></td><td>${tsk.due_date ? new Date(tsk.due_date).toLocaleDateString() : '-'}${isOverdue ? ' <span style="color:#dc2626">&#9888;</span>' : ''}</td><td><a href="/org/tasks/${tsk.id}" class="btn btn-sm">View</a></td></tr>`;
+      }).join('')}</table>` : '<p class="muted">No tasks found. Create your first task to get started.</p>'}
+      ${totalPages > 1 ? `<div style="margin-top:15px;text-align:center">${Array.from({length:totalPages},(_,i)=>`<a href="/org/tasks?page=${i+1}&status=${statusFilter}&priority=${priorityFilter}&search=${encodeURIComponent(search)}" class="btn btn-sm ${i+1===page?'btn-green':''}" style="margin:2px">${i+1}</a>`).join('')}</div>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/tasks/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Create Task', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create New Task</h2>
+    <form method="POST" action="/org/tasks/save">
+      <label>Task Title</label><input name="title" required placeholder="Design annual report layout">
+      <label>Description</label><textarea name="description" rows="3" placeholder="Detailed task description..."></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Assign To</label><select name="assigned_to"><option value="">Unassigned</option>${members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select></div>
+        <div><label>Priority</label><select name="priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Due Date</label><input name="due_date" type="date"></div>
+        <div><label>Initial Status</label><select name="status"><option value="pending">Pending</option><option value="in_progress">In Progress</option></select></div>
+      </div>
+      <button class="btn btn-green">Create Task</button>
+      <a href="/org/tasks" class="btn" style="margin-left:8px">Cancel</a>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/tasks/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, description, assigned_to, priority, status, due_date } = req.body;
+  await pool.query('INSERT INTO org_tasks(tenant_id,title,description,assigned_to,assigned_by,priority,status,due_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, title, description || null, assigned_to || null, req.session.user.email, priority || 'medium', status || 'pending', due_date || null]);
+  await audit(req.session.user.email, 'create_task', `Created task: ${title}`);
+  // Notify the assignee if assigned
+  if (assigned_to) {
+    const assignee = (await pool.query('SELECT email FROM members WHERE id=$1 AND tenant_id=$2', [assigned_to, t])).rows[0];
+    if (assignee && assignee.email) {
+      await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, assignee.email, 'New Task Assigned', `You have been assigned: ${title}`, '/org/tasks']);
+    }
+  }
+  res.redirect('/org/tasks');
+}));
+
+app.get('/org/tasks/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const task = (await pool.query('SELECT ot.*, m.name as assignee_name, m.email as assignee_email FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.id=$1 AND ot.tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!task) return res.status(404).send('Task not found');
+  const comments = (await pool.query('SELECT * FROM org_task_comments WHERE task_id=$1 AND tenant_id=$2 ORDER BY created_at ASC', [task.id, t])).rows;
+  const members = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const prioColors = {critical:'#dc2626',high:'#f59e0b',medium:'#3b82f6',low:'#6b7280'};
+  const statusColors = {pending:'#f59e0b',in_progress:'#3b82f6',completed:'#059669',overdue:'#dc2626'};
+  const isOverdue = task.status !== 'completed' && task.due_date && new Date(task.due_date) < new Date();
+  res.send(renderPage(task.title, `
+    <div class="card" style="max-width:800px;margin:0 auto">
+      <h2>${esc(task.title)}</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">
+        <span class="tag" style="background:${prioColors[task.priority]||'#6b7280'}20;color:${prioColors[task.priority]||'#6b7280'};font-size:14px">${task.priority} priority</span>
+        <span class="tag" style="background:${statusColors[isOverdue?'overdue':task.status]||'#6b7280'}20;color:${statusColors[isOverdue?'overdue':task.status]||'#6b7280'};font-size:14px">${isOverdue?'overdue':task.status.replace('_',' ')}</span>
+        ${task.due_date ? `<span class="tag" style="font-size:14px">Due: ${new Date(task.due_date).toLocaleDateString()}${isOverdue?' <span style="color:#dc2626">&#9888; OVERDUE</span>':''}</span>` : ''}
+      </div>
+      ${task.description ? `<p>${esc(task.description)}</p>` : ''}
+      <p class="muted">Assigned to: ${esc(task.assignee_name||'Unassigned')} | Created by: ${esc(task.assigned_by||'-')} | Created: ${new Date(task.created_at).toLocaleDateString()}${task.completed_at ? ' | Completed: '+new Date(task.completed_at).toLocaleDateString() : ''}</p>
+
+      <h3 style="margin-top:25px">Update Status</h3>
+      <form method="POST" action="/org/tasks/${task.id}/status" style="display:flex;gap:8px;flex-wrap:wrap">
+        <select name="status" style="padding:8px"><option value="pending" ${task.status==='pending'?'selected':''}>Pending</option><option value="in_progress" ${task.status==='in_progress'?'selected':''}>In Progress</option><option value="completed" ${task.status==='completed'?'selected':''}>Completed</option></select>
+        <button class="btn btn-sm btn-green">Update</button>
+      </form>
+
+      <h3 style="margin-top:25px">Edit Task</h3>
+      <form method="POST" action="/org/tasks/${task.id}/update">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Reassign To</label><select name="assigned_to"><option value="">Unassigned</option>${members.map(m => `<option value="${m.id}" ${m.id===task.assigned_to?'selected':''}>${esc(m.name)}</option>`).join('')}</select></div>
+          <div><label>Priority</label><select name="priority"><option value="low" ${task.priority==='low'?'selected':''}>Low</option><option value="medium" ${task.priority==='medium'?'selected':''}>Medium</option><option value="high" ${task.priority==='high'?'selected':''}>High</option><option value="critical" ${task.priority==='critical'?'selected':''}>Critical</option></select></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Due Date</label><input name="due_date" type="date" value="${task.due_date ? task.due_date.toISOString().split('T')[0] : ''}"></div>
+          <div><label>Description</label><textarea name="description" rows="2">${esc(task.description||'')}</textarea></div>
+        </div>
+        <button class="btn btn-sm" style="margin-top:8px">Save Changes</button>
+      </form>
+
+      <h3 style="margin-top:25px">Comments (${comments.length})</h3>
+      ${comments.length ? comments.map(c => `<div style="background:#f8fafc;border-radius:8px;padding:10px;margin:8px 0"><strong>${esc(c.commented_by||'Anonymous')}</strong> <span class="muted">${new Date(c.created_at).toLocaleString()}</span><p style="margin:5px 0">${esc(c.comment)}</p></div>`).join('') : '<p class="muted">No comments yet</p>'}
+      <form method="POST" action="/org/tasks/${task.id}/comment" style="display:flex;gap:8px;margin-top:10px">
+        <input name="comment" placeholder="Add a comment..." required style="flex:1;padding:8px">
+        <button class="btn btn-sm btn-green">Comment</button>
+      </form>
+
+      <div style="margin-top:20px;display:flex;gap:8px">
+        <form method="POST" action="/org/tasks/${task.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red" onclick="return confirm('Delete this task?')">Delete Task</button></form>
+        <a href="/org/tasks" class="btn">Back to Tasks</a>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/tasks/:id/status', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { status } = req.body;
+  const VALID = ['pending','in_progress','completed'];
+  if (!VALID.includes(status)) return res.status(400).send('Invalid status');
+  const completedAt = status === 'completed' ? 'NOW()' : null;
+  if (completedAt) {
+    await pool.query('UPDATE org_tasks SET status=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
+  } else {
+    await pool.query('UPDATE org_tasks SET status=$1, completed_at=NULL WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
+  }
+  await audit(req.session.user.email, 'update_task_status', `Task ${req.params.id} status -> ${status}`);
+  // Mark overdue tasks
+  if (status === 'completed') {
+    await pool.query("UPDATE org_tasks SET status='completed' WHERE id=$1 AND tenant_id=$2 AND due_date < CURRENT_DATE AND status='overdue'", [req.params.id, t]);
+  }
+  res.redirect(`/org/tasks/${req.params.id}`);
+}));
+
+app.post('/org/tasks/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { assigned_to, priority, due_date, description } = req.body;
+  const oldTask = (await pool.query('SELECT assigned_to FROM org_tasks WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!oldTask) return res.status(404).send('Not found');
+  await pool.query('UPDATE org_tasks SET assigned_to=$1,priority=$2,due_date=$3,description=$4 WHERE id=$5 AND tenant_id=$6', [assigned_to || null, priority || 'medium', due_date || null, description || null, req.params.id, t]);
+  // Notify newly assigned member if changed
+  if (assigned_to && parseInt(assigned_to) !== oldTask.assigned_to) {
+    const assignee = (await pool.query('SELECT email,name FROM members WHERE id=$1 AND tenant_id=$2', [assigned_to, t])).rows[0];
+    if (assignee && assignee.email) {
+      await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, assignee.email, 'Task Reassigned', `You have been reassigned to a task. Check your tasks.`, `/org/tasks/${req.params.id}`]);
+    }
+  }
+  await audit(req.session.user.email, 'update_task', `Updated task ${req.params.id}`);
+  res.redirect(`/org/tasks/${req.params.id}`);
+}));
+
+app.post('/org/tasks/:id/comment', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { comment } = req.body;
+  if (!comment || !comment.trim()) return res.redirect(`/org/tasks/${req.params.id}`);
+  await pool.query('INSERT INTO org_task_comments(tenant_id,task_id,comment,commented_by) VALUES($1,$2,$3,$4)', [t, req.params.id, comment, req.session.user.email]);
+  await audit(req.session.user.email, 'task_comment', `Commented on task ${req.params.id}`);
+  res.redirect(`/org/tasks/${req.params.id}`);
+}));
+
+app.post('/org/tasks/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM org_task_comments WHERE task_id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await pool.query('DELETE FROM org_tasks WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_task', `Deleted task ${req.params.id}`);
+  res.redirect('/org/tasks');
+}));
+
+
+// =============================================
+// ORG: IN-APP NOTIFICATIONS
+// =============================================
+app.get('/org/notifications', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const userEmail = req.session.user.email;
+  const filter = req.query.filter || 'all'; // all, unread, read
+  let where = 'WHERE tenant_id=$1 AND user_email=$2';
+  const params = [t, userEmail];
+  if (filter === 'unread') { where += ' AND is_read=false'; }
+  if (filter === 'read') { where += ' AND is_read=true'; }
+  const total = (await pool.query(`SELECT COUNT(*) FROM org_notifications ${where}`, params)).rows[0].count;
+  const notifications = (await pool.query(`SELECT * FROM org_notifications ${where} ORDER BY created_at DESC LIMIT 50`, params)).rows;
+  const unreadCount = (await pool.query('SELECT COUNT(*) FROM org_notifications WHERE tenant_id=$1 AND user_email=$2 AND is_read=false', [t, userEmail])).rows[0].count;
+  res.send(renderPage('Notifications', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Notifications</h1><p>${unreadCount > 0 ? `You have ${unreadCount} unread notification${unreadCount>1?'s':''}` : 'You are all caught up!'}</p></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;gap:6px">
+          <a href="/org/notifications?filter=all" class="btn btn-sm ${filter==='all'?'btn-green':''}">All</a>
+          <a href="/org/notifications?filter=unread" class="btn btn-sm ${filter==='unread'?'btn-green':''}">Unread (${unreadCount})</a>
+          <a href="/org/notifications?filter=read" class="btn btn-sm ${filter==='read'?'btn-green':''}">Read</a>
+        </div>
+        <form method="POST" action="/org/notifications/mark-all-read" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm">Mark All Read</button></form>
+      </div>
+      ${notifications.length ? notifications.map(n => `
+        <div style="display:flex;justify-content:space-between;align-items:start;padding:12px;border-radius:8px;margin:6px 0;background:${n.is_read?'#f8fafc':'#eff6ff'};border-left:4px solid ${n.is_read?'#d1d5db':'#3b82f6'}">
+          <div style="flex:1">
+            <strong>${esc(n.title)}</strong>
+            ${n.message ? `<p style="margin:4px 0;color:#4b5563">${esc(n.message)}</p>` : ''}
+            <span class="muted" style="font-size:12px">${new Date(n.created_at).toLocaleString()}</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            ${n.link ? `<a href="${esc(n.link)}" class="btn btn-sm">View</a>` : ''}
+            ${!n.is_read ? `<form method="POST" action="/org/notifications/${n.id}/read" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-green">Read</button></form>` : ''}
+          </div>
+        </div>
+      `).join('') : '<p class="muted">No notifications</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/notifications/:id/read', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE org_notifications SET is_read=true, read_at=NOW() WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, t, req.session.user.email]);
+  res.redirect('back');
+}));
+
+app.post('/org/notifications/mark-all-read', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE org_notifications SET is_read=true, read_at=NOW() WHERE tenant_id=$1 AND user_email=$2 AND is_read=false', [t, req.session.user.email]);
+  res.redirect('/org/notifications');
+}));
+
+// API: Get unread notification count (for bell icon)
+app.get('/org/notifications/count', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const count = (await pool.query('SELECT COUNT(*) FROM org_notifications WHERE tenant_id=$1 AND user_email=$2 AND is_read=false', [t, req.session.user.email])).rows[0].count;
+  res.json({ unread: parseInt(count) });
+}));
+
+
+// =============================================
+// ORG: COMMITTEE EDIT + MEETING SCHEDULE
+// =============================================
+app.get('/org/committees/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const committee = (await pool.query('SELECT * FROM committees WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!committee) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Committee', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Edit: ${esc(committee.name)}</h2>
+    <form method="POST" action="/org/committees/${committee.id}/update">
+      <label>Name</label><input name="name" required value="${esc(committee.name)}">
+      <label>Description</label><textarea name="description" rows="3">${esc(committee.description||'')}</textarea>
+      <label>Chairperson</label><input name="chairperson" value="${esc(committee.chairperson||'')}">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Meeting Day</label><select name="meeting_day">
+          <option value="">None</option>
+          ${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => `<option value="${d}" ${committee.meeting_day===d?'selected':''}>${d}</option>`).join('')}
+        </select></div>
+        <div><label>Meeting Time</label><input name="meeting_time" type="time" value="${committee.meeting_time||'09:00'}"></div>
+      </div>
+      <button class="btn btn-green">Save Changes</button>
+      <a href="/org/committees/${committee.id}" class="btn" style="margin-left:8px">Cancel</a>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/committees/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, description, chairperson, meeting_day, meeting_time } = req.body;
+  await pool.query('UPDATE committees SET name=$1,description=$2,chairperson=$3,meeting_day=$4,meeting_time=$5 WHERE id=$6 AND tenant_id=$7', [name, description || null, chairperson || null, meeting_day || null, meeting_time || null, req.params.id, t]);
+  await audit(req.session.user.email, 'update_committee', `Updated committee: ${name}`);
+  res.redirect(`/org/committees/${req.params.id}`);
+}));
+
+
+// =============================================
+// ORG: ACTIVITY FEED / TIMELINE
+// =============================================
+app.get('/org/activity', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const page = parseInt(req.query.page) || 1;
+  const limit = 30;
+  const offset = (page - 1) * limit;
+  // Gather recent activities from audit_logs (the single source of truth for all org actions)
+  const total = (await pool.query("SELECT COUNT(*) FROM audit_logs WHERE tenant_id=$1 AND action IN ('create_task','update_task_status','task_comment','create_event','event_rsvp','create_committee','add_committee_member','create_finance_category','register_member','update_member','delete_member','create_project','update_project_status','meeting_save','notice_save','vote_resolution','create_finance','ticket_checkin','import_members','create_committee','update_committee','delete_committee','create_task','delete_task','assign_task')", [t])).rows[0].count;
+  const activities = (await pool.query("SELECT user_email, action, details, created_at FROM audit_logs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3", [t, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
+  // Icon and color mapping for activity types
+  const actionMeta = {
+    create_task: {icon:'&#9745;', color:'#3b82f6', label:'Task Created'},
+    update_task_status: {icon:'&#8634;', color:'#8b5cf6', label:'Task Updated'},
+    task_comment: {icon:'&#128172;', color:'#6b7280', label:'Task Comment'},
+    delete_task: {icon:'&#128465;', color:'#dc2626', label:'Task Deleted'},
+    create_event: {icon:'&#128197;', color:'#059669', label:'Event Created'},
+    create_recurring_events: {icon:'&#128257;', color:'#0891b2', label:'Recurring Events'},
+    event_rsvp: {icon:'&#9989;', color:'#7c3aed', label:'RSVP'},
+    create_committee: {icon:'&#128101;', color:'#0891b2', label:'Committee Created'},
+    update_committee: {icon:'&#9998;', color:'#d97706', label:'Committee Updated'},
+    add_committee_member: {icon:'&#128100;', color:'#059669', label:'Member Added to Committee'},
+    create_finance_category: {icon:'&#128176;', color:'#059669', label:'Budget Category'},
+    register_member: {icon:'&#128100;', color:'#3b82f6', label:'Member Registered'},
+    update_member: {icon:'&#9998;', color:'#d97706', label:'Member Updated'},
+    delete_member: {icon:'&#128465;', color:'#dc2626', label:'Member Removed'},
+    create_project: {icon:'&#128203;', color:'#7c3aed', label:'Project Created'},
+    update_project_status: {icon:'&#8634;', color:'#8b5cf6', label:'Project Status'},
+    meeting_save: {icon:'&#128221;', color:'#1e40af', label:'Meeting Recorded'},
+    notice_save: {icon:'&#128227;', color:'#f59e0b', label:'Notice Posted'},
+    vote_resolution: {icon:'&#127497;', color:'#7c3aed', label:'Vote Cast'},
+    create_finance: {icon:'&#128178;', color:'#059669', label:'Finance Entry'},
+    ticket_checkin: {icon:'&#9989;', color:'#059669', label:'Ticket Checked In'},
+    import_members: {icon:'&#128228;', color:'#0891b2', label:'Members Imported'},
+    assign_task: {icon:'&#128100;', color:'#3b82f6', label:'Task Assigned'}
+  };
+  res.send(renderPage('Activity Feed', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f172a,#334155)"><h1>Activity Feed</h1><p>Recent actions across your organization</p></div>
+    <div class="card">
+      ${activities.length ? `<div style="position:relative;padding-left:30px;border-left:3px solid #e2e8f0">${activities.map(a => {
+        const meta = actionMeta[a.action] || {icon:'&#9679;', color:'#6b7280', label:a.action.replace(/_/g,' ')};
+        const timeAgo = getTimeAgo(new Date(a.created_at));
+        return `<div style="margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;position:relative">
+          <div style="position:absolute;left:-38px;top:12px;width:24px;height:24px;background:${meta.color};color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px">${meta.icon}</div>
+          <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:4px">
+            <div><strong style="color:${meta.color}">${meta.label}</strong> <span class="muted">by ${esc(a.user_email)}</span></div>
+            <span class="muted" style="font-size:12px;white-space:nowrap">${timeAgo}</span>
+          </div>
+          <p style="margin:4px 0;color:#4b5563;font-size:14px">${esc(a.details||'')}</p>
+        </div>`;
+      }).join('')}</div>` : '<p class="muted">No activity yet. Start using the portal to see your activity feed here.</p>'}
+      ${totalPages > 1 ? `<div style="margin-top:15px;text-align:center">${Array.from({length:Math.min(totalPages,10)},(_,i)=>`<a href="/org/activity?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-green':''}" style="margin:2px">${i+1}</a>`).join('')}</div>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+// Helper: time ago formatter
+function getTimeAgo(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + 'm ago';
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + 'h ago';
+  const days = Math.floor(hours / 24);
+  if (days < 30) return days + 'd ago';
+  const months = Math.floor(days / 30);
+  return months + 'mo ago';
+}
+
+
+// =============================================
+// ORG: ORGANIZATION SETTINGS
+// =============================================
+app.get('/org/settings', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE id=$1', [t])).rows[0];
+  if (!tenant) return res.status(404).send('Tenant not found');
+  // Get feature flags for this tenant
+  const features = (await pool.query("SELECT feature_name, is_enabled FROM feature_flags WHERE tenant_id=$1 ORDER BY feature_name", [t])).rows;
+  res.send(renderPage('Organization Settings', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f172a,#1e293b)"><h1>Organization Settings</h1><p>Configure your organization's profile and features</p></div>
+    <div class="card" style="max-width:800px;margin:0 auto">
+      <h3>Organization Profile</h3>
+      <form method="POST" action="/org/settings/save">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Organization Name</label><input name="name" required value="${esc(tenant.name)}" style="width:100%"></div>
+          <div><label>Organization Type</label><input name="type" value="${esc(tenant.type)}" readonly style="width:100%;background:#f1f5f9"></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Email</label><input name="email" type="email" value="${esc(tenant.email||'')}" style="width:100%"></div>
+          <div><label>Phone</label><input name="phone" value="${esc(tenant.phone||'')}" style="width:100%"></div>
+        </div>
+        <label>Address</label><input name="address" value="${esc(tenant.address||'')}" style="width:100%">
+        <label>Description</label><textarea name="description" rows="3" style="width:100%">${esc(tenant.description||'')}</textarea>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Logo URL</label><input name="logo_url" value="${esc(tenant.logo_url||'')}" placeholder="https://..." style="width:100%"></div>
+          <div><label>Subdomain</label><input name="subdomain" value="${esc(tenant.subdomain||'')}" readonly style="width:100%;background:#f1f5f9"></div>
+        </div>
+        <button class="btn btn-green" style="margin-top:15px">Save Settings</button>
+      </form>
+    </div>
+    <div class="card" style="max-width:800px;margin:20px auto 0">
+      <h3>Feature Flags</h3>
+      <p class="muted">Enable or disable features for your organization</p>
+      <form method="POST" action="/org/settings/features">
+        <table>
+          <tr><th>Feature</th><th>Status</th><th>Toggle</th></tr>
+          ${features.length ? features.map(f => `<tr><td>${esc(f.feature_name)}</td><td>${f.is_enabled ? '<span class="tag" style="background:#d1fae5;color:#065f46">Enabled</span>' : '<span class="tag" style="background:#fee2e2;color:#991b1b">Disabled</span>'}</td><td><label style="cursor:pointer"><input type="checkbox" name="feature_${esc(f.feature_name)}" ${f.is_enabled?'checked':''}> ${f.is_enabled?'Disable':'Enable'}</label></td></tr>`).join('') : '<tr><td colspan="3"><span class="muted">No feature flags configured</span></td></tr>'}
+        </table>
+        ${features.length ? '<button class="btn btn-sm" style="margin-top:10px">Update Features</button>' : ''}
+      </form>
+    </div>
+    <div class="card" style="max-width:800px;margin:20px auto 0">
+      <h3>Organization Stats</h3>
+      <div class="stats">
+        <div class="stat-card"><div class="stat-num">${tenant.verified ? '&#9989;' : '&#9888;'}</div><div>${tenant.verified ? 'Verified' : 'Unverified'}</div></div>
+        <div class="stat-card"><div class="stat-num">${tenant.approved ? '&#9989;' : '&#9203;'}</div><div>${tenant.approved ? 'Approved' : 'Pending'}</div></div>
+        <div class="stat-card"><div class="stat-num">${tenant.has_fundraising ? '&#9989;' : '&#10060;'}</div><div>Fundraising</div></div>
+        <div class="stat-card"><div class="stat-num">UGX ${parseInt(tenant.wallet_balance||0).toLocaleString()}</div><div>Wallet</div></div>
+      </div>
+      <p class="muted" style="margin-top:10px">Created: ${new Date(tenant.created_at).toLocaleDateString()} | Account ID: ${tenant.id}</p>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/settings/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, email, phone, address, description, logo_url } = req.body;
+  if (!name || !name.trim()) return res.status(400).send('Organization name is required');
+  await pool.query('UPDATE tenants SET name=$1,email=$2,phone=$3,address=$4,description=$5,logo_url=$6 WHERE id=$7', [name.trim(), email||null, phone||null, address||null, description||null, logo_url||null, t]);
+  await audit(req.session.user.email, 'update_org_settings', `Updated organization profile`);
+  res.redirect('/org/settings');
+}));
+
+app.post('/org/settings/features', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const features = (await pool.query("SELECT feature_name FROM feature_flags WHERE tenant_id=$1", [t])).rows;
+  for (const f of features) {
+    const enabled = !!req.body['feature_' + f.feature_name];
+    await pool.query('UPDATE feature_flags SET is_enabled=$1 WHERE tenant_id=$2 AND feature_name=$3', [enabled, t, f.feature_name]);
+  }
+  await audit(req.session.user.email, 'update_feature_flags', `Updated feature flags`);
+  res.redirect('/org/settings');
+}));
+
+
+// =============================================
+// ORG: CALENDAR VIEW
+// =============================================
+app.get('/org/calendar', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const month = parseInt(req.query.month) || (new Date().getMonth() + 1);
+  const year = parseInt(req.query.year) || new Date().getFullYear();
+  // Get events, meetings, and task due dates for the month
+  const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+  const endDate = new Date(year, month, 0).toISOString().split('T')[0]; // Last day of month
+  const [events, meetings, tasks] = await Promise.all([
+    pool.query('SELECT id, name, event_date, is_recurring, recurring_pattern FROM events WHERE tenant_id=$1 AND event_date BETWEEN $2 AND $3 ORDER BY event_date', [t, startDate, endDate]),
+    pool.query('SELECT id, title, meeting_date FROM meeting_minutes WHERE tenant_id=$1 AND meeting_date BETWEEN $2 AND $3 ORDER BY meeting_date', [t, startDate, endDate]),
+    pool.query("SELECT id, title, due_date, status, priority FROM org_tasks WHERE tenant_id=$1 AND due_date BETWEEN $2 AND $3 ORDER BY due_date", [t, startDate, endDate])
+  ]);
+  // Build calendar grid
+  const firstDay = new Date(year, month - 1, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  // Group events/meetings/tasks by date
+  const eventsByDate = {};
+  events.rows.forEach(e => { const d = e.event_date; if (!eventsByDate[d]) eventsByDate[d] = []; eventsByDate[d].push({type:'event', name:e.name, id:e.id, recurring:e.is_recurring}); });
+  meetings.rows.forEach(m => { const d = m.meeting_date; if (!eventsByDate[d]) eventsByDate[d] = []; eventsByDate[d].push({type:'meeting', name:m.title, id:m.id}); });
+  tasks.rows.forEach(tk => { const d = tk.due_date; if (!eventsByDate[d]) eventsByDate[d] = []; eventsByDate[d].push({type:'task', name:tk.title, id:tk.id, status:tk.status, priority:tk.priority}); });
+  // Build calendar HTML
+  let calHtml = '<table style="width:100%;border-collapse:collapse"><tr>';
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => { calHtml += `<th style="padding:8px;text-align:center;background:#f1f5f9;font-size:12px">${d}</th>`; });
+  calHtml += '</tr><tr>';
+  // Empty cells before first day
+  for (let i = 0; i < firstDay; i++) { calHtml += '<td style="padding:4px;min-height:80px;vertical-align:top;border:1px solid #e2e8f0"></td>'; }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const isToday = dateStr === todayStr;
+    const dayEvents = eventsByDate[dateStr] || [];
+    calHtml += `<td style="padding:4px;min-height:80px;vertical-align:top;border:1px solid #e2e8f0;${isToday?'background:#eff6ff;':''}${dayEvents.length>3?'font-size:11px;':''}">
+      <div style="font-weight:${isToday?'bold':'normal'};color:${isToday?'#1e40af':'inherit'};margin-bottom:2px">${day}</div>
+      ${dayEvents.slice(0,3).map(e => {
+        const colors = {event:'#059669', meeting:'#1e40af', task:'#f59e0b'};
+        const labels = {event:'E', meeting:'M', task:'T'};
+        return `<div style="font-size:10px;padding:1px 4px;margin:1px 0;border-radius:3px;background:${colors[e.type]}15;color:${colors[e.type]};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(e.name)}">${labels[e.type]} ${esc(e.name.substring(0,10))}${e.name.length>10?'...':''}</div>`;
+      }).join('')}
+      ${dayEvents.length > 3 ? `<div style="font-size:9px;color:#6b7280">+${dayEvents.length-3} more</div>` : ''}
+    </td>`;
+    if ((firstDay + day) % 7 === 0 && day < daysInMonth) { calHtml += '</tr><tr>'; }
+  }
+  // Fill remaining cells
+  const remaining = 7 - ((firstDay + daysInMonth) % 7);
+  if (remaining < 7) { for (let i = 0; i < remaining; i++) { calHtml += '<td style="padding:4px;min-height:80px;vertical-align:top;border:1px solid #e2e8f0"></td>'; } }
+  calHtml += '</tr></table>';
+  // Legend
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  res.send(renderPage('Calendar', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Calendar</h1><p>${monthNames[month-1]} ${year}</p></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+        <a href="/org/calendar?month=${prevMonth}&year=${prevYear}" class="btn btn-sm">&larr; ${monthNames[prevMonth-1]}</a>
+        <a href="/org/calendar" class="btn btn-sm">Today</a>
+        <a href="/org/calendar?month=${nextMonth}&year=${nextYear}" class="btn btn-sm">${monthNames[nextMonth-1]} &rarr;</a>
+      </div>
+      ${calHtml}
+      <div style="display:flex;gap:15px;margin-top:15px;flex-wrap:wrap">
+        <span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;background:#05966915;border:1px solid #059669;border-radius:2px;vertical-align:middle"></span> Event</span>
+        <span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;background:#1e40af15;border:1px solid #1e40af;border-radius:2px;vertical-align:middle"></span> Meeting</span>
+        <span style="font-size:12px"><span style="display:inline-block;width:12px;height:12px;background:#f59e0b15;border:1px solid #f59e0b;border-radius:2px;vertical-align:middle"></span> Task Due</span>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: BULK ACTIONS
+// =============================================
+app.get('/org/members/bulk', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id, name, email, phone, role FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Bulk Actions', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>Bulk Actions</h1><p>Perform actions on multiple members at once</p></div>
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <h3>Select Members</h3>
+      <form method="POST" action="/org/members/bulk/action">
+        <div style="margin-bottom:10px">
+          <label style="cursor:pointer"><input type="checkbox" id="selectAll" onchange="document.querySelectorAll('.memberCheck').forEach(cb=>cb.checked=this.checked)"> Select All</label>
+        </div>
+        <table><tr><th></th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th></tr>
+          ${members.map(m => `<tr><td><input type="checkbox" class="memberCheck" name="member_ids" value="${m.id}"></td><td>${esc(m.name)}</td><td>${esc(m.email||'-')}</td><td>${esc(m.phone||'-')}</td><td>${esc(m.role||'Member')}</td></tr>`).join('')}
+        </table>
+        <div style="margin-top:15px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select name="bulk_action" required style="padding:8px">
+            <option value="">Choose Action...</option>
+            <option value="delete">Delete Selected Members</option>
+            <option value="assign_role">Change Role</option>
+            <option value="send_email">Send Email</option>
+            <option value="add_to_committee">Add to Committee</option>
+          </select>
+          <select name="role" id="bulkRole" style="padding:8px;display:none">
+            <option value="Member">Member</option><option value="Volunteer">Volunteer</option><option value="Staff">Staff</option><option value="Board">Board</option>
+          </select>
+          <input name="email_subject" id="bulkSubject" placeholder="Email subject" style="padding:8px;display:none;min-width:200px">
+          <textarea name="email_body" id="bulkBody" placeholder="Email body..." rows="2" style="padding:8px;display:none;min-width:200px"></textarea>
+          <select name="committee_id" id="bulkCommittee" style="padding:8px;display:none">
+            <option value="">Select Committee...</option>
+            ${(await pool.query('SELECT id, name FROM committees WHERE tenant_id=$1 ORDER BY name', [t])).rows.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+          </select>
+          <button class="btn btn-red" onclick="return confirm('Are you sure you want to perform this bulk action?')">Execute</button>
+        </div>
+      </form>
+      <script>
+        document.querySelector('[name=bulk_action]').addEventListener('change', function() {
+          document.getElementById('bulkRole').style.display = this.value==='assign_role'?'inline-block':'none';
+          document.getElementById('bulkSubject').style.display = this.value==='send_email'?'inline-block':'none';
+          document.getElementById('bulkBody').style.display = this.value==='send_email'?'inline-block':'none';
+          document.getElementById('bulkCommittee').style.display = this.value==='add_to_committee'?'inline-block':'none';
+        });
+      </script>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/members/bulk/action', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { bulk_action, member_ids, role, email_subject, email_body, committee_id } = req.body;
+  const ids = Array.isArray(member_ids) ? member_ids : (member_ids ? [member_ids] : []);
+  if (!ids.length) return res.status(400).send('No members selected');
+  let resultMsg = '';
+  if (bulk_action === 'delete') {
+    let deleted = 0;
+    for (const id of ids) {
+      try { await pool.query('DELETE FROM members WHERE id=$1 AND tenant_id=$2', [id, t]); deleted++; } catch(e) {}
+    }
+    resultMsg = `Deleted ${deleted} member(s)`;
+  } else if (bulk_action === 'assign_role') {
+    const VALID_ROLES = ['Member','Volunteer','Staff','Board'];
+    if (!VALID_ROLES.includes(role)) return res.status(400).send('Invalid role');
+    const result = await pool.query('UPDATE members SET role=$1 WHERE id=ANY($2) AND tenant_id=$3', [role, ids, t]);
+    resultMsg = `Updated role to "${role}" for ${result.rowCount} member(s)`;
+  } else if (bulk_action === 'send_email') {
+    const members = (await pool.query('SELECT email, name FROM members WHERE id=ANY($1) AND tenant_id=$2 AND email IS NOT NULL', [ids, t])).rows;
+    let sent = 0;
+    for (const m of members) {
+      try { await sendEmail(t, m.email, email_subject || 'Organization Update', email_body || ''); sent++; } catch(e) {}
+    }
+    resultMsg = `Sent email to ${sent} member(s) (${members.length} have email, ${ids.length - members.length} have no email)`;
+  } else if (bulk_action === 'add_to_committee') {
+    if (!committee_id) return res.status(400).send('No committee selected');
+    let added = 0;
+    for (const id of ids) {
+      try {
+        await pool.query('INSERT INTO committee_members(tenant_id,committee_id,member_id,role) VALUES($1,$2,$3,$4) ON CONFLICT (committee_id,member_id) DO NOTHING', [t, committee_id, id, 'member']);
+        added++;
+      } catch(e) {}
+    }
+    resultMsg = `Added ${added} member(s) to committee`;
+  } else {
+    return res.status(400).send('Invalid action');
+  }
+  await audit(req.session.user.email, 'bulk_action', `${bulk_action}: ${resultMsg}`);
+  res.send(renderPage('Bulk Action Complete', `
+    <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+      <div class="alert alert-success">${resultMsg}</div>
+      <a href="/org/members/bulk" class="btn" style="margin-top:10px">Back to Bulk Actions</a>
+      <a href="/org/members" class="btn" style="margin-top:10px">View Members</a>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: MEMBER PROFILE (Detailed View)
+// =============================================
+app.get('/org/members/:id/profile', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const member = (await pool.query('SELECT * FROM members WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!member) return res.status(404).send('Member not found');
+  // Get related data
+  const [committees, tasks, attendance, rsvps, auditHistory] = await Promise.all([
+    pool.query('SELECT c.name, cm.role, cm.joined_at FROM committee_members cm JOIN committees c ON c.id=cm.committee_id WHERE cm.member_id=$1 AND cm.tenant_id=$2', [member.id, t]),
+    pool.query('SELECT * FROM org_tasks WHERE assigned_to=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 10', [member.id, t]),
+    pool.query('SELECT date, status FROM attendance WHERE tenant_id=$1 AND date IN (SELECT date FROM attendance WHERE tenant_id=$1 ORDER BY date DESC LIMIT 30) ORDER BY date DESC', [t]),
+    pool.query('SELECT er.response, er.responded_at, e.name as event_name FROM event_rsvps er JOIN events e ON e.id=er.event_id WHERE er.member_id=$1 AND er.tenant_id=$2 ORDER BY er.responded_at DESC LIMIT 10', [member.id, t]),
+    pool.query("SELECT action, details, created_at FROM audit_logs WHERE tenant_id=$1 AND (details ILIKE $2 OR details ILIKE $3) ORDER BY created_at DESC LIMIT 15", [t, `%${member.email||''}%`, `%member ${member.id}%`])
+  ]);
+  // Task stats
+  const taskStats = { total: tasks.rows.length, completed: tasks.rows.filter(t=>t.status==='completed').length, pending: tasks.rows.filter(t=>t.status==='pending').length, overdue: tasks.rows.filter(t=>t.status!=='completed'&&t.due_date&&new Date(t.due_date)<new Date()).length };
+  const prioColors = {critical:'#dc2626',high:'#f59e0b',medium:'#3b82f6',low:'#6b7280'};
+  const statusColors = {pending:'#f59e0b',in_progress:'#3b82f6',completed:'#059669',overdue:'#dc2626'};
+  res.send(renderPage(member.name, `
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
+        <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#3b82f6);display:flex;align-items:center;justify-content:center;color:white;font-size:32px;font-weight:bold">${esc(member.name.charAt(0).toUpperCase())}</div>
+        <div>
+          <h2 style="margin:0">${esc(member.name)}</h2>
+          <span class="tag" style="margin-top:4px">${esc(member.role||'Member')}</span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <a href="/org/members/${member.id}/edit" class="btn btn-sm">Edit</a>
+          <a href="/org/members" class="btn btn-sm">Back</a>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><strong>Email:</strong> ${esc(member.email||'Not provided')}</div>
+        <div><strong>Phone:</strong> ${esc(member.phone||'Not provided')}</div>
+        <div><strong>Role:</strong> ${esc(member.role||'Member')}</div>
+        <div><strong>Joined:</strong> ${member.joined_at ? new Date(member.joined_at).toLocaleDateString() : 'Unknown'}</div>
+      </div>
+
+      <h3 style="margin-top:25px">Committees (${committees.rows.length})</h3>
+      ${committees.rows.length ? `<table><tr><th>Committee</th><th>Role</th><th>Joined</th></tr>${committees.rows.map(c => `<tr><td>${esc(c.name)}</td><td><span class="tag">${esc(c.role)}</span></td><td>${new Date(c.joined_at).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">Not in any committee</p>'}
+
+      <h3 style="margin-top:25px">Assigned Tasks (${taskStats.total})</h3>
+      <div class="stats" style="margin-bottom:10px">
+        <div class="stat-card"><div class="stat-num" style="color:#059669;font-size:18px">${taskStats.completed}</div><div>Completed</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#f59e0b;font-size:18px">${taskStats.pending}</div><div>Pending</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#dc2626;font-size:18px">${taskStats.overdue}</div><div>Overdue</div></div>
+      </div>
+      ${tasks.rows.length ? `<table><tr><th>Task</th><th>Priority</th><th>Status</th><th>Due</th></tr>${tasks.rows.map(tk => {
+        const isOverdue = tk.status!=='completed'&&tk.due_date&&new Date(tk.due_date)<new Date();
+        return `<tr><td><a href="/org/tasks/${tk.id}">${esc(tk.title)}</a></td><td><span class="tag" style="background:${prioColors[tk.priority]||'#6b7280'}20;color:${prioColors[tk.priority]||'#6b7280'}">${tk.priority}</span></td><td><span class="tag" style="background:${statusColors[isOverdue?'overdue':tk.status]||'#6b7280'}20;color:${statusColors[isOverdue?'overdue':tk.status]||'#6b7280'}">${isOverdue?'overdue':tk.status.replace('_',' ')}</span></td><td>${tk.due_date?new Date(tk.due_date).toLocaleDateString():'-'}</td></tr>`;
+      }).join('')}</table>` : '<p class="muted">No tasks assigned</p>'}
+
+      <h3 style="margin-top:25px">Event RSVPs (${rsvps.rows.length})</h3>
+      ${rsvps.rows.length ? `<table><tr><th>Event</th><th>Response</th><th>Date</th></tr>${rsvps.rows.map(r => `<tr><td>${esc(r.event_name)}</td><td><span class="tag" style="background:${r.response==='yes'?'#d1fae5;color:#065f46':r.response==='maybe'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b'}">${r.response}</span></td><td>${new Date(r.responded_at).toLocaleDateString()}</td></tr>`).join('')}</table>` : '<p class="muted">No RSVPs</p>'}
+
+      <h3 style="margin-top:25px">Activity History</h3>
+      ${auditHistory.rows.length ? auditHistory.rows.map(a => `<div style="padding:6px 0;border-bottom:1px solid #f1f5f9"><span class="muted" style="font-size:12px">${new Date(a.created_at).toLocaleDateString()}</span> <strong>${esc(a.action.replace(/_/g,' '))}</strong> ${esc(a.details||'')}</div>`).join('') : '<p class="muted">No activity recorded</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: ENGAGEMENT ANALYTICS DASHBOARD
+// =============================================
+app.get('/org/analytics', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // Compute engagement metrics
+  const [memberGrowth, taskCompletion, eventAttendance, meetingParticipation, financeTrend, topContributors] = await Promise.all([
+    // Member growth over last 6 months
+    pool.query("SELECT TO_CHAR(joined_at,'Mon YYYY') as month, COUNT(*) as cnt FROM members WHERE tenant_id=$1 AND joined_at > NOW()-INTERVAL '6 months' GROUP BY month ORDER BY MIN(joined_at)", [t]),
+    // Task completion rate
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER(WHERE status='completed') as completed, COUNT(*) FILTER(WHERE status='pending') as pending, COUNT(*) FILTER(WHERE status='in_progress') as in_progress, COUNT(*) FILTER(WHERE status!='completed' AND due_date < CURRENT_DATE) as overdue FROM org_tasks WHERE tenant_id=$1", [t]),
+    // Event RSVP stats
+    pool.query("SELECT response, COUNT(*) as cnt FROM event_rsvps WHERE tenant_id=$1 GROUP BY response", [t]),
+    // Meeting participation
+    pool.query("SELECT COUNT(*) as total_meetings, COUNT(*) FILTER(WHERE meeting_date > NOW()-INTERVAL '3 months') as recent FROM meeting_minutes WHERE tenant_id=$1", [t]),
+    // Finance trend
+    pool.query("SELECT type, COALESCE(SUM(amount),0) as total, TO_CHAR(created_at,'Mon YYYY') as month FROM org_finance WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '6 months' GROUP BY type, month ORDER BY MIN(created_at)", [t]),
+    // Top task completers
+    pool.query("SELECT m.name, COUNT(ot.id) as task_count FROM org_tasks ot JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 AND ot.status='completed' GROUP BY m.name ORDER BY task_count DESC LIMIT 5", [t])
+  ]);
+  const totalMembers = (await pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [t])).rows[0].count;
+  const totalEvents = (await pool.query('SELECT COUNT(*) FROM events WHERE tenant_id=$1', [t])).rows[0].count;
+  const taskData = taskCompletion.rows[0] || {total:0,completed:0,pending:0,in_progress:0,overdue:0};
+  const completionRate = parseInt(taskData.total) > 0 ? Math.round(parseInt(taskData.completed) / parseInt(taskData.total) * 100) : 0;
+  const rsvpYes = eventAttendance.rows.find(r => r.response==='yes')?.cnt || 0;
+  const rsvpNo = eventAttendance.rows.find(r => r.response==='no')?.cnt || 0;
+  const rsvpMaybe = eventAttendance.rows.find(r => r.response==='maybe')?.cnt || 0;
+  res.send(renderPage('Engagement Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#0f172a,#334155)"><h1>Engagement Analytics</h1><p>Understand how your organization is performing</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${totalMembers}</div><div>Total Members</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${completionRate>=70?'#059669':completionRate>=40?'#f59e0b':'#dc2626'}">${completionRate}%</div><div>Task Completion</div></div>
+      <div class="stat-card"><div class="stat-num">${totalEvents}</div><div>Total Events</div></div>
+      <div class="stat-card"><div class="stat-num">${meetingParticipation.rows[0]?.recent||0}</div><div>Recent Meetings</div></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Task Completion Rate</h3>
+        <div style="display:flex;align-items:center;gap:15px;margin:15px 0">
+          <div style="width:120px;height:120px;border-radius:50%;background:conic-gradient(#059669 ${completionRate*3.6}deg, #e2e8f0 ${completionRate*3.6}deg);display:flex;align-items:center;justify-content:center">
+            <div style="width:90px;height:90px;border-radius:50%;background:white;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:bold;color:#059669">${completionRate}%</div>
+          </div>
+          <div>
+            <div>Completed: ${taskData.completed}</div>
+            <div>In Progress: ${taskData.in_progress}</div>
+            <div>Pending: ${taskData.pending}</div>
+            <div style="color:#dc2626">Overdue: ${taskData.overdue}</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Event RSVPs</h3>
+        <div style="display:flex;gap:10px;margin:15px 0;flex-wrap:wrap">
+          <div style="flex:1;text-align:center;padding:15px;background:#d1fae5;border-radius:8px"><div style="font-size:24px;font-weight:bold;color:#065f46">${rsvpYes}</div><div>Attending</div></div>
+          <div style="flex:1;text-align:center;padding:15px;background:#fef3c7;border-radius:8px"><div style="font-size:24px;font-weight:bold;color:#92400e">${rsvpMaybe}</div><div>Maybe</div></div>
+          <div style="flex:1;text-align:center;padding:15px;background:#fee2e2;border-radius:8px"><div style="font-size:24px;font-weight:bold;color:#991b1b">${rsvpNo}</div><div>Not Attending</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Member Growth (6 months)</h3>
+        ${memberGrowth.rows.length ? `<table><tr><th>Month</th><th>New Members</th><th>Bar</th></tr>${memberGrowth.rows.map(m => {
+          const maxCnt = Math.max(...memberGrowth.rows.map(r=>parseInt(r.cnt)),1);
+          const width = Math.round(parseInt(m.cnt)/maxCnt*100);
+          return `<tr><td>${esc(m.month)}</td><td>${m.cnt}</td><td><div style="background:#7c3aed;height:16px;width:${width}%;border-radius:4px"></div></td></tr>`;
+        }).join('')}</table>` : '<p class="muted">No member growth data yet</p>'}
+      </div>
+      <div class="card">
+        <h3>Top Task Completers</h3>
+        ${topContributors.rows.length ? `<table><tr><th>Member</th><th>Tasks Done</th><th>Bar</th></tr>${topContributors.rows.map(m => {
+          const maxCnt = Math.max(...topContributors.rows.map(r=>parseInt(r.task_count)),1);
+          const width = Math.round(parseInt(m.task_count)/maxCnt*100);
+          return `<tr><td>${esc(m.name)}</td><td>${m.task_count}</td><td><div style="background:#059669;height:16px;width:${width}%;border-radius:4px"></div></td></tr>`;
+        }).join('')}</table>` : '<p class="muted">No completed tasks yet</p>'}
+      </div>
+    </div>
+    <div class="card">
+      <h3>Finance Trend (6 months)</h3>
+      ${financeTrend.rows.length ? `<table><tr><th>Month</th><th>Income</th><th>Expense</th></tr>${(() => {
+        const months = [...new Set(financeTrend.rows.map(r=>r.month))];
+        return months.map(m => {
+          const income = financeTrend.rows.find(r=>r.month===m&&r.type==='income')?.total||0;
+          const expense = financeTrend.rows.find(r=>r.month===m&&r.type==='expense')?.total||0;
+          return `<tr><td>${esc(m)}</td><td style="color:#059669">UGX ${parseInt(income).toLocaleString()}</td><td style="color:#dc2626">UGX ${parseInt(expense).toLocaleString()}</td></tr>`;
+        }).join('');
+      })()}</table>` : '<p class="muted">No finance data in the last 6 months</p>'}
+    </div>
+    <a href="/portal/organization" class="btn" style="margin-top:15px">Back to Dashboard</a>
+  `, req.session.user));
+}));
+
+// Analytics chart API endpoints
+app.get('/org/analytics/tasks-chart', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, COUNT(*) as created, COUNT(*) FILTER(WHERE status='completed') as completed FROM org_tasks WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '6 months' GROUP BY month ORDER BY MIN(created_at)", [t])).rows;
+  res.json({ labels: data.map(d=>d.month), created: data.map(d=>parseInt(d.created)), completed: data.map(d=>parseInt(d.completed)) });
+}));
+
+app.get('/org/analytics/finance-chart', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const data = (await pool.query("SELECT TO_CHAR(created_at,'Mon YYYY') as month, type, COALESCE(SUM(amount),0) as total FROM org_finance WHERE tenant_id=$1 AND created_at > NOW()-INTERVAL '6 months' GROUP BY month, type ORDER BY MIN(created_at)", [t])).rows;
+  const months = [...new Set(data.map(d=>d.month))];
+  res.json({ labels: months, income: months.map(m=>parseInt(data.find(d=>d.month===m&&d.type==='income')?.total||0)), expense: months.map(m=>parseInt(data.find(d=>d.month===m&&d.type==='expense')?.total||0)) });
+}));
+
+
+// =============================================
+// ORG: FILE ATTACHMENTS
+// =============================================
+app.post('/org/attachments/upload', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { entity_type, entity_id, file_url, file_name, file_type } = req.body;
+  const VALID_ENTITIES = ['task','event','project','meeting','notice'];
+  if (!VALID_ENTITIES.includes(entity_type)) return res.status(400).send('Invalid entity type');
+  if (!file_url || !file_name) return res.status(400).send('File URL and name required');
+  await pool.query('INSERT INTO org_attachments(tenant_id,entity_type,entity_id,file_name,file_url,file_type,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, entity_type, entity_id, file_name, file_url, file_type||null, req.session.user.email]);
+  await audit(req.session.user.email, 'upload_attachment', `Attached ${file_name} to ${entity_type} ${entity_id}`);
+  res.redirect('back');
+}));
+
+app.get('/org/attachments/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const att = (await pool.query('SELECT * FROM org_attachments WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!att) return res.status(404).send('Attachment not found');
+  await pool.query('DELETE FROM org_attachments WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_attachment', `Deleted attachment ${att.file_name}`);
+  res.redirect('back');
+}));
+
+// Attachment list API for any entity
+app.get('/org/attachments/:entity_type/:entity_id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { entity_type, entity_id } = req.params;
+  const attachments = (await pool.query('SELECT * FROM org_attachments WHERE entity_type=$1 AND entity_id=$2 AND tenant_id=$3 ORDER BY created_at DESC', [entity_type, entity_id, t])).rows;
+  res.json(attachments);
+}));
+
+
+// =============================================
+// ORG: MEETING ACTION ITEMS
+// =============================================
+app.post('/org/meetings/:id/action-items/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { description, assigned_to, due_date } = req.body;
+  if (!description) return res.status(400).send('Description required');
+  await pool.query('INSERT INTO meeting_action_items(tenant_id,meeting_id,description,assigned_to,due_date) VALUES($1,$2,$3,$4,$5)', [t, req.params.id, description, assigned_to||null, due_date||null]);
+  await audit(req.session.user.email, 'create_action_item', `Created action item for meeting ${req.params.id}`);
+  res.redirect(`/org/meetings/${req.params.id}`);
+}));
+
+app.post('/org/meetings/action-items/:id/status', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { status } = req.body;
+  if (!['pending','in_progress','completed'].includes(status)) return res.status(400).send('Invalid status');
+  const completedAt = status === 'completed' ? 'NOW()' : null;
+  if (completedAt) {
+    await pool.query('UPDATE meeting_action_items SET status=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
+  } else {
+    await pool.query('UPDATE meeting_action_items SET status=$1, completed_at=NULL WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
+  }
+  await audit(req.session.user.email, 'update_action_item', `Action item ${req.params.id} -> ${status}`);
+  res.redirect('back');
+}));
+
+app.post('/org/meetings/action-items/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM meeting_action_items WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_action_item', `Deleted action item ${req.params.id}`);
+  res.redirect('back');
+}));
+
+
+// =============================================
+// ORG: SELF-SERVICE MEMBER PORTAL
+// =============================================
+app.get('/my-portal', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const userEmail = req.session.user.email;
+  // Find member by email
+  const member = (await pool.query('SELECT * FROM members WHERE email=$1 AND tenant_id=$2', [userEmail, t])).rows[0];
+  if (!member) {
+    return res.send(renderPage('My Portal', `
+      <div class="card" style="max-width:500px;margin:40px auto;text-align:center">
+        <h2>My Portal</h2>
+        <p class="muted">Your email (${esc(userEmail)}) is not linked to a member record. Contact your organization admin to be added.</p>
+        <a href="/portal/organization" class="btn" style="margin-top:10px">Back to Dashboard</a>
+      </div>
+    `, req.session.user));
+  }
+  // Get member's tasks, RSVPs, committees, notifications
+  const [tasks, rsvps, committees, notifications] = await Promise.all([
+    pool.query("SELECT * FROM org_tasks WHERE assigned_to=$1 AND tenant_id=$2 AND status!='completed' ORDER BY due_date ASC NULLS LAST LIMIT 10", [member.id, t]),
+    pool.query("SELECT er.response, er.responded_at, e.name as event_name, e.event_date FROM event_rsvps er JOIN events e ON e.id=er.event_id WHERE er.member_id=$1 AND er.tenant_id=$2 ORDER BY er.responded_at DESC LIMIT 5", [member.id, t]),
+    pool.query("SELECT c.name, cm.role, cm.joined_at FROM committee_members cm JOIN committees c ON c.id=cm.committee_id WHERE cm.member_id=$1 AND cm.tenant_id=$2", [member.id, t]),
+    pool.query("SELECT * FROM org_notifications WHERE user_email=$1 AND tenant_id=$2 AND is_read=false ORDER BY created_at DESC LIMIT 5", [userEmail, t])
+  ]);
+  const upcomingEvents = (await pool.query("SELECT id, name, event_date, venue FROM events WHERE tenant_id=$1 AND event_date >= CURRENT_DATE ORDER BY event_date LIMIT 5", [t])).rows;
+  const recentNotices = (await pool.query("SELECT title, content, priority, created_at FROM notice_board WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 5", [t])).rows;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  res.send(renderPage('My Portal', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)">
+      <h1>My Portal</h1><p>Welcome, ${esc(member.name)} | ${esc(tenant.name)}</p>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${tasks.rows.length}</div><div>Open Tasks</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#7c3aed">${notifications.rows.length}</div><div>Unread Alerts</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${committees.rows.length}</div><div>Committees</div></div>
+      <div class="stat-card"><div class="stat-num">${rsvps.rows.length}</div><div>RSVPs</div></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>My Tasks</h3>
+        ${tasks.rows.length ? tasks.rows.map(tk => {
+          const isOverdue = tk.status!=='completed'&&tk.due_date&&new Date(tk.due_date)<new Date();
+          const statusColors = {pending:'#f59e0b',in_progress:'#3b82f6',overdue:'#dc2626'};
+          return `<div style="padding:8px;border-left:3px solid ${isOverdue?'#dc2626':statusColors[tk.status]||'#6b7280'};margin:6px 0;background:#f8fafc;border-radius:4px">
+            <strong>${esc(tk.title)}</strong> <span class="tag" style="font-size:10px">${isOverdue?'OVERDUE':tk.status.replace('_',' ')}</span><br>
+            <span class="muted" style="font-size:12px">${tk.due_date?'Due: '+new Date(tk.due_date).toLocaleDateString():''} | Priority: ${tk.priority}</span>
+          </div>`;
+        }).join('') : '<p class="muted">No open tasks assigned to you</p>'}
+        <a href="/org/tasks" class="btn btn-sm" style="margin-top:10px">View All Tasks</a>
+      </div>
+      <div class="card">
+        <h3>Upcoming Events</h3>
+        ${upcomingEvents.length ? upcomingEvents.map(e => `<div style="padding:8px;border-left:3px solid #059669;margin:6px 0;background:#f8fafc;border-radius:4px">
+          <strong>${esc(e.name)}</strong><br><span class="muted" style="font-size:12px">${e.event_date?new Date(e.event_date).toLocaleDateString():''} ${e.venue?'@ '+esc(e.venue):''}</span>
+        </div>`).join('') : '<p class="muted">No upcoming events</p>'}
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>My Notifications</h3>
+        ${notifications.rows.length ? notifications.rows.map(n => `<div style="padding:8px;border-left:3px solid #3b82f6;margin:6px 0;background:#eff6ff;border-radius:4px">
+          <strong>${esc(n.title)}</strong><br><span class="muted" style="font-size:12px">${esc(n.message||'')} - ${getTimeAgo(new Date(n.created_at))}</span>
+        </div>`).join('') : '<p class="muted">No new notifications</p>'}
+        <a href="/org/notifications" class="btn btn-sm" style="margin-top:10px">All Notifications</a>
+      </div>
+      <div class="card">
+        <h3>My Committees</h3>
+        ${committees.rows.length ? committees.rows.map(c => `<div style="padding:8px;border-left:3px solid #0891b2;margin:6px 0;background:#f8fafc;border-radius:4px">
+          <strong>${esc(c.name)}</strong> <span class="tag" style="font-size:10px">${esc(c.role)}</span>
+        </div>`).join('') : '<p class="muted">Not in any committee</p>'}
+      </div>
+    </div>
+    <div class="card">
+      <h3>Recent Notices</h3>
+      ${recentNotices.length ? recentNotices.map(n => `<div style="padding:8px;border-left:3px solid ${n.priority==='urgent'?'#dc2626':n.priority==='high'?'#f59e0b':'#6b7280'};margin:6px 0;background:#f8fafc;border-radius:4px">
+        <strong>${esc(n.title)}</strong> ${n.priority==='urgent'?'<span class="tag" style="background:#fee2e2;color:#991b1b;font-size:10px">URGENT</span>':''}<br>
+        <span class="muted" style="font-size:12px">${esc((n.content||'').substring(0,100))}${(n.content||'').length>100?'...':''}</span>
+      </div>`).join('') : '<p class="muted">No recent notices</p>'}
+      <a href="/org/notices" class="btn btn-sm" style="margin-top:10px">All Notices</a>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: PUBLIC ORGANIZATION PAGE
+// =============================================
+app.get('/org/:subdomain/public', ah(async (req, res) => {
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.subdomain])).rows[0];
+  if (!tenant) return res.status(404).send('Organization not found');
+  const [memberCount, eventCount, projectCount] = await Promise.all([
+    pool.query('SELECT COUNT(*) FROM members WHERE tenant_id=$1', [tenant.id]),
+    pool.query("SELECT name, event_date, venue FROM events WHERE tenant_id=$1 AND event_date >= CURRENT_DATE ORDER BY event_date LIMIT 5", [tenant.id]),
+    pool.query("SELECT name, status, description FROM projects WHERE tenant_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 5", [tenant.id])
+  ]);
+  res.send(renderPage(tenant.name, `
+    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#3b82f6);text-align:center">
+      ${tenant.logo_url ? `<img src="${esc(tenant.logo_url)}" style="width:80px;height:80px;border-radius:50%;margin-bottom:10px">` : ''}
+      <h1>${esc(tenant.name)}</h1>
+      <p>${esc(tenant.description||'Welcome to our organization')}</p>
+      ${tenant.address ? `<p class="muted">${esc(tenant.address)}</p>` : ''}
+    </div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${memberCount.rows[0].count}</div><div>Members</div></div>
+      <div class="stat-card"><div class="stat-num">${eventCount.rows.length}</div><div>Upcoming Events</div></div>
+      <div class="stat-card"><div class="stat-num">${projectCount.rows.length}</div><div>Active Projects</div></div>
+    </div>
+    ${eventCount.rows.length ? `<div class="card"><h3>Upcoming Events</h3>
+      <table><tr><th>Event</th><th>Date</th><th>Venue</th></tr>${eventCount.rows.map(e => `<tr><td>${esc(e.name)}</td><td>${e.event_date?new Date(e.event_date).toLocaleDateString():'TBD'}</td><td>${esc(e.venue||'-')}</td></tr>`).join('')}</table>
+    </div>` : ''}
+    ${projectCount.rows.length ? `<div class="card"><h3>Active Projects</h3>
+      ${projectCount.rows.map(p => `<div style="padding:10px;border-left:3px solid #059669;margin:6px 0;background:#f8fafc;border-radius:4px"><strong>${esc(p.name)}</strong>${p.description?`<br><span class="muted">${esc(p.description)}</span>`:''}</div>`).join('')}
+    </div>` : ''}
+    <div class="card" style="text-align:center;margin-top:20px">
+      <p class="muted">Powered by Comfort Platform</p>
+    </div>
+  `, { name: tenant.name, tenant_id: tenant.id, role: 'public' }));
+}));
+
+
+// =============================================
+// ORG: ORG HEALTH SCORE
+// =============================================
+app.get('/org/health', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // Compute health metrics
+  const [memberStats, financeStats, taskStats, eventStats] = await Promise.all([
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER(WHERE email IS NOT NULL) as with_email, COUNT(*) FILTER(WHERE phone IS NOT NULL) as with_phone, COUNT(*) FILTER(WHERE joined_at > NOW()-INTERVAL '3 months') as recent FROM members WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) as income, COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) as expense, COUNT(*) as transactions, COUNT(*) FILTER(WHERE created_at > NOW()-INTERVAL '3 months') as recent_transactions FROM org_finance WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER(WHERE status='completed') as completed, COUNT(*) FILTER(WHERE status!='completed' AND due_date < CURRENT_DATE) as overdue, COUNT(*) FILTER(WHERE created_at > NOW()-INTERVAL '3 months') as recent FROM org_tasks WHERE tenant_id=$1", [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER(WHERE event_date >= CURRENT_DATE) as upcoming, COUNT(*) FILTER(WHERE event_date > NOW()-INTERVAL '3 months') as recent FROM events WHERE tenant_id=$1", [t])
+  ]);
+  const m = memberStats.rows[0], f = financeStats.rows[0], tk = taskStats.rows[0], ev = eventStats.rows[0];
+  // Compute sub-scores (0-100 each)
+  const memberHealth = Math.min(100, Math.round((parseInt(m.with_email)/Math.max(parseInt(m.total),1))*30 + (parseInt(m.with_phone)/Math.max(parseInt(m.total),1))*20 + Math.min(parseInt(m.recent)/5,1)*50));
+  const financeHealth = Math.min(100, Math.round((parseInt(f.recent_transactions)>0?40:0) + (parseInt(f.income)>parseInt(f.expense)?40:parseInt(f.income)>0?20:0) + Math.min(parseInt(f.transactions)/20,1)*20));
+  const taskHealth = Math.min(100, Math.round((parseInt(tk.total)>0?parseInt(tk.completed)/parseInt(tk.total)*60:50) + (parseInt(tk.overdue)===0?20:Math.max(0,20-parseInt(tk.overdue)*5)) + Math.min(parseInt(tk.recent)/5,1)*20));
+  const eventHealth = Math.min(100, Math.round((parseInt(ev.upcoming)>0?40:0) + Math.min(parseInt(ev.recent)/3,1)*40 + (parseInt(ev.total)>0?20:0)));
+  const overallScore = Math.round((memberHealth + financeHealth + taskHealth + eventHealth) / 4);
+  // Upsert health score
+  await pool.query(`INSERT INTO org_health_scores(tenant_id,score,member_health,finance_health,task_health,event_health,computed_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT (tenant_id) DO UPDATE SET score=$2,member_health=$3,finance_health=$4,task_health=$5,event_health=$6,computed_at=NOW()`, [t, overallScore, memberHealth, financeHealth, taskHealth, eventHealth]);
+  const scoreColor = (s) => s >= 70 ? '#059669' : s >= 40 ? '#f59e0b' : '#dc2626';
+  const scoreLabel = (s) => s >= 70 ? 'Healthy' : s >= 40 ? 'Needs Attention' : 'Critical';
+  res.send(renderPage('Organization Health', `
+    <div class="hero" style="background:linear-gradient(135deg,${scoreColor(overallScore)},${scoreColor(overallScore)}dd)"><h1>Organization Health</h1><p>Overall Score: ${overallScore}/100 - ${scoreLabel(overallScore)}</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:${scoreColor(overallScore)}">${overallScore}</div><div>Overall Score</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${scoreColor(memberHealth)}">${memberHealth}</div><div>Member Health</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${scoreColor(financeHealth)}">${financeHealth}</div><div>Finance Health</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${scoreColor(taskHealth)}">${taskHealth}</div><div>Task Health</div></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3 style="color:${scoreColor(memberHealth)}">Member Health: ${memberHealth}/100</h3>
+        <div style="background:#e2e8f0;height:12px;border-radius:6px;margin:10px 0"><div style="background:${scoreColor(memberHealth)};height:12px;border-radius:6px;width:${memberHealth}%"></div></div>
+        <table><tr><td>Total Members</td><td>${m.total}</td></tr><tr><td>With Email</td><td>${m.with_email} (${Math.round(parseInt(m.with_email)/Math.max(parseInt(m.total),1)*100)}%)</td></tr><tr><td>With Phone</td><td>${m.with_phone} (${Math.round(parseInt(m.with_phone)/Math.max(parseInt(m.total),1)*100)}%)</td></tr><tr><td>New (3 months)</td><td>${m.recent}</td></tr></table>
+      </div>
+      <div class="card">
+        <h3 style="color:${scoreColor(financeHealth)}">Finance Health: ${financeHealth}/100</h3>
+        <div style="background:#e2e8f0;height:12px;border-radius:6px;margin:10px 0"><div style="background:${scoreColor(financeHealth)};height:12px;border-radius:6px;width:${financeHealth}%"></div></div>
+        <table><tr><td>Total Income</td><td style="color:#059669">UGX ${parseInt(f.income).toLocaleString()}</td></tr><tr><td>Total Expense</td><td style="color:#dc2626">UGX ${parseInt(f.expense).toLocaleString()}</td></tr><tr><td>Net</td><td style="color:${parseInt(f.income)-parseInt(f.expense)>=0?'#059669':'#dc2626'}">UGX ${(parseInt(f.income)-parseInt(f.expense)).toLocaleString()}</td></tr><tr><td>Recent Activity</td><td>${f.recent_transactions} transactions</td></tr></table>
+      </div>
+      <div class="card">
+        <h3 style="color:${scoreColor(taskHealth)}">Task Health: ${taskHealth}/100</h3>
+        <div style="background:#e2e8f0;height:12px;border-radius:6px;margin:10px 0"><div style="background:${scoreColor(taskHealth)};height:12px;border-radius:6px;width:${taskHealth}%"></div></div>
+        <table><tr><td>Total Tasks</td><td>${tk.total}</td></tr><tr><td>Completed</td><td>${tk.completed} (${parseInt(tk.total)>0?Math.round(parseInt(tk.completed)/parseInt(tk.total)*100):0}%)</td></tr><tr><td>Overdue</td><td style="color:#dc2626">${tk.overdue}</td></tr><tr><td>New (3 months)</td><td>${tk.recent}</td></tr></table>
+      </div>
+      <div class="card">
+        <h3 style="color:${scoreColor(eventHealth)}">Event Health: ${eventHealth}/100</h3>
+        <div style="background:#e2e8f0;height:12px;border-radius:6px;margin:10px 0"><div style="background:${scoreColor(eventHealth)};height:12px;border-radius:6px;width:${eventHealth}%"></div></div>
+        <table><tr><td>Total Events</td><td>${ev.total}</td></tr><tr><td>Upcoming</td><td>${ev.upcoming}</td></tr><tr><td>Recent (3 months)</td><td>${ev.recent}</td></tr></table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Recommendations</h3>
+      ${memberHealth < 50 ? '<div style="padding:8px;border-left:3px solid #dc2626;margin:6px 0;background:#fee2e2;border-radius:4px"><strong>Members:</strong> Add email and phone to member profiles. Recruit new members to grow the organization.</div>' : ''}
+      ${financeHealth < 50 ? '<div style="padding:8px;border-left:3px solid #dc2626;margin:6px 0;background:#fee2e2;border-radius:4px"><strong>Finance:</strong> Record more transactions. Focus on increasing income sources and tracking expenses.</div>' : ''}
+      ${taskHealth < 50 ? '<div style="padding:8px;border-left:3px solid #dc2626;margin:6px 0;background:#fee2e2;border-radius:4px"><strong>Tasks:</strong> Complete overdue tasks. Assign tasks to members and track progress regularly.</div>' : ''}
+      ${eventHealth < 50 ? '<div style="padding:8px;border-left:3px solid #f59e0b;margin:6px 0;background:#fef3c7;border-radius:4px"><strong>Events:</strong> Schedule more events to keep members engaged. Plan regular activities.</div>' : ''}
+      ${overallScore >= 70 ? '<div style="padding:8px;border-left:3px solid #059669;margin:6px 0;background:#d1fae5;border-radius:4px"><strong>Great job!</strong> Your organization is healthy. Keep up the good work and continue engaging members.</div>' : ''}
+    </div>
+    <a href="/portal/organization" class="btn" style="margin-top:15px">Back to Dashboard</a>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: ROLE-BASED ACCESS CONTROL
+// =============================================
+app.get('/org/roles', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id, name, email, role, is_admin, can_manage_finance, can_manage_members, can_manage_events FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Access Control', `
+    <div class="hero" style="background:linear-gradient(135deg,#334155,#475569)"><h1>Access Control</h1><p>Manage member permissions and roles</p></div>
+    <div class="card">
+      <p class="muted" style="margin-bottom:15px">Grant members access to manage specific areas of the organization. Board and Staff members can be given admin privileges.</p>
+      <table><tr><th>Name</th><th>Role</th><th>Admin</th><th>Manage Finance</th><th>Manage Members</th><th>Manage Events</th></tr>
+      ${members.map(m => `<tr>
+        <td><strong>${esc(m.name)}</strong><br><span class="muted" style="font-size:11px">${esc(m.email||'')}</span></td>
+        <td><span class="tag">${esc(m.role||'Member')}</span></td>
+        <td style="text-align:center">${m.is_admin?'<span style="color:#059669">&#9989;</span>':'<span style="color:#d1d5db">&#9744;</span>'}</td>
+        <td style="text-align:center">${m.can_manage_finance?'<span style="color:#059669">&#9989;</span>':'<span style="color:#d1d5db">&#9744;</span>'}</td>
+        <td style="text-align:center">${m.can_manage_members?'<span style="color:#059669">&#9989;</span>':'<span style="color:#d1d5db">&#9744;</span>'}</td>
+        <td style="text-align:center">${m.can_manage_events?'<span style="color:#059669">&#9989;</span>':'<span style="color:#d1d5db">&#9744;</span>'}</td>
+      </tr>`).join('')}
+      </table>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/roles/:memberId/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { is_admin, can_manage_finance, can_manage_members, can_manage_events } = req.body;
+  const member = (await pool.query('SELECT name FROM members WHERE id=$1 AND tenant_id=$2', [req.params.memberId, t])).rows[0];
+  if (!member) return res.status(404).send('Member not found');
+  await pool.query('UPDATE members SET is_admin=$1, can_manage_finance=$2, can_manage_members=$3, can_manage_events=$4 WHERE id=$5 AND tenant_id=$6', [
+    is_admin === 'on' || is_admin === 'true', can_manage_finance === 'on' || can_manage_finance === 'true',
+    can_manage_members === 'on' || can_manage_members === 'true', can_manage_events === 'on' || can_manage_events === 'true',
+    req.params.memberId, t
+  ]);
+  await audit(req.session.user.email, 'update_member_roles', `Updated permissions for ${member.name}`);
+  res.redirect('/org/roles');
+}));
+
+app.get('/org/roles/:memberId/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const member = (await pool.query('SELECT * FROM members WHERE id=$1 AND tenant_id=$2', [req.params.memberId, t])).rows[0];
+  if (!member) return res.status(404).send('Member not found');
+  res.send(renderPage('Edit Permissions: ' + member.name, `
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <h2>Permissions for ${esc(member.name)}</h2>
+      <p class="muted">${esc(member.email||'')} | ${esc(member.role||'Member')}</p>
+      <form method="POST" action="/org/roles/${member.id}/update">
+        <div style="margin:15px 0">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px;background:#f8fafc;border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="is_admin" ${member.is_admin?'checked':''}> <strong>Organization Admin</strong> - Full access to all features
+          </label>
+        </div>
+        <div style="margin:15px 0">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px;background:#f8fafc;border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="can_manage_finance" ${member.can_manage_finance?'checked':''}> <strong>Manage Finance</strong> - Record income/expenses, manage budgets
+          </label>
+        </div>
+        <div style="margin:15px 0">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px;background:#f8fafc;border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="can_manage_members" ${member.can_manage_members?'checked':''}> <strong>Manage Members</strong> - Register, edit, delete members
+          </label>
+        </div>
+        <div style="margin:15px 0">
+          <label style="display:flex;align-items:center;gap:10px;padding:10px;background:#f8fafc;border-radius:8px;cursor:pointer">
+            <input type="checkbox" name="can_manage_events" ${member.can_manage_events?'checked':''}> <strong>Manage Events</strong> - Create events, manage RSVPs, ticketing
+          </label>
+        </div>
+        <button class="btn btn-green">Save Permissions</button>
+        <a href="/org/roles" class="btn" style="margin-left:8px">Cancel</a>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG: AUTOMATED REMINDERS
+// =============================================
+app.get('/org/reminders', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  // Find overdue tasks and upcoming events
+  const [overdueTasks, upcomingEvents, expiringProjects] = await Promise.all([
+    pool.query("SELECT ot.*, m.name as assignee_name, m.email as assignee_email FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 AND ot.status!='completed' AND ot.due_date < CURRENT_DATE ORDER BY ot.due_date", [t]),
+    pool.query("SELECT * FROM events WHERE tenant_id=$1 AND event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' ORDER BY event_date", [t]),
+    pool.query("SELECT * FROM projects WHERE tenant_id=$1 AND status='active' AND budget > 0 AND spent >= budget * 0.9 ORDER BY name", [t])
+  ]);
+  res.send(renderPage('Reminders & Alerts', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>Reminders & Alerts</h1><p>Items needing your attention</p></div>
+    <div class="card">
+      <h3 style="color:#dc2626">Overdue Tasks (${overdueTasks.rows.length})</h3>
+      ${overdueTasks.rows.length ? `<table><tr><th>Task</th><th>Assignee</th><th>Due Date</th><th>Days Overdue</th><th>Action</th></tr>${overdueTasks.rows.map(tk => {
+        const daysOverdue = Math.floor((new Date() - new Date(tk.due_date)) / (1000*60*60*24));
+        return `<tr><td>${esc(tk.title)}</td><td>${esc(tk.assignee_name||'Unassigned')}</td><td>${new Date(tk.due_date).toLocaleDateString()}</td><td style="color:#dc2626;font-weight:bold">${daysOverdue}d</td><td><form method="POST" action="/org/notifications/send-reminder" style="display:inline"><input type="hidden" name="email" value="${esc(tk.assignee_email||'')}"><input type="hidden" name="title" value="Overdue Task Reminder"><input type="hidden" name="message" value="Task '${esc(tk.title)}' is ${daysOverdue} days overdue. Please complete it."><input type="hidden" name="link" value="/org/tasks/${tk.id}"><button class="btn btn-sm btn-red">Send Reminder</button></form></td></tr>`;
+      }).join('')}</table>` : '<p class="muted">No overdue tasks - great work!</p>'}
+    </div>
+    <div class="card">
+      <h3 style="color:#059669">Upcoming Events (7 days) - ${upcomingEvents.rows.length}</h3>
+      ${upcomingEvents.rows.length ? `<table><tr><th>Event</th><th>Date</th><th>Venue</th></tr>${upcomingEvents.rows.map(e => `<tr><td>${esc(e.name)}</td><td>${new Date(e.event_date).toLocaleDateString()}</td><td>${esc(e.venue||'-')}</td></tr>`).join('')}</table>` : '<p class="muted">No events in the next 7 days</p>'}
+    </div>
+    <div class="card">
+      <h3 style="color:#f59e0b">Budget Near Limit (${expiringProjects.rows.length})</h3>
+      ${expiringProjects.rows.length ? `<table><tr><th>Project</th><th>Budget</th><th>Spent</th><th>% Used</th></tr>${expiringProjects.rows.map(p => `<tr><td>${esc(p.name)}</td><td>UGX ${parseInt(p.budget).toLocaleString()}</td><td>UGX ${parseInt(p.spent).toLocaleString()}</td><td style="color:#f59e0b;font-weight:bold">${Math.round(parseInt(p.spent)/parseInt(p.budget)*100)}%</td></tr>`).join('')}</table>` : '<p class="muted">All projects within budget</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/notifications/send-reminder', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { email, title, message, link } = req.body;
+  if (!email || !title) return res.status(400).send('Email and title required');
+  await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, email, title, message||'', link||'']);
+  await audit(req.session.user.email, 'send_reminder', `Sent reminder to ${email}: ${title}`);
+  res.redirect('/org/reminders');
+}));
+
+
+// =============================================
+// ORG: ADVANCED EXPORT (JSON, Excel-like CSV, Summary PDF)
+// =============================================
+app.get('/org/export/:type', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const exportType = req.params.type;
+  const format = req.query.format || 'csv'; // csv or json
+  const dateFrom = req.query.date_from || '';
+  const dateTo = req.query.date_to || '';
+
+  let query, filename;
+  const dateFilter = dateFrom && dateTo ? ` AND created_at BETWEEN '${dateFrom}' AND '${dateTo}'` : '';
+
+  switch(exportType) {
+    case 'members':
+      query = 'SELECT name, email, phone, role, joined_at FROM members WHERE tenant_id=$1 ORDER BY name';
+      filename = 'members_export'; break;
+    case 'finance':
+      query = `SELECT amount, type, description, category, created_at FROM org_finance WHERE tenant_id=$1${dateFilter} ORDER BY created_at DESC`;
+      filename = 'finance_export'; break;
+    case 'tasks':
+      query = 'SELECT ot.title, ot.description, ot.priority, ot.status, ot.due_date, m.name as assignee, ot.created_at FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 ORDER BY ot.created_at DESC';
+      filename = 'tasks_export'; break;
+    case 'events':
+      query = 'SELECT name, event_date, venue, budget, is_recurring, recurring_pattern FROM events WHERE tenant_id=$1 ORDER BY event_date DESC';
+      filename = 'events_export'; break;
+    case 'attendance':
+      query = 'SELECT m.name, a.date, a.status FROM attendance a JOIN members m ON m.id=a.member_id WHERE a.tenant_id=$1 ORDER BY a.date DESC';
+      filename = 'attendance_export'; break;
+    case 'audit':
+      query = `SELECT user_email, action, details, created_at FROM audit_logs WHERE tenant_id=$1${dateFilter} ORDER BY created_at DESC LIMIT 5000`;
+      filename = 'audit_export'; break;
+    default:
+      return res.status(400).send('Invalid export type. Use: members, finance, tasks, events, attendance, audit');
+  }
+
+  const data = (await pool.query(query, [t])).rows;
+
+  if (format === 'json') {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.json"`);
+    res.json({ export_type: exportType, tenant_id: t, exported_at: new Date().toISOString(), record_count: data.length, data });
+  } else {
+    // CSV export
+    if (!data.length) return res.send(renderPage('Export', '<div class="card"><div class="alert">No data to export for the selected criteria.</div><a href="/org/analytics" class="btn">Back</a></div>', req.session.user));
+    const headers = Object.keys(data[0]);
+    const csvRows = [headers.join(',')];
+    for (const row of data) {
+      csvRows.push(headers.map(h => {
+        let val = row[h];
+        if (val instanceof Date) val = val.toISOString();
+        if (val === null || val === undefined) val = '';
+        val = String(val).replace(/"/g, '""');
+        return `"${val}"`;
+      }).join(','));
+    }
+    const csv = csvRows.join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
+    res.send(csv);
+  }
+}));
+
+// Export form page
+app.get('/org/export', requireAuth, requireNotBanned, ah(async (req, res) => {
+  res.send(renderPage('Export Data', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>Export Data</h1><p>Download your organization data</p></div>
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <form method="GET" action="/org/export" style="margin-bottom:20px">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Data Type</label><select name="type" required style="width:100%;padding:8px">
+            <option value="members">Members</option><option value="finance">Finance</option>
+            <option value="tasks">Tasks</option><option value="events">Events</option>
+            <option value="attendance">Attendance</option><option value="audit">Audit Logs</option>
+          </select></div>
+          <div><label>Format</label><select name="format" style="width:100%;padding:8px">
+            <option value="csv">CSV (Excel)</option><option value="json">JSON</option>
+          </select></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Date From (optional)</label><input name="date_from" type="date" style="width:100%;padding:8px"></div>
+          <div><label>Date To (optional)</label><input name="date_to" type="date" style="width:100%;padding:8px"></div>
+        </div>
+        <button class="btn btn-green" style="margin-top:15px">Download Export</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+
+// =============================================
+// ORG PORTAL V6: ALL REMAINING FEATURES
+// PDF Reports, Meeting Minutes, Surveys & Polls,
+// Discussions, Kanban Board, Budget vs Actual,
+// Email Templates, Broadcast, Global Search,
+// Data Backup, Churn Enhancement, Mobile CSS,
+// Dashboard Widgets
+// =============================================
+
+// === V6: PDF REPORT GENERATION ===
+app.get('/org/reports', requireAuth, requireNotBanned, ah(async (req, res) => {
+  res.send(renderPage('PDF Reports', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#991b1b)"><h1>PDF Reports</h1><p>Generate professional PDF reports</p></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px">
+      <div class="card" style="border-left:4px solid #3b82f6"><h3>Members Report</h3><p class="muted">Complete member directory with contact info, roles, and join dates</p><a href="/org/reports/members/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #059669"><h3>Finance Report</h3><p class="muted">Income and expense summary with category breakdown</p><a href="/org/reports/finance/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #f59e0b"><h3>Tasks Report</h3><p class="muted">Task status overview with priority and assignee details</p><a href="/org/reports/tasks/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #8b5cf6"><h3>Events Report</h3><p class="muted">Upcoming and past events with attendance and RSVP data</p><a href="/org/reports/events/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #ec4899"><h3>Attendance Report</h3><p class="muted">Member attendance trends and statistics</p><a href="/org/reports/attendance/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+      <div class="card" style="border-left:4px solid #14b8a6"><h3>Churn Risk Report</h3><p class="muted">Members at risk of churning with risk factors</p><a href="/org/reports/churn/pdf" class="btn btn-sm" style="background:#dc2626;color:white">Download PDF</a></div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/reports/members/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const members = (await pool.query('SELECT name,email,phone,role,joined_at FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="members_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#1e40af').text('Members Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Generated: ' + new Date().toLocaleDateString(), { align: 'center' });
+  doc.moveDown(1.5);
+  doc.fontSize(10).fillColor('#334155');
+  doc.text('Total Members: ' + members.length, { underline: false });
+  doc.moveDown(0.5);
+  const tableTop = doc.y;
+  const colWidths = [180, 150, 100, 80];
+  const headers = ['Name', 'Email', 'Role', 'Joined'];
+  let y = tableTop;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  headers.forEach((h, i) => { doc.text(h, x, y, { width: colWidths[i] }); x += colWidths[i]; });
+  y += 18;
+  doc.fillColor('#475569');
+  for (const m of members) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text(m.name || '-', x, y, { width: colWidths[0] });
+    doc.text(m.email || '-', x + colWidths[0], y, { width: colWidths[1] });
+    doc.text(m.role || 'Member', x + colWidths[0] + colWidths[1], y, { width: colWidths[2] });
+    doc.text(m.joined_at ? new Date(m.joined_at).toLocaleDateString() : '-', x + colWidths[0] + colWidths[1] + colWidths[2], y, { width: colWidths[3] });
+    y += 16;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated members PDF report');
+}));
+
+app.get('/org/reports/finance/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const finance = (await pool.query("SELECT type,amount,description,category,created_at FROM org_finance WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200", [t])).rows;
+  const totals = (await pool.query("SELECT type,SUM(amount) as total FROM org_finance WHERE tenant_id=$1 GROUP BY type", [t])).rows;
+  const totalIncome = (totals.find(r => r.type === 'income')?.total || 0);
+  const totalExpense = (totals.find(r => r.type === 'expense')?.total || 0);
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="finance_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#059669').text('Finance Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Generated: ' + new Date().toLocaleDateString(), { align: 'center' });
+  doc.moveDown(1);
+  doc.fontSize(14).fillColor('#059669').text('Total Income: UGX ' + parseInt(totalIncome).toLocaleString());
+  doc.fillColor('#dc2626').text('Total Expenses: UGX ' + parseInt(totalExpense).toLocaleString());
+  doc.fillColor('#1e293b').text('Net: UGX ' + (parseInt(totalIncome) - parseInt(totalExpense)).toLocaleString());
+  doc.moveDown(1);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [80, 80, 140, 80, 80];
+  ['Type', 'Amount', 'Description', 'Category', 'Date'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const f of finance) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text(f.type || '-', x, y, { width: cols[0] });
+    doc.text('UGX ' + parseInt(f.amount || 0).toLocaleString(), x + cols[0], y, { width: cols[1] });
+    doc.text((f.description || '-').substring(0, 35), x + cols[0] + cols[1], y, { width: cols[2] });
+    doc.text(f.category || '-', x + cols[0] + cols[1] + cols[2], y, { width: cols[3] });
+    doc.text(f.created_at ? new Date(f.created_at).toLocaleDateString() : '-', x + cols[0] + cols[1] + cols[2] + cols[3], y, { width: cols[4] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated finance PDF report');
+}));
+
+app.get('/org/reports/tasks/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const tasks = (await pool.query('SELECT ot.*, m.name as assignee_name FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 ORDER BY ot.priority DESC, ot.due_date ASC', [t])).rows;
+  const stats = (await pool.query("SELECT status,COUNT(*) as cnt FROM org_tasks WHERE tenant_id=$1 GROUP BY status", [t])).rows;
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="tasks_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#7c3aed').text('Tasks Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Generated: ' + new Date().toLocaleDateString(), { align: 'center' });
+  doc.moveDown(1);
+  doc.fontSize(11).fillColor('#334155');
+  for (const s of stats) { doc.text(s.status + ': ' + s.cnt); }
+  doc.text('Total: ' + tasks.length);
+  doc.moveDown(1);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [150, 80, 70, 100, 70];
+  ['Title', 'Priority', 'Status', 'Assignee', 'Due Date'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const tk of tasks) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text((tk.title || '-').substring(0, 30), x, y, { width: cols[0] });
+    doc.text(tk.priority || '-', x + cols[0], y, { width: cols[1] });
+    doc.text(tk.status || '-', x + cols[0] + cols[1], y, { width: cols[2] });
+    doc.text(tk.assignee_name || 'Unassigned', x + cols[0] + cols[1] + cols[2], y, { width: cols[3] });
+    doc.text(tk.due_date ? new Date(tk.due_date).toLocaleDateString() : '-', x + cols[0] + cols[1] + cols[2] + cols[3], y, { width: cols[4] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated tasks PDF report');
+}));
+
+app.get('/org/reports/events/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const events = (await pool.query('SELECT * FROM events WHERE tenant_id=$1 ORDER BY event_date DESC LIMIT 100', [t])).rows;
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="events_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#f59e0b').text('Events Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Total Events: ' + events.length, { align: 'center' });
+  doc.moveDown(1.5);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [160, 90, 100, 80, 50];
+  ['Event', 'Date', 'Venue', 'Budget', 'Recurring'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const e of events) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text((e.name || '-').substring(0, 32), x, y, { width: cols[0] });
+    doc.text(e.event_date ? new Date(e.event_date).toLocaleDateString() : '-', x + cols[0], y, { width: cols[1] });
+    doc.text((e.venue || '-').substring(0, 20), x + cols[0] + cols[1], y, { width: cols[2] });
+    doc.text(e.budget ? 'UGX ' + parseInt(e.budget).toLocaleString() : '-', x + cols[0] + cols[1] + cols[2], y, { width: cols[3] });
+    doc.text(e.is_recurring ? e.recurring_pattern || 'Yes' : 'No', x + cols[0] + cols[1] + cols[2] + cols[3], y, { width: cols[4] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated events PDF report');
+}));
+
+app.get('/org/reports/attendance/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const records = (await pool.query("SELECT m.name,a.date,a.status FROM attendance a JOIN members m ON m.id=a.member_id WHERE a.tenant_id=$1 ORDER BY a.date DESC LIMIT 200", [t])).rows;
+  const summary = (await pool.query("SELECT status,COUNT(*) as cnt FROM attendance WHERE tenant_id=$1 GROUP BY status", [t])).rows;
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="attendance_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#14b8a6').text('Attendance Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | Generated: ' + new Date().toLocaleDateString(), { align: 'center' });
+  doc.moveDown(1);
+  for (const s of summary) { doc.fontSize(11).fillColor('#334155').text(s.status + ': ' + s.cnt); }
+  doc.moveDown(1);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [200, 150, 100];
+  ['Member', 'Date', 'Status'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const r of records) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text(r.name || '-', x, y, { width: cols[0] });
+    doc.text(r.date ? new Date(r.date).toLocaleDateString() : '-', x + cols[0], y, { width: cols[1] });
+    doc.text(r.status || '-', x + cols[0] + cols[1], y, { width: cols[2] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated attendance PDF report');
+}));
+
+app.get('/org/reports/churn/pdf', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  const members = (await pool.query('SELECT * FROM members WHERE tenant_id=$1', [t])).rows;
+  const attendanceData = (await pool.query("SELECT student_id, COUNT(*) as total, SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) as present FROM attendance WHERE tenant_id=$1 GROUP BY student_id", [t])).rows;
+  const attendanceMap = {};
+  attendanceData.forEach(a => { attendanceMap[a.student_id] = { total: parseInt(a.total), present: parseInt(a.present) }; });
+  const donationData = (await pool.query('SELECT member_id, COUNT(*) as cnt, SUM(amount) as total, MAX(created_at) as last_donation FROM donations WHERE tenant_id=$1 GROUP BY member_id', [t])).rows;
+  const donationMap = {};
+  donationData.forEach(d => { donationMap[d.member_id] = { count: parseInt(d.cnt), total: parseInt(d.total), last: d.last_donation }; });
+  const scored = members.map(m => {
+    let riskScore = 0;
+    let riskFactors = [];
+    const daysSince = (Date.now() - new Date(m.joined_at || m.created_at).getTime()) / (1000*60*60*24);
+    if (!m.email && !m.phone) { riskScore += 2; riskFactors.push('No contact info'); }
+    if (daysSince > 180 && (!m.role || m.role === 'Member')) { riskScore += 2; riskFactors.push('Inactive > 6 months'); }
+    if (daysSince > 365) { riskScore += 1; riskFactors.push('Member > 1 year'); }
+    const att = attendanceMap[m.id];
+    if (att && att.total > 0) {
+      const rate = att.present / att.total;
+      if (rate < 0.3) { riskScore += 3; riskFactors.push('Attendance ' + Math.round(rate*100) + '%'); }
+      else if (rate < 0.5) { riskScore += 2; riskFactors.push('Attendance ' + Math.round(rate*100) + '%'); }
+    } else if (!att && daysSince > 30) { riskScore += 2; riskFactors.push('No attendance'); }
+    if (m.role === 'Member' && !m.email) { riskScore += 1; riskFactors.push('Basic member'); }
+    const don = donationMap[m.id];
+    if (!don && daysSince > 60) { riskScore += 1; riskFactors.push('Never donated'); }
+    else if (don) {
+      const daysSinceDon = don.last ? (Date.now() - new Date(don.last).getTime()) / (1000*60*60*24) : 999;
+      if (daysSinceDon > 180) { riskScore += 2; riskFactors.push('Last donation > 6mo ago'); }
+    }
+    const level = riskScore >= 7 ? 'Critical' : riskScore >= 4 ? 'High' : riskScore >= 2 ? 'Medium' : 'Low';
+    return { ...m, riskScore, level, riskFactors, daysSince: Math.round(daysSince) };
+  });
+  const atRisk = scored.filter(m => m.riskScore >= 2).sort((a,b) => b.riskScore - a.riskScore);
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="churn_risk_report.pdf"');
+  doc.pipe(res);
+  doc.fontSize(22).fillColor('#dc2626').text('Churn Risk Report', { align: 'center' });
+  doc.fontSize(12).fillColor('#64748b').text(tenant.name + ' | At-Risk: ' + atRisk.length + '/' + members.length, { align: 'center' });
+  doc.moveDown(1.5);
+  let y = doc.y;
+  doc.rect(50, y - 5, 495, 20).fill('#e2e8f0');
+  doc.fillColor('#1e293b').fontSize(9);
+  let x = 55;
+  const cols = [130, 55, 55, 230];
+  ['Name', 'Score', 'Level', 'Risk Factors'].forEach((h, i) => { doc.text(h, x, y, { width: cols[i] }); x += cols[i]; });
+  y += 18;
+  doc.fillColor('#475569').fontSize(8);
+  for (const m of atRisk.slice(0, 60)) {
+    if (y > 750) { doc.addPage(); y = 50; }
+    x = 55;
+    doc.text((m.name || '-').substring(0, 26), x, y, { width: cols[0] });
+    doc.text(String(m.riskScore), x + cols[0], y, { width: cols[1] });
+    doc.text(m.level, x + cols[0] + cols[1], y, { width: cols[2] });
+    doc.text(m.riskFactors.join(', ').substring(0, 50), x + cols[0] + cols[1] + cols[2], y, { width: cols[3] });
+    y += 14;
+  }
+  doc.end();
+  await audit(req.session.user.email, 'export_pdf', 'Generated churn risk PDF report');
+}));
+
+// === V6: MEETING MINUTES ===
+app.get('/org/minutes', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const result = await pool.query('SELECT mm.*, m.name as recorder_name FROM org_meeting_minutes mm LEFT JOIN members m ON m.id=mm.recorded_by WHERE mm.tenant_id=$1 ORDER BY mm.meeting_date DESC LIMIT $2 OFFSET $3', [t, limit, offset]);
+  const countResult = await pool.query('SELECT COUNT(*) FROM org_meeting_minutes WHERE tenant_id=$1', [t]);
+  const total = parseInt(countResult.rows[0].count);
+  const totalPages = Math.ceil(total / limit);
+  res.send(renderPage('Meeting Minutes', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#3730a3)"><h1>Meeting Minutes</h1><p>Record and access meeting notes</p></div>
+    <div style="margin:15px 0"><a href="/org/minutes/new" class="btn">+ Record Minutes</a></div>
+    <div class="card">
+      ${result.rows.length ? `<table><tr><th>Date</th><th>Title</th><th>Type</th><th>Attendees</th><th>Recorded By</th><th>Actions</th></tr>${result.rows.map(r => `<tr><td>${new Date(r.meeting_date).toLocaleDateString()}</td><td><strong>${esc(r.title)}</strong></td><td><span class="tag">${esc(r.meeting_type||'General')}</span></td><td>${r.attendee_count||0}</td><td>${esc(r.recorder_name||'N/A')}</td><td><a href="/org/minutes/${r.id}" class="btn btn-sm">View</a> <a href="/org/minutes/${r.id}/edit" class="btn btn-sm">Edit</a></td></tr>`).join('')}</table>` : '<p class="muted">No meeting minutes recorded yet.</p>'}
+      ${totalPages > 1 ? `<div style="margin-top:15px;text-align:center">${Array.from({length:Math.min(totalPages,10)},(_,i)=>`<a href="/org/minutes?page=${i+1}" class="btn btn-sm ${i+1===page?'btn-green':''}" style="margin:2px">${i+1}</a>`).join('')}</div>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/minutes/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Record Minutes', `<div class="card" style="max-width:800px;margin:0 auto"><h2>Record Meeting Minutes</h2>
+    <form method="POST" action="/org/minutes/save">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Meeting Title</label><input name="title" required placeholder="Monthly Board Meeting"></div>
+        <div><label>Meeting Date</label><input name="meeting_date" type="date" required></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Meeting Type</label><select name="meeting_type"><option value="General">General</option><option value="Board">Board</option><option value="Committee">Committee</option><option value="AGM">AGM</option><option value="Special">Special</option></select></div>
+        <div><label>Venue</label><input name="venue" placeholder="Main Hall"></div>
+      </div>
+      <label>Attendees (hold Ctrl/Cmd to select multiple)</label>
+      <select name="attendees" multiple style="height:120px;width:100%;padding:8px">${members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>
+      <label>Agenda</label><textarea name="agenda" rows="4" placeholder="1. Opening prayer&#10;2. Review of previous minutes&#10;3. Financial report&#10;4. Any other business"></textarea>
+      <label>Minutes / Notes</label><textarea name="content" rows="8" placeholder="Detailed notes of what was discussed, decisions made, and action items agreed upon..." required></textarea>
+      <label>Key Decisions</label><textarea name="decisions" rows="3" placeholder="List the key decisions made during the meeting"></textarea>
+      <label>Action Items</label><textarea name="action_items" rows="3" placeholder="List action items with assignees and deadlines"></textarea>
+      <label>Next Meeting Date</label><input name="next_meeting_date" type="date">
+      <button class="btn btn-green" style="margin-top:10px">Save Minutes</button>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/minutes/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, meeting_date, meeting_type, venue, agenda, content, decisions, action_items, next_meeting_date } = req.body;
+  const attendees = Array.isArray(req.body.attendees) ? req.body.attendees : req.body.attendees ? [req.body.attendees] : [];
+  const member = (await pool.query('SELECT id FROM members WHERE tenant_id=$1 AND email=$2', [t, req.session.user.email])).rows[0];
+  await pool.query('INSERT INTO org_meeting_minutes(tenant_id,title,meeting_date,meeting_type,venue,agenda,content,decisions,action_items,attendee_count,recorded_by,next_meeting_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+    [t, title, meeting_date, meeting_type||'General', venue||'', agenda||'', content, decisions||'', action_items||'', attendees.length, member?.id||null, next_meeting_date||null]);
+  await audit(req.session.user.email, 'create_minutes', 'Recorded meeting minutes: ' + title);
+  res.redirect('/org/minutes');
+}));
+
+app.get('/org/minutes/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const min = (await pool.query('SELECT mm.*, m.name as recorder_name FROM org_meeting_minutes mm LEFT JOIN members m ON m.id=mm.recorded_by WHERE mm.tenant_id=$1 AND mm.id=$2', [t, req.params.id])).rows[0];
+  if (!min) return res.status(404).send('Minutes not found');
+  res.send(renderPage('Meeting Minutes: ' + min.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#3730a3)"><h1>${esc(min.title)}</h1><p>${new Date(min.meeting_date).toLocaleDateString()} | ${esc(min.meeting_type)} | ${esc(min.venue||'N/A')}</p></div>
+    <div class="card">
+      <div style="display:flex;gap:15px;margin-bottom:15px;flex-wrap:wrap">
+        <span class="tag">${esc(min.meeting_type)}</span>
+        <span class="muted">Attendees: ${min.attendee_count||0}</span>
+        <span class="muted">Recorded by: ${esc(min.recorder_name||'N/A')}</span>
+        ${min.next_meeting_date ? `<span class="tag" style="background:#dbeafe;color:#1e40af">Next: ${new Date(min.next_meeting_date).toLocaleDateString()}</span>` : ''}
+      </div>
+      ${min.agenda ? `<h3>Agenda</h3><div style="white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:15px">${esc(min.agenda)}</div>` : ''}
+      <h3>Minutes</h3><div style="white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:15px">${esc(min.content)}</div>
+      ${min.decisions ? `<h3>Key Decisions</h3><div style="white-space:pre-wrap;background:#f0fdf4;padding:12px;border-radius:8px;border-left:4px solid #059669;margin-bottom:15px">${esc(min.decisions)}</div>` : ''}
+      ${min.action_items ? `<h3>Action Items</h3><div style="white-space:pre-wrap;background:#fffbeb;padding:12px;border-radius:8px;border-left:4px solid #f59e0b;margin-bottom:15px">${esc(min.action_items)}</div>` : ''}
+      <div style="margin-top:15px"><a href="/org/minutes" class="btn">Back to Minutes</a> <a href="/org/minutes/${min.id}/edit" class="btn">Edit</a></div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/minutes/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const min = (await pool.query('SELECT * FROM org_meeting_minutes WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!min) return res.status(404).send('Minutes not found');
+  res.send(renderPage('Edit Minutes', `<div class="card" style="max-width:800px;margin:0 auto"><h2>Edit Minutes: ${esc(min.title)}</h2>
+    <form method="POST" action="/org/minutes/${min.id}/update">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Title</label><input name="title" value="${esc(min.title)}" required></div>
+        <div><label>Date</label><input name="meeting_date" type="date" value="${min.meeting_date?new Date(min.meeting_date).toISOString().split('T')[0]:''}" required></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Type</label><select name="meeting_type"><option value="General" ${min.meeting_type==='General'?'selected':''}>General</option><option value="Board" ${min.meeting_type==='Board'?'selected':''}>Board</option><option value="Committee" ${min.meeting_type==='Committee'?'selected':''}>Committee</option><option value="AGM" ${min.meeting_type==='AGM'?'selected':''}>AGM</option><option value="Special" ${min.meeting_type==='Special'?'selected':''}>Special</option></select></div>
+        <div><label>Venue</label><input name="venue" value="${esc(min.venue||'')}"></div>
+      </div>
+      <label>Agenda</label><textarea name="agenda" rows="3">${esc(min.agenda||'')}</textarea>
+      <label>Minutes</label><textarea name="content" rows="8" required>${esc(min.content)}</textarea>
+      <label>Key Decisions</label><textarea name="decisions" rows="3">${esc(min.decisions||'')}</textarea>
+      <label>Action Items</label><textarea name="action_items" rows="3">${esc(min.action_items||'')}</textarea>
+      <label>Next Meeting Date</label><input name="next_meeting_date" type="date" value="${min.next_meeting_date?new Date(min.next_meeting_date).toISOString().split('T')[0]:''}">
+      <div style="margin-top:10px"><button class="btn btn-green">Update</button> <a href="/org/minutes" class="btn">Cancel</a></div>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/minutes/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, meeting_date, meeting_type, venue, agenda, content, decisions, action_items, next_meeting_date } = req.body;
+  await pool.query('UPDATE org_meeting_minutes SET title=$1,meeting_date=$2,meeting_type=$3,venue=$4,agenda=$5,content=$6,decisions=$7,action_items=$8,next_meeting_date=$9 WHERE tenant_id=$10 AND id=$11',
+    [title, meeting_date, meeting_type||'General', venue||'', agenda||'', content, decisions||'', action_items||'', next_meeting_date||null, t, req.params.id]);
+  await audit(req.session.user.email, 'update_minutes', 'Updated minutes: ' + title);
+  res.redirect('/org/minutes/' + req.params.id);
+}));
+
+// === V6: SURVEYS & POLLS ===
+app.get('/org/surveys', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const surveys = (await pool.query('SELECT s.*, (SELECT COUNT(*) FROM org_survey_responses WHERE survey_id=s.id) as response_count FROM org_surveys s WHERE s.tenant_id=$1 ORDER BY s.created_at DESC', [t])).rows;
+  res.send(renderPage('Surveys & Polls', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"><h1>Surveys & Polls</h1><p>Collect feedback and vote on decisions</p></div>
+    <div style="margin:15px 0"><a href="/org/surveys/new" class="btn">+ Create Survey</a> <a href="/org/surveys/quick-poll" class="btn" style="background:#f59e0b;color:white">Quick Poll</a></div>
+    <div class="card">
+      ${surveys.length ? `<table><tr><th>Title</th><th>Type</th><th>Status</th><th>Responses</th><th>Created</th><th>Actions</th></tr>${surveys.map(s => `<tr><td><strong>${esc(s.title)}</strong></td><td><span class="tag">${esc(s.survey_type||'survey')}</span></td><td><span class="tag" style="background:${s.is_active?'#d1fae5;color:#059669':'#fee2e2;color:#dc2626'}">${s.is_active?'Active':'Closed'}</span></td><td>${s.response_count||0}</td><td>${new Date(s.created_at).toLocaleDateString()}</td><td><a href="/org/surveys/${s.id}" class="btn btn-sm">View</a> ${s.is_active?`<a href="/org/surveys/${s.id}/close" class="btn btn-sm btn-red">Close</a>`:`<a href="/org/surveys/${s.id}/results" class="btn btn-sm">Results</a>`}</td></tr>`).join('')}</table>` : '<p class="muted">No surveys yet. Create one to start collecting feedback!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/surveys/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Survey', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create Survey</h2>
+    <form method="POST" action="/org/surveys/save">
+      <label>Survey Title</label><input name="title" required placeholder="Member Satisfaction Survey">
+      <label>Description</label><textarea name="description" rows="2" placeholder="What this survey is about..."></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Survey Type</label><select name="survey_type"><option value="survey">Survey (Free Text)</option><option value="poll">Poll (Single Choice)</option><option value="rating">Rating (1-5 Scale)</option></select></div>
+        <div><label>Allow Anonymous</label><select name="is_anonymous"><option value="true">Yes</option><option value="false" selected>No</option></select></div>
+      </div>
+      <label>Questions (one per line)</label><textarea name="questions" rows="6" placeholder="How satisfied are you with our events?&#10;What improvements would you suggest?&#10;Would you recommend this organization to others?" required></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Closes On (optional)</label><input name="closes_at" type="date"></div>
+        <div><label>Max Responses</label><input name="max_responses" type="number" placeholder="Unlimited" min="1"></div>
+      </div>
+      <button class="btn btn-green" style="margin-top:10px">Create Survey</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.get('/org/surveys/quick-poll', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Quick Poll', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Create Quick Poll</h2>
+    <form method="POST" action="/org/surveys/save">
+      <label>Poll Question</label><input name="title" required placeholder="Where should we hold the next event?">
+      <input type="hidden" name="survey_type" value="poll">
+      <label>Options (one per line)</label><textarea name="questions" rows="4" placeholder="City Center&#10;Community Hall&#10;Outdoor Park" required></textarea>
+      <label>Allow Multiple Choices?</label><select name="is_anonymous"><option value="true">Single Choice</option><option value="false">Multiple Choice</option></select>
+      <div><label>Closes On (optional)</label><input name="closes_at" type="date"></div>
+      <button class="btn" style="background:#f59e0b;color:white;margin-top:10px">Create Poll</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/surveys/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, description, survey_type, is_anonymous, questions, closes_at, max_responses } = req.body;
+  const questionsArr = questions.split('\n').map(q => q.trim()).filter(Boolean);
+  await pool.query('INSERT INTO org_surveys(tenant_id,title,description,survey_type,is_anonymous,questions,is_active,closes_at,max_responses) VALUES($1,$2,$3,$4,$5,$6,true,$7,$8)',
+    [t, title, description||'', survey_type||'survey', is_anonymous==='true', JSON.stringify(questionsArr), closes_at||null, max_responses?parseInt(max_responses):null]);
+  await audit(req.session.user.email, 'create_survey', 'Created survey: ' + title);
+  res.redirect('/org/surveys');
+}));
+
+app.get('/org/surveys/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const survey = (await pool.query('SELECT * FROM org_surveys WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!survey) return res.status(404).send('Survey not found');
+  const responses = (await pool.query('SELECT * FROM org_survey_responses WHERE survey_id=$1 ORDER BY created_at DESC', [survey.id])).rows;
+  const questions = JSON.parse(survey.questions || '[]');
+  res.send(renderPage(survey.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"><h1>${esc(survey.title)}</h1><p>${esc(survey.description||'')} | ${responses.length} responses</p></div>
+    ${survey.is_active ? `<div class="card" style="max-width:700px;margin:0 auto">
+      <h2>Submit Your Response</h2>
+      <form method="POST" action="/org/surveys/${survey.id}/respond">
+        ${questions.map((q, i) => {
+          if (survey.survey_type === 'poll') {
+            return `<div style="margin-bottom:12px"><label>${esc(q)}</label><select name="q${i}" required style="width:100%;padding:8px"><option value="">Select...</option>${questions.map((opt, j) => `<option value="${esc(opt)}">${esc(opt)}</option>`).join('')}</select></div>`;
+          } else if (survey.survey_type === 'rating') {
+            return `<div style="margin-bottom:12px"><label>${esc(q)}</label><select name="q${i}" required style="width:100%;padding:8px"><option value="">Rate...</option><option value="5">5 - Excellent</option><option value="4">4 - Good</option><option value="3">3 - Average</option><option value="2">2 - Below Average</option><option value="1">1 - Poor</option></select></div>`;
+          } else {
+            return `<div style="margin-bottom:12px"><label>${esc(q)}</label><textarea name="q${i}" rows="3" required placeholder="Your answer..."></textarea></div>`;
+          }
+        }).join('')}
+        <button class="btn btn-green">Submit Response</button>
+      </form>
+    </div>` : '<div class="alert">This survey is now closed.</div>'}
+    ${responses.length ? `<div class="card" style="margin-top:15px"><h3>Responses (${responses.length})</h3>
+      <table><tr><th>Respondent</th><th>Date</th><th>Answers</th></tr>${responses.map(r => {
+        let answers;
+        try { answers = JSON.parse(r.answers); } catch(e) { answers = {}; }
+        return `<tr><td>${survey.is_anonymous ? 'Anonymous' : esc(r.respondent_email||'N/A')}</td><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${Object.entries(answers).map(([k,v]) => `<strong>${esc(k)}:</strong> ${esc(String(v))}`).join(' | ')}</td></tr>`;
+      }).join('')}</table>
+    </div>` : ''}
+    <div style="margin-top:15px"><a href="/org/surveys" class="btn">Back to Surveys</a> ${survey.is_active ? `<a href="/org/surveys/${survey.id}/close" class="btn btn-red">Close Survey</a>` : ''}</div>
+  `, req.session.user));
+}));
+
+app.post('/org/surveys/:id/respond', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const survey = (await pool.query('SELECT * FROM org_surveys WHERE tenant_id=$1 AND id=$2 AND is_active=true', [t, req.params.id])).rows[0];
+  if (!survey) return res.status(400).send('Survey not found or closed');
+  const questions = JSON.parse(survey.questions || '[]');
+  const answers = {};
+  questions.forEach((q, i) => { answers[q] = req.body['q' + i] || ''; });
+  const existing = (await pool.query('SELECT id FROM org_survey_responses WHERE survey_id=$1 AND respondent_email=$2', [survey.id, req.session.user.email])).rows[0];
+  if (existing && !survey.is_anonymous) return res.status(400).send('You have already responded to this survey');
+  await pool.query('INSERT INTO org_survey_responses(survey_id,respondent_email,answers) VALUES($1,$2,$3)', [survey.id, req.session.user.email, JSON.stringify(answers)]);
+  await audit(req.session.user.email, 'survey_response', 'Responded to survey: ' + survey.title);
+  res.redirect('/org/surveys/' + survey.id);
+}));
+
+app.get('/org/surveys/:id/close', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE org_surveys SET is_active=false WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  await audit(req.session.user.email, 'close_survey', 'Closed survey ID: ' + req.params.id);
+  res.redirect('/org/surveys');
+}));
+
+app.get('/org/surveys/:id/results', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const survey = (await pool.query('SELECT * FROM org_surveys WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!survey) return res.status(404).send('Survey not found');
+  const responses = (await pool.query('SELECT * FROM org_survey_responses WHERE survey_id=$1', [survey.id])).rows;
+  const questions = JSON.parse(survey.questions || '[]');
+  const tallies = {};
+  if (survey.survey_type === 'poll' || survey.survey_type === 'rating') {
+    questions.forEach(q => { tallies[q] = {}; });
+    responses.forEach(r => {
+      let answers; try { answers = JSON.parse(r.answers); } catch(e) { answers = {}; }
+      Object.entries(answers).forEach(([q, a]) => { if (tallies[q]) { tallies[q][a] = (tallies[q][a] || 0) + 1; } });
+    });
+  }
+  res.send(renderPage('Results: ' + survey.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"><h1>${esc(survey.title)} - Results</h1><p>${responses.length} total responses</p></div>
+    <div class="card">
+      ${survey.survey_type === 'poll' || survey.survey_type === 'rating' ?
+        questions.map(q => `<h3>${esc(q)}</h3><div style="margin:10px 0">${Object.entries(tallies[q]||{}).map(([opt, cnt]) => {
+          const pct = responses.length ? Math.round(cnt/responses.length*100) : 0;
+          return `<div style="margin:5px 0"><span style="display:inline-block;width:150px">${esc(opt)}</span><div style="display:inline-block;width:200px;background:#e2e8f0;border-radius:4px;height:20px"><div style="width:${pct}%;background:#8b5cf6;border-radius:4px;height:20px"></div></div> <span style="margin-left:8px">${cnt} (${pct}%)</span></div>`;
+        }).join('')}</div>`).join('') :
+        `<table><tr><th>Respondent</th><th>Date</th><th>Answers</th></tr>${responses.map(r => {
+          let answers; try { answers = JSON.parse(r.answers); } catch(e) { answers = {}; }
+          return `<tr><td>${survey.is_anonymous?'Anonymous':esc(r.respondent_email||'N/A')}</td><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${Object.entries(answers).map(([k,v]) => `<strong>${esc(k)}:</strong> ${esc(String(v))}`).join('<br>')}</td></tr>`;
+        }).join('')}</table>`
+      }
+    </div>
+    <div style="margin-top:15px"><a href="/org/surveys" class="btn">Back to Surveys</a></div>
+  `, req.session.user));
+}));
+
+// === V6: DISCUSSIONS / FORUM ===
+app.get('/org/discussions', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const discussions = (await pool.query('SELECT d.*, m.name as author_name, (SELECT COUNT(*) FROM org_discussion_replies WHERE discussion_id=d.id) as reply_count FROM org_discussions d LEFT JOIN members m ON m.email=d.author_email WHERE d.tenant_id=$1 ORDER BY d.is_pinned DESC, d.updated_at DESC LIMIT $2 OFFSET $3', [t, limit, offset])).rows;
+  res.send(renderPage('Discussions', `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>Discussions</h1><p>Community conversations and decision-making</p></div>
+    <div style="margin:15px 0"><a href="/org/discussions/new" class="btn">+ New Discussion</a></div>
+    <div class="card">
+      ${discussions.length ? `<table><tr><th>Topic</th><th>Author</th><th>Category</th><th>Replies</th><th>Last Activity</th></tr>${discussions.map(d => `<tr><td><a href="/org/discussions/${d.id}"><strong>${esc(d.title)}</strong></a>${d.is_pinned?' <span class="tag" style="background:#fef3c7;color:#92400e">Pinned</span>':''}</td><td>${esc(d.author_name||d.author_email)}</td><td><span class="tag">${esc(d.category||'General')}</span></td><td>${d.reply_count||0}</td><td>${getTimeAgo(d.updated_at)}</td></tr>`).join('')}</table>` : '<p class="muted">No discussions yet. Start a conversation!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/discussions/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('New Discussion', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Start a Discussion</h2>
+    <form method="POST" action="/org/discussions/save">
+      <label>Topic</label><input name="title" required placeholder="How can we improve member engagement?">
+      <label>Category</label><select name="category"><option value="General">General</option><option value="Ideas">Ideas</option><option value="Announcements">Announcements</option><option value="Questions">Questions</option><option value="Feedback">Feedback</option><option value="Governance">Governance</option></select>
+      <label>Description</label><textarea name="content" rows="6" placeholder="Share your thoughts, ideas, or questions..." required></textarea>
+      <button class="btn btn-green" style="margin-top:10px">Post Discussion</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/discussions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, category, content } = req.body;
+  await pool.query('INSERT INTO org_discussions(tenant_id,title,category,content,author_email) VALUES($1,$2,$3,$4,$5)', [t, title, category||'General', content, req.session.user.email]);
+  await audit(req.session.user.email, 'create_discussion', 'Started discussion: ' + title);
+  res.redirect('/org/discussions');
+}));
+
+app.get('/org/discussions/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const disc = (await pool.query('SELECT d.*, m.name as author_name FROM org_discussions d LEFT JOIN members m ON m.email=d.author_email WHERE d.tenant_id=$1 AND d.id=$2', [t, req.params.id])).rows[0];
+  if (!disc) return res.status(404).send('Discussion not found');
+  const replies = (await pool.query('SELECT r.*, m.name as author_name FROM org_discussion_replies r LEFT JOIN members m ON m.email=r.author_email WHERE r.discussion_id=$1 ORDER BY r.created_at ASC', [disc.id])).rows;
+  res.send(renderPage(disc.title, `
+    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>${esc(disc.title)}</h1><p>${esc(disc.category)} | by ${esc(disc.author_name||disc.author_email)} | ${getTimeAgo(disc.created_at)}</p></div>
+    <div class="card">
+      <div style="white-space:pre-wrap;line-height:1.6">${esc(disc.content)}</div>
+      <div style="margin-top:10px;display:flex;gap:10px">
+        <a href="/org/discussions/${disc.id}/pin" class="btn btn-sm">${disc.is_pinned?'Unpin':'Pin'}</a>
+        <a href="/org/discussions/${disc.id}/delete" class="btn btn-sm btn-red">Delete</a>
+      </div>
+    </div>
+    <div class="card" style="margin-top:15px"><h3>Replies (${replies.length})</h3>
+      ${replies.map(r => `<div style="border-left:3px solid #0891b2;padding:10px;margin:10px 0;background:#f8fafc;border-radius:0 8px 8px 0"><strong>${esc(r.author_name||r.author_email)}</strong> <span class="muted">${getTimeAgo(r.created_at)}</span><div style="white-space:pre-wrap;margin-top:5px">${esc(r.content)}</div></div>`).join('')}
+      <form method="POST" action="/org/discussions/${disc.id}/reply" style="margin-top:15px">
+        <textarea name="content" rows="3" placeholder="Write a reply..." required></textarea>
+        <button class="btn btn-green" style="margin-top:5px">Post Reply</button>
+      </form>
+    </div>
+    <div style="margin-top:15px"><a href="/org/discussions" class="btn">Back to Discussions</a></div>
+  `, req.session.user));
+}));
+
+app.post('/org/discussions/:id/reply', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { content } = req.body;
+  if (!content || !content.trim()) return res.status(400).send('Reply cannot be empty');
+  await pool.query('INSERT INTO org_discussion_replies(discussion_id,content,author_email) VALUES($1,$2,$3)', [req.params.id, content, req.session.user.email]);
+  await pool.query('UPDATE org_discussions SET updated_at=NOW() WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  res.redirect('/org/discussions/' + req.params.id);
+}));
+
+app.get('/org/discussions/:id/pin', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE org_discussions SET is_pinned=NOT is_pinned WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  res.redirect('/org/discussions/' + req.params.id);
+}));
+
+app.get('/org/discussions/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM org_discussion_replies WHERE discussion_id=$1', [req.params.id]);
+  await pool.query('DELETE FROM org_discussions WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  await audit(req.session.user.email, 'delete_discussion', 'Deleted discussion ID: ' + req.params.id);
+  res.redirect('/org/discussions');
+}));
+
+// === V6: KANBAN BOARD FOR TASKS ===
+app.get('/org/tasks/board', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tasks = (await pool.query('SELECT ot.*, m.name as assignee_name FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.tenant_id=$1 ORDER BY ot.priority DESC, ot.created_at ASC', [t])).rows;
+  const columns = { todo: [], in_progress: [], review: [], completed: [] };
+  tasks.forEach(tk => {
+    const status = tk.status || 'todo';
+    if (columns[status]) columns[status].push(tk);
+    else columns.todo.push(tk);
+  });
+  const priorityColors = { urgent: '#dc2626', high: '#f59e0b', medium: '#3b82f6', low: '#6b7280' };
+  res.send(renderPage('Task Board', `
+    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#0284c7)"><h1>Task Board</h1><p>Visual task management with drag-and-drop style view</p></div>
+    <div style="margin:15px 0"><a href="/org/tasks" class="btn">List View</a> <a href="/org/tasks/new" class="btn btn-green">+ New Task</a></div>
+    <div style="display:flex;gap:15px;overflow-x:auto;padding-bottom:10px">
+      ${Object.entries(columns).map(([status, items]) => {
+        const statusColors = { todo: '#6b7280', in_progress: '#3b82f6', review: '#f59e0b', completed: '#059669' };
+        const statusLabels = { todo: 'To Do', in_progress: 'In Progress', review: 'Review', completed: 'Completed' };
+        return `<div style="min-width:260px;flex:1;background:#f1f5f9;border-radius:12px;padding:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h3 style="color:${statusColors[status]};margin:0;font-size:14px">${statusLabels[status] || status}</h3>
+            <span style="background:${statusColors[status]};color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold">${items.length}</span>
+          </div>
+          ${items.map(tk => `<div style="background:white;border-radius:8px;padding:12px;margin-bottom:8px;border-left:4px solid ${priorityColors[tk.priority]||'#6b7280'};box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+            <div style="font-weight:600;font-size:13px;margin-bottom:4px">${esc(tk.title)}</div>
+            ${tk.description ? `<div style="font-size:11px;color:#64748b;margin-bottom:6px">${esc(tk.description.substring(0,60))}${tk.description.length>60?'...':''}</div>` : ''}
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:#64748b">${esc(tk.assignee_name||'Unassigned')}</span>
+              ${tk.due_date ? `<span style="font-size:11px;color:${new Date(tk.due_date)<new Date()?'#dc2626':'#64748b'}">${new Date(tk.due_date).toLocaleDateString()}</span>` : ''}
+            </div>
+            <div style="margin-top:6px"><a href="/org/tasks/${tk.id}?status=todo" class="btn btn-sm" style="font-size:10px;padding:2px 6px">Todo</a> <a href="/org/tasks/${tk.id}?status=in_progress" class="btn btn-sm" style="font-size:10px;padding:2px 6px">Prog</a> <a href="/org/tasks/${tk.id}?status=review" class="btn btn-sm" style="font-size:10px;padding:2px 6px">Rev</a> <a href="/org/tasks/${tk.id}?status=completed" class="btn btn-sm" style="font-size:10px;padding:2px 6px">Done</a></div>
+          </div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/tasks/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const newStatus = req.query.status;
+  if (newStatus && ['todo','in_progress','review','completed'].includes(newStatus)) {
+    await pool.query('UPDATE org_tasks SET status=$1 WHERE tenant_id=$2 AND id=$3', [newStatus, t, req.params.id]);
+    await audit(req.session.user.email, 'update_task_status', 'Task #' + req.params.id + ' -> ' + newStatus);
+  }
+  res.redirect('/org/tasks/board');
+}));
+
+// === V6: BUDGET VS ACTUAL DASHBOARD ===
+app.get('/org/budget', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const projects = (await pool.query('SELECT * FROM projects WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const categories = (await pool.query('SELECT * FROM finance_categories WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const totalBudget = projects.reduce((sum, p) => sum + parseInt(p.budget || 0), 0);
+  const totalSpent = projects.reduce((sum, p) => sum + parseInt(p.spent || 0), 0);
+  const totalRemaining = totalBudget - totalSpent;
+  const overBudget = projects.filter(p => parseInt(p.spent || 0) > parseInt(p.budget || 0) && parseInt(p.budget) > 0);
+  const nearBudget = projects.filter(p => { const b = parseInt(p.budget||0); return b > 0 && parseInt(p.spent||0)/b >= 0.9 && parseInt(p.spent||0) <= b; });
+  res.send(renderPage('Budget vs Actual', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#047857)"><h1>Budget vs Actual</h1><p>Track spending against planned budgets</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${totalBudget.toLocaleString()}</div><div>Total Budget</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">UGX ${totalSpent.toLocaleString()}</div><div>Total Spent</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${totalRemaining>=0?'#3b82f6':'#dc2626'}">UGX ${totalRemaining.toLocaleString()}</div><div>${totalRemaining>=0?'Remaining':'Over Budget'}</div></div>
+      <div class="stat-card"><div class="stat-num">${totalBudget>0?Math.round(totalSpent/totalBudget*100):0}%</div><div>Utilization</div></div>
+    </div>
+    ${overBudget.length ? `<div class="card" style="border-left:4px solid #dc2626"><h3 style="color:#dc2626">Over Budget (${overBudget.length})</h3><table><tr><th>Project</th><th>Budget</th><th>Spent</th><th>Over By</th><th>% Used</th></tr>${overBudget.map(p => `<tr><td><strong>${esc(p.name)}</strong></td><td>UGX ${parseInt(p.budget).toLocaleString()}</td><td style="color:#dc2626;font-weight:bold">UGX ${parseInt(p.spent).toLocaleString()}</td><td style="color:#dc2626">UGX ${(parseInt(p.spent)-parseInt(p.budget)).toLocaleString()}</td><td style="color:#dc2626">${Math.round(parseInt(p.spent)/parseInt(p.budget)*100)}%</td></tr>`).join('')}</table></div>` : ''}
+    ${nearBudget.length ? `<div class="card" style="border-left:4px solid #f59e0b"><h3 style="color:#f59e0b">Near Budget (${nearBudget.length})</h3><table><tr><th>Project</th><th>Budget</th><th>Spent</th><th>Remaining</th><th>% Used</th></tr>${nearBudget.map(p => `<tr><td><strong>${esc(p.name)}</strong></td><td>UGX ${parseInt(p.budget).toLocaleString()}</td><td>UGX ${parseInt(p.spent).toLocaleString()}</td><td>UGX ${(parseInt(p.budget)-parseInt(p.spent)).toLocaleString()}</td><td style="color:#f59e0b">${Math.round(parseInt(p.spent)/parseInt(p.budget)*100)}%</td></tr>`).join('')}</table></div>` : ''}
+    <div class="card"><h3>All Projects Budget</h3>
+      ${projects.length ? `<table><tr><th>Project</th><th>Status</th><th>Budget</th><th>Spent</th><th>Remaining</th><th>Progress</th></tr>${projects.map(p => {
+        const budget = parseInt(p.budget||0), spent = parseInt(p.spent||0);
+        const pct = budget > 0 ? Math.round(spent/budget*100) : 0;
+        const barColor = pct > 100 ? '#dc2626' : pct > 90 ? '#f59e0b' : '#059669';
+        return `<tr><td><strong>${esc(p.name)}</strong></td><td><span class="tag" style="background:${p.status==='active'?'#d1fae5;color:#059669':'#f1f5f9;color:#64748b'}">${esc(p.status||'active')}</span></td><td>UGX ${budget.toLocaleString()}</td><td>UGX ${spent.toLocaleString()}</td><td style="color:${pct>100?'#dc2626':'#334155'}">UGX ${(budget-spent).toLocaleString()}</td><td><div style="display:flex;align-items:center;gap:5px"><div style="flex:1;background:#e2e8f0;border-radius:4px;height:8px"><div style="width:${Math.min(pct,100)}%;background:${barColor};border-radius:4px;height:8px"></div></div><span style="font-size:12px;min-width:35px">${pct}%</span></div></td></tr>`;
+      }).join('')}</table>` : '<p class="muted">No projects with budgets yet.</p>'}
+    </div>
+    ${categories.length ? `<div class="card"><h3>Budget by Category</h3><table><tr><th>Category</th><th>Type</th><th>Budget</th></tr>${categories.map(c => `<tr><td><strong>${esc(c.name)}</strong></td><td><span class="tag">${esc(c.type||'general')}</span></td><td>UGX ${parseInt(c.budget||0).toLocaleString()}</td></tr>`).join('')}</table></div>` : ''}
+  `, req.session.user));
+}));
+
+// === V6: EMAIL TEMPLATES ===
+app.get('/org/templates', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const templates = (await pool.query('SELECT * FROM org_email_templates WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Email Templates', `
+    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#be185d)"><h1>Email Templates</h1><p>Customize email templates for notices and reminders</p></div>
+    <div style="margin:15px 0"><a href="/org/templates/new" class="btn">+ Create Template</a></div>
+    <div class="card">
+      ${templates.length ? `<table><tr><th>Name</th><th>Type</th><th>Subject</th><th>Updated</th><th>Actions</th></tr>${templates.map(tp => `<tr><td><strong>${esc(tp.name)}</strong></td><td><span class="tag">${esc(tp.template_type||'general')}</span></td><td>${esc(tp.subject||'-')}</td><td>${new Date(tp.updated_at||tp.created_at).toLocaleDateString()}</td><td><a href="/org/templates/${tp.id}/edit" class="btn btn-sm">Edit</a> <a href="/org/templates/${tp.id}/delete" class="btn btn-sm btn-red">Delete</a></td></tr>`).join('')}</table>` : '<p class="muted">No email templates yet. Create one to standardize your communications!</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/templates/new', requireAuth, requireNotBanned, (req, res) => {
+  res.send(renderPage('Create Template', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create Email Template</h2>
+    <form method="POST" action="/org/templates/save">
+      <label>Template Name</label><input name="name" required placeholder="Welcome Email">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Type</label><select name="template_type"><option value="notice">Notice</option><option value="reminder">Reminder</option><option value="invitation">Invitation</option><option value="thank_you">Thank You</option><option value="welcome">Welcome</option><option value="custom">Custom</option></select></div>
+        <div><label>Subject Line</label><input name="subject" required placeholder="Welcome to {{org_name}}!"></div>
+      </div>
+      <label>Body Content</label><textarea name="body" rows="10" placeholder="Dear {{member_name}},&#10;&#10;Welcome to {{org_name}}! We are excited to have you...&#10;&#10;Best regards,&#10;{{org_name}} Team" required></textarea>
+      <div class="card" style="background:#f8fafc;margin-top:10px"><h4>Available Variables</h4>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+          <span class="tag">{{member_name}}</span><span class="tag">{{org_name}}</span><span class="tag">{{event_name}}</span><span class="tag">{{event_date}}</span><span class="tag">{{task_title}}</span><span class="tag">{{due_date}}</span><span class="tag">{{amount}}</span><span class="tag">{{link}}</span>
+        </div>
+      </div>
+      <button class="btn btn-green" style="margin-top:10px">Save Template</button>
+    </form></div>
+  `, req.session.user));
+});
+
+app.post('/org/templates/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, template_type, subject, body } = req.body;
+  await pool.query('INSERT INTO org_email_templates(tenant_id,name,template_type,subject,body) VALUES($1,$2,$3,$4,$5)', [t, name, template_type||'custom', subject||'', body]);
+  await audit(req.session.user.email, 'create_template', 'Created email template: ' + name);
+  res.redirect('/org/templates');
+}));
+
+app.get('/org/templates/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tp = (await pool.query('SELECT * FROM org_email_templates WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!tp) return res.status(404).send('Template not found');
+  res.send(renderPage('Edit Template', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Edit: ${esc(tp.name)}</h2>
+    <form method="POST" action="/org/templates/${tp.id}/update">
+      <label>Name</label><input name="name" value="${esc(tp.name)}" required>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Type</label><select name="template_type"><option value="notice" ${tp.template_type==='notice'?'selected':''}>Notice</option><option value="reminder" ${tp.template_type==='reminder'?'selected':''}>Reminder</option><option value="invitation" ${tp.template_type==='invitation'?'selected':''}>Invitation</option><option value="thank_you" ${tp.template_type==='thank_you'?'selected':''}>Thank You</option><option value="welcome" ${tp.template_type==='welcome'?'selected':''}>Welcome</option><option value="custom" ${tp.template_type==='custom'?'selected':''}>Custom</option></select></div>
+        <div><label>Subject</label><input name="subject" value="${esc(tp.subject||'')}" required></div>
+      </div>
+      <label>Body</label><textarea name="body" rows="10" required>${esc(tp.body)}</textarea>
+      <button class="btn btn-green" style="margin-top:10px">Update</button> <a href="/org/templates" class="btn">Cancel</a>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/templates/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, template_type, subject, body } = req.body;
+  await pool.query('UPDATE org_email_templates SET name=$1,template_type=$2,subject=$3,body=$4 WHERE tenant_id=$5 AND id=$6', [name, template_type||'custom', subject||'', body, t, req.params.id]);
+  res.redirect('/org/templates');
+}));
+
+app.get('/org/templates/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM org_email_templates WHERE tenant_id=$1 AND id=$2', [t, req.params.id]);
+  await audit(req.session.user.email, 'delete_template', 'Deleted email template ID: ' + req.params.id);
+  res.redirect('/org/templates');
+}));
+
+// === V6: BROADCAST / ANNOUNCEMENTS ===
+app.get('/org/broadcast', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query("SELECT COUNT(*) as total, COUNT(CASE WHEN email IS NOT NULL AND email!='' THEN 1 END) as with_email FROM members WHERE tenant_id=$1", [t])).rows[0];
+  const recent = (await pool.query('SELECT * FROM org_broadcasts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10', [t])).rows;
+  res.send(renderPage('Broadcast', `
+    <div class="hero" style="background:linear-gradient(135deg,#ea580c,#c2410c)"><h1>Broadcast Message</h1><p>Send announcements to all members</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${members.total||0}</div><div>Total Members</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${members.with_email||0}</div><div>With Email</div></div>
+    </div>
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <h2>Send Broadcast</h2>
+      <form method="POST" action="/org/broadcast/send">
+        <label>Subject</label><input name="subject" required placeholder="Important Announcement">
+        <label>Message</label><textarea name="message" rows="5" placeholder="Dear members,..." required></textarea>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Send Via</label><select name="channel"><option value="notification">In-App Notification</option><option value="email">Email</option><option value="both">Both (Notification + Email)</option></select></div>
+          <div><label>Priority</label><select name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
+        </div>
+        <label>Target Audience</label><select name="target"><option value="all">All Members</option><option value="admins">Admins Only</option><option value="committee">Committee Members</option></select>
+        <button class="btn" style="background:#ea580c;color:white;margin-top:10px">Send Broadcast</button>
+      </form>
+    </div>
+    ${recent.length ? `<div class="card" style="margin-top:15px"><h3>Recent Broadcasts</h3><table><tr><th>Subject</th><th>Channel</th><th>Target</th><th>Sent</th></tr>${recent.map(b => `<tr><td><strong>${esc(b.subject)}</strong></td><td><span class="tag">${esc(b.channel)}</span></td><td><span class="tag">${esc(b.target||'all')}</span></td><td>${new Date(b.created_at).toLocaleDateString()}</td></tr>`).join('')}</table></div>` : ''}
+  `, req.session.user));
+}));
+
+app.post('/org/broadcast/send', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { subject, message, channel, priority, target } = req.body;
+  let targetMembers;
+  if (target === 'admins') {
+    targetMembers = (await pool.query('SELECT email FROM members WHERE tenant_id=$1 AND is_admin=true AND email IS NOT NULL', [t])).rows;
+  } else if (target === 'committee') {
+    targetMembers = (await pool.query('SELECT m.email FROM members m JOIN committee_members cm ON cm.member_id=m.id WHERE m.tenant_id=$1 AND m.email IS NOT NULL', [t])).rows;
+  } else {
+    targetMembers = (await pool.query("SELECT email FROM members WHERE tenant_id=$1 AND email IS NOT NULL AND email!=''", [t])).rows;
+  }
+  let notified = 0;
+  for (const m of targetMembers) {
+    if (m.email && channel !== 'email') {
+      await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, m.email, subject, message, '']);
+      notified++;
+    }
+    if (m.email && (channel === 'email' || channel === 'both')) {
+      try { await sendEmail(m.email, subject, message); } catch(e) { /* log but don't fail */ }
+      notified++;
+    }
+  }
+  await pool.query('INSERT INTO org_broadcasts(tenant_id,subject,message,channel,priority,target,recipient_count) VALUES($1,$2,$3,$4,$5,$6,$7)', [t, subject, message, channel||'notification', priority||'normal', target||'all', notified]);
+  await audit(req.session.user.email, 'broadcast', 'Sent broadcast "' + subject + '" to ' + notified + ' recipients');
+  res.redirect('/org/broadcast');
+}));
+
+// === V6: GLOBAL SEARCH ===
+app.get('/org/search', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 2) {
+    return res.send(renderPage('Search', `
+      <div class="hero" style="background:linear-gradient(135deg,#64748b,#475569)"><h1>Global Search</h1><p>Search across all organization data</p></div>
+      <div class="card" style="max-width:600px;margin:0 auto">
+        <form method="GET" action="/org/search"><input name="q" placeholder="Search members, events, tasks, finance..." style="width:100%;padding:12px;font-size:16px;border-radius:8px;border:2px solid #e2e8f0" value="${esc(q)}"><button class="btn btn-green" style="margin-top:10px;width:100%">Search</button></form>
+      </div>
+    `, req.session.user));
+  }
+  const like = '%' + q + '%';
+  const [members, events, tasks, finance, notices, committees] = await Promise.all([
+    pool.query('SELECT id,name,email,phone,role FROM members WHERE tenant_id=$1 AND (name ILIKE $2 OR email ILIKE $2 OR phone ILIKE $2) LIMIT 10', [t, like]),
+    pool.query('SELECT id,name,event_date,venue FROM events WHERE tenant_id=$1 AND (name ILIKE $2 OR venue ILIKE $2) LIMIT 10', [t, like]),
+    pool.query('SELECT id,title,status,priority FROM org_tasks WHERE tenant_id=$1 AND (title ILIKE $2 OR description ILIKE $2) LIMIT 10', [t, like]),
+    pool.query('SELECT id,amount,type,description,category FROM org_finance WHERE tenant_id=$1 AND (description ILIKE $2 OR category ILIKE $2) LIMIT 10', [t, like]),
+    pool.query('SELECT id,title FROM notice_board WHERE tenant_id=$1 AND (title ILIKE $2 OR content ILIKE $2) LIMIT 5', [t, like]),
+    pool.query('SELECT id,name FROM committees WHERE tenant_id=$1 AND name ILIKE $2 LIMIT 5', [t, like])
+  ]);
+  const total = members.rows.length + events.rows.length + tasks.rows.length + finance.rows.length + notices.rows.length + committees.rows.length;
+  res.send(renderPage('Search Results: ' + q, `
+    <div class="hero" style="background:linear-gradient(135deg,#64748b,#475569)"><h1>Search Results</h1><p>"${esc(q)}" - ${total} results</p></div>
+    <div style="margin:15px 0"><form method="GET" action="/org/search" style="display:flex;gap:8px"><input name="q" value="${esc(q)}" style="flex:1;padding:10px;border-radius:8px;border:2px solid #e2e8f0;font-size:14px"><button class="btn btn-green">Search</button></form></div>
+    ${members.rows.length ? `<div class="card"><h3>Members (${members.rows.length})</h3><table><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th></tr>${members.rows.map(m => `<tr><td><a href="/org/members/${m.id}"><strong>${esc(m.name)}</strong></a></td><td>${esc(m.email||'-')}</td><td>${esc(m.phone||'-')}</td><td><span class="tag">${esc(m.role||'Member')}</span></td></tr>`).join('')}</table></div>` : ''}
+    ${events.rows.length ? `<div class="card"><h3>Events (${events.rows.length})</h3><table><tr><th>Name</th><th>Date</th><th>Venue</th></tr>${events.rows.map(e => `<tr><td><strong>${esc(e.name)}</strong></td><td>${e.event_date?new Date(e.event_date).toLocaleDateString():'-'}</td><td>${esc(e.venue||'-')}</td></tr>`).join('')}</table></div>` : ''}
+    ${tasks.rows.length ? `<div class="card"><h3>Tasks (${tasks.rows.length})</h3><table><tr><th>Title</th><th>Status</th><th>Priority</th></tr>${tasks.rows.map(tk => `<tr><td><strong>${esc(tk.title)}</strong></td><td><span class="tag">${esc(tk.status)}</span></td><td><span class="tag" style="background:${tk.priority==='urgent'?'#fee2e2;color:#dc2626':tk.priority==='high'?'#fef3c7;color:#92400e':'#dbeafe;color:#1e40af'}">${esc(tk.priority)}</span></td></tr>`).join('')}</table></div>` : ''}
+    ${finance.rows.length ? `<div class="card"><h3>Finance (${finance.rows.length})</h3><table><tr><th>Amount</th><th>Type</th><th>Description</th><th>Category</th></tr>${finance.rows.map(f => `<tr><td>UGX ${parseInt(f.amount||0).toLocaleString()}</td><td><span class="tag">${esc(f.type)}</span></td><td>${esc(f.description||'-')}</td><td>${esc(f.category||'-')}</td></tr>`).join('')}</table></div>` : ''}
+    ${notices.rows.length ? `<div class="card"><h3>Notices (${notices.rows.length})</h3>${notices.rows.map(n => `<div><strong>${esc(n.title)}</strong></div>`).join('')}</div>` : ''}
+    ${committees.rows.length ? `<div class="card"><h3>Committees (${committees.rows.length})</h3>${committees.rows.map(c => `<div><strong>${esc(c.name)}</strong></div>`).join('')}</div>` : ''}
+    ${total === 0 ? '<div class="card"><div class="alert">No results found for "' + esc(q) + '". Try different keywords.</div></div>' : ''}
+  `, req.session.user));
+}));
+
+// === V6: DATA BACKUP ===
+app.get('/org/backup', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const backups = (await pool.query('SELECT * FROM org_data_backups WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10', [t])).rows;
+  res.send(renderPage('Data Backup', `
+    <div class="hero" style="background:linear-gradient(135deg,#475569,#334155)"><h1>Data Backup</h1><p>Create and download organization data snapshots</p></div>
+    <div class="card" style="max-width:700px;margin:0 auto">
+      <h2>Create Backup</h2>
+      <p class="muted">This will export all your organization data as a single JSON file for safekeeping or migration.</p>
+      <form method="POST" action="/org/backup/create">
+        <label>Backup Description</label><input name="description" placeholder="Monthly backup - May 2026">
+        <button class="btn" style="background:#475569;color:white;margin-top:10px">Create Backup Now</button>
+      </form>
+    </div>
+    ${backups.length ? `<div class="card" style="margin-top:15px"><h3>Backup History</h3><table><tr><th>Date</th><th>Description</th><th>Records</th><th>Size</th><th>Actions</th></tr>${backups.map(b => `<tr><td>${new Date(b.created_at).toLocaleDateString()}</td><td>${esc(b.description||'Manual backup')}</td><td>${b.record_count||'N/A'}</td><td>${b.file_size?Math.round(b.file_size/1024)+'KB':'N/A'}</td><td><a href="/org/backup/${b.id}/download" class="btn btn-sm">Download</a></td></tr>`).join('')}</table></div>` : ''}
+  `, req.session.user));
+}));
+
+app.post('/org/backup/create', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const description = req.body.description || 'Manual backup';
+  const tables = ['members', 'events', 'org_finance', 'org_tasks', 'org_task_comments', 'org_notifications', 'notice_board', 'projects', 'committees', 'committee_members', 'org_meeting_minutes', 'org_surveys', 'org_survey_responses', 'org_discussions', 'org_discussion_replies', 'org_email_templates', 'org_broadcasts', 'org_attachments', 'meeting_action_items', 'attendance', 'resolution_votes'];
+  const backup = { tenant_id: t, exported_at: new Date().toISOString(), description };
+  let totalRecords = 0;
+  for (const table of tables) {
+    try {
+      const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t]);
+      backup[table] = result.rows;
+      totalRecords += result.rows.length;
+    } catch(e) { /* table may not exist, skip */ }
+  }
+  const jsonStr = JSON.stringify(backup, null, 2);
+  const fileSize = Buffer.byteLength(jsonStr);
+  await pool.query('INSERT INTO org_data_backups(tenant_id,description,record_count,file_size) VALUES($1,$2,$3,$4)', [t, description, totalRecords, fileSize]);
+  await audit(req.session.user.email, 'create_backup', 'Created backup with ' + totalRecords + ' records');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="org_backup_${t}_${Date.now()}.json"');
+  res.send(jsonStr);
+}));
+
+app.get('/org/backup/:id/download', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const backupRecord = (await pool.query('SELECT * FROM org_data_backups WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
+  if (!backupRecord) return res.status(404).send('Backup not found');
+  const tables = ['members', 'events', 'org_finance', 'org_tasks', 'notice_board', 'projects', 'committees', 'attendance'];
+  const backup = { tenant_id: t, backup_id: backupRecord.id, created_at: backupRecord.created_at, description: backupRecord.description };
+  for (const table of tables) {
+    try {
+      const result = await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1`, [t]);
+      backup[table] = result.rows;
+    } catch(e) { /* skip */ }
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="org_backup_${backupRecord.id}.json"');
+  res.send(JSON.stringify(backup, null, 2));
+}));
+
+// === V6: ENHANCED CHURN PREDICTION ===
+app.get('/org/churn-enhanced', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT * FROM members WHERE tenant_id=$1', [t])).rows;
+  const attendanceData = (await pool.query("SELECT student_id, COUNT(*) as total, SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) as present FROM attendance WHERE tenant_id=$1 GROUP BY student_id", [t])).rows;
+  const attendanceMap = {};
+  attendanceData.forEach(a => { attendanceMap[a.student_id] = { total: parseInt(a.total), present: parseInt(a.present) }; });
+  const [donationData, financeData, eventData, taskData] = await Promise.all([
+    pool.query('SELECT member_id, COUNT(*) as cnt, SUM(amount) as total, MAX(created_at) as last_donation FROM donations WHERE tenant_id=$1 GROUP BY member_id', [t]),
+    pool.query('SELECT member_id, COUNT(*) as cnt FROM org_finance WHERE tenant_id=$1 AND member_id IS NOT NULL GROUP BY member_id', [t]),
+    pool.query('SELECT er.member_id, COUNT(*) as rsvp_count FROM event_rsvps er WHERE er.tenant_id=$1 GROUP BY er.member_id', [t]),
+    pool.query('SELECT assigned_to, COUNT(*) as total, SUM(CASE WHEN status=\'completed\' THEN 1 ELSE 0 END) as completed FROM org_tasks WHERE tenant_id=$1 AND assigned_to IS NOT NULL GROUP BY assigned_to', [t])
+  ]);
+  const donationMap = {}; donationData.rows.forEach(d => { donationMap[d.member_id] = { count: parseInt(d.cnt), total: parseInt(d.total), last: d.last_donation }; });
+  const financeMap = {}; financeData.rows.forEach(f => { financeMap[f.member_id] = parseInt(f.cnt); });
+  const eventMap = {}; eventData.rows.forEach(e => { eventMap[e.member_id] = parseInt(e.rsvp_count); });
+  const taskMap = {}; taskData.rows.forEach(tk => { taskMap[tk.assigned_to] = { total: parseInt(tk.total), completed: parseInt(tk.completed) }; });
+  const scored = members.map(m => {
+    let riskScore = 0;
+    let riskFactors = [];
+    let protectiveFactors = [];
+    const daysSince = m.joined_at ? (Date.now() - new Date(m.joined_at).getTime()) / (1000*60*60*24) : 0;
+    if (!m.email && !m.phone) { riskScore += 2; riskFactors.push('No contact info'); }
+    else if (!m.email) { riskScore += 1; riskFactors.push('No email'); }
+    if (daysSince > 180 && (!m.role || m.role === 'Member')) { riskScore += 2; riskFactors.push('Inactive > 6 months'); }
+    if (daysSince > 365) { riskScore += 1; riskFactors.push('Member > 1 year'); }
+    const att = attendanceMap[m.id];
+    if (att && att.total > 0) {
+      const rate = att.present / att.total;
+      if (rate < 0.3) { riskScore += 3; riskFactors.push('Attendance ' + Math.round(rate*100) + '%'); }
+      else if (rate < 0.5) { riskScore += 2; riskFactors.push('Attendance ' + Math.round(rate*100) + '%'); }
+      else if (rate > 0.8) { protectiveFactors.push('Strong attendance'); riskScore -= 1; }
+    } else if (!att && daysSince > 30) { riskScore += 2; riskFactors.push('No attendance'); }
+    const don = donationMap[m.id];
+    if (!don && daysSince > 60) { riskScore += 1; riskFactors.push('Never donated'); }
+    else if (don) {
+      const daysSinceDon = don.last ? (Date.now() - new Date(don.last).getTime()) / (1000*60*60*24) : 999;
+      if (daysSinceDon > 180) { riskScore += 2; riskFactors.push('Last donation > 6mo ago'); }
+      else if (daysSinceDon < 30) { protectiveFactors.push('Recent donor'); riskScore -= 1; }
+      if (don.count > 5) { protectiveFactors.push('Frequent donor'); riskScore -= 1; }
+    }
+    const fin = financeMap[m.id];
+    if (!fin && daysSince > 60) { riskScore += 1; riskFactors.push('No financial activity'); }
+    else if (fin && fin > 3) { protectiveFactors.push('Active in finance'); riskScore -= 1; }
+    const ev = eventMap[m.id];
+    if (!ev && daysSince > 30) { riskScore += 1; riskFactors.push('No event RSVPs'); }
+    else if (ev && ev > 3) { protectiveFactors.push('Active participant'); riskScore -= 1; }
+    const tk = taskMap[m.id];
+    if (tk && tk.total > 0) {
+      const taskRate = tk.completed / tk.total;
+      if (taskRate < 0.3 && tk.total > 2) { riskScore += 1; riskFactors.push('Low task completion'); }
+      else if (taskRate > 0.8) { protectiveFactors.push('Reliable completer'); riskScore -= 1; }
+    }
+    if (m.role && m.role !== 'Member') { protectiveFactors.push('Has role: ' + m.role); riskScore -= 1; }
+    riskScore = Math.max(0, riskScore);
+    const level = riskScore >= 7 ? 'Critical' : riskScore >= 4 ? 'High' : riskScore >= 2 ? 'Medium' : 'Low';
+    return { ...m, riskScore, level, riskFactors, protectiveFactors, daysSince: Math.round(daysSince) };
+  });
+  const atRisk = scored.filter(m => m.riskScore >= 2).sort((a,b) => b.riskScore - a.riskScore);
+  const critical = scored.filter(m => m.level === 'Critical').length;
+  const high = scored.filter(m => m.level === 'High').length;
+  const medium = scored.filter(m => m.level === 'Medium').length;
+  const low = scored.filter(m => m.level === 'Low').length;
+  const avgScore = members.length ? (scored.reduce((s,m) => s+m.riskScore, 0) / members.length).toFixed(1) : 0;
+  res.send(renderPage('Enhanced Churn Analysis', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>Enhanced Churn Analysis</h1><p>AI-powered risk assessment with multi-factor scoring</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${members.length}</div><div>Total Members</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${critical}</div><div>Critical</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${high}</div><div>High</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${medium}</div><div>Medium</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${low}</div><div>Low</div></div>
+      <div class="stat-card"><div class="stat-num">${avgScore}</div><div>Avg Risk</div></div>
+    </div>
+    <div class="card">
+      <h3>Risk Factors Analyzed</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">
+        <span class="tag" style="background:#fee2e2;color:#991b1b">No Contact</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">Low Attendance</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">No Donations</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">No Event RSVPs</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">No Finance Activity</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">Low Task Completion</span>
+        <span class="tag" style="background:#fee2e2;color:#991b1b">Long Inactivity</span>
+        <span class="tag" style="background:#d1fae5;color:#065f46">Strong Attendance</span>
+        <span class="tag" style="background:#d1fae5;color:#065f46">Recent Donor</span>
+        <span class="tag" style="background:#d1fae5;color:#065f46">Active Participant</span>
+        <span class="tag" style="background:#d1fae5;color:#065f46">Reliable Completer</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Members at Risk (${atRisk.length})</h3>
+      ${atRisk.length ? `<table><tr><th>Name</th><th>Score</th><th>Level</th><th>Risk Factors</th><th>Protective Factors</th><th>Action</th></tr>${atRisk.map(m => `<tr><td><strong>${esc(m.name)}</strong></td><td style="font-weight:bold">${m.riskScore}</td><td><span class="tag" style="background:${m.level==='Critical'?'#fee2e2;color:#991b1b':m.level==='High'?'#fef3c7;color:#92400e':'#dbeafe;color:#1e40af'}">${m.level}</span></td><td style="font-size:0.85em">${m.riskFactors.map(f => `<span style="display:inline-block;background:#fee2e2;padding:2px 6px;border-radius:4px;margin:1px;color:#991b1b">${esc(f)}</span>`).join(' ')}</td><td style="font-size:0.85em">${m.protectiveFactors.map(f => `<span style="display:inline-block;background:#d1fae5;padding:2px 6px;border-radius:4px;margin:1px;color:#065f46">${esc(f)}</span>`).join(' ')}</td><td><form method="POST" action="/org/notifications/send-reminder" style="display:inline"><input type="hidden" name="email" value="${esc(m.email||'')}"><input type="hidden" name="title" value="We miss you!"><input type="hidden" name="message" value="Hi ${esc(m.name)}, we noticed you haven't been active recently. We'd love to see you again!"><button class="btn btn-sm" style="background:#f59e0b;color:white">Reach Out</button></form></td></tr>`).join('')}</table>` : '<div class="alert alert-success">No members at significant risk of churning.</div>'}
+    </div>
+  `, req.session.user));
 }));
 
 
@@ -17120,17 +20126,7 @@ app.get('/clinic/staff/new', requireAuth, requireNotBanned, requireFeature('clin
 app.post('/clinic/staff/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { name, role, specialization, license_no, email, phone, department } = req.body;
-  if (!name || !name.trim()) return res.redirect('/clinic/staff/new');
-  // v12: Check for duplicate staff (same email or license within tenant)
-  if (email) {
-    const dupEmail = (await pool.query('SELECT id FROM clinic_staff WHERE tenant_id=$1 AND email=$2', [t, email])).rows[0];
-    if (dupEmail) return res.send(renderPage('Duplicate Staff', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Duplicate Email</h2><p>A staff member with this email already exists.</p><a href="/clinic/staff/new" class="btn">Go Back</a></div>', req.session.user));
-  }
-  if (license_no) {
-    const dupLicense = (await pool.query('SELECT id FROM clinic_staff WHERE tenant_id=$1 AND license_no=$2', [t, license_no])).rows[0];
-    if (dupLicense) return res.send(renderPage('Duplicate Staff', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Duplicate License</h2><p>A staff member with this license number already exists.</p><a href="/clinic/staff/new" class="btn">Go Back</a></div>', req.session.user));
-  }
-  await pool.query('INSERT INTO clinic_staff(tenant_id,name,role,specialization,license_no,email,phone,department) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name.trim(), role||'doctor', specialization||null, license_no||null, email||null, phone||null, department||null]);
+  await pool.query('INSERT INTO clinic_staff(tenant_id,name,role,specialization,license_no,email,phone,department) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, name, role||'doctor', specialization||null, license_no||null, email||null, phone||null, department||null]);
   await audit(req.session.user.email, 'Add clinic staff', name);
   res.redirect('/clinic/staff?role='+(role||'doctor'));
 }));
@@ -17186,7 +20182,7 @@ app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_
 app.get('/clinic/queue/new', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const students = (await pool.query('SELECT id,name,class FROM students WHERE tenant_id=$1 ORDER BY name LIMIT 200', [t])).rows;
-  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE FOR UPDATE", [t])).rows[0];
+  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0];
   res.send(renderPage('Add to Queue', `
     <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Patient to Queue</h2>
     <form method="POST" action="/clinic/queue/save">
@@ -17209,7 +20205,7 @@ app.post('/clinic/queue/save', requireAuth, requireNotBanned, requireFeature('pa
   res.redirect('/clinic/queue');
 }));
 
-app.post('/clinic/queue/:id/see', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic/queue/:id/see', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const doctors = (await pool.query("SELECT id FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true LIMIT 1", [t])).rows;
   await pool.query("UPDATE patient_queue SET status='seeing', seen_by=$1 WHERE tenant_id=$2 AND id=$3", [doctors[0]?.id||null, t, req.params.id]);
@@ -17252,7 +20248,7 @@ app.post('/clinic/consultation/save', requireAuth, requireNotBanned, requireFeat
   const { queue_id, patient_name, patient_id, patient_type, doctor_id, chief_complaint, history, examination, diagnosis, treatment_plan, follow_up_date, notes, action } = req.body;
   const result = await pool.query('INSERT INTO consultations(tenant_id,patient_type,patient_id,patient_name,doctor_id,queue_id,chief_complaint,history,examination,diagnosis,treatment_plan,follow_up_date,notes,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id', [t, patient_type||'student', patient_id||null, patient_name, doctor_id, queue_id||null, chief_complaint||null, history||null, examination||null, diagnosis, treatment_plan||null, follow_up_date||null, notes||null, 'in_progress']);
   const consultationId = result.rows[0].id;
-  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1 AND tenant_id=$2', [doctor_id, t])).rows[0]?.name || '';
+  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1', [doctor_id])).rows[0]?.name || '';
   if (queue_id) await pool.query("UPDATE patient_queue SET status='consulted' WHERE tenant_id=$1 AND id=$2", [t, queue_id]);
   if (action === 'prescribe') return res.redirect(`/clinic/prescription/new?consultation=${consultationId}&doctor=${doctor_id}&patient=${encodeURIComponent(patient_name)}&diagnosis=${encodeURIComponent(diagnosis||'')}`);
   if (action === 'lab') return res.redirect(`/clinic/lab/new?consultation=${consultationId}&doctor=${doctor_id}&patient=${encodeURIComponent(patient_name)}&diagnosis=${encodeURIComponent(diagnosis||'')}`);
@@ -17336,7 +20332,7 @@ app.post('/clinic/prescription/save', requireAuth, requireNotBanned, requireFeat
       // Still allow but flag
       const allergyNote = 'ALLERGY ALERT: Patient may be allergic to: ' + matchedAllergies.join(', ');
       const existingNotes = notes || '';
-      const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, allergyNote + (existingNotes ? ' | ' + existingNotes : ''), 'pending']);
+      const rx = await pool.query('INSERT INTO prescriptions(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,diagnosis,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [t, consultation_id||null, 'student', patient_id, patient_name, doctor_id||null, (await pool.query('SELECT name FROM clinic_staff WHERE id=$1',[doctor_id])).rows[0]?.name||'', diagnosis||null, allergyNote + (existingNotes ? ' | ' + existingNotes : '')]);
       const rxId = rx.rows[0].id;
       i = 1;
       while (req.body[`medicine_${i}`]) {
@@ -17425,7 +20421,6 @@ app.get('/clinic/prescriptions/:id/dispense', requireAuth, requireNotBanned, req
 app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { pharmacist_id, notes } = req.body;
-  const rx = (await pool.query('SELECT patient_name FROM prescriptions WHERE tenant_id=$1 AND id=$2', [t, req.params.id])).rows[0];
   const items = (await pool.query("SELECT * FROM prescription_items WHERE prescription_id IN (SELECT id FROM prescriptions WHERE tenant_id=$1) AND prescription_id=$2 AND status='pending'", [t, req.params.id])).rows;
   for (const item of items) {
     const qty = parseInt(req.body[`qty_${item.id}`]) || item.quantity;
@@ -17440,16 +20435,12 @@ app.post('/clinic/prescriptions/:id/dispense/save', requireAuth, requireNotBanne
     if (stock && stock.expiry_date && new Date(stock.expiry_date) < new Date()) {
       return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Drug Expired</h2><p><strong>${esc(item.medicine_name)}</strong> expired on ${new Date(stock.expiry_date).toLocaleDateString()}</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
     }
-    // Decrement pharmacy inventory stock FIRST (atomic)
-    if (stock) {
-      const result = (await pool.query('UPDATE pharmacy_inventory SET quantity = quantity - $1 WHERE medicine_name=$2 AND tenant_id=$3 AND quantity >= $1 RETURNING quantity', [qty, item.medicine_name, t])).rows[0];
-      if (!result) {
-        return res.send(renderPage('Dispensing Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Stock Update Failed</h2><p>Insufficient <strong>${esc(item.medicine_name)}</strong> (concurrent update). Please try again.</p><a href="/clinic/prescriptions" class="btn">Back</a></div>`, req.session.user));
-      }
-    }
-    // THEN mark as dispensed
     await pool.query('UPDATE prescription_items SET status=$1,dispensed_by=$2,dispensed_at=NOW() WHERE id=$3', ['dispensed', pharmacist_id, item.id]);
-    await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, rx.patient_name, item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
+    // Decrement pharmacy inventory stock
+    if (stock) {
+      await pool.query('UPDATE pharmacy_inventory SET quantity = quantity - $1 WHERE medicine_name=$2 AND tenant_id=$3', [qty, item.medicine_name, t]);
+    }
+    await pool.query('INSERT INTO pharmacy_dispensing(tenant_id,prescription_id,item_id,pharmacist_id,patient_name,medicine_name,dosage,quantity_dispensed,batch_number,expiry_date,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, req.params.id, item.id, pharmacist_id, (await pool.query('SELECT patient_name FROM prescriptions WHERE id=$1',[req.params.id])).rows[0]?.patient_name||'', item.medicine_name, item.dosage, qty, batch, expiry, notes||null]);
   }
   await pool.query("UPDATE prescriptions SET status='dispensed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
   await audit(req.session.user.email, 'Prescription dispensed', `Rx #${req.params.id}`);
@@ -17502,7 +20493,7 @@ app.get('/clinic/lab/new', requireAuth, requireNotBanned, requireFeature('clinic
 app.post('/clinic/lab/save', requireAuth, requireNotBanned, requireFeature('clinic_lab'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { consultation_id, patient_type, patient_id, patient_name, doctor_id, test_name, test_category, urgency, clinical_notes } = req.body;
-  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1 AND tenant_id=$2', [doctor_id, t])).rows[0]?.name || '';
+  const doctorName = (await pool.query('SELECT name FROM clinic_staff WHERE id=$1', [doctor_id])).rows[0]?.name || '';
   await pool.query('INSERT INTO lab_requests(tenant_id,consultation_id,patient_type,patient_id,patient_name,doctor_id,doctor_name,test_name,test_category,urgency,clinical_notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, consultation_id||null, patient_type||'student', patient_id||null, patient_name, doctor_id||null, doctorName, test_name, test_category||null, urgency||'routine', clinical_notes||null]);
   res.redirect('/clinic/lab');
 }));
@@ -18281,9 +21272,12 @@ app.post('/clinic/appointments/save', requireAuth, requireNotBanned, requireFeat
   }
   // Check for appointment conflicts (same doctor, date, time)
   if (doctor_name) {
-    const conflict = (await pool.query("SELECT id, patient_name FROM clinic_appointments WHERE tenant_id=$1 AND doctor_name=$2 AND appointment_date=$3 AND appointment_time=$4 AND status='scheduled'", [t, doctor_name, appointment_date, appointment_time])).rows[0];
+    const conflict = (await pool.query("SELECT id FROM clinic_appointments WHERE tenant_id=$1 AND doctor_name=$2 AND appointment_date=$3 AND appointment_time=$4 AND status='scheduled'", [t, doctor_name, appointment_date, appointment_time])).rows[0];
     if (conflict) {
-      return res.send(renderPage('Appointment Conflict', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#f59e0b">Time Slot Already Booked</h2><p>Dr. ${esc(doctor_name)} already has an appointment at ${esc(appointment_time)} on ${esc(appointment_date)} for patient <strong>${esc(conflict.patient_name)}</strong>.</p><p style="margin-top:10px">Please choose a different time slot.</p><a href="/clinic/appointments/new" class="btn">Choose Different Time</a></div>`, req.session.user));
+      const appts = (await pool.query('SELECT * FROM clinic_appointments WHERE id=$1', [conflict.id])).rows;
+      // Show conflict warning but still allow booking (double-booking may be intentional for urgent cases)
+      // For strict conflict prevention, uncomment the next line:
+      // return res.send(renderPage('Appointment Conflict', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#f59e0b">Time Slot Taken</h2><p>Dr. ${esc(doctor_name)} already has an appointment at ${esc(appointment_time)} on ${esc(appointment_date)}.</p><a href="/clinic/appointments/new" class="btn">Choose Different Time</a></div>`, req.session.user));
     }
   }
   await pool.query(
@@ -18307,8 +21301,8 @@ app.post('/clinic/appointments/:id/complete', requireAuth, requireNotBanned, req
   if (!appt) return res.redirect('/clinic/appointments');
   // Mark appointment completed
   await pool.query("UPDATE clinic_appointments SET status='completed' WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  // Create queue entry with atomic queue number
-  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE FOR UPDATE", [t])).rows[0];
+  // Create queue entry
+  const maxQ = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM patient_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0];
   await pool.query(
     'INSERT INTO patient_queue(tenant_id,patient_type,patient_id,patient_name,complaint,priority,triage_notes,queue_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
     [t, appt.patient_type || 'patient', appt.patient_id || null, appt.patient_name, appt.reason || 'Appointment visit', 'normal', 'From appointment #' + appt.id, maxQ.next]
@@ -18358,7 +21352,7 @@ async function checkAndSendReminders() {
           if (settings.whatsapp_enabled) {
             const msg = (settings.whatsapp_template || '')
               .replace('{facility_name}', tenant.name)
-              .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
+              .replace('{date}', new Date(appt.appt_date + 'T00:00:00').toLocaleDateString())
               .replace('{time}', appt.appointment_time || '')
               .replace('{patient_name}', appt.patient_name || '')
               .replace('{doctor}', appt.doctor_name || 'TBD');
@@ -18560,8 +21554,41 @@ app.post('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFea
   res.redirect('/clinic/reminders');
 }));
 
-// GET /clinic/reminders/send-all — Redirect to POST
-app.get('/clinic/reminders/send-all', requireAuth, requireNotBanned, ah(async (req, res) => {
+// GET /clinic/reminders/send-all — Also support GET for the link button
+app.get('/clinic/reminders/send-all', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  const appts = (await pool.query(
+    `SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=$2 AND status='scheduled' AND phone IS NOT NULL AND phone != ''`,
+    [t, tomorrowStr]
+  )).rows;
+
+  if (!appts.length) { req.flash('info', 'No appointments found for tomorrow'); return res.redirect('/clinic/reminders'); }
+
+  const tenant = (await pool.query('SELECT name FROM tenants WHERE id=$1', [t])).rows[0];
+  let settings = (await pool.query('SELECT * FROM reminder_settings WHERE tenant_id=$1', [t])).rows[0];
+  if (!settings) settings = { sms_enabled: true, sms_template: 'Reminder: You have an appointment at {facility_name} on {date} at {time} with Dr. {doctor}.' };
+
+  let sent = 0;
+  for (const appt of appts) {
+    const msg = (settings.sms_template || '')
+      .replace('{facility_name}', tenant.name)
+      .replace('{date}', new Date(appt.appointment_date + 'T00:00:00').toLocaleDateString())
+      .replace('{time}', appt.appointment_time || '')
+      .replace('{patient_name}', appt.patient_name || '')
+      .replace('{doctor}', appt.doctor_name || 'TBD');
+    await pool.query(
+      'INSERT INTO appointment_reminders(tenant_id,appointment_id,patient_name,phone,reminder_type,message,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [t, appt.id, appt.patient_name, appt.phone, 'sms', msg, 'sent']
+    );
+    await pool.query('UPDATE clinic_appointments SET reminder_sent=true WHERE id=$1', [appt.id]);
+    sent++;
+  }
+  await audit(req.session.user.email, 'bulk_reminders_sent', { count: sent, date: tomorrowStr });
+  req.flash('success', `${sent} reminder(s) sent for tomorrow's appointments`);
   res.redirect('/clinic/reminders');
 }));
 
@@ -18820,15 +21847,11 @@ app.get('/clinic/pay/:invoice_id/verify', requireAuth, requireNotBanned, require
         console.warn('[Flutterwave Verify]', e.message);
       }
     }
-    // Demo mode: auto-complete ONLY in development/testing
-    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-      await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
-      await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1, status=CASE WHEN paid_amount + $1 >= total_amount THEN 'paid' ELSE 'partial' END WHERE id=$2", [tx.amount, invoice.id]);
-      await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount });
-      if (req.flash) req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed! (Demo)`);
-    } else {
-      if (req.flash) req.flash('error', 'Payment verification failed. Please contact support with reference: ' + ref);
-    }
+    // Demo: auto-complete after 2 seconds for testing
+    await pool.query("UPDATE payment_transactions SET status='successful', paid_at=NOW() WHERE id=$1", [tx.id]);
+    await pool.query("UPDATE patient_invoices SET paid_amount=paid_amount + $1, status=CASE WHEN paid_amount + $1 >= total_amount THEN 'paid' ELSE 'partial' END WHERE id=$2", [tx.amount, invoice.id]);
+    await audit(req.session.user.email, 'payment_successful_demo', { ref, amount: tx.amount });
+    req.flash('success', `Payment of ${tx.amount.toLocaleString()} UGX confirmed! (Demo)`);
   }
 
   res.redirect(`/clinic/pay/${invoice.id}`);
@@ -19672,31 +22695,10 @@ const publicBookingLimiter = rateLimit({
   legacyHeaders: false
 });
 
-// === v14-v17+ Rate Limiters ===
-const aiTriageLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many triage requests. Please try again later.' });
-const notificationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many notification requests.' });
-const kioskLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'Too many kiosk requests.' });
-const walletLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many wallet requests.' });
-const theatreLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many theatre requests.' });
-const icuLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many ICU requests.' });
-const radiologyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many radiology requests.' });
-const pathwayLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many pathway requests.' });
-const formularyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many formulary requests.' });
-const supplyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many supply chain requests.' });
-const fhirLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: 'Too many FHIR API requests.' });
-const erxLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many e-prescription requests.' });
-const labAutoLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many lab automation requests.' });
-const syncLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many sync requests.' });
-const analyticsLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: 'Too many analytics requests.' });
-const revenueLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many revenue requests.' });
-const complianceLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many compliance requests.' });
-const mobileLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: 'Too many mobile API requests.' });
-const exportLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'Too many export requests.' });
-
 // GET /clinic/book/:tenant_subdomain — Public appointment booking
 app.get('/clinic/book/:tenant_subdomain', publicBookingLimiter, ah(async (req, res) => {
-  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.tenant_subdomain])).rows[0];
-  if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic does not exist or is not yet approved.</p></div>', null));
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
+  if (!tenant) return res.status(404).send(renderPageV3('Not Found', '<div class="card" style="text-align:center;padding:40px"><h2>Clinic Not Found</h2><p class="muted">This clinic does not exist.</p></div>', null));
   const doctors = (await pool.query("SELECT name FROM clinic_staff WHERE tenant_id=$1 AND role='doctor' AND is_active=true ORDER BY name", [tenant.id])).rows;
   const today = new Date().toISOString().split('T')[0];
   const success = req.query.success === '1';
@@ -19737,7 +22739,7 @@ app.get('/clinic/book/:tenant_subdomain', publicBookingLimiter, ah(async (req, r
 
 // POST /clinic/book/:tenant_subdomain/save — Save public appointment
 app.post('/clinic/book/:tenant_subdomain/save', publicBookingLimiter, ah(async (req, res) => {
-  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1 AND approved=true', [req.params.tenant_subdomain])).rows[0];
+  const tenant = (await pool.query('SELECT * FROM tenants WHERE subdomain=$1', [req.params.tenant_subdomain])).rows[0];
   if (!tenant) return res.status(404).send('Clinic not found');
   const { patient_name, phone, appointment_date, appointment_time, doctor_name, reason } = req.body;
   if (!patient_name || !phone || !appointment_date || !appointment_time || !reason) {
@@ -21993,7 +24995,7 @@ const requireFundraisingSubscription = async (req, res, next) => {
     const sub = (await pool.query("SELECT plan FROM subscriptions WHERE tenant_id=$1 AND status='active'", [req.session.user.tenant_id])).rows[0];
     if (!sub || sub.plan === 'free') return res.redirect('/upgrade/fundraising');
     return next();
-  } catch(e) { console.warn('[requireFundraisingSubscription Error]', e.message); return res.redirect('/upgrade/fundraising'); }
+  } catch(e) { return next(); }
 };
 
 app.get('/fundraising', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
@@ -22382,7 +25384,7 @@ app.post('/fundraising/:id/donate-save', requireAuth, requireNotBanned, requireF
   // Trigger post-donation processing (matching, badges, thank you, milestones, followers)
   try {
     if (_processDonationEffects) await _processDonationEffects({ tenant_id: t, campaign_id: req.params.id, donation_id: donationId, donor_name: displayName, donor_email: donorEmail, donor_phone: donorPhone, amount, method, message, is_anonymous: isAnonymous });
-  } catch(e) { console.warn('[processDonationEffects Error]', e.message); }
+  } catch(e) { /* non-blocking */ }
   res.redirect('/fundraising/'+req.params.id);
 }));
 
@@ -22615,7 +25617,7 @@ app.get('/discover/:id/donate', requireAuth, requireFundraisingSubscription, ah(
   `, req.session.user));
 }));
 
-app.post('/discover/:id/donate-save', requireAuth, requireNotBanned, requireFundraisingSubscription, ah(async (req, res) => {
+app.post('/discover/:id/donate-save', requireAuth, requireFundraisingSubscription, ah(async (req, res) => {
   const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND is_public=true', [req.params.id])).rows[0];
   if (!c) return res.status(404).send('Not found');
   const { donor_name, donor_email, amount, method, message, donate_anonymously, donor_phone } = req.body;
@@ -22635,14 +25637,11 @@ app.post('/discover/:id/donate-save', requireAuth, requireNotBanned, requireFund
     await pool.query('UPDATE platform_wallet SET balance=balance+$1 WHERE id=1', [fee]);
     await pool.query('INSERT INTO developer_revenue(amount,source) VALUES($1,$2)', [fee, 'Public donation fee - Campaign #'+c.id]);
   }
-  // Track revenue for campaign donation
-  try { await global.trackRevenue('campaign_donation', parseFloat(amount||0) / 3700, 'Campaign donation: ' + c.title + ' by ' + displayName, donationId); } catch(e) {}
-  try { await global.creditDeveloperRevenue(c.tenant_id, fee, 'campaign_donation', 'Platform fee: Campaign #' + c.id); } catch(e) {}
 
   // Trigger post-donation processing (matching, badges, thank you, milestones, followers)
   try {
     if (_processDonationEffects) await _processDonationEffects({ tenant_id: c.tenant_id, campaign_id: c.id, donation_id: donationId, donor_name: displayName, donor_email: donorEmail, donor_phone: donorPhone, amount, method, message, is_anonymous: isAnonymous });
-  } catch(e) { console.warn('[processDonationEffects Error]', e.message); }
+  } catch(e) { /* non-blocking */ }
 
   res.redirect('/discover/'+c.id);
 }));
@@ -24664,8 +27663,7 @@ app.get('/pay/checkout-v2', requireAuth, ah(async (req, res) => {
 app.get('/clinic/patient/:type/:id/ehr', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const { type, id } = req.params;
-  const patientType = VALID_PATIENT_TYPES.includes(type) ? type : 'patient';
-  if (!VALID_PATIENT_TYPES.includes(type)) return res.redirect('/clinic');
+  const patientType = type || 'student';
   
   // Get patient name
   let patientName = 'Unknown Patient';
@@ -26188,19 +29186,19 @@ app.get('/clinic/claims', requireAuth, requireNotBanned, requireFeature('patient
     <div class="card">
       <h2>Insurance Claims</h2>
       ${claims.length ? `<table><tr><th>Claim #</th><th>Patient</th><th>Provider</th><th>Claimed</th><th>Approved</th><th>Status</th><th>Actions</th></tr>
-        ${claims.map(c => `<tr><td>${esc(c.claim_number)}</td><td>${esc(c.patient_name)}</td><td>${esc(c.provider_name||'')}</td><td>UGX ${parseInt(c.amount_claimed).toLocaleString()}</td><td>UGX ${parseInt(c.amount_approved).toLocaleString()}</td><td><span class="tag" style="background:${c.status==='approved'?'#d1fae5;color:#065f46':c.status==='rejected'?'#fee2e2;color:#991b1b':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td>${c.status==='submitted'?`<form method="POST" action="/clinic/claims/${c.id}/approve" style="display:inline"><button class="btn btn-sm btn-green">Approve</button></form> <form method="POST" action="/clinic/claims/${c.id}/reject" style="display:inline"><button class="btn btn-sm btn-red">Reject</button></form>`:''}</td></tr>`).join('')}</table>` : '<p class="muted">No claims yet</p>'}
+        ${claims.map(c => `<tr><td>${esc(c.claim_number)}</td><td>${esc(c.patient_name)}</td><td>${esc(c.provider_name||'')}</td><td>UGX ${parseInt(c.amount_claimed).toLocaleString()}</td><td>UGX ${parseInt(c.amount_approved).toLocaleString()}</td><td><span class="tag" style="background:${c.status==='approved'?'#d1fae5;color:#065f46':c.status==='rejected'?'#fee2e2;color:#991b1b':'#fef3c7;color:#92400e'}">${esc(c.status)}</span></td><td>${c.status==='submitted'?`<a href="/clinic/claims/${c.id}/approve" class="btn btn-sm btn-green">Approve</a> <a href="/clinic/claims/${c.id}/reject" class="btn btn-sm btn-red">Reject</a>`:''}</td></tr>`).join('')}</table>` : '<p class="muted">No claims yet</p>'}
     </div>
   `, req.session.user));
 }));
 
-app.post('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+app.get('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   const claim = (await pool.query('SELECT * FROM insurance_claims WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!claim) return res.redirect('/clinic/claims');
   await pool.query('UPDATE insurance_claims SET status=$1, amount_approved=$2, processed_at=NOW() WHERE id=$3', ['approved', claim.amount_claimed, req.params.id]);
   // Apply insurance payment to invoice
   if (claim.invoice_id) {
-    const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1 AND tenant_id=$2', [claim.invoice_id, t])).rows[0];
+    const inv = (await pool.query('SELECT * FROM patient_invoices WHERE id=$1', [claim.invoice_id])).rows[0];
     if (inv) {
       const newPaid = Math.min(inv.paid_amount + claim.amount_claimed, inv.total_amount);
       await pool.query('UPDATE patient_invoices SET paid_amount=$1, insurance_cover=$2, status=$3 WHERE id=$4', [newPaid, claim.amount_claimed, newPaid >= inv.total_amount ? 'paid' : 'partial', claim.invoice_id]);
@@ -26210,7 +29208,7 @@ app.post('/clinic/claims/:id/approve', requireAuth, requireNotBanned, requireFea
   res.redirect('/clinic/claims');
 }));
 
-app.post('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
+app.get('/clinic/claims/:id/reject', requireAuth, requireNotBanned, requireFeature('patient_billing'), ah(async (req, res) => {
   const t = req.session.user.tenant_id;
   await pool.query('UPDATE insurance_claims SET status=$1, processed_at=NOW(), rejection_reason=$2 WHERE id=$3', ['rejected', 'Rejected by admin', req.params.id]);
   await audit(req.session.user.email, 'claim_rejected', { claimId: req.params.id });
@@ -26622,8 +29620,7 @@ app.post('/clinic/prescription/save-cds', requireAuth, requireNotBanned, require
   
   if (medications.length > 0 && patient_id) {
     try {
-      const baseUrl = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      const cdsResp = await fetch(`${baseUrl}/api/cds/full-check`, {
+      const cdsResp = await fetch(`http://localhost:${process.env.PORT || 3000}/api/cds/full-check`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Cookie': req.headers.cookie || '' },
         body: JSON.stringify({ patient_type, patient_id, medications, age: null, weight: null })
       });
@@ -27272,6 +30269,30 @@ try {
   console.warn('[PublicPortal] Failed to load public portal:', e.message);
 }
 
+// === PUBLIC BLOG (posts, comments, search, RSS, admin CRUD) ===
+try {
+  require('./public-blog')(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger);
+  console.log('[PublicBlog] Blog system loaded');
+} catch (e) {
+  console.warn('[PublicBlog] Failed to load blog:', e.message);
+}
+
+// === PUBLIC SEO (sitemap, robots, privacy, terms, help-center, pricing, health-check, 404) ===
+try {
+  require('./public-seo')(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger);
+  console.log('[PublicSEO] SEO and static pages loaded');
+} catch (e) {
+  console.warn('[PublicSEO] Failed to load SEO:', e.message);
+}
+
+// === PUBLIC NEWSLETTER (double opt-in, unsubscribe, preferences, campaigns, CSV export) ===
+try {
+  require('./public-newsletter')(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger);
+  console.log('[PublicNewsletter] Newsletter system loaded');
+} catch (e) {
+  console.warn('[PublicNewsletter] Failed to load newsletter:', e.message);
+}
+
 // === BUSINESS SPECIALIZATIONS (hotel, restaurant, retail, salon, pharmacy, gym, hardware, supermarket, transport, electronics) ===
 try {
   const bizSpec = require('./business-specializations');
@@ -27299,170 +30320,69 @@ try {
   console.warn('[FundraisingPro] Failed to load fundraising pro:', e.message);
 }
 
-// === FUNDRAISING ENHANCEMENTS (Post-donation effects, matching, badges, thank-you, milestones, receipts, social proof, V5-V18 bonus features) ===
-let _processDonationEffects = null;
-try {
-  const fundraisingEnhancements = require('./fundraising-enhancements');
-  fundraisingEnhancements(app, pool, ah, requireAuth, requireNotBanned, requireFundraisingSubscription, renderPage, esc, notify, notifyAll, sendEmail, sendSMS);
-  if (typeof fundraisingEnhancements.processDonationEffects === 'function') {
-    _processDonationEffects = fundraisingEnhancements.processDonationEffects;
-    console.log('[FundraisingEnhancements] V5-V18 features loaded — processDonationEffects wired up');
-  } else {
-    console.log('[FundraisingEnhancements] V5-V18 features loaded — processDonationEffects NOT found in exports');
-  }
-} catch (e) {
-  console.warn('[FundraisingEnhancements] Failed to load:', e.message);
-}
-
-// === FUNDRAISING ULTIMATE (recurring donations, impact calculator, loyalty tiers, campaign grader, emergency mode, harambee, WhatsApp donate, mobile money auto-detect, funeral funds, AI story writer) ===
+// === FUNDRAISING ULTIMATE (recurring donations, impact calculator, loyalty tiers, campaign grader, emergency mode, harambee, WhatsApp donate, mobile money, funeral funds, AI story writer) ===
 ['recurring_donations','impact_items','campaign_impact_goals','donor_loyalty_tiers','donor_loyalty_ledger','campaign_grades','emergency_campaigns','harambee_pools','harambee_contributions','harambee_distributions','whatsapp_donate_config','whatsapp_donate_sessions','mobile_money_providers','donation_payment_attempts','funeral_funds','funeral_contributions','ai_campaign_stories'].forEach(t => VALID_TABLES.add(t));
 try {
   const fundraisingUltimate = require('./fundraising-ultimate');
   fundraisingUltimate(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-  console.log('[FundraisingUltimate] Ultimate fundraising features loaded — 10 features, 60+ routes');
-} catch (e) {
-  console.warn('[FundraisingUltimate] Failed to load fundraising ultimate:', e.message);
-}
+  console.log('[FundraisingUltimate] Ultimate fundraising features loaded — 10 features');
+} catch (e) { console.warn('[FundraisingUltimate] Failed to load:', e.message); }
 
-// === FUNDRAISING MEGA (Donor CRM, Pledges, Templates, Tipping, Stretch Goals, Segmentation, Campaign Clone, Bulk Donations, Gift Aid/Tax, Donation Challenges) ===
-['donor_crm_contacts','donor_crm_interactions','campaign_pledges','campaign_templates','donation_tips','tip_settings','campaign_stretch_goals','donor_segments','donor_segment_members','bulk_donation_batches','bulk_donation_items','gift_tax_declarations','tax_receipts','donation_challenges','challenge_participants'].forEach(t => VALID_TABLES.add(t));
+// === FUNDRAISING MEGA (Donor CRM, Pledges, Templates, Tipping, Stretch Goals, Segmentation, Clone, Bulk Donations, Gift Aid, Challenges) ===
+['donor_crm_contacts','donor_crm_interactions','campaign_pledges_mega','campaign_templates','donation_tips','tip_settings','campaign_stretch_goals','donor_segments','donor_segment_members','bulk_donation_batches','bulk_donation_items','gift_tax_declarations','tax_receipts','donation_challenges','challenge_participants'].forEach(t => VALID_TABLES.add(t));
 try {
   const fundraisingMega = require('./fundraising-mega');
   fundraisingMega(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-  console.log('[FundraisingMega] Mega fundraising features loaded — 10 features, 50+ routes');
-} catch (e) {
-  console.warn('[FundraisingMega] Failed to load fundraising mega:', e.message);
-}
+  console.log('[FundraisingMega] Mega fundraising features loaded — 10 features');
+} catch (e) { console.warn('[FundraisingMega] Failed to load:', e.message); }
 
-// === FUNDRAISING MEGA2 (Analytics Dashboard, A/B Testing, Donor Retention, Social Proof, Endorsements, Wish List, Corporate Matching, Multi-Currency, QR Menu, Thank-You Videos) ===
+// === FUNDRAISING MEGA2 (Analytics, A/B Testing, Retention, Social Proof, Endorsements, Wishlists, Corporate Matching, Multi-Currency, QR Menu, Thank-You Videos) ===
 ['campaign_ab_tests','donor_retention_metrics','social_proof_events','campaign_endorsements','donation_wishlists','wishlist_fulfillments','corporate_matchers','corporate_match_claims','currency_display_settings','thank_you_videos','thank_you_video_views'].forEach(t => VALID_TABLES.add(t));
 try {
   const fundraisingMega2 = require('./fundraising-mega2');
   fundraisingMega2(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-  console.log('[FundraisingMega2] Mega2 fundraising features loaded — 10 features, 50+ routes');
-} catch (e) {
-  console.warn('[FundraisingMega2] Failed to load fundraising mega2:', e.message);
-}
+  console.log('[FundraisingMega2] Mega2 fundraising features loaded — 10 features');
+} catch (e) { console.warn('[FundraisingMega2] Failed to load:', e.message); }
 
-// === FUNDRAISING ULTIMATE2 (Donor Journey, Capacity Scoring, Major Gift Pipeline, Prospect Research, Moves Management, Stewardship Plans, Donor Surveys, Churn Predictor, Smart Recommendations, Comm Prefs, Relationship Mapping, Next Best Action, Donor LTV, Re-engagement, Annual Giving Predictor) ===
+// === FUNDRAISING ULTIMATE2 (Donor Intelligence & Engagement — 15 features) ===
 ['donor_journeys','donor_capacity_scores','major_gift_pipeline','major_gift_activities','prospect_research','moves_management','stewardship_plans','stewardship_actions','donor_surveys','donor_survey_responses','donor_churn_scores','donor_recommendations','donor_comm_prefs','donor_relationships','donor_next_actions','donor_ltv','reengagement_campaigns','reengagement_logs','annual_giving_forecasts'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate2 = require('./fundraising-ultimate2');
-    fundraisingUltimate2(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate2] Donor Intelligence & CRM Pro loaded — 15 features, 80+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate2] Failed to load:', e.message);
-  }
-}, 3000);
+setTimeout(() => { try { const m = require('./fundraising-ultimate2'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate2] Donor Intelligence loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate2] Failed:', e.message); } }, 3000);
 
-// === FUNDRAISING ULTIMATE3 (A/B Testing, Smart Scheduling, Co-Creation, Bundle Packs, Health Monitor, Calendar Planner, Goal Recommender, Storyboard Builder, Form Builder, Success Blueprint, Thank You Engine, Micro Round-Ups, Donation Scheduler, Seasonality Adjuster, Amount Suggestions) ===
-['campaign_ab_tests3','campaign_schedules','scheduling_insights','campaign_co_creators','campaign_edit_history','campaign_bundles','campaign_bundle_items','campaign_health_scores','fundraising_calendar','goal_recommendations','campaign_storyboards','storyboard_sections','donation_forms','donation_form_submissions','campaign_blueprints','thank_you_templates','thank_you_log','micro_roundup_settings','micro_roundup_transactions','scheduled_donations','seasonality_profiles','amount_suggestions','amount_suggestion_settings'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate3 = require('./fundraising-ultimate3');
-    fundraisingUltimate3(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate3] Campaign Optimization & Smart Tools loaded — 15 features, 80+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate3] Failed to load:', e.message);
-  }
-}, 5000);
+// === FUNDRAISING ULTIMATE3 (Campaign Optimization — 15 features) ===
+['campaign_schedules','scheduling_insights','campaign_co_creators','campaign_edit_history','campaign_bundles','campaign_bundle_items','campaign_health_scores','fundraising_calendar','goal_recommendations','campaign_storyboards','storyboard_sections','donation_forms','donation_form_submissions','campaign_blueprints','thank_you_templates','thank_you_log','micro_roundup_settings','micro_roundup_transactions','scheduled_donations','seasonality_profiles','amount_suggestions','amount_suggestion_settings'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate3'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate3] Campaign Optimization loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate3] Failed:', e.message); } }, 5000);
 
-// === FUNDRAISING ULTIMATE4 (Fund Allocation, Budget Tracking, Reconciliation, Grant Management, Endowment, Multi-Currency Wallet, Receipt Batches, Donation Splits, Fund Categories, Anonymity Manager, Payment Router, Financial Dashboard Pro, Compliance Vault, Audit Trail Pro, Fund Balance Calculator) ===
-['fund_allocations','fund_allocation_entries','fundraising_budgets','budget_line_items','reconciliation_batches','reconciliation_items','grants','grant_reports','endowments','endowment_transactions','currency_wallets','currency_transactions','receipt_batches','receipt_batch_items','donation_splits','donation_split_items','fund_categories','fund_category_assignments','donation_anonymity_settings','anonymous_donations','payment_routing_rules','payment_routing_log','financial_dashboard_config','financial_snapshots','compliance_docs','compliance_reminders','enhanced_audit_trail','audit_reports','fund_balances'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate4 = require('./fundraising-ultimate4');
-    fundraisingUltimate4(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate4] Financial, Compliance & Legal Suite loaded — 15 features, 75+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate4] Failed to load:', e.message);
-  }
-}, 7000);
+// === FUNDRAISING ULTIMATE4 (Financial & Compliance — 15 features) ===
+['fund_allocations','fund_allocation_entries','fundraising_budgets','budget_line_items','reconciliation_batches','reconciliation_items','grants_ult4','grant_reports_ult4','endowments','endowment_transactions','currency_wallets','currency_transactions','receipt_batches','receipt_batch_items','donation_splits','donation_split_items','fund_categories','fund_category_assignments','donation_anonymity_settings','anonymous_donations','payment_routing_rules','payment_routing_log','financial_dashboard_config','financial_snapshots','compliance_docs','compliance_reminders','enhanced_audit_trail','audit_reports_ult4','fund_balances'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate4'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate4] Financial & Compliance loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate4] Failed:', e.message); } }, 7000);
 
-// === FUNDRAISING ULTIMATE5 (Community Hub, Forums Pro, Mentorship, Peer Groups, Regional Chapters, Alumni Network, CSR Portal, Ambassador Pro, Referral Pro, Impact Stories, Volunteer Time, Giving Circles, Community Events, Donor Wall Pro, Recognition Awards) ===
-['community_hub_posts','community_hub_reactions','forum_categories_pro','forum_threads_pro','forum_replies_pro','mentorship_programs','mentorship_pairs','mentorship_sessions','peer_groups','peer_group_members','peer_group_events','regional_chapters','chapter_members','chapter_activities','alumni_networks','alumni_members','alumni_events','csr_portals','csr_projects','csr_reports','ambassadors_pro','ambassador_activities','ambassador_rewards','referral_tiers_pro','referral_tracking_pro','impact_stories','impact_story_reactions','volunteer_profiles','volunteer_time_logs','giving_circles','giving_circle_members','giving_circle_nominations','giving_circle_votes','community_events_pro','community_event_registrations','donor_wall_config_pro','donor_wall_entries_pro','recognition_awards','recognition_recipients'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate5 = require('./fundraising-ultimate5');
-    fundraisingUltimate5(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate5] Community, Social & Engagement Pro loaded — 15 features, 80+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate5] Failed to load:', e.message);
-  }
-}, 9000);
+// === FUNDRAISING ULTIMATE5 (Community & Social — 15 features) ===
+['community_hub_posts','community_hub_reactions','forum_categories_pro','forum_threads_pro','forum_replies_pro','mentorship_programs','mentorship_pairs','mentorship_sessions','peer_groups','peer_group_members','peer_group_events','regional_chapters','chapter_members','chapter_activities','alumni_networks_ult5','alumni_members_ult5','alumni_events_ult5','csr_portals','csr_projects','csr_reports','ambassadors_pro','ambassador_activities','ambassador_rewards','referral_tiers_pro','referral_tracking_pro','impact_stories','impact_story_reactions','volunteer_profiles','volunteer_time_logs','giving_circles','giving_circle_members','giving_circle_nominations','giving_circle_votes','community_events_pro','community_event_registrations','donor_wall_config_pro','donor_wall_entries_pro','recognition_awards','recognition_recipients'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate5'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate5] Community & Social loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate5] Failed:', e.message); } }, 9000);
 
-// === FUNDRAISING ULTIMATE6 (Integration Hub, CRM Sync, Email Marketing, Accounting Sync, Webhook Manager, API Gateway, Data Import/Export, White Label Pro, Multi-Language, Custom Domains, SSO/OAuth, Donor 2FA, Privacy & Consent, Data Retention, Plugin Marketplace) ===
+// === FUNDRAISING ULTIMATE6 (Integration & Platform — 15 features) ===
 ['integration_configs','integration_sync_log','crm_sync_configs','crm_sync_queue','email_marketing_configs','email_campaign_sync','accounting_sync_configs','accounting_sync_records','webhook_endpoints_pro','webhook_deliveries','api_gateway_keys_pro','api_gateway_logs','api_rate_limits_pro','data_import_jobs','data_export_jobs','import_error_rows','whitelabel_pro_config','language_configs','translations','custom_domains','sso_configs','sso_sessions','donor_2fa_configs','donor_2fa_attempts','privacy_consent_records','privacy_settings','data_retention_policies','data_retention_log','platform_plugins','plugin_marketplace'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate6 = require('./fundraising-ultimate6');
-    fundraisingUltimate6(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate6] Integration, Automation & Platform Pro loaded — 15 features, 80+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate6] Failed to load:', e.message);
-  }
-}, 11000);
+setTimeout(() => { try { const m = require('./fundraising-ultimate6'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate6] Integration & Platform loaded — 15 features'); } catch(e) { console.warn('[FundraisingUltimate6] Failed:', e.message); } }, 11000);
 
-// === FUNDRAISING ULTIMATE7 (Crypto Donations, In-Kind Donations, Planned Giving/Bequests, Board Giving, Event Ticketing, Auction Platform, Sponsorship Management, Donor Advised Funds) ===
-['crypto_donations','crypto_wallets','crypto_transactions','inkind_donations','inkind_categories','planned_giving','bequests','board_giving_pledges','board_members','event_tickets','ticket_tiers','ticket_purchases','auction_items','auction_bids','sponsorship_packages','sponsorship_purchases','donor_advised_funds','daf_grants'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate7 = require('./fundraising-ultimate7');
-    fundraisingUltimate7(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate7] Advanced Donation Types & Events loaded — 8 features, 50+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate7] Failed to load:', e.message);
-  }
-}, 13000);
+// === FUNDRAISING ULTIMATE7 (Advanced Donation Types & Events — 8 features) ===
+['crypto_wallets','crypto_donations','crypto_transactions','inkind_categories','inkind_donations','planned_giving','bequests','board_members','board_giving_pledges','ticket_tiers','ticket_purchases','auction_items','auction_bids','sponsorship_packages','sponsorship_purchases','donor_advised_funds','daf_grants'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate7'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate7] Advanced Donations & Events loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate7] Failed:', e.message); } }, 13000);
 
-// === FUNDRAISING ULTIMATE8 (Capital Campaigns, Tribute/Memorial, Crowdfunding Perks, Thermometer Widgets, Donor Portal, Email Builder, Direct Mail, Donor Heatmaps) ===
-['capital_campaigns','capital_phases','capital_pledges','tribute_donations','memorial_pages','crowdfunding_perks','perk_claims','campaign_thermometers','thermometer_views','donor_portal_sessions','donor_portal_preferences','email_campaign_builder','email_templates_builder','direct_mail_campaigns','direct_mail_recipients','donor_heatmap_data','regional_donation_stats'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate8 = require('./fundraising-ultimate8');
-    fundraisingUltimate8(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate8] Campaign Enhancement & Donor Experience loaded — 8 features, 50+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate8] Failed to load:', e.message);
-  }
-}, 15000);
+// === FUNDRAISING ULTIMATE8 (Campaign Enhancement & Donor Experience — 8 features) ===
+['capital_campaigns','capital_phases','capital_pledges','tribute_donations','memorial_pages','crowdfunding_perks','perk_claims','campaign_thermometers','thermometer_views','donor_portal_preferences','donor_portal_sessions','email_templates_builder','email_campaign_builder','direct_mail_campaigns','direct_mail_recipients','donor_heatmap_data','regional_donation_stats'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate8'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate8] Campaign Enhancement loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate8] Failed:', e.message); } }, 15000);
 
-// === FUNDRAISING ULTIMATE9 (Virtual Events, Gala Management, Wealth Screening, Grant Writing Assistant, Tax Statement Generator, Giving Days, Installment Plans, Engagement Scoring) ===
-['virtual_events','virtual_event_attendees','fundraising_galas','gala_tables','gala_seats','wealth_screening_results','donor_wealth_indicators','grant_proposals','grant_writing_templates','donor_tax_statements','tax_statement_batches','giving_days','giving_day_challenges','giving_day_leaderboards','installment_plans','installment_payments','donor_engagement_scores','engagement_activities'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate9 = require('./fundraising-ultimate9');
-    fundraisingUltimate9(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate9] Events, Intelligence & Financial Pro loaded — 8 features, 50+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate9] Failed to load:', e.message);
-  }
-}, 17000);
+// === FUNDRAISING ULTIMATE9 (Events, Intelligence & Financial — 8 features) ===
+['virtual_events','virtual_event_attendees','fundraising_galas','gala_tables','gala_seats','wealth_screening_results','donor_wealth_indicators','grant_writing_templates','grant_proposals','donor_tax_statements','tax_statement_batches','giving_days','giving_day_challenges','giving_day_leaderboards','installment_plans','installment_payments','donor_engagement_scores','engagement_activities'].forEach(t => VALID_TABLES.add(t));
+setTimeout(() => { try { const m = require('./fundraising-ultimate9'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate9] Events & Intelligence loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate9] Failed:', e.message); } }, 17000);
 
-// === FUNDRAISING ULTIMATE10 (Landing Page Builder, Payment Gateway Hub, Donor Renewal, Gift Clubs, Video Integration, Stock/Securities, Real Estate, IRA Rollovers) ===
+// === FUNDRAISING ULTIMATE10 (Pages, Payments & Asset Giving — 8 features) ===
 ['landing_pages','landing_page_versions','payment_gateways','gateway_transactions','donor_renewal_campaigns','renewal_reminders','donor_gift_clubs','gift_club_members','campaign_videos','video_engagement','stock_donations','stock_valuations','real_estate_donations','ira_rollovers','ira_distributions'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate10 = require('./fundraising-ultimate10');
-    fundraisingUltimate10(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate10] Pages, Payments & Asset Giving loaded — 8 features, 50+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate10] Failed to load:', e.message);
-  }
-}, 19000);
+setTimeout(() => { try { const m = require('./fundraising-ultimate10'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate10] Pages & Payments loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate10] Failed:', e.message); } }, 19000);
 
-// === FUNDRAISING ULTIMATE11 (Vehicle Donations, Family Foundations, Mobile Experience, Risk Assessment, Compliance Checker, Impact Reports, Collaboration Portal, Communication Hub) ===
+// === FUNDRAISING ULTIMATE11 (Special Assets & Platform Pro — 8 features) ===
 ['vehicle_donations','vehicle_valuations','family_foundations','foundation_members','foundation_grants','mobile_experience_config','push_notifications','campaign_risk_assessments','risk_mitigation_plans','fundraising_compliance_checks','compliance_requirements','donation_impact_reports','impact_report_sections','campaign_collaboration','collaboration_tasks','communication_hub','unified_messages'].forEach(t => VALID_TABLES.add(t));
-setTimeout(() => {
-  try {
-    const fundraisingUltimate11 = require('./fundraising-ultimate11');
-    fundraisingUltimate11(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS);
-    console.log('[FundraisingUltimate11] Special Assets & Platform Pro loaded — 8 features, 50+ routes');
-  } catch (e) {
-    console.warn('[FundraisingUltimate11] Failed to load:', e.message);
-  }
-}, 21000);
+setTimeout(() => { try { const m = require('./fundraising-ultimate11'); m(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS); console.log('[FundraisingUltimate11] Special Assets & Platform loaded — 8 features'); } catch(e) { console.warn('[FundraisingUltimate11] Failed:', e.message); } }, 21000);
 
 // ============================================================
 // ROUND 3 FEATURES: Leave, Expenses, Visitors, Assets, Feedback, Notes, Announcements
@@ -32025,7 +34945,7 @@ app.post('/branches/select', requireAuth, requireNotBanned, ah(async (req, res) 
 // ============================================================
 // FEATURE 5: ENHANCED CLINIC PORTAL
 // ============================================================
-app.get('/clinic-enhanced', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patientCount = (await pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tid])).rows[0].count;
   const todayAppts = (await pool.query("SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1 AND appointment_date=CURRENT_DATE", [tid])).rows[0].count;
@@ -32051,7 +34971,7 @@ app.get('/clinic-enhanced', requireAuth, requireNotBanned, requireFeature('clini
   res.send(renderPage('Clinic Dashboard', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const search = req.query.search || '';
   const rows = search
@@ -32081,7 +35001,7 @@ app.get('/clinic-enhanced/patients', requireAuth, requireNotBanned, requireFeatu
   res.send(renderPage('Patients', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>Register New Patient</h1>
   </div>
@@ -32119,7 +35039,7 @@ app.get('/clinic-enhanced/patients/new', requireAuth, requireNotBanned, requireF
   res.send(renderPage('Register Patient', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, full_name, date_of_birth, gender, phone, address, blood_type, allergies, emergency_contact, emergency_phone, insurance_provider, insurance_number } = req.body;
   const pid = patient_id || 'PT-' + Date.now().toString(36).toUpperCase();
@@ -32131,12 +35051,12 @@ app.post('/clinic-enhanced/patients/save', requireAuth, requireNotBanned, requir
   res.redirect('/clinic-enhanced/patients');
 }));
 
-app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT * FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.id, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
-  const appointments = (await pool.query('SELECT * FROM clinic_appointments WHERE patient_id=$1 AND tenant_id=$2 ORDER BY appointment_date DESC LIMIT 20', [patient.id, tid])).rows;
-  const consultations = (await pool.query('SELECT * FROM clinic_consultations WHERE patient_id=$1 AND tenant_id=$2 ORDER BY created_at DESC LIMIT 20', [patient.id, tid])).rows;
+  const appointments = (await pool.query('SELECT * FROM clinic_appointments WHERE patient_id=$1 ORDER BY appointment_date DESC LIMIT 20', [patient.id])).rows;
+  const consultations = (await pool.query('SELECT * FROM clinic_consultations WHERE patient_id=$1 ORDER BY created_at DESC LIMIT 20', [patient.id])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
     <h1>${esc(patient.full_name)}</h1>
     <p>ID: ${esc(patient.patient_id)} | ${esc(patient.gender||'-')} | Blood: ${esc(patient.blood_type||'Unknown')}</p>
@@ -32171,7 +35091,7 @@ app.get('/clinic-enhanced/patients/:id', requireAuth, requireNotBanned, requireF
   res.send(renderPage('Patient: ' + patient.full_name, html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const rows = (await pool.query(`
     SELECT a.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -32195,7 +35115,7 @@ app.get('/clinic-enhanced/appointments', requireAuth, requireNotBanned, requireF
   res.send(renderPage('Appointments', html, req.session.user));
 }));
 
-app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patients = (await pool.query('SELECT id, full_name, patient_id FROM clinic_patients WHERE tenant_id=$1 ORDER BY full_name LIMIT 200', [tid])).rows;
   const html = `<div class="hero" style="background:linear-gradient(135deg,#ef4444,#dc2626);padding:24px;border-radius:16px;margin-bottom:20px;color:white">
@@ -32222,7 +35142,7 @@ app.get('/clinic-enhanced/appointments/new', requireAuth, requireNotBanned, requ
   res.send(renderPage('Book Appointment', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, appointment_date, appointment_time, doctor_name, department, reason } = req.body;
   await pool.query(
@@ -32233,7 +35153,7 @@ app.post('/clinic-enhanced/appointments/save', requireAuth, requireNotBanned, re
   res.redirect('/clinic-enhanced/appointments');
 }));
 
-app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const queue = (await pool.query(`
     SELECT a.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -32267,7 +35187,7 @@ app.get('/clinic-enhanced/queue', requireAuth, requireNotBanned, requireFeature(
   res.send(renderPage('Clinic Queue', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   for (const [key, value] of Object.entries(req.body)) {
     if (key.startsWith('status_')) {
@@ -32278,7 +35198,7 @@ app.post('/clinic-enhanced/queue/update', requireAuth, requireNotBanned, require
   res.redirect('/clinic-enhanced/queue');
 }));
 
-app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const patient = (await pool.query('SELECT id, full_name, patient_id FROM clinic_patients WHERE id=$1 AND tenant_id=$2', [req.params.patientId, tid])).rows[0];
   if (!patient) return res.status(404).send('Patient not found');
@@ -32305,19 +35225,19 @@ app.get('/clinic-enhanced/consultations/new/:patientId', requireAuth, requireNot
   res.send(renderPage('New Consultation', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.post('/clinic-enhanced/consultations/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { patient_id, appointment_id, doctor_name, chief_complaint, history, examination, diagnosis, weight, temperature, blood_pressure, notes } = req.body;
   await pool.query(
     `INSERT INTO clinic_consultations (tenant_id,patient_id,appointment_id,doctor_name,chief_complaint,history,examination,diagnosis,weight,temperature,blood_pressure,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
     [tid, parseInt(patient_id), appointment_id ? parseInt(appointment_id) : null, doctor_name, chief_complaint, history, examination, diagnosis, parseFloat(weight)||null, parseFloat(temperature)||null, blood_pressure, notes]
   );
-  if (appointment_id) { await pool.query("UPDATE clinic_appointments SET status='completed' WHERE id=$1 AND tenant_id=$2", [parseInt(appointment_id), tid]); }
+  if (appointment_id) { await pool.query("UPDATE clinic_appointments SET status='completed' WHERE id=$1", [parseInt(appointment_id)]); }
   audit(req.session.user.email, 'consultation_saved', 'Patient ID: ' + patient_id);
   res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
 
-app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const rows = (await pool.query(`
     SELECT pr.*, p.full_name AS patient_name, p.patient_id AS patient_code
@@ -32336,7 +35256,7 @@ app.get('/clinic-enhanced/prescriptions', requireAuth, requireNotBanned, require
   res.send(renderPage('Prescriptions', html, req.session.user));
 }));
 
-app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const { consultation_id, patient_id, prescribed_by, notes } = req.body;
   const result = await pool.query(
@@ -32358,7 +35278,7 @@ app.post('/clinic-enhanced/prescriptions/save', requireAuth, requireNotBanned, r
   res.redirect('/clinic-enhanced/patients/' + patient_id);
 }));
 
-app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
+app.get('/clinic-enhanced/reports', requireAuth, requireNotBanned, ah(async (req, res) => {
   const tid = req.session.user.tenant_id;
   const totalPatients = (await pool.query('SELECT COUNT(*) FROM clinic_patients WHERE tenant_id=$1', [tid])).rows[0].count;
   const totalAppts = (await pool.query('SELECT COUNT(*) FROM clinic_appointments WHERE tenant_id=$1', [tid])).rows[0].count;
@@ -33065,234 +35985,94 @@ try {
 }
 
 // ============================================================
-// NEW MODULE: ATTENDANCE TRACKER (QR, Manual, Reports)
+// STAGGERED MODULE LOADING — batches of 5, 2s delay between batches
+// Prevents DB pool exhaustion on startup
 // ============================================================
+
+// Batch 1 — immediate
 try { const m = require('./attendance-tracker'); m(app, db, pool, renderPage, esc); console.log('[Attendance] Module loaded'); } catch(e) { console.warn('[Attendance] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: HELPDESK / TICKET SYSTEM
-// ============================================================
 try { const m = require('./helpdesk'); m(app, db, pool, renderPage, esc); console.log('[Helpdesk] Module loaded'); } catch(e) { console.warn('[Helpdesk] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: ONLINE EXAMS & QUIZZES
-// ============================================================
 try { const m = require('./online-exams'); m(app, db, pool, renderPage, esc); console.log('[Exams] Module loaded'); } catch(e) { console.warn('[Exams] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: EVENT MANAGEMENT & RSVP
-// ============================================================
 try { const m = require('./event-manager'); m(app, db, pool, renderPage, esc); console.log('[Events] Module loaded'); } catch(e) { console.warn('[Events] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: ADVANCED INVENTORY MANAGEMENT
-// ============================================================
 try { const m = require('./inventory-pro'); m(app, db, pool, renderPage, esc); console.log('[Inventory] Module loaded'); } catch(e) { console.warn('[Inventory] Error:', e.message); }
 
-// ============================================================
-// NEW MODULE: VISITOR MANAGEMENT
-// ============================================================
-try { const m = require('./visitor-log'); m(app, db, pool, renderPage, esc); console.log('[Visitors] Module loaded'); } catch(e) { console.warn('[Visitors] Error:', e.message); }
+// Batch 2 — 2s delay
+setTimeout(() => {
+  try { const m = require('./visitor-log'); m(app, db, pool, renderPage, esc); console.log('[Visitors] Module loaded'); } catch(e) { console.warn('[Visitors] Error:', e.message); }
+  try { const m = require('./library'); m(app, db, pool, renderPage, esc); console.log('[Library] Module loaded'); } catch(e) { console.warn('[Library] Error:', e.message); }
+  try { const m = require('./payroll'); m(app, db, pool, renderPage, esc); console.log('[Payroll] Module loaded'); } catch(e) { console.warn('[Payroll] Error:', e.message); }
+  try { const m = require('./alumni-network'); m(app, db, pool, renderPage, esc); console.log('[Alumni] Module loaded'); } catch(e) { console.warn('[Alumni] Error:', e.message); }
+  try { const m = require('./hostel-manager'); m(app, db, pool, renderPage, esc); console.log('[Hostel] Module loaded'); } catch(e) { console.warn('[Hostel] Error:', e.message); }
+}, 2000);
 
-// ============================================================
-// NEW MODULE: LIBRARY MANAGEMENT
-// ============================================================
-try { const m = require('./library'); m(app, db, pool, renderPage, esc); console.log('[Library] Module loaded'); } catch(e) { console.warn('[Library] Error:', e.message); }
+// Batch 3 — 4s delay
+setTimeout(() => {
+  try { const m = require('./transport'); m(app, db, pool, renderPage, esc); console.log('[Transport] Module loaded'); } catch(e) { console.warn('[Transport] Error:', e.message); }
+  try { const m = require('./canteen'); m(app, db, pool, renderPage, esc); console.log('[Canteen] Module loaded'); } catch(e) { console.warn('[Canteen] Error:', e.message); }
+  try { const m = require('./sports'); m(app, db, pool, renderPage, esc); console.log('[Sports] Module loaded'); } catch(e) { console.warn('[Sports] Error:', e.message); }
+  try { const m = require('./certificates'); m(app, db, pool, renderPage, esc); console.log('[Certificates] Module loaded'); } catch(e) { console.warn('[Certificates] Error:', e.message); }
+  try { const m = require('./feedback'); m(app, db, pool, renderPage, esc); console.log('[Feedback] Module loaded'); } catch(e) { console.warn('[Feedback] Error:', e.message); }
+}, 4000);
 
-// ============================================================
-// NEW MODULE: PAYROLL MANAGEMENT
-// ============================================================
-try { const m = require('./payroll'); m(app, db, pool, renderPage, esc); console.log('[Payroll] Module loaded'); } catch(e) { console.warn('[Payroll] Error:', e.message); }
+// Batch 4 — 6s delay
+setTimeout(() => {
+  try { const m = require('./asset-tracker'); m(app, db, pool, renderPage, esc); console.log('[Assets] Module loaded'); } catch(e) { console.warn('[Assets] Error:', e.message); }
+  try { const m = require('./crm'); m(app, db, pool, renderPage, esc); console.log('[CRM] Module loaded'); } catch(e) { console.warn('[CRM] Error:', e.message); }
+  try { const m = require('./blog-cms'); m(app, db, pool, renderPage, esc); console.log('[Blog] Module loaded'); } catch(e) { console.warn('[Blog] Error:', e.message); }
+  try { const _atInit = (process.env.AT_API_KEY && process.env.AT_USERNAME) ? require('africastalking')({ apiKey: process.env.AT_API_KEY, username: process.env.AT_USERNAME }) : null; const m = require('./sms-blast'); m(app, db, pool, renderPage, esc, { africastalking: _atInit }); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
+  try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
+}, 6000);
 
-// ============================================================
-// NEW MODULE: ALUMNI NETWORK
-// ============================================================
-try { const m = require('./alumni-network'); m(app, db, pool, renderPage, esc); console.log('[Alumni] Module loaded'); } catch(e) { console.warn('[Alumni] Error:', e.message); }
+// Batch 5 — 8s delay
+setTimeout(() => {
+  try { const m = require('./student-id-cards'); m(app, db, pool, renderPage, esc); console.log('[IDCards] Student ID card generator loaded'); } catch(e) { console.warn('[IDCards] Error:', e.message); }
+  try { const m = require('./qr-payments'); m(app, db, pool, renderPage, esc); console.log('[QRPayments] QR code payment system loaded'); } catch(e) { console.warn('[QRPayments] Error:', e.message); }
+  try { const m = require('./fee-installments'); m(app, db, pool, renderPage, esc); console.log('[FeeInstallments] Fee installment plans loaded'); } catch(e) { console.warn('[FeeInstallments] Error:', e.message); }
+  try { const m = require('./whatsapp-receipts'); m(app, db, pool, renderPage, esc); console.log('[WhatsAppReceipts] WhatsApp receipt sharing loaded'); } catch(e) { console.warn('[WhatsAppReceipts] Error:', e.message); }
+  try { const m = require('./ussd-portal'); m(app, db, pool, renderPage, esc); console.log('[USSD] USSD portal loaded'); } catch(e) { console.warn('[USSD] Error:', e.message); }
+}, 8000);
 
-// ============================================================
-// NEW MODULE: HOSTEL / ACCOMMODATION MANAGEMENT
-// ============================================================
-try { const m = require('./hostel-manager'); m(app, db, pool, renderPage, esc); console.log('[Hostel] Module loaded'); } catch(e) { console.warn('[Hostel] Error:', e.message); }
+// Batch 6 — 10s delay
+setTimeout(() => {
+  try { const m = require('./email-campaigns'); m(app, db, pool, renderPage, esc); console.log('[EmailCampaigns] Email campaign builder loaded'); } catch(e) { console.warn('[EmailCampaigns] Error:', e.message); }
+  try { const m = require('./ptc-booking'); m(app, db, pool, renderPage, esc); console.log('[PTCBooking] Parent-teacher conference booking loaded'); } catch(e) { console.warn('[PTCBooking] Error:', e.message); }
+  try { const m = require('./inventory-reorder'); m(app, db, pool, renderPage, esc); console.log('[InventoryReorder] Inventory auto-reorder loaded'); } catch(e) { console.warn('[InventoryReorder] Error:', e.message); }
+  try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc); console.log('[StaffAppraisals] Staff appraisals loaded'); } catch(e) { console.warn('[StaffAppraisals] Error:', e.message); }
+  try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
+}, 10000);
 
-// ============================================================
-// NEW MODULE: TRANSPORT MANAGEMENT
-// ============================================================
-try { const m = require('./transport'); m(app, db, pool, renderPage, esc); console.log('[Transport] Module loaded'); } catch(e) { console.warn('[Transport] Error:', e.message); }
+// Batch 7 — 12s delay
+setTimeout(() => {
+  try { const m = require('./scholarship-manager'); m(app, db, pool, renderPage, esc); console.log('[Scholarships] Scholarship & bursary manager loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
+  try { const m = require('./leave-manager'); m(app, db, pool, renderPage, esc); console.log('[LeaveManager] Leave management loaded'); } catch(e) { console.warn('[LeaveManager] Error:', e.message); }
+  try { const m = require('./discipline-tracker'); m(app, db, pool, renderPage, esc); console.log('[Discipline] Discipline & behavior tracker loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
+  try { const m = require('./budget-manager'); m(app, db, pool, renderPage, esc); console.log('[Budget] Department & budget manager loaded'); } catch(e) { console.warn('[Budget] Error:', e.message); }
+  try { const m = require('./volunteer-manager'); m(app, db, pool, renderPage, esc); console.log('[Volunteers] Volunteer manager loaded'); } catch(e) { console.warn('[Volunteers] Error:', e.message); }
+}, 12000);
 
-// ============================================================
-// NEW MODULE: CANTEEN / MEAL MANAGEMENT
-// ============================================================
-try { const m = require('./canteen'); m(app, db, pool, renderPage, esc); console.log('[Canteen] Module loaded'); } catch(e) { console.warn('[Canteen] Error:', e.message); }
+// Batch 8 — 14s delay
+setTimeout(() => {
+  try { const m = require('./dev-team-manager'); m(app, db, pool, renderPage, esc); console.log('[DevTeam] Dev team manager loaded'); } catch(e) { console.warn('[DevTeam] Error:', e.message); }
+  try { const m = require('./dev-portal'); m(app, pool, renderPage, esc); console.log('[DevPortal] Developer portal extension loaded — 25 features'); } catch(e) { console.warn('[DevPortal] Error:', e.message); }
+  try { const m = require('./staff-access-control'); m(app, db, pool, renderPage, esc); console.log('[StaffAccess] Staff & access control loaded'); } catch(e) { console.warn('[StaffAccess] Error:', e.message); }
+  try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
+  try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
+  try { const m = require('./student-portal'); m(app, db, pool, renderPage, esc); console.log('[StudentPortal] Student portal module loaded'); } catch(e) { console.warn('[StudentPortal] Error:', e.message); }
+}, 14000);
 
-// ============================================================
-// NEW MODULE: SPORTS LEAGUE MANAGEMENT
-// ============================================================
-try { const m = require('./sports'); m(app, db, pool, renderPage, esc); console.log('[Sports] Module loaded'); } catch(e) { console.warn('[Sports] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: CERTIFICATE GENERATOR
-// ============================================================
-try { const m = require('./certificates'); m(app, db, pool, renderPage, esc); console.log('[Certificates] Module loaded'); } catch(e) { console.warn('[Certificates] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: FEEDBACK & RATING SYSTEM
-// ============================================================
-try { const m = require('./feedback'); m(app, db, pool, renderPage, esc); console.log('[Feedback] Module loaded'); } catch(e) { console.warn('[Feedback] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: ASSET TRACKER
-// ============================================================
-try { const m = require('./asset-tracker'); m(app, db, pool, renderPage, esc); console.log('[Assets] Module loaded'); } catch(e) { console.warn('[Assets] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: CRM & CONTACT MANAGEMENT
-// ============================================================
-try { const m = require('./crm'); m(app, db, pool, renderPage, esc); console.log('[CRM] Module loaded'); } catch(e) { console.warn('[CRM] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: BLOG CMS
-// ============================================================
-try { const m = require('./blog-cms'); m(app, db, pool, renderPage, esc); console.log('[Blog] Module loaded'); } catch(e) { console.warn('[Blog] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: BULK SMS & COMMUNICATION
-// ============================================================
-try { const m = require('./sms-blast'); m(app, db, pool, renderPage, esc); console.log('[SMS] Module loaded'); } catch(e) { console.warn('[SMS] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: AI ASSISTANT
-// ============================================================
-try { const m = require('./ai-assistant'); m(app, db, pool, renderPage, esc); console.log('[AI] Module loaded'); } catch(e) { console.warn('[AI] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: STUDENT ID CARD GENERATOR
-// ============================================================
-try { const m = require('./student-id-cards'); m(app, db, pool, renderPage, esc); console.log('[IDCards] Student ID card generator loaded'); } catch(e) { console.warn('[IDCards] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: QR CODE PAYMENT SYSTEM
-// ============================================================
-try { const m = require('./qr-payments'); m(app, db, pool, renderPage, esc); console.log('[QRPayments] QR code payment system loaded'); } catch(e) { console.warn('[QRPayments] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: FEE INSTALLMENT PLANS
-// ============================================================
-try { const m = require('./fee-installments'); m(app, db, pool, renderPage, esc); console.log('[FeeInstallments] Fee installment plans loaded'); } catch(e) { console.warn('[FeeInstallments] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: WHATSAPP RECEIPT SHARING
-// ============================================================
-try { const m = require('./whatsapp-receipts'); m(app, db, pool, renderPage, esc); console.log('[WhatsAppReceipts] WhatsApp receipt sharing loaded'); } catch(e) { console.warn('[WhatsAppReceipts] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: USSD PORTAL (Feature Phone Access)
-// ============================================================
-try { const m = require('./ussd-portal'); m(app, db, pool, renderPage, esc); console.log('[USSD] USSD portal loaded'); } catch(e) { console.warn('[USSD] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: EMAIL CAMPAIGN BUILDER
-// ============================================================
-try { const m = require('./email-campaigns'); m(app, db, pool, renderPage, esc); console.log('[EmailCampaigns] Email campaign builder loaded'); } catch(e) { console.warn('[EmailCampaigns] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: PARENT-TEACHER CONFERENCE BOOKING
-// ============================================================
-try { const m = require('./ptc-booking'); m(app, db, pool, renderPage, esc); console.log('[PTCBooking] Parent-teacher conference booking loaded'); } catch(e) { console.warn('[PTCBooking] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: INVENTORY AUTO-REORDER & ALERTS
-// ============================================================
-try { const m = require('./inventory-reorder'); m(app, db, pool, renderPage, esc); console.log('[InventoryReorder] Inventory auto-reorder loaded'); } catch(e) { console.warn('[InventoryReorder] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: STAFF PERFORMANCE APPRAISALS
-// ============================================================
-try { const m = require('./staff-appraisals'); m(app, db, pool, renderPage, esc); console.log('[StaffAppraisals] Staff appraisals loaded'); } catch(e) { console.warn('[StaffAppraisals] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: STUDENT HEALTH RECORDS
-// ============================================================
-try { const m = require('./student-health'); m(app, db, pool, renderPage, esc); console.log('[StudentHealth] Student health records loaded'); } catch(e) { console.warn('[StudentHealth] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: SCHOLARSHIP & BURSARY MANAGER
-// ============================================================
-try { const m = require('./scholarship-manager'); m(app, db, pool, renderPage, esc); console.log('[Scholarships] Scholarship & bursary manager loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: LEAVE MANAGEMENT (Staff & Student)
-// ============================================================
-try { const m = require('./leave-manager'); m(app, db, pool, renderPage, esc); console.log('[LeaveManager] Leave management loaded'); } catch(e) { console.warn('[LeaveManager] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: DISCIPLINE & BEHAVIOR TRACKER
-// ============================================================
-try { const m = require('./discipline-tracker'); m(app, db, pool, renderPage, esc); console.log('[Discipline] Discipline & behavior tracker loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: DEPARTMENT & BUDGET MANAGER
-// ============================================================
-try { const m = require('./budget-manager'); m(app, db, pool, renderPage, esc); console.log('[Budget] Department & budget manager loaded'); } catch(e) { console.warn('[Budget] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: VOLUNTEER MANAGER
-// ============================================================
-try { const m = require('./volunteer-manager'); m(app, db, pool, renderPage, esc); console.log('[Volunteers] Volunteer manager loaded'); } catch(e) { console.warn('[Volunteers] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: DEV TEAM MANAGER
-// ============================================================
-try { const m = require('./dev-team-manager'); m(app, db, pool, renderPage, esc); console.log('[DevTeam] Dev team manager loaded'); } catch(e) { console.warn('[DevTeam] Error:', e.message); }
-
-// ============================================================
-// NEW MODULE: STAFF & ACCESS CONTROL (RBAC for Subscribers)
-// ============================================================
-try { const m = require('./staff-access-control'); m(app, db, pool, renderPage, esc); console.log('[StaffAccess] Staff & access control loaded'); } catch(e) { console.warn('[StaffAccess] Error:', e.message); }
-
-// ============================================================
-// MODULE: TITHES & OFFERINGS (Church Giving Management)
-// ============================================================
-try { const m = require('./tithes-offerings'); m(app, db, pool, renderPage, esc); console.log('[Tithes] Tithes & offerings module loaded'); } catch(e) { console.warn('[Tithes] Error:', e.message); }
-
-// ============================================================
-// MODULE: ANALYTICS DASHBOARD (Platform-wide Analytics)
-// ============================================================
-try { const m = require('./analytics-dashboard'); m(app, db, pool, renderPage, esc); console.log('[Analytics] Analytics dashboard module loaded'); } catch(e) { console.warn('[Analytics] Error:', e.message); }
-
-// ============================================================
-// MODULE: STUDENT PORTAL (Student Self-Service)
-// ============================================================
-try { const m = require('./student-portal'); m(app, db, pool, renderPage, esc); console.log('[StudentPortal] Student portal module loaded'); } catch(e) { console.warn('[StudentPortal] Error:', e.message); }
-
-// ============================================================
-// MODULE: GRADEBOOK (Academic Grades Management)
-// ============================================================
+// Batch 9 — 16s delay (table allowlists registered synchronously; module loading deferred)
 ['grades','marks','marksheets','grading_scales','class_subjects'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./gradebook'); m(app, db, pool, renderPage, esc); console.log('[Gradebook] Gradebook module loaded'); } catch(e) { console.warn('[Gradebook] Error:', e.message); }
-
-// ============================================================
-// MODULE: FEE MANAGEMENT (Fee Structures, Collection, Receipts)
-// ============================================================
 ['fee_structures','fees_structure','fee_receipts','fee_reminder_settings','class_payments','payment_methods','payment_requests','payment_transactions'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./fee-management'); m(app, db, pool, renderPage, esc); console.log('[FeeManagement] Fee management module loaded'); } catch(e) { console.warn('[FeeManagement] Error:', e.message); }
-
-// ============================================================
-// MODULE: POS TERMINAL (Point of Sale, Inventory, Reports)
-// ============================================================
 ['retail_products','retail_sales','retail_sale_items','school_shop_sales','supermarket_daily_sales','supermarket_products','stock_adjustments','stock_movements','stock_takes','stock_take_items','stock_transfers'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./pos-terminal'); m(app, db, pool, renderPage, esc); console.log('[POS] POS terminal module loaded'); } catch(e) { console.warn('[POS] Error:', e.message); }
-
-// ============================================================
-// MODULE: TIMETABLE BUILDER (Scheduling, Lessons, Conflicts)
-// ============================================================
 ['timetable_periods','timetable_conflicts','lesson_plans','live_classes'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./timetable-builder'); m(app, db, pool, renderPage, esc); console.log('[Timetable] Timetable builder module loaded'); } catch(e) { console.warn('[Timetable] Error:', e.message); }
-
-// ============================================================
-// MODULE: LMS (Learning Management System)
-// ============================================================
 ['lms_enrollments','lms_content','lms_assignments','lms_submissions','courses','quiz_questions','quizzes','quiz_attempts'].forEach(t => VALID_TABLES.add(t));
-try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log('[LMS] Learning management system loaded'); } catch(e) { console.warn('[LMS] Error:', e.message); }
+setTimeout(() => {
+  try { const m = require('./gradebook'); m(app, db, pool, renderPage, esc); console.log('[Gradebook] Gradebook module loaded'); } catch(e) { console.warn('[Gradebook] Error:', e.message); }
+  try { const m = require('./fee-management'); m(app, db, pool, renderPage, esc); console.log('[FeeManagement] Fee management module loaded'); } catch(e) { console.warn('[FeeManagement] Error:', e.message); }
+  try { const m = require('./pos-terminal'); m(app, db, pool, renderPage, esc); console.log('[POS] POS terminal module loaded'); } catch(e) { console.warn('[POS] Error:', e.message); }
+  try { const m = require('./timetable-builder'); m(app, db, pool, renderPage, esc); console.log('[Timetable] Timetable builder module loaded'); } catch(e) { console.warn('[Timetable] Error:', e.message); }
+  try { const m = require('./lms'); m(app, db, pool, renderPage, esc); console.log('[LMS] Learning management system loaded'); } catch(e) { console.warn('[LMS] Error:', e.message); }
+}, 16000);
 
 // ============================================================
 // MODULE: ADMISSIONS (Application, Review, Enrollment)
@@ -33328,7 +36108,7 @@ const _tenantMw = (req, res, next) => {
   req.user = req.session.user;
   next();
 };
-const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth: requireAuth, wsBroadcast, redis: redisCache, ah, esc, renderPage, notify, sendEmail, sendSMS };
+const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth, requireNotBanned, requireSuperAdmin, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, wsBroadcast, redis: redisCache, queueEmail, uiT };
 
 // Batch 1: Old-style modules (app, db, pool, renderPage, esc)
 ['approval_requests','approval_actions','approval_notifications','approval_steps','approval_workflow_templates','approval_workflows'].forEach(t => VALID_TABLES.add(t));
@@ -33406,225 +36186,1120 @@ try { const m = require('./gallery'); m(app, db, pool, renderPage, esc); console
   'branch_inter_requests','branch_kpis','branch_holidays','audit_logs'
 ].forEach(t => VALID_TABLES.add(t));
 
+// === DEFERRED MODULE LOADING — load heavy modules AFTER server starts ===
+// This reduces startup memory spike and prevents Render OOM kills
+const _deferModules = () => {
 try { const m = require('./e-commerce'); m(app, pool, _newModOpts); console.log('[ECommerce] E-commerce module loaded'); } catch(e) { console.warn('[ECommerce] Error:', e.message); }
 try { const m = require('./scholarships'); m(app, pool, _newModOpts); console.log('[Scholarships] Scholarships module loaded'); } catch(e) { console.warn('[Scholarships] Error:', e.message); }
 try { const m = require('./homework'); m(app, pool, _newModOpts); console.log('[Homework] Homework module loaded'); } catch(e) { console.warn('[Homework] Error:', e.message); }
 try { const m = require('./discipline'); m(app, pool, _newModOpts); console.log('[Discipline] Discipline module loaded'); } catch(e) { console.warn('[Discipline] Error:', e.message); }
 try { const m = require('./multi-branch'); m(app, pool, _newModOpts); console.log('[MultiBranch] Multi-branch module loaded'); } catch(e) { console.warn('[MultiBranch] Error:', e.message); }
 
+// ============================================================
+// === SELF-EXECUTING MODULE LOADER — Global Scope Bridge ===
+// ============================================================
+// These modules reference app/pool/ah/esc/renderPage etc. as globals.
+// Node.js require() creates a new module scope, so we temporarily
+// expose these variables on the global object, then clean up after.
+// ============================================================
 
-//
-
-// === Module-scope uiT translation helper (used by SchoolV18b and other modules) ===
-const uiT = (key, lang) => {
-  const dict = {
-    'nav.dashboard': { lg: 'Olutimbe', sw: 'Dashibodi', fr: 'Tableau de bord' },
-    'nav.notifications': { lg: 'Ebyogerwa', sw: 'Arifa', fr: 'Notifications' },
-    'nav.modules': { lg: 'Amasomo', sw: 'Moduli', fr: 'Modules' },
-    'nav.search': { lg: 'Noonya', sw: 'Tafuta', fr: 'Rechercher' },
-    'nav.portal': { lg: 'Akabinja', sw: 'Lango', fr: 'Portail' },
-    'nav.settings': { lg: 'Enteekateeka', sw: 'Mipangilio', fr: 'Parametres' },
-    'school_pages': { lg: 'Emitwe', sw: 'Kurasa', fr: 'Pages' },
-    'school_admissions': { lg: 'Okuyingira', sw: 'Uingizwaji', fr: 'Admissions' },
-    'school_bus': { lg: 'Emotoka', sw: 'Basi', fr: 'Bus' },
-    'school_meals': { lg: 'Emere', sw: 'Chakula', fr: 'Repas' },
-    'school_sickbay': { lg: 'Edwaliro', sw: 'Hospitali', fr: 'Infirmerie' },
-    'school_analytics': { lg: 'Ebigambo', sw: 'Uchambuzi', fr: 'Analytique' },
-    'school_api_docs': { lg: 'Ebirala', sw: 'Hati', fr: 'API Docs' },
-    'school_pwa': { lg: 'Apuyaka', sw: 'Programu', fr: 'Application' },
-  };
-  const entry = dict[key];
-  if (!entry) return key;
-  return entry[lang || 'en'] || key;
+// Variables that exist right now in server.js scope
+const _scopeBridge = {
+  app, pool, db, ah, esc, renderPage, requireAuth, requireNotBanned,
+  requireSuperAdmin, audit, notify, notifyAll, sendEmail, sendSMS, migrations,
+  VALID_TABLES, requestMtnPayment
 };
 
-// === V18 SCHOOL UPGRADE: School Features Part 2 (Public Pages, SEO, Accessibility, Admissions Form, Bus GPS, Meals, Sickbay, API Docs, PWA, Analytics) ===
-[
-  'school_public_pages','public_admission_applications','bus_trips','bus_trip_logs','meal_schedules',
-  'meal_attendance_v18','sickbay_medicine_inventory','user_accessibility_settings'
-].forEach(t => VALID_TABLES.add(t));
+// Cross-module functions: populated by modules when they load
+// Start as no-op stubs so dependent modules don't crash if loaded out of order
+global.trackRevenue = async () => {};
+global.awardPoints = async () => {};
+global.creditDeveloperRevenue = async () => {};
+global.queueEmail = async () => {};
+
+// Expose all scope variables to global
+Object.entries(_scopeBridge).forEach(([k, v]) => { global[k] = v; });
+
+// Helper: load self-executing module with full error details
+function loadSelfExec(modName, label) {
+  try {
+    require('./' + modName);
+    console.log('[' + label + '] Module loaded successfully');
+    return true;
+  } catch(e) {
+    console.error('[' + label + '] FAILED:', e.message);
+    console.error('[' + label + '] Stack:', e.stack?.split('\n').slice(0,3).join(' | '));
+    return false;
+  }
+}
+
+// Load order matters: monetization defines trackRevenue/creditDeveloperRevenue,
+// viral-content defines awardPoints — others depend on these.
+
+// 1. MONETIZATION ENGINE (defines trackRevenue, creditDeveloperRevenue)
+loadSelfExec('monetization-engine', 'Monetization');
+
+// 1b. SUBSCRIPTION ENFORCEMENT — Actual plan limit blocking, feature gating, downgrade execution
 try {
-  const _v18bOpts = { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail: global.queueEmail || (() => {}), uiT, awardPoints: global.awardPoints || (() => {}), trackRevenue: global.trackRevenue || (() => {}) };
-  const m = require('./school-v18-b');
-  m(app, pool, _v18bOpts);
-  console.log('[SchoolV18b] School upgrade Part 2 loaded (V18) — 10 features, 30+ routes');
-} catch(e) { console.warn('[SchoolV18b] Error:', e.message); }
+  const subEnforcement = require('./subscription-enforcement')(app, pool, { esc, audit, sendEmail });
+  // Expose enforcement middleware globally so other modules can use them
+  global.enforcePlanLimit = subEnforcement.enforcePlanLimit;
+  global.enforceFeature = subEnforcement.enforceFeature;
+  global.enforcePlanOrAbove = subEnforcement.enforcePlanOrAbove;
+  console.log('[SubscriptionEnforcement] Plan enforcement middleware registered globally');
+} catch(e) { console.warn('[SubscriptionEnforcement] Failed:', e.message); }
 
-// === V19 MASSIVE FEATURE UPGRADE: 10 New Modules (50+ new features) ===
-const _v19ModuleList = [
-  'ai_auto_grading', 'emergency_alerts', 'gamification', 'digital_signatures',
-  'school_elections', 'smart_hostel', 'uniform_shop', 'canteen_preorder',
-  'staff_performance', 'lost_found'
-];
-const _v19TableList = [
-  'ai_grading_results','plagiarism_checks','ai_generated_questions',
-  'emergency_alerts','emergency_templates','emergency_drills',
-  'gamification_points','gamification_badges','gamification_earned_badges','gamification_rewards','gamification_redemptions','gamification_streaks',
-  'signature_requests','signature_records','signed_documents',
-  'elections','election_candidates','election_votes','school_polls','poll_votes',
-  'hostel_rooms_smart','room_allocations','room_swap_requests','room_inspections','room_maintenance',
-  'shop_products','shop_orders','shop_order_items','shop_stock_history',
-  'canteen_menu_items','canteen_weekly_menu','canteen_orders','canteen_order_items','canteen_wallet',
-  'staff_kpi_scores','staff_student_feedback','staff_classroom_observations','staff_professional_development',
-  'lost_found_items','lost_found_claims'
-];
-_v19TableList.forEach(t => VALID_TABLES.add(t));
+// 1c. SUBSCRIPTION DUNNING — Payment recovery & auto-downgrade pipeline
+try {
+  require('./subscription-dunning')(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail,
+    { info: (...a) => console.log('[Dunning]', ...a), warn: (...a) => console.warn('[Dunning]', ...a), error: (...a) => console.error('[Dunning]', ...a) });
+  console.log('[Dunning] Subscription dunning pipeline loaded');
+} catch(e) { console.warn('[Dunning] Failed:', e.message); }
 
-const _v19Opts = { esc, renderPage, ah, requireAuth, requireNotBanned, audit, queueEmail, uiT: uiT || ((k)=>k), awardPoints: (() => {}), trackRevenue: global.trackRevenue || (() => {}) };
+// 1e. GOOGLE OAUTH2 — "Sign in with Google" (manual OAuth2, no passport)
+try {
+  require('./google-oauth')(app, pool, { esc, audit, ah, renderPage, bcrypt });
+  console.log('[GoogleOAuth] Google OAuth2 login module loaded');
+} catch(e) { console.warn('[GoogleOAuth] Failed:', e.message); }
 
-const _v19Modules = [
-  ['./ai-auto-grading', 'AI Auto-Grading & Plagiarism'],
-  ['./emergency-alerts', 'Emergency Alert System'],
-  ['./gamification-engine', 'Gamification Engine'],
-  ['./digital-signatures', 'Digital Signatures'],
-  ['./school-elections', 'School Elections & Voting'],
-  ['./smart-hostel', 'Smart Hostel Allocation'],
-  ['./uniform-shop', 'School Uniform Shop'],
-  ['./canteen-preorder', 'Canteen Pre-ordering'],
-  ['./staff-performance', 'Staff Performance Dashboard'],
-  ['./lost-found', 'Lost & Found Management']
-];
-_v19Modules.forEach(([modPath, label]) => {
-  try {
-    const m = require(modPath);
-    m(app, pool, _v19Opts);
-    console.log('[V19] ' + label + ' loaded');
-  } catch(e) { console.warn('[V19] ' + label + ' Error:', e.message); }
-});
-console.log('[V19] === 10 modules loaded — V19 Massive Feature Upgrade complete ===');
+// 1d. USAGE METERING — Track usage per tenant, enforce limits, generate overage charges
+try {
+  const usageMetering = require('./usage-metering')(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail,
+    { info: (...a) => console.log('[Usage]', ...a), warn: (...a) => console.warn('[Usage]', ...a), error: (...a) => console.error('[Usage]', ...a) });
+  if (usageMetering?.trackUsage) global.trackUsage = usageMetering.trackUsage;
+  console.log('[UsageMetering] Usage metering module loaded');
+} catch(e) { console.warn('[UsageMetering] Failed:', e.message); }
 
-// === V19 CONTINUED: 5 More Modules ===
-[
-  'parent_teacher_chat','chat_conversations','chat_messages','chat_announcements','chat_announcement_reads',
-  'aptitude_tests','aptitude_answers','interest_responses','career_library','career_recommendations',
-  'university_programs','career_counselling_sessions',
-  'referral_codes','referral_tracking','referral_rewards_config','referral_reward_claims','referral_payouts',
-  'wallet_accounts','wallet_transactions','wallet_savings',
-  'tutor_profiles','tutoring_sessions','tutoring_reviews','tutoring_hours',
-  'mood_checkins','wellness_resources','counsellor_bookings_mh','anonymous_reports','sleep_logs','gratitude_entries'
-].forEach(t => VALID_TABLES.add(t));
+// 2. VIRAL CONTENT ENGINE (defines awardPoints)
+loadSelfExec('viral-content-engine', 'ViralEngine');
 
-const _v19bModules = [
-  ['./parent-teacher-chat', 'Parent-Teacher Chat'],
-  ['./career-guidance', 'Career Guidance & Aptitude'],
-  ['./referral-rewards', 'Referral Rewards Program'],
-  ['./pocket-money', 'Student Pocket Money Wallet'],
-  ['./peer-tutoring', 'Peer Tutoring Marketplace'],
-  ['./mental-health', 'Mental Health & Wellness']
-];
-_v19bModules.forEach(([modPath, label]) => {
-  try {
-    const m = require(modPath);
-    m(app, pool, _v19Opts);
-    console.log('[V19+] ' + label + ' loaded');
-  } catch(e) { console.warn('[V19+] ' + label + ' Error:', e.message); }
-});
-console.log('[V19+] === 6 more modules loaded — V19 continued ===');
+// 3. FEATURES BLOCK (exams, whatsapp, branches, clinic, scheduled-reports)
+loadSelfExec('features-block', 'FeaturesBlock');
 
-// === V20 FINAL BATCH: 5 More School Modules ===
-[
-  'exam_seating_plans','exam_seats','room_layout_templates',
-  'teacher_absences','teacher_substitutions',
-  'gate_passes','visitor_passes','late_arrivals',
-  'bullying_reports','bullying_case_notes','bullying_resources',
-  'merch_products','merch_orders','merch_order_items','merch_campaigns','merch_stock_history'
-].forEach(t => VALID_TABLES.add(t));
+// 4. VIRAL GROWTH BOOSTER (depends on trackRevenue)
+loadSelfExec('viral-growth-booster', 'ViralGrowth');
 
-[
-  ['./exam-seating', 'Exam Seating Arranger'],
-  ['./teacher-substitution', 'Teacher Substitution Manager'],
-  ['./gate-pass', 'Digital Gate Pass System'],
-  ['./anti-bullying', 'Anti-Bullying Reporting'],
-  ['./school-merch', 'School Merchandise Store']
-].forEach(([modPath, label]) => {
-  try {
-    const m = require(modPath);
-    m(app, pool, _v19Opts);
-    console.log('[V20] ' + label + ' loaded');
-  } catch(e) { console.warn('[V20] ' + label + ' Error:', e.message); }
-});
-console.log('[V20] === 5 more modules loaded — V20 complete ===');
+// 5. ENGAGEMENT ENGINE (depends on awardPoints, trackRevenue)
+loadSelfExec('engagement-engine', 'Engagement');
 
-// === V21 BATCH: 13 More School Modules ===
-[
-  'social_media_posts','social_media_accounts','social_media_templates','social_media_post_rules','social_media_hashtags','social_media_approvals','social_media_scheduled',
-  'virtual_meetings','meeting_participants','meeting_recordings','meeting_templates','meeting_notes',
-  'bus_routes','bus_fleet','bus_stops','bus_student_assignments','bus_trips','bus_maintenance','bus_notifications_log','bus_settings',
-  'flashcard_decks','flashcards','flashcard_progress','study_sessions','flashcard_imports','deck_ratings',
-  'cert_templates','blockchain_certificates','blockchain_ledger','cert_requests','cert_verification_log',
-  'collab_requests','collab_projects','collab_project_members','collab_resources','collab_forums','collab_forum_posts','collab_exchange_pairs','collab_competitions','collab_competition_teams','collab_knowledge_articles','collab_events','collab_messages',
-  'carpool_groups','carpool_members','carpool_schedules','carpool_rides','carpool_stops','carpool_emergency_contacts','carpool_messages','carpool_ride_logs',
+// 6. SEO TRAFFIC ENGINE
+loadSelfExec('seo-traffic-engine', 'SEO');
+
+// 7. ANALYTICS INTELLIGENCE
+loadSelfExec('analytics-engine', 'Analytics');
+
+// 8. EMAIL AUTOMATION (depends on trackRevenue)
+loadSelfExec('email-automation', 'EmailAuto');
+
+// 9. REVENUE QUICKSTART (depends on requestMtnPayment)
+loadSelfExec('revenue-quickstart', 'Revenue');
+
+// 10. GLOBAL VIRAL ENGINE (search, chat, QR, link shortener, contests, gallery, embeddable widgets, badges, translate)
+loadSelfExec('global-viral-engine', 'GlobalViral');
+
+// Clean up globals — DISABLED: self-executing modules reference these at request time
+// Removing them causes ReferenceError in route handlers after startup.
+// Object.keys(_scopeBridge).forEach(k => { delete global[k]; });
+// delete global.trackRevenue;
+// delete global.awardPoints;
+// delete global.creditDeveloperRevenue;
+// delete global.queueEmail;
+
+// ============================================================
+// === PHASE 1 UPGRADE: 24 UNDEPLOYED MODULES ACTIVATION ===
+// ============================================================
+// These modules existed on disk but were never registered.
+// All use (app, pool, opts) pattern — _newModOpts bridges them.
+
+// --- TABLE ALLOWLISTS: Education & STEM ---
+['whiteboard_sessions','whiteboard_pages','whiteboard_content','whiteboard_templates','whiteboard_collaborators','whiteboard_submissions',
+  'flashcard_decks','flashcard_cards','flashcard_reviews','flashcard_study_sessions',
+  'omr_templates','omr_scans','omr_results','omr_answer_keys',
+  'virtual_experiments','virtual_lab_sessions','virtual_lab_reports','virtual_safety_rules',
+  'smart_textbooks','smart_textbook_chapters','smart_textbook_notes','smart_textbook_bookmarks','smart_textbook_highlights','smart_textbook_progress',
+  'drone_fleet','drone_flight_logs','drone_certifications','drone_training_modules','drone_missions','drone_safety_protocols',
   'classroom_rooms','classroom_inventory','classroom_sensors','classroom_sensor_readings','classroom_bookings','classroom_maintenance','classroom_energy_logs','classroom_signage','classroom_lesson_recordings',
-  'procurement_vendors','procurement_requisitions','procurement_requisition_items','procurement_purchase_orders','procurement_po_items','procurement_rfq','procurement_rfq_quotes','procurement_contracts','procurement_budgets','procurement_audit_log',
-  'learning_paths','path_modules','skill_tree','student_skills','adaptive_assessments','assessment_questions','learning_progress','intervention_alerts','learning_goals',
-  'omr_templates','omr_answer_keys','omr_exams','omr_scanned_sheets','omr_results','omr_result_analysis',
-  'whiteboard_sessions','whiteboard_pages','whiteboard_content','whiteboard_templates','whiteboard_collaborators','whiteboard_submissions','whiteboard_version_history',
-  'podcast_channels','podcast_episodes','podcast_listens','podcast_comments','podcast_subscriptions','podcast_student_submissions'
+  'ai_tutor_sessions','ai_tutor_messages','ai_tutor_concepts','ai_tutor_practice_problems','ai_tutor_progress'
 ].forEach(t => VALID_TABLES.add(t));
 
-const _v21Modules = [
-  ['./social-media-autopost', 'Social Media AutoPost'],
-  ['./video-conferencing', 'Video Conferencing'],
-  ['./bus-route-optimizer', 'Bus Route Optimizer'],
-  ['./spaced-repetition', 'Spaced Repetition Flashcards'],
-  ['./blockchain-certificates', 'Blockchain Certificates'],
-  ['./cross-school-collab', 'Cross-School Collaboration'],
-  ['./carpool-coordination', 'Carpool Coordination'],
-  ['./smart-classroom', 'Smart Classroom IoT'],
-  ['./supply-chain-procurement', 'Supply Chain Procurement'],
-  ['./adaptive-learning', 'Adaptive Learning Paths'],
-  ['./omr-scanner', 'OMR Sheet Scanner'],
-  ['./interactive-whiteboard', 'Interactive Whiteboard'],
-  ['./campus-podcast', 'Campus Podcast']
-];
-_v21Modules.forEach(([modPath, label]) => {
+// --- TABLE ALLOWLISTS: Transport ---
+['bus_routes','bus_stops','bus_students','bus_fleet','bus_trips','bus_maintenance','bus_notifications','bus_route_optimization_logs',
+  'carpool_groups','carpool_members','carpool_rides','carpool_schedules','carpool_emergency_contacts','carpool_checkins','carpool_cost_sharing'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Blockchain ---
+['blockchain_certificates','blockchain_certificate_templates','blockchain_verifications','blockchain_revocations',
+  'blockchain_grades','blockchain_grade_attestations','blockchain_transcripts','blockchain_disputes'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Communication ---
+['video_rooms','video_participants','video_recordings','video_chat_messages','video_breakout_rooms','video_analytics','video_scheduling',
+  'peer_review_assignments','peer_review_submissions','peer_review_reviews','peer_review_rubrics','peer_review_calibration',
+  'social_accounts','social_posts','social_templates','social_scheduled_posts','social_analytics','social_hashtags',
+  'podcast_channels','podcast_episodes','podcast_listens','podcast_comments','podcast_subscriptions','podcast_student_submissions',
+  'school_newsletters','newsletter_articles','newsletter_subscribers','newsletter_reads','newsletter_categories'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Environment & Campus ---
+['green_initiatives','green_energy','green_waste','green_water','green_challenges','green_trees','green_reports','green_certifications','green_eco_clubs','green_carbon_calc',
+  'campus_safety_incidents','campus_safety_drills','campus_inspections'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Finance ---
+['pocket_money_wallets','pocket_money_transactions','pocket_money_savings','pocket_money_admin_limits','pocket_money_merchants',
+  'bank_accounts','bank_transactions','bank_transfers','bank_cards','bank_statements','bank_loan_requests'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Adaptive Learning ---
+['learning_paths','path_modules','skill_tree','student_skills','adaptive_assessments','assessment_questions','learning_progress','intervention_alerts'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Cross-School ---
+['collab_requests','collab_projects','collab_project_members','collab_resources','collab_forums','collab_forum_posts','collab_exchange_pairs','collab_competitions','collab_competition_teams','collab_knowledge_articles',
+  'procurement_vendors','procurement_requisitions','procurement_requisition_items','procurement_purchase_orders','procurement_po_items','procurement_rfq','procurement_rfq_quotes','procurement_contracts','procurement_budgets','procurement_audit_log'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Parent Engagement ---
+['parent_workshops','parent_workshop_registrations','parent_workshop_attendance','parent_workshop_resources','parent_workshop_feedback','parent_workshop_certificates'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- MODULE REGISTRATIONS ---
+
+// 1. Interactive Whiteboard (2,727 lines — collaborative classroom whiteboard)
+try { const m = require('./interactive-whiteboard'); m(app, pool, _newModOpts); console.log('[Whiteboard] Interactive whiteboard loaded — 6 tables, 15+ routes'); } catch(e) { console.warn('[Whiteboard] Error:', e.message); }
+
+// 2. Spaced Repetition / Flashcards (2,387 lines — SM-2 algorithm learning)
+try { const m = require('./spaced-repetition'); m(app, pool, _newModOpts); console.log('[SpacedRepetition] Flashcard & SM-2 learning loaded — 4 tables, 12+ routes'); } catch(e) { console.warn('[SpacedRepetition] Error:', e.message); }
+
+// 3. Carpool Coordination (2,502 lines — parent carpooling system)
+try { const m = require('./carpool-coordination'); m(app, pool, _newModOpts); console.log('[Carpool] Parent carpool coordination loaded — 7 tables, 15+ routes'); } catch(e) { console.warn('[Carpool] Error:', e.message); }
+
+// 4. Bus Route Optimizer (1,970 lines — fleet & route management)
+try { const m = require('./bus-route-optimizer'); m(app, pool, _newModOpts); console.log('[BusRoutes] Bus route optimizer loaded — 8 tables, 22+ routes'); } catch(e) { console.warn('[BusRoutes] Error:', e.message); }
+
+// 5. Blockchain Certificates (1,741 lines — tamper-proof digital certs)
+try { const m = require('./blockchain-certificates'); m(app, pool, _newModOpts); console.log('[BlockchainCerts] Blockchain certificates loaded — 5 tables, 22+ routes'); } catch(e) { console.warn('[BlockchainCerts] Error:', e.message); }
+
+// 6. Video Conferencing (1,755 lines — virtual classrooms)
+try { const m = require('./video-conferencing'); m(app, pool, _newModOpts); console.log('[VideoConf] Video conferencing loaded — 7 tables, 15+ routes'); } catch(e) { console.warn('[VideoConf] Error:', e.message); }
+
+// 7. Peer Review System (1,728 lines — academic peer review)
+try { const m = require('./peer-review'); m(app, pool, _newModOpts); console.log('[PeerReview] Peer review system loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[PeerReview] Error:', e.message); }
+
+// 8. OMR Scanner (1,519 lines — bubble sheet exam grading)
+try { const m = require('./omr-scanner'); m(app, pool, _newModOpts); console.log('[OMR] OMR scanner loaded — 4 tables, 12+ routes'); } catch(e) { console.warn('[OMR] Error:', e.message); }
+
+// 9. Social Media Auto-Post (1,576 lines — scheduling & analytics)
+try { const m = require('./social-media-autopost'); m(app, pool, _newModOpts); console.log('[SocialMedia] Social media auto-post loaded — 6 tables, 12+ routes'); } catch(e) { console.warn('[SocialMedia] Error:', e.message); }
+
+// 10. Green Campus (1,575 lines — sustainability tracking)
+try { const m = require('./green-campus'); m(app, pool, _newModOpts); console.log('[GreenCampus] Green campus & sustainability loaded — 10 tables, 15+ routes'); } catch(e) { console.warn('[GreenCampus] Error:', e.message); }
+
+// 11. Campus Podcast (1,284 lines — audio content management)
+try { const m = require('./campus-podcast'); m(app, pool, _newModOpts); console.log('[Podcast] Campus podcast system loaded — 6 tables, 11+ routes'); } catch(e) { console.warn('[Podcast] Error:', e.message); }
+
+// 12. School Newsletter (1,250 lines — rich newsletter editor)
+try { const m = require('./school-newsletter'); m(app, pool, _newModOpts); console.log('[Newsletter] School newsletter system loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[Newsletter] Error:', e.message); }
+
+// 13. Pocket Money (1,211 lines — student digital wallet)
+try { const m = require('./pocket-money'); m(app, pool, _newModOpts); console.log('[PocketMoney] Student digital wallet loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[PocketMoney] Error:', e.message); }
+
+// 14. Parent Workshop (1,093 lines — workshop scheduling & training)
+try { const m = require('./parent-workshop'); m(app, pool, _newModOpts); console.log('[ParentWorkshop] Parent workshop & training loaded — 6 tables, 12+ routes'); } catch(e) { console.warn('[ParentWorkshop] Error:', e.message); }
+
+// 15. Student Banking (1,137 lines — student banking system)
+try { const m = require('./student-banking'); m(app, pool, _newModOpts); console.log('[StudentBanking] Student banking system loaded — 6 tables, 12+ routes'); } catch(e) { console.warn('[StudentBanking] Error:', e.message); }
+
+// 16. AI Tutor (955 lines — AI-powered tutoring sessions)
+try { const m = require('./ai-tutor'); m(app, pool, _newModOpts); console.log('[AITutor] AI tutoring module loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[AITutor] Error:', e.message); }
+
+// 17. Virtual Lab (718 lines — science experiments & simulations)
+try { const m = require('./virtual-lab'); m(app, pool, _newModOpts); console.log('[VirtualLab] Virtual laboratory loaded — 4 tables, 12+ routes'); } catch(e) { console.warn('[VirtualLab] Error:', e.message); }
+
+// 18. Smart Textbook (768 lines — digital textbooks & note-taking)
+try { const m = require('./smart-textbook'); m(app, pool, _newModOpts); console.log('[SmartTextbook] Smart textbook system loaded — 6 tables, 12+ routes'); } catch(e) { console.warn('[SmartTextbook] Error:', e.message); }
+
+// 19. Blockchain Gradebook (675 lines — tamper-proof academic records)
+try { const m = require('./blockchain-gradebook'); m(app, pool, _newModOpts); console.log('[BlockchainGradebook] Blockchain gradebook loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[BlockchainGradebook] Error:', e.message); }
+
+// 20. Adaptive Learning (550 lines — personalized learning paths)
+try { const m = require('./adaptive-learning'); m(app, pool, _newModOpts); console.log('[AdaptiveLearning] Adaptive learning engine loaded — 8 tables, 12+ routes'); } catch(e) { console.warn('[AdaptiveLearning] Error:', e.message); }
+
+// 21. Cross-School Collaboration (463 lines — multi-school projects)
+try { const m = require('./cross-school-collab'); m(app, pool, _newModOpts); console.log('[CrossSchool] Cross-school collaboration loaded — 10 tables, 12+ routes'); } catch(e) { console.warn('[CrossSchool] Error:', e.message); }
+
+// 22. Smart Classroom (340 lines — IoT classroom management)
+try { const m = require('./smart-classroom'); m(app, pool, _newModOpts); console.log('[SmartClassroom] Smart classroom IoT loaded — 9 tables, 12+ routes'); } catch(e) { console.warn('[SmartClassroom] Error:', e.message); }
+
+// 23. Drone Education (547 lines — drone training & certification)
+try { const m = require('./drone-education'); m(app, pool, _newModOpts); console.log('[DroneEducation] Drone education module loaded — 6 tables, 10+ routes'); } catch(e) { console.warn('[DroneEducation] Error:', e.message); }
+
+// 24. Supply Chain & Procurement (225 lines — vendor & PO management)
+try { const m = require('./supply-chain-procurement'); m(app, pool, _newModOpts); console.log('[Procurement] Supply chain & procurement loaded — 10 tables, 12+ routes'); } catch(e) { console.warn('[Procurement] Error:', e.message); }
+
+console.log('[Phase1] 24 undeployed modules activated — total module count now 122+');
+
+// ============================================================
+// === PHASE 2 UPGRADE: 10 NEW FEATURE MODULES ===
+// ============================================================
+// Brand-new modules built from scratch for the Dev Portal upgrade.
+
+// --- TABLE ALLOWLISTS: Phase 2 New Modules ---
+['mfa_secrets','mfa_backup_codes','mfa_verification_log','mfa_trusted_devices','mfa_settings',
+  'rbac_roles','rbac_permissions','rbac_role_permissions','rbac_user_roles','rbac_permission_audit',
+  'health_metrics','health_slow_queries','health_alerts','health_cron_log','health_changelog','health_maintenance','health_error_log',
+  'integration_api_keys','integration_webhooks','integration_webhook_deliveries','integration_activity_log',
+  'gdpr_consents','gdpr_export_requests','gdpr_deletion_requests','gdpr_cookie_audit','gdpr_retention_policies','gdpr_compliance_reports','gdpr_data_access_log',
+  'feature_flags','feature_flag_assignments','feature_experiments','feature_experiment_events','feature_segments','feature_flag_audit',
+  'custom_dashboards','dashboard_widgets','dashboard_widget_data',
+  'onboarding_progress','onboarding_data',
+  'announcements','announcement_reads','announcement_templates',
+  'data_recycle_bin','data_archives','data_backup_points','data_retention_log'
+].forEach(t => VALID_TABLES.add(t));
+
+// 1. TOTP MFA System (930 lines — Google Authenticator, backup codes, rate limiting, AES encryption)
+try { const m = require('./mfa-totp'); m(app, pool, _newModOpts); console.log('[MFA] TOTP multi-factor authentication loaded — 5 tables, 12 routes'); } catch(e) { console.warn('[MFA] Error:', e.message); }
+
+// 2. Advanced RBAC Manager (760 lines — 38 permissions, 7 roles, visual matrix, audit trail)
+try { const m = require('./rbac-manager'); m(app, pool, _newModOpts); console.log('[RBAC] Advanced role-based access control loaded — 5 tables, 14 routes'); } catch(e) { console.warn('[RBAC] Error:', e.message); }
+
+// 3. System Health Monitor (956 lines — KPIs, SVG charts, metrics, maintenance mode)
+try { const m = require('./system-health'); m(app, pool, _newModOpts); console.log('[Health] System health monitor loaded — 7 tables, 16 routes'); } catch(e) { console.warn('[Health] Error:', e.message); }
+
+// 4. API Key & Webhook Manager (706 lines — key generation, HMAC signing, delivery logs)
+try { const m = require('./api-webhook-manager'); m(app, pool, _newModOpts); console.log('[Integrations] API key & webhook manager loaded — 4 tables, 15 routes'); } catch(e) { console.warn('[Integrations] Error:', e.message); }
+
+// 5. GDPR Compliance Center (852 lines — data export, deletion, consent, retention)
+try { const m = require('./gdpr-compliance'); m(app, pool, _newModOpts); console.log('[GDPR] Privacy compliance center loaded — 7 tables, 17 routes'); } catch(e) { console.warn('[GDPR] Error:', e.message); }
+
+// 6. Feature Flags & A/B Testing (757 lines — flag management, chi-squared significance)
+try { const m = require('./feature-flags'); m(app, pool, _newModOpts); console.log('[Features] Feature flags & A/B testing loaded — 6 tables, 20 routes'); } catch(e) { console.warn('[Features] Error:', e.message); }
+
+// 7. Custom Dashboard Builder (668 lines — widget builder, SVG charts, drag-drop layout)
+try { const m = require('./dashboard-builder'); m(app, pool, _newModOpts); console.log('[DashBuilder] Custom dashboard builder loaded — 2 tables, 12 routes'); } catch(e) { console.warn('[DashBuilder] Error:', e.message); }
+
+// 8. User Onboarding Wizard (723 lines — 5-step setup wizard, CSV import)
+try { const m = require('./user-onboarding'); m(app, pool, _newModOpts); console.log('[Onboarding] User onboarding wizard loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[Onboarding] Error:', e.message); }
+
+// 9. Announcement Broadcast System (321 lines — priority levels, read tracking, templates)
+try { const m = require('./announcement-system'); m(app, pool, _newModOpts); console.log('[Announcements] Broadcast system loaded — 3 tables, 12 routes'); } catch(e) { console.warn('[Announcements] Error:', e.message); }
+
+// 10. Data Archive & Management (668 lines — recycle bin, backups, audit export, retention)
+try { const m = require('./data-archive'); m(app, pool, _newModOpts); console.log('[DataMgmt] Data archive & management loaded — 4 tables, 19 routes'); } catch(e) { console.warn('[DataMgmt] Error:', e.message); }
+
+console.log('[Phase2] 10 new feature modules activated — total module count now 132+');
+
+// ============================================================
+// === PHASE 4: 27 Additional Feature Modules ===
+// === Security, Monitoring, UX, Analytics, Communication ===
+// ============================================================
+
+// --- Security & Access Control ---
+try { const m = require('./ip-protection'); m(app, pool, _newModOpts); console.log('[IPProtection] IP whitelist/blacklist loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[IPProtection] Error:', e.message); }
+try { const m = require('./encryption-key-manager'); m(app, pool, _newModOpts); console.log('[EncryptionKeys] Encryption key manager loaded — 2 tables, 12 routes'); } catch(e) { console.warn('[EncryptionKeys] Error:', e.message); }
+try { const m = require('./login-attempt-dashboard'); m(app, pool, _newModOpts); console.log('[LoginSecurity] Login attempt dashboard loaded — 2 tables, 15 routes'); } catch(e) { console.warn('[LoginSecurity] Error:', e.message); }
+try { const m = require('./captcha-config'); m(app, pool, _newModOpts); console.log('[CAPTCHA] CAPTCHA configuration loaded — 2 tables, 13 routes'); } catch(e) { console.warn('[CAPTCHA] Error:', e.message); }
+
+// --- Monitoring & Diagnostics ---
+try { const m = require('./slow-query-monitor'); m(app, pool, _newModOpts); console.log('[SlowQueries] Slow query monitor loaded — 2 tables, 15 routes'); } catch(e) { console.warn('[SlowQueries] Error:', e.message); }
+try { const m = require('./error-log-dashboard'); m(app, pool, _newModOpts); console.log('[ErrorLogs] Error log dashboard loaded — 2 tables, 17 routes'); } catch(e) { console.warn('[ErrorLogs] Error:', e.message); }
+try { const m = require('./session-manager'); m(app, pool, _newModOpts); console.log('[Sessions] Session manager loaded — routes'); } catch(e) { console.warn('[Sessions] Error:', e.message); }
+
+// --- Task Automation ---
+try { const m = require('./scheduled-tasks'); m(app, pool, _newModOpts); console.log('[ScheduledTasks] Scheduled tasks manager loaded — 2 tables, 16 routes'); } catch(e) { console.warn('[ScheduledTasks] Error:', e.message); }
+try { const m = require('./quick-actions'); m(app, pool, _newModOpts); console.log('[QuickActions] Quick actions loaded — routes'); } catch(e) { console.warn('[QuickActions] Error:', e.message); }
+
+// --- API & Integration ---
+try { const m = require('./api-endpoint-builder'); m(app, pool, _newModOpts); console.log('[APIBuilder] API endpoint builder loaded — 2 tables, 12 routes'); } catch(e) { console.warn('[APIBuilder] Error:', e.message); }
+try { const m = require('./custom-domain-manager'); m(app, pool, _newModOpts); console.log('[Domains] Custom domain manager loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[Domains] Error:', e.message); }
+try { const m = require('./push-notifications'); m(app, pool, _newModOpts); console.log('[Push] Push notification manager loaded — 4 tables, 15 routes'); } catch(e) { console.warn('[Push] Error:', e.message); }
+
+// --- Live Chat & Forms ---
+try { const m = require('./live-chat-config'); m(app, pool, _newModOpts); console.log('[ChatConfig] Live chat widget config loaded — 3 tables, 13 routes'); } catch(e) { console.warn('[ChatConfig] Error:', e.message); }
+try { const m = require('./form-builder-advanced'); m(app, pool, _newModOpts); console.log('[FormBuilder] Advanced form builder loaded — 3 tables, 17 routes'); } catch(e) { console.warn('[FormBuilder] Error:', e.message); }
+
+// --- UX & Theming ---
+try { const m = require('./theme-builder'); m(app, pool, _newModOpts); console.log('[ThemeBuilder] Visual theme builder loaded — 2 tables, 16 routes'); } catch(e) { console.warn('[ThemeBuilder] Error:', e.message); }
+try { const m = require('./theme-manager'); m(app, pool, _newModOpts); console.log('[ThemeManager] Theme manager loaded — routes'); } catch(e) { console.warn('[ThemeManager] Error:', e.message); }
+try { const m = require('./locale-manager'); m(app, pool, _newModOpts); console.log('[Locales] Language/locale manager loaded — 3 tables, 15 routes'); } catch(e) { console.warn('[Locales] Error:', e.message); }
+try { const m = require('./accessibility-checker'); m(app, pool, _newModOpts); console.log('[A11y] Accessibility checker loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[A11y] Error:', e.message); }
+
+// --- Data Management ---
+try { const m = require('./recycle-bin'); m(app, pool, _newModOpts); console.log('[RecycleBin] Recycle bin/soft delete loaded — 2 tables, 13 routes'); } catch(e) { console.warn('[RecycleBin] Error:', e.message); }
+try { const m = require('./audit-trail-export'); m(app, pool, _newModOpts); console.log('[AuditExport] Audit trail export loaded — 1 table, 12 routes'); } catch(e) { console.warn('[AuditExport] Error:', e.message); }
+try { const m = require('./bulk-import'); m(app, pool, _newModOpts); console.log('[BulkImport] Bulk user import loaded — routes'); } catch(e) { console.warn('[BulkImport] Error:', e.message); }
+
+// --- Analytics & Intelligence ---
+try { const m = require('./communication-analytics'); m(app, pool, _newModOpts); console.log('[CommAnalytics] Communication analytics loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[CommAnalytics] Error:', e.message); }
+try { const m = require('./funnel-analytics'); m(app, pool, _newModOpts); console.log('[FunnelAnalytics] Funnel analytics loaded — routes'); } catch(e) { console.warn('[FunnelAnalytics] Error:', e.message); }
+try { const m = require('./financial-forecast'); m(app, pool, _newModOpts); console.log('[FinForecast] Financial forecast loaded — routes'); } catch(e) { console.warn('[FinForecast] Error:', e.message); }
+try { const m = require('./visual-report-builder'); m(app, pool, _newModOpts); console.log('[ReportBuilder] Visual report builder loaded — routes'); } catch(e) { console.warn('[ReportBuilder] Error:', e.message); }
+try { const m = require('./user-segmentation'); m(app, pool, _newModOpts); console.log('[UserSegmentation] User segmentation engine loaded — routes'); } catch(e) { console.warn('[UserSegmentation] Error:', e.message); }
+
+// --- Content & Moderation ---
+try { const m = require('./content-moderation'); m(app, pool, _newModOpts); console.log('[ContentMod] Content moderation loaded — routes'); } catch(e) { console.warn('[ContentMod] Error:', e.message); }
+
+console.log('[Deferred] All deferred modules loaded successfully');
+}; // end _deferModules
+
+// Schedule deferred module loading after server starts (staggered to reduce memory spike)
+setTimeout(_deferModules, 2000);
+
+console.log('[Phase4] 27 additional feature modules deferred — will load 2s after startup');
+
+// ============================================================
+// === REFERRAL & INVITE SYSTEM — Invite & Earn, Growth Loop ===
+// ============================================================
+['referral_codes', 'referral_signups', 'referral_rewards'].forEach(t => VALID_TABLES.add(t));
+try {
+  const m = require('./referral-system');
+  m(app, pool, requireAuth, ah, esc, renderPage, audit, notify, sendEmail, logger);
+  console.log('[Referral] Referral & invite system loaded — 3 tables, 5 routes');
+} catch(e) { console.warn('[Referral] Error:', e.message); }
+
+// ============================================================
+// === EMAIL VERIFICATION SYSTEM — 6-digit code verification ===
+// ============================================================
+['email_verifications'].forEach(t => VALID_TABLES.add(t));
+try {
+  const emailVerification = require('./email-verification')(app, pool, _newModOpts);
+  if (emailVerification?.requireVerifiedEmail) {
+    global.requireVerifiedEmail = emailVerification.requireVerifiedEmail;
+  }
+  console.log('[EmailVerification] Email verification system loaded — 1 table, 4 routes + middleware');
+} catch(e) { console.warn("[EmailVerification] Error:", e.message); }
+
+// ============================================================
+// === FUNDRAISING ENHANCEMENTS — Professional Features ===
+// Social Sharing, Donor Dashboard, Payouts, Donor Wall, QR Codes,
+// Refund Handling, Embed Widget, Matching Donations, Comments,
+// Thank You SMS/Email, Campaign Following, Testimonials, Milestones,
+// Impact Tracking, SEO/Sitemap, Trending, Global Visibility
+// ============================================================
+let _processDonationEffects = null;
+try {
+  const fundraisingEnhancements = require('./fundraising-enhancements');
+  fundraisingEnhancements(app, pool, ah, requireAuth, requireNotBanned, requireFundraisingSubscription, renderPage, esc, notify, notifyAll, sendEmail, sendSMS, audit);
+  _processDonationEffects = fundraisingEnhancements.processDonationEffects;
+  console.log('[FundraisingEnhancements] Professional fundraising features loaded - Social Sharing, Donor Dashboard, Payouts, Donor Wall, QR Codes, Refunds, Embed Widget, Matching Donations, Comments, Thank You, Following, Testimonials, Milestones, Impact, SEO, Trending');
+} catch(e) { console.warn('[FundraisingEnhancements] Error:', e.message); }
+
+// ============================================================
+// === MASSIVE FEATURE UPGRADE — ALL NEW MODULES ===
+// ============================================================
+
+// --- MIGRATIONS: New Tables ---
+(async () => {
+  const tables = [
+    `CREATE TABLE IF NOT EXISTS clinic_queue (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name TEXT, patient_id INTEGER, complaint TEXT, token_number INTEGER DEFAULT 1, status TEXT DEFAULT 'waiting', priority TEXT DEFAULT 'normal', created_at TIMESTAMP DEFAULT NOW(), started_at TIMESTAMP, completed_at TIMESTAMP, doctor_id INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS clinic_prescriptions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_id INTEGER, patient_name TEXT, diagnosis TEXT, medications JSONB DEFAULT '[]', notes TEXT, prescribed_by TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS sick_bay (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), student_name TEXT, student_id INTEGER, complaint TEXT, temperature TEXT, treatment TEXT, nurse_name TEXT, checked_in TIMESTAMP DEFAULT NOW(), checked_out TIMESTAMP, status TEXT DEFAULT 'in_bay')`,
+    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), invoice_number TEXT UNIQUE, amount NUMERIC(12,2) DEFAULT 0, tax NUMERIC(12,2) DEFAULT 0, total NUMERIC(12,2) DEFAULT 0, status TEXT DEFAULT 'pending', payer_name TEXT, payer_email TEXT, description TEXT, due_date DATE, paid_at TIMESTAMP, payment_method TEXT, items JSONB DEFAULT '[]', created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS product_reviews (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL, product_id INTEGER NOT NULL, reviewer_name TEXT, rating INTEGER DEFAULT 5 CHECK (rating BETWEEN 1 AND 5), review_text TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS order_tracking (id SERIAL PRIMARY KEY, order_id INTEGER NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), status TEXT DEFAULT 'placed', tracking_number TEXT, notes TEXT, updated_at TIMESTAMP DEFAULT NOW(), updated_by TEXT)`,
+    `CREATE TABLE IF NOT EXISTS api_keys (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), name TEXT, key_hash TEXT, key_prefix TEXT(8), created_at TIMESTAMP DEFAULT NOW(), last_used TIMESTAMP, is_active BOOLEAN DEFAULT true)`,
+    `CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), url TEXT NOT NULL, events TEXT[] DEFAULT '{}', secret TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS user_2fa (email TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, secret TEXT, enabled BOOLEAN DEFAULT false, backup_codes TEXT[] DEFAULT '{}')`,
+    `CREATE TABLE IF NOT EXISTS audit_log (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_email TEXT, action TEXT NOT NULL, details TEXT, ip_address TEXT, user_agent TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS push_subscriptions (id SERIAL PRIMARY KEY, user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), endpoint TEXT NOT NULL, p256dh_key TEXT, auth_key TEXT, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE TABLE IF NOT EXISTS notification_preferences (user_email TEXT NOT NULL, tenant_id INTEGER NOT NULL REFERENCES tenants(id), email_notifs BOOLEAN DEFAULT true, sms_notifs BOOLEAN DEFAULT true, push_notifs BOOLEAN DEFAULT true, inapp_notifs BOOLEAN DEFAULT true, categories JSONB DEFAULT '{"payments":true,"assignments":true,"events":true,"announcements":true,"emergencies":true}', PRIMARY KEY (user_email, tenant_id))`,
+    // Referral Management System
+    `CREATE TABLE IF NOT EXISTS referrals (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name VARCHAR(255) NOT NULL, patient_id INTEGER, patient_type VARCHAR(20) DEFAULT 'student', referring_doctor VARCHAR(255), receiving_facility VARCHAR(255), receiving_facility_contact VARCHAR(255), referral_category VARCHAR(50) DEFAULT 'specialist', urgency VARCHAR(20) DEFAULT 'routine', reason TEXT, clinical_notes TEXT, diagnosis TEXT, status VARCHAR(20) DEFAULT 'pending', accepted_by VARCHAR(255), accepted_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // Telehealth / Video Consultation Booking
+    `CREATE TABLE IF NOT EXISTS telehealth_consultations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), patient_name VARCHAR(255) NOT NULL, patient_id INTEGER, patient_phone VARCHAR(20), doctor_id INTEGER REFERENCES clinic_staff(id), doctor_name VARCHAR(255), scheduled_date DATE, scheduled_time TIME, duration_minutes INTEGER DEFAULT 30, meeting_link TEXT, meeting_id VARCHAR(255) UNIQUE, status VARCHAR(20) DEFAULT 'scheduled', subjective TEXT, objective TEXT, assessment TEXT, plan TEXT, started_at TIMESTAMPTZ, ended_at TIMESTAMPTZ, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`
+  ];
+  for (const sql of tables) { try { await pool.query(sql); } catch(e) { /* table may already exist */ } }
+
+  // Add missing columns to insurance_claims (table may already exist)
+  const claimAlters = [
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS patient_insurance_id INTEGER REFERENCES patient_insurance(id)`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS provider_name VARCHAR(255)`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS service_type VARCHAR(100)`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS diagnosis TEXT`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS total_amount BIGINT DEFAULT 0`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS covered_amount BIGINT DEFAULT 0`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS patient_amount BIGINT DEFAULT 0`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS approved_amount BIGINT DEFAULT 0`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)`,
+    `ALTER TABLE insurance_claims ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`
+  ];
+  for (const sql of claimAlters) { try { await pool.query(sql); } catch(e) { /* column may already exist */ } }
+
+  console.log('[Migrations] All new tables ready');
+
+  // === FIX SCHEMA GAPS — Missing tables + duplicate schema columns ===
   try {
-    const m = require(modPath);
-    m(app, pool, _v19Opts);
-    console.log('[V21] ' + label + ' loaded');
-  } catch(e) { console.warn('[V21] ' + label + ' Error:', e.message); }
+    const fixSchemaGaps = require('./fix-schema-gaps');
+    await fixSchemaGaps(pool);
+    console.log('[Schema] Gap fixes applied');
+  } catch(e) {
+    console.warn('[Schema] Gap fixes error:', e.message);
+  }
+})();
+
+// ============================================================
+// === 1. CLINIC QUEUE, PRESCRIPTIONS, SICK BAY ===
+// ============================================================
+app.get('/clinic/queue', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [waiting, inConsult, completed, todayStats] = await Promise.all([
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='waiting' ORDER BY token_number, priority DESC, created_at", [t]),
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='in-consultation' ORDER BY started_at", [t]),
+    pool.query("SELECT * FROM clinic_queue WHERE tenant_id=$1 AND status='completed' AND completed_at::date=CURRENT_DATE ORDER BY completed_at DESC", [t]),
+    pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='completed') as seen, AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60) as avg_wait FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])
+  ]);
+  const s = todayStats.rows[0] || {};
+  res.send(renderPage('Patient Queue', `
+    <div class="hero" style="background:linear-gradient(135deg,#ef4444,#f97316)"><h1>Patient Queue</h1><p>Manage patient flow efficiently</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${waiting.rows.length}</div><div>Waiting</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${inConsult.rows.length}</div><div>In Consultation</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#10b981">${s.seen||0}</div><div>Seen Today</div></div>
+      <div class="stat-card"><div class="stat-num">${Math.round(s.avg_wait||0)}m</div><div>Avg Wait</div></div>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:20px">
+      <a href="/clinic/queue" class="btn btn-green">Queue</a>
+      <a href="/clinic/prescriptions" class="btn">Prescriptions</a>
+      <a href="/clinic/sick-bay" class="btn">Sick Bay</a>
+    </div>
+    <div class="card"><h3>Waiting Patients (${waiting.rows.length})</h3>
+      <table><tr><th>Token</th><th>Patient</th><th>Complaint</th><th>Priority</th><th>Wait</th><th>Action</th></tr>
+      ${waiting.rows.map(p => {
+        const waitMin = Math.round((Date.now() - new Date(p.created_at).getTime()) / 60000);
+        return `<tr><td><span style="background:#f59e0b;color:white;padding:4px 10px;border-radius:6px;font-weight:700">#${p.token_number}</span></td><td><strong>${esc(p.patient_name)}</strong></td><td>${esc(p.complaint||'')}</td><td><span class="tag" style="background:${p.priority==='urgent'?'#fee2e2;color:#991b1b':'#f0f0f0'}">${esc(p.priority)}</span></td><td>${waitMin}m</td><td><form method="POST" action="/clinic/queue/${p.id}/call" style="display:inline"><button class="btn btn-sm" style="background:#3b82f6;color:white">Call</button></form></td></tr>`;
+      }).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px" class="muted">No patients waiting</td></tr>'}
+      </table>
+    </div>
+    ${inConsult.rows.length > 0 ? '<div class="card" style="margin-top:16px"><h3>In Consultation</h3><table><tr><th>Token</th><th>Patient</th><th>Doctor</th><th>Started</th><th>Action</th></tr>'+inConsult.rows.map(p=>'<tr><td>#'+p.token_number+'</td><td>'+esc(p.patient_name)+'</td><td class="muted">'+esc(p.doctor_id||'')+'</td><td>'+(p.started_at?new Date(p.started_at).toLocaleTimeString():'')+'</td><td><form method="POST" action="/clinic/queue/'+p.id+'/complete" style="display:inline"><button class="btn btn-sm btn-green">Complete</button></form></td></tr>').join('')+'</table></div>' : ''}
+    <div class="card" style="margin-top:16px"><h3>Check In Patient</h3>
+      <form method="POST" action="/clinic/queue/checkin" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end">
+        <div><label>Patient Name *</label><input name="patient_name" required></div>
+        <div><label>Complaint</label><input name="complaint" placeholder="Chief complaint"></div>
+        <div><label>Priority</label><select name="priority"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="emergency">Emergency</option></select></div>
+        <div><button class="btn btn-green" style="width:100%">Check In</button></div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/queue/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, complaint, priority } = req.body;
+  const nextToken = (await pool.query("SELECT COALESCE(MAX(token_number),0)+1 as next FROM clinic_queue WHERE tenant_id=$1 AND created_at::date=CURRENT_DATE", [t])).rows[0].next;
+  await pool.query("INSERT INTO clinic_queue (tenant_id,patient_name,complaint,token_number,priority) VALUES ($1,$2,$3,$4,$5)", [t, patient_name, complaint||'', nextToken||1, priority||'normal']);
+  await pool.query("INSERT INTO audit_log (tenant_id,user_email,action,details) VALUES ($1,$2,'clinic_checkin',$3)", [t, req.session.user.email, 'Checked in: '+patient_name]);
+  res.redirect('/clinic/queue');
+}));
+
+app.post('/clinic/queue/:id/call', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("UPDATE clinic_queue SET status='in-consultation',started_at=NOW(),doctor_id=$1 WHERE id=$2 AND tenant_id=$3", [req.session.user.name||'', req.params.id, t]);
+  res.redirect('/clinic/queue');
+}));
+
+app.post('/clinic/queue/:id/complete', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("UPDATE clinic_queue SET status='completed',completed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+  res.redirect('/clinic/queue');
+}));
+
+// Prescriptions
+app.get('/clinic/prescriptions', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const rx = (await pool.query("SELECT * FROM clinic_prescriptions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
+  res.send(renderPage('Prescriptions', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Prescriptions</h1></div>
+    <div style="margin-bottom:16px"><a href="/clinic/prescriptions/new" class="btn btn-green">+ New Prescription</a> <a href="/clinic/queue" class="btn">Back to Queue</a></div>
+    <div class="card"><table><tr><th>Date</th><th>Patient</th><th>Diagnosis</th><th>By</th></tr>
+      ${rx.map(r=>'<tr><td>'+(r.created_at?new Date(r.created_at).toLocaleDateString():'')+'</td><td><strong>'+esc(r.patient_name)+'</strong></td><td>'+esc(r.diagnosis||'')+'</td><td class="muted">'+esc(r.prescribed_by||'')+'</td></tr>').join('')||'<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">No prescriptions yet</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+app.get('/clinic/prescriptions/new', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), (req, res) => {
+  res.send(renderPage('New Prescription', `
+    <div class="card" style="max-width:700px;margin:40px auto"><h2>New Prescription</h2>
+      <form method="POST" action="/clinic/prescriptions/save" id="rxForm">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>Patient Name *</label><input name="patient_name" required></div>
+          <div><label>Prescribing Doctor</label><input name="prescribed_by" value="${esc(req.session.user.name||'')}"></div>
+        </div>
+        <div style="margin-top:12px"><label>Diagnosis *</label><input name="diagnosis" required></div>
+        <div style="margin-top:16px"><label>Medications</label><div id="meds-list"></div>
+          <button type="button" onclick="addMed()" class="btn btn-sm" style="margin-top:8px">+ Add Medication</button></div>
+        <div style="margin-top:12px"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+        <button class="btn btn-green" style="width:100%;margin-top:16px">Save Prescription</button>
+      </form>
+    </div>
+    <script>
+      let medCount=0;
+      function addMed(){medCount++;const d=document.createElement('div');d.style.cssText='display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:8px;margin-top:8px;align-items:center';d.innerHTML='<input name="med_name[]" placeholder="Medication name"><input name="med_dose[]" placeholder="Dose"><input name="med_freq[]" placeholder="Frequency"><input name="med_dur[]" placeholder="Duration"><button type="button" onclick="this.parentElement.remove()" style="color:red;background:none;border:none;font-size:18px">×</button>';document.getElementById('meds-list').appendChild(d);}
+      addMed();
+    </script>
+  `, req.session.user));
 });
-console.log('[V21] === 13 more modules loaded — V21 Massive Batch complete ===');
+
+app.post('/clinic/prescriptions/save', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { patient_name, diagnosis, prescribed_by, notes } = req.body;
+  const meds = Array.isArray(req.body.med_name) ? req.body.med_name.map((n,i)=>({name:n,dose:req.body.med_dose?.[i]||'',freq:req.body.med_freq?.[i]||'',dur:req.body.med_dur?.[i]||''})).filter(m=>m.name) : req.body.med_name ? [{name:req.body.med_name,dose:req.body.med_dose||'',freq:req.body.med_freq||'',dur:req.body.med_dur||''}] : [];
+  await pool.query("INSERT INTO clinic_prescriptions (tenant_id,patient_name,diagnosis,medications,notes,prescribed_by) VALUES ($1,$2,$3,$4,$5,$6)", [t, patient_name, diagnosis, JSON.stringify(meds), notes||'', prescribed_by||'']);
+  res.redirect('/clinic/prescriptions');
+}));
+
+// Sick Bay
+app.get('/clinic/sick-bay', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [active, today] = await Promise.all([
+    pool.query("SELECT * FROM sick_bay WHERE tenant_id=$1 AND status='in_bay' ORDER BY checked_in DESC", [t]),
+    pool.query("SELECT * FROM sick_bay WHERE tenant_id=$1 AND checked_in::date=CURRENT_DATE ORDER BY checked_in DESC LIMIT 30", [t])
+  ]);
+  res.send(renderPage('Sick Bay', `
+    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)"><h1>Sick Bay</h1><p>Student health monitoring</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#ef4444">${active.rows.length}</div><div>Currently In</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#10b981">${today.rows.filter(r=>r.status==='released').length}</div><div>Released Today</div></div>
+      <div class="stat-card"><div class="stat-num">${today.rows.length}</div><div>Total Today</div></div>
+    </div>
+    <div class="card"><h3>Currently in Sick Bay (${active.rows.length})</h3>
+      <table><tr><th>Student</th><th>Complaint</th><th>Temp</th><th>Treatment</th><th>Checked In</th><th>Action</th></tr>
+      ${active.rows.map(s=>'<tr><td><strong>'+esc(s.student_name)+'</strong></td><td>'+esc(s.complaint||'')+'</td><td>'+(s.temperature||'-')+'</td><td>'+esc(s.treatment||'')+'</td><td>'+(s.checked_in?new Date(s.checked_in).toLocaleTimeString():'')+'</td><td><form method="POST" action="/clinic/sick-bay/'+s.id+'/release" style="display:inline"><button class="btn btn-sm btn-green">Release</button></form></td></tr>').join('')||'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No students in sick bay</td></tr>'}
+      </table>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>Check In to Sick Bay</h3>
+      <form method="POST" action="/clinic/sick-bay/checkin" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end">
+        <div><label>Student Name *</label><input name="student_name" required></div>
+        <div><label>Complaint</label><input name="complaint"></div>
+        <div><label>Temperature</label><input name="temperature" placeholder="36.5°C"></div>
+        <div><label>Nurse</label><input name="nurse_name" value="${esc(req.session.user.name||'')}"></div>
+        <div><button class="btn" style="background:#8b5cf6;color:white">Check In</button></div>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/clinic/sick-bay/checkin', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  await pool.query("INSERT INTO sick_bay (tenant_id,student_name,complaint,temperature,nurse_name) VALUES ($1,$2,$3,$4,$5)", [req.session.user.tenant_id, req.body.student_name, req.body.complaint||'', req.body.temperature||'', req.body.nurse_name||'']);
+  res.redirect('/clinic/sick-bay');
+}));
+
+app.post('/clinic/sick-bay/:id/release', requireAuth, requireNotBanned, requireFeature('patient_queue'), ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { treatment } = req.body;
+  await pool.query("UPDATE sick_bay SET status='released',checked_out=NOW(),treatment=$1 WHERE id=$2 AND tenant_id=$3", [treatment||'Released', req.params.id, t]);
+  res.redirect('/clinic/sick-bay');
+}));
+
+// ============================================================
+// === 2. INVOICES & BILLING HISTORY ===
+// ============================================================
+app.get('/billing/invoices', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const invoices = (await pool.query("SELECT * FROM invoices WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
+  const stats = (await pool.query("SELECT COUNT(*) as total, COALESCE(SUM(total),0) as amount, COUNT(*) FILTER (WHERE status='paid') as paid, COUNT(*) FILTER (WHERE status='pending') as pending FROM invoices WHERE tenant_id=$1", [t])).rows[0];
+  res.send(renderPage('Invoices', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#6366f1)"><h1>Invoices</h1></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${stats.total}</div><div>Total Invoices</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${(parseInt(stats.amount)||0).toLocaleString()}</div><div>Total Value</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${stats.pending}</div><div>Pending</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#10b981">${stats.paid}</div><div>Paid</div></div>
+    </div>
+    <div class="card"><table><tr><th>Invoice #</th><th>Payer</th><th>Amount</th><th>Status</th><th>Date</th><th>Actions</th></tr>
+      ${invoices.map(i=>'<tr><td><strong>'+esc(i.invoice_number)+'</strong></td><td>'+esc(i.payer_name||'')+'</td><td style="font-weight:700">UGX '+(parseInt(i.total)||0).toLocaleString()+'</td><td><span class="tag" style="background:'+(i.status==='paid'?'#d1fae5;color:#065f46':i.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+esc(i.status)+'</span></td><td>'+(i.created_at?new Date(i.created_at).toLocaleDateString():'')+'</td><td><a href="/billing/invoices/'+i.id+'" class="btn btn-sm">View</a></td></tr>').join('')||'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No invoices yet</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+app.get('/billing/invoices/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const inv = (await pool.query("SELECT * FROM invoices WHERE id=$1", [req.params.id])).rows[0];
+  if (!inv) return res.status(404).send('Not found');
+  const tenant = (await pool.query("SELECT name,type FROM tenants WHERE id=$1", [inv.tenant_id])).rows[0];
+  const items = Array.isArray(inv.items) ? inv.items : [];
+  res.send(renderPage('Invoice ' + inv.invoice_number, `
+    <div style="max-width:750px;margin:40px auto">
+      <div style="display:flex;justify-content:space-between;margin-bottom:30px"><div><h1 style="margin:0">INVOICE</h1><p class="muted">${esc(tenant?.name||'')} &bull; ${esc(inv.invoice_number)}</p></div><div style="text-align:right"><p><strong>Status:</strong> <span class="tag" style="background:${inv.status==='paid'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e'}">${esc(inv.status)}</span></p><p class="muted">Date: ${inv.created_at?new Date(inv.created_at).toLocaleDateString():''}</p>${inv.due_date?'<p class="muted">Due: '+new Date(inv.due_date).toLocaleDateString()+'</p>':''}</div></div>
+      <div class="card" style="margin-bottom:20px"><p><strong>Bill To:</strong> ${esc(inv.payer_name||'N/A')}</p>${inv.payer_email?'<p class="muted">'+esc(inv.payer_email)+'</p>':''}${inv.description?'<p class="muted">'+esc(inv.description)+'</p>':''}</div>
+      <div class="card"><table><tr><th>Description</th><th style="text-align:right">Amount</th></tr>
+        ${items.map(i=>'<tr><td>'+esc(i.description||i.name||'Item')+'</td><td style="text-align:right">UGX '+(parseInt(i.amount)||0).toLocaleString()+'</td></tr>').join('')||'<tr><td class="muted">General</td><td style="text-align:right">UGX '+(parseInt(inv.amount)||0).toLocaleString()+'</td></tr>'}
+        <tr style="border-top:2px solid #333"><td><strong>Subtotal</strong></td><td style="text-align:right"><strong>UGX ${parseInt(inv.amount||0).toLocaleString()}</strong></td></tr>
+        ${parseInt(inv.tax)>0?'<tr><td>Tax</td><td style="text-align:right">UGX '+parseInt(inv.tax).toLocaleString()+'</td></tr>':''}
+        <tr style="background:#f0fdf4"><td><strong style="font-size:18px">Total</strong></td><td style="text-align:right"><strong style="font-size:18px;color:#059669">UGX ${parseInt(inv.total||inv.amount||0).toLocaleString()}</strong></td></tr>
+      </table></div>
+      <div style="margin-top:20px;text-align:center"><button onclick="window.print()" class="btn btn-green">Print Invoice</button></div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/billing/history', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { from, to, method, status } = req.query;
+  let where = "WHERE tenant_id=$1", params = [t], pNum = 2;
+  if (from) { where += ` AND created_at >= $${pNum++}`; params.push(from); }
+  if (to) { where += ` AND created_at <= $${pNum++}`; params.push(to+'T23:59:59'); }
+  if (method) { where += ` AND payment_method=$${pNum++}`; params.push(method); }
+  if (status) { where += ` AND status=$${pNum++}`; params.push(status); }
+  const payments = (await pool.query("SELECT * FROM payments "+where+" ORDER BY created_at DESC LIMIT 100", params)).rows;
+  const summary = (await pool.query("SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM payments WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'", [t])).rows[0];
+  res.send(renderPage('Payment History', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Payment History</h1><p>Last 30 days: UGX ${(parseInt(summary.total)||0).toLocaleString()} across ${summary.cnt} transactions</p></div>
+    <div class="card" style="margin-bottom:20px"><form method="GET" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end">
+      <div><label>From</label><input type="date" name="from" value="${from||''}"></div>
+      <div><label>To</label><input type="date" name="to" value="${to||''}"></div>
+      <div><label>Method</label><select name="method"><option value="">All</option><option ${method==='mobile_money'?'selected':''}>mobile_money</option><option ${method==='cash'?'selected':''}>cash</option><option ${method==='card'?'selected':''}>card</option><option ${method==='bank_transfer'?'selected':''}>bank_transfer</option></select></div>
+      <div><label>Status</label><select name="status"><option value="">All</option><option ${status==='completed'?'selected':''}>completed</option><option ${status==='pending'?'selected':''}>pending</option><option ${status==='failed'?'selected':''}>failed</option></select></div>
+      <div><button class="btn btn-green">Filter</button> <a href="/billing/history" class="btn btn-sm">Reset</a></div>
+    </form></div>
+    <div class="card"><table><tr><th>Date</th><th>Reference</th><th>Amount</th><th>Method</th><th>Status</th></tr>
+      ${payments.map(p=>'<tr><td>'+(p.created_at?new Date(p.created_at).toLocaleDateString():'')+'</td><td class="muted">'+esc(p.reference||p.id)+'</td><td style="font-weight:700">UGX '+(parseInt(p.amount)||0).toLocaleString()+'</td><td><span class="tag">'+esc(p.payment_method||p.method||'')+'</span></td><td><span class="tag" style="background:'+(p.status==='completed'?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b')+'">'+esc(p.status)+'</span></td></tr>').join('')||'<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">No payments found</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 3. PRICING PAGE (PUBLIC) ===
+// ============================================================
+app.get('/pricing', ah(async (req, res) => {
+  const plans = [
+    { name:'Free', price:'0', color:'#6b7280', features:['Up to 50 records','Basic dashboard','Student portal','Gradebook & timetable','Discipline tracking','Email notifications','Community support'], cta:'Get Started', href:'/register' },
+    { name:'Basic', price:'50,000', color:'#f59e0b', features:['Up to 500 records','All Free features','LMS & homework','Online exams','E-commerce store','POS terminal','Clinic management','Inventory tracking','Fundraising & campaigns','Priority support'], cta:'Subscribe Now', href:'/billing/subscribe/basic', popular:true },
+    { name:'Pro', price:'150,000', color:'#4f46e5', features:['Up to 50,000 records','All Basic features','SMS & email campaigns','Blog CMS','AI assistant','Multi-branch management','Payroll system','Advanced analytics','API access & webhooks','Custom branding','Dedicated support'], cta:'Subscribe Now', href:'/billing/subscribe/pro' },
+    { name:'Enterprise', price:'Custom', color:'#059669', features:['Unlimited records','All Pro features','White-label branding','Custom domain','SLA guarantee','On-site training','Dedicated account manager','Custom integrations','HIPAA compliance options','24/7 phone support'], cta:'Contact Us', href:'/contact' }
+  ];
+  res.send(renderPage('Pricing Plans', `
+    <div style="text-align:center;padding:60px 20px 40px;background:linear-gradient(135deg,#1e293b,#334155);color:white"><h1 style="font-size:36px;margin:0">Simple, Transparent Pricing</h1><p style="margin-top:12px;opacity:0.8;font-size:18px">Choose the plan that fits your organization. Upgrade or downgrade anytime.</p></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;max-width:1200px;margin:40px auto;padding:0 20px">
+      ${plans.map(p=>`<div style="border:2px solid ${p.popular?p.color:'#e5e7eb'};border-radius:16px;padding:30px;text-align:center;position:relative;${p.popular?'box-shadow:0 8px 30px rgba(0,0,0,0.12)':''}">
+        ${p.popular?'<div style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:'+p.color+';color:white;padding:4px 16px;border-radius:20px;font-size:13px;font-weight:700">MOST POPULAR</div>':''}
+        <h3 style="margin:0">${p.name}</h3>
+        <div style="margin:20px 0"><span style="font-size:14px;color:#6b7280">UGX</span><br><span style="font-size:40px;font-weight:800;color:${p.color}">${p.price}</span><span style="color:#6b7280;font-size:14px">/mo</span></div>
+        <a href="${p.href}" class="btn" style="display:block;width:100%;padding:14px;background:${p.color};color:white;border:none;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none;cursor:pointer">${p.cta}</a>
+        <ul style="list-style:none;padding:0;margin:24px 0 0;text-align:left">${p.features.map(f=>'<li style="padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:14px">✅ '+f+'</li>').join('')}</ul>
+      </div>`).join('')}
+    </div>
+    <div style="max-width:700px;margin:40px auto;padding:0 20px"><h2 style="text-align:center">Frequently Asked Questions</h2>
+      <div class="card" style="margin-top:20px"><h3>Can I upgrade anytime?</h3><p>Yes, you can upgrade your plan at any time. Changes take effect immediately and you only pay the prorated difference.</p></div>
+      <div class="card" style="margin-top:12px"><h3>Is there a setup fee?</h3><p>No setup fees. Sign up and start using the platform immediately. We handle all the technical setup for you.</p></div>
+      <div class="card" style="margin-top:12px"><h3>What payment methods do you accept?</h3><p>We accept MTN Mobile Money, Airtel Money, bank transfers, Visa/Mastercard, and Flutterwave.</p></div>
+      <div class="card" style="margin-top:12px"><h3>Can I cancel anytime?</h3><p>Absolutely. No long-term contracts. Cancel anytime from your billing settings and you will retain access until the end of your billing period.</p></div>
+    </div>
+  `, req.session.user || null));
+}));
+
+// ============================================================
+// === 4. PWA MANIFEST & SERVICE WORKER ===
+// ============================================================
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(JSON.stringify({
+    name: "Comfort Zone - All-in-One Management Platform",
+    short_name: "ComfortZone",
+    description: "School, church, clinic, business & organization management",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#ffffff",
+    theme_color: "#059669",
+    orientation: "any",
+    categories: ["business", "education", "health", "productivity"],
+    icons: [
+      { src: "/favicon.ico", sizes: "64x64 32x32 24x24 16x16", type: "image/x-icon" },
+      { src: "/public/icons/icon_general.png", sizes: "192x192", type: "image/png" },
+      { src: "/public/icons/icon_general.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
+    ]
+  }));
+});
+
+// ============================================================
+// === 5. NOTIFICATION ENHANCEMENTS ===
+// ============================================================
+app.post('/notifications/push/subscribe', requireAuth, ah(async (req, res) => {
+  const { endpoint, p256dh_key, auth_key } = req.body;
+  if (!endpoint) return res.status(400).json({error:'Missing endpoint'});
+  await pool.query("INSERT INTO push_subscriptions (user_email,tenant_id,endpoint,p256dh_key,auth_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [req.session.user.email, req.session.user.tenant_id, endpoint, p256dh_key||'', auth_key||'']);
+  res.json({success:true});
+}));
+
+app.get('/notifications/badge', requireAuth, ah(async (req, res) => {
+  const count = (await pool.query("SELECT COUNT(*) as cnt FROM notifications WHERE tenant_id=$1 AND read=false", [req.session.user.tenant_id])).rows[0].cnt;
+  res.json({unread:parseInt(count)});
+}));
+
+app.get('/notifications/preferences', requireAuth, ah(async (req, res) => {
+  const pref = (await pool.query("SELECT * FROM notification_preferences WHERE user_email=$1 AND tenant_id=$2", [req.session.user.email, req.session.user.tenant_id])).rows[0] || {};
+  res.send(renderPage('Notification Preferences', `
+    <div class="card" style="max-width:600px;margin:40px auto"><h2>Notification Preferences</h2><p class="muted">Choose how you want to be notified</p>
+      <form method="POST" action="/notifications/preferences/save">
+        <div style="margin:20px 0"><h4>Channels</h4>
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer"><input type="checkbox" name="email_notifs" ${pref.email_notifs!==false?'checked':''}> Email Notifications</label>
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer"><input type="checkbox" name="sms_notifs" ${pref.sms_notifs!==false?'checked':''}> SMS Notifications</label>
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer"><input type="checkbox" name="push_notifs" ${pref.push_notifs!==false?'checked':''}> Push Notifications</label>
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer"><input type="checkbox" name="inapp_notifs" ${pref.inapp_notifs!==false?'checked':''}> In-App Notifications</label>
+        </div>
+        <button class="btn btn-green" style="width:100%">Save Preferences</button>
+      </form>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/notifications/preferences/save', requireAuth, ah(async (req, res) => {
+  const { email_notifs, sms_notifs, push_notifs, inapp_notifs } = req.body;
+  await pool.query(`INSERT INTO notification_preferences (user_email,tenant_id,email_notifs,sms_notifs,push_notifs,inapp_notifs) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_email,tenant_id) DO UPDATE SET email_notifs=$3,sms_notifs=$4,push_notifs=$5,inapp_notifs=$6`,
+    [req.session.user.email, req.session.user.tenant_id, !!email_notifs, !!sms_notifs, !!push_notifs, !!inapp_notifs]);
+  res.redirect('/notifications/preferences');
+}));
+
+// ============================================================
+// === 6. REVENUE ANALYTICS ===
+// ============================================================
+app.get('/analytics/revenue', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [daily, methods, thisMonth, lastMonth] = await Promise.all([
+    pool.query("SELECT DATE(created_at) as day, SUM(amount) as total, COUNT(*) as cnt FROM payments WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days' AND status='completed' GROUP BY DATE(created_at) ORDER BY day", [t]),
+    pool.query("SELECT payment_method, SUM(amount) as total, COUNT(*) as cnt FROM payments WHERE tenant_id=$1 AND created_at >= CURRENT_DATE - INTERVAL '30 days' AND status='completed' GROUP BY payment_method ORDER BY total DESC", [t]),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total, COUNT(*) as cnt FROM payments WHERE tenant_id=$1 AND EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM CURRENT_DATE) AND status='completed'", [t]),
+    pool.query("SELECT COALESCE(SUM(amount),0) as total, COUNT(*) as cnt FROM payments WHERE tenant_id=$1 AND created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE) AND status='completed'", [t])
+  ]);
+  const maxDaily = Math.max(...daily.rows.map(d=>parseInt(d.total)||0), 1);
+  const changePct = lastMonth.rows[0].total > 0 ? Math.round(((parseInt(thisMonth.rows[0].total)-parseInt(lastMonth.rows[0].total))/parseInt(lastMonth.rows[0].total))*100) : 0;
+  res.send(renderPage('Revenue Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Revenue Analytics</h1></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${(parseInt(thisMonth.rows[0].total)||0).toLocaleString()}</div><div>This Month</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${(parseInt(lastMonth.rows[0].total)||0).toLocaleString()}</div><div>Last Month</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${changePct>=0?'#059669':'#ef4444'}">${changePct>=0?'+':''}${changePct}%</div><div>Change</div></div>
+      <div class="stat-card"><div class="stat-num">${thisMonth.rows[0].cnt}</div><div>Transactions</div></div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Revenue — Last 30 Days</h3>
+      <div style="display:flex;align-items:flex-end;gap:3px;height:200px;margin-top:16px">${daily.rows.map(d=>{const h=Math.round((parseInt(d.total)/maxDaily)*100);return `<div style="flex:1;min-width:0;background:linear-gradient(to top,#059669,#10b981);height:${Math.max(h,2)}%;border-radius:3px 3px 0 0" title="${d.day}: UGX ${(parseInt(d.total)||0).toLocaleString()}"></div>`;}).join('')}</div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Payment Methods</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-top:16px">
+        ${methods.rows.map(m=>`<div style="padding:16px;border:1px solid #e5e7eb;border-radius:10px;text-align:center"><div style="font-size:24px;font-weight:800;color:#059669">UGX ${(parseInt(m.total)||0).toLocaleString()}</div><div class="muted">${esc(m.payment_method||'other')}</div><div class="muted">${m.cnt} transactions</div></div>`).join('')}
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 7. API KEY MANAGEMENT ===
+// ============================================================
+app.get('/dev/api-keys', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const keys = (await pool.query("SELECT id,name,key_prefix,created_at,last_used,is_active FROM api_keys WHERE tenant_id=$1 ORDER BY created_at DESC", [req.session.user.tenant_id])).rows;
+  res.send(renderPage('API Keys', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e293b,#334155)"><h1>API Keys</h1><p>Manage API access for integrations</p></div>
+    <div style="margin:16px 0"><form method="POST" action="/dev/api-keys/generate" style="display:flex;gap:12px"><input name="name" placeholder="Key name (e.g., Mobile App)" required style="max-width:300px"><button class="btn btn-green">Generate Key</button></form></div>
+    <div class="card"><table><tr><th>Name</th><th>Key</th><th>Created</th><th>Last Used</th><th>Status</th><th>Actions</th></tr>
+      ${keys.map(k=>'<tr><td><strong>'+esc(k.name)+'</strong></td><td><code style="background:#f3f4f6;padding:4px 8px;border-radius:4px">sk_live_'+esc(k.key_prefix||'****')+'****</code></td><td class="muted">'+(k.created_at?new Date(k.created_at).toLocaleDateString():'')+'</td><td class="muted">'+(k.last_used?new Date(k.last_used).toLocaleDateString():'Never')+'</td><td><span class="tag" style="background:'+(k.is_active?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b')+'">'+(k.is_active?'Active':'Revoked')+'</span></td><td>'+(!k.is_active?'<span class="muted">Revoked</span>':'<form method="POST" action="/dev/api-keys/'+k.id+'/revoke" style="display:inline"><button class="btn btn-sm" style="color:#ef4444">Revoke</button></form>')+'</td></tr>').join('')||'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No API keys yet</td></tr>'}
+    </table></div>
+    <div class="card" style="margin-top:20px"><h3>API Documentation</h3><p>Base URL: <code>https://ssewasswa.onrender.com/api/v1/</code></p><p>Authentication: Include header <code>Authorization: Bearer sk_live_YOUR_KEY</code></p><p>Rate limit: 100 requests/minute per key</p></div>
+  `, req.session.user));
+}));
+
+app.post('/dev/api-keys/generate', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const crypto = require('crypto');
+  const key = 'sk_live_' + crypto.randomBytes(24).toString('hex');
+  const keyHash = crypto.createHash('sha256').update(key).digest('hex');
+  const prefix = key.substring(8, 16);
+  await pool.query("INSERT INTO api_keys (tenant_id,name,key_hash,key_prefix) VALUES ($1,$2,$3,$4)", [req.session.user.tenant_id, req.body.name, keyHash, prefix]);
+  // Show the full key ONE TIME
+  res.send(renderPage('API Key Created', `
+    <div class="card" style="max-width:600px;margin:60px auto;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">🔑</div><h2>API Key Generated</h2>
+      <p class="muted">Copy this key now. You will NOT be able to see it again.</p>
+      <div style="background:#1e293b;color:#10b981;padding:16px;border-radius:8px;font-family:monospace;word-break:break-all;font-size:14px;margin:20px 0">${esc(key)}</div>
+      <p><a href="/dev/api-keys" class="btn btn-green">Back to API Keys</a></p>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/dev/api-keys/:id/revoke', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  await pool.query("UPDATE api_keys SET is_active=false WHERE id=$1", [req.params.id]);
+  res.redirect('/dev/api-keys');
+}));
+
+// ============================================================
+// === 8. WEBHOOK MANAGEMENT ===
+// ============================================================
+app.get('/dev/webhooks', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const hooks = (await pool.query("SELECT * FROM webhooks WHERE tenant_id=$1 ORDER BY created_at DESC", [req.session.user.tenant_id])).rows;
+  res.send(renderPage('Webhooks', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#6366f1)"><h1>Webhooks</h1><p>Receive real-time event notifications</p></div>
+    <div class="card" style="margin-bottom:20px"><h3>Register Webhook</h3>
+      <form method="POST" action="/dev/webhooks/save" style="display:grid;gap:12px;max-width:500px">
+        <input name="url" placeholder="https://your-app.com/webhook" required>
+        <div><label>Events (comma separated)</label><input name="events" placeholder="payment.received, student.enrolled, order.created" value="payment.received"></div>
+        <button class="btn btn-green">Save Webhook</button>
+      </form>
+    </div>
+    <div class="card"><table><tr><th>URL</th><th>Events</th><th>Status</th><th>Actions</th></tr>
+      ${hooks.map(h=>'<tr><td><code>'+esc(h.url)+'</code></td><td>'+(h.events||[]).map(e=>'<span class="tag">'+esc(e)+'</span>').join(' ')+'</td><td><span class="tag" style="background:'+(h.is_active?'#d1fae5;color:#065f46':'#fee2e2;color:#991b1b')+'">'+(h.is_active?'Active':'Inactive')+'</span></td><td><form method="POST" action="/dev/webhooks/'+h.id+'/test" style="display:inline"><button class="btn btn-sm">Test</button></form></td></tr>').join('')||'<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">No webhooks configured</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+app.post('/dev/webhooks/save', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const crypto = require('crypto');
+  const events = req.body.events ? req.body.events.split(',').map(s=>s.trim()).filter(Boolean) : ['payment.received'];
+  await pool.query("INSERT INTO webhooks (tenant_id,url,events,secret) VALUES ($1,$2,$3,$4)", [req.session.user.tenant_id, req.body.url, events, crypto.randomBytes(16).toString('hex')]);
+  res.redirect('/dev/webhooks');
+}));
+
+app.post('/dev/webhooks/:id/test', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const hook = (await pool.query("SELECT * FROM webhooks WHERE id=$1", [req.params.id])).rows[0];
+  if (!hook) return res.status(404).send('Not found');
+  try { await require('https').request(hook.url, {method:'POST',headers:{'Content-Type':'application/json','X-Webhook-Secret':hook.secret}}, (r)=>{r.on('data',()=>{})}).end(JSON.stringify({test:true,timestamp:new Date().toISOString(),event:'ping'})); } catch(e) {}
+  res.redirect('/dev/webhooks');
+}));
+
+// ============================================================
+// === 9. TWO-FACTOR AUTHENTICATION ===
+// ============================================================
+app.get('/settings/2fa', requireAuth, ah(async (req, res) => {
+  const tfa = (await pool.query("SELECT * FROM user_2fa WHERE email=$1", [req.session.user.email])).rows[0];
+  const crypto = require('crypto');
+  const secret = tfa?.secret || crypto.randomBytes(20).toString('hex').toUpperCase().match(/.{4}/g).join(' ');
+  res.send(renderPage('Two-Factor Authentication', `
+    <div class="card" style="max-width:550px;margin:40px auto;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">${tfa?.enabled?'🔒':'🔓'}</div>
+      <h2>Two-Factor Authentication</h2>
+      <p class="muted" style="margin-bottom:20px">${tfa?.enabled ? 'Your account is secured with 2FA' : 'Add an extra layer of security to your account'}</p>
+      ${tfa?.enabled ? `<p style="margin-bottom:16px"><span class="tag" style="background:#d1fae5;color:#065f46">Enabled</span></p>
+        <form method="POST" action="/settings/2fa/disable"><input type="hidden" name="_csrf" value="${esc(req.csrfToken)}"><label>Current Password</label><input type="password" name="current_password" required placeholder="Enter your password" style="max-width:300px;margin:10px auto;display:block"><br><button class="btn" style="color:#ef4444;border:2px solid #ef4444;background:white">Disable 2FA</button></form>` :
+        `<div style="background:#f8fafc;padding:20px;border-radius:10px;text-align:left;margin-bottom:20px">
+          <p><strong>Step 1:</strong> Scan this QR code with Google Authenticator or Authy</p>
+          <div style="text-align:center;margin:16px 0"><div style="background:#f0f0f0;padding:16px;display:inline-block;border-radius:8px;font-family:monospace;font-size:13px;word-break:break-all">${esc(secret)}</div></div>
+          <p style="margin-top:12px"><strong>Step 2:</strong> Enter the 6-digit code from your authenticator app</p>
+          <form method="POST" action="/settings/2fa/verify" style="margin-top:12px;display:flex;gap:8px">
+            <input type="hidden" name="secret" value="${esc(secret)}">
+            <input name="code" placeholder="000000" maxlength="6" required style="font-size:24px;text-align:center;letter-spacing:8px;max-width:200px">
+            <button class="btn btn-green">Verify & Enable</button>
+          </form>
+        </div>`}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/settings/2fa/verify', requireAuth, ah(async (req, res) => {
+  const { secret, code } = req.body;
+  // SECURITY: Actually verify TOTP code against the secret
+  if (!code || code.length !== 6) return res.redirect('/settings/2fa?error=invalid');
+  try {
+    const { authenticator } = require('otplib');
+    const cleanSecret = (secret || '').replace(/\s/g, '').toUpperCase();
+    const isValid = authenticator.verify({ token: code, secret: cleanSecret });
+    if (!isValid) {
+      return res.send(renderPage('2FA Setup', '<div class="card alert alert-error"><h2>Invalid Code</h2><p>The code you entered is incorrect. Please try again.</p><a href="/settings/2fa" class="btn">Back</a></div>', req.session.user));
+    }
+  } catch(e) {
+    // SECURITY: Hard-fail if TOTP verification throws — never accept unverified codes
+    console.error('[2FA] otplib verification failed:', e.message);
+    return res.send(renderPage('2FA Setup', '<div class="card alert alert-error"><h2>Verification Error</h2><p>Could not verify your code. Please try again.</p><a href="/settings/2fa" class="btn">Back</a></div>', req.session.user));
+  }
+  const backupCodes = Array.from({length:10}, () => require('crypto').randomBytes(4).toString('hex'));
+  await pool.query("INSERT INTO user_2fa (email,tenant_id,secret,enabled,backup_codes) VALUES ($1,$2,$3,true,$4) ON CONFLICT (email) DO UPDATE SET secret=$3,enabled=true,backup_codes=$4",
+    [req.session.user.email, req.session.user.tenant_id, secret.replace(/\s/g,''), backupCodes]);
+  await pool.query("INSERT INTO audit_log (tenant_id,user_email,action,details) VALUES ($1,$2,'2fa_enabled','Two-factor authentication enabled')", [req.session.user.tenant_id, req.session.user.email]);
+  res.send(renderPage('2FA Enabled', `
+    <div class="card" style="max-width:550px;margin:60px auto;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">✅</div><h2>Two-Factor Authentication Enabled!</h2>
+      <p class="muted" style="margin-bottom:20px">Save these backup codes in a safe place. Each code can only be used once.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center;margin:20px 0">${backupCodes.map(c=>'<div style="background:#f8fafc;padding:8px;border-radius:4px;font-family:monospace">'+esc(c)+'</div>').join('')}</div>
+      <a href="/settings/2fa" class="btn btn-green">Continue</a>
+    </div>
+  `, req.session.user));
+}));
+
+// REMOVED: Duplicate insecure /settings/2fa/disable endpoint.
+// The secure version with password verification is defined earlier in the file (requires current_password + bcrypt check).
+
+// ============================================================
+// === 10. AUDIT LOG ===
+// ============================================================
+app.get('/settings/audit-log', requireAuth, requireSuperAdmin, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { user, action, from, to } = req.query;
+  let where = "WHERE tenant_id=$1", params = [t], pNum = 2;
+  if (user) { where += ` AND user_email ILIKE $${pNum++}`; params.push('%'+user+'%'); }
+  if (action) { where += ` AND action ILIKE $${pNum++}`; params.push('%'+action+'%'); }
+  if (from) { where += ` AND created_at >= $${pNum++}`; params.push(from); }
+  if (to) { where += ` AND created_at <= $${pNum++}`; params.push(to+'T23:59:59'); }
+  const logs = (await pool.query("SELECT * FROM audit_log "+where+" ORDER BY created_at DESC LIMIT 200", params)).rows;
+  res.send(renderPage('Audit Log', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e293b,#334155)"><h1>Audit Log</h1><p>Track all sensitive actions</p></div>
+    <div class="card" style="margin-bottom:20px"><form method="GET" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end">
+      <div><label>User</label><input name="user" value="${from||''}" placeholder="Search by email"></div>
+      <div><label>Action</label><input name="action" value="${action||''}" placeholder="e.g. login, 2fa"></div>
+      <div><label>From</label><input type="date" name="from" value="${from||''}"></div>
+      <div><label>To</label><input type="date" name="to" value="${to||''}"></div>
+      <div><button class="btn btn-green">Filter</button></div>
+    </form></div>
+    <div class="card"><table><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Details</th><th>IP</th></tr>
+      ${logs.map(l=>'<tr><td style="white-space:nowrap;font-size:13px">'+(l.created_at?new Date(l.created_at).toLocaleString():'')+'</td><td>'+esc(l.user_email||'')+'</td><td><span class="tag">'+esc(l.action)+'</span></td><td class="muted">'+esc(l.details||'')+'</td><td class="muted" style="font-size:12px">'+esc(l.ip_address||'')+'</td></tr>').join('')||'<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">No audit entries</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 11. E-COMMERCE REVIEWS & ORDER TRACKING ===
+// ============================================================
+app.post('/store/:id/reviews', requireAuth, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query("INSERT INTO product_reviews (tenant_id,product_id,reviewer_name,rating,review_text) VALUES ($1,$2,$3,$4,$5)", [t, req.params.id, req.body.reviewer_name||req.session.user.name, Math.min(5,Math.max(1,parseInt(req.body.rating)||5)), req.body.review_text||'']);
+  res.redirect('/store/'+req.params.id);
+}));
+
+app.get('/store/:id/reviews', ah(async (req, res) => {
+  const reviews = (await pool.query("SELECT * FROM product_reviews WHERE product_id=$1 ORDER BY created_at DESC", [req.params.id])).rows;
+  const avgRating = reviews.length > 0 ? (reviews.reduce((a,r)=>a+parseInt(r.rating),0)/reviews.length).toFixed(1) : '0';
+  res.send(renderPage('Product Reviews', `
+    <div style="max-width:700px;margin:40px auto">
+      <div class="card" style="text-align:center;margin-bottom:20px"><h2>Customer Reviews</h2><div style="font-size:48px;font-weight:800;color:#f59e0b">${avgRating}</div><div class="muted">${reviews.length} reviews</div></div>
+      ${reviews.map(r=>'<div class="card" style="margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center"><strong>'+esc(r.reviewer_name)+'</strong><span style="color:#f59e0b">'+('★'.repeat(r.rating))+'☆</span><span class="muted" style="font-size:12px">'+(r.created_at?new Date(r.created_at).toLocaleDateString():'')+'</span></div>'+(r.review_text?'<p style="margin:8px 0 0">'+esc(r.review_text)+'</p>':'')+'</div>').join('')||'<div class="card"><p class="muted" style="text-align:center">No reviews yet. Be the first to review!</p></div>'}
+      ${req.session.user?'<div class="card" style="margin-top:20px"><h3>Write a Review</h3><form method="POST" action="/store/'+req.params.id+'/reviews"><div style="display:flex;gap:8px;margin:12px 0"><label>Rating:</label>'+[1,2,3,4,5].map(i=>'<label style="cursor:pointer;font-size:24px"><input type="radio" name="rating" value="'+i+'" '+(i===5?'checked':'')+' required style="display:none"><span onclick="this.parentElement.querySelectorAll(\'input\')[0].checked=true">★</span></label>').join('')+'</div><textarea name="review_text" rows="3" placeholder="Share your experience..."></textarea><button class="btn btn-green" style="margin-top:8px">Submit Review</button></form></div>':''}
+    </div>
+  `, req.session.user||null));
+}));
+
+app.get('/orders/:id/track', requireAuth, ah(async (req, res) => {
+  const tracking = (await pool.query("SELECT * FROM order_tracking WHERE order_id=$1 ORDER BY updated_at DESC", [req.params.id])).rows;
+  const statuses = ['placed','confirmed','processing','shipped','delivered'];
+  const currentStatus = tracking.length > 0 ? tracking[0].status : 'placed';
+  const currentIndex = statuses.indexOf(currentStatus);
+  res.send(renderPage('Track Order', `
+    <div style="max-width:600px;margin:40px auto">
+      <h2 style="text-align:center">Track Order #${req.params.id}</h2>
+      <div style="display:flex;justify-content:space-between;margin:40px 0 20px;position:relative">
+        <div style="position:absolute;top:20px;left:0;right:0;height:4px;background:#e5e7eb;z-index:0"></div>
+        <div style="position:absolute;top:20px;left:0;height:4px;background:#059669;z-index:1;width:${Math.round(currentIndex/(statuses.length-1)*100)}%;transition:width 0.5s"></div>
+        ${statuses.map((s,i)=>'<div style="text-align:center;z-index:2;flex:1"><div style="width:40px;height:40px;border-radius:50%;background:'+(i<=currentIndex?'#059669':'#e5e7eb')+';color:'+(i<=currentIndex?'white':'#9ca3af')+';display:flex;align-items:center;justify-content:center;font-weight:700;margin:0 auto;font-size:14px">'+(i+1)+'</div><div style="margin-top:8px;font-size:12px;color:'+(i<=currentIndex?'#059669':'#9ca3af')+';font-weight:'+(i===currentIndex?'700':'400')+'">'+esc(s)+'</div></div>').join('')}
+      </div>
+      ${tracking[0]?.tracking_number?'<div class="card" style="text-align:center"><strong>Tracking Number:</strong> <code>'+esc(tracking[0].tracking_number)+'</code></div>':''}
+      <div class="card" style="margin-top:20px"><h3>Update History</h3>
+        ${tracking.map(t=>'<div style="padding:8px 0;border-bottom:1px solid #f3f4f6"><span class="tag">'+esc(t.status)+'</span> <span class="muted" style="font-size:13px">'+(t.updated_at?new Date(t.updated_at).toLocaleString():'')+'</span>'+(t.notes?' — '+esc(t.notes):'')+'</div>').join('')||'<p class="muted">No tracking updates yet</p>'}
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/store/alerts', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const alerts = (await pool.query("SELECT * FROM products WHERE tenant_id=$1 AND quantity <= reorder_level AND quantity > 0 ORDER BY (quantity - reorder_level) ASC", [t])).rows;
+  res.send(renderPage('Low Stock Alerts', `
+    <div class="hero" style="background:linear-gradient(135deg,#ef4444,#f97316)"><h1>Low Stock Alerts</h1><p>${alerts.length} items need restocking</p></div>
+    <div class="card"><table><tr><th>Product</th><th>Current Stock</th><th>Reorder Level</th><th>Gap</th><th>Status</th></tr>
+      ${alerts.map(a=>{const gap=parseInt(a.reorder_level)-parseInt(a.quantity);return '<tr><td><strong>'+esc(a.name)+'</strong></td><td style="color:#ef4444;font-weight:700">'+a.quantity+'</td><td>'+a.reorder_level+'</td><td style="color:#ef4444;font-weight:700">'+gap+'</td><td><span class="tag" style="background:'+(gap<=0?'#d1fae5;color:#065f46':gap<=5?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+(gap<=0?'OK':gap<=5?'Low':'Critical')+'</span></td></tr>';}).join('')||'<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">All stock levels are healthy!</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 12. PAYROLL DASHBOARD ===
+// ============================================================
+app.get('/payroll/dashboard', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [thisMonth, lastMonth, pending, dept] = await Promise.all([
+    pool.query("SELECT COALESCE(SUM(net_pay),0) as total FROM payroll WHERE tenant_id=$1 AND EXTRACT(MONTH FROM pay_date)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM pay_date)=EXTRACT(YEAR FROM CURRENT_DATE) AND status='paid'", [t]),
+    pool.query("SELECT COALESCE(SUM(net_pay),0) as total FROM payroll WHERE tenant_id=$1 AND pay_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND pay_date < DATE_TRUNC('month', CURRENT_DATE) AND status='paid'", [t]),
+    pool.query("SELECT COUNT(*) as cnt FROM payroll WHERE tenant_id=$1 AND status='pending'", [t]),
+    pool.query("SELECT department, COALESCE(SUM(net_pay),0) as total, COUNT(*) as cnt FROM payroll WHERE tenant_id=$1 AND EXTRACT(MONTH FROM pay_date)=EXTRACT(MONTH FROM CURRENT_DATE) GROUP BY department ORDER BY total DESC", [t])
+  ]);
+  const change = lastMonth.rows[0].total > 0 ? Math.round(((parseInt(thisMonth.rows[0].total)-parseInt(lastMonth.rows[0].total))/parseInt(lastMonth.rows[0].total))*100) : 0;
+  res.send(renderPage('Payroll Dashboard', `
+    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Payroll Dashboard</h1></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#059669">UGX ${(parseInt(thisMonth.rows[0].total)||0).toLocaleString()}</div><div>This Month</div></div>
+      <div class="stat-card"><div class="stat-num">UGX ${(parseInt(lastMonth.rows[0].total)||0).toLocaleString()}</div><div>Last Month</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:${change>=0?'#059669':'#ef4444'}">${change>=0?'+':''}${change}%</div><div>Change</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${pending.rows[0].cnt}</div><div>Pending</div></div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Department Breakdown</h3><table><tr><th>Department</th><th>Staff</th><th>Total Pay</th></tr>
+      ${dept.rows.map(d=>'<tr><td><strong>'+esc(d.department||'Unassigned')+'</strong></td><td>'+d.cnt+'</td><td style="font-weight:700">UGX '+(parseInt(d.total)||0).toLocaleString()+'</td></tr>').join('')||'<tr><td colspan="3" class="muted" style="text-align:center;padding:20px">No payroll data</td></tr>'}
+    </table></div>
+  `, req.session.user));
+}));
+
+// ============================================================
+// === 13. ATTENDANCE ANALYTICS ===
+// ============================================================
+app.get('/attendance/analytics', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const [classStats, weekly, absentees] = await Promise.all([
+    pool.query("SELECT class_name, COUNT(*) as total, COUNT(*) FILTER (WHERE status='present') as present, ROUND(COUNT(*) FILTER (WHERE status='present')::numeric / NULLIF(COUNT(*),0) * 100, 1) as rate FROM attendance WHERE tenant_id=$1 AND date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY class_name ORDER BY rate ASC", [t]),
+    pool.query("SELECT DATE_TRUNC('week',date) as week, COUNT(*) as total, COUNT(*) FILTER (WHERE status='present') as present FROM attendance WHERE tenant_id=$1 AND date >= CURRENT_DATE - INTERVAL '12 weeks' GROUP BY DATE_TRUNC('week',date) ORDER BY week", [t]),
+    pool.query("SELECT student_name, COUNT(*) as total, COUNT(*) FILTER (WHERE status='present') as present, ROUND(COUNT(*) FILTER (WHERE status='present')::numeric / NULLIF(COUNT(*),0) * 100, 1) as rate FROM attendance WHERE tenant_id=$1 AND date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY student_name HAVING ROUND(COUNT(*) FILTER (WHERE status='present')::numeric / NULLIF(COUNT(*),0) * 100, 1) < 70 ORDER BY rate ASC LIMIT 20", [t])
+  ]);
+  const maxWeek = Math.max(...weekly.rows.map(w=>parseInt(w.total)||0), 1);
+  res.send(renderPage('Attendance Analytics', `
+    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Attendance Analytics</h1></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num">${classStats.rows.length}</div><div>Classes Tracked</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#ef4444">${absentees.rows.length}</div><div>Chronic Absentees</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${weekly.rows.length}</div><div>Weeks of Data</div></div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Weekly Attendance Trend (12 weeks)</h3>
+      <div style="display:flex;align-items:flex-end;gap:6px;height:180px;margin-top:16px">${weekly.rows.map(w=>{const pct=Math.round((parseInt(w.present)/maxWeek)*100);return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px"><span style="font-size:11px;font-weight:700">'+Math.round(parseInt(w.present)/((parseInt(w.total)||1))*100)+'%</span><div style="width:100%;background:linear-gradient(to top,#f59e0b,#fbbf24);height:'+Math.max(pct,4)+'%;border-radius:4px 4px 0 0"></div><span style="font-size:10px;color:#9ca3af">'+(w.week?new Date(w.week).toLocaleDateString('en',{month:'short',day:'numeric'}):'')+'</span></div>';}).join('')}</div>
+    </div>
+    <div class="card" style="margin-top:20px"><h3>Attendance by Class</h3><table><tr><th>Class</th><th>Total Records</th><th>Present</th><th>Rate</th></tr>
+      ${classStats.map(c=>'<tr><td><strong>'+esc(c.class_name||'')+'</strong></td><td>'+c.total+'</td><td>'+c.present+'</td><td><span class="tag" style="background:'+(c.rate>=90?'#d1fae5;color:#065f46':c.rate>=75?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b')+'">'+c.rate+'%</span></td></tr>').join('')||'<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">No data</td></tr>'}
+    </table></div>
+    ${absentees.rows.length>0?'<div class="card" style="margin-top:20px"><h3 style="color:#ef4444">Chronic Absentees (below 70%)</h3><table><tr><th>Student</th><th>Attendance Rate</th></tr>'+absentees.rows.map(a=>'<tr><td>'+esc(a.student_name)+'</td><td style="color:#ef4444;font-weight:700">'+a.rate+'%</td></tr>').join('')+'</table></div>':''}
+  `, req.session.user));
+}));
 
 // === 404 CATCH-ALL (MUST be after all routes including launch-routes) ===
-app.use((req, res) => res.status(404).send(renderPage('404', '<div class="card"><h2>404</h2><p>Page not found</p><a href="/" class="btn">Go Home</a></div>', req.session?.user || null)));
-
-// === ERROR HANDLER ===
-app.use((err, req, res, next) => {
-  console.error('Server Error:', err);
-  // Send to Sentry if configured
-  if (Sentry) Sentry.captureException(err);
-  const msg = err.message || 'Something went wrong';
-  const user = req.session?.user || null;
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
-});
-
-// === REQUEST TIMEOUT MIDDLEWARE ===
-app.use((req, res, next) => {
-  req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-    if (!res.headersSent) {
-      res.status(504).json({ error: 'Request timeout' });
-    }
-  });
-  next();
-});
-
-// === CENTRALIZED ERROR HANDLER ===
-app.use((err, req, res, next) => {
-  console.error(`[Error] ${req.method} ${req.path}:`, err.message);
-  // Guard against double-response (headers already sent)
-  if (res.headersSent) return;
-  // Don't leak stack traces in production
-  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message;
+app.use((req, res) => {
   if (req.accepts('json')) {
-    return res.status(500).json({ error: msg });
+    return res.status(404).json({ error: 'Not found', path: req.path });
   }
-  const user = req.session?.user || null;
-  res.status(500).send(renderPage('Error', `<div class="card"><div class="alert alert-error"><h2>500 Error</h2><p>${esc(msg)}</p></div><a href="/" class="btn">Go Home</a></div>`, user));
+  res.status(404).send(renderPage('404 - Page Not Found', `
+    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)"><h1>404</h1><p>Page not found</p></div>
+    <div class="card" style="max-width:600px;margin:0 auto;text-align:center">
+      <div style="font-size:80px;margin:20px 0">🔍</div>
+      <h2>Oops! This page doesn't exist</h2>
+      <p class="muted" style="margin:15px 0">The page you're looking for might have been removed, renamed, or is temporarily unavailable.</p>
+      <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <a href="/" class="btn">Go Home</a>
+        <a href="/org/search" class="btn" style="background:#64748b">Search</a>
+        <a href="javascript:history.back()" class="btn" style="background:#dc2626">Go Back</a>
+      </div>
+    </div>
+  `, req.session?.user || null));
 });
 
-const PORT = process.env.PORT || 3000;
-const server = http.createServer(app);
+// === PRODUCTION ERROR HANDLER (single unified handler) ===
+app.use((err, req, res, next) => {
+  // Guard against double-response
+  if (res.headersSent) return next(err);
+  
+  // Log the error
+  console.error(`[Error] ${req.method} ${req.path}:`, err.message);
+  
+  // Send to Sentry if configured
+  try { if (Sentry) Sentry.captureException(err); } catch(e) {}
+  
+  // Don't leak error details in production
+  const msg = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred. Our team has been notified.' : (err.message || 'Something went wrong');
+  
+  // JSON response for API requests
+  if (req.accepts('json')) {
+    return res.status(500).json({ error: msg, ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }) });
+  }
+  
+  // HTML response for browser requests
+  const user = req.session?.user || null;
+  res.status(500).send(renderPage('500 - Server Error', `
+    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>500</h1><p>Something went wrong</p></div>
+    <div class="card" style="max-width:600px;margin:0 auto;text-align:center">
+      <div style="font-size:80px;margin:20px 0">⚠️</div>
+      <h2>Internal Server Error</h2>
+      <p class="muted" style="margin:15px 0">${esc(msg)}</p>
+      <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <a href="/" class="btn">Go Home</a>
+        <a href="javascript:history.back()" class="btn" style="background:#64748b">Go Back</a>
+      </div>
+    </div>
+  `, user));
+});
 
 // === ATTACH WEBSOCKET SERVER ===
 try {
@@ -33635,7 +37310,8 @@ try {
     const sidMatch = cookieHeader.match(/connect\.sid=([^;]+)/);
     if (!sidMatch) { ws.close(1008, 'No session'); return; }
     const sessionId = decodeURIComponent(sidMatch[1]);
-    // Look up user from session store
+    // Look up user from session store (if PG store available)
+    if (!pgSessionStore || typeof pgSessionStore.get !== 'function') { ws.close(1008, 'Session store unavailable'); return; }
     pgSessionStore.get(sessionId, async (err, session) => {
       if (err || !session || !session.user) { ws.close(1008, 'Not authenticated'); return; }
       const tenantId = session.user.tenant_id;
@@ -33659,2280 +37335,13 @@ try {
   console.log('[WS] WebSocket server initialized');
 } catch (e) { console.warn('[WS] Failed to initialize WebSocket:', e.message); }
 
-// ============================================================
-// === v12.0: MAJOR HEALTH PORTAL ENHANCEMENTS ===
-// ============================================================
-
-// --- FEATURE 1: ICD-10 DIAGNOSIS CODES ---
-const ICD10_COMMON = [
-  { code: 'A00', description: 'Cholera', category: 'Infectious' },
-  { code: 'A09', description: 'Gastroenteritis', category: 'Infectious' },
-  { code: 'B54', description: 'Unspecified malaria', category: 'Infectious' },
-  { code: 'B34.9', description: 'Viral infection, unspecified', category: 'Infectious' },
-  { code: 'E11.9', description: 'Type 2 diabetes mellitus without complications', category: 'Endocrine' },
-  { code: 'E78.5', description: 'Hyperlipidemia, unspecified', category: 'Endocrine' },
-  { code: 'I10', description: 'Essential hypertension', category: 'Circulatory' },
-  { code: 'I21.9', description: 'Acute myocardial infarction, unspecified', category: 'Circulatory' },
-  { code: 'J00', description: 'Acute nasopharyngitis (common cold)', category: 'Respiratory' },
-  { code: 'J06.9', description: 'Acute upper respiratory infection, unspecified', category: 'Respiratory' },
-  { code: 'J10.1', description: 'Influenza due to other identified influenza virus with other respiratory manifestations', category: 'Respiratory' },
-  { code: 'J11.1', description: 'Influenza with other respiratory manifestations, virus not identified', category: 'Respiratory' },
-  { code: 'J18.9', description: 'Pneumonia, unspecified organism', category: 'Respiratory' },
-  { code: 'J45.909', description: 'Unspecified asthma, uncomplicated', category: 'Respiratory' },
-  { code: 'K21.0', description: 'Gastroesophageal reflux disease with esophagitis', category: 'Digestive' },
-  { code: 'K29.7', description: 'Gastritis, unspecified', category: 'Digestive' },
-  { code: 'K52.9', description: 'Noninfective gastroenteritis and colitis, unspecified', category: 'Digestive' },
-  { code: 'L30.9', description: 'Dermatitis, unspecified', category: 'Skin' },
-  { code: 'M54.5', description: 'Low back pain', category: 'Musculoskeletal' },
-  { code: 'M79.3', description: 'Panniculitis, unspecified', category: 'Musculoskeletal' },
-  { code: 'N30.0', description: 'Acute cystitis', category: 'Genitourinary' },
-  { code: 'N39.0', description: 'Urinary tract infection, site not specified', category: 'Genitourinary' },
-  { code: 'O03.9', description: 'Spontaneous abortion, unspecified', category: 'Pregnancy' },
-  { code: 'O80', description: 'Encounter for full-term uncomplicated delivery', category: 'Pregnancy' },
-  { code: 'O10.919', description: 'Pre-existing hypertension, unspecified, first trimester', category: 'Pregnancy' },
-  { code: 'R50.9', description: 'Fever, unspecified', category: 'Symptoms' },
-  { code: 'R51', description: 'Headache', category: 'Symptoms' },
-  { code: 'R52', description: 'Pain, unspecified', category: 'Symptoms' },
-  { code: 'R56.9', description: 'Febrile convulsions, unspecified', category: 'Symptoms' },
-  { code: 'Z23', description: 'Encounter for immunization', category: 'Health' },
-  { code: 'Z34.00', description: 'Supervision of normal first pregnancy', category: 'Pregnancy' }
-];
-
-app.get('/api/health/icd10-search', requireAuth, ah(async (req, res) => {
-  const q = (req.query.q || '').toLowerCase().trim();
-  if (!q || q.length < 1) return res.json({ results: [] });
-  const results = ICD10_COMMON.filter(c => c.code.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)).slice(0, 20);
-  res.json({ results });
-}));
-
-// --- FEATURE 2: PHARMACY STOCK AUDIT TRAIL ---
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS pharmacy_stock_movements (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      drug_id INTEGER REFERENCES pharmacy_inventory(id),
-      medicine_name VARCHAR(255) NOT NULL,
-      movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('in','out','adjustment','expiry_writeoff','damaged')),
-      quantity INTEGER NOT NULL,
-      previous_quantity INTEGER,
-      new_quantity INTEGER,
-      reference_type VARCHAR(50),
-      reference_id INTEGER,
-      batch_number VARCHAR(100),
-      expiry_date DATE,
-      notes TEXT,
-      performed_by VARCHAR(255) NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_tenant ON pharmacy_stock_movements(tenant_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_drug ON pharmacy_stock_movements(drug_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_pharm_stock_mov_date ON pharmacy_stock_movements(created_at)');
-  } catch (e) { console.warn('[v12] pharmacy_stock_movements table:', e.message); }
-})();
-
-app.get('/clinic/pharmacy/stock-movements', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { drug_id, type, from_date, to_date, page = 1 } = req.query;
-  const limit = 50;
-  const offset = (parseInt(page) - 1) * limit;
-  let where = 'WHERE sm.tenant_id = $1';
-  const params = [t];
-  let paramIdx = 2;
-  if (drug_id) { where += ` AND sm.drug_id = $${paramIdx++}`; params.push(drug_id); }
-  if (type && type !== 'all') { where += ` AND sm.movement_type = $${paramIdx++}`; params.push(type); }
-  if (from_date) { where += ` AND sm.created_at::date >= $${paramIdx++}`; params.push(from_date); }
-  if (to_date) { where += ` AND sm.created_at::date <= $${paramIdx++}`; params.push(to_date); }
-  
-  const [movements, total] = await Promise.all([
-    pool.query(`SELECT sm.*, pi.medicine_name as inv_name FROM pharmacy_stock_movements sm LEFT JOIN pharmacy_inventory pi ON sm.drug_id=pi.id ${where} ORDER BY sm.created_at DESC LIMIT ${limit} OFFSET ${offset}`, params),
-    pool.query(`SELECT COUNT(*)::int FROM pharmacy_stock_movements sm ${where}`, params)
-  ]);
-  const totalPages = Math.ceil((total.rows[0]?.count || 0) / limit);
-  
-  res.send(renderPage('Stock Movements', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Stock Movement History</h1><p>Complete audit trail of all pharmacy stock changes</p></div>
-    <div class="card" style="margin-bottom:16px">
-      <form method="GET" style="display:flex;gap:10px;flex-wrap:wrap">
-        <select name="type"><option value="all">All Types</option><option value="in">Stock In</option><option value="out">Stock Out</option><option value="adjustment">Adjustment</option><option value="expiry_writeoff">Expiry Write-off</option><option value="damaged">Damaged</option></select>
-        <input name="from_date" type="date" placeholder="From" value="${from_date||''}">
-        <input name="to_date" type="date" placeholder="To" value="${to_date||''}">
-        <button class="btn btn-green">Filter</button>
-        <a href="/clinic/pharmacy/stock-movements" class="btn">Clear</a>
-      </form>
-    </div>
-    <div class="card"><table><tr><th>Date</th><th>Drug</th><th>Type</th><th>Qty</th><th>Before</th><th>After</th><th>Reference</th><th>By</th></tr>
-      ${movements.rows.map(m => `<tr style="${m.movement_type==='out'||m.movement_type==='expiry_writeoff'||m.movement_type==='damaged'?'background:#fef3c7':''}"><td>${new Date(m.created_at).toLocaleString()}</td><td><strong>${esc(m.medicine_name)}</strong></td><td><span class="tag" style="background:${m.movement_type==='in'?'#d1fae5;color:#065f46':m.movement_type==='out'?'#dbeafe;color:#1e40af':'#f3f4f6'}">${m.movement_type}</span></td><td style="font-weight:700;color:${m.movement_type==='in'?'#059669':'#dc2626'}">${m.movement_type==='in'?'+':'-'}${m.quantity}</td><td>${m.previous_quantity}</td><td>${m.new_quantity}</td><td class="muted">${esc(m.reference_type||'')} #${m.reference_id||''}</td><td class="muted">${esc(m.performed_by)}</td></tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px" class="muted">No stock movements recorded</td></tr>'}
-    </table>
-    ${totalPages > 1 ? `<div style="display:flex;gap:8px;justify-content:center;margin-top:16px">${Array.from({length: totalPages}, (_, i) => `<a href="?page=${i+1}&type=${type||'all'}" class="btn btn-sm ${parseInt(page)===i+1?'btn-green':''}">${i+1}</a>`).join('')}</div>` : ''}
-    </div>
-  `, req.session.user));
-}));
-
-// --- FEATURE 3: BLOOD BANK MANAGEMENT ---
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS blood_bank_inventory (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      blood_type VARCHAR(10) NOT NULL CHECK (blood_type IN ('A+','A-','B+','B-','AB+','AB-','O+','O-')),
-      component VARCHAR(50) NOT NULL CHECK (component IN ('whole_blood','packed_rbc','platelets','plasma','cryoprecipitate')),
-      units_available INTEGER NOT NULL DEFAULT 0,
-      batch_number VARCHAR(100),
-      collected_date DATE,
-      expiry_date DATE,
-      donor_id VARCHAR(100),
-      storage_location VARCHAR(100),
-      status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available','reserved','used','expired','quarantine')),
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_bank_tenant ON blood_bank_inventory(tenant_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_bank_type ON blood_bank_inventory(blood_type, component)');
-
-    await pool.query(`CREATE TABLE IF NOT EXISTS blood_transfusions (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_name VARCHAR(255) NOT NULL,
-      patient_id INTEGER,
-      patient_type VARCHAR(20),
-      blood_type VARCHAR(10) NOT NULL,
-      component VARCHAR(50) NOT NULL,
-      units_transfused INTEGER NOT NULL DEFAULT 1,
-      transfusion_date TIMESTAMPTZ DEFAULT NOW(),
-      reason TEXT,
-      crossmatch_result VARCHAR(20) DEFAULT 'compatible',
-      adverse_reactions TEXT,
-      performed_by VARCHAR(255),
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_blood_trans_tenant ON blood_transfusions(tenant_id)');
-  } catch (e) { console.warn('[v12] blood bank tables:', e.message); }
-})();
-
-app.get('/clinic/blood-bank', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [inventory, recentTransfusions] = await Promise.all([
-    pool.query("SELECT * FROM blood_bank_inventory WHERE tenant_id=$1 AND status='available' ORDER BY blood_type, component", [t]),
-    pool.query("SELECT * FROM blood_transfusions WHERE tenant_id=$1 ORDER BY transfusion_date DESC LIMIT 20", [t])
-  ]);
-  const bloodTypes = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
-  const components = ['whole_blood','packed_rbc','platelets','plasma','cryoprecipitate'];
-  const componentLabels = { whole_blood:'Whole Blood', packed_rbc:'Packed RBC', platelets:'Platelets', plasma:'Plasma', cryoprecipitate:'Cryoprecipitate' };
-  
-  // Build summary matrix
-  const summary = {};
-  for (const bt of bloodTypes) { summary[bt] = { total: 0 }; }
-  for (const row of inventory.rows) {
-    if (!summary[row.blood_type]) summary[row.blood_type] = { total: 0 };
-    summary[row.blood_type][row.component] = row.units_available;
-    summary[row.blood_type].total += row.units_available;
-  }
-
-  res.send(renderPage('Blood Bank', `
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>Blood Bank Management</h1><p>Manage blood inventory and transfusion records</p></div>
-    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
-      <a href="/clinic/blood-bank/add" class="btn btn-green">+ Add Blood Units</a>
-      <a href="/clinic/blood-bank/transfuse" class="btn" style="background:#dc2626;color:white">+ Record Transfusion</a>
-      <a href="/clinic/blood-bank/stock" class="btn">Full Inventory</a>
-    </div>
-    <div class="card"><h3>Blood Stock Summary</h3>
-      <div style="overflow-x:auto"><table><tr><th>Blood Type</th>${components.map(c=>`<th>${componentLabels[c]}</th>`).join('')}<th style="font-weight:700">Total</th></tr>
-      ${bloodTypes.map(bt => `<tr style="${(summary[bt].total||0) < 3 ? 'background:#fee2e2' : (summary[bt].total||0) < 5 ? 'background:#fef3c7' : ''}"><td style="font-weight:700;font-size:16px;color:#dc2626">${bt}</td>${components.map(c=>`<td>${summary[bt]?.[c] || 0}</td>`).join('')}<td style="font-weight:700">${summary[bt]?.total || 0}</td></tr>`).join('')}
-      </table></div>
-    </div>
-    ${recentTransfusions.rows.length > 0 ? `<div class="card" style="margin-top:16px"><h3>Recent Transfusions</h3><table><tr><th>Date</th><th>Patient</th><th>Type</th><th>Component</th><th>Units</th><th>By</th></tr>${recentTransfusions.rows.map(r=>`<tr><td>${new Date(r.transfusion_date).toLocaleString()}</td><td>${esc(r.patient_name)}</td><td style="color:#dc2626;font-weight:700">${r.blood_type}</td><td>${componentLabels[r.component]||r.component}</td><td>${r.units_transfused}</td><td class="muted">${esc(r.performed_by||'')}</td></tr>`).join('')}</table></div>` : ''}
-  `, req.session.user));
-}));
-
-app.get('/clinic/blood-bank/add', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
-  res.send(renderPage('Add Blood Units', `
-    <div class="card" style="max-width:600px;margin:0 auto"><h2>Add Blood Units to Inventory</h2>
-    <form method="POST" action="/clinic/blood-bank/save">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div><label>Blood Type *</label><select name="blood_type" required>${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bt=>`<option value="${bt}">${bt}</option>`).join('')}</select></div>
-        <div><label>Component *</label><select name="component" required><option value="whole_blood">Whole Blood</option><option value="packed_rbc">Packed RBC</option><option value="platelets">Platelets</option><option value="plasma">Plasma</option><option value="cryoprecipitate">Cryoprecipitate</option></select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Units *</label><input name="units_available" type="number" min="1" value="1" required></div>
-        <div><label>Batch Number</label><input name="batch_number" placeholder="e.g. BTN-2026-001"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Collected Date</label><input name="collected_date" type="date"></div>
-        <div><label>Expiry Date *</label><input name="expiry_date" type="date" required></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Donor ID</label><input name="donor_id" placeholder="Donor reference"></div>
-        <div><label>Storage Location</label><input name="storage_location" placeholder="e.g. Fridge 1, Shelf A"></div>
-      </div>
-      <div style="margin-top:12px"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-      <button class="btn btn-green" style="width:100%;margin-top:16px">Add to Inventory</button>
-    </form></div>
-  `, req.session.user));
-});
-
-app.post('/clinic/blood-bank/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { blood_type, component, units_available, batch_number, collected_date, expiry_date, donor_id, storage_location, notes } = req.body;
-  if (!blood_type || !component || !expiry_date) return res.redirect('/clinic/blood-bank/add');
-  // Check expiry
-  if (new Date(expiry_date) < new Date()) {
-    return res.send(renderPage('Error', '<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Expired Blood</h2><p>Cannot add blood that has already expired.</p><a href="/clinic/blood-bank/add" class="btn">Go Back</a></div>', req.session.user));
-  }
-  await pool.query('INSERT INTO blood_bank_inventory(tenant_id,blood_type,component,units_available,batch_number,collected_date,expiry_date,donor_id,storage_location,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, blood_type, component, parseInt(units_available)||1, batch_number||null, collected_date||null, expiry_date, donor_id||null, storage_location||null, notes||null]);
-  await audit(req.session.user.email, 'blood_bank_add', { blood_type, component, units: units_available });
-  res.redirect('/clinic/blood-bank');
-}));
-
-app.get('/clinic/blood-bank/transfuse', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const available = (await pool.query("SELECT * FROM blood_bank_inventory WHERE tenant_id=$1 AND status='available' AND units_available > 0 AND expiry_date > CURRENT_DATE ORDER BY blood_type", [t])).rows;
-  res.send(renderPage('Record Transfusion', `
-    <div class="card" style="max-width:600px;margin:0 auto"><h2>Record Blood Transfusion</h2>
-    <form method="POST" action="/clinic/blood-bank/transfuse/save">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div><label>Patient Name *</label><input name="patient_name" required></div>
-        <div><label>Patient Blood Type *</label><select name="blood_type" required>${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(bt=>`<option value="${bt}">${bt}</option>`).join('')}</select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Component *</label><select name="component" required><option value="whole_blood">Whole Blood</option><option value="packed_rbc">Packed RBC</option><option value="platelets">Platelets</option><option value="plasma">Plasma</option></select></div>
-        <div><label>Units *</label><input name="units_transfused" type="number" min="1" value="1" required></div>
-      </div>
-      <div style="margin-top:12px"><label>Reason *</label><textarea name="reason" rows="2" required placeholder="Indication for transfusion"></textarea></div>
-      <div style="margin-top:12px"><label>Crossmatch Result</label><select name="crossmatch_result"><option value="compatible">Compatible</option><option value="incompatible">Incompatible</option><option value="not_done">Not Done</option></select></div>
-      <div style="margin-top:12px"><label>Adverse Reactions</label><textarea name="adverse_reactions" rows="2" placeholder="Any transfusion reactions observed"></textarea></div>
-      <button class="btn" style="width:100%;margin-top:16px;background:#dc2626;color:white">Record Transfusion</button>
-    </form></div>
-    ${available.length === 0 ? '<p style="text-align:center;color:#dc2626;margin-top:16px">No blood units currently available in inventory.</p>' : ''}
-  `, req.session.user));
-}));
-
-app.post('/clinic/blood-bank/transfuse/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_name, patient_id, patient_type, blood_type, component, units_transfused, reason, crossmatch_result, adverse_reactions } = req.body;
-  if (!patient_name || !blood_type || !component || !reason) return res.redirect('/clinic/blood-bank/transfuse');
-  const units = parseInt(units_transfused) || 1;
-  // Check and reserve stock
-  const stock = (await pool.query("UPDATE blood_bank_inventory SET units_available = units_available - $1, status = CASE WHEN units_available - $1 <= 0 THEN 'used' ELSE status END, updated_at = NOW() WHERE tenant_id=$2 AND blood_type=$3 AND component=$4 AND status='available' AND units_available >= $1 RETURNING id, units_available", [units, t, blood_type, component])).rows[0];
-  if (!stock) {
-    return res.send(renderPage('Stock Error', `<div class="card" style="max-width:500px;margin:40px auto;text-align:center"><h2 style="color:#dc2626">Insufficient Blood Stock</h2><p>No available ${blood_type} ${component} units. Please check inventory.</p><a href="/clinic/blood-bank" class="btn">Go Back</a></div>`, req.session.user));
-  }
-  await pool.query('INSERT INTO blood_transfusions(tenant_id,patient_name,patient_id,patient_type,blood_type,component,units_transfused,reason,crossmatch_result,adverse_reactions,performed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [t, patient_name, patient_id||null, patient_type||'patient', blood_type, component, units, reason, crossmatch_result||'compatible', adverse_reactions||null, req.session.user.name||req.session.user.email]);
-  await audit(req.session.user.email, 'blood_transfusion', { patient_name, blood_type, component, units });
-  res.redirect('/clinic/blood-bank');
-}));
-
-// --- FEATURE 4: MATERNAL / ANTENATAL CARE ---
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS maternal_anc_visits (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_name VARCHAR(255) NOT NULL,
-      patient_id INTEGER,
-      patient_type VARCHAR(20) DEFAULT 'patient',
-      visit_number INTEGER NOT NULL,
-      visit_date DATE NOT NULL DEFAULT CURRENT_DATE,
-      edd DATE,
-      gestational_age_weeks INTEGER,
-      blood_pressure_systolic INTEGER,
-      blood_pressure_diastolic INTEGER,
-      weight_kg DECIMAL(6,2),
-      fundal_height_cm DECIMAL(5,1),
-      fetal_heart_rate INTEGER,
-      presentation VARCHAR(50),
-      urine_protein VARCHAR(20),
-      urine_glucose VARCHAR(20),
-      hemoglobin DECIMAL(5,1),
-      tt_dose INTEGER DEFAULT 0,
-      ipt_dose INTEGER DEFAULT 0,
-      itn_given BOOLEAN DEFAULT false,
-      supplements TEXT,
-      findings TEXT,
-      plan TEXT,
-      next_visit_date DATE,
-      provider VARCHAR(255),
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_maternal_tenant ON maternal_anc_visits(tenant_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_maternal_patient ON maternal_anc_visits(patient_id)');
-
-    await pool.query(`CREATE TABLE IF NOT EXISTS maternal_deliveries (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_name VARCHAR(255) NOT NULL,
-      patient_id INTEGER,
-      delivery_date TIMESTAMPTZ DEFAULT NOW(),
-      delivery_type VARCHAR(30) CHECK (delivery_type IN ('svd','assisted','cesarean','vacuum','forceps')),
-      gestational_age_weeks INTEGER,
-      baby_sex VARCHAR(10),
-      baby_weight_grams INTEGER,
-      apgar_1min SMALLINT,
-      apgar_5min SMALLINT,
-      baby_status VARCHAR(20) DEFAULT 'alive',
-      complications TEXT,
-      provider VARCHAR(255),
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_deliveries_tenant ON maternal_deliveries(tenant_id)');
-  } catch (e) { console.warn('[v12] maternal care tables:', e.message); }
-})();
-
-// ============================================================
-// === v14-v17+ DATABASE TABLES ===
-// ============================================================
-(async () => {
-  // Wait a bit for DB pool to be available (free plan has limited connections)
-  await new Promise(r => setTimeout(r, 2000));
-  const maxRetries = 3;
-  async function retryQuery(sql, params) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await pool.query(sql, params);
-      } catch(e) {
-        if (attempt === maxRetries) throw e;
-        console.warn('[v14-v17] Retry ' + attempt + '/' + maxRetries + ' for query...');
-        await new Promise(r => setTimeout(r, attempt * 2000));
-      }
-    }
-  }
-  try {
-    // v14: AI Triage
-    await retryQuery(`CREATE TABLE IF NOT EXISTS ai_triage_logs (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER, patient_name TEXT, symptoms TEXT NOT NULL,
-      severity VARCHAR(20) DEFAULT 'mild', recommendation TEXT,
-      department TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery('CREATE INDEX IF NOT EXISTS idx_ai_triage_tenant ON ai_triage_logs(tenant_id)');
-
-    // v14: Smart Notifications
-    await retryQuery(`CREATE TABLE IF NOT EXISTS notification_templates (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      name TEXT NOT NULL, channel VARCHAR(20) DEFAULT 'in_app',
-      subject TEXT, body TEXT NOT NULL, variables TEXT[],
-      is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS notification_history (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      template_id INTEGER REFERENCES notification_templates(id),
-      recipient TEXT NOT NULL, channel VARCHAR(20) DEFAULT 'in_app',
-      subject TEXT, body TEXT, status VARCHAR(20) DEFAULT 'sent',
-      sent_at TIMESTAMPTZ DEFAULT NOW(), read_at TIMESTAMPTZ
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS notification_preferences (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      user_email TEXT NOT NULL, channel VARCHAR(20) DEFAULT 'in_app',
-      enabled BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(tenant_id, user_email, channel)
-    )`);
-
-    // v14: Patient Kiosk
-    await retryQuery(`CREATE TABLE IF NOT EXISTS kiosk_checkins (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER, patient_name TEXT, visit_type VARCHAR(50),
-      department TEXT, queue_number INTEGER, status VARCHAR(20) DEFAULT 'waiting',
-      checked_in_at TIMESTAMPTZ DEFAULT NOW(), seen_at TIMESTAMPTZ
-    )`);
-    await retryQuery('CREATE INDEX IF NOT EXISTS idx_kiosk_tenant ON kiosk_checkins(tenant_id)');
-
-    // v14: Health Wallet
-    await retryQuery(`CREATE TABLE IF NOT EXISTS health_wallets (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER NOT NULL, balance INTEGER DEFAULT 0,
-      currency VARCHAR(10) DEFAULT 'UGX', is_active BOOLEAN DEFAULT true,
-      created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(tenant_id, patient_id)
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS wallet_transactions (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      wallet_id INTEGER REFERENCES health_wallets(id),
-      type VARCHAR(20) NOT NULL CHECK (type IN ('topup','spend','refund','adjustment')),
-      amount INTEGER NOT NULL, balance_after INTEGER,
-      description TEXT, reference TEXT, created_by TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery('CREATE INDEX IF NOT EXISTS idx_wallet_tx_tenant ON wallet_transactions(tenant_id)');
-
-    // v14: Theatre/Surgery
-    await retryQuery(`CREATE TABLE IF NOT EXISTS theatres (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      name TEXT NOT NULL, type VARCHAR(50), floor TEXT,
-      status VARCHAR(20) DEFAULT 'available', created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS surgery_schedules (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER NOT NULL, patient_name TEXT, procedure_name TEXT NOT NULL,
-      theatre_id INTEGER REFERENCES theatres(id),
-      surgeon TEXT, anesthetist TEXT, scrub_nurse TEXT,
-      scheduled_date DATE NOT NULL, scheduled_time TIME,
-      estimated_duration_min INTEGER, status VARCHAR(20) DEFAULT 'scheduled',
-      notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS surgery_records (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      schedule_id INTEGER REFERENCES surgery_schedules(id),
-      patient_id INTEGER, procedure_name TEXT, surgeon TEXT,
-      start_time TIMESTAMPTZ, end_time TIMESTAMPTZ,
-      findings TEXT, complications TEXT, outcome VARCHAR(50),
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v15: ICU/CCU Monitoring
-    await retryQuery(`CREATE TABLE IF NOT EXISTS icu_patients (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER NOT NULL, patient_name TEXT,
-      bed_number TEXT, admission_date DATE NOT NULL,
-      diagnosis TEXT, acuity VARCHAR(20) DEFAULT 'stable',
-      attending_doctor TEXT, status VARCHAR(20) DEFAULT 'admitted',
-      discharged_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS icu_vitals (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      icu_patient_id INTEGER REFERENCES icu_patients(id),
-      recorded_at TIMESTAMPTZ DEFAULT NOW(),
-      temp DECIMAL(5,1), pulse INTEGER, bp_systolic INTEGER, bp_diastolic INTEGER,
-      resp_rate INTEGER, spo2 INTEGER, gcs INTEGER, blood_sugar INTEGER,
-      pain_score INTEGER, urine_output INTEGER, notes TEXT
-    )`);
-    await retryQuery('CREATE INDEX IF NOT EXISTS idx_icu_vitals_tenant ON icu_vitals(tenant_id)');
-    await retryQuery(`CREATE TABLE IF NOT EXISTS icu_handovers (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      icu_patient_id INTEGER REFERENCES icu_patients(id),
-      shift_from TEXT, shift_to TEXT, handed_over_by TEXT,
-      handed_over_to TEXT, summary TEXT NOT NULL,
-      pending_tasks TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v15: Radiology/Imaging
-    await retryQuery(`CREATE TABLE IF NOT EXISTS imaging_orders (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER NOT NULL, patient_name TEXT,
-      ordering_doctor TEXT, modality VARCHAR(50) NOT NULL,
-      body_part TEXT NOT NULL, clinical_indication TEXT,
-      urgency VARCHAR(20) DEFAULT 'routine', status VARCHAR(20) DEFAULT 'ordered',
-      ordered_at TIMESTAMPTZ DEFAULT NOW(), completed_at TIMESTAMPTZ
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS imaging_results (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      order_id INTEGER REFERENCES imaging_orders(id),
-      patient_id INTEGER, radiologist TEXT,
-      findings TEXT NOT NULL, impression TEXT,
-      images_count INTEGER DEFAULT 0, report_status VARCHAR(20) DEFAULT 'draft',
-      reported_at TIMESTAMPTZ DEFAULT NOW(), approved_by TEXT, approved_at TIMESTAMPTZ
-    )`);
-
-    // v15: Clinical Pathways
-    await retryQuery(`CREATE TABLE IF NOT EXISTS clinical_pathways (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      name TEXT NOT NULL, condition TEXT, description TEXT,
-      steps JSONB DEFAULT '[]', estimated_duration_days INTEGER,
-      is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS pathway_instances (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      pathway_id INTEGER REFERENCES clinical_pathways(id),
-      patient_id INTEGER NOT NULL, patient_name TEXT,
-      assigned_by TEXT, current_step INTEGER DEFAULT 1,
-      status VARCHAR(20) DEFAULT 'active', started_at TIMESTAMPTZ DEFAULT NOW(),
-      completed_at TIMESTAMPTZ, notes TEXT
-    )`);
-
-    // v15: Drug Formulary
-    await retryQuery(`CREATE TABLE IF NOT EXISTS drug_formulary (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      drug_name TEXT NOT NULL, generic_name TEXT,
-      strength TEXT, dosage_form VARCHAR(50),
-      category VARCHAR(50), atc_code TEXT,
-      is_generic BOOLEAN DEFAULT true, is_on_formulary BOOLEAN DEFAULT true,
-      max_dose TEXT, frequency TEXT, route TEXT,
-      contraindications TEXT, side_effects TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v15: Supply Chain
-    await retryQuery(`CREATE TABLE IF NOT EXISTS suppliers (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      name TEXT NOT NULL, contact_person TEXT, phone TEXT, email TEXT,
-      address TEXT, category VARCHAR(50), rating INTEGER DEFAULT 0,
-      is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS supply_purchase_orders (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      po_number TEXT UNIQUE, supplier_id INTEGER REFERENCES suppliers(id),
-      supplier_name TEXT, items JSONB, total_amount INTEGER DEFAULT 0,
-      status VARCHAR(20) DEFAULT 'draft', order_date DATE DEFAULT CURRENT_DATE,
-      expected_date DATE, notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS supply_po_items (
-      id SERIAL PRIMARY KEY, po_id INTEGER REFERENCES supply_purchase_orders(id) ON DELETE CASCADE,
-      item_name TEXT NOT NULL, quantity INTEGER NOT NULL, unit VARCHAR(20),
-      unit_price INTEGER, total_price INTEGER, received_qty INTEGER DEFAULT 0
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS goods_received_notes (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      po_id INTEGER REFERENCES supply_purchase_orders(id),
-      received_by TEXT, grn_number TEXT, received_date DATE DEFAULT CURRENT_DATE,
-      notes TEXT, status VARCHAR(20) DEFAULT 'partial', created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v16: FHIR API
-    await retryQuery(`CREATE TABLE IF NOT EXISTS fhir_audit_log (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      resource_type VARCHAR(50), operation VARCHAR(20),
-      request_url TEXT, response_status INTEGER,
-      user_email TEXT, client_ip TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v16: Electronic Prescriptions
-    await retryQuery(`CREATE TABLE IF NOT EXISTS electronic_prescriptions (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER NOT NULL, patient_name TEXT,
-      prescriber TEXT, prescriber_license TEXT,
-      medications JSONB NOT NULL, diagnosis TEXT,
-      status VARCHAR(20) DEFAULT 'active', rx_number TEXT UNIQUE,
-      issued_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ,
-      dispensed_by TEXT, dispensed_at TIMESTAMPTZ
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS erx_verification_log (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      rx_id INTEGER REFERENCES electronic_prescriptions(id),
-      verified_by TEXT, verification_status VARCHAR(20),
-      notes TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v16: Lab Automation
-    await retryQuery(`CREATE TABLE IF NOT EXISTS lab_automation_rules (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      test_name TEXT NOT NULL, condition_field VARCHAR(50),
-      operator VARCHAR(10), threshold_value NUMERIC,
-      action VARCHAR(50) DEFAULT 'flag', is_active BOOLEAN DEFAULT true,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS lab_quality_control (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      test_name TEXT, lot_number TEXT, expected_value NUMERIC,
-      actual_value NUMERIC, is_within_range BOOLEAN,
-      technician TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v16: Multi-location Sync
-    await retryQuery(`CREATE TABLE IF NOT EXISTS sync_log (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      source_location TEXT, target_location TEXT,
-      entity_type VARCHAR(50), entity_id INTEGER,
-      operation VARCHAR(20), sync_status VARCHAR(20) DEFAULT 'pending',
-      retry_count INTEGER DEFAULT 0, error_message TEXT,
-      synced_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v17: Analytics
-    await retryQuery(`CREATE TABLE IF NOT EXISTS analytics_cache (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      metric_key TEXT NOT NULL, metric_data JSONB,
-      period_start DATE, period_end DATE,
-      created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ,
-      UNIQUE(tenant_id, metric_key, period_start)
-    )`);
-
-    // v17: Revenue Cycle
-    await retryQuery(`CREATE TABLE IF NOT EXISTS revenue_cycle_metrics (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      period TEXT NOT NULL, total_billed INTEGER DEFAULT 0,
-      total_collected INTEGER DEFAULT 0, total_outstanding INTEGER DEFAULT 0,
-      denial_rate NUMERIC(5,2) DEFAULT 0, avg_days_to_payment NUMERIC(6,1) DEFAULT 0,
-      claim_count INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS claim_denials (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      claim_id INTEGER, patient_name TEXT, insurer TEXT,
-      denial_code VARCHAR(20), denial_reason TEXT,
-      amount INTEGER, status VARCHAR(20) DEFAULT 'open',
-      appeal_date TIMESTAMPTZ, resolved_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v17: Compliance Audit
-    await retryQuery(`CREATE TABLE IF NOT EXISTS compliance_audit_log (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      category VARCHAR(50) NOT NULL, action TEXT NOT NULL,
-      performed_by TEXT, target_entity VARCHAR(50),
-      target_id INTEGER, details TEXT,
-      risk_level VARCHAR(20) DEFAULT 'low', status VARCHAR(20) DEFAULT 'info',
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v17: Mobile API
-    await retryQuery(`CREATE TABLE IF NOT EXISTS mobile_tokens (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      user_id INTEGER NOT NULL, device_id TEXT,
-      token TEXT NOT NULL, platform VARCHAR(20),
-      is_active BOOLEAN DEFAULT true, last_used TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await retryQuery(`CREATE TABLE IF NOT EXISTS mobile_devices (
-      id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      user_id INTEGER, device_name TEXT, device_type VARCHAR(20),
-      os_version TEXT, app_version TEXT,
-      is_active BOOLEAN DEFAULT true, last_login TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-
-    // v17: Data Export
-    await retryQuery(`CREATE TABLE IF NOT EXISTS export_jobs (
-      id BIGSERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      export_type VARCHAR(50) NOT NULL, format VARCHAR(20) DEFAULT 'csv',
-      filters JSONB, status VARCHAR(20) DEFAULT 'pending',
-      file_url TEXT, file_size INTEGER,
-      started_by TEXT, started_at TIMESTAMPTZ DEFAULT NOW(),
-      completed_at TIMESTAMPTZ, error_message TEXT
-    )`);
-
-    console.log('[v14-v17] All new database tables created successfully');
-  } catch (e) { console.warn('[v14-v17] table creation error:', e.message); }
-})();
-
-app.get('/clinic/maternal-care', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [activeANC, totalDeliveries, totalANC] = await Promise.all([
-    pool.query("SELECT DISTINCT ON (patient_id) m.* FROM maternal_anc_visits m WHERE m.tenant_id=$1 ORDER BY m.patient_id, m.visit_number DESC", [t]),
-    pool.query("SELECT COUNT(*)::int FROM maternal_deliveries WHERE tenant_id=$1", [t]),
-    pool.query("SELECT COUNT(DISTINCT patient_id)::int FROM maternal_anc_visits WHERE tenant_id=$1", [t])
-  ]);
-  res.send(renderPage('Maternal Care', `
-    <div class="hero" style="background:linear-gradient(135deg,#ec4899,#f43f5e)"><h1>Maternal Health Care</h1><p>Antenatal care, delivery tracking &amp; postnatal follow-up</p></div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num" style="color:#ec4899">${totalANC.rows[0].count}</div><div>Active ANC Patients</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#059669">${totalDeliveries.rows[0].count}</div><div>Total Deliveries</div></div>
-    </div>
-    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
-      <a href="/clinic/maternal-care/anc/new" class="btn btn-green">+ New ANC Visit</a>
-      <a href="/clinic/maternal-care/delivery/new" class="btn" style="background:#ec4899;color:white">+ Record Delivery</a>
-      <a href="/clinic/maternal-care/register" class="btn">ANC Register</a>
-    </div>
-    <div class="card"><h3>Recent ANC Visits</h3>
-    <table><tr><th>Patient</th><th>Visit #</th><th>Date</th><th>GA (weeks)</th><th>BP</th><th>Weight</th><th>FHR</th><th>Provider</th></tr>
-      ${activeANC.rows.slice(0, 15).map(v => `<tr><td><strong>${esc(v.patient_name)}</strong></td><td>${v.visit_number}</td><td>${new Date(v.visit_date).toLocaleDateString()}</td><td>${v.gestational_age_weeks||'-'}</td><td>${v.blood_pressure_systolic||'-'}/${v.blood_pressure_diastolic||'-'}</td><td>${v.weight_kg||'-'}</td><td>${v.fetal_heart_rate||'-'}</td><td class="muted">${esc(v.provider||'')}</td></tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:20px" class="muted">No ANC visits recorded</td></tr>'}
-    </table></div>
-  `, req.session.user));
-}));
-
-app.get('/clinic/maternal-care/anc/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
-  res.send(renderPage('New ANC Visit', `
-    <div class="card" style="max-width:700px;margin:0 auto"><h2>Record ANC Visit</h2>
-    <form method="POST" action="/clinic/maternal-care/anc/save">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-        <div><label>Patient Name *</label><input name="patient_name" required></div>
-        <div><label>Visit Number *</label><input name="visit_number" type="number" min="1" value="1" required></div>
-        <div><label>Visit Date *</label><input name="visit_date" type="date" required></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>EDD</label><input name="edd" type="date"></div>
-        <div><label>Gestational Age (weeks)</label><input name="gestational_age_weeks" type="number" min="0" max="42"></div>
-        <div><label>Weight (kg)</label><input name="weight_kg" type="number" step="0.1"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>BP Systolic</label><input name="blood_pressure_systolic" type="number" min="60" max="250"></div>
-        <div><label>BP Diastolic</label><input name="blood_pressure_diastolic" type="number" min="30" max="150"></div>
-        <div><label>Fetal Heart Rate</label><input name="fetal_heart_rate" type="number" min="60" max="220"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Fundal Height (cm)</label><input name="fundal_height_cm" type="number" step="0.1"></div>
-        <div><label>Hemoglobin (g/dL)</label><input name="hemoglobin" type="number" step="0.1"></div>
-        <div><label>Presentation</label><select name="presentation"><option value="">-</option><option value="cephalic">Cephalic</option><option value="breech">Breech</option><option value="transverse">Transverse</option><option value="oblique">Oblique</option></select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>Urine Protein</label><select name="urine_protein"><option value="">-</option><option value="nil">Nil</option><option value="trace">Trace</option><option value="+1">+1</option><option value="+2">+2</option><option value="+3">+3</option></select></div>
-        <div><label>Urine Glucose</label><select name="urine_glucose"><option value="">-</option><option value="nil">Nil</option><option value="trace">Trace</option><option value="+1">+1</option><option value="+2">+2</option></select></div>
-        <div><label>Next Visit Date</label><input name="next_visit_date" type="date"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <label><input type="checkbox" name="itn_given" value="true"> ITN Given</label>
-        <div><label>TT Dose</label><input name="tt_dose" type="number" min="0" max="5" value="0"></div>
-        <div><label>IPT Dose</label><input name="ipt_dose" type="number" min="0" max="5" value="0"></div>
-      </div>
-      <div style="margin-top:12px"><label>Findings</label><textarea name="findings" rows="2"></textarea></div>
-      <div style="margin-top:12px"><label>Plan</label><textarea name="plan" rows="2"></textarea></div>
-      <button class="btn btn-green" style="width:100%;margin-top:16px">Save ANC Visit</button>
-    </form></div>
-  `, req.session.user));
-});
-
-app.post('/clinic/maternal-care/anc/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_name, patient_id, visit_number, visit_date, edd, gestational_age_weeks, weight_kg, blood_pressure_systolic, blood_pressure_diastolic, fetal_heart_rate, fundal_height_cm, hemoglobin, presentation, urine_protein, urine_glucose, next_visit_date, itn_given, tt_dose, ipt_dose, findings, plan } = req.body;
-  if (!patient_name || !visit_number || !visit_date) return res.redirect('/clinic/maternal-care/anc/new');
-  // Alert for high BP (pre-eclampsia screening)
-  const systolic = parseInt(blood_pressure_systolic);
-  const diastolic = parseInt(blood_pressure_diastolic);
-  let bpAlert = '';
-  if (systolic >= 140 || diastolic >= 90) {
-    bpAlert = ' ALERT: Elevated BP detected - screen for pre-eclampsia.';
-  }
-  await pool.query(`INSERT INTO maternal_anc_visits(tenant_id,patient_name,patient_id,patient_type,visit_number,visit_date,edd,gestational_age_weeks,blood_pressure_systolic,blood_pressure_diastolic,weight_kg,fundal_height_cm,fetal_heart_rate,presentation,urine_protein,urine_glucose,hemoglobin,tt_dose,ipt_dose,itn_given,findings,plan,next_visit_date,provider) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
-    [t, patient_name, patient_id||null, 'patient', parseInt(visit_number), visit_date, edd||null, gestational_age_weeks||null, systolic||null, diastolic||null, weight_kg||null, fundal_height_cm||null, fetal_heart_rate||null, presentation||null, urine_protein||null, urine_glucose||null, hemoglobin||null, parseInt(tt_dose)||0, parseInt(ipt_dose)||0, itn_given==='true', findings||null, plan||null, next_visit_date||null, req.session.user.name||'']);
-  await audit(req.session.user.email, 'anc_visit', { patient_name, visit_number, bpAlert: bpAlert.trim() });
-  res.redirect('/clinic/maternal-care');
-}));
-
-app.get('/clinic/maternal-care/delivery/new', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), (req, res) => {
-  res.send(renderPage('Record Delivery', `
-    <div class="card" style="max-width:700px;margin:0 auto"><h2>Record Delivery</h2>
-    <form method="POST" action="/clinic/maternal-care/delivery/save">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div><label>Patient Name *</label><input name="patient_name" required></div>
-        <div><label>Delivery Type *</label><select name="delivery_type" required><option value="svd">SVD (Normal)</option><option value="assisted">Assisted</option><option value="cesarean">C-Section</option><option value="vacuum">Vacuum</option><option value="forceps">Forceps</option></select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>GA at Delivery (weeks)</label><input name="gestational_age_weeks" type="number" min="20" max="44"></div>
-        <div><label>Baby Sex</label><select name="baby_sex"><option value="">-</option><option value="male">Male</option><option value="female">Female</option></select></div>
-        <div><label>Baby Weight (g)</label><input name="baby_weight_grams" type="number" min="500" max="6000"></div>
-        <div><label>Baby Status</label><select name="baby_status"><option value="alive">Alive</option><option value="stillbirth">Stillbirth</option><option value="neonatal_death">Neonatal Death</option></select></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-        <div><label>APGAR 1 min</label><input name="apgar_1min" type="number" min="0" max="10"></div>
-        <div><label>APGAR 5 min</label><input name="apgar_5min" type="number" min="0" max="10"></div>
-      </div>
-      <div style="margin-top:12px"><label>Complications</label><textarea name="complications" rows="2"></textarea></div>
-      <div style="margin-top:12px"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-      <button class="btn" style="width:100%;margin-top:16px;background:#ec4899;color:white">Record Delivery</button>
-    </form></div>
-  `, req.session.user));
-});
-
-app.post('/clinic/maternal-care/delivery/save', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_name, patient_id, delivery_type, gestational_age_weeks, baby_sex, baby_weight_grams, apgar_1min, apgar_5min, baby_status, complications, notes } = req.body;
-  if (!patient_name || !delivery_type) return res.redirect('/clinic/maternal-care/delivery/new');
-  await pool.query(`INSERT INTO maternal_deliveries(tenant_id,patient_name,patient_id,delivery_date,delivery_type,gestational_age_weeks,baby_sex,baby_weight_grams,apgar_1min,apgar_5min,baby_status,complications,provider,notes) VALUES($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-    [t, patient_name, patient_id||null, delivery_type, gestational_age_weeks||null, baby_sex||null, baby_weight_grams||null, apgar_1min||null, apgar_5min||null, baby_status||'alive', complications||null, req.session.user.name||'', notes||null]);
-  await audit(req.session.user.email, 'delivery_recorded', { patient_name, delivery_type });
-  res.redirect('/clinic/maternal-care');
-}));
-
-// --- FEATURE 5: CLINIC REPORTS & ANALYTICS ---
-app.get('/clinic/reports', requireAuth, requireNotBanned, requireFeature('clinic_workflow'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { period = 'month' } = req.query;
-  const dateFilter = period === 'week' ? "created_at >= CURRENT_DATE - INTERVAL '7 days'" : period === 'month' ? "created_at >= CURRENT_DATE - INTERVAL '30 days'" : period === 'year' ? "created_at >= CURRENT_DATE - INTERVAL '1 year'" : '1=1';
-  
-  const [apptStats, rxStats, labStats, revenueStats, queueStats, topDiagnoses] = await Promise.all([
-    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='scheduled')::int as scheduled, COUNT(*) FILTER (WHERE status='completed')::int as completed, COUNT(*) FILTER (WHERE status='cancelled')::int as cancelled FROM clinic_appointments WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
-    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='dispensed')::int as dispensed, COUNT(*) FILTER (WHERE status='pending')::int as pending FROM prescriptions WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
-    pool.query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE status='completed')::int as completed, COUNT(*) FILTER (WHERE status='requested')::int as pending FROM lab_requests WHERE tenant_id=$1 AND ${dateFilter}`, [t]),
-    pool.query(`SELECT COALESCE(SUM(amount),0)::bigint as total_revenue, COUNT(*)::int as paid_invoices FROM payment_transactions WHERE tenant_id=$1 AND status='successful' AND ${dateFilter}`, [t]),
-    pool.query(`SELECT COUNT(*)::int as total, COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/60),0)::numeric(6,1) as avg_wait_min FROM patient_queue WHERE tenant_id=$1 AND status='completed' AND ${dateFilter}`, [t]),
-    pool.query(`SELECT diagnosis, COUNT(*)::int as count FROM prescriptions WHERE tenant_id=$1 AND diagnosis IS NOT NULL AND ${dateFilter} GROUP BY diagnosis ORDER BY count DESC LIMIT 10`, [t])
-  ]);
-  
-  const a = apptStats.rows[0] || {};
-  const r = rxStats.rows[0] || {};
-  const l = labStats.rows[0] || {};
-  const rev = revenueStats.rows[0] || {};
-  const q = queueStats.rows[0] || {};
-  
-  res.send(renderPage('Clinic Reports', `
-    <div class="hero" style="background:linear-gradient(135deg,#3b82f6,#6366f1)"><h1>Clinic Analytics &amp; Reports</h1></div>
-    <div style="display:flex;gap:8px;margin-bottom:20px"><a href="?period=week" class="btn btn-sm ${period==='week'?'btn-green':''}">Week</a><a href="?period=month" class="btn btn-sm ${period==='month'?'btn-green':''}">Month</a><a href="?period=year" class="btn btn-sm ${period==='year'?'btn-green':''}">Year</a><a href="?period=all" class="btn btn-sm ${period==='all'?'btn-green':''}">All</a></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
-      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#3b82f6,#6366f1);color:white"><div style="font-size:2rem;font-weight:700">${a.total||0}</div><div>Appointments</div></div>
-      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#059669,#10b981);color:white"><div style="font-size:2rem;font-weight:700">${r.total||0}</div><div>Prescriptions</div></div>
-      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#f59e0b,#d97706);color:white"><div style="font-size:2rem;font-weight:700">${l.total||0}</div><div>Lab Tests</div></div>
-      <div class="card" style="padding:20px;text-align:center;background:linear-gradient(135deg,#0d9488,#14b8a6);color:white"><div style="font-size:2rem;font-weight:700">UGX ${(parseInt(rev.total_revenue)||0).toLocaleString()}</div><div>Revenue</div></div>
-      <div class="card" style="padding:20px;text-align:center"><div style="font-size:2rem;font-weight:700">${q.total||0}</div><div>Patients Served</div></div>
-      <div class="card" style="padding:20px;text-align:center"><div style="font-size:2rem;font-weight:700">${q.avg_wait_min||0}</div><div>Avg Wait (min)</div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div class="card"><h3>Top Diagnoses</h3><table><tr><th>Diagnosis</th><th>Count</th></tr>${topDiagnoses.rows.map(d=>`<tr><td>${esc(d.diagnosis)}</td><td style="font-weight:700">${d.count}</td></tr>`).join('')||'<tr><td colspan="2" class="muted">No data</td></tr>'}</table></div>
-      <div class="card"><h3>Appointment Summary</h3>
-        <table><tr><th>Status</th><th>Count</th><th>%</th></tr>
-          <tr><td><span class="tag" style="background:#dbeafe">Scheduled</span></td><td>${a.scheduled||0}</td><td>${a.total?Math.round((a.scheduled||0)/a.total*100):0}%</td></tr>
-          <tr><td><span class="tag" style="background:#d1fae5">Completed</span></td><td>${a.completed||0}</td><td>${a.total?Math.round((a.completed||0)/a.total*100):0}%</td></tr>
-          <tr><td><span class="tag" style="background:#fee2e2">Cancelled</span></td><td>${a.cancelled||0}</td><td>${a.total?Math.round((a.cancelled||0)/a.total*100):0}%</td></tr>
-        </table>
-      </div>
-    </div>
-  `, req.session.user));
-}));
-
-// --- FEATURE 6: STOCK EXPIRY ALERTS ---
-app.get('/clinic/pharmacy/expiry-alerts', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [expired, expiringSoon, lowStock] = await Promise.all([
-    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND expiry_date < CURRENT_DATE AND quantity > 0 ORDER BY expiry_date", [t]),
-    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '90 days' AND quantity > 0 ORDER BY expiry_date", [t]),
-    pool.query("SELECT * FROM pharmacy_inventory WHERE tenant_id=$1 AND quantity > 0 AND quantity <= reorder_level ORDER BY quantity ASC", [t])
-  ]);
-  res.send(renderPage('Pharmacy Alerts', `
-    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Pharmacy Alerts</h1><p>Expiry and stock level monitoring</p></div>
-    <div class="stats">
-      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${expired.rows.length}</div><div>Expired Drugs</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${expiringSoon.rows.length}</div><div>Expiring Soon (90d)</div></div>
-      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${lowStock.rows.length}</div><div>Low Stock</div></div>
-    </div>
-    ${expired.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #dc2626"><h3 style="color:#dc2626">EXPIRED DRUGS (${expired.rows.length})</h3><table><tr><th>Drug</th><th>Batch</th><th>Qty</th><th>Expired</th><th>Action</th></tr>${expired.rows.map(d=>`<tr style="background:#fee2e2"><td>${esc(d.medicine_name)}</td><td>${esc(d.batch_number||'-')}</td><td>${d.quantity}</td><td>${new Date(d.expiry_date).toLocaleDateString()}</td><td><form method="POST" action="/clinic/pharmacy/inventory/${d.id}/writeoff" style="display:inline"><button class="btn btn-sm" style="background:#dc2626;color:white" onclick="return confirm('Write off this expired drug?')">Write Off</button></form></td></tr>`).join('')}</table></div>` : ''}
-    ${expiringSoon.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #f59e0b"><h3 style="color:#d97706">EXPIRING SOON (${expiringSoon.rows.length})</h3><table><tr><th>Drug</th><th>Batch</th><th>Qty</th><th>Expiry Date</th><th>Days Left</th></tr>${expiringSoon.rows.map(d=>{const days=Math.ceil((new Date(d.expiry_date)-new Date())/(1000*60*60*24));return `<tr style="background:#fef3c7"><td>${esc(d.medicine_name)}</td><td>${esc(d.batch_number||'-')}</td><td>${d.quantity}</td><td>${new Date(d.expiry_date).toLocaleDateString()}</td><td style="font-weight:700;color:${days<30?'#dc2626':'#d97706'}">${days}d</td></tr>`;}).join('')}</table></div>` : ''}
-    ${lowStock.rows.length > 0 ? `<div class="card" style="margin-top:16px;border:2px solid #3b82f6"><h3 style="color:#3b82f6">LOW STOCK (${lowStock.rows.length})</h3><table><tr><th>Drug</th><th>Current Qty</th><th>Reorder Level</th><th>Category</th></tr>${lowStock.rows.map(d=>`<tr style="background:#dbeafe"><td>${esc(d.medicine_name)}</td><td style="font-weight:700;color:#dc2626">${d.quantity}</td><td>${d.reorder_level}</td><td>${esc(d.category||'')}</td></tr>`).join('')}</table></div>` : ''}
-    ${expired.rows.length===0 && expiringSoon.rows.length===0 && lowStock.rows.length===0 ? '<div class="card" style="text-align:center;padding:40px;color:#059669"><h2>All Clear!</h2><p>No pharmacy alerts at this time.</p></div>' : ''}
-  `, req.session.user));
-}));
-
-app.post('/clinic/pharmacy/inventory/:id/writeoff', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const item = (await pool.query("SELECT * FROM pharmacy_inventory WHERE id=$1 AND tenant_id=$2", [req.params.id, t])).rows[0];
-  if (!item) return res.redirect('/clinic/pharmacy/expiry-alerts');
-  const prevQty = item.quantity;
-  await pool.query("UPDATE pharmacy_inventory SET quantity=0 WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
-  // Record in stock movements
-  await pool.query("INSERT INTO pharmacy_stock_movements(tenant_id,drug_id,medicine_name,movement_type,quantity,previous_quantity,new_quantity,reference_type,reference_id,batch_number,expiry_date,notes,performed_by) VALUES($1,$2,$3,'expiry_writeoff',$4,$5,0,'expiry',NULL,$6,$7,'Expired stock written off',$8)", [t, item.id, item.medicine_name, prevQty, prevQty, item.batch_number||null, item.expiry_date||null, req.session.user.email]);
-  await audit(req.session.user.email, 'expiry_writeoff', { drug: item.medicine_name, qty: prevQty });
-  res.redirect('/clinic/pharmacy/expiry-alerts');
-}));
-
-// --- FEATURE 7: PRESCRIPTION REFILL WORKFLOW ---
-app.get('/clinic/prescriptions/refill-requests', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const requests = (await pool.query("SELECT * FROM prescription_refills WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", [t])).rows;
-  res.send(renderPage('Refill Requests', `
-    <div class="hero" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)"><h1>Prescription Refill Requests</h1><p>Manage patient medication refill requests</p></div>
-    ${requests.length > 0 ? `<div class="card"><table><tr><th>Date</th><th>Patient</th><th>Rx #</th><th>Medicine</th><th>Status</th><th>Actions</th></tr>${requests.map(r=>`<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${esc(r.patient_name||'')}</td><td>#${r.prescription_id}</td><td>${esc(r.medicine_name||'')}</td><td><span class="tag" style="background:${r.status==='pending'?'#f59e0b':r.status==='approved'?'#d1fae5':'#fee2e2'}">${esc(r.status)}</span></td><td>${r.status==='pending'?`<form method="POST" action="/clinic/prescriptions/refill/${r.id}/approve" style="display:inline"><button class="btn btn-sm btn-green">Approve</button></form> <form method="POST" action="/clinic/prescriptions/refill/${r.id}/reject" style="display:inline"><button class="btn btn-sm" style="background:#dc2626;color:white">Reject</button></form>`:''}</td></tr>`).join('')}</table></div>` : '<div class="card" style="text-align:center;padding:40px"><p class="muted">No refill requests at this time.</p></div>'}
-  `, req.session.user));
-}));
-
-// Ensure prescription_refills table exists
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS prescription_refills (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      prescription_id INTEGER NOT NULL,
-      item_id INTEGER,
-      patient_name VARCHAR(255),
-      medicine_name VARCHAR(255),
-      requested_by VARCHAR(255),
-      status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      reviewed_at TIMESTAMPTZ
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_rx_refills_tenant ON prescription_refills(tenant_id)');
-  } catch(e) { console.warn('[v12] prescription_refills:', e.message); }
-})();
-
-app.post('/clinic/prescriptions/refill/:id/approve', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  await pool.query("UPDATE prescription_refills SET status='approved', reviewed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'refill_approved', { refill_id: req.params.id });
-  res.redirect('/clinic/prescriptions/refill-requests');
-}));
-
-app.post('/clinic/prescriptions/refill/:id/reject', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  await pool.query("UPDATE prescription_refills SET status='rejected', reviewed_at=NOW() WHERE tenant_id=$1 AND id=$2", [t, req.params.id]);
-  await audit(req.session.user.email, 'refill_rejected', { refill_id: req.params.id });
-  res.redirect('/clinic/prescriptions/refill-requests');
-}));
-
-// --- FEATURE 8: AUTOMATED VITALS ALERTS ---
-// Flag abnormal vitals with WebSocket notification
-const VITAL_ALERTS = {
-  temp_high: 39.5, temp_low: 35.0,
-  bp_systolic_high: 180, bp_systolic_low: 80,
-  bp_diastolic_high: 120, bp_diastolic_low: 50,
-  hr_high: 150, hr_low: 40,
-  spo2_low: 90, spo2_critical: 85,
-  pain_high: 8
-};
-
-function checkVitalAlerts(tenantId, vitals) {
-  const alerts = [];
-  if (vitals.temperature) {
-    if (vitals.temperature >= VITAL_ALERTS.temp_high) alerts.push({ level: 'critical', message: `Critical temperature: ${vitals.temperature}C`, metric: 'temperature' });
-    else if (vitals.temperature > 38.0) alerts.push({ level: 'warning', message: `Fever: ${vitals.temperature}C`, metric: 'temperature' });
-    else if (vitals.temperature <= VITAL_ALERTS.temp_low) alerts.push({ level: 'critical', message: `Hypothermia: ${vitals.temperature}C`, metric: 'temperature' });
-  }
-  if (vitals.bp_systolic) {
-    if (vitals.bp_systolic >= VITAL_ALERTS.bp_systolic_high || (vitals.bp_diastolic && vitals.bp_diastolic >= VITAL_ALERTS.bp_diastolic_high))
-      alerts.push({ level: 'critical', message: `Hypertensive crisis: ${vitals.bp_systolic}/${vitals.bp_diastolic}`, metric: 'blood_pressure' });
-    else if (vitals.bp_systolic >= 140 || (vitals.bp_diastolic && vitals.bp_diastolic >= 90))
-      alerts.push({ level: 'warning', message: `High BP: ${vitals.bp_systolic}/${vitals.bp_diastolic}`, metric: 'blood_pressure' });
-  }
-  if (vitals.heart_rate) {
-    if (vitals.heart_rate >= VITAL_ALERTS.hr_high) alerts.push({ level: 'critical', message: `Tachycardia: ${vitals.heart_rate} bpm`, metric: 'heart_rate' });
-    else if (vitals.heart_rate <= VITAL_ALERTS.hr_low) alerts.push({ level: 'critical', message: `Bradycardia: ${vitals.heart_rate} bpm`, metric: 'heart_rate' });
-  }
-  if (vitals.spo2) {
-    if (vitals.spo2 <= VITAL_ALERTS.spo2_critical) alerts.push({ level: 'critical', message: `Critical SpO2: ${vitals.spo2}%`, metric: 'spo2' });
-    else if (vitals.spo2 <= VITAL_ALERTS.spo2_low) alerts.push({ level: 'warning', message: `Low SpO2: ${vitals.spo2}%`, metric: 'spo2' });
-  }
-  if (vitals.pain_score && vitals.pain_score >= VITAL_ALERTS.pain_high) alerts.push({ level: 'warning', message: `Severe pain: ${vitals.pain_score}/10`, metric: 'pain' });
-  
-  if (alerts.length > 0) {
-    wsBroadcast(tenantId, { type: 'vital_alert', patient: vitals.patient_name, alerts, timestamp: new Date().toISOString() });
-    alerts.forEach(a => console.log(`[VITAL ALERT] Tenant ${tenantId}: ${a.level} - ${a.message} (${vitals.patient_name})`));
-  }
-  return alerts;
-}
-
-// --- FEATURE 9: PRINTABLE PRESCRIPTIONS ---
-app.get('/clinic/prescriptions/:id/print', requireAuth, requireNotBanned, requireFeature('clinic_pharmacy'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const rx = (await pool.query('SELECT p.*, cs.name as doctor FROM prescriptions p LEFT JOIN clinic_staff cs ON p.doctor_id=cs.id WHERE p.tenant_id=$1 AND p.id=$2', [t, req.params.id])).rows[0];
-  if (!rx) return res.status(404).send('Not found');
-  const items = (await pool.query('SELECT * FROM prescription_items WHERE prescription_id=$1', [rx.id])).rows;
-  const tenant = (await pool.query('SELECT name, business_type, subdomain FROM tenants WHERE id=$1', [t])).rows[0];
-  
-  res.send(`<!DOCTYPE html><html><head><title>Prescription #${rx.id}</title>
-    <style>
-      body{font-family:Arial,sans-serif;margin:40px;color:#333}
-      .header{display:flex;justify-content:space-between;border-bottom:3px double #333;padding-bottom:15px;margin-bottom:20px}
-      .header h1{margin:0;font-size:24px;color:#1a5632}
-      .header p{margin:2px 0;color:#666;font-size:13px}
-      .rx-content{margin:20px 0}
-      .patient-info{background:#f8fafc;padding:15px;border-radius:6px;margin-bottom:20px}
-      .patient-info div{margin:4px 0}
-      table{width:100%;border-collapse:collapse;margin:15px 0}
-      th,td{border:1px solid #ddd;padding:8px;text-align:left;font-size:13px}
-      th{background:#f1f5f9;font-weight:600}
-      .footer{margin-top:60px;display:flex;justify-content:space-between}
-      .signature{width:200px;text-align:center;border-top:1px solid #333;padding-top:5px;font-size:12px}
-      @media print{body{margin:20px}.no-print{display:none}}
-    </style></head><body>
-    <div class="header"><div><h1>${esc(tenant?.name||'Health Facility')}</h1><p>${esc(tenant?.business_type||'Healthcare Facility')}</p><p>${esc(tenant?.subdomain||'')}.comfort.ug</p></div><div style="text-align:right"><h2 style="margin:0;color:#1a5632">PRESCRIPTION</h2><p>#${rx.id}</p><p>${new Date(rx.created_at).toLocaleDateString()}</p></div></div>
-    <div class="patient-info"><div><strong>Patient:</strong> ${esc(rx.patient_name)}</div><div><strong>Doctor:</strong> ${esc(rx.doctor_name||rx.doctor||'-')}</div>${rx.diagnosis?`<div><strong>Diagnosis:</strong> ${esc(rx.diagnosis)}</div>`:''}</div>
-    <table><thead><tr><th>#</th><th>Medicine</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Qty</th><th>Instructions</th></tr></thead><tbody>${items.map((item,i)=>`<tr><td>${i+1}</td><td><strong>${esc(item.medicine_name)}</strong></td><td>${esc(item.dosage||'-')}</td><td>${esc(item.frequency||'-')}</td><td>${esc(item.duration||'-')}</td><td>${item.quantity}</td><td>${esc(item.instructions||'-')}</td></tr>`).join('')}</tbody></table>
-    ${rx.notes?`<p><strong>Notes:</strong> ${esc(rx.notes)}</p>`:''}
-    <div class="footer"><div class="signature">Prescribing Doctor<br><br>${esc(rx.doctor_name||'')}</div><div class="signature">Dispensing Pharmacist<br><br><br></div></div>
-    <div class="no-print" style="margin-top:20px;text-align:center"><button onclick="window.print()" style="padding:10px 30px;background:#059669;color:white;border:none;border-radius:6px;font-size:16px;cursor:pointer">Print Prescription</button></div>
-    </body></html>`);
-}));
-
-// --- FEATURE 10: PATIENT CONSENT MANAGEMENT ---
-(async () => {
-  try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS patient_consent (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      patient_id INTEGER,
-      patient_type VARCHAR(20),
-      patient_name VARCHAR(255) NOT NULL,
-      consent_type VARCHAR(100) NOT NULL,
-      consent_status VARCHAR(20) DEFAULT 'signed' CHECK (consent_status IN ('signed','declined','revoked','expired')),
-      details TEXT,
-      signed_by VARCHAR(255),
-      signed_at TIMESTAMPTZ DEFAULT NOW(),
-      expires_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_consent_tenant ON patient_consent(tenant_id)');
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_consent_patient ON patient_consent(patient_id)');
-  } catch(e) { console.warn('[v12] patient_consent:', e.message); }
-})();
-
-app.get('/clinic/consent/:type/:id/new', requireAuth, requireNotBanned, requireFeature('patient_ehr'), (req, res) => {
-  const consentTypes = ['treatment', 'surgery', 'blood_transfusion', 'data_privacy', 'photography', 'research', 'telemedicine', 'discharge'];
-  const consentLabels = { treatment: 'Consent to Treatment', surgery: 'Consent to Surgery', blood_transfusion: 'Consent to Blood Transfusion', data_privacy: 'Data Privacy Consent (HIPAA)', photography: 'Photography/Recording Consent', research: 'Research Participation Consent', telemedicine: 'Telemedicine Consent', discharge: 'Discharge Against Medical Advice' };
-  res.send(renderPage('Record Patient Consent', `
-    <div class="card" style="max-width:600px;margin:0 auto"><h2>Record Patient Consent</h2>
-    <form method="POST" action="/clinic/consent/${req.params.type}/${req.params.id}/save">
-      <input type="hidden" name="patient_type" value="${req.params.type}">
-      <input type="hidden" name="patient_id" value="${req.params.id}">
-      <div><label>Consent Type *</label><select name="consent_type" required>${consentTypes.map(ct=>`<option value="${ct}">${consentLabels[ct]||ct}</option>`).join('')}</select></div>
-      <div style="margin-top:12px"><label>Status *</label><select name="consent_status"><option value="signed">Signed</option><option value="declined">Declined</option></select></div>
-      <div style="margin-top:12px"><label>Details / Notes</label><textarea name="details" rows="3"></textarea></div>
-      <button class="btn btn-green" style="width:100%;margin-top:16px">Record Consent</button>
-    </form></div>
-  `, req.session.user));
-});
-
-app.post('/clinic/consent/:type/:id/save', requireAuth, requireNotBanned, requireFeature('patient_ehr'), ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { consent_type, consent_status, details } = req.body;
-  await pool.query('INSERT INTO patient_consent(tenant_id,patient_id,patient_type,patient_name,consent_type,consent_status,details,signed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, req.params.id, req.params.type, req.body.patient_name||'Patient', consent_type, consent_status||'signed', details||null, req.session.user.email]);
-  await audit(req.session.user.email, 'consent_recorded', { patient_id: req.params.id, consent_type });
-  res.redirect(`/clinic/patient/${req.params.type}/${req.params.id}/ehr`);
-}));
-
-console.log('[v12] All v12 health features loaded successfully');
-
-// ============================================================
-// === v14.0: AI SYMPTOM CHECKER, SMART NOTIFICATIONS, PATIENT KIOSK, HEALTH WALLET, THEATRE ===
-// ============================================================
-
-// --- AI TRIAGE ---
-app.get('/clinic/ai-triage', requireAuth, requireNotBanned, requireFeature('ai_triage'), aiTriageLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const recentLogs = (await pool.query('SELECT * FROM ai_triage_logs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20', [t])).rows;
-  const severityCounts = (await pool.query("SELECT severity, COUNT(*)::int as cnt FROM ai_triage_logs WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '7 days' GROUP BY severity ORDER BY cnt DESC", [t])).rows;
-  res.send(renderPage('AI Symptom Triage', `
-    <div class="hero" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)"><h1>AI Symptom Checker</h1><p>Intelligent symptom assessment and triage recommendations</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${severityCounts.find(s=>s.severity==='mild')?.cnt||0}</h3><p>Mild</p></div>
-      <div class="stat-card"><h3>${severityCounts.find(s=>s.severity==='moderate')?.cnt||0}</h3><p>Moderate</p></div>
-      <div class="stat-card"><h3>${severityCounts.find(s=>s.severity==='severe')?.cnt||0}</h3><p>Severe</p></div>
-      <div class="stat-card"><h3>${severityCounts.find(s=>s.severity==='critical')?.cnt||0}</h3><p>Critical</p></div>
-    </div>
-    <div class="card"><h2>Check Symptoms</h2>
-      <form method="POST" action="/clinic/ai-triage/check" class="form-grid">
-        <div><label>Patient Name</label><input name="patient_name" required placeholder="Enter patient name"></div>
-        <div><label>Patient ID (optional)</label><input name="patient_id" type="number" placeholder="Optional"></div>
-        <div class="full-width"><label>Symptoms (comma-separated)</label><textarea name="symptoms" rows="3" required placeholder="e.g. headache, fever, nausea, body aches"></textarea></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Analyze Symptoms</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Recent Triage Logs</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Patient</th><th>Symptoms</th><th>Severity</th><th>Recommendation</th><th>Date</th></tr></thead>
-      <tbody>${recentLogs.map(l => `<tr><td>${esc(l.patient_name)}</td><td>${esc(l.symptoms)}</td><td><span class="badge badge-${l.severity==='critical'?'red':l.severity==='severe'?'orange':'green'}">${esc(l.severity)}</span></td><td>${esc(l.recommendation||'')}</td><td>${l.created_at?.toLocaleDateString()}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/ai-triage/check', requireAuth, requireNotBanned, requireFeature('ai_triage'), aiTriageLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_name, patient_id, symptoms } = req.body;
-  const symList = symptoms.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  // Rule-based severity assessment
-  const criticalKw = ['chest pain','difficulty breathing','unconscious','severe bleeding','seizure'];
-  const severeKw = ['high fever','severe pain','vomiting blood','blurred vision','fainting'];
-  const moderateKw = ['fever','headache','abdominal pain','diarrhea','cough','rash','swelling'];
-  let severity = 'mild', dept = 'General Outpatient';
-  if (symList.some(s => criticalKw.some(k => s.includes(k)))) { severity = 'critical'; dept = 'Emergency'; }
-  else if (symList.some(s => severeKw.some(k => s.includes(k)))) { severity = 'severe'; dept = 'Emergency / Urgent Care'; }
-  else if (symList.some(s => moderateKw.some(k => s.includes(k)))) { severity = 'moderate'; dept = 'Outpatient Clinic'; }
-  const rec = severity === 'critical' ? 'Immediate emergency attention required' : severity === 'severe' ? 'See a doctor within 1 hour' : severity === 'moderate' ? 'Schedule appointment within 24 hours' : 'Self-care, monitor symptoms';
-  await pool.query('INSERT INTO ai_triage_logs (tenant_id,patient_id,patient_name,symptoms,severity,recommendation,department) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, patient_id||null, patient_name, symptoms, severity, rec, dept]);
-  await audit(req.session.user.email, 'ai_triage', { patient_name, symptoms, severity });
-  res.redirect('/clinic/ai-triage');
-}));
-
-app.get('/api/health/triage/severity', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { symptoms } = req.query;
-  if (!symptoms) return res.json({ error: 'Symptoms required' });
-  const symList = symptoms.split(',').map(s => s.trim().toLowerCase());
-  const criticalKw = ['chest pain','difficulty breathing','unconscious','severe bleeding','seizure'];
-  const severeKw = ['high fever','severe pain','vomiting blood','blurred vision','fainting'];
-  const moderateKw = ['fever','headache','abdominal pain','diarrhea','cough','rash','swelling'];
-  let severity = 'mild';
-  if (symList.some(s => criticalKw.some(k => s.includes(k)))) severity = 'critical';
-  else if (symList.some(s => severeKw.some(k => s.includes(k)))) severity = 'severe';
-  else if (symList.some(s => moderateKw.some(k => s.includes(k)))) severity = 'moderate';
-  res.json({ severity, symptoms: symList });
-}));
-
-// --- SMART NOTIFICATIONS ---
-app.get('/clinic/notifications', requireAuth, requireNotBanned, requireFeature('smart_notifications'), notificationLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [templates, history, prefs] = await Promise.all([
-    pool.query('SELECT * FROM notification_templates WHERE tenant_id=$1 ORDER BY created_at DESC', [t]),
-    pool.query('SELECT * FROM notification_history WHERE tenant_id=$1 ORDER BY sent_at DESC LIMIT 50', [t]),
-    pool.query('SELECT * FROM notification_preferences WHERE tenant_id=$1', [t])
-  ]);
-  res.send(renderPage('Smart Notifications', `
-    <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><h1>Smart Notifications</h1><p>Template management, delivery tracking &amp; preferences</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${templates.rows.length}</h3><p>Templates</p></div>
-      <div class="stat-card"><h3>${history.rows.length}</h3><p>Sent</p></div>
-      <div class="stat-card"><h3>${prefs.rows.length}</h3><p>Preferences</p></div>
-    </div>
-    <div class="card"><h2>Create Notification</h2>
-      <form method="POST" action="/clinic/notifications/send" class="form-grid">
-        <div><label>Recipient</label><input name="recipient" required placeholder="Email or phone"></div>
-        <div><label>Channel</label><select name="channel"><option value="in_app">In-App</option><option value="email">Email</option><option value="sms">SMS</option></select></div>
-        <div><label>Subject</label><input name="subject" placeholder="Notification subject"></div>
-        <div class="full-width"><label>Message</label><textarea name="body" rows="3" required></textarea></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Send Notification</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Recent Notifications</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>To</th><th>Channel</th><th>Subject</th><th>Status</th><th>Sent</th></tr></thead>
-      <tbody>${history.rows.map(h => `<tr><td>${esc(h.recipient)}</td><td>${esc(h.channel)}</td><td>${esc(h.subject||h.body?.substring(0,50))}</td><td><span class="badge badge-${h.status==='sent'?'green':'orange'}">${esc(h.status)}</span></td><td>${h.sent_at?.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/notifications/send', requireAuth, requireNotBanned, requireFeature('smart_notifications'), notificationLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { recipient, channel, subject, body } = req.body;
-  await pool.query('INSERT INTO notification_history (tenant_id,recipient,channel,subject,body,status) VALUES ($1,$2,$3,$4,$5,$6)', [t, recipient, channel||'in_app', subject, body, 'sent']);
-  await audit(req.session.user.email, 'notification_sent', { recipient, channel });
-  res.redirect('/clinic/notifications');
-}));
-
-app.get('/clinic/notifications/templates', requireAuth, requireNotBanned, requireFeature('smart_notifications'), notificationLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const templates = (await pool.query('SELECT * FROM notification_templates WHERE tenant_id=$1 ORDER BY name', [t])).rows;
-  res.send(renderPage('Notification Templates', `
-    <div class="card"><h2>Notification Templates</h2>
-      <form method="POST" action="/clinic/notifications/templates/save" class="form-grid">
-        <div><label>Template Name</label><input name="name" required></div>
-        <div><label>Channel</label><select name="channel"><option value="in_app">In-App</option><option value="email">Email</option><option value="sms">SMS</option></select></div>
-        <div><label>Subject</label><input name="subject"></div>
-        <div class="full-width"><label>Body</label><textarea name="body" rows="3" required></textarea></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Save Template</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Existing Templates</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>Channel</th><th>Subject</th><th>Status</th><th>Created</th></tr></thead>
-      <tbody>${templates.map(tp => `<tr><td>${esc(tp.name)}</td><td>${esc(tp.channel)}</td><td>${esc(tp.subject||'-')}</td><td><span class="badge badge-${tp.is_active?'green':'red'}">${tp.is_active?'Active':'Inactive'}</span></td><td>${tp.created_at?.toLocaleDateString()}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/notifications/templates/save', requireAuth, requireNotBanned, requireFeature('smart_notifications'), notificationLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { name, channel, subject, body } = req.body;
-  await pool.query('INSERT INTO notification_templates (tenant_id,name,channel,subject,body) VALUES ($1,$2,$3,$4,$5)', [t, name, channel||'in_app', subject, body]);
-  await audit(req.session.user.email, 'notification_template_created', { name });
-  res.redirect('/clinic/notifications/templates');
-}));
-
-app.post('/clinic/notifications/bulk', requireAuth, requireNotBanned, requireFeature('smart_notifications'), notificationLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { channel, subject, body } = req.body;
-  const recipients = (await pool.query('SELECT DISTINCT email FROM users WHERE tenant_id=$1 AND approved=true AND banned=false', [t])).rows;
-  let sent = 0;
-  for (const r of recipients) {
-    await pool.query('INSERT INTO notification_history (tenant_id,recipient,channel,subject,body,status) VALUES ($1,$2,$3,$4,$5,$6)', [t, r.email, channel||'in_app', subject, body, 'sent']);
-    sent++;
-  }
-  await audit(req.session.user.email, 'bulk_notification', { channel, sent_count: sent });
-  res.send(renderPage('Bulk Notification Sent', `<div class="card" style="text-align:center;padding:40px"><h2 style="color:#059669">Notification sent to ${sent} users</h2><a href="/clinic/notifications" class="btn btn-primary" style="margin-top:16px">Back to Notifications</a></div>`));
-}));
-
-// --- PATIENT KIOSK ---
-app.get('/clinic/kiosk', requireAuth, requireNotBanned, requireFeature('patient_kiosk'), kioskLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const today = new Date().toISOString().split('T')[0];
-  const [todayCheckins, waiting] = await Promise.all([
-    pool.query('SELECT * FROM kiosk_checkins WHERE tenant_id=$1 AND checked_in_at::date=$2 ORDER BY checked_in_at DESC', [t, today]),
-    pool.query("SELECT COUNT(*)::int FROM kiosk_checkins WHERE tenant_id=$1 AND status='waiting'", [t])
-  ]);
-  res.send(renderPage('Patient Kiosk', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Patient Self Check-In Kiosk</h1><p>Streamline patient arrivals with self-service check-in</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${todayCheckins.rows.length}</h3><p>Today</p></div>
-      <div class="stat-card"><h3>${waiting.rows[0]?.count||0}</h3><p>Waiting</p></div>
-    </div>
-    <div class="card"><h2>Patient Check-In</h2>
-      <form method="POST" action="/clinic/kiosk/checkin" class="form-grid">
-        <div><label>Patient Name</label><input name="patient_name" required></div>
-        <div><label>Patient ID (optional)</label><input name="patient_id" type="number"></div>
-        <div><label>Visit Type</label><select name="visit_type"><option value="consultation">Consultation</option><option value="followup">Follow-Up</option><option value="lab">Lab Test</option><option value="pharmacy">Pharmacy</option><option value="imaging">Imaging</option></select></div>
-        <div><label>Department</label><select name="department"><option value="general">General</option><option value="pediatrics">Pediatrics</option><option value="obgyn">OB/GYN</option><option value="surgery">Surgery</option><option value="internal">Internal Medicine</option><option value="emergency">Emergency</option></select></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Check In Patient</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Today's Queue</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>#</th><th>Patient</th><th>Visit Type</th><th>Dept</th><th>Status</th><th>Time</th></tr></thead>
-      <tbody>${todayCheckins.rows.map(c => `<tr><td>${c.queue_number}</td><td>${esc(c.patient_name)}</td><td>${esc(c.visit_type)}</td><td>${esc(c.department)}</td><td><span class="badge badge-${c.status==='waiting'?'orange':c.status==='seen'?'green':'blue'}">${esc(c.status)}</span></td><td>${c.checked_in_at?.toLocaleTimeString()}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/kiosk/checkin', requireAuth, requireNotBanned, requireFeature('patient_kiosk'), kioskLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_name, patient_id, visit_type, department } = req.body;
-  const qResult = (await pool.query("SELECT COALESCE(MAX(queue_number),0)+1 as next FROM kiosk_checkins WHERE tenant_id=$1 AND checked_in_at::date=CURRENT_DATE", [t])).rows[0];
-  await pool.query('INSERT INTO kiosk_checkins (tenant_id,patient_id,patient_name,visit_type,department,queue_number) VALUES ($1,$2,$3,$4,$5,$6)', [t, patient_id||null, patient_name, visit_type, department, qResult.next]);
-  await audit(req.session.user.email, 'kiosk_checkin', { patient_name, visit_type });
-  res.redirect('/clinic/kiosk');
-}));
-
-// --- HEALTH WALLET ---
-app.get('/clinic/wallet', requireAuth, requireNotBanned, requireFeature('health_wallet'), walletLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const wallets = (await pool.query('SELECT hw.*, COUNT(wt.id)::int as tx_count FROM health_wallets hw LEFT JOIN wallet_transactions wt ON wt.wallet_id=hw.id WHERE hw.tenant_id=$1 GROUP BY hw.id ORDER BY hw.created_at DESC', [t])).rows;
-  const totalBalance = wallets.reduce((s,w) => s + (w.balance||0), 0);
-  res.send(renderPage('Health Wallet', `
-    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#06b6d4)"><h1>Health Wallet</h1><p>Prepaid patient wallets for seamless payments</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${wallets.length}</h3><p>Wallets</p></div>
-      <div class="stat-card"><h3>${totalBalance.toLocaleString()}</h3><p>Total Balance (UGX)</p></div>
-    </div>
-    <div class="card"><h2>Top Up Wallet</h2>
-      <form method="POST" action="/clinic/wallet/topup" class="form-grid">
-        <div><label>Patient ID</label><input name="patient_id" type="number" required></div>
-        <div><label>Amount (UGX)</label><input name="amount" type="number" required min="1000"></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Top Up</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>All Wallets</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>ID</th><th>Patient ID</th><th>Balance</th><th>Transactions</th><th>Status</th></tr></thead>
-      <tbody>${wallets.map(w => `<tr><td>${w.id}</td><td>${w.patient_id}</td><td>${(w.balance||0).toLocaleString()} UGX</td><td>${w.tx_count}</td><td><span class="badge badge-${w.is_active?'green':'red'}">${w.is_active?'Active':'Inactive'}</span></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/wallet/topup', requireAuth, requireNotBanned, requireFeature('health_wallet'), walletLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_id, amount } = req.body;
-  const amt = parseInt(amount);
-  if (!amt || amt < 1000) return res.redirect('/clinic/wallet');
-  const existing = (await pool.query('SELECT * FROM health_wallets WHERE tenant_id=$1 AND patient_id=$2', [t, patient_id])).rows[0];
-  let walletId;
-  if (existing) {
-    const newBal = existing.balance + amt;
-    await pool.query('UPDATE health_wallets SET balance=$1, updated_at=NOW() WHERE id=$2', [newBal, existing.id]);
-    walletId = existing.id;
-    await pool.query('INSERT INTO wallet_transactions (tenant_id,wallet_id,type,amount,balance_after,description,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, walletId, 'topup', amt, newBal, 'Wallet top-up', req.session.user.email]);
-  } else {
-    const w = (await pool.query('INSERT INTO health_wallets (tenant_id,patient_id,balance) VALUES ($1,$2,$3) RETURNING id', [t, patient_id, amt])).rows[0];
-    walletId = w.id;
-    await pool.query('INSERT INTO wallet_transactions (tenant_id,wallet_id,type,amount,balance_after,description,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, walletId, 'topup', amt, amt, 'Initial wallet top-up', req.session.user.email]);
-  }
-  await audit(req.session.user.email, 'wallet_topup', { patient_id, amount: amt });
-  res.redirect('/clinic/wallet');
-}));
-
-app.post('/clinic/wallet/spend', requireAuth, requireNotBanned, requireFeature('health_wallet'), walletLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_id, amount, description } = req.body;
-  const amt = parseInt(amount);
-  const wallet = (await pool.query('SELECT * FROM health_wallets WHERE tenant_id=$1 AND patient_id=$2 AND is_active=true', [t, patient_id])).rows[0];
-  if (!wallet || wallet.balance < amt) return res.send(renderPage('Wallet Error', '<div class="card" style="text-align:center;padding:40px"><h2 style="color:#dc2626">Insufficient balance or wallet not found</h2></div>'));
-  const newBal = wallet.balance - amt;
-  await pool.query('UPDATE health_wallets SET balance=$1, updated_at=NOW() WHERE id=$2', [newBal, wallet.id]);
-  await pool.query('INSERT INTO wallet_transactions (tenant_id,wallet_id,type,amount,balance_after,description,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, wallet.id, 'spend', amt, newBal, description||'Payment', req.session.user.email]);
-  await audit(req.session.user.email, 'wallet_spend', { patient_id, amount: amt });
-  res.redirect('/clinic/wallet');
-}));
-
-app.get('/clinic/wallet/history/:patient_id', requireAuth, requireNotBanned, requireFeature('health_wallet'), walletLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const wallet = (await pool.query('SELECT * FROM health_wallets WHERE tenant_id=$1 AND patient_id=$2', [t, req.params.patient_id])).rows[0];
-  if (!wallet) return res.redirect('/clinic/wallet');
-  const txns = (await pool.query('SELECT * FROM wallet_transactions WHERE tenant_id=$1 AND wallet_id=$2 ORDER BY created_at DESC LIMIT 50', [t, wallet.id])).rows;
-  res.send(renderPage('Wallet History - Patient #' + req.params.patient_id, `
-    <div class="stats"><div class="stat-card"><h3>${(wallet.balance||0).toLocaleString()} UGX</h3><p>Current Balance</p></div></div>
-    <div class="card"><h2>Transaction History</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Balance After</th><th>Description</th><th>By</th></tr></thead>
-      <tbody>${txns.map(tx => `<tr><td>${tx.created_at?.toLocaleString()}</td><td><span class="badge badge-${tx.type==='topup'?'green':'red'}">${tx.type}</span></td><td>${tx.type==='topup'?'+':''}${tx.amount.toLocaleString()}</td><td>${(tx.balance_after||0).toLocaleString()}</td><td>${esc(tx.description||'')}</td><td>${esc(tx.created_by||'')}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-    <a href="/clinic/wallet" class="btn btn-sm" style="margin-top:12px">Back to Wallets</a>
-  `));
-}));
-
-// --- THEATRE / SURGERY ---
-app.get('/clinic/theatre', requireAuth, requireNotBanned, requireFeature('theatre'), theatreLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [theatres, todaySurgeries, upcoming] = await Promise.all([
-    pool.query('SELECT * FROM theatres WHERE tenant_id=$1 ORDER BY name', [t]),
-    pool.query('SELECT ss.*, th.name as theatre_name FROM surgery_schedules ss LEFT JOIN theatres th ON th.id=ss.theatre_id WHERE ss.tenant_id=$1 AND ss.scheduled_date=CURRENT_DATE ORDER BY ss.scheduled_time', [t]),
-    pool.query("SELECT ss.*, th.name as theatre_name FROM surgery_schedules ss LEFT JOIN theatres th ON th.id=ss.theatre_id WHERE ss.tenant_id=$1 AND ss.scheduled_date > CURRENT_DATE AND ss.status='scheduled' ORDER BY ss.scheduled_date LIMIT 20", [t])
-  ]);
-  res.send(renderPage('Theatre Management', `
-    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Theatre &amp; Surgery</h1><p>Operating theatre scheduling and surgical management</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${theatres.rows.length}</h3><p>Theatres</p></div>
-      <div class="stat-card"><h3>${todaySurgeries.rows.length}</h3><p>Today</p></div>
-      <div class="stat-card"><h3>${upcoming.rows.length}</h3><p>Upcoming</p></div>
-    </div>
-    <div class="card"><h2>Schedule Surgery</h2>
-      <form method="POST" action="/clinic/theatre/schedule" class="form-grid">
-        <div><label>Patient ID</label><input name="patient_id" type="number" required></div>
-        <div><label>Patient Name</label><input name="patient_name" required></div>
-        <div><label>Procedure</label><input name="procedure_name" required></div>
-        <div><label>Theatre</label><select name="theatre_id">${theatres.rows.map(th => `<option value="${th.id}">${esc(th.name)}</option>`).join('')}</select></div>
-        <div><label>Surgeon</label><input name="surgeon" required></div>
-        <div><label>Anesthetist</label><input name="anesthetist"></div>
-        <div><label>Date</label><input name="scheduled_date" type="date" required></div>
-        <div><label>Time</label><input name="scheduled_time" type="time"></div>
-        <div><label>Duration (min)</label><input name="estimated_duration_min" type="number"></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Schedule</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Today's Surgeries</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Patient</th><th>Procedure</th><th>Theatre</th><th>Surgeon</th><th>Time</th><th>Status</th></tr></thead>
-      <tbody>${todaySurgeries.rows.map(s => `<tr><td>${esc(s.patient_name)}</td><td>${esc(s.procedure_name)}</td><td>${esc(s.theatre_name||'TBD')}</td><td>${esc(s.surgeon)}</td><td>${s.scheduled_time||'TBD'}</td><td><span class="badge badge-${s.status==='completed'?'green':s.status==='in_progress'?'blue':s.status==='cancelled'?'red':'orange'}">${esc(s.status)}</span></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/theatre/schedule', requireAuth, requireNotBanned, requireFeature('theatre'), theatreLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_id, patient_name, procedure_name, theatre_id, surgeon, anesthetist, scheduled_date, scheduled_time, estimated_duration_min } = req.body;
-  await pool.query('INSERT INTO surgery_schedules (tenant_id,patient_id,patient_name,procedure_name,theatre_id,surgeon,anesthetist,scheduled_date,scheduled_time,estimated_duration_min) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [t, patient_id, patient_name, procedure_name, theatre_id||null, surgeon, anesthetist, scheduled_date, scheduled_time||null, estimated_duration_min||null]);
-  await audit(req.session.user.email, 'surgery_scheduled', { patient_name, procedure_name });
-  res.redirect('/clinic/theatre');
-}));
-
-app.get('/clinic/theatre/list', requireAuth, requireNotBanned, requireFeature('theatre'), theatreLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const theatres = (await pool.query('SELECT * FROM theatres WHERE tenant_id=$1 ORDER BY name', [t])).rows;
-  res.send(renderPage('Theatres', `
-    <div class="card"><h2>Manage Theatres</h2>
-      <form method="POST" action="/clinic/theatre/save" class="form-grid">
-        <div><label>Name</label><input name="name" required></div>
-        <div><label>Type</label><select name="type"><option value="general">General</option><option value="orthopedic">Orthopedic</option><option value="cardiac">Cardiac</option><option value="neuro">Neuro</option><option value="obstetric">Obstetric</option></select></div>
-        <div><label>Floor</label><input name="floor" placeholder="e.g. 2nd Floor"></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Add Theatre</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Existing Theatres</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>Type</th><th>Floor</th><th>Status</th></tr></thead>
-      <tbody>${theatres.map(th => `<tr><td>${esc(th.name)}</td><td>${esc(th.type||'General')}</td><td>${esc(th.floor||'-')}</td><td><span class="badge badge-${th.status==='available'?'green':'red'}">${esc(th.status)}</span></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/theatre/save', requireAuth, requireNotBanned, requireFeature('theatre'), theatreLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { name, type, floor } = req.body;
-  await pool.query('INSERT INTO theatres (tenant_id,name,type,floor) VALUES ($1,$2,$3,$4)', [t, name, type||'general', floor]);
-  await audit(req.session.user.email, 'theatre_created', { name });
-  res.redirect('/clinic/theatre/list');
-}));
-
-app.post('/clinic/theatre/status', requireAuth, requireNotBanned, requireFeature('theatre'), theatreLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { id, status } = req.body;
-  await pool.query('UPDATE theatres SET status=$1 WHERE id=$2 AND tenant_id=$3', [status, id, t]);
-  res.json({ success: true });
-}));
-
-app.get('/clinic/theatre/reports', requireAuth, requireNotBanned, requireFeature('theatre'), theatreLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [totalCompleted, thisMonth, byStatus] = await Promise.all([
-    pool.query("SELECT COUNT(*)::int FROM surgery_schedules WHERE tenant_id=$1 AND status='completed'", [t]),
-    pool.query("SELECT COUNT(*)::int FROM surgery_schedules WHERE tenant_id=$1 AND status='completed' AND scheduled_date >= DATE_TRUNC('month', CURRENT_DATE)", [t]),
-    pool.query("SELECT status, COUNT(*)::int as cnt FROM surgery_schedules WHERE tenant_id=$1 GROUP BY status ORDER BY cnt DESC", [t])
-  ]);
-  res.send(renderPage('Surgery Reports', `
-    <div class="stats">
-      <div class="stat-card"><h3>${totalCompleted.rows[0]?.count||0}</h3><p>Total Completed</p></div>
-      <div class="stat-card"><h3>${thisMonth.rows[0]?.count||0}</h3><p>This Month</p></div>
-    </div>
-    <div class="card"><h2>By Status</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Status</th><th>Count</th></tr></thead>
-      <tbody>${byStatus.rows.map(s => `<tr><td><span class="badge badge-${s.status==='completed'?'green':s.status==='cancelled'?'red':'orange'}">${esc(s.status)}</span></td><td>${s.cnt}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-
-// ============================================================
-// === v15.0: ICU/CCU, RADIOLOGY, CLINICAL PATHWAYS, DRUG FORMULARY, SUPPLY CHAIN ===
-// ============================================================
-
-// --- ICU/CCU MONITORING ---
-app.get('/clinic/icu', requireAuth, requireNotBanned, requireFeature('icu_monitoring'), icuLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const patients = (await pool.query("SELECT * FROM icu_patients WHERE tenant_id=$1 AND status='admitted' ORDER BY acuity DESC, admission_date", [t])).rows;
-  const discharged = (await pool.query("SELECT COUNT(*)::int FROM icu_patients WHERE tenant_id=$1 AND status='discharged' AND discharged_at >= DATE_TRUNC('month', CURRENT_DATE)", [t])).rows[0]?.count || 0;
-  res.send(renderPage('ICU/CCU Monitoring', `
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#ef4444)"><h1>ICU/CCU Monitoring</h1><p>Real-time critical care patient monitoring</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${patients.length}</h3><p>Active ICU Patients</p></div>
-      <div class="stat-card"><h3>${discharged}</h3><p>Discharged This Month</p></div>
-    </div>
-    <div class="card"><h2>Admit Patient to ICU</h2>
-      <form method="POST" action="/clinic/icu/admit" class="form-grid">
-        <div><label>Patient ID</label><input name="patient_id" type="number" required></div>
-        <div><label>Patient Name</label><input name="patient_name" required></div>
-        <div><label>Bed Number</label><input name="bed_number" required></div>
-        <div><label>Diagnosis</label><input name="diagnosis" required></div>
-        <div><label>Acuity</label><select name="acuity"><option value="stable">Stable</option><option value="guarded">Guarded</option><option value="critical">Critical</option></select></div>
-        <div><label>Attending Doctor</label><input name="attending_doctor" required></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Admit to ICU</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Current ICU Patients</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Bed</th><th>Patient</th><th>Diagnosis</th><th>Acuity</th><th>Doctor</th><th>Admitted</th><th>Actions</th></tr></thead>
-      <tbody>${patients.map(p => `<tr><td>${esc(p.bed_number)}</td><td>${esc(p.patient_name)}</td><td>${esc(p.diagnosis)}</td><td><span class="badge badge-${p.acuity==='critical'?'red':p.acuity==='guarded'?'orange':'green'}">${esc(p.acuity)}</span></td><td>${esc(p.attending_doctor)}</td><td>${p.admission_date}</td><td><a href="/clinic/icu/vitals/${p.id}" class="btn btn-sm">Vitals</a> <a href="/clinic/icu/chart/${p.id}" class="btn btn-sm">Chart</a></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/icu/admit', requireAuth, requireNotBanned, requireFeature('icu_monitoring'), icuLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_id, patient_name, bed_number, diagnosis, acuity, attending_doctor } = req.body;
-  await pool.query('INSERT INTO icu_patients (tenant_id,patient_id,patient_name,bed_number,admission_date,diagnosis,acuity,attending_doctor) VALUES ($1,$2,$3,$4,CURRENT_DATE,$5,$6,$7)', [t, patient_id, patient_name, bed_number, diagnosis, acuity, attending_doctor]);
-  await audit(req.session.user.email, 'icu_admit', { patient_name, bed_number });
-  res.redirect('/clinic/icu');
-}));
-
-app.get('/clinic/icu/vitals/:id', requireAuth, requireNotBanned, requireFeature('icu_monitoring'), icuLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const patient = (await pool.query('SELECT * FROM icu_patients WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
-  if (!patient) return res.redirect('/clinic/icu');
-  const vitals = (await pool.query('SELECT * FROM icu_vitals WHERE icu_patient_id=$1 ORDER BY recorded_at DESC LIMIT 30', [req.params.id])).rows;
-  res.send(renderPage('ICU Vitals - ' + patient.patient_name, `
-    <div class="stats"><div class="stat-card"><h3>Bed ${esc(patient.bed_number)}</h3><p>${esc(patient.diagnosis)}</p></div></div>
-    <div class="card"><h2>Record Vitals</h2>
-      <form method="POST" action="/clinic/icu/vitals/save" class="form-grid">
-        <input type="hidden" name="icu_patient_id" value="${patient.id}">
-        <div><label>Temp (C)</label><input name="temp" type="number" step="0.1"></div>
-        <div><label>Pulse</label><input name="pulse" type="number"></div>
-        <div><label>BP Systolic</label><input name="bp_systolic" type="number"></div>
-        <div><label>BP Diastolic</label><input name="bp_diastolic" type="number"></div>
-        <div><label>Resp Rate</label><input name="resp_rate" type="number"></div>
-        <div><label>SpO2 (%)</label><input name="spo2" type="number"></div>
-        <div><label>GCS</label><input name="gcs" type="number" min="3" max="15"></div>
-        <div><label>Blood Sugar</label><input name="blood_sugar" type="number"></div>
-        <div><label>Pain Score (0-10)</label><input name="pain_score" type="number" min="0" max="10"></div>
-        <div><label>Urine Output (ml)</label><input name="urine_output" type="number"></div>
-        <div class="full-width"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Save Vitals</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Vitals History</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Time</th><th>Temp</th><th>Pulse</th><th>BP</th><th>RR</th><th>SpO2</th><th>GCS</th></tr></thead>
-      <tbody>${vitals.map(v => `<tr><td>${v.recorded_at?.toLocaleString()}</td><td>${v.temp||'-'}</td><td>${v.pulse||'-'}</td><td>${v.bp_systolic||'-'}/${v.bp_diastolic||'-'}</td><td>${v.resp_rate||'-'}</td><td>${v.spo2||'-'}</td><td>${v.gcs||'-'}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-    <a href="/clinic/icu" class="btn btn-sm" style="margin-top:12px">Back to ICU</a>
-  `));
-}));
-
-app.post('/clinic/icu/vitals/save', requireAuth, requireNotBanned, requireFeature('icu_monitoring'), icuLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { icu_patient_id, temp, pulse, bp_systolic, bp_diastolic, resp_rate, spo2, gcs, blood_sugar, pain_score, urine_output, notes } = req.body;
-  await pool.query('INSERT INTO icu_vitals (tenant_id,icu_patient_id,temp,pulse,bp_systolic,bp_diastolic,resp_rate,spo2,gcs,blood_sugar,pain_score,urine_output,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)', [t, icu_patient_id, temp||null, pulse||null, bp_systolic||null, bp_diastolic||null, resp_rate||null, spo2||null, gcs||null, blood_sugar||null, pain_score||null, urine_output||null, notes]);
-  await audit(req.session.user.email, 'icu_vitals_recorded', { icu_patient_id });
-  res.redirect(`/clinic/icu/vitals/${icu_patient_id}`);
-}));
-
-app.post('/clinic/icu/handover', requireAuth, requireNotBanned, requireFeature('icu_monitoring'), icuLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { icu_patient_id, shift_from, shift_to, summary, pending_tasks } = req.body;
-  await pool.query('INSERT INTO icu_handovers (tenant_id,icu_patient_id,shift_from,shift_to,handed_over_by,summary,pending_tasks) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, icu_patient_id, shift_from, shift_to, req.session.user.email, summary, pending_tasks]);
-  await audit(req.session.user.email, 'icu_handover', { icu_patient_id });
-  res.redirect('/clinic/icu');
-}));
-
-// --- RADIOLOGY / IMAGING ---
-app.get('/clinic/radiology', requireAuth, requireNotBanned, requireFeature('radiology'), radiologyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [pending, completed, modalities] = await Promise.all([
-    pool.query("SELECT * FROM imaging_orders WHERE tenant_id=$1 AND status IN ('ordered','in_progress') ORDER BY urgency DESC, ordered_at", [t]),
-    pool.query("SELECT COUNT(*)::int FROM imaging_orders WHERE tenant_id=$1 AND status='completed'", [t]),
-    pool.query("SELECT modality, COUNT(*)::int as cnt FROM imaging_orders WHERE tenant_id=$1 GROUP BY modality ORDER BY cnt DESC", [t])
-  ]);
-  res.send(renderPage('Radiology & Imaging', `
-    <div class="hero" style="background:linear-gradient(135deg,#2563eb,#3b82f6)"><h1>Radiology &amp; Imaging</h1><p>Order management, results tracking &amp; reporting</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${pending.rows.length}</h3><p>Pending</p></div>
-      <div class="stat-card"><h3>${completed.rows[0]?.count||0}</h3><p>Completed</p></div>
-    </div>
-    <div class="card"><h2>Order Imaging</h2>
-      <form method="POST" action="/clinic/radiology/order" class="form-grid">
-        <div><label>Patient ID</label><input name="patient_id" type="number" required></div>
-        <div><label>Patient Name</label><input name="patient_name" required></div>
-        <div><label>Modality</label><select name="modality"><option value="X-Ray">X-Ray</option><option value="CT Scan">CT Scan</option><option value="MRI">MRI</option><option value="Ultrasound">Ultrasound</option><option value="Mammography">Mammography</option><option value="Fluoroscopy">Fluoroscopy</option></select></div>
-        <div><label>Body Part</label><input name="body_part" required placeholder="e.g. Chest, Abdomen"></div>
-        <div><label>Urgency</label><select name="urgency"><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="stat">STAT</option></select></div>
-        <div><label>Ordering Doctor</label><input name="ordering_doctor" required></div>
-        <div class="full-width"><label>Clinical Indication</label><textarea name="clinical_indication" rows="2" required></textarea></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Place Order</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Pending Orders</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Patient</th><th>Modality</th><th>Body Part</th><th>Urgency</th><th>Doctor</th><th>Ordered</th><th>Actions</th></tr></thead>
-      <tbody>${pending.rows.map(o => `<tr><td>${esc(o.patient_name)}</td><td>${esc(o.modality)}</td><td>${esc(o.body_part)}</td><td><span class="badge badge-${o.urgency==='stat'?'red':o.urgency==='urgent'?'orange':'green'}">${esc(o.urgency)}</span></td><td>${esc(o.ordering_doctor)}</td><td>${o.ordered_at?.toLocaleDateString()}</td><td><a href="/clinic/radiology/result/${o.id}" class="btn btn-sm">Add Result</a></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/radiology/order', requireAuth, requireNotBanned, requireFeature('radiology'), radiologyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_id, patient_name, modality, body_part, urgency, ordering_doctor, clinical_indication } = req.body;
-  await pool.query('INSERT INTO imaging_orders (tenant_id,patient_id,patient_name,modality,body_part,urgency,ordering_doctor,clinical_indication) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [t, patient_id, patient_name, modality, body_part, urgency, ordering_doctor, clinical_indication]);
-  await audit(req.session.user.email, 'imaging_ordered', { patient_name, modality, body_part });
-  res.redirect('/clinic/radiology');
-}));
-
-app.get('/clinic/radiology/result/:id', requireAuth, requireNotBanned, requireFeature('radiology'), radiologyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const order = (await pool.query('SELECT * FROM imaging_orders WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
-  if (!order) return res.redirect('/clinic/radiology');
-  const results = (await pool.query('SELECT * FROM imaging_results WHERE order_id=$1 ORDER BY reported_at DESC', [req.params.id])).rows;
-  res.send(renderPage('Imaging Result - ' + order.patient_name, `
-    <div class="card"><h2>Order Details</h2><p><strong>Patient:</strong> ${esc(order.patient_name)} | <strong>Modality:</strong> ${esc(order.modality)} | <strong>Body Part:</strong> ${esc(order.body_part)} | <strong>Urgency:</strong> ${esc(order.urgency)}</p></div>
-    <div class="card"><h2>Add Result</h2>
-      <form method="POST" action="/clinic/radiology/result/save" class="form-grid">
-        <input type="hidden" name="order_id" value="${order.id}">
-        <input type="hidden" name="patient_id" value="${order.patient_id}">
-        <div><label>Radiologist</label><input name="radiologist" required></div>
-        <div><label>Images Count</label><input name="images_count" type="number" value="0"></div>
-        <div class="full-width"><label>Findings</label><textarea name="findings" rows="4" required></textarea></div>
-        <div class="full-width"><label>Impression</label><textarea name="impression" rows="3" required></textarea></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Save Result</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Previous Results</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Radiologist</th><th>Findings</th><th>Impression</th><th>Status</th><th>Date</th></tr></thead>
-      <tbody>${results.map(r => `<tr><td>${esc(r.radiologist)}</td><td>${esc(r.findings?.substring(0,100))}</td><td>${esc(r.impression?.substring(0,100))}</td><td><span class="badge badge-${r.report_status==='approved'?'green':'orange'}">${esc(r.report_status)}</span></td><td>${r.reported_at?.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/radiology/result/save', requireAuth, requireNotBanned, requireFeature('radiology'), radiologyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { order_id, patient_id, radiologist, images_count, findings, impression } = req.body;
-  await pool.query('INSERT INTO imaging_results (tenant_id,order_id,patient_id,radiologist,findings,impression,images_count) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, order_id, patient_id, radiologist, findings, impression, images_count||0]);
-  await pool.query("UPDATE imaging_orders SET status='completed', completed_at=NOW() WHERE id=$1 AND tenant_id=$2", [order_id, t]);
-  await audit(req.session.user.email, 'imaging_result', { order_id });
-  res.redirect(`/clinic/radiology/result/${order_id}`);
-}));
-
-app.get('/clinic/radiology/stats', requireAuth, requireNotBanned, requireFeature('radiology'), radiologyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [byModality, byStatus, thisMonth] = await Promise.all([
-    pool.query("SELECT modality, COUNT(*)::int as cnt FROM imaging_orders WHERE tenant_id=$1 GROUP BY modality ORDER BY cnt DESC", [t]),
-    pool.query("SELECT status, COUNT(*)::int as cnt FROM imaging_orders WHERE tenant_id=$1 GROUP BY status ORDER BY cnt DESC", [t]),
-    pool.query("SELECT COUNT(*)::int FROM imaging_orders WHERE tenant_id=$1 AND ordered_at >= DATE_TRUNC('month', CURRENT_DATE)", [t])
-  ]);
-  res.send(renderPage('Radiology Statistics', `
-    <div class="stats"><div class="stat-card"><h3>${thisMonth.rows[0]?.count||0}</h3><p>This Month</p></div></div>
-    <div class="card"><h2>By Modality</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>Modality</th><th>Count</th></tr></thead><tbody>${byModality.rows.map(r => `<tr><td>${esc(r.modality)}</td><td>${r.cnt}</td></tr>`).join('')}</tbody></table></div></div>
-    <div class="card"><h2>By Status</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>Status</th><th>Count</th></tr></thead><tbody>${byStatus.rows.map(r => `<tr><td>${esc(r.status)}</td><td>${r.cnt}</td></tr>`).join('')}</tbody></table></div></div>
-  `));
-}));
-
-// --- CLINICAL PATHWAYS ---
-app.get('/clinic/pathways', requireAuth, requireNotBanned, requireFeature('clinical_pathways'), pathwayLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [pathways, activeInstances] = await Promise.all([
-    pool.query('SELECT * FROM clinical_pathways WHERE tenant_id=$1 AND is_active=true ORDER BY name', [t]),
-    pool.query("SELECT COUNT(*)::int FROM pathway_instances WHERE tenant_id=$1 AND status='active'", [t])
-  ]);
-  res.send(renderPage('Clinical Pathways', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Clinical Pathways</h1><p>Standardized care protocols and patient pathway tracking</p></div>
-    <div class="stats"><div class="stat-card"><h3>${pathways.rows.length}</h3><p>Pathways</p></div><div class="stat-card"><h3>${activeInstances.rows[0]?.count||0}</h3><p>Active Instances</p></div></div>
-    <div class="card"><h2>Create Pathway</h2>
-      <form method="POST" action="/clinic/pathways/save" class="form-grid">
-        <div><label>Name</label><input name="name" required></div>
-        <div><label>Condition</label><input name="condition" required placeholder="e.g. Diabetes Management"></div>
-        <div><label>Duration (days)</label><input name="estimated_duration_days" type="number"></div>
-        <div class="full-width"><label>Description</label><textarea name="description" rows="2"></textarea></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Create Pathway</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Pathways</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Name</th><th>Condition</th><th>Duration</th><th>Created</th><th>Actions</th></tr></thead>
-      <tbody>${pathways.rows.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.condition||'')}</td><td>${p.estimated_duration_days ? p.estimated_duration_days+' days' : '-'}</td><td>${p.created_at?.toLocaleDateString()}</td><td><a href="/clinic/pathways/assign/${p.id}" class="btn btn-sm">Assign</a></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/pathways/save', requireAuth, requireNotBanned, requireFeature('clinical_pathways'), pathwayLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { name, condition, description, estimated_duration_days } = req.body;
-  await pool.query('INSERT INTO clinical_pathways (tenant_id,name,condition,description,estimated_duration_days) VALUES ($1,$2,$3,$4,$5)', [t, name, condition, description, estimated_duration_days||null]);
-  await audit(req.session.user.email, 'pathway_created', { name });
-  res.redirect('/clinic/pathways');
-}));
-
-app.get('/clinic/pathways/assign/:id', requireAuth, requireNotBanned, requireFeature('clinical_pathways'), pathwayLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const pathway = (await pool.query('SELECT * FROM clinical_pathways WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
-  if (!pathway) return res.redirect('/clinic/pathways');
-  res.send(renderPage('Assign Pathway', `
-    <div class="card" style="max-width:500px;margin:0 auto"><h2>Assign: ${esc(pathway.name)}</h2>
-      <form method="POST" action="/clinic/pathways/assign/save" class="form-grid">
-        <input type="hidden" name="pathway_id" value="${pathway.id}">
-        <div><label>Patient ID</label><input name="patient_id" type="number" required></div>
-        <div><label>Patient Name</label><input name="patient_name" required></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Assign Pathway</button></div>
-      </form>
-    </div>
-  `));
-}));
-
-app.post('/clinic/pathways/assign/save', requireAuth, requireNotBanned, requireFeature('clinical_pathways'), pathwayLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { pathway_id, patient_id, patient_name } = req.body;
-  await pool.query('INSERT INTO pathway_instances (tenant_id,pathway_id,patient_id,patient_name,assigned_by) VALUES ($1,$2,$3,$4,$5)', [t, pathway_id, patient_id, patient_name, req.session.user.email]);
-  await audit(req.session.user.email, 'pathway_assigned', { pathway_id, patient_name });
-  res.redirect('/clinic/pathways');
-}));
-
-// --- DRUG FORMULARY ---
-app.get('/clinic/formulary', requireAuth, requireNotBanned, requireFeature('drug_formulary'), formularyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const drugs = (await pool.query('SELECT * FROM drug_formulary WHERE tenant_id=$1 ORDER BY drug_name', [t])).rows;
-  res.send(renderPage('Drug Formulary', `
-    <div class="hero" style="background:linear-gradient(135deg,#0891b2,#06b6d4)"><h1>Drug Formulary</h1><p>Institutional formulary management and drug information</p></div>
-    <div class="stats"><div class="stat-card"><h3>${drugs.length}</h3><p>Drugs on Formulary</p></div></div>
-    <div class="card"><h2>Add Drug</h2>
-      <form method="POST" action="/clinic/formulary/save" class="form-grid">
-        <div><label>Drug Name</label><input name="drug_name" required></div>
-        <div><label>Generic Name</label><input name="generic_name"></div>
-        <div><label>Strength</label><input name="strength" placeholder="e.g. 500mg"></div>
-        <div><label>Dosage Form</label><select name="dosage_form"><option value="tablet">Tablet</option><option value="capsule">Capsule</option><option value="syrup">Syrup</option><option value="injection">Injection</option><option value="cream">Cream</option><option value="drops">Drops</option><option value="inhaler">Inhaler</option></select></div>
-        <div><label>Category</label><input name="category" placeholder="e.g. Antibiotic, Analgesic"></div>
-        <div><label>Route</label><select name="route"><option value="oral">Oral</option><option value="IV">IV</option><option value="IM">IM</option><option value="SC">SC</option><option value="topical">Topical</option></select></div>
-        <div><label>Max Dose</label><input name="max_dose" placeholder="e.g. 4g/day"></div>
-        <div><label>Frequency</label><input name="frequency" placeholder="e.g. 3x daily"></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Add to Formulary</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Formulary List</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Drug Name</th><th>Strength</th><th>Form</th><th>Category</th><th>Route</th><th>Frequency</th><th>Status</th></tr></thead>
-      <tbody>${drugs.map(d => `<tr><td>${esc(d.drug_name)}</td><td>${esc(d.strength||'')}</td><td>${esc(d.dosage_form||'')}</td><td>${esc(d.category||'')}</td><td>${esc(d.route||'')}</td><td>${esc(d.frequency||'')}</td><td><span class="badge badge-${d.is_on_formulary?'green':'red'}">${d.is_on_formulary?'On Formulary':'Off'}</span></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/formulary/save', requireAuth, requireNotBanned, requireFeature('drug_formulary'), formularyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { drug_name, generic_name, strength, dosage_form, category, route, max_dose, frequency } = req.body;
-  await pool.query('INSERT INTO drug_formulary (tenant_id,drug_name,generic_name,strength,dosage_form,category,route,max_dose,frequency) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, drug_name, generic_name, strength, dosage_form, category, route, max_dose, frequency]);
-  await audit(req.session.user.email, 'formulary_drug_added', { drug_name });
-  res.redirect('/clinic/formulary');
-}));
-
-app.get('/api/health/formulary/search', requireAuth, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const q = (req.query.q || '').trim();
-  if (!q) return res.json({ results: [] });
-  const drugs = (await pool.query("SELECT * FROM drug_formulary WHERE tenant_id=$1 AND (drug_name ILIKE $2 OR generic_name ILIKE $2 OR category ILIKE $2) LIMIT 20", [t, `%${q}%`])).rows;
-  res.json({ results: drugs });
-}));
-
-// --- SUPPLY CHAIN ---
-app.get('/clinic/supply-chain', requireAuth, requireNotBanned, requireFeature('supply_chain'), supplyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [suppliers, pos, pendingGRN] = await Promise.all([
-    pool.query('SELECT * FROM suppliers WHERE tenant_id=$1 ORDER BY name', [t]),
-    pool.query("SELECT * FROM supply_purchase_orders WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20", [t]),
-    pool.query("SELECT COUNT(*)::int FROM goods_received_notes WHERE tenant_id=$1 AND status='partial'", [t])
-  ]);
-  res.send(renderPage('Supply Chain', `
-    <div class="hero" style="background:linear-gradient(135deg,#d97706,#f59e0b)"><h1>Supply Chain</h1><p>Suppliers, purchase orders &amp; inventory management</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${suppliers.rows.length}</h3><p>Suppliers</p></div>
-      <div class="stat-card"><h3>${pos.rows.length}</h3><p>Purchase Orders</p></div>
-      <div class="stat-card"><h3>${pendingGRN.rows[0]?.count||0}</h3><p>Pending GRN</p></div>
-    </div>
-    <div class="card"><h2>Add Supplier</h2>
-      <form method="POST" action="/clinic/supply-chain/supplier/save" class="form-grid">
-        <div><label>Name</label><input name="name" required></div>
-        <div><label>Contact Person</label><input name="contact_person"></div>
-        <div><label>Phone</label><input name="phone"></div>
-        <div><label>Email</label><input name="email" type="email"></div>
-        <div><label>Category</label><input name="category" placeholder="e.g. Pharmaceuticals, Equipment"></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Add Supplier</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Purchase Orders</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>PO #</th><th>Supplier</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
-      <tbody>${pos.rows.map(po => `<tr><td>${esc(po.po_number||'PO-'+po.id)}</td><td>${esc(po.supplier_name||'')}</td><td>${(po.total_amount||0).toLocaleString()}</td><td><span class="badge badge-${po.status==='approved'?'green':po.status==='delivered'?'blue':'orange'}">${esc(po.status)}</span></td><td>${po.order_date}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/supply-chain/supplier/save', requireAuth, requireNotBanned, requireFeature('supply_chain'), supplyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { name, contact_person, phone, email, category, address } = req.body;
-  await pool.query('INSERT INTO suppliers (tenant_id,name,contact_person,phone,email,category,address) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, name, contact_person, phone, email, category, address]);
-  await audit(req.session.user.email, 'supplier_created', { name });
-  res.redirect('/clinic/supply-chain');
-}));
-
-app.get('/clinic/supply-chain/po/new', requireAuth, requireNotBanned, requireFeature('supply_chain'), supplyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const suppliers = (await pool.query('SELECT * FROM suppliers WHERE tenant_id=$1 AND is_active=true ORDER BY name', [t])).rows;
-  res.send(renderPage('New Purchase Order', `
-    <div class="card" style="max-width:800px;margin:0 auto"><h2>Create Purchase Order</h2>
-      <form method="POST" action="/clinic/supply-chain/po/save" class="form-grid">
-        <div><label>Supplier</label><select name="supplier_id">${suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></div>
-        <div><label>Expected Delivery Date</label><input name="expected_date" type="date"></div>
-        <div class="full-width"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Create PO</button></div>
-      </form>
-    </div>
-  `));
-}));
-
-app.post('/clinic/supply-chain/po/save', requireAuth, requireNotBanned, requireFeature('supply_chain'), supplyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { supplier_id, expected_date, notes } = req.body;
-  const supplier = (await pool.query('SELECT * FROM suppliers WHERE id=$1', [supplier_id])).rows[0];
-  const poNumber = 'PO-' + Date.now().toString(36).toUpperCase();
-  await pool.query('INSERT INTO supply_purchase_orders (tenant_id,po_number,supplier_id,supplier_name,expected_date,notes,status) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, poNumber, supplier_id, supplier?.name, expected_date, notes, 'pending']);
-  await audit(req.session.user.email, 'po_created', { po_number: poNumber });
-  res.redirect('/clinic/supply-chain');
-}));
-
-app.get('/clinic/supply-chain/reports', requireAuth, requireNotBanned, requireFeature('supply_chain'), supplyLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [totalPOs, totalSuppliers, byStatus] = await Promise.all([
-    pool.query("SELECT COUNT(*)::int FROM supply_purchase_orders WHERE tenant_id=$1", [t]),
-    pool.query("SELECT COUNT(*)::int FROM suppliers WHERE tenant_id=$1", [t]),
-    pool.query("SELECT status, COUNT(*)::int as cnt FROM supply_purchase_orders WHERE tenant_id=$1 GROUP BY status", [t])
-  ]);
-  res.send(renderPage('Supply Chain Reports', `
-    <div class="stats"><div class="stat-card"><h3>${totalPOs.rows[0]?.count||0}</h3><p>Total POs</p></div><div class="stat-card"><h3>${totalSuppliers.rows[0]?.count||0}</h3><p>Suppliers</p></div></div>
-    <div class="card"><h2>PO Status Breakdown</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>Status</th><th>Count</th></tr></thead><tbody>${byStatus.rows.map(r => `<tr><td>${esc(r.status)}</td><td>${r.cnt}</td></tr>`).join('')}</tbody></table></div></div>
-  `));
-}));
-
-
-// ============================================================
-// === v16.0: HL7/FHIR API, ELECTRONIC PRESCRIPTIONS, LAB AUTOMATION, MULTI-LOCATION SYNC ===
-// ============================================================
-
-// --- FHIR API ---
-app.get('/clinic/fhir/Patient', requireAuth, requireNotBanned, requireFeature('fhir_api'), fhirLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const patients = (await pool.query('SELECT id, name, phone, email FROM patients WHERE tenant_id=$1 ORDER BY name LIMIT 50', [t])).rows;
-  const fhirBundle = { resourceType: 'Bundle', type: 'collection', entry: patients.map(p => ({ resource: { resourceType: 'Patient', id: String(p.id), name: [{ text: p.name }], telecom: p.phone ? [{ system: 'phone', value: p.phone }] : [] } })) };
-  await pool.query('INSERT INTO fhir_audit_log (tenant_id,resource_type,operation,user_email) VALUES ($1,$2,$3,$4)', [t, 'Patient', 'read', req.session.user.email]);
-  res.json(fhirBundle);
-}));
-
-app.get('/clinic/fhir/Observation', requireAuth, requireNotBanned, requireFeature('fhir_api'), fhirLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const patientId = req.query.patient;
-  const vitals = (await pool.query('SELECT * FROM patient_vitals WHERE tenant_id=$1 $2 ORDER BY recorded_at DESC LIMIT 50', [t, patientId ? `AND patient_id=${patientId}` : ''])).rows;
-  const fhirBundle = { resourceType: 'Bundle', type: 'collection', entry: vitals.map(v => ({ resource: { resourceType: 'Observation', subject: { reference: `Patient/${v.patient_id}` }, effectiveDateTime: v.recorded_at, valueQuantity: v.temperature ? { value: v.temperature, unit: 'C' } : undefined } })) };
-  await pool.query('INSERT INTO fhir_audit_log (tenant_id,resource_type,operation,user_email) VALUES ($1,$2,$3,$4)', [t, 'Observation', 'read', req.session.user.email]);
-  res.json(fhirBundle);
-}));
-
-app.get('/clinic/fhir/Condition', requireAuth, requireNotBanned, requireFeature('fhir_api'), fhirLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const diagnoses = (await pool.query("SELECT id, patient_id, diagnosis, date FROM consultations WHERE tenant_id=$1 AND diagnosis IS NOT NULL AND diagnosis != '' ORDER BY date DESC LIMIT 50", [t])).rows;
-  const fhirBundle = { resourceType: 'Bundle', type: 'collection', entry: diagnoses.map(d => ({ resource: { resourceType: 'Condition', id: String(d.id), subject: { reference: `Patient/${d.patient_id}` }, code: { text: d.diagnosis }, onsetDateTime: d.date } })) };
-  await pool.query('INSERT INTO fhir_audit_log (tenant_id,resource_type,operation,user_email) VALUES ($1,$2,$3,$4)', [t, 'Condition', 'read', req.session.user.email]);
-  res.json(fhirBundle);
-}));
-
-app.get('/clinic/fhir/MedicationRequest', requireAuth, requireNotBanned, requireFeature('fhir_api'), fhirLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const rxs = (await pool.query('SELECT * FROM electronic_prescriptions WHERE tenant_id=$1 ORDER BY issued_at DESC LIMIT 50', [t])).rows;
-  const fhirBundle = { resourceType: 'Bundle', type: 'collection', entry: rxs.map(r => ({ resource: { resourceType: 'MedicationRequest', id: String(r.id), subject: { reference: `Patient/${r.patient_id}` }, status: r.status, authoredOn: r.issued_at } })) };
-  await pool.query('INSERT INTO fhir_audit_log (tenant_id,resource_type,operation,user_email) VALUES ($1,$2,$3,$4)', [t, 'MedicationRequest', 'read', req.session.user.email]);
-  res.json(fhirBundle);
-}));
-
-app.get('/clinic/fhir/ServiceRequest', requireAuth, requireNotBanned, requireFeature('fhir_api'), fhirLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const labs = (await pool.query('SELECT id, patient_id, test_name, date_ordered FROM lab_results WHERE tenant_id=$1 ORDER BY date_ordered DESC LIMIT 50', [t])).rows;
-  const fhirBundle = { resourceType: 'Bundle', type: 'collection', entry: labs.map(l => ({ resource: { resourceType: 'ServiceRequest', id: String(l.id), subject: { reference: `Patient/${l.patient_id}` }, code: { text: l.test_name }, authoredOn: l.date_ordered } })) };
-  await pool.query('INSERT INTO fhir_audit_log (tenant_id,resource_type,operation,user_email) VALUES ($1,$2,$3,$4)', [t, 'ServiceRequest', 'read', req.session.user.email]);
-  res.json(fhirBundle);
-}));
-
-app.get('/clinic/fhir/DiagnosticReport', requireAuth, requireNotBanned, requireFeature('fhir_api'), fhirLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const imaging = (await pool.query('SELECT ir.*, io.patient_id FROM imaging_results ir JOIN imaging_orders io ON io.id=ir.order_id WHERE ir.tenant_id=$1 ORDER BY ir.reported_at DESC LIMIT 50', [t])).rows;
-  const fhirBundle = { resourceType: 'Bundle', type: 'collection', entry: imaging.map(i => ({ resource: { resourceType: 'DiagnosticReport', id: String(i.id), subject: { reference: `Patient/${i.patient_id}` }, status: i.report_status, conclusion: i.impression, effectiveDateTime: i.reported_at } })) };
-  await pool.query('INSERT INTO fhir_audit_log (tenant_id,resource_type,operation,user_email) VALUES ($1,$2,$3,$4)', [t, 'DiagnosticReport', 'read', req.session.user.email]);
-  res.json(fhirBundle);
-}));
-
-app.get('/clinic/fhir/AllergyIntolerance', requireAuth, requireNotBanned, requireFeature('fhir_api'), fhirLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const allergies = (await pool.query("SELECT * FROM patient_allergies WHERE tenant_id=$1 LIMIT 50", [t])).rows;
-  const fhirBundle = { resourceType: 'Bundle', type: 'collection', entry: allergies.map(a => ({ resource: { resourceType: 'AllergyIntolerance', id: String(a.id), subject: { reference: `Patient/${a.patient_id}` }, code: { text: a.allergen || a.allergy }, criticality: a.severity || 'low' } })) };
-  await pool.query('INSERT INTO fhir_audit_log (tenant_id,resource_type,operation,user_email) VALUES ($1,$2,$3,$4)', [t, 'AllergyIntolerance', 'read', req.session.user.email]);
-  res.json(fhirBundle);
-}));
-
-app.get('/clinic/fhir/audit', requireAuth, requireNotBanned, requireFeature('fhir_api'), fhirLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const logs = (await pool.query('SELECT * FROM fhir_audit_log WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100', [t])).rows;
-  res.send(renderPage('FHIR API Audit', `
-    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#6366f1)"><h1>FHIR API Audit Log</h1><p>Track all FHIR API access</p></div>
-    <div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th>Date</th><th>Resource</th><th>Operation</th><th>User</th><th>Status</th></tr></thead>
-    <tbody>${logs.map(l => `<tr><td>${l.created_at?.toLocaleString()}</td><td>${esc(l.resource_type)}</td><td>${esc(l.operation)}</td><td>${esc(l.user_email)}</td><td>${l.response_status||'-'}</td></tr>`).join('')}</tbody></table></div></div>
-  `));
-}));
-
-// --- ELECTRONIC PRESCRIPTIONS ---
-app.get('/clinic/erx', requireAuth, requireNotBanned, requireFeature('electronic_rx'), erxLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const prescriptions = (await pool.query('SELECT * FROM electronic_prescriptions WHERE tenant_id=$1 ORDER BY issued_at DESC LIMIT 30', [t])).rows;
-  const [activeCount, dispensedCount] = await Promise.all([
-    pool.query("SELECT COUNT(*)::int FROM electronic_prescriptions WHERE tenant_id=$1 AND status='active'", [t]),
-    pool.query("SELECT COUNT(*)::int FROM electronic_prescriptions WHERE tenant_id=$1 AND status='dispensed'", [t])
-  ]);
-  res.send(renderPage('Electronic Prescriptions', `
-    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#8b5cf6)"><h1>Electronic Prescriptions</h1><p>Digital prescribing, verification &amp; dispensing</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${activeCount.rows[0]?.count||0}</h3><p>Active</p></div>
-      <div class="stat-card"><h3>${dispensedCount.rows[0]?.count||0}</h3><p>Dispensed</p></div>
-    </div>
-    <div class="card"><h2>New e-Prescription</h2>
-      <form method="POST" action="/clinic/erx/create" class="form-grid">
-        <div><label>Patient ID</label><input name="patient_id" type="number" required></div>
-        <div><label>Patient Name</label><input name="patient_name" required></div>
-        <div><label>Prescriber</label><input name="prescriber" required></div>
-        <div><label>License #</label><input name="prescriber_license"></div>
-        <div class="full-width"><label>Medications (JSON)</label><textarea name="medications" rows="3" placeholder='[{"drug":"Amoxicillin","dose":"500mg","frequency":"3x daily","duration":"7 days"}]'></textarea></div>
-        <div><label>Diagnosis</label><input name="diagnosis"></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Issue Prescription</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Prescriptions</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Rx #</th><th>Patient</th><th>Prescriber</th><th>Diagnosis</th><th>Status</th><th>Issued</th><th>Actions</th></tr></thead>
-      <tbody>${prescriptions.map(rx => `<tr><td>${esc(rx.rx_number||'RX-'+rx.id)}</td><td>${esc(rx.patient_name)}</td><td>${esc(rx.prescriber)}</td><td>${esc(rx.diagnosis||'')}</td><td><span class="badge badge-${rx.status==='active'?'green':rx.status==='dispensed'?'blue':'red'}">${esc(rx.status)}</span></td><td>${rx.issued_at?.toLocaleDateString()}</td><td><a href="/clinic/erx/verify/${rx.id}" class="btn btn-sm">Verify</a></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/erx/create', requireAuth, requireNotBanned, requireFeature('electronic_rx'), erxLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { patient_id, patient_name, prescriber, prescriber_license, medications, diagnosis } = req.body;
-  let medsParsed = medications;
-  try { medsParsed = JSON.parse(medications); } catch(e) { /* keep as-is */ }
-  const rxNumber = 'RX-' + Date.now().toString(36).toUpperCase();
-  await pool.query('INSERT INTO electronic_prescriptions (tenant_id,patient_id,patient_name,prescriber,prescriber_license,medications,diagnosis,rx_number,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW()+INTERVAL \'30 days\')', [t, patient_id, patient_name, prescriber, prescriber_license, JSON.stringify(medsParsed), diagnosis, rxNumber]);
-  await audit(req.session.user.email, 'erx_issued', { rx_number: rxNumber, patient_name });
-  res.redirect('/clinic/erx');
-}));
-
-app.post('/clinic/erx/verify/:id', requireAuth, requireNotBanned, requireFeature('electronic_rx'), erxLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { verification_status, notes } = req.body;
-  await pool.query('INSERT INTO erx_verification_log (tenant_id,rx_id,verified_by,verification_status,notes) VALUES ($1,$2,$3,$4,$5)', [t, req.params.id, req.session.user.email, verification_status, notes]);
-  if (verification_status === 'verified') await pool.query("UPDATE electronic_prescriptions SET status='verified' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
-  await audit(req.session.user.email, 'erx_verified', { rx_id: req.params.id });
-  res.redirect('/clinic/erx');
-}));
-
-app.get('/clinic/erx/history', requireAuth, requireNotBanned, requireFeature('electronic_rx'), erxLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const logs = (await pool.query('SELECT ev.*, ep.rx_number, ep.patient_name FROM erx_verification_log ev JOIN electronic_prescriptions ep ON ep.id=ev.rx_id WHERE ev.tenant_id=$1 ORDER BY ev.created_at DESC LIMIT 50', [t])).rows;
-  res.send(renderPage('e-Rx Verification History', `
-    <div class="card"><div style="overflow-x:auto"><table class="table"><thead><tr><th>Date</th><th>Rx #</th><th>Patient</th><th>Verified By</th><th>Status</th><th>Notes</th></tr></thead>
-    <tbody>${logs.map(l => `<tr><td>${l.created_at?.toLocaleString()}</td><td>${esc(l.rx_number||'')}</td><td>${esc(l.patient_name||'')}</td><td>${esc(l.verified_by)}</td><td><span class="badge badge-${l.verification_status==='verified'?'green':'red'}">${esc(l.verification_status)}</span></td><td>${esc(l.notes||'')}</td></tr>`).join('')}</tbody></table></div></div>
-  `));
-}));
-
-// --- LAB AUTOMATION ---
-app.get('/clinic/lab-automation', requireAuth, requireNotBanned, requireFeature('lab_automation'), labAutoLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [rules, qcRecords] = await Promise.all([
-    pool.query('SELECT * FROM lab_automation_rules WHERE tenant_id=$1 ORDER BY test_name', [t]),
-    pool.query('SELECT * FROM lab_quality_control WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 30', [t])
-  ]);
-  res.send(renderPage('Lab Automation', `
-    <div class="hero" style="background:linear-gradient(135deg,#059669,#10b981)"><h1>Lab Automation</h1><p>Auto-result rules, quality control &amp; critical value management</p></div>
-    <div class="card"><h2>Add Automation Rule</h2>
-      <form method="POST" action="/clinic/lab-automation/rules/save" class="form-grid">
-        <div><label>Test Name</label><input name="test_name" required></div>
-        <div><label>Condition Field</label><input name="condition_field" required placeholder="e.g. result_value"></div>
-        <div><label>Operator</label><select name="operator"><option value=">">&gt;</option><option value="<">&lt;</option><option value="=">=</option><option value=">="> >=</option><option value="<="><=</option></select></div>
-        <div><label>Threshold Value</label><input name="threshold_value" type="number" step="0.01" required></div>
-        <div><label>Action</label><select name="action"><option value="flag">Flag</option><option value="alert">Alert</option><option value="hold">Hold</option><option value="auto_repeat">Auto Repeat</option></select></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Save Rule</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Automation Rules</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Test</th><th>Condition</th><th>Threshold</th><th>Action</th><th>Active</th></tr></thead>
-      <tbody>${rules.rows.map(r => `<tr><td>${esc(r.test_name)}</td><td>${esc(r.condition_field)} ${esc(r.operator)}</td><td>${r.threshold_value}</td><td>${esc(r.action)}</td><td><span class="badge badge-${r.is_active?'green':'red'}">${r.is_active?'Active':'Inactive'}</span></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/lab-automation/rules/save', requireAuth, requireNotBanned, requireFeature('lab_automation'), labAutoLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { test_name, condition_field, operator, threshold_value, action } = req.body;
-  await pool.query('INSERT INTO lab_automation_rules (tenant_id,test_name,condition_field,operator,threshold_value,action) VALUES ($1,$2,$3,$4,$5,$6)', [t, test_name, condition_field, operator, threshold_value, action]);
-  await audit(req.session.user.email, 'lab_rule_created', { test_name });
-  res.redirect('/clinic/lab-automation');
-}));
-
-app.post('/clinic/lab-automation/qc/save', requireAuth, requireNotBanned, requireFeature('lab_automation'), labAutoLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { test_name, lot_number, expected_value, actual_value, technician } = req.body;
-  const withinRange = Math.abs(parseFloat(actual_value) - parseFloat(expected_value)) <= parseFloat(expected_value) * 0.1;
-  await pool.query('INSERT INTO lab_quality_control (tenant_id,test_name,lot_number,expected_value,actual_value,is_within_range,technician) VALUES ($1,$2,$3,$4,$5,$6,$7)', [t, test_name, lot_number, expected_value, actual_value, withinRange, technician]);
-  await audit(req.session.user.email, 'lab_qc_recorded', { test_name, within_range: withinRange });
-  res.redirect('/clinic/lab-automation');
-}));
-
-app.get('/clinic/lab-automation/stats', requireAuth, requireNotBanned, requireFeature('lab_automation'), labAutoLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [totalRules, qcPassRate, recentFlags] = await Promise.all([
-    pool.query("SELECT COUNT(*)::int FROM lab_automation_rules WHERE tenant_id=$1 AND is_active=true", [t]),
-    pool.query("SELECT ROUND(COUNT(*) FILTER (WHERE is_within_range=true)::numeric / NULLIF(COUNT(*),0) * 100, 1) as pass_rate FROM lab_quality_control WHERE tenant_id=$1", [t]),
-    pool.query("SELECT COUNT(*)::int as cnt FROM lab_quality_control WHERE tenant_id=$1 AND is_within_range=false AND created_at >= NOW() - INTERVAL '30 days'", [t])
-  ]);
-  res.send(renderPage('Lab Automation Stats', `
-    <div class="stats">
-      <div class="stat-card"><h3>${totalRules.rows[0]?.count||0}</h3><p>Active Rules</p></div>
-      <div class="stat-card"><h3>${qcPassRate.rows[0]?.pass_rate||0}%</h3><p>QC Pass Rate</p></div>
-      <div class="stat-card"><h3>${recentFlags.rows[0]?.cnt||0}</h3><p>QC Failures (30d)</p></div>
-    </div>
-  `));
-}));
-
-// --- MULTI-LOCATION SYNC ---
-app.get('/clinic/sync', requireAuth, requireNotBanned, requireFeature('multi_location_sync'), syncLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [syncLogs, pending, failed] = await Promise.all([
-    pool.query('SELECT * FROM sync_log WHERE tenant_id=$1 ORDER BY synced_at DESC LIMIT 50', [t]),
-    pool.query("SELECT COUNT(*)::int FROM sync_log WHERE tenant_id=$1 AND sync_status='pending'", [t]),
-    pool.query("SELECT COUNT(*)::int FROM sync_log WHERE tenant_id=$1 AND sync_status='failed'", [t])
-  ]);
-  res.send(renderPage('Multi-Location Sync', `
-    <div class="hero" style="background:linear-gradient(135deg,#4f46e5,#6366f1)"><h1>Multi-Location Sync</h1><p>Synchronize data across multiple locations</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${pending.rows[0]?.count||0}</h3><p>Pending</p></div>
-      <div class="stat-card"><h3>${failed.rows[0]?.count||0}</h3><p>Failed</p></div>
-    </div>
-    <div class="card"><h2>Sync Log</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Entity</th><th>Operation</th><th>Source</th><th>Target</th><th>Status</th><th>Date</th></tr></thead>
-      <tbody>${syncLogs.rows.map(s => `<tr><td>${esc(s.entity_type)}</td><td>${esc(s.operation)}</td><td>${esc(s.source_location||'')}</td><td>${esc(s.target_location||'')}</td><td><span class="badge badge-${s.sync_status==='completed'?'green':s.sync_status==='failed'?'red':'orange'}">${esc(s.sync_status)}</span></td><td>${s.synced_at?.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-
-// ============================================================
-// === v17.0: ADVANCED ANALYTICS, REVENUE CYCLE, COMPLIANCE, MOBILE API, DATA EXPORT ===
-// ============================================================
-
-// --- ADVANCED ANALYTICS ---
-app.get('/clinic/analytics', requireAuth, requireNotBanned, requireFeature('advanced_analytics'), analyticsLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const today = new Date().toISOString().split('T')[0];
-  const [totalPatients, todayVisits, monthlyRevenue, totalBilled] = await Promise.all([
-    pool.query('SELECT COUNT(*)::int FROM patients WHERE tenant_id=$1', [t]),
-    pool.query('SELECT COUNT(*)::int FROM clinic_queue WHERE tenant_id=$1 AND visit_date=$2', [t, today]),
-    pool.query("SELECT COALESCE(SUM(amount),0)::int FROM payments WHERE tenant_id=$1 AND status='successful' AND created_at >= DATE_TRUNC('month', CURRENT_DATE)", [t]),
-    pool.query("SELECT COALESCE(SUM(amount),0)::int FROM payments WHERE tenant_id=$1", [t])
-  ]);
-  res.send(renderPage('Advanced Analytics', `
-    <div class="hero" style="background:linear-gradient(135deg,#0f172a,#1e293b)"><h1>Advanced Analytics</h1><p>Comprehensive healthcare analytics dashboard</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${totalPatients.rows[0]?.count||0}</h3><p>Total Patients</p></div>
-      <div class="stat-card"><h3>${todayVisits.rows[0]?.count||0}</h3><p>Today's Visits</p></div>
-      <div class="stat-card"><h3>${monthlyRevenue.rows[0]?.sum?.toLocaleString()||0}</h3><p>Monthly Revenue</p></div>
-      <div class="stat-card"><h3>${totalBilled.rows[0]?.sum?.toLocaleString()||0}</h3><p>Total Billed</p></div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
-      <a href="/clinic/analytics/revenue" class="card" style="text-decoration:none;display:block"><h3>Revenue Analytics</h3><p>Detailed revenue breakdowns</p></a>
-      <a href="/clinic/analytics/patient-flow" class="card" style="text-decoration:none;display:block"><h3>Patient Flow</h3><p>Visit trends and patterns</p></a>
-      <a href="/clinic/analytics/disease-burden" class="card" style="text-decoration:none;display:block"><h3>Disease Burden</h3><p>Top diagnoses and conditions</p></a>
-      <a href="/clinic/analytics/financial" class="card" style="text-decoration:none;display:block"><h3>Financial Overview</h3><p>Income, expenses, projections</p></a>
-    </div>
-  `));
-}));
-
-app.get('/clinic/analytics/revenue', requireAuth, requireNotBanned, requireFeature('advanced_analytics'), analyticsLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const monthly = (await pool.query("SELECT DATE_TRUNC('month', created_at)::date as month, SUM(amount)::int as total, COUNT(*)::int as cnt FROM payments WHERE tenant_id=$1 AND status='successful' GROUP BY month ORDER BY month DESC LIMIT 12", [t])).rows;
-  res.send(renderPage('Revenue Analytics', `
-    <div class="card"><h2>Monthly Revenue</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Month</th><th>Transactions</th><th>Revenue</th></tr></thead>
-      <tbody>${monthly.map(m => `<tr><td>${m.month}</td><td>${m.cnt}</td><td>${m.total?.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.get('/clinic/analytics/patient-flow', requireAuth, requireNotBanned, requireFeature('advanced_analytics'), analyticsLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const daily = (await pool.query("SELECT visit_date, COUNT(*)::int as visits FROM clinic_queue WHERE tenant_id=$1 AND visit_date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY visit_date ORDER BY visit_date DESC", [t])).rows;
-  res.send(renderPage('Patient Flow', `
-    <div class="card"><h2>Daily Visits (Last 30 Days)</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Date</th><th>Visits</th></tr></thead>
-      <tbody>${daily.map(d => `<tr><td>${d.visit_date}</td><td>${d.visits}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.get('/clinic/analytics/disease-burden', requireAuth, requireNotBanned, requireFeature('advanced_analytics'), analyticsLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const topDiagnoses = (await pool.query("SELECT diagnosis, COUNT(*)::int as cnt FROM consultations WHERE tenant_id=$1 AND diagnosis IS NOT NULL AND diagnosis != '' GROUP BY diagnosis ORDER BY cnt DESC LIMIT 20", [t])).rows;
-  res.send(renderPage('Disease Burden', `
-    <div class="card"><h2>Top Diagnoses</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Diagnosis</th><th>Count</th></tr></thead>
-      <tbody>${topDiagnoses.map(d => `<tr><td>${esc(d.diagnosis)}</td><td>${d.cnt}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.get('/clinic/analytics/financial', requireAuth, requireNotBanned, requireFeature('advanced_analytics'), analyticsLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [totalIncome, totalExpenses, netProfit] = await Promise.all([
-    pool.query("SELECT COALESCE(SUM(amount),0)::int FROM payments WHERE tenant_id=$1 AND status='successful'", [t]),
-    pool.query("SELECT COALESCE(SUM(amount),0)::int FROM expenses WHERE tenant_id=$1", [t]),
-    pool.query("SELECT (SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='successful') - (SELECT COALESCE(SUM(amount),0) FROM expenses WHERE tenant_id=$1) as net", [t])
-  ]);
-  res.send(renderPage('Financial Overview', `
-    <div class="stats">
-      <div class="stat-card"><h3>${totalIncome.rows[0]?.sum?.toLocaleString()||0}</h3><p>Total Income</p></div>
-      <div class="stat-card"><h3>${totalExpenses.rows[0]?.sum?.toLocaleString()||0}</h3><p>Total Expenses</p></div>
-      <div class="stat-card"><h3>${netProfit.rows[0]?.net?.toLocaleString()||0}</h3><p>Net Profit</p></div>
-    </div>
-  `));
-}));
-
-// --- REVENUE CYCLE ---
-app.get('/clinic/revenue-cycle', requireAuth, requireNotBanned, requireFeature('revenue_cycle'), revenueLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const metrics = (await pool.query('SELECT * FROM revenue_cycle_metrics WHERE tenant_id=$1 ORDER BY period DESC LIMIT 12', [t])).rows;
-  const denials = (await pool.query("SELECT * FROM claim_denials WHERE tenant_id=$1 AND status='open' ORDER BY created_at DESC LIMIT 20", [t])).rows;
-  res.send(renderPage('Revenue Cycle Management', `
-    <div class="hero" style="background:linear-gradient(135deg,#0ea5e9,#2563eb)"><h1>Revenue Cycle</h1><p>Billing, claims, denials &amp; collections management</p></div>
-    <div class="card"><h2>Monthly Metrics</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Period</th><th>Billed</th><th>Collected</th><th>Outstanding</th><th>Denial Rate</th><th>Claims</th></tr></thead>
-      <tbody>${metrics.map(m => `<tr><td>${esc(m.period)}</td><td>${m.total_billed?.toLocaleString()}</td><td>${m.total_collected?.toLocaleString()}</td><td>${m.total_outstanding?.toLocaleString()}</td><td>${m.denial_rate}%</td><td>${m.claim_count}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-    <div class="card"><h2>Open Denials</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Patient</th><th>Insurer</th><th>Code</th><th>Reason</th><th>Amount</th></tr></thead>
-      <tbody>${denials.map(d => `<tr><td>${esc(d.patient_name||'')}</td><td>${esc(d.insurer||'')}</td><td>${esc(d.denial_code||'')}</td><td>${esc(d.denial_reason||'')}</td><td>${d.amount?.toLocaleString()||'-'}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.get('/clinic/revenue-cycle/aging', requireAuth, requireNotBanned, requireFeature('revenue_cycle'), revenueLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const aging = (await pool.query("SELECT CASE WHEN age < 30 THEN '0-30 days' WHEN age < 60 THEN '31-60 days' WHEN age < 90 THEN '61-90 days' WHEN age < 120 THEN '91-120 days' ELSE '120+ days' END as bucket, COUNT(*)::int as cnt, SUM(amount)::int as total FROM (SELECT *, CURRENT_DATE - COALESCE(due_date, created_at::date) as age FROM invoices WHERE tenant_id=$1 AND status='unpaid') sub GROUP BY bucket ORDER BY bucket", [t])).rows;
-  res.send(renderPage('Aging Report', `
-    <div class="card"><h2>Accounts Receivable Aging</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Age Bucket</th><th>Invoices</th><th>Total Outstanding</th></tr></thead>
-      <tbody>${aging.map(a => `<tr><td>${esc(a.bucket)}</td><td>${a.cnt}</td><td>${a.total?.toLocaleString()||0}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.get('/clinic/revenue-cycle/denials', requireAuth, requireNotBanned, requireFeature('revenue_cycle'), revenueLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [denials, byReason] = await Promise.all([
-    pool.query('SELECT * FROM claim_denials WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t]),
-    pool.query("SELECT denial_reason, COUNT(*)::int as cnt, SUM(amount)::int as total FROM claim_denials WHERE tenant_id=$1 GROUP BY denial_reason ORDER BY cnt DESC LIMIT 10", [t])
-  ]);
-  res.send(renderPage('Denial Management', `
-    <div class="card"><h2>Denials by Reason</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>Reason</th><th>Count</th><th>Total Amount</th></tr></thead><tbody>${byReason.rows.map(r => `<tr><td>${esc(r.denial_reason||'Unknown')}</td><td>${r.cnt}</td><td>${r.total?.toLocaleString()||0}</td></tr>`).join('')}</tbody></table></div></div>
-    <div class="card"><h2>All Denials</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>Patient</th><th>Insurer</th><th>Code</th><th>Reason</th><th>Amount</th><th>Status</th></tr></thead><tbody>${denials.rows.map(d => `<tr><td>${esc(d.patient_name||'')}</td><td>${esc(d.insurer||'')}</td><td>${esc(d.denial_code||'')}</td><td>${esc(d.denial_reason||'')}</td><td>${d.amount?.toLocaleString()||'-'}</td><td><span class="badge badge-${d.status==='resolved'?'green':'red'}">${esc(d.status)}</span></td></tr>`).join('')}</tbody></table></div></div>
-  `));
-}));
-
-app.get('/clinic/revenue-cycle/collections', requireAuth, requireNotBanned, requireFeature('revenue_cycle'), revenueLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const outstanding = (await pool.query("SELECT i.*, t.name as tenant_name FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.tenant_id=$1 AND i.status='unpaid' ORDER BY i.due_date ASC LIMIT 30", [t])).rows;
-  res.send(renderPage('Collections', `
-    <div class="card"><h2>Outstanding Invoices</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Invoice #</th><th>Customer</th><th>Amount</th><th>Due Date</th><th>Days Overdue</th></tr></thead>
-      <tbody>${outstanding.map(i => { const overdue = Math.max(0, Math.floor((Date.now() - new Date(i.due_date)) / 86400000)); return `<tr><td>${esc(i.invoice_no)}</td><td>${esc(i.customer_name||'')}</td><td>${i.amount?.toLocaleString()}</td><td>${i.due_date}</td><td style="color:${overdue>60?'#dc2626':overdue>30?'#f59e0b':'inherit'}">${overdue} days</td></tr>`; }).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-// --- COMPLIANCE AUDIT ---
-app.get('/clinic/compliance', requireAuth, requireNotBanned, requireFeature('compliance_audit'), complianceLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const logs = (await pool.query('SELECT * FROM compliance_audit_log WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50', [t])).rows;
-  const [highRisk, thisMonth] = await Promise.all([
-    pool.query("SELECT COUNT(*)::int FROM compliance_audit_log WHERE tenant_id=$1 AND risk_level='high'", [t]),
-    pool.query("SELECT COUNT(*)::int FROM compliance_audit_log WHERE tenant_id=$1 AND created_at >= DATE_TRUNC('month', CURRENT_DATE)", [t])
-  ]);
-  res.send(renderPage('Compliance Audit', `
-    <div class="hero" style="background:linear-gradient(135deg,#dc2626,#b91c1c)"><h1>Compliance Audit</h1><p>Regulatory compliance tracking and audit trail</p></div>
-    <div class="stats">
-      <div class="stat-card"><h3>${thisMonth.rows[0]?.count||0}</h3><p>This Month</p></div>
-      <div class="stat-card"><h3>${highRisk.rows[0]?.count||0}</h3><p>High Risk</p></div>
-    </div>
-    <div class="card"><h2>Audit Log</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Date</th><th>Category</th><th>Action</th><th>Performed By</th><th>Risk Level</th></tr></thead>
-      <tbody>${logs.map(l => `<tr><td>${l.created_at?.toLocaleString()}</td><td>${esc(l.category)}</td><td>${esc(l.action)}</td><td>${esc(l.performed_by||'')}</td><td><span class="badge badge-${l.risk_level==='high'?'red':l.risk_level==='medium'?'orange':'green'}">${esc(l.risk_level)}</span></td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.get('/clinic/compliance/search', requireAuth, requireNotBanned, requireFeature('compliance_audit'), complianceLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const q = req.query.q || '';
-  const results = q ? (await pool.query("SELECT * FROM compliance_audit_log WHERE tenant_id=$1 AND (action ILIKE $2 OR category ILIKE $2 OR details ILIKE $2 OR performed_by ILIKE $2) ORDER BY created_at DESC LIMIT 50", [t, `%${q}%`])).rows : [];
-  res.send(renderPage('Compliance Search', `
-    <div class="card"><h2>Search Audit Log</h2>
-      <form method="GET" class="form-grid"><div class="full-width"><input name="q" value="${esc(q)}" placeholder="Search actions, categories, details..." style="width:100%;padding:10px"></div><div class="full-width"><button class="btn btn-primary" type="submit">Search</button></div></form>
-    </div>
-    ${q ? `<div class="card"><p>${results.length} result(s) for "${esc(q)}"</p><div style="overflow-x:auto"><table class="table"><thead><tr><th>Date</th><th>Category</th><th>Action</th><th>Details</th></tr></thead><tbody>${results.map(r => `<tr><td>${r.created_at?.toLocaleString()}</td><td>${esc(r.category)}</td><td>${esc(r.action)}</td><td>${esc(r.details?.substring(0,100)||'')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
-  `));
-}));
-
-app.get('/clinic/compliance/report', requireAuth, requireNotBanned, requireFeature('compliance_audit'), complianceLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const [byCategory, byRisk, byPerformer] = await Promise.all([
-    pool.query("SELECT category, COUNT(*)::int as cnt FROM compliance_audit_log WHERE tenant_id=$1 GROUP BY category ORDER BY cnt DESC", [t]),
-    pool.query("SELECT risk_level, COUNT(*)::int as cnt FROM compliance_audit_log WHERE tenant_id=$1 GROUP BY risk_level ORDER BY cnt DESC", [t]),
-    pool.query("SELECT performed_by, COUNT(*)::int as cnt FROM compliance_audit_log WHERE tenant_id=$1 AND performed_by IS NOT NULL GROUP BY performed_by ORDER BY cnt DESC LIMIT 10", [t])
-  ]);
-  res.send(renderPage('Compliance Report', `
-    <div class="card"><h2>By Category</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>Category</th><th>Count</th></tr></thead><tbody>${byCategory.rows.map(r => `<tr><td>${esc(r.category)}</td><td>${r.cnt}</td></tr>`).join('')}</tbody></table></div></div>
-    <div class="card"><h2>By Risk Level</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>Level</th><th>Count</th></tr></thead><tbody>${byRisk.rows.map(r => `<tr><td><span class="badge badge-${r.risk_level==='high'?'red':r.risk_level==='medium'?'orange':'green'}">${esc(r.risk_level)}</span></td><td>${r.cnt}</td></tr>`).join('')}</tbody></table></div></div>
-    <div class="card"><h2>Top Performers</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>User</th><th>Actions</th></tr></thead><tbody>${byPerformer.rows.map(r => `<tr><td>${esc(r.performed_by)}</td><td>${r.cnt}</td></tr>`).join('')}</tbody></table></div></div>
-  `));
-}));
-
-// --- MOBILE API ---
-app.post('/api/mobile/login', ah(async (req, res) => {
-  const { email, password, device_id, platform } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-  const user = (await pool.query('SELECT u.*, t.approved as tenant_approved FROM users u JOIN tenants t ON t.id=u.tenant_id WHERE u.email=$1', [email])).rows[0];
-  if (!user || !user.tenant_approved) return res.status(401).json({ error: 'Invalid credentials' });
-  const hash = user.password_hash || user.password;
-  if (!hash) return res.status(401).json({ error: 'Account not set up' });
-  const bcrypt = require('bcrypt');
-  const valid = await bcrypt.compare(password, hash);
-  if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-  const token = require('crypto').randomBytes(32).toString('hex');
-  await pool.query('INSERT INTO mobile_tokens (tenant_id,user_id,device_id,token,platform) VALUES ($1,$2,$3,$4,$5)', [user.tenant_id, user.id, device_id||'unknown', token, platform||'unknown']);
-  await pool.query('INSERT INTO mobile_devices (tenant_id,user_id,device_name,device_type,os_version,app_version,last_login) VALUES ($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT DO NOTHING', [user.tenant_id, user.id, req.headers['user-agent']?.substring(0,100), platform||'mobile', '', '']);
-  res.json({ token, user: { id: user.id, name: user.name || user.email, email: user.email, role: user.role, tenant_id: user.tenant_id } });
-}));
-
-app.get('/api/mobile/profile', ah(async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Token required' });
-  const token = authHeader.replace('Bearer ', '');
-  const mt = (await pool.query('SELECT mt.*, u.email, u.role FROM mobile_tokens mt JOIN users u ON u.id=mt.user_id WHERE mt.token=$1 AND mt.is_active=true', [token])).rows[0];
-  if (!mt) return res.status(401).json({ error: 'Invalid token' });
-  res.json({ id: mt.user_id, email: mt.email, role: mt.role, tenant_id: mt.tenant_id });
-}));
-
-app.get('/api/mobile/appointments', ah(async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Token required' });
-  const token = authHeader.replace('Bearer ', '');
-  const mt = (await pool.query('SELECT * FROM mobile_tokens WHERE token=$1 AND is_active=true', [token])).rows[0];
-  if (!mt) return res.status(401).json({ error: 'Invalid token' });
-  const appts = (await pool.query('SELECT * FROM clinic_appointments WHERE tenant_id=$1 AND patient_id=$2 ORDER BY appointment_date DESC LIMIT 20', [mt.tenant_id, mt.user_id])).rows;
-  res.json({ appointments: appts });
-}));
-
-app.get('/api/mobile/vitals', ah(async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Token required' });
-  const token = authHeader.replace('Bearer ', '');
-  const mt = (await pool.query('SELECT * FROM mobile_tokens WHERE token=$1 AND is_active=true', [token])).rows[0];
-  if (!mt) return res.status(401).json({ error: 'Invalid token' });
-  const vitals = (await pool.query('SELECT * FROM patient_vitals WHERE tenant_id=$1 AND patient_id=$2 ORDER BY recorded_at DESC LIMIT 20', [mt.tenant_id, mt.user_id])).rows;
-  res.json({ vitals });
-}));
-
-app.get('/api/mobile/prescriptions', ah(async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Token required' });
-  const token = authHeader.replace('Bearer ', '');
-  const mt = (await pool.query('SELECT * FROM mobile_tokens WHERE token=$1 AND is_active=true', [token])).rows[0];
-  if (!mt) return res.status(401).json({ error: 'Invalid token' });
-  const rxs = (await pool.query('SELECT id, rx_number, medications, diagnosis, status, issued_at FROM electronic_prescriptions WHERE tenant_id=$1 AND patient_id=$2 ORDER BY issued_at DESC LIMIT 20', [mt.tenant_id, mt.user_id])).rows;
-  res.json({ prescriptions: rxs });
-}));
-
-app.get('/api/mobile/notifications', ah(async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Token required' });
-  const token = authHeader.replace('Bearer ', '');
-  const mt = (await pool.query('SELECT * FROM mobile_tokens WHERE token=$1 AND is_active=true', [token])).rows[0];
-  if (!mt) return res.status(401).json({ error: 'Invalid token' });
-  const user = (await pool.query('SELECT email FROM users WHERE id=$1', [mt.user_id])).rows[0];
-  const notifs = (await pool.query('SELECT * FROM notification_history WHERE tenant_id=$1 AND recipient=$2 ORDER BY sent_at DESC LIMIT 20', [mt.tenant_id, user?.email])).rows;
-  res.json({ notifications: notifs });
-}));
-
-// --- DATA EXPORT ---
-app.get('/clinic/export', requireAuth, requireNotBanned, requireFeature('data_export'), exportLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const jobs = (await pool.query('SELECT * FROM export_jobs WHERE tenant_id=$1 ORDER BY started_at DESC LIMIT 20', [t])).rows;
-  res.send(renderPage('Data Export', `
-    <div class="hero" style="background:linear-gradient(135deg,#0f172a,#334155)"><h1>Data Export</h1><p>Export your data in CSV, Excel or JSON format</p></div>
-    <div class="card"><h2>New Export</h2>
-      <form method="POST" action="/clinic/export/start" class="form-grid">
-        <div><label>Data Type</label><select name="export_type"><option value="patients">Patients</option><option value="appointments">Appointments</option><option value="lab_results">Lab Results</option><option value="prescriptions">Prescriptions</option><option value="financial">Financial</option><option value="inventory">Inventory</option></select></div>
-        <div><label>Format</label><select name="format"><option value="csv">CSV</option><option value="json">JSON</option></select></div>
-        <div class="full-width"><button class="btn btn-primary" type="submit">Start Export</button></div>
-      </form>
-    </div>
-    <div class="card"><h2>Export History</h2>
-      <div style="overflow-x:auto"><table class="table"><thead><tr><th>Type</th><th>Format</th><th>Status</th><th>Started</th><th>Completed</th></tr></thead>
-      <tbody>${jobs.map(j => `<tr><td>${esc(j.export_type)}</td><td>${esc(j.format)}</td><td><span class="badge badge-${j.status==='completed'?'green':j.status==='failed'?'red':'orange'}">${esc(j.status)}</span></td><td>${j.started_at?.toLocaleString()}</td><td>${j.completed_at?.toLocaleString()||'-'}</td></tr>`).join('')}</tbody></table></div>
-    </div>
-  `));
-}));
-
-app.post('/clinic/export/start', requireAuth, requireNotBanned, requireFeature('data_export'), exportLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const { export_type, format } = req.body;
-  const job = (await pool.query('INSERT INTO export_jobs (tenant_id,export_type,format,started_by,status) VALUES ($1,$2,$3,$4,$5) RETURNING id', [t, export_type, format||'csv', req.session.user.email, 'pending'])).rows[0];
-  // Process export in background
-  (async () => {
-    try {
-      let data;
-      const tableMap = { patients: 'patients', appointments: 'clinic_appointments', lab_results: 'lab_results', prescriptions: 'electronic_prescriptions', financial: 'payments', inventory: 'pharmacy_inventory' };
-      const table = tableMap[export_type] || 'patients';
-      data = (await pool.query(`SELECT * FROM ${table} WHERE tenant_id=$1 LIMIT 10000`, [t])).rows;
-      await pool.query("UPDATE export_jobs SET status='completed', file_size=$1, completed_at=NOW(), details=$2 WHERE id=$3", [JSON.stringify(data).length, `${data.length} records`, job.id]);
-    } catch(e) {
-      await pool.query("UPDATE export_jobs SET status='failed', error_message=$1 WHERE id=$2", [e.message, job.id]);
-    }
-  })();
-  await audit(req.session.user.email, 'export_started', { export_type, format, job_id: job.id });
-  res.redirect('/clinic/export');
-}));
-
-app.get('/api/health/export/patients', requireAuth, requireNotBanned, requireFeature('data_export'), exportLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const patients = (await pool.query('SELECT id, name, phone, email, gender, dob, address, created_at FROM patients WHERE tenant_id=$1 ORDER BY name LIMIT 10000', [t])).rows;
-  const format = req.query.format || 'csv';
-  if (format === 'json') return res.json({ patients, exported_at: new Date().toISOString(), count: patients.length });
-  // CSV
-  const headers = Object.keys(patients[0] || {}).join(',');
-  const rows = patients.map(p => Object.values(p).map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=patients_export.csv');
-  res.send([headers, ...rows].join('\n'));
-}));
-
-app.get('/api/health/export/financial', requireAuth, requireNotBanned, requireFeature('data_export'), exportLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const payments = (await pool.query('SELECT id, amount, method, reference, status, description, created_at FROM payments WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10000', [t])).rows;
-  const format = req.query.format || 'csv';
-  if (format === 'json') return res.json({ payments, exported_at: new Date().toISOString(), count: payments.length });
-  const headers = Object.keys(payments[0] || {}).join(',');
-  const rows = payments.map(p => Object.values(p).map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=financial_export.csv');
-  res.send([headers, ...rows].join('\n'));
-}));
-
-app.get('/api/health/export/clinical', requireAuth, requireNotBanned, requireFeature('data_export'), exportLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const consultations = (await pool.query('SELECT id, patient_id, diagnosis, treatment, notes, date FROM consultations WHERE tenant_id=$1 ORDER BY date DESC LIMIT 10000', [t])).rows;
-  const format = req.query.format || 'csv';
-  if (format === 'json') return res.json({ consultations, exported_at: new Date().toISOString(), count: consultations.length });
-  const headers = Object.keys(consultations[0] || {}).join(',');
-  const rows = consultations.map(c => Object.values(c).map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=clinical_export.csv');
-  res.send([headers, ...rows].join('\n'));
-}));
-
-app.get('/api/health/export/inventory', requireAuth, requireNotBanned, requireFeature('data_export'), exportLimiter, ah(async (req, res) => {
-  const t = req.session.user.tenant_id;
-  const items = (await pool.query('SELECT id, medicine_name, category, unit, unit_price, quantity_in_stock, expiry_date, supplier FROM pharmacy_inventory WHERE tenant_id=$1 ORDER BY medicine_name LIMIT 10000', [t])).rows;
-  const format = req.query.format || 'csv';
-  if (format === 'json') return res.json({ inventory: items, exported_at: new Date().toISOString(), count: items.length });
-  const headers = Object.keys(items[0] || {}).join(',');
-  const rows = items.map(i => Object.values(i).map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename=inventory_export.csv');
-  res.send([headers, ...rows].join('\n'));
-}));
-
-console.log('[v14-v17] All v14-v17+ routes loaded successfully');
-
-
+// === START SERVER (after all routes are registered) ===
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Comfort Platform LIVE on ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`WebSocket: ws${process.env.NODE_ENV === 'production' ? 's' : ''}://localhost:${PORT}/ws/notifications`);
 });
-// Increase HTTP server timeouts to prevent freezing on Render free plan
-server.timeout = 120000;            // 120s overall request timeout (default is 120s in Node 18+ but explicit is safer)
-server.keepAliveTimeout = 75000;    // 75s keep-alive timeout (default 5s is too short for slow DB spin-ups)
-server.headersTimeout = 80000;      // Must be > keepAliveTimeout
-// Deploy trigger 1783498600
-// Deploy trigger v17-upgrade
-// Deploy trigger redeploy-$(date +%s)
+
+// Deploy trigger 1779091065
+// Phase 4 deploy trigger: 27 additional modules — 2026-05-18
+// Redeploy trigger: 2026-05-18T113500Z

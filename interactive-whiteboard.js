@@ -68,171 +68,148 @@ module.exports = function(app, pool, opts) {
   // ══════════════════════════════════════════════════════════════════════════
 
   async function ensureTables() {
-    const conn = await pool.getConnection();
     try {
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_sessions (
-          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          tenant_id INT UNSIGNED NOT NULL,
+          id SERIAL PRIMARY KEY,
+          tenant_id INT NOT NULL,
           title VARCHAR(255) NOT NULL,
           description TEXT,
-          class_id INT UNSIGNED DEFAULT NULL,
-          subject_id INT UNSIGNED DEFAULT NULL,
-          lesson_plan_id INT UNSIGNED DEFAULT NULL,
-          mode ENUM('live','static') NOT NULL DEFAULT 'live',
-          status ENUM('active','archived','draft') NOT NULL DEFAULT 'draft',
-          background_config JSON DEFAULT NULL,
-          thumbnail MEDIUMTEXT DEFAULT NULL,
-          created_by INT UNSIGNED NOT NULL,
-          presenter_id INT UNSIGNED DEFAULT NULL,
+          class_id INT DEFAULT NULL,
+          subject_id INT DEFAULT NULL,
+          lesson_plan_id INT DEFAULT NULL,
+          mode TEXT NOT NULL DEFAULT 'live',
+          status TEXT NOT NULL DEFAULT 'draft',
+          background_config JSONB DEFAULT NULL,
+          thumbnail TEXT DEFAULT NULL,
+          created_by INT NOT NULL,
+          presenter_id INT DEFAULT NULL,
           auto_save_interval INT DEFAULT 30,
-          last_saved_at DATETIME DEFAULT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_tenant (tenant_id),
-          INDEX idx_class (class_id),
-          INDEX idx_created_by (created_by),
-          INDEX idx_status (status)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+          last_saved_at TIMESTAMPTZ DEFAULT NULL,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_pages (
-          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          tenant_id INT UNSIGNED NOT NULL,
-          session_id INT UNSIGNED NOT NULL,
-          page_number INT UNSIGNED NOT NULL DEFAULT 1,
+          id SERIAL PRIMARY KEY,
+          tenant_id INT NOT NULL,
+          session_id INT NOT NULL,
+          page_number INT NOT NULL DEFAULT 1,
           title VARCHAR(255) DEFAULT '',
-          background_config JSON DEFAULT NULL,
-          canvas_data MEDIUMTEXT DEFAULT NULL,
-          thumbnail MEDIUMTEXT DEFAULT NULL,
-          width INT UNSIGNED DEFAULT 1920,
-          height INT UNSIGNED DEFAULT 1080,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          UNIQUE KEY uk_session_page (session_id, page_number),
-          INDEX idx_tenant (tenant_id),
-          INDEX idx_session (session_id),
+          background_config JSONB DEFAULT NULL,
+          canvas_data TEXT DEFAULT NULL,
+          thumbnail TEXT DEFAULT NULL,
+          width INT DEFAULT 1920,
+          height INT DEFAULT 1080,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT uk_session_page UNIQUE (session_id, page_number),
           FOREIGN KEY (session_id) REFERENCES whiteboard_sessions(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_content (
-          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          tenant_id INT UNSIGNED NOT NULL,
-          page_id INT UNSIGNED NOT NULL,
-          content_type ENUM('drawing','text','image','sticky_note','math_equation','video_embed','shape','freehand','highlight','eraser') NOT NULL DEFAULT 'freehand',
-          content_data JSON NOT NULL,
+          id SERIAL PRIMARY KEY,
+          tenant_id INT NOT NULL,
+          page_id INT NOT NULL,
+          content_type TEXT NOT NULL DEFAULT 'freehand',
+          content_data JSONB NOT NULL,
           z_index INT DEFAULT 0,
-          locked TINYINT(1) DEFAULT 0,
-          created_by INT UNSIGNED DEFAULT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_tenant (tenant_id),
-          INDEX idx_page (page_id),
-          INDEX idx_type (content_type),
+          locked SMALLINT DEFAULT 0,
+          created_by INT DEFAULT NULL,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (page_id) REFERENCES whiteboard_pages(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_templates (
-          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          tenant_id INT UNSIGNED NOT NULL DEFAULT 0,
+          id SERIAL PRIMARY KEY,
+          tenant_id INT NOT NULL DEFAULT 0,
           name VARCHAR(255) NOT NULL,
           description TEXT,
           category VARCHAR(100) DEFAULT 'general',
-          thumbnail MEDIUMTEXT DEFAULT NULL,
-          config JSON NOT NULL,
-          is_builtin TINYINT(1) DEFAULT 0,
-          is_public TINYINT(1) DEFAULT 1,
-          created_by INT UNSIGNED DEFAULT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_tenant (tenant_id),
-          INDEX idx_category (category),
-          INDEX idx_public (is_public)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+          thumbnail TEXT DEFAULT NULL,
+          config JSONB NOT NULL,
+          is_builtin SMALLINT DEFAULT 0,
+          is_public SMALLINT DEFAULT 1,
+          created_by INT DEFAULT NULL,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_collaborators (
-          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          tenant_id INT UNSIGNED NOT NULL,
-          session_id INT UNSIGNED NOT NULL,
-          user_id INT UNSIGNED NOT NULL,
-          permission ENUM('presenter','editor','viewer') NOT NULL DEFAULT 'viewer',
+          id SERIAL PRIMARY KEY,
+          tenant_id INT NOT NULL,
+          session_id INT NOT NULL,
+          user_id INT NOT NULL,
+          permission TEXT NOT NULL DEFAULT 'viewer',
           color VARCHAR(7) DEFAULT '#000000',
           cursor_x INT DEFAULT 0,
           cursor_y INT DEFAULT 0,
-          is_online TINYINT(1) DEFAULT 0,
-          last_active DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE KEY uk_session_user (session_id, user_id),
-          INDEX idx_tenant (tenant_id),
-          INDEX idx_user (user_id),
+          is_online SMALLINT DEFAULT 0,
+          last_active TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          joined_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT uk_session_user UNIQUE (session_id, user_id),
           FOREIGN KEY (session_id) REFERENCES whiteboard_sessions(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_submissions (
-          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          tenant_id INT UNSIGNED NOT NULL,
-          assignment_id INT UNSIGNED DEFAULT NULL,
-          session_id INT UNSIGNED NOT NULL,
-          student_id INT UNSIGNED NOT NULL,
-          status ENUM('draft','submitted','graded','returned') NOT NULL DEFAULT 'draft',
-          submitted_at DATETIME DEFAULT NULL,
-          graded_by INT UNSIGNED DEFAULT NULL,
+          id SERIAL PRIMARY KEY,
+          tenant_id INT NOT NULL,
+          assignment_id INT DEFAULT NULL,
+          session_id INT NOT NULL,
+          student_id INT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'draft',
+          submitted_at TIMESTAMPTZ DEFAULT NULL,
+          graded_by INT DEFAULT NULL,
           grade VARCHAR(20) DEFAULT NULL,
           score DECIMAL(5,2) DEFAULT NULL,
           feedback TEXT DEFAULT NULL,
-          graded_at DATETIME DEFAULT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_tenant (tenant_id),
-          INDEX idx_assignment (assignment_id),
-          INDEX idx_student (student_id),
-          INDEX idx_status (status),
+          graded_at TIMESTAMPTZ DEFAULT NULL,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (session_id) REFERENCES whiteboard_sessions(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        )
       `);
 
-      await conn.query(`
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS whiteboard_version_history (
-          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          tenant_id INT UNSIGNED NOT NULL,
-          session_id INT UNSIGNED NOT NULL,
-          page_id INT UNSIGNED DEFAULT NULL,
+          id SERIAL PRIMARY KEY,
+          tenant_id INT NOT NULL,
+          session_id INT NOT NULL,
+          page_id INT DEFAULT NULL,
           version_label VARCHAR(255) DEFAULT '',
-          snapshot_data MEDIUMTEXT NOT NULL,
-          created_by INT UNSIGNED DEFAULT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          INDEX idx_tenant (tenant_id),
-          INDEX idx_session (session_id),
-          INDEX idx_page (page_id),
-          INDEX idx_created (created_at)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+          snapshot_data TEXT NOT NULL,
+          created_by INT DEFAULT NULL,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
       `);
 
       // Seed built-in templates (tenant_id=0 means shared across all tenants)
       for (const tpl of BUILTIN_TEMPLATES) {
-        const [existing] = await conn.query(
-          'SELECT id FROM whiteboard_templates WHERE tenant_id=0 AND name=? AND is_builtin=1 LIMIT 1',
+        const existing = await pool.query(
+          'SELECT id FROM whiteboard_templates WHERE tenant_id=0 AND name=$1 AND is_builtin=1 LIMIT 1',
           [tpl.name]
         );
-        if (!existing.length) {
-          await conn.query(
+        if (!existing.rows.length) {
+          await pool.query(
             `INSERT INTO whiteboard_templates (tenant_id, name, description, category, config, is_builtin, is_public)
-             VALUES (0, ?, ?, ?, ?, 1, 1)`,
+             VALUES (0, $1, $2, $3, $4, 1, 1)`,
             [tpl.name, tpl.description, tpl.category, tpl.config]
           );
         }
       }
-    } finally {
-      conn.release();
+    } catch(err) {
+      console.error('[whiteboard] Table init error:', err.message);
     }
   }
 

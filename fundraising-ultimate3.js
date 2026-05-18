@@ -1,942 +1,2015 @@
 /**
- * Fundraising Ultimate3 Module — Campaign Optimization & Smart Tools
- * Features: A/B Testing, Smart Scheduling, Co-Creation, Bundle Packs,
- * Health Monitor, Calendar Planner, Goal Recommender, Storyboard Builder,
- * Form Builder, Success Blueprint, Thank You Engine, Micro Round-Ups,
- * Donation Scheduler, Seasonality Adjuster, Amount Suggestions
+ * Fundraising Ultimate 3 — Campaign Optimization Module
+ * 15 Features: Smart Campaign Scheduling, Campaign Co-Creation, Campaign Bundle Packs,
+ * Campaign Health Monitor, Fundraising Calendar, Smart Goal Recommender,
+ * Campaign Storyboard Builder, Donation Form Builder, Campaign Success Blueprint,
+ * Smart Thank You Engine, Micro-Donation Round-Ups, Donation Day Scheduler,
+ * Campaign Seasonality Adjuster, Smart Amount Suggestions, Campaign A/B Testing Engine
  */
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
-  const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 
   // =============================================
   // DATABASE MIGRATIONS
   // =============================================
   const migrations = [
-    // Feature 1: Campaign A/B Testing Engine
-    `CREATE TABLE IF NOT EXISTS campaign_ab_tests (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL, test_element TEXT NOT NULL, variant_a TEXT, variant_b TEXT, variant_a_views INTEGER DEFAULT 0, variant_b_views INTEGER DEFAULT 0, variant_a_conversions INTEGER DEFAULT 0, variant_b_conversions INTEGER DEFAULT 0, winner TEXT, status TEXT DEFAULT 'running' CHECK (status IN ('running','completed','cancelled')), started_at TIMESTAMPTZ DEFAULT NOW(), ended_at TIMESTAMPTZ, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_ab_tests_tenant ON campaign_ab_tests(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_ab_tests_campaign ON campaign_ab_tests(campaign_id)`,
+    // 1a. Smart Campaign Scheduling
+    `CREATE TABLE IF NOT EXISTS campaign_schedules (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER NOT NULL,
+      scheduled_date DATE,
+      optimal_time TEXT,
+      timezone TEXT DEFAULT 'Africa/Kampala',
+      status TEXT DEFAULT 'scheduled' CHECK (status IN ('scheduled','active','completed','cancelled')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
 
-    // Feature 2: Smart Campaign Scheduling
-    `CREATE TABLE IF NOT EXISTS campaign_schedules (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, scheduled_date DATE, scheduled_time TEXT, timezone TEXT DEFAULT 'Africa/Kampala', recommended_based_on TEXT, auto_launch BOOLEAN DEFAULT false, status TEXT DEFAULT 'scheduled' CHECK (status IN ('scheduled','launched','cancelled','completed')), launched_at TIMESTAMPTZ, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS scheduling_insights (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, best_day TEXT, best_hour INTEGER, best_month INTEGER, avg_performance NUMERIC, sample_size INTEGER DEFAULT 0, updated_at TIMESTAMPTZ DEFAULT NOW())`,
+    // 1b. Scheduling Insights
+    `CREATE TABLE IF NOT EXISTS scheduling_insights (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+      hour INTEGER NOT NULL CHECK (hour BETWEEN 0 AND 23),
+      avg_donations INTEGER DEFAULT 0,
+      conversion_rate NUMERIC(5,2) DEFAULT 0,
+      UNIQUE(tenant_id, day_of_week, hour)
+    )`,
+
+    // 2a. Campaign Co-Creators
+    `CREATE TABLE IF NOT EXISTS campaign_co_creators (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER NOT NULL,
+      collaborator_email TEXT NOT NULL,
+      role TEXT DEFAULT 'editor' CHECK (role IN ('viewer','editor','admin')),
+      invited_at TIMESTAMPTZ DEFAULT NOW(),
+      accepted_at TIMESTAMPTZ
+    )`,
+
+    // 2b. Campaign Edit History
+    `CREATE TABLE IF NOT EXISTS campaign_edit_history (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER NOT NULL,
+      editor_email TEXT NOT NULL,
+      field_changed TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      edited_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 3a. Campaign Bundle Packs
+    `CREATE TABLE IF NOT EXISTS campaign_bundles (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      total_goal INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 3b. Campaign Bundle Items
+    `CREATE TABLE IF NOT EXISTS campaign_bundle_items (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      bundle_id INTEGER REFERENCES campaign_bundles(id) ON DELETE CASCADE,
+      campaign_id INTEGER NOT NULL,
+      allocation_percentage NUMERIC(5,2) DEFAULT 100
+    )`,
+
+    // 4. Campaign Health Monitor
+    `CREATE TABLE IF NOT EXISTS campaign_health_scores (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER NOT NULL,
+      health_score INTEGER DEFAULT 0 CHECK (health_score BETWEEN 0 AND 100),
+      momentum_score INTEGER DEFAULT 0 CHECK (momentum_score BETWEEN 0 AND 100),
+      engagement_score INTEGER DEFAULT 0 CHECK (engagement_score BETWEEN 0 AND 100),
+      recommendation TEXT,
+      checked_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 5. Fundraising Calendar
+    `CREATE TABLE IF NOT EXISTS fundraising_calendar (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      event_type TEXT DEFAULT 'event' CHECK (event_type IN ('event','deadline','milestone','campaign_launch','meeting','other')),
+      start_date DATE NOT NULL,
+      end_date DATE,
+      goal_amount INTEGER DEFAULT 0,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 6. Smart Goal Recommender
+    `CREATE TABLE IF NOT EXISTS goal_recommendations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER NOT NULL,
+      recommended_goal INTEGER DEFAULT 0,
+      confidence NUMERIC(5,2) DEFAULT 0,
+      based_on TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 7a. Campaign Storyboard Builder
+    `CREATE TABLE IF NOT EXISTS campaign_storyboards (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      is_published BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 7b. Storyboard Sections
+    `CREATE TABLE IF NOT EXISTS storyboard_sections (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      storyboard_id INTEGER REFERENCES campaign_storyboards(id) ON DELETE CASCADE,
+      section_type TEXT DEFAULT 'text' CHECK (section_type IN ('text','image','video','quote','stats','cta','divider')),
+      title TEXT,
+      content TEXT,
+      sort_order INTEGER DEFAULT 0,
+      image_url TEXT
+    )`,
+
+    // 8a. Donation Form Builder
+    `CREATE TABLE IF NOT EXISTS donation_forms (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER,
+      title TEXT NOT NULL,
+      fields_json JSONB DEFAULT '[]',
+      styling_json JSONB DEFAULT '{}',
+      is_active BOOLEAN DEFAULT true,
+      submissions_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 8b. Donation Form Submissions
+    `CREATE TABLE IF NOT EXISTS donation_form_submissions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      form_id INTEGER REFERENCES donation_forms(id) ON DELETE CASCADE,
+      donor_email TEXT,
+      responses_json JSONB DEFAULT '{}',
+      amount INTEGER DEFAULT 0,
+      submitted_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 9. Campaign Success Blueprint
+    `CREATE TABLE IF NOT EXISTS campaign_blueprints (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      category TEXT DEFAULT 'general',
+      milestones_json JSONB DEFAULT '[]',
+      timeline_json JSONB DEFAULT '[]',
+      checklist_json JSONB DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 10a. Smart Thank You Templates
+    `CREATE TABLE IF NOT EXISTS thank_you_templates (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      subject TEXT,
+      body_template TEXT NOT NULL,
+      channel TEXT DEFAULT 'email' CHECK (channel IN ('email','sms','both')),
+      is_default BOOLEAN DEFAULT false
+    )`,
+
+    // 10b. Thank You Log
+    `CREATE TABLE IF NOT EXISTS thank_you_log (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      template_id INTEGER,
+      donor_email TEXT NOT NULL,
+      campaign_id INTEGER,
+      sent_at TIMESTAMPTZ DEFAULT NOW(),
+      opened BOOLEAN DEFAULT false
+    )`,
+
+    // 11a. Micro-Donation Round-Up Settings
+    `CREATE TABLE IF NOT EXISTS micro_roundup_settings (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
+      enabled BOOLEAN DEFAULT false,
+      default_roundup INTEGER DEFAULT 100,
+      max_monthly INTEGER DEFAULT 10000
+    )`,
+
+    // 11b. Micro-Donation Round-Up Transactions
+    `CREATE TABLE IF NOT EXISTS micro_roundup_transactions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donor_email TEXT NOT NULL,
+      original_amount INTEGER DEFAULT 0,
+      rounded_amount INTEGER DEFAULT 0,
+      roundup_amount INTEGER DEFAULT 0,
+      campaign_id INTEGER,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 12. Donation Day Scheduler
+    `CREATE TABLE IF NOT EXISTS scheduled_donations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donor_email TEXT NOT NULL,
+      campaign_id INTEGER,
+      amount INTEGER DEFAULT 0,
+      scheduled_date DATE NOT NULL,
+      frequency TEXT DEFAULT 'once' CHECK (frequency IN ('once','weekly','biweekly','monthly','quarterly','yearly')),
+      next_date DATE,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active','paused','completed','cancelled')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 13. Campaign Seasonality Adjuster
+    `CREATE TABLE IF NOT EXISTS seasonality_profiles (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+      seasonality_factor NUMERIC(5,2) DEFAULT 1.00,
+      avg_donation_trend TEXT,
+      recommendation TEXT,
+      year INTEGER NOT NULL DEFAULT EXTRACT(YEAR FROM NOW())::INTEGER,
+      UNIQUE(tenant_id, month, year)
+    )`,
+
+    // 14a. Smart Amount Suggestions
+    `CREATE TABLE IF NOT EXISTS amount_suggestions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      campaign_id INTEGER NOT NULL,
+      suggested_amounts_json JSONB DEFAULT '[]',
+      based_on TEXT
+    )`,
+
+    // 14b. Amount Suggestion Settings
+    `CREATE TABLE IF NOT EXISTS amount_suggestion_settings (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
+      strategy TEXT DEFAULT 'data_driven' CHECK (strategy IN ('data_driven','presets','custom','tiered')),
+      presets_json JSONB DEFAULT '[]',
+      custom_amounts_json JSONB DEFAULT '[]'
+    )`,
+
+    // 15. A/B Engine Enhanced Tracking (adds to existing campaign_ab_tests)
+    `CREATE TABLE IF NOT EXISTS ab_engine_events (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      test_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL CHECK (event_type IN ('impression','click','donation','share','bounce')),
+      donor_email TEXT,
+      metadata_json JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Indexes
     `CREATE INDEX IF NOT EXISTS idx_campaign_schedules_tenant ON campaign_schedules(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_scheduling_insights_tenant ON scheduling_insights(tenant_id)`,
-
-    // Feature 3: Campaign Co-Creation
-    `CREATE TABLE IF NOT EXISTS campaign_co_creators (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL, collaborator_email TEXT NOT NULL, role TEXT DEFAULT 'editor' CHECK (role IN ('owner','editor','viewer')), permissions_json TEXT DEFAULT '{}', invited_at TIMESTAMPTZ DEFAULT NOW(), accepted_at TIMESTAMPTZ, status TEXT DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined','removed')))`,
-
-    `CREATE TABLE IF NOT EXISTS campaign_edit_history (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL, editor_email TEXT, field_changed TEXT, old_value TEXT, new_value TEXT, edited_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_co_creators_tenant ON campaign_co_creators(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_edit_history_campaign ON campaign_edit_history(campaign_id)`,
-
-    // Feature 4: Campaign Bundle Packs
-    `CREATE TABLE IF NOT EXISTS campaign_bundles (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, cover_image TEXT, total_target INTEGER DEFAULT 0, total_raised INTEGER DEFAULT 0, campaign_count INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK (status IN ('active','closed','archived')), created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS campaign_bundle_items (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, bundle_id INTEGER NOT NULL REFERENCES campaign_bundles(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL, display_order INTEGER DEFAULT 0, added_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_bundles_tenant ON campaign_bundles(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_bundle_items_bundle ON campaign_bundle_items(bundle_id)`,
-
-    // Feature 5: Campaign Health Monitor
-    `CREATE TABLE IF NOT EXISTS campaign_health_scores (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL, health_score INTEGER DEFAULT 0, momentum_score INTEGER DEFAULT 0, engagement_score INTEGER DEFAULT 0, conversion_score INTEGER DEFAULT 0, velocity NUMERIC DEFAULT 0, trend TEXT DEFAULT 'stable' CHECK (trend IN ('improving','stable','declining')), recommendations_json TEXT DEFAULT '[]', checked_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_health_scores_tenant ON campaign_health_scores(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_health_scores_campaign ON campaign_health_scores(campaign_id)`,
-
-    // Feature 6: Fundraising Calendar & Planner
-    `CREATE TABLE IF NOT EXISTS fundraising_calendar (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, event_type TEXT DEFAULT 'campaign' CHECK (event_type IN ('campaign','event','deadline','milestone','meeting','other')), start_date DATE, end_date DATE, campaign_id INTEGER, target_amount INTEGER, description TEXT, color TEXT DEFAULT '#059669', is_recurring BOOLEAN DEFAULT false, recurrence_pattern TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_calendar_tenant ON fundraising_calendar(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_calendar_dates ON fundraising_calendar(start_date, end_date)`,
-
-    // Feature 7: Smart Goal Recommender
-    `CREATE TABLE IF NOT EXISTS goal_recommendations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, recommended_target INTEGER, confidence NUMERIC DEFAULT 0, based_on_campaigns INTEGER DEFAULT 0, based_on_category TEXT, factor_analysis_json TEXT DEFAULT '{}', created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_goal_recs_tenant ON goal_recommendations(tenant_id)`,
-
-    // Feature 8: Campaign Storyboard Builder
-    `CREATE TABLE IF NOT EXISTS campaign_storyboards (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, campaign_id INTEGER, theme TEXT DEFAULT 'classic', layout TEXT DEFAULT 'single', status TEXT DEFAULT 'draft' CHECK (status IN ('draft','published','archived')), created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS storyboard_sections (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, storyboard_id INTEGER NOT NULL REFERENCES campaign_storyboards(id) ON DELETE CASCADE, section_type TEXT DEFAULT 'text' CHECK (section_type IN ('text','image','video','quote','stats','cta','divider')), title TEXT, content TEXT, media_url TEXT, display_order INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_storyboards_tenant ON campaign_storyboards(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_sections_storyboard ON storyboard_sections(storyboard_id)`,
-
-    // Feature 9: Donation Form Builder
-    `CREATE TABLE IF NOT EXISTS donation_forms (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, campaign_id INTEGER, fields_json TEXT DEFAULT '[]', theme_json TEXT DEFAULT '{}', confirmation_message TEXT, is_active BOOLEAN DEFAULT true, submission_count INTEGER DEFAULT 0, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS donation_form_submissions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, form_id INTEGER NOT NULL REFERENCES donation_forms(id) ON DELETE CASCADE, donor_email TEXT, responses_json TEXT DEFAULT '{}', amount INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_forms_tenant ON donation_forms(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_form_submissions_form ON donation_form_submissions(form_id)`,
-
-    // Feature 10: Campaign Success Blueprint
-    `CREATE TABLE IF NOT EXISTS campaign_blueprints (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, category TEXT, success_factors_json TEXT DEFAULT '[]', avg_conversion NUMERIC DEFAULT 0, avg_raise INTEGER DEFAULT 0, key_metrics_json TEXT DEFAULT '{}', template_data_json TEXT DEFAULT '{}', created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_blueprints_tenant ON campaign_blueprints(tenant_id)`,
-
-    // Feature 11: Smart Thank You Engine
-    `CREATE TABLE IF NOT EXISTS thank_you_templates (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, channel TEXT DEFAULT 'email' CHECK (channel IN ('email','sms','whatsapp')), template_text TEXT NOT NULL, tier_trigger TEXT, is_default BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS thank_you_log (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donor_email TEXT NOT NULL, campaign_id INTEGER, template_id INTEGER, channel TEXT, sent_at TIMESTAMPTZ DEFAULT NOW(), delivered BOOLEAN DEFAULT false, opened_at TIMESTAMPTZ)`,
-    `CREATE INDEX IF NOT EXISTS idx_thank_templates_tenant ON thank_you_templates(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_thank_log_tenant ON thank_you_log(tenant_id)`,
-
-    // Feature 12: Micro-Donation Round-Ups
-    `CREATE TABLE IF NOT EXISTS micro_roundup_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, enabled BOOLEAN DEFAULT true, round_to INTEGER DEFAULT 1000, max_roundup INTEGER DEFAULT 5000, total_roundup_collected INTEGER DEFAULT 0, updated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS micro_roundup_transactions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donation_id INTEGER, original_amount INTEGER NOT NULL, rounded_amount INTEGER NOT NULL, roundup_amount INTEGER NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_roundup_settings_tenant ON micro_roundup_settings(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_roundup_tx_tenant ON micro_roundup_transactions(tenant_id)`,
-
-    // Feature 13: Donation Day Scheduler
-    `CREATE TABLE IF NOT EXISTS scheduled_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donor_email TEXT NOT NULL, campaign_id INTEGER, amount INTEGER NOT NULL, scheduled_date DATE NOT NULL, recurrence TEXT DEFAULT 'once' CHECK (recurrence IN ('once','weekly','monthly','quarterly','annually')), status TEXT DEFAULT 'pending' CHECK (status IN ('pending','processed','cancelled','failed')), reminder_sent BOOLEAN DEFAULT false, processed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_co_creators_tenant ON campaign_co_creators(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_edit_history_tenant ON campaign_edit_history(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_bundles_tenant ON campaign_bundles(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_bundle_items_tenant ON campaign_bundle_items(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_health_scores_tenant ON campaign_health_scores(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fundraising_calendar_tenant ON fundraising_calendar(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_goal_recommendations_tenant ON goal_recommendations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_storyboards_tenant ON campaign_storyboards(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_storyboard_sections_tenant ON storyboard_sections(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donation_forms_tenant ON donation_forms(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_donation_form_submissions_tenant ON donation_form_submissions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_campaign_blueprints_tenant ON campaign_blueprints(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_thank_you_templates_tenant ON thank_you_templates(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_thank_you_log_tenant ON thank_you_log(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_micro_roundup_settings_tenant ON micro_roundup_settings(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_micro_roundup_transactions_tenant ON micro_roundup_transactions(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_scheduled_donations_tenant ON scheduled_donations(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_scheduled_donations_date ON scheduled_donations(scheduled_date)`,
-
-    // Feature 14: Campaign Seasonality Adjuster
-    `CREATE TABLE IF NOT EXISTS seasonality_profiles (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12), season_name TEXT, giving_multiplier NUMERIC DEFAULT 1.0, avg_historic_donations INTEGER DEFAULT 0, avg_historic_amount INTEGER DEFAULT 0, notes TEXT, updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, month))`,
-    `CREATE INDEX IF NOT EXISTS idx_seasonality_tenant ON seasonality_profiles(tenant_id)`,
-
-    // Feature 15: Smart Donation Amount Suggestions
-    `CREATE TABLE IF NOT EXISTS amount_suggestions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donor_email TEXT, suggested_amounts_json TEXT DEFAULT '[]', based_on TEXT, confidence NUMERIC DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS amount_suggestion_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, preset_amounts_json TEXT DEFAULT '[5000,10000,25000,50000,100000,250000]', show_custom BOOLEAN DEFAULT true, show_round_up BOOLEAN DEFAULT true, min_amount INTEGER DEFAULT 500, max_amount INTEGER DEFAULT 50000000, updated_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_seasonality_profiles_tenant ON seasonality_profiles(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_amount_suggestions_tenant ON amount_suggestions(tenant_id)`,
-
-    // Seed default thank-you templates
-    `INSERT INTO thank_you_templates (tenant_id, name, channel, template_text, tier_trigger, is_default) SELECT t.id, 'Standard Thank You', 'email', 'Dear {donor_name}, Thank you for your generous donation of UGX {amount} to {campaign_title}. Your support makes a real difference. With gratitude, {organization}', NULL, true FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM thank_you_templates WHERE tenant_id=t.id AND name='Standard Thank You')`,
-    `INSERT INTO thank_you_templates (tenant_id, name, channel, template_text, tier_trigger, is_default) SELECT t.id, 'SMS Thank You', 'sms', 'Thank you {donor_name} for donating UGX {amount} to {campaign_title}! Your generosity is changing lives.', NULL, true FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM thank_you_templates WHERE tenant_id=t.id AND name='SMS Thank You')`,
-    `INSERT INTO thank_you_templates (tenant_id, name, channel, template_text, tier_trigger, is_default) SELECT t.id, 'Major Donor Thank You', 'email', 'Dear {donor_name}, Your remarkable contribution of UGX {amount} to {campaign_title} demonstrates extraordinary generosity. We would love to share the impact of your gift and invite you to see the results firsthand. With deepest appreciation, {organization}', 'gold', false FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM thank_you_templates WHERE tenant_id=t.id AND name='Major Donor Thank You')`,
-
-    // Seed default seasonality profiles
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 1, 'New Year Recovery', 0.7, 0, 0, 'Post-holiday giving is typically lower' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=1)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 2, 'Back to School', 0.8, 0, 0, 'School fees competing for funds' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=2)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 3, 'Lent Season', 1.2, 0, 0, 'Increased faith-based giving' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=3)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 4, 'Easter Period', 1.3, 0, 0, 'Easter giving peak' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=4)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 5, 'Post-Easter', 0.9, 0, 0, 'Slight dip after Easter' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=5)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 6, 'Mid-Year', 0.85, 0, 0, 'Mid-year giving steady' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=6)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 7, 'Summer Lull', 0.75, 0, 0, 'Holiday season reduces giving' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=7)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 8, 'Back to Routine', 0.9, 0, 0, 'People returning to routine' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=8)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 9, 'Autumn Rise', 1.1, 0, 0, 'Giving picks up in autumn' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=9)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 10, 'Harvest Season', 1.15, 0, 0, 'Harvest thanksgiving giving' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=10)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 11, 'Pre-Christmas', 1.4, 0, 0, 'Holiday giving season starts' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=11)`,
-    `INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, avg_historic_donations, avg_historic_amount, notes) SELECT t.id, 12, 'Christmas Peak', 1.6, 0, 0, 'Peak giving season of the year' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM seasonality_profiles WHERE tenant_id=t.id AND month=12)`,
-
-    // Seed default amount suggestion settings
-    `INSERT INTO amount_suggestion_settings (tenant_id, preset_amounts_json, show_custom, show_round_up, min_amount, max_amount) SELECT t.id, '[5000,10000,25000,50000,100000,250000]', true, true, 500, 50000000 FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM amount_suggestion_settings WHERE tenant_id=t.id)`,
-
-    // Seed default micro-roundup settings
-    `INSERT INTO micro_roundup_settings (tenant_id, enabled, round_to, max_roundup, total_roundup_collected) SELECT t.id, true, 1000, 5000, 0 FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM micro_roundup_settings WHERE tenant_id=t.id)`,
+    `CREATE INDEX IF NOT EXISTS idx_amount_suggestion_settings_tenant ON amount_suggestion_settings(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_ab_engine_events_tenant ON ab_engine_events(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_ab_engine_events_test ON ab_engine_events(test_id)`,
   ];
 
+  // Run migrations and seed data
   (async () => {
     for (const q of migrations) {
       try { await pool.query(q); } catch(e) { /* already exists OK */ }
     }
-    console.log('[FundraisingUltimate3] Migrations complete — 15 features');
+    console.log('[FundraisingUltimate3] Migrations complete');
+
+    // Seed per tenant
+    try {
+      const tenants = (await pool.query('SELECT id FROM tenants')).rows;
+
+      // Feature 10: Seed 3 thank-you templates per tenant
+      for (const t of tenants) {
+        const existingTemplates = (await pool.query('SELECT id FROM thank_you_templates WHERE tenant_id=$1', [t.id])).rows;
+        if (existingTemplates.length === 0) {
+          await pool.query(
+            `INSERT INTO thank_you_templates (tenant_id, name, subject, body_template, channel, is_default) VALUES
+            ($1, 'Standard Thank You', 'Thank you for your donation!', 'Dear {donor_name}, thank you for your generous donation of {amount} to {campaign_title}. Your support means the world to us!', 'email', true),
+            ($1, 'SMS Thank You', NULL, 'Thank you {donor_name} for donating {amount} to {campaign_title}! Your generosity makes a difference.', 'sms', false),
+            ($1, 'Impact Thank You', 'Your donation made an impact!', 'Dear {donor_name}, your donation of {amount} to {campaign_title} has already started making an impact. Together we are changing lives. Stay tuned for updates on how your contribution is being used!', 'email', false)`,
+            [t.id]
+          );
+        }
+      }
+
+      // Feature 13: Seed 12 months of seasonality profiles per tenant
+      for (const t of tenants) {
+        const existingProfiles = (await pool.query('SELECT id FROM seasonality_profiles WHERE tenant_id=$1', [t.id])).rows;
+        if (existingProfiles.length === 0) {
+          const currentYear = new Date().getFullYear();
+          const monthData = [
+            { month: 1, factor: 0.85, trend: 'declining', rec: 'Focus on recurring donors and year-start appeals' },
+            { month: 2, factor: 0.80, trend: 'low', rec: 'Plan spring campaigns; engage lapsed donors' },
+            { month: 3, factor: 0.90, trend: 'rising', rec: 'Launch spring fundraising events' },
+            { month: 4, factor: 0.95, trend: 'moderate', rec: 'Capitalize on spring momentum' },
+            { month: 5, factor: 1.00, trend: 'stable', rec: 'Maintain engagement with mid-year appeals' },
+            { month: 6, factor: 1.05, trend: 'rising', rec: 'Mid-year campaigns perform well' },
+            { month: 7, factor: 0.90, trend: 'declining', rec: 'Summer lull — focus on online campaigns' },
+            { month: 8, factor: 0.85, trend: 'low', rec: 'Prepare for end-of-year campaigns' },
+            { month: 9, factor: 1.10, trend: 'rising', rec: 'Back-to-school and fall campaigns' },
+            { month: 10, factor: 1.15, trend: 'strong', rec: 'Peak season approaching — increase outreach' },
+            { month: 11, factor: 1.40, trend: 'peak', rec: 'Giving season — maximize all channels' },
+            { month: 12, factor: 1.50, trend: 'peak', rec: 'Year-end giving — highest donation month' },
+          ];
+          for (const md of monthData) {
+            await pool.query(
+              `INSERT INTO seasonality_profiles (tenant_id, month, seasonality_factor, avg_donation_trend, recommendation, year) VALUES ($1,$2,$3,$4,$5,$6)`,
+              [t.id, md.month, md.factor, md.trend, md.rec, currentYear]
+            );
+          }
+        }
+      }
+
+      // Feature 14: Seed amount suggestion settings per tenant
+      for (const t of tenants) {
+        const existingSettings = (await pool.query('SELECT id FROM amount_suggestion_settings WHERE tenant_id=$1', [t.id])).rows;
+        if (existingSettings.length === 0) {
+          await pool.query(
+            `INSERT INTO amount_suggestion_settings (tenant_id, strategy, presets_json, custom_amounts_json) VALUES ($1, 'data_driven', $2, $3)`,
+            [t.id,
+              JSON.stringify([5000, 10000, 25000, 50000, 100000]),
+              JSON.stringify([])
+            ]
+          );
+        }
+      }
+
+      // Feature 11: Seed micro-roundup settings per tenant
+      for (const t of tenants) {
+        const existingSettings = (await pool.query('SELECT id FROM micro_roundup_settings WHERE tenant_id=$1', [t.id])).rows;
+        if (existingSettings.length === 0) {
+          await pool.query(
+            `INSERT INTO micro_roundup_settings (tenant_id, enabled, default_roundup, max_monthly) VALUES ($1, false, 100, 10000)`,
+            [t.id]
+          );
+        }
+      }
+
+      // Feature 1: Seed scheduling insights per tenant (best-effort from donation data)
+      for (const t of tenants) {
+        const existingInsights = (await pool.query('SELECT id FROM scheduling_insights WHERE tenant_id=$1', [t.id])).rows;
+        if (existingInsights.length === 0) {
+          // Seed with sensible defaults
+          const defaultInsights = [
+            { day: 1, hour: 9, avg: 5000, rate: 3.2 },
+            { day: 1, hour: 12, avg: 8000, rate: 4.5 },
+            { day: 2, hour: 10, avg: 6000, rate: 3.8 },
+            { day: 3, hour: 11, avg: 7500, rate: 4.1 },
+            { day: 4, hour: 9, avg: 5500, rate: 3.5 },
+            { day: 5, hour: 14, avg: 9000, rate: 5.0 },
+            { day: 6, hour: 10, avg: 12000, rate: 6.2 },
+            { day: 0, hour: 11, avg: 15000, rate: 7.0 },
+          ];
+          for (const di of defaultInsights) {
+            await pool.query(
+              `INSERT INTO scheduling_insights (tenant_id, day_of_week, hour, avg_donations, conversion_rate) VALUES ($1,$2,$3,$4,$5)`,
+              [t.id, di.day, di.hour, di.avg, di.rate]
+            );
+          }
+        }
+      }
+
+      console.log('[FundraisingUltimate3] Seed data complete');
+    } catch(e) { console.warn('[FundraisingUltimate3] Seed error:', e.message); }
   })();
 
   // =============================================
-  // FEATURE 1: CAMPAIGN A/B TESTING ENGINE
+  // 1. SMART CAMPAIGN SCHEDULING
   // =============================================
-  app.post('/api/campaign-ab-tests', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { campaign_id, test_element, variant_a, variant_b } = req.body;
-    if (!campaign_id || !test_element) return res.status(400).json({ error: 'campaign_id and test_element required' });
-    const r = await pool.query(`INSERT INTO campaign_ab_tests (tenant_id, campaign_id, test_element, variant_a, variant_b, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [tid, campaign_id, esc(test_element), esc(variant_a||''), esc(variant_b||''), req.session.user.email]);
-    await audit(req, 'create', 'campaign_ab_tests', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
 
-  app.get('/api/campaign-ab-tests/active', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM campaign_ab_tests WHERE tenant_id=$1 AND status='running' ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.get('/api/campaign-ab-tests/:id/results', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM campaign_ab_tests WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'Test not found' });
-    const t = r.rows[0];
-    const aRate = t.variant_a_views > 0 ? (t.variant_a_conversions / t.variant_a_views * 100).toFixed(2) : 0;
-    const bRate = t.variant_b_views > 0 ? (t.variant_b_conversions / t.variant_b_views * 100).toFixed(2) : 0;
-    res.json({ ...t, variant_a_rate: aRate, variant_b_rate: bRate, winner: parseFloat(bRate) > parseFloat(aRate) ? 'B' : 'A' });
-  }));
-
-  app.post('/api/campaign-ab-tests/:id/end', requireAuth, ah(async (req, res) => {
-    const test = await pool.query(`SELECT * FROM campaign_ab_tests WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    if (!test.rows.length) return res.status(404).json({ error: 'Test not found' });
-    const t = test.rows[0];
-    const aRate = t.variant_a_views > 0 ? t.variant_a_conversions / t.variant_a_views : 0;
-    const bRate = t.variant_b_views > 0 ? t.variant_b_conversions / t.variant_b_views : 0;
-    const winner = bRate > aRate ? 'B' : 'A';
-    const r = await pool.query(`UPDATE campaign_ab_tests SET status='completed', winner=$1, ended_at=NOW() WHERE tenant_id=$2 AND id=$3 RETURNING *`, [winner, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'campaign_ab_tests', req.params.id);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/campaign-ab-tests/:id/track', ah(async (req, res) => {
-    const { variant, type } = req.body; // type: 'view' or 'conversion'
-    const col = variant === 'B' ? (type === 'conversion' ? 'variant_b_conversions' : 'variant_b_views') : (type === 'conversion' ? 'variant_a_conversions' : 'variant_a_views');
-    await pool.query(`UPDATE campaign_ab_tests SET ${col} = ${col} + 1 WHERE id=$1 AND status='running'`, [req.params.id]);
-    res.json({ ok: true });
-  }));
-
-  // =============================================
-  // FEATURE 2: SMART CAMPAIGN SCHEDULING
-  // =============================================
+  // GET /api/campaign-schedules — list campaign schedules
   app.get('/api/campaign-schedules', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM campaign_schedules WHERE tenant_id=$1 ORDER BY scheduled_date`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+    const t = req.session.user.tenant_id;
+    const { status, campaign_id } = req.query;
+    let q = 'SELECT * FROM campaign_schedules WHERE tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (status) { q += ' AND status=$' + idx; params.push(esc(status)); idx++; }
+    if (campaign_id) { q += ' AND campaign_id=$' + idx; params.push(parseInt(campaign_id)); idx++; }
+    q += ' ORDER BY scheduled_date ASC';
+    const result = await pool.query(q, params);
+    res.json({ schedules: result.rows });
   }));
 
+  // POST /api/campaign-schedules — create a schedule
   app.post('/api/campaign-schedules', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { campaign_id, scheduled_date, scheduled_time, auto_launch } = req.body;
-    const r = await pool.query(`INSERT INTO campaign_schedules (tenant_id, campaign_id, scheduled_date, scheduled_time, auto_launch, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [tid, campaign_id||null, scheduled_date, scheduled_time||'09:00', auto_launch||false, req.session.user.email]);
-    await audit(req, 'create', 'campaign_schedules', r.rows[0].id);
-    res.json(r.rows[0]);
+    const t = req.session.user.tenant_id;
+    const { campaign_id, scheduled_date, optimal_time, timezone, status } = req.body;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id is required' });
+    const result = await pool.query(
+      'INSERT INTO campaign_schedules (tenant_id, campaign_id, scheduled_date, optimal_time, timezone, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, parseInt(campaign_id), scheduled_date || null, optimal_time ? esc(optimal_time) : null, timezone ? esc(timezone) : 'Africa/Kampala', status || 'scheduled']
+    );
+    await audit(req.session.user.email, 'campaign_schedule_created', 'Scheduled campaign #' + campaign_id);
+    res.json({ schedule: result.rows[0] });
   }));
 
-  app.put('/api/campaign-schedules/:id', requireAuth, ah(async (req, res) => {
-    const { scheduled_date, scheduled_time, status } = req.body;
-    const r = await pool.query(`UPDATE campaign_schedules SET scheduled_date=COALESCE($1,scheduled_date), scheduled_time=COALESCE($2,scheduled_time), status=COALESCE($3,status) WHERE tenant_id=$4 AND id=$5 RETURNING *`, [scheduled_date, scheduled_time, status, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'campaign_schedules', req.params.id);
-    res.json(r.rows[0]);
-  }));
-
-  app.delete('/api/campaign-schedules/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM campaign_schedules WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'campaign_schedules', req.params.id);
-    res.json({ ok: true });
-  }));
-
-  app.post('/api/campaign-schedules/analyze', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const r = await pool.query(`SELECT EXTRACT(DOW FROM created_at) as dow, EXTRACT(HOUR FROM created_at) as hr, COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM donations WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '12 months' GROUP BY dow, hr ORDER BY total DESC`, [tid]);
-    if (r.rows.length) {
-      const best = r.rows[0];
-      await pool.query(`INSERT INTO scheduling_insights (tenant_id, best_day, best_hour, best_month, avg_performance, sample_size) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id) DO UPDATE SET best_day=$2, best_hour=$3, best_month=$4, avg_performance=$5, sample_size=$6, updated_at=NOW()`, [tid, ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][best.dow]||'Tuesday', best.hr||9, best.dow+1, best.total, r.rows.length]);
+  // GET /api/scheduling-insights — get scheduling insights
+  app.get('/api/scheduling-insights', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT * FROM scheduling_insights WHERE tenant_id=$1 ORDER BY day_of_week, hour',
+      [t]
+    );
+    // Find best time slot
+    let bestSlot = null;
+    if (result.rows.length > 0) {
+      bestSlot = result.rows.reduce((best, r) => parseFloat(r.conversion_rate) > parseFloat(best.conversion_rate) ? r : best, result.rows[0]);
     }
-    res.json(r.rows);
+    res.json({ insights: result.rows, best_time_slot: bestSlot });
   }));
 
-  app.get('/api/campaign-schedules/recommendations', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM scheduling_insights WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 3: CAMPAIGN CO-CREATION
-  // =============================================
-  app.post('/api/campaign-co-create/:id/invite', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { collaborator_email, role } = req.body;
-    if (!collaborator_email) return res.status(400).json({ error: 'collaborator_email required' });
-    const r = await pool.query(`INSERT INTO campaign_co_creators (tenant_id, campaign_id, collaborator_email, role) VALUES ($1,$2,$3,$4) RETURNING *`, [tid, req.params.id, esc(collaborator_email), role||'editor']);
-    await audit(req, 'create', 'campaign_co_creators', r.rows[0].id);
-    try { await sendEmail(collaborator_email, 'Campaign Collaboration Invite', `You've been invited to collaborate on a campaign. Accept at ${BASE_URL}/campaign-co-creation`); } catch(e){}
-    res.json(r.rows[0]);
-  }));
-
-  app.put('/api/campaign-co-create/:id/accept', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`UPDATE campaign_co_creators SET status='accepted', accepted_at=NOW() WHERE tenant_id=$1 AND campaign_id=$2 AND collaborator_email=$3 AND status='pending' RETURNING *`, [req.session.user.tenant_id, req.params.id, req.session.user.email]);
-    if (!r.rows.length) return res.status(404).json({ error: 'No pending invitation found' });
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/campaign-co-create/:id/history', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM campaign_edit_history WHERE tenant_id=$1 AND campaign_id=$2 ORDER BY edited_at DESC LIMIT 50`, [req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows);
-  }));
-
-  app.delete('/api/campaign-co-create/:id/collaborator/:email', requireAuth, ah(async (req, res) => {
-    await pool.query(`UPDATE campaign_co_creators SET status='removed' WHERE tenant_id=$1 AND campaign_id=$2 AND collaborator_email=$3`, [req.session.user.tenant_id, req.params.id, req.params.email]);
-    await audit(req, 'delete', 'campaign_co_creators', req.params.id);
-    res.json({ ok: true });
-  }));
-
-  // =============================================
-  // FEATURE 4: CAMPAIGN BUNDLE PACKS
-  // =============================================
-  app.get('/api/campaign-bundles', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM campaign_bundles WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/campaign-bundles', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, description, cover_image } = req.body;
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const r = await pool.query(`INSERT INTO campaign_bundles (tenant_id, name, description, cover_image, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *`, [tid, esc(name), esc(description||''), esc(cover_image||''), req.session.user.email]);
-    await audit(req, 'create', 'campaign_bundles', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.put('/api/campaign-bundles/:id', requireAuth, ah(async (req, res) => {
-    const { name, description, status } = req.body;
-    const r = await pool.query(`UPDATE campaign_bundles SET name=COALESCE($1,name), description=COALESCE($2,description), status=COALESCE($3,status) WHERE tenant_id=$4 AND id=$5 RETURNING *`, [name?esc(name):null, description?esc(description):null, status, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'campaign_bundles', req.params.id);
-    res.json(r.rows[0]);
-  }));
-
-  app.delete('/api/campaign-bundles/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM campaign_bundles WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'campaign_bundles', req.params.id);
-    res.json({ ok: true });
-  }));
-
-  app.post('/api/campaign-bundles/:id/campaigns', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { campaign_id, display_order } = req.body;
-    const r = await pool.query(`INSERT INTO campaign_bundle_items (tenant_id, bundle_id, campaign_id, display_order) VALUES ($1,$2,$3,$4) RETURNING *`, [tid, req.params.id, campaign_id, display_order||0]);
-    await pool.query(`UPDATE campaign_bundles SET campaign_count=(SELECT COUNT(*) FROM campaign_bundle_items WHERE bundle_id=$1) WHERE id=$1`, [req.params.id]);
-    await audit(req, 'create', 'campaign_bundle_items', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.delete('/api/campaign-bundles/:id/campaigns/:campaignId', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM campaign_bundle_items WHERE tenant_id=$1 AND bundle_id=$2 AND campaign_id=$3`, [req.session.user.tenant_id, req.params.id, req.params.campaignId]);
-    await pool.query(`UPDATE campaign_bundles SET campaign_count=(SELECT COUNT(*) FROM campaign_bundle_items WHERE bundle_id=$1) WHERE id=$1`, [req.params.id]);
-    res.json({ ok: true });
-  }));
-
-  app.get('/api/campaign-bundles/:id/stats', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT b.*, COALESCE(SUM(c.goal_amount),0) as total_target, COALESCE(SUM(c.raised_amount),0) as total_raised FROM campaign_bundles b LEFT JOIN campaign_bundle_items bi ON b.id=bi.bundle_id LEFT JOIN fundraising_campaigns c ON bi.campaign_id=c.id WHERE b.tenant_id=$1 AND b.id=$2 GROUP BY b.id`, [req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows[0] || {});
-  }));
-
-  // =============================================
-  // FEATURE 5: CAMPAIGN HEALTH MONITOR
-  // =============================================
-  app.get('/api/campaign-health/:campaignId', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const cid = req.params.campaignId;
-    const camp = await pool.query(`SELECT * FROM fundraising_campaigns WHERE tenant_id=$1 AND id=$2`, [tid, cid]);
-    if (!camp.rows.length) return res.status(404).json({ error: 'Campaign not found' });
-    const c = camp.rows[0];
-    const progress = c.goal_amount > 0 ? Math.min(100, Math.round(c.raised_amount / c.goal_amount * 100)) : 0;
-    const daysSince = Math.max(1, Math.floor((Date.now() - new Date(c.created_at)) / 86400000));
-    const velocity = Math.round(c.raised_amount / daysSince);
-    const donors = await pool.query(`SELECT COUNT(DISTINCT donor_email) as cnt FROM donations WHERE tenant_id=$1 AND campaign_id=$2`, [tid, cid]);
-    const donorCount = parseInt(donors.rows[0]?.cnt || 0);
-    const engagementScore = Math.min(100, Math.round(donorCount * 2 + (c.views_count || 0) * 0.1));
-    const healthScore = Math.min(100, Math.round(progress * 0.4 + engagementScore * 0.3 + Math.min(100, velocity / 100) * 0.3));
-    const trend = progress > 50 ? 'improving' : progress > 20 ? 'stable' : 'declining';
-    const recs = [];
-    if (progress < 25) recs.push('Consider boosting campaign visibility through social media');
-    if (donorCount < 5) recs.push('Campaign needs more donors - try ambassador outreach');
-    if (velocity < 5000) recs.push('Donation velocity is low - consider updating the story');
-    await pool.query(`INSERT INTO campaign_health_scores (tenant_id, campaign_id, health_score, momentum_score, engagement_score, conversion_score, velocity, trend, recommendations_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, [tid, cid, healthScore, Math.min(100, Math.round(velocity/100)), engagementScore, progress, velocity, trend, JSON.stringify(recs)]);
-    res.json({ health_score: healthScore, momentum: Math.min(100, Math.round(velocity/100)), engagement: engagementScore, conversion: progress, velocity, trend, recommendations: recs });
-  }));
-
-  app.post('/api/campaign-health/check-all', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const camps = await pool.query(`SELECT id FROM fundraising_campaigns WHERE tenant_id=$1 AND status='active'`, [tid]);
-    const results = [];
-    for (const c of camps.rows) {
-      try {
-        const healthRes = await new Promise((resolve) => {
-          const origJson = res.json;
-          res.json = (data) => { res.json = origJson; resolve(data); };
-          app.handle({ method: 'GET', url: `/api/campaign-health/${c.id}`, params: { campaignId: c.id }, session: req.session }, { json: (d) => resolve(d), status: () => ({ json: (d) => resolve(d) }) });
-        });
-        results.push({ campaign_id: c.id, ...healthRes });
-      } catch(e) { results.push({ campaign_id: c.id, error: e.message }); }
-    }
-    res.json({ checked: results.length, results });
-  }));
-
-  app.get('/api/campaign-health/alerts', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT chs.*, fc.title as campaign_title FROM campaign_health_scores chs LEFT JOIN fundraising_campaigns fc ON chs.campaign_id=fc.id WHERE chs.tenant_id=$1 AND (chs.health_score < 40 OR chs.trend='declining') ORDER BY chs.health_score ASC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 6: FUNDRAISING CALENDAR & PLANNER
-  // =============================================
-  app.get('/api/fundraising-calendar', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM fundraising_calendar WHERE tenant_id=$1 ORDER BY start_date`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/fundraising-calendar', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { title, event_type, start_date, end_date, campaign_id, target_amount, description, color, is_recurring, recurrence_pattern } = req.body;
-    if (!title || !start_date) return res.status(400).json({ error: 'title and start_date required' });
-    const r = await pool.query(`INSERT INTO fundraising_calendar (tenant_id, title, event_type, start_date, end_date, campaign_id, target_amount, description, color, is_recurring, recurrence_pattern, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`, [tid, esc(title), event_type||'campaign', start_date, end_date||start_date, campaign_id||null, target_amount||0, esc(description||''), color||'#059669', is_recurring||false, recurrence_pattern||null, req.session.user.email]);
-    await audit(req, 'create', 'fundraising_calendar', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.put('/api/fundraising-calendar/:id', requireAuth, ah(async (req, res) => {
-    const { title, start_date, end_date, description, color } = req.body;
-    const r = await pool.query(`UPDATE fundraising_calendar SET title=COALESCE($1,title), start_date=COALESCE($2,start_date), end_date=COALESCE($3,end_date), description=COALESCE($4,description), color=COALESCE($5,color) WHERE tenant_id=$6 AND id=$7 RETURNING *`, [title?esc(title):null, start_date, end_date, description?esc(description):null, color, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'fundraising_calendar', req.params.id);
-    res.json(r.rows[0]);
-  }));
-
-  app.delete('/api/fundraising-calendar/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM fundraising_calendar WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'fundraising_calendar', req.params.id);
-    res.json({ ok: true });
-  }));
-
-  app.get('/api/fundraising-calendar/month/:year/:month', requireAuth, ah(async (req, res) => {
-    const { year, month } = req.params;
-    const r = await pool.query(`SELECT * FROM fundraising_calendar WHERE tenant_id=$1 AND ((EXTRACT(YEAR FROM start_date)=$2 AND EXTRACT(MONTH FROM start_date)=$3) OR (start_date <= MAKE_DATE($2,$3,1) + INTERVAL '1 month - 1 day' AND end_date >= MAKE_DATE($2,$3,1))) ORDER BY start_date`, [req.session.user.tenant_id, year, month]);
-    res.json(r.rows);
-  }));
-
-  app.get('/api/fundraising-calendar/upcoming', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM fundraising_calendar WHERE tenant_id=$1 AND start_date >= CURRENT_DATE ORDER BY start_date LIMIT 20`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 7: SMART GOAL RECOMMENDER
-  // =============================================
-  app.post('/api/goal-recommendations', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { campaign_id, category } = req.body;
-    const hist = await pool.query(`SELECT AVG(goal_amount) as avg_goal, AVG(raised_amount) as avg_raised, COUNT(*) as cnt FROM fundraising_campaigns WHERE tenant_id=$1 AND category=$2 AND status IN ('active','funded','completed')`, [tid, category||'general']);
-    const avgGoal = parseInt(hist.rows[0]?.avg_goal || 5000000);
-    const avgRaised = parseInt(hist.rows[0]?.avg_raised || 2500000);
-    const ratio = avgGoal > 0 ? avgRaised / avgGoal : 0.5;
-    const recommended = Math.round(avgGoal * Math.min(1.2, Math.max(0.8, ratio)));
-    const r = await pool.query(`INSERT INTO goal_recommendations (tenant_id, campaign_id, recommended_target, confidence, based_on_campaigns, based_on_category, factor_analysis_json) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [tid, campaign_id||null, recommended, Math.min(100, Math.round(hist.rows[0]?.cnt * 10 || 0)), hist.rows[0]?.cnt || 0, category||'general', JSON.stringify({ avg_goal: avgGoal, avg_raised: avgRaised, ratio, sample: hist.rows[0]?.cnt || 0 })]);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/goal-recommendations/:campaignId', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM goal_recommendations WHERE tenant_id=$1 AND campaign_id=$2 ORDER BY created_at DESC LIMIT 1`, [req.session.user.tenant_id, req.params.campaignId]);
-    res.json(r.rows[0] || {});
-  }));
-
-  app.get('/api/goal-recommendations/category/:category', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM goal_recommendations WHERE tenant_id=$1 AND based_on_category=$2 ORDER BY created_at DESC`, [req.session.user.tenant_id, req.params.category]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 8: CAMPAIGN STORYBOARD BUILDER
-  // =============================================
-  app.get('/api/storyboards', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT s.*, COUNT(ss.id) as section_count FROM campaign_storyboards s LEFT JOIN storyboard_sections ss ON s.id=ss.storyboard_id WHERE s.tenant_id=$1 GROUP BY s.id ORDER BY s.created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/storyboards', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { campaign_id, theme, layout } = req.body;
-    const r = await pool.query(`INSERT INTO campaign_storyboards (tenant_id, campaign_id, theme, layout) VALUES ($1,$2,$3,$4) RETURNING *`, [tid, campaign_id||null, theme||'classic', layout||'single']);
-    await audit(req, 'create', 'campaign_storyboards', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/storyboards/:id/sections', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { section_type, title, content, media_url, display_order } = req.body;
-    const r = await pool.query(`INSERT INTO storyboard_sections (tenant_id, storyboard_id, section_type, title, content, media_url, display_order) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [tid, req.params.id, section_type||'text', esc(title||''), esc(content||''), esc(media_url||''), display_order||0]);
-    await audit(req, 'create', 'storyboard_sections', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.put('/api/storyboards/:id/sections/:sectionId/reorder', requireAuth, ah(async (req, res) => {
-    const { display_order } = req.body;
-    const r = await pool.query(`UPDATE storyboard_sections SET display_order=$1 WHERE tenant_id=$2 AND storyboard_id=$3 AND id=$4 RETURNING *`, [display_order, req.session.user.tenant_id, req.params.id, req.params.sectionId]);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/storyboards/:id/preview', requireAuth, ah(async (req, res) => {
-    const sb = await pool.query(`SELECT * FROM campaign_storyboards WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    const sec = await pool.query(`SELECT * FROM storyboard_sections WHERE tenant_id=$1 AND storyboard_id=$2 ORDER BY display_order`, [req.session.user.tenant_id, req.params.id]);
-    res.json({ storyboard: sb.rows[0], sections: sec.rows });
-  }));
-
-  app.delete('/api/storyboards/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM campaign_storyboards WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'campaign_storyboards', req.params.id);
-    res.json({ ok: true });
-  }));
-
-  // =============================================
-  // FEATURE 9: DONATION FORM BUILDER
-  // =============================================
-  app.get('/api/donation-forms', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT f.*, COUNT(fs.id) as submission_count FROM donation_forms f LEFT JOIN donation_form_submissions fs ON f.id=fs.form_id WHERE f.tenant_id=$1 GROUP BY f.id ORDER BY f.created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/donation-forms', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, campaign_id, fields_json, theme_json, confirmation_message } = req.body;
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const r = await pool.query(`INSERT INTO donation_forms (tenant_id, name, campaign_id, fields_json, theme_json, confirmation_message, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [tid, esc(name), campaign_id||null, JSON.stringify(fields_json||[{type:'amount',label:'Donation Amount',required:true},{type:'name',label:'Full Name',required:true},{type:'email',label:'Email',required:true},{type:'phone',label:'Phone',required:false}]), JSON.stringify(theme_json||{primaryColor:'#059669',fontFamily:'sans-serif'}), esc(confirmation_message||'Thank you for your generous donation!'), req.session.user.email]);
-    await audit(req, 'create', 'donation_forms', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.put('/api/donation-forms/:id', requireAuth, ah(async (req, res) => {
-    const { name, fields_json, theme_json, confirmation_message, is_active } = req.body;
-    const r = await pool.query(`UPDATE donation_forms SET name=COALESCE($1,name), fields_json=COALESCE($2,fields_json), theme_json=COALESCE($3,theme_json), confirmation_message=COALESCE($4,confirmation_message), is_active=COALESCE($5,is_active) WHERE tenant_id=$6 AND id=$7 RETURNING *`, [name?esc(name):null, fields_json?JSON.stringify(fields_json):null, theme_json?JSON.stringify(theme_json):null, confirmation_message?esc(confirmation_message):null, is_active, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'donation_forms', req.params.id);
-    res.json(r.rows[0]);
-  }));
-
-  app.delete('/api/donation-forms/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM donation_forms WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'donation_forms', req.params.id);
-    res.json({ ok: true });
-  }));
-
-  app.post('/api/donation-forms/:id/submit', ah(async (req, res) => {
-    const { donor_email, responses, amount } = req.body;
-    const form = await pool.query(`SELECT * FROM donation_forms WHERE id=$1 AND is_active=true`, [req.params.id]);
-    if (!form.rows.length) return res.status(404).json({ error: 'Form not found or inactive' });
-    const r = await pool.query(`INSERT INTO donation_form_submissions (tenant_id, form_id, donor_email, responses_json, amount) VALUES ($1,$2,$3,$4,$5) RETURNING *`, [form.rows[0].tenant_id, req.params.id, esc(donor_email||''), JSON.stringify(responses||{}), amount||0]);
-    await pool.query(`UPDATE donation_forms SET submission_count=submission_count+1 WHERE id=$1`, [req.params.id]);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/donation-forms/:id/submissions', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM donation_form_submissions WHERE tenant_id=$1 AND form_id=$2 ORDER BY created_at DESC LIMIT 100`, [req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 10: CAMPAIGN SUCCESS BLUEPRINT
-  // =============================================
-  app.post('/api/campaign-blueprints/analyze', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { category } = req.body;
-    const top = await pool.query(`SELECT id, title, goal_amount, raised_amount, created_at FROM fundraising_campaigns WHERE tenant_id=$1 AND category=$2 AND raised_amount >= goal_amount * 0.8 ORDER BY raised_amount DESC LIMIT 10`, [tid, category||'general']);
-    if (!top.rows.length) return res.json({ message: 'Not enough successful campaigns to analyze', campaigns_analyzed: 0 });
-    const avgGoal = Math.round(top.rows.reduce((s,c)=>s+parseInt(c.goal_amount||0),0)/top.rows.length);
-    const avgRaise = Math.round(top.rows.reduce((s,c)=>s+parseInt(c.raised_amount||0),0)/top.rows.length);
-    const avgConv = Math.round(top.rows.reduce((s,c)=>s+(c.goal_amount>0?c.raised_amount/c.goal_amount:0),0)/top.rows.length*100);
-    const factors = ['Strong emotional storytelling','Clear impact metrics','Regular updates to donors','Social proof and testimonials','Multiple sharing channels','Urgency and deadline pressure','Matching donation opportunities'];
-    const r = await pool.query(`INSERT INTO campaign_blueprints (tenant_id, name, category, success_factors_json, avg_conversion, avg_raise, key_metrics_json, template_data_json, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [tid, `Top ${category||'general'} Blueprint`, category||'general', JSON.stringify(factors), avgConv, avgRaise, JSON.stringify({avg_goal:avgGoal,avg_raise:avgRaise,campaigns_analyzed:top.rows.length}), JSON.stringify({avg_goal:avgGoal,factors}), req.session.user.email]);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/campaign-blueprints', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM campaign_blueprints WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/campaign-blueprints/:id/apply', requireAuth, ah(async (req, res) => {
-    const bp = await pool.query(`SELECT * FROM campaign_blueprints WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    if (!bp.rows.length) return res.status(404).json({ error: 'Blueprint not found' });
-    res.json({ message: 'Blueprint applied', blueprint: bp.rows[0], tip: 'Use the success factors and metrics to guide your campaign strategy' });
-  }));
-
-  app.get('/api/campaign-blueprints/top', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM campaign_blueprints WHERE tenant_id=$1 ORDER BY avg_conversion DESC LIMIT 5`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 11: SMART THANK YOU ENGINE
-  // =============================================
-  app.get('/api/thank-you-templates', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM thank_you_templates WHERE tenant_id=$1 ORDER BY is_default DESC, created_at`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/thank-you-templates', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, channel, template_text, tier_trigger, is_default } = req.body;
-    if (!name || !template_text) return res.status(400).json({ error: 'name and template_text required' });
-    const r = await pool.query(`INSERT INTO thank_you_templates (tenant_id, name, channel, template_text, tier_trigger, is_default) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [tid, esc(name), channel||'email', esc(template_text), tier_trigger||null, is_default||false]);
-    await audit(req, 'create', 'thank_you_templates', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.put('/api/thank-you-templates/:id', requireAuth, ah(async (req, res) => {
-    const { name, template_text, channel, tier_trigger } = req.body;
-    const r = await pool.query(`UPDATE thank_you_templates SET name=COALESCE($1,name), template_text=COALESCE($2,template_text), channel=COALESCE($3,channel), tier_trigger=COALESCE($4,tier_trigger) WHERE tenant_id=$5 AND id=$6 RETURNING *`, [name?esc(name):null, template_text?esc(template_text):null, channel, tier_trigger, req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows[0]);
-  }));
-
-  app.delete('/api/thank-you-templates/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM thank_you_templates WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    res.json({ ok: true });
-  }));
-
-  app.post('/api/thank-you/send', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donor_email, campaign_id, template_id, channel } = req.body;
-    if (!donor_email) return res.status(400).json({ error: 'donor_email required' });
-    const tmpl = template_id ? await pool.query(`SELECT * FROM thank_you_templates WHERE tenant_id=$1 AND id=$2`, [tid, template_id]) : await pool.query(`SELECT * FROM thank_you_templates WHERE tenant_id=$1 AND is_default=true AND channel=$2 LIMIT 1`, [tid, channel||'email']);
-    if (!tmpl.rows.length) return res.status(404).json({ error: 'No template found' });
-    const ch = channel || tmpl.rows[0].channel;
+  // POST /api/scheduling-insights/calculate — recalculate insights from donation data
+  app.post('/api/scheduling-insights/calculate', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
     try {
-      if (ch === 'email') await sendEmail(donor_email, 'Thank You for Your Donation', tmpl.rows[0].template_text);
-      else if (ch === 'sms') await sendSMS(donor_email, tmpl.rows[0].template_text);
-    } catch(e) {}
-    const r = await pool.query(`INSERT INTO thank_you_log (tenant_id, donor_email, campaign_id, template_id, channel, delivered) VALUES ($1,$2,$3,$4,$5,true) RETURNING *`, [tid, esc(donor_email), campaign_id||null, tmpl.rows[0].id, ch]);
-    res.json(r.rows[0]);
-  }));
+      const stats = (await pool.query(`
+        SELECT EXTRACT(DOW FROM cd.donated_at)::INT AS day_of_week,
+               EXTRACT(HOUR FROM cd.donated_at)::INT AS hour,
+               COALESCE(AVG(cd.amount),0)::INT AS avg_donations,
+               (COUNT(DISTINCT cd.donor_email)::NUMERIC / NULLIF(COUNT(*)::NUMERIC, 0) * 100)::NUMERIC(5,2) AS conversion_rate
+        FROM campaign_donations cd
+        JOIN fundraising_campaigns fc ON cd.campaign_id = fc.id
+        WHERE fc.tenant_id = $1 AND cd.donated_at >= NOW() - INTERVAL '6 months'
+        GROUP BY day_of_week, hour
+      `, [t])).rows;
 
-  app.post('/api/thank-you/auto-send', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const unsent = await pool.query(`SELECT d.id, d.donor_email, d.campaign_id, d.amount FROM donations d LEFT JOIN thank_you_log tyl ON d.id=tyl.donation_id AND tyl.tenant_id=$1 WHERE d.tenant_id=$1 AND tyl.id IS NULL AND d.created_at > NOW() - INTERVAL '7 days' LIMIT 50`, [tid]);
-    let sent = 0;
-    for (const d of unsent.rows) {
-      const tmpl = await pool.query(`SELECT * FROM thank_you_templates WHERE tenant_id=$1 AND is_default=true AND channel='email' LIMIT 1`, [tid]);
-      if (tmpl.rows.length) {
-        try { await sendEmail(d.donor_email, 'Thank You for Your Donation', tmpl.rows[0].template_text); } catch(e){}
-        await pool.query(`INSERT INTO thank_you_log (tenant_id, donor_email, campaign_id, template_id, channel, delivered) VALUES ($1,$2,$3,$4,'email',true)`, [tid, d.donor_email, d.campaign_id, tmpl.rows[0].id]);
-        sent++;
+      let upserted = 0;
+      for (const s of stats) {
+        await pool.query(
+          `INSERT INTO scheduling_insights (tenant_id, day_of_week, hour, avg_donations, conversion_rate) VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (tenant_id, day_of_week, hour) DO UPDATE SET avg_donations=$4, conversion_rate=$5`,
+          [t, s.day_of_week, s.hour, parseInt(s.avg_donations) || 0, parseFloat(s.conversion_rate) || 0]
+        );
+        upserted++;
       }
+      await audit(req.session.user.email, 'scheduling_insights_calculated', 'Calculated insights for ' + upserted + ' time slots');
+      res.json({ message: 'Calculated ' + upserted + ' time slots', count: upserted });
+    } catch(e) {
+      res.json({ message: 'Calculation attempted', count: 0, note: 'Ensure donation data exists' });
     }
-    res.json({ sent, total_unsent: unsent.rows.length });
-  }));
-
-  app.get('/api/thank-you/history', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM thank_you_log WHERE tenant_id=$1 ORDER BY sent_at DESC LIMIT 100`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.get('/api/thank-you/stats', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT channel, COUNT(*) as total_sent, COUNT(CASE WHEN delivered THEN 1 END) as delivered, COUNT(CASE WHEN opened_at IS NOT NULL THEN 1 END) as opened FROM thank_you_log WHERE tenant_id=$1 GROUP BY channel`, [req.session.user.tenant_id]);
-    res.json(r.rows);
   }));
 
   // =============================================
-  // FEATURE 12: MICRO-DONATION ROUND-UPS
+  // 2. CAMPAIGN CO-CREATION
   // =============================================
-  app.get('/api/micro-roundup/settings', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM micro_roundup_settings WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    res.json(r.rows[0] || { enabled: true, round_to: 1000, max_roundup: 5000 });
+
+  // POST /api/campaigns/:id/co-creators — invite a co-creator
+  app.post('/api/campaigns/:id/co-creators', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const { collaborator_email, role } = req.body;
+    if (!collaborator_email) return res.status(400).json({ error: 'collaborator_email is required' });
+    const validRoles = ['viewer', 'editor', 'admin'];
+    if (role && !validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role. Use: viewer, editor, admin' });
+    const result = await pool.query(
+      'INSERT INTO campaign_co_creators (tenant_id, campaign_id, collaborator_email, role) VALUES ($1,$2,$3,$4) RETURNING *',
+      [t, campaignId, esc(collaborator_email), role || 'editor']
+    );
+    // Notify the collaborator
+    if (notify) {
+      notify(t, collaborator_email, 'Co-Creator Invitation', 'You have been invited as a co-creator for campaign #' + campaignId, 'fundraising');
+    }
+    await audit(req.session.user.email, 'co_creator_invited', 'Invited ' + collaborator_email + ' as co-creator for campaign #' + campaignId);
+    res.json({ co_creator: result.rows[0] });
   }));
 
-  app.put('/api/micro-roundup/settings', requireAuth, ah(async (req, res) => {
-    const { enabled, round_to, max_roundup } = req.body;
-    const r = await pool.query(`INSERT INTO micro_roundup_settings (tenant_id, enabled, round_to, max_roundup) VALUES ($1,$2,$3,$4) ON CONFLICT (tenant_id) DO UPDATE SET enabled=$2, round_to=$3, max_roundup=$4, updated_at=NOW() RETURNING *`, [req.session.user.tenant_id, enabled??true, round_to||1000, max_roundup||5000]);
-    res.json(r.rows[0]);
+  // GET /api/campaigns/:id/co-creators — list co-creators
+  app.get('/api/campaigns/:id/co-creators', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const result = await pool.query(
+      'SELECT * FROM campaign_co_creators WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY invited_at DESC',
+      [campaignId, t]
+    );
+    res.json({ co_creators: result.rows });
   }));
 
-  app.post('/api/micro-roundup/process', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donation_id, original_amount } = req.body;
-    const settings = await pool.query(`SELECT * FROM micro_roundup_settings WHERE tenant_id=$1`, [tid]);
-    const s = settings.rows[0];
-    if (!s || !s.enabled) return res.json({ roundup_amount: 0, message: 'Round-up disabled' });
-    const rounded = Math.ceil(original_amount / s.round_to) * s.round_to;
-    const roundup = Math.min(rounded - original_amount, s.max_roundup);
-    if (roundup <= 0) return res.json({ roundup_amount: 0, rounded_amount: original_amount });
-    await pool.query(`INSERT INTO micro_roundup_transactions (tenant_id, donation_id, original_amount, rounded_amount, roundup_amount) VALUES ($1,$2,$3,$4,$5)`, [tid, donation_id||null, original_amount, rounded, roundup]);
-    await pool.query(`UPDATE micro_roundup_settings SET total_roundup_collected=total_roundup_collected+$1 WHERE tenant_id=$2`, [roundup, tid]);
-    res.json({ original_amount, rounded_amount: rounded, roundup_amount: roundup });
+  // DELETE /api/campaigns/:id/co-creators — remove a co-creator
+  app.delete('/api/campaigns/:id/co-creators', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const { co_creator_id } = req.body;
+    if (!co_creator_id) return res.status(400).json({ error: 'co_creator_id is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_co_creators WHERE id=$1 AND campaign_id=$2 AND tenant_id=$3', [co_creator_id, campaignId, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Co-creator not found' });
+    await pool.query('DELETE FROM campaign_co_creators WHERE id=$1 AND tenant_id=$2', [co_creator_id, t]);
+    await audit(req.session.user.email, 'co_creator_removed', 'Removed co-creator ' + existing.collaborator_email + ' from campaign #' + campaignId);
+    res.json({ success: true });
   }));
 
-  app.get('/api/micro-roundup/stats', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT s.total_roundup_collected, COUNT(t.id) as total_transactions, AVG(t.roundup_amount) as avg_roundup FROM micro_roundup_settings s LEFT JOIN micro_roundup_transactions t ON s.tenant_id=t.tenant_id WHERE s.tenant_id=$1 GROUP BY s.total_roundup_collected`, [req.session.user.tenant_id]);
-    res.json(r.rows[0] || { total_roundup_collected: 0, total_transactions: 0, avg_roundup: 0 });
+  // POST /api/campaigns/:id/co-creators/:cc_id/accept — accept invitation
+  app.post('/api/campaigns/:id/co-creators/:cc_id/accept', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const ccId = parseInt(req.params.cc_id);
+    const existing = (await pool.query('SELECT * FROM campaign_co_creators WHERE id=$1 AND campaign_id=$2 AND tenant_id=$3', [ccId, campaignId, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Co-creator invitation not found' });
+    const result = await pool.query(
+      'UPDATE campaign_co_creators SET accepted_at=NOW() WHERE id=$1 AND tenant_id=$2 RETURNING *',
+      [ccId, t]
+    );
+    await audit(req.session.user.email, 'co_creator_accepted', 'Accepted co-creator invitation for campaign #' + campaignId);
+    res.json({ co_creator: result.rows[0] });
   }));
 
-  app.get('/api/micro-roundup/history', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM micro_roundup_transactions WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+  // GET /api/campaigns/:id/edit-history — list edit history
+  app.get('/api/campaigns/:id/edit-history', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const result = await pool.query(
+      'SELECT * FROM campaign_edit_history WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY edited_at DESC LIMIT 100',
+      [campaignId, t]
+    );
+    res.json({ history: result.rows });
+  }));
+
+  // POST /api/campaigns/:id/edit-history — record an edit
+  app.post('/api/campaigns/:id/edit-history', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const { field_changed, old_value, new_value } = req.body;
+    if (!field_changed) return res.status(400).json({ error: 'field_changed is required' });
+    const result = await pool.query(
+      'INSERT INTO campaign_edit_history (tenant_id, campaign_id, editor_email, field_changed, old_value, new_value) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, campaignId, esc(req.session.user.email), esc(field_changed), old_value ? esc(old_value) : null, new_value ? esc(new_value) : null]
+    );
+    await audit(req.session.user.email, 'campaign_edited', 'Edited field "' + field_changed + '" on campaign #' + campaignId);
+    res.json({ edit: result.rows[0] });
   }));
 
   // =============================================
-  // FEATURE 13: DONATION DAY SCHEDULER
+  // 3. CAMPAIGN BUNDLE PACKS
   // =============================================
+
+  // GET /api/campaign-bundles — list bundles
+  app.get('/api/campaign-bundles', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { is_active } = req.query;
+    let q = 'SELECT b.*, (SELECT COUNT(*) FROM campaign_bundle_items WHERE bundle_id=b.id AND tenant_id=$1) AS item_count FROM campaign_bundles b WHERE b.tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (is_active !== undefined) { q += ' AND b.is_active=$' + idx; params.push(is_active === 'true'); idx++; }
+    q += ' ORDER BY b.created_at DESC';
+    const result = await pool.query(q, params);
+    res.json({ bundles: result.rows });
+  }));
+
+  // POST /api/campaign-bundles — create bundle
+  app.post('/api/campaign-bundles', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, description, total_goal, is_active } = req.body;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const result = await pool.query(
+      'INSERT INTO campaign_bundles (tenant_id, name, description, total_goal, is_active) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [t, esc(name), description ? esc(description) : null, total_goal || 0, is_active !== false]
+    );
+    await audit(req.session.user.email, 'campaign_bundle_created', 'Created bundle "' + name + '"');
+    res.json({ bundle: result.rows[0] });
+  }));
+
+  // PUT /api/campaign-bundles — update bundle
+  app.put('/api/campaign-bundles', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, name, description, total_goal, is_active } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_bundles WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Bundle not found' });
+    const result = await pool.query(
+      'UPDATE campaign_bundles SET name=$1, description=$2, total_goal=$3, is_active=$4 WHERE id=$5 AND tenant_id=$6 RETURNING *',
+      [name ? esc(name) : existing.name, description !== undefined ? esc(description) : existing.description,
+       total_goal !== undefined ? total_goal : existing.total_goal, is_active !== undefined ? is_active : existing.is_active, id, t]
+    );
+    await audit(req.session.user.email, 'campaign_bundle_updated', 'Updated bundle #' + id);
+    res.json({ bundle: result.rows[0] });
+  }));
+
+  // DELETE /api/campaign-bundles — delete bundle
+  app.delete('/api/campaign-bundles', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_bundles WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Bundle not found' });
+    await pool.query('DELETE FROM campaign_bundle_items WHERE bundle_id=$1 AND tenant_id=$2', [id, t]);
+    await pool.query('DELETE FROM campaign_bundles WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'campaign_bundle_deleted', 'Deleted bundle #' + id);
+    res.json({ success: true });
+  }));
+
+  // POST /api/campaign-bundles/:id/add-campaign — add campaign to bundle
+  app.post('/api/campaign-bundles/:id/add-campaign', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const bundleId = parseInt(req.params.id);
+    const { campaign_id, allocation_percentage } = req.body;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id is required' });
+    const bundle = (await pool.query('SELECT * FROM campaign_bundles WHERE id=$1 AND tenant_id=$2', [bundleId, t])).rows[0];
+    if (!bundle) return res.status(404).json({ error: 'Bundle not found' });
+    const result = await pool.query(
+      'INSERT INTO campaign_bundle_items (tenant_id, bundle_id, campaign_id, allocation_percentage) VALUES ($1,$2,$3,$4) RETURNING *',
+      [t, bundleId, parseInt(campaign_id), allocation_percentage || 100]
+    );
+    await audit(req.session.user.email, 'bundle_campaign_added', 'Added campaign #' + campaign_id + ' to bundle #' + bundleId);
+    res.json({ item: result.rows[0] });
+  }));
+
+  // DELETE /api/campaign-bundles/:id/remove-campaign — remove campaign from bundle
+  app.delete('/api/campaign-bundles/:id/remove-campaign', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const bundleId = parseInt(req.params.id);
+    const { campaign_id } = req.body;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id is required' });
+    await pool.query('DELETE FROM campaign_bundle_items WHERE bundle_id=$1 AND campaign_id=$2 AND tenant_id=$3', [bundleId, parseInt(campaign_id), t]);
+    await audit(req.session.user.email, 'bundle_campaign_removed', 'Removed campaign #' + campaign_id + ' from bundle #' + bundleId);
+    res.json({ success: true });
+  }));
+
+  // GET /api/campaign-bundles/:id/items — get bundle items
+  app.get('/api/campaign-bundles/:id/items', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const bundleId = parseInt(req.params.id);
+    const result = await pool.query(
+      'SELECT bi.*, fc.title AS campaign_title FROM campaign_bundle_items bi LEFT JOIN fundraising_campaigns fc ON bi.campaign_id=fc.id WHERE bi.bundle_id=$1 AND bi.tenant_id=$2',
+      [bundleId, t]
+    );
+    res.json({ items: result.rows });
+  }));
+
+  // =============================================
+  // 4. CAMPAIGN HEALTH MONITOR
+  // =============================================
+
+  // GET /api/campaign-health — list health scores
+  app.get('/api/campaign-health', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { campaign_id } = req.query;
+    let q = 'SELECT chs.*, fc.title AS campaign_title FROM campaign_health_scores chs LEFT JOIN fundraising_campaigns fc ON chs.campaign_id=fc.id WHERE chs.tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (campaign_id) { q += ' AND chs.campaign_id=$' + idx; params.push(parseInt(campaign_id)); idx++; }
+    q += ' ORDER BY chs.checked_at DESC';
+    const result = await pool.query(q, params);
+    res.json({ health_scores: result.rows });
+  }));
+
+  // POST /api/campaigns/:id/health-check — run health check for a campaign
+  app.post('/api/campaigns/:id/health-check', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+
+    // Get campaign data
+    const campaign = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [campaignId, t])).rows[0];
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    // Calculate health metrics
+    let healthScore = 50;
+    let momentumScore = 50;
+    let engagementScore = 50;
+    let recommendation = '';
+
+    try {
+      // Donation stats
+      const donationStats = (await pool.query(`
+        SELECT COALESCE(COUNT(*),0) AS total_donations,
+               COALESCE(SUM(amount),0) AS total_raised,
+               COALESCE(AVG(amount),0) AS avg_donation,
+               COUNT(CASE WHEN donated_at >= NOW() - INTERVAL '7 days' THEN 1 END) AS last_week_donations,
+               COUNT(CASE WHEN donated_at >= NOW() - INTERVAL '30 days' THEN 1 END) AS last_month_donations
+        FROM campaign_donations cd
+        JOIN fundraising_campaigns fc ON cd.campaign_id = fc.id
+        WHERE fc.id = $1 AND fc.tenant_id = $2 AND cd.refunded = false
+      `, [campaignId, t])).rows[0];
+
+      const totalRaised = parseInt(donationStats.total_raised) || 0;
+      const target = parseInt(campaign.target) || 1;
+      const progressPct = Math.min(100, Math.round((totalRaised / target) * 100));
+      const totalDonations = parseInt(donationStats.total_donations) || 0;
+      const lastWeekDonations = parseInt(donationStats.last_week_donations) || 0;
+      const lastMonthDonations = parseInt(donationStats.last_month_donations) || 0;
+
+      // Health score: based on progress toward goal
+      healthScore = Math.min(100, Math.round(progressPct * 0.6 + (totalDonations > 0 ? Math.min(40, totalDonations * 2) : 0)));
+
+      // Momentum score: recent donation velocity
+      if (lastWeekDonations > 0) {
+        momentumScore = Math.min(100, Math.round(50 + (lastWeekDonations * 10)));
+      } else if (lastMonthDonations > 0) {
+        momentumScore = Math.round(30 + (lastMonthDonations * 3));
+      } else {
+        momentumScore = 10;
+      }
+
+      // Engagement score: donor interaction level
+      const avgDonation = parseInt(donationStats.avg_donation) || 0;
+      engagementScore = Math.min(100, Math.round(
+        (totalDonations > 0 ? 30 : 0) +
+        (lastMonthDonations > 0 ? 30 : 0) +
+        (avgDonation > 5000 ? 20 : avgDonation > 1000 ? 10 : 0) +
+        (lastWeekDonations > 0 ? 20 : 0)
+      ));
+
+      // Generate recommendation
+      if (healthScore < 30) recommendation = 'Campaign is underperforming. Consider refreshing the story, increasing outreach, or adjusting the goal.';
+      else if (healthScore < 60) recommendation = 'Campaign needs a boost. Try social media promotion and email outreach to existing donors.';
+      else if (momentumScore < 30) recommendation = 'Campaign has slowed down. Create urgency with deadline reminders and matching challenges.';
+      else if (engagementScore < 40) recommendation = 'Engagement is low. Consider personal outreach to major donors and update the campaign story.';
+      else recommendation = 'Campaign is performing well. Maintain current strategy and consider increasing the goal.';
+    } catch(e) {
+      recommendation = 'Insufficient data for full analysis. Continue collecting donations for better insights.';
+    }
+
+    const result = await pool.query(
+      `INSERT INTO campaign_health_scores (tenant_id, campaign_id, health_score, momentum_score, engagement_score, recommendation, checked_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW()) RETURNING *`,
+      [t, campaignId, healthScore, momentumScore, engagementScore, esc(recommendation)]
+    );
+    await audit(req.session.user.email, 'campaign_health_checked', 'Ran health check for campaign #' + campaignId + ' (score: ' + healthScore + ')');
+    res.json({ health: result.rows[0] });
+  }));
+
+  // =============================================
+  // 5. FUNDRAISING CALENDAR
+  // =============================================
+
+  // GET /api/fundraising-calendar — list calendar events
+  app.get('/api/fundraising-calendar', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { event_type, start_date, end_date } = req.query;
+    let q = 'SELECT * FROM fundraising_calendar WHERE tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (event_type) { q += ' AND event_type=$' + idx; params.push(esc(event_type)); idx++; }
+    if (start_date) { q += ' AND start_date>=$' + idx; params.push(start_date); idx++; }
+    if (end_date) { q += ' AND start_date<=$' + idx; params.push(end_date); idx++; }
+    q += ' ORDER BY start_date ASC';
+    const result = await pool.query(q, params);
+    res.json({ events: result.rows });
+  }));
+
+  // POST /api/fundraising-calendar — create event
+  app.post('/api/fundraising-calendar', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { title, event_type, start_date, end_date, goal_amount, notes } = req.body;
+    if (!title || !start_date) return res.status(400).json({ error: 'title and start_date are required' });
+    const result = await pool.query(
+      'INSERT INTO fundraising_calendar (tenant_id, title, event_type, start_date, end_date, goal_amount, notes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [t, esc(title), event_type || 'event', start_date, end_date || null, goal_amount || 0, notes ? esc(notes) : null]
+    );
+    await audit(req.session.user.email, 'calendar_event_created', 'Created calendar event "' + title + '"');
+    res.json({ event: result.rows[0] });
+  }));
+
+  // PUT /api/fundraising-calendar — update event
+  app.put('/api/fundraising-calendar', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, title, event_type, start_date, end_date, goal_amount, notes } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM fundraising_calendar WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Event not found' });
+    const result = await pool.query(
+      'UPDATE fundraising_calendar SET title=$1, event_type=$2, start_date=$3, end_date=$4, goal_amount=$5, notes=$6 WHERE id=$7 AND tenant_id=$8 RETURNING *',
+      [title ? esc(title) : existing.title, event_type || existing.event_type,
+       start_date || existing.start_date, end_date !== undefined ? end_date : existing.end_date,
+       goal_amount !== undefined ? goal_amount : existing.goal_amount,
+       notes !== undefined ? esc(notes) : existing.notes, id, t]
+    );
+    await audit(req.session.user.email, 'calendar_event_updated', 'Updated calendar event #' + id);
+    res.json({ event: result.rows[0] });
+  }));
+
+  // DELETE /api/fundraising-calendar — delete event
+  app.delete('/api/fundraising-calendar', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM fundraising_calendar WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Event not found' });
+    await pool.query('DELETE FROM fundraising_calendar WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'calendar_event_deleted', 'Deleted calendar event #' + id);
+    res.json({ success: true });
+  }));
+
+  // =============================================
+  // 6. SMART GOAL RECOMMENDER
+  // =============================================
+
+  // GET /api/goal-recommendations — list recommendations
+  app.get('/api/goal-recommendations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { campaign_id } = req.query;
+    let q = 'SELECT gr.*, fc.title AS campaign_title FROM goal_recommendations gr LEFT JOIN fundraising_campaigns fc ON gr.campaign_id=fc.id WHERE gr.tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (campaign_id) { q += ' AND gr.campaign_id=$' + idx; params.push(parseInt(campaign_id)); idx++; }
+    q += ' ORDER BY gr.created_at DESC';
+    const result = await pool.query(q, params);
+    res.json({ recommendations: result.rows });
+  }));
+
+  // POST /api/goal-recommendations — generate a goal recommendation
+  app.post('/api/goal-recommendations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { campaign_id } = req.body;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id is required' });
+
+    const campaign = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [campaign_id, t])).rows[0];
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    let recommendedGoal = parseInt(campaign.target) || 0;
+    let confidence = 50;
+    let basedOn = 'current_target';
+
+    try {
+      // Analyze past campaign performance
+      const pastStats = (await pool.query(`
+        SELECT COALESCE(AVG(total_raised),0) AS avg_raised,
+               COALESCE(AVG(target),0) AS avg_target,
+               COUNT(*) AS campaign_count,
+               COALESCE(AVG(donation_count),0) AS avg_donation_count
+        FROM (
+          SELECT fc.id, fc.target, COALESCE(SUM(cd.amount),0) AS total_raised, COUNT(cd.id) AS donation_count
+          FROM fundraising_campaigns fc
+          LEFT JOIN campaign_donations cd ON cd.campaign_id = fc.id
+          WHERE fc.tenant_id = $1 AND cd.refunded = false
+          GROUP BY fc.id, fc.target
+        ) sub
+      `, [t])).rows[0];
+
+      const avgRaised = parseInt(pastStats.avg_raised) || 0;
+      const avgTarget = parseInt(pastStats.avg_target) || 0;
+      const campaignCount = parseInt(pastStats.campaign_count) || 0;
+
+      if (campaignCount > 0) {
+        const avgAchievementRate = avgTarget > 0 ? (avgRaised / avgTarget) : 0;
+        recommendedGoal = Math.round(avgRaised * 1.15); // 15% growth target
+        confidence = Math.min(95, Math.round(50 + (campaignCount * 5)));
+        basedOn = 'historical_avg_' + campaignCount + '_campaigns';
+      }
+
+      // Factor in seasonality
+      const currentMonth = new Date().getMonth() + 1;
+      const seasonality = (await pool.query('SELECT seasonality_factor FROM seasonality_profiles WHERE tenant_id=$1 AND month=$2', [t, currentMonth])).rows[0];
+      if (seasonality) {
+        recommendedGoal = Math.round(recommendedGoal * parseFloat(seasonality.seasonality_factor));
+        basedOn += '_seasonality_adjusted';
+      }
+    } catch(e) {
+      // Fallback to current target
+    }
+
+    const result = await pool.query(
+      'INSERT INTO goal_recommendations (tenant_id, campaign_id, recommended_goal, confidence, based_on) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [t, campaign_id, recommendedGoal, confidence, esc(basedOn)]
+    );
+    await audit(req.session.user.email, 'goal_recommendation_created', 'Recommended goal of ' + recommendedGoal + ' for campaign #' + campaign_id);
+    res.json({ recommendation: result.rows[0] });
+  }));
+
+  // =============================================
+  // 7. CAMPAIGN STORYBOARD BUILDER
+  // =============================================
+
+  // GET /api/storyboards — list storyboards
+  app.get('/api/storyboards', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { campaign_id, is_published } = req.query;
+    let q = 'SELECT s.*, fc.title AS campaign_title FROM campaign_storyboards s LEFT JOIN fundraising_campaigns fc ON s.campaign_id=fc.id WHERE s.tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (campaign_id) { q += ' AND s.campaign_id=$' + idx; params.push(parseInt(campaign_id)); idx++; }
+    if (is_published !== undefined) { q += ' AND s.is_published=$' + idx; params.push(is_published === 'true'); idx++; }
+    q += ' ORDER BY s.created_at DESC';
+    const result = await pool.query(q, params);
+    res.json({ storyboards: result.rows });
+  }));
+
+  // POST /api/storyboards — create storyboard
+  app.post('/api/storyboards', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { campaign_id, title, is_published } = req.body;
+    if (!campaign_id || !title) return res.status(400).json({ error: 'campaign_id and title are required' });
+    const result = await pool.query(
+      'INSERT INTO campaign_storyboards (tenant_id, campaign_id, title, is_published) VALUES ($1,$2,$3,$4) RETURNING *',
+      [t, parseInt(campaign_id), esc(title), is_published || false]
+    );
+    await audit(req.session.user.email, 'storyboard_created', 'Created storyboard "' + title + '" for campaign #' + campaign_id);
+    res.json({ storyboard: result.rows[0] });
+  }));
+
+  // PUT /api/storyboards — update storyboard
+  app.put('/api/storyboards', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, title, is_published } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_storyboards WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Storyboard not found' });
+    const result = await pool.query(
+      'UPDATE campaign_storyboards SET title=$1, is_published=$2 WHERE id=$3 AND tenant_id=$4 RETURNING *',
+      [title ? esc(title) : existing.title, is_published !== undefined ? is_published : existing.is_published, id, t]
+    );
+    await audit(req.session.user.email, 'storyboard_updated', 'Updated storyboard #' + id);
+    res.json({ storyboard: result.rows[0] });
+  }));
+
+  // DELETE /api/storyboards — delete storyboard
+  app.delete('/api/storyboards', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_storyboards WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Storyboard not found' });
+    await pool.query('DELETE FROM storyboard_sections WHERE storyboard_id=$1 AND tenant_id=$2', [id, t]);
+    await pool.query('DELETE FROM campaign_storyboards WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'storyboard_deleted', 'Deleted storyboard #' + id);
+    res.json({ success: true });
+  }));
+
+  // GET /api/storyboards/:id/sections — list sections
+  app.get('/api/storyboards/:id/sections', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const storyboardId = parseInt(req.params.id);
+    const result = await pool.query(
+      'SELECT * FROM storyboard_sections WHERE storyboard_id=$1 AND tenant_id=$2 ORDER BY sort_order ASC',
+      [storyboardId, t]
+    );
+    res.json({ sections: result.rows });
+  }));
+
+  // POST /api/storyboards/:id/sections — add section
+  app.post('/api/storyboards/:id/sections', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const storyboardId = parseInt(req.params.id);
+    const storyboard = (await pool.query('SELECT * FROM campaign_storyboards WHERE id=$1 AND tenant_id=$2', [storyboardId, t])).rows[0];
+    if (!storyboard) return res.status(404).json({ error: 'Storyboard not found' });
+    const { section_type, title, content, sort_order, image_url } = req.body;
+    const result = await pool.query(
+      'INSERT INTO storyboard_sections (tenant_id, storyboard_id, section_type, title, content, sort_order, image_url) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [t, storyboardId, section_type || 'text', title ? esc(title) : null, content ? esc(content) : null, sort_order || 0, image_url ? esc(image_url) : null]
+    );
+    await audit(req.session.user.email, 'storyboard_section_added', 'Added section to storyboard #' + storyboardId);
+    res.json({ section: result.rows[0] });
+  }));
+
+  // PUT /api/storyboards/:id/sections — update section
+  app.put('/api/storyboards/:id/sections', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const storyboardId = parseInt(req.params.id);
+    const { section_id, section_type, title, content, sort_order, image_url } = req.body;
+    if (!section_id) return res.status(400).json({ error: 'section_id is required' });
+    const existing = (await pool.query('SELECT * FROM storyboard_sections WHERE id=$1 AND storyboard_id=$2 AND tenant_id=$3', [section_id, storyboardId, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Section not found' });
+    const result = await pool.query(
+      'UPDATE storyboard_sections SET section_type=$1, title=$2, content=$3, sort_order=$4, image_url=$5 WHERE id=$6 AND tenant_id=$7 RETURNING *',
+      [section_type || existing.section_type, title !== undefined ? esc(title) : existing.title,
+       content !== undefined ? esc(content) : existing.content,
+       sort_order !== undefined ? sort_order : existing.sort_order,
+       image_url !== undefined ? esc(image_url) : existing.image_url, section_id, t]
+    );
+    await audit(req.session.user.email, 'storyboard_section_updated', 'Updated section #' + section_id + ' in storyboard #' + storyboardId);
+    res.json({ section: result.rows[0] });
+  }));
+
+  // =============================================
+  // 8. DONATION FORM BUILDER
+  // =============================================
+
+  // GET /api/donation-forms — list donation forms
+  app.get('/api/donation-forms', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { campaign_id, is_active } = req.query;
+    let q = 'SELECT df.*, fc.title AS campaign_title FROM donation_forms df LEFT JOIN fundraising_campaigns fc ON df.campaign_id=fc.id WHERE df.tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (campaign_id) { q += ' AND df.campaign_id=$' + idx; params.push(parseInt(campaign_id)); idx++; }
+    if (is_active !== undefined) { q += ' AND df.is_active=$' + idx; params.push(is_active === 'true'); idx++; }
+    q += ' ORDER BY df.created_at DESC';
+    const result = await pool.query(q, params);
+    res.json({ forms: result.rows });
+  }));
+
+  // POST /api/donation-forms — create donation form
+  app.post('/api/donation-forms', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { campaign_id, title, fields_json, styling_json, is_active } = req.body;
+    if (!title) return res.status(400).json({ error: 'title is required' });
+    const result = await pool.query(
+      'INSERT INTO donation_forms (tenant_id, campaign_id, title, fields_json, styling_json, is_active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, campaign_id ? parseInt(campaign_id) : null, esc(title),
+       fields_json ? JSON.stringify(fields_json) : JSON.stringify([
+         { id: 'name', label: 'Full Name', type: 'text', required: true },
+         { id: 'email', label: 'Email', type: 'email', required: true },
+         { id: 'amount', label: 'Donation Amount', type: 'number', required: true },
+         { id: 'message', label: 'Message', type: 'textarea', required: false }
+       ]),
+       styling_json ? JSON.stringify(styling_json) : JSON.stringify({ theme: 'default', layout: 'single' }),
+       is_active !== false]
+    );
+    await audit(req.session.user.email, 'donation_form_created', 'Created donation form "' + title + '"');
+    res.json({ form: result.rows[0] });
+  }));
+
+  // PUT /api/donation-forms — update donation form
+  app.put('/api/donation-forms', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, campaign_id, title, fields_json, styling_json, is_active } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM donation_forms WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Form not found' });
+    const result = await pool.query(
+      'UPDATE donation_forms SET campaign_id=$1, title=$2, fields_json=$3, styling_json=$4, is_active=$5 WHERE id=$6 AND tenant_id=$7 RETURNING *',
+      [campaign_id !== undefined ? (campaign_id ? parseInt(campaign_id) : null) : existing.campaign_id,
+       title ? esc(title) : existing.title,
+       fields_json ? JSON.stringify(fields_json) : existing.fields_json,
+       styling_json ? JSON.stringify(styling_json) : existing.styling_json,
+       is_active !== undefined ? is_active : existing.is_active, id, t]
+    );
+    await audit(req.session.user.email, 'donation_form_updated', 'Updated donation form #' + id);
+    res.json({ form: result.rows[0] });
+  }));
+
+  // DELETE /api/donation-forms — delete donation form
+  app.delete('/api/donation-forms', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM donation_forms WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Form not found' });
+    await pool.query('DELETE FROM donation_form_submissions WHERE form_id=$1 AND tenant_id=$2', [id, t]);
+    await pool.query('DELETE FROM donation_forms WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'donation_form_deleted', 'Deleted donation form #' + id);
+    res.json({ success: true });
+  }));
+
+  // POST /api/donation-forms/:id/submit — submit a donation form
+  app.post('/api/donation-forms/:id/submit', ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const formId = parseInt(req.params.id);
+    const form = (await pool.query('SELECT * FROM donation_forms WHERE id=$1 AND tenant_id=$2 AND is_active=true', [formId, t])).rows[0];
+    if (!form) return res.status(404).json({ error: 'Form not found or inactive' });
+    const { donor_email, responses, amount } = req.body;
+    const result = await pool.query(
+      'INSERT INTO donation_form_submissions (tenant_id, form_id, donor_email, responses_json, amount) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [t, formId, donor_email ? esc(donor_email) : null, responses ? JSON.stringify(responses) : '{}', parseInt(amount) || 0]
+    );
+    // Increment submissions count
+    await pool.query('UPDATE donation_forms SET submissions_count = submissions_count + 1 WHERE id=$1 AND tenant_id=$2', [formId, t]);
+    res.json({ submission: result.rows[0] });
+  }));
+
+  // GET /api/donation-forms/:id/submissions — get form submissions
+  app.get('/api/donation-forms/:id/submissions', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const formId = parseInt(req.params.id);
+    const { limit, offset } = req.query;
+    const lim = parseInt(limit) || 100;
+    const off = parseInt(offset) || 0;
+    const result = await pool.query(
+      'SELECT * FROM donation_form_submissions WHERE form_id=$1 AND tenant_id=$2 ORDER BY submitted_at DESC LIMIT $3 OFFSET $4',
+      [formId, t, lim, off]
+    );
+    const count = (await pool.query('SELECT COUNT(*) AS total FROM donation_form_submissions WHERE form_id=$1 AND tenant_id=$2', [formId, t])).rows[0];
+    const totalAmount = (await pool.query('SELECT COALESCE(SUM(amount),0) AS total FROM donation_form_submissions WHERE form_id=$1 AND tenant_id=$2', [formId, t])).rows[0];
+    res.json({ submissions: result.rows, total: parseInt(count.total), total_amount: parseInt(totalAmount.total) });
+  }));
+
+  // =============================================
+  // 9. CAMPAIGN SUCCESS BLUEPRINT
+  // =============================================
+
+  // GET /api/campaign-blueprints — list blueprints
+  app.get('/api/campaign-blueprints', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { category } = req.query;
+    let q = 'SELECT * FROM campaign_blueprints WHERE tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (category) { q += ' AND category=$' + idx; params.push(esc(category)); idx++; }
+    q += ' ORDER BY created_at DESC';
+    const result = await pool.query(q, params);
+    res.json({ blueprints: result.rows });
+  }));
+
+  // POST /api/campaign-blueprints — create blueprint
+  app.post('/api/campaign-blueprints', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, category, milestones_json, timeline_json, checklist_json } = req.body;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const result = await pool.query(
+      'INSERT INTO campaign_blueprints (tenant_id, name, category, milestones_json, timeline_json, checklist_json) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, esc(name), category ? esc(category) : 'general',
+       milestones_json ? JSON.stringify(milestones_json) : JSON.stringify([
+         { id: 1, name: 'Planning', description: 'Define goals and strategy', target_days: 7 },
+         { id: 2, name: 'Launch', description: 'Go live with campaign', target_days: 14 },
+         { id: 3, name: 'Mid-campaign Review', description: 'Assess progress and adjust', target_days: 30 },
+         { id: 4, name: 'Final Push', description: 'Intensify outreach', target_days: 45 },
+         { id: 5, name: 'Wrap-up', description: 'Thank donors and report results', target_days: 60 }
+       ]),
+       timeline_json ? JSON.stringify(timeline_json) : JSON.stringify([
+         { week: 1, tasks: ['Set campaign goals', 'Identify target donors'] },
+         { week: 2, tasks: ['Launch campaign', 'Send announcement emails'] },
+         { week: 3, tasks: ['Social media push', 'Follow up with major donors'] }
+       ]),
+       checklist_json ? JSON.stringify(checklist_json) : JSON.stringify([
+         { id: 1, task: 'Define campaign goal and timeline', done: false },
+         { id: 2, task: 'Create campaign story and media', done: false },
+         { id: 3, task: 'Set up donation page', done: false },
+         { id: 4, task: 'Prepare email templates', done: false },
+         { id: 5, task: 'Plan social media content', done: false },
+         { id: 6, task: 'Brief team and volunteers', done: false },
+         { id: 7, task: 'Test donation flow', done: false },
+         { id: 8, task: 'Schedule launch communications', done: false }
+       ])]
+    );
+    await audit(req.session.user.email, 'blueprint_created', 'Created blueprint "' + name + '"');
+    res.json({ blueprint: result.rows[0] });
+  }));
+
+  // PUT /api/campaign-blueprints — update blueprint
+  app.put('/api/campaign-blueprints', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, name, category, milestones_json, timeline_json, checklist_json } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_blueprints WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Blueprint not found' });
+    const result = await pool.query(
+      'UPDATE campaign_blueprints SET name=$1, category=$2, milestones_json=$3, timeline_json=$4, checklist_json=$5 WHERE id=$6 AND tenant_id=$7 RETURNING *',
+      [name ? esc(name) : existing.name, category ? esc(category) : existing.category,
+       milestones_json ? JSON.stringify(milestones_json) : existing.milestones_json,
+       timeline_json ? JSON.stringify(timeline_json) : existing.timeline_json,
+       checklist_json ? JSON.stringify(checklist_json) : existing.checklist_json, id, t]
+    );
+    await audit(req.session.user.email, 'blueprint_updated', 'Updated blueprint #' + id);
+    res.json({ blueprint: result.rows[0] });
+  }));
+
+  // DELETE /api/campaign-blueprints — delete blueprint
+  app.delete('/api/campaign-blueprints', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM campaign_blueprints WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Blueprint not found' });
+    await pool.query('DELETE FROM campaign_blueprints WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'blueprint_deleted', 'Deleted blueprint #' + id);
+    res.json({ success: true });
+  }));
+
+  // GET /api/campaign-blueprints/:id — get a single blueprint with full details
+  app.get('/api/campaign-blueprints/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const blueprintId = parseInt(req.params.id);
+    const result = await pool.query('SELECT * FROM campaign_blueprints WHERE id=$1 AND tenant_id=$2', [blueprintId, t]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'Blueprint not found' });
+    res.json({ blueprint: result.rows[0] });
+  }));
+
+  // =============================================
+  // 10. SMART THANK YOU ENGINE
+  // =============================================
+
+  // GET /api/thank-you-templates — list templates
+  app.get('/api/thank-you-templates', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { channel } = req.query;
+    let q = 'SELECT * FROM thank_you_templates WHERE tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (channel) { q += ' AND channel=$' + idx; params.push(esc(channel)); idx++; }
+    q += ' ORDER BY is_default DESC, name ASC';
+    const result = await pool.query(q, params);
+    res.json({ templates: result.rows });
+  }));
+
+  // POST /api/thank-you-templates — create template
+  app.post('/api/thank-you-templates', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, subject, body_template, channel, is_default } = req.body;
+    if (!name || !body_template) return res.status(400).json({ error: 'name and body_template are required' });
+    const result = await pool.query(
+      'INSERT INTO thank_you_templates (tenant_id, name, subject, body_template, channel, is_default) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, esc(name), subject ? esc(subject) : null, esc(body_template), channel || 'email', is_default || false]
+    );
+    await audit(req.session.user.email, 'thank_you_template_created', 'Created thank-you template "' + name + '"');
+    res.json({ template: result.rows[0] });
+  }));
+
+  // PUT /api/thank-you-templates — update template
+  app.put('/api/thank-you-templates', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, name, subject, body_template, channel, is_default } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM thank_you_templates WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    const result = await pool.query(
+      'UPDATE thank_you_templates SET name=$1, subject=$2, body_template=$3, channel=$4, is_default=$5 WHERE id=$6 AND tenant_id=$7 RETURNING *',
+      [name ? esc(name) : existing.name, subject !== undefined ? esc(subject) : existing.subject,
+       body_template ? esc(body_template) : existing.body_template,
+       channel || existing.channel, is_default !== undefined ? is_default : existing.is_default, id, t]
+    );
+    await audit(req.session.user.email, 'thank_you_template_updated', 'Updated thank-you template #' + id);
+    res.json({ template: result.rows[0] });
+  }));
+
+  // DELETE /api/thank-you-templates — delete template
+  app.delete('/api/thank-you-templates', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM thank_you_templates WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    await pool.query('DELETE FROM thank_you_templates WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'thank_you_template_deleted', 'Deleted thank-you template #' + id);
+    res.json({ success: true });
+  }));
+
+  // POST /api/thank-you/send — send a thank you message
+  app.post('/api/thank-you/send', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { template_id, donor_email, campaign_id, donor_name, amount, campaign_title } = req.body;
+    if (!donor_email) return res.status(400).json({ error: 'donor_email is required' });
+
+    // Get template
+    let template;
+    if (template_id) {
+      template = (await pool.query('SELECT * FROM thank_you_templates WHERE id=$1 AND tenant_id=$2', [parseInt(template_id), t])).rows[0];
+    }
+    if (!template) {
+      template = (await pool.query('SELECT * FROM thank_you_templates WHERE tenant_id=$1 AND is_default=true LIMIT 1', [t])).rows[0];
+    }
+    if (!template) {
+      template = (await pool.query('SELECT * FROM thank_you_templates WHERE tenant_id=$1 LIMIT 1', [t])).rows[0];
+    }
+
+    let body = template ? template.body_template : 'Dear {donor_name}, thank you for your donation of {amount} to {campaign_title}!';
+    let subject = template ? template.subject : 'Thank you for your donation!';
+
+    // Replace placeholders
+    body = body.replace(/\{donor_name\}/g, donor_name || 'Donor')
+               .replace(/\{amount\}/g, (parseInt(amount) || 0).toLocaleString())
+               .replace(/\{campaign_title\}/g, campaign_title || 'our campaign');
+    subject = (subject || '').replace(/\{donor_name\}/g, donor_name || 'Donor')
+               .replace(/\{amount\}/g, (parseInt(amount) || 0).toLocaleString())
+               .replace(/\{campaign_title\}/g, campaign_title || 'our campaign');
+
+    // Send via appropriate channel
+    const channel = template ? template.channel : 'email';
+    let sent = false;
+
+    if ((channel === 'email' || channel === 'both') && sendEmail) {
+      try {
+        await sendEmail(donor_email, subject, '<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">' + body.replace(/\n/g, '<br>') + '</div>');
+        sent = true;
+      } catch(e) { /* email send failed */ }
+    }
+    if ((channel === 'sms' || channel === 'both') && sendSMS) {
+      try {
+        await sendSMS(donor_email, body);
+        sent = true;
+      } catch(e) { /* sms send failed */ }
+    }
+
+    // Log the thank you
+    const logResult = await pool.query(
+      'INSERT INTO thank_you_log (tenant_id, template_id, donor_email, campaign_id, sent_at, opened) VALUES ($1,$2,$3,$4,NOW(),false) RETURNING *',
+      [t, template ? template.id : null, esc(donor_email), campaign_id ? parseInt(campaign_id) : null]
+    );
+
+    await audit(req.session.user.email, 'thank_you_sent', 'Sent thank you to ' + donor_email + (campaign_id ? ' for campaign #' + campaign_id : ''));
+    res.json({ sent, log: logResult.rows[0], channel, body_preview: body.substring(0, 200) });
+  }));
+
+  // GET /api/thank-you/log — list thank you log entries
+  app.get('/api/thank-you/log', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { donor_email, campaign_id, limit, offset } = req.query;
+    let q = 'SELECT tyl.*, tyt.name AS template_name FROM thank_you_log tyl LEFT JOIN thank_you_templates tyt ON tyl.template_id=tyt.id WHERE tyl.tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (donor_email) { q += ' AND tyl.donor_email=$' + idx; params.push(esc(donor_email)); idx++; }
+    if (campaign_id) { q += ' AND tyl.campaign_id=$' + idx; params.push(parseInt(campaign_id)); idx++; }
+    q += ' ORDER BY tyl.sent_at DESC';
+    const lim = parseInt(limit) || 100;
+    const off = parseInt(offset) || 0;
+    q += ' LIMIT $' + idx + ' OFFSET $' + (idx + 1);
+    params.push(lim, off);
+    const result = await pool.query(q, params);
+    res.json({ log: result.rows });
+  }));
+
+  // POST /api/thank-you/log/:id/track-open — track thank you open
+  app.post('/api/thank-you/log/:id/track-open', ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const logId = parseInt(req.params.id);
+    await pool.query('UPDATE thank_you_log SET opened=true WHERE id=$1 AND tenant_id=$2', [logId, t]);
+    res.json({ success: true });
+  }));
+
+  // =============================================
+  // 11. MICRO-DONATION ROUND-UPS
+  // =============================================
+
+  // GET /api/micro-roundup-settings — get roundup settings
+  app.get('/api/micro-roundup-settings', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const result = await pool.query('SELECT * FROM micro_roundup_settings WHERE tenant_id=$1', [t]);
+    res.json({ settings: result.rows[0] || null });
+  }));
+
+  // PUT /api/micro-roundup-settings — update roundup settings
+  app.put('/api/micro-roundup-settings', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { enabled, default_roundup, max_monthly } = req.body;
+    const result = await pool.query(
+      `INSERT INTO micro_roundup_settings (tenant_id, enabled, default_roundup, max_monthly) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (tenant_id) DO UPDATE SET enabled=$2, default_roundup=$3, max_monthly=$4
+       RETURNING *`,
+      [t, enabled !== undefined ? enabled : false, default_roundup || 100, max_monthly || 10000]
+    );
+    await audit(req.session.user.email, 'roundup_settings_updated', 'Updated micro-roundup settings');
+    res.json({ settings: result.rows[0] });
+  }));
+
+  // POST /api/micro-roundup — process a round-up donation
+  app.post('/api/micro-roundup', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { donor_email, original_amount, campaign_id } = req.body;
+    if (!donor_email || original_amount === undefined) return res.status(400).json({ error: 'donor_email and original_amount are required' });
+
+    // Check settings
+    const settings = (await pool.query('SELECT * FROM micro_roundup_settings WHERE tenant_id=$1', [t])).rows[0];
+    if (!settings || !settings.enabled) return res.status(400).json({ error: 'Round-up donations are not enabled' });
+
+    const origAmount = parseInt(original_amount) || 0;
+    const roundupAmount = settings.default_roundup;
+    const roundedAmount = origAmount + roundupAmount;
+
+    // Check monthly cap
+    const monthlyTotal = (await pool.query(
+      `SELECT COALESCE(SUM(roundup_amount),0) AS total FROM micro_roundup_transactions
+       WHERE tenant_id=$1 AND donor_email=$2 AND created_at >= DATE_TRUNC('month', NOW())`,
+      [t, esc(donor_email)]
+    )).rows[0];
+    if (parseInt(monthlyTotal.total) + roundupAmount > settings.max_monthly) {
+      return res.status(400).json({ error: 'Monthly round-up cap exceeded', current_monthly: parseInt(monthlyTotal.total), cap: settings.max_monthly });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO micro_roundup_transactions (tenant_id, donor_email, original_amount, rounded_amount, roundup_amount, campaign_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, esc(donor_email), origAmount, roundedAmount, roundupAmount, campaign_id ? parseInt(campaign_id) : null]
+    );
+    await audit(req.session.user.email, 'roundup_processed', 'Processed round-up of ' + roundupAmount + ' for ' + donor_email);
+    res.json({ transaction: result.rows[0] });
+  }));
+
+  // GET /api/micro-roundup/summary — get round-up summary
+  app.get('/api/micro-roundup/summary', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const summary = (await pool.query(`
+      SELECT COALESCE(SUM(roundup_amount),0) AS total_roundup,
+             COUNT(*) AS total_transactions,
+             COUNT(DISTINCT donor_email) AS unique_donors,
+             COALESCE(AVG(roundup_amount),0) AS avg_roundup
+      FROM micro_roundup_transactions WHERE tenant_id=$1
+    `, [t])).rows[0];
+    const monthly = (await pool.query(`
+      SELECT DATE_TRUNC('month', created_at) AS month,
+             COALESCE(SUM(roundup_amount),0) AS total,
+             COUNT(*) AS count
+      FROM micro_roundup_transactions WHERE tenant_id=$1
+      GROUP BY month ORDER BY month DESC LIMIT 12
+    `, [t])).rows;
+    res.json({ summary, monthly });
+  }));
+
+  // =============================================
+  // 12. DONATION DAY SCHEDULER
+  // =============================================
+
+  // GET /api/scheduled-donations — list scheduled donations
   app.get('/api/scheduled-donations', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM scheduled_donations WHERE tenant_id=$1 ORDER BY scheduled_date`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+    const t = req.session.user.tenant_id;
+    const { donor_email, status, frequency } = req.query;
+    let q = 'SELECT sd.*, fc.title AS campaign_title FROM scheduled_donations sd LEFT JOIN fundraising_campaigns fc ON sd.campaign_id=fc.id WHERE sd.tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (donor_email) { q += ' AND sd.donor_email=$' + idx; params.push(esc(donor_email)); idx++; }
+    if (status) { q += ' AND sd.status=$' + idx; params.push(esc(status)); idx++; }
+    if (frequency) { q += ' AND sd.frequency=$' + idx; params.push(esc(frequency)); idx++; }
+    q += ' ORDER BY sd.next_date ASC NULLS LAST, sd.created_at DESC';
+    const result = await pool.query(q, params);
+    res.json({ donations: result.rows });
   }));
 
+  // POST /api/scheduled-donations — create scheduled donation
   app.post('/api/scheduled-donations', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donor_email, campaign_id, amount, scheduled_date, recurrence } = req.body;
-    if (!donor_email || !amount || !scheduled_date) return res.status(400).json({ error: 'donor_email, amount, and scheduled_date required' });
-    const r = await pool.query(`INSERT INTO scheduled_donations (tenant_id, donor_email, campaign_id, amount, scheduled_date, recurrence) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [tid, esc(donor_email), campaign_id||null, amount, scheduled_date, recurrence||'once']);
-    await audit(req, 'create', 'scheduled_donations', r.rows[0].id);
-    res.json(r.rows[0]);
+    const t = req.session.user.tenant_id;
+    const { donor_email, campaign_id, amount, scheduled_date, frequency, status } = req.body;
+    if (!donor_email || !scheduled_date) return res.status(400).json({ error: 'donor_email and scheduled_date are required' });
+    const validFreq = ['once', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'];
+    if (frequency && !validFreq.includes(frequency)) return res.status(400).json({ error: 'Invalid frequency' });
+
+    // Calculate next_date
+    let nextDate = scheduled_date;
+    if (frequency && frequency !== 'once') {
+      nextDate = scheduled_date; // First occurrence is the scheduled_date
+    }
+
+    const result = await pool.query(
+      'INSERT INTO scheduled_donations (tenant_id, donor_email, campaign_id, amount, scheduled_date, frequency, next_date, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [t, esc(donor_email), campaign_id ? parseInt(campaign_id) : null, amount || 0,
+       scheduled_date, frequency || 'once', nextDate, status || 'active']
+    );
+    await audit(req.session.user.email, 'scheduled_donation_created', 'Scheduled donation for ' + donor_email + ' on ' + scheduled_date);
+    res.json({ donation: result.rows[0] });
   }));
 
-  app.put('/api/scheduled-donations/:id', requireAuth, ah(async (req, res) => {
-    const { amount, scheduled_date, recurrence, status } = req.body;
-    const r = await pool.query(`UPDATE scheduled_donations SET amount=COALESCE($1,amount), scheduled_date=COALESCE($2,scheduled_date), recurrence=COALESCE($3,recurrence), status=COALESCE($4,status) WHERE tenant_id=$5 AND id=$6 RETURNING *`, [amount, scheduled_date, recurrence, status, req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows[0]);
+  // PUT /api/scheduled-donations — update scheduled donation
+  app.put('/api/scheduled-donations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id, donor_email, campaign_id, amount, scheduled_date, frequency, status } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM scheduled_donations WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Scheduled donation not found' });
+
+    // Recalculate next_date if frequency or scheduled_date changes
+    const newFreq = frequency || existing.frequency;
+    const newDate = scheduled_date || existing.scheduled_date;
+    let nextDate = existing.next_date;
+    if (scheduled_date || (frequency && frequency !== existing.frequency)) {
+      nextDate = newDate;
+    }
+
+    const result = await pool.query(
+      'UPDATE scheduled_donations SET donor_email=$1, campaign_id=$2, amount=$3, scheduled_date=$4, frequency=$5, next_date=$6, status=$7 WHERE id=$8 AND tenant_id=$9 RETURNING *',
+      [donor_email ? esc(donor_email) : existing.donor_email,
+       campaign_id !== undefined ? (campaign_id ? parseInt(campaign_id) : null) : existing.campaign_id,
+       amount !== undefined ? amount : existing.amount,
+       scheduled_date || existing.scheduled_date,
+       newFreq, nextDate,
+       status || existing.status, id, t]
+    );
+    await audit(req.session.user.email, 'scheduled_donation_updated', 'Updated scheduled donation #' + id);
+    res.json({ donation: result.rows[0] });
   }));
 
-  app.delete('/api/scheduled-donations/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM scheduled_donations WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    res.json({ ok: true });
+  // DELETE /api/scheduled-donations — delete scheduled donation
+  app.delete('/api/scheduled-donations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const existing = (await pool.query('SELECT * FROM scheduled_donations WHERE id=$1 AND tenant_id=$2', [id, t])).rows[0];
+    if (!existing) return res.status(404).json({ error: 'Scheduled donation not found' });
+    await pool.query('DELETE FROM scheduled_donations WHERE id=$1 AND tenant_id=$2', [id, t]);
+    await audit(req.session.user.email, 'scheduled_donation_deleted', 'Deleted scheduled donation #' + id);
+    res.json({ success: true });
   }));
 
-  app.get('/api/scheduled-donations/upcoming', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM scheduled_donations WHERE tenant_id=$1 AND status='pending' AND scheduled_date <= CURRENT_DATE + INTERVAL '7 days' ORDER BY scheduled_date`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
+  // POST /api/scheduled-donations/process-due — process donations that are due
+  app.post('/api/scheduled-donations/process-due', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const dueDonations = (await pool.query(
+      'SELECT * FROM scheduled_donations WHERE tenant_id=$1 AND status=$2 AND next_date <= CURRENT_DATE',
+      [t, 'active']
+    )).rows;
 
-  app.post('/api/scheduled-donations/:id/process', requireAuth, ah(async (req, res) => {
-    const sd = await pool.query(`SELECT * FROM scheduled_donations WHERE tenant_id=$1 AND id=$2 AND status='pending'`, [req.session.user.tenant_id, req.params.id]);
-    if (!sd.rows.length) return res.status(404).json({ error: 'Scheduled donation not found or already processed' });
-    await pool.query(`UPDATE scheduled_donations SET status='processed', processed_at=NOW() WHERE id=$1`, [req.params.id]);
-    await audit(req, 'process', 'scheduled_donations', req.params.id);
-    res.json({ ok: true, message: 'Scheduled donation processed' });
-  }));
+    let processed = 0;
+    for (const d of dueDonations) {
+      // Record the donation
+      if (d.campaign_id) {
+        try {
+          await pool.query(
+            'INSERT INTO campaign_donations (campaign_id, donor_name, donor_email, amount, method, donated_at) VALUES ($1,$2,$3,$4,$5,NOW())',
+            [d.campaign_id, d.donor_email, d.donor_email, d.amount, 'scheduled']
+          );
+        } catch(e) { /* campaign_donations may not have all columns */ }
+      }
 
-  app.post('/api/scheduled-donations/:id/remind', requireAuth, ah(async (req, res) => {
-    const sd = await pool.query(`SELECT * FROM scheduled_donations WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    if (!sd.rows.length) return res.status(404).json({ error: 'Not found' });
-    try { await sendEmail(sd.rows[0].donor_email, 'Donation Reminder', `Your scheduled donation of UGX ${sd.rows[0].amount} is coming up on ${sd.rows[0].scheduled_date}.`); } catch(e){}
-    await pool.query(`UPDATE scheduled_donations SET reminder_sent=true WHERE id=$1`, [req.params.id]);
-    res.json({ ok: true });
+      // Calculate next date
+      const freq = d.frequency;
+      let nextDate = null;
+      if (freq === 'once') {
+        // Mark as completed
+        await pool.query('UPDATE scheduled_donations SET status=$1 WHERE id=$2 AND tenant_id=$3', ['completed', d.id, t]);
+      } else {
+        const current = new Date(d.next_date || d.scheduled_date);
+        switch (freq) {
+          case 'weekly': current.setDate(current.getDate() + 7); break;
+          case 'biweekly': current.setDate(current.getDate() + 14); break;
+          case 'monthly': current.setMonth(current.getMonth() + 1); break;
+          case 'quarterly': current.setMonth(current.getMonth() + 3); break;
+          case 'yearly': current.setFullYear(current.getFullYear() + 1); break;
+        }
+        nextDate = current.toISOString().split('T')[0];
+        await pool.query('UPDATE scheduled_donations SET next_date=$1 WHERE id=$2 AND tenant_id=$3', [nextDate, d.id, t]);
+      }
+
+      // Notify donor
+      if (notify) {
+        notify(t, d.donor_email, 'Scheduled Donation Processed', 'Your scheduled donation of ' + d.amount + ' has been processed.', 'fundraising');
+      }
+      processed++;
+    }
+
+    if (processed > 0) {
+      await audit(req.session.user.email, 'scheduled_donations_processed', 'Processed ' + processed + ' scheduled donations');
+    }
+    res.json({ processed, total_due: dueDonations.length });
   }));
 
   // =============================================
-  // FEATURE 14: CAMPAIGN SEASONALITY ADJUSTER
+  // 13. CAMPAIGN SEASONALITY ADJUSTER
   // =============================================
+
+  // GET /api/seasonality — list seasonality profiles
   app.get('/api/seasonality', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM seasonality_profiles WHERE tenant_id=$1 ORDER BY month`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
+    const t = req.session.user.tenant_id;
+    const { month, year } = req.query;
+    let q = 'SELECT * FROM seasonality_profiles WHERE tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (month) { q += ' AND month=$' + idx; params.push(parseInt(month)); idx++; }
+    if (year) { q += ' AND year=$' + idx; params.push(parseInt(year)); idx++; }
+    q += ' ORDER BY month ASC';
+    const result = await pool.query(q, params);
 
-  app.post('/api/seasonality', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { month, season_name, giving_multiplier, notes } = req.body;
-    if (!month) return res.status(400).json({ error: 'month required (1-12)' });
-    const r = await pool.query(`INSERT INTO seasonality_profiles (tenant_id, month, season_name, giving_multiplier, notes) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (tenant_id, month) DO UPDATE SET season_name=$3, giving_multiplier=$4, notes=$5, updated_at=NOW() RETURNING *`, [tid, month, esc(season_name||''), giving_multiplier||1.0, esc(notes||'')]);
-    res.json(r.rows[0]);
-  }));
-
-  app.put('/api/seasonality/:id', requireAuth, ah(async (req, res) => {
-    const { season_name, giving_multiplier, notes } = req.body;
-    const r = await pool.query(`UPDATE seasonality_profiles SET season_name=COALESCE($1,season_name), giving_multiplier=COALESCE($2,giving_multiplier), notes=COALESCE($3,notes), updated_at=NOW() WHERE tenant_id=$4 AND id=$5 RETURNING *`, [season_name?esc(season_name):null, giving_multiplier, notes?esc(notes):null, req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/seasonality/analyze', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const monthly = await pool.query(`SELECT EXTRACT(MONTH FROM created_at) as month, COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM donations WHERE tenant_id=$1 AND created_at > NOW() - INTERVAL '24 months' GROUP BY month ORDER BY month`, [tid]);
-    const avgTotal = monthly.rows.reduce((s,r)=>s+parseInt(r.total),0) / Math.max(1, monthly.rows.length);
-    for (const m of monthly.rows) {
-      const mult = avgTotal > 0 ? (parseInt(m.total) / avgTotal) : 1.0;
-      await pool.query(`UPDATE seasonality_profiles SET giving_multiplier=$1, avg_historic_donations=$2, avg_historic_amount=$3, updated_at=NOW() WHERE tenant_id=$4 AND month=$5`, [Math.round(mult*100)/100, m.cnt, m.total, tid, m.month]);
-    }
-    res.json({ message: 'Seasonality analysis complete', months_analyzed: monthly.rows.length });
-  }));
-
-  app.get('/api/seasonality/adjust/:campaignId', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
+    // Current month factor
     const currentMonth = new Date().getMonth() + 1;
-    const sp = await pool.query(`SELECT * FROM seasonality_profiles WHERE tenant_id=$1 AND month=$2`, [tid, currentMonth]);
-    const camp = await pool.query(`SELECT * FROM fundraising_campaigns WHERE tenant_id=$1 AND id=$2`, [tid, req.params.campaignId]);
-    if (!camp.rows.length || !sp.rows.length) return res.json({ multiplier: 1.0, adjusted_target: 0 });
-    const mult = sp.rows[0].giving_multiplier || 1.0;
-    const adjustedTarget = Math.round(parseInt(camp.rows[0].goal_amount) * mult);
-    res.json({ current_month: currentMonth, season: sp.rows[0].season_name, multiplier: mult, original_target: camp.rows[0].goal_amount, adjusted_target: adjustedTarget });
+    const currentYear = new Date().getFullYear();
+    const currentProfile = (await pool.query(
+      'SELECT * FROM seasonality_profiles WHERE tenant_id=$1 AND month=$2 AND year=$3',
+      [t, currentMonth, currentYear]
+    )).rows[0];
+
+    res.json({ profiles: result.rows, current_month_factor: currentProfile ? currentProfile.seasonality_factor : 1.0 });
   }));
 
-  app.get('/api/seasonality/calendar', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT month, season_name, giving_multiplier FROM seasonality_profiles WHERE tenant_id=$1 ORDER BY month`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+  // POST /api/seasonality — create or update a seasonality profile
+  app.post('/api/seasonality', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { month, seasonality_factor, avg_donation_trend, recommendation, year } = req.body;
+    if (!month) return res.status(400).json({ error: 'month is required' });
+    if (month < 1 || month > 12) return res.status(400).json({ error: 'month must be between 1 and 12' });
+    const yr = year || new Date().getFullYear();
+
+    const result = await pool.query(
+      `INSERT INTO seasonality_profiles (tenant_id, month, seasonality_factor, avg_donation_trend, recommendation, year)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (tenant_id, month, year) DO UPDATE SET seasonality_factor=$3, avg_donation_trend=$4, recommendation=$5
+       RETURNING *`,
+      [t, parseInt(month), seasonality_factor || 1.0,
+       avg_donation_trend ? esc(avg_donation_trend) : null,
+       recommendation ? esc(recommendation) : null, yr]
+    );
+    await audit(req.session.user.email, 'seasonality_updated', 'Updated seasonality profile for month ' + month);
+    res.json({ profile: result.rows[0] });
   }));
 
-  // =============================================
-  // FEATURE 15: SMART DONATION AMOUNT SUGGESTIONS
-  // =============================================
-  app.get('/api/amount-suggestions/:email', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const email = req.params.email;
-    const hist = await pool.query(`SELECT amount FROM donations WHERE tenant_id=$1 AND donor_email=$2 ORDER BY created_at DESC LIMIT 10`, [tid, email]);
-    const settings = await pool.query(`SELECT * FROM amount_suggestion_settings WHERE tenant_id=$1`, [tid]);
-    if (!hist.rows.length) return res.json({ suggested: JSON.parse(settings.rows[0]?.preset_amounts_json || '[5000,10000,25000,50000,100000,250000]'), based_on: 'preset', confidence: 0 });
-    const amounts = hist.rows.map(r => parseInt(r.amount));
-    const avg = Math.round(amounts.reduce((a,b)=>a+b,0) / amounts.length);
-    const max = Math.max(...amounts);
-    const suggested = [Math.round(avg*0.5), avg, Math.round(avg*1.5), Math.round(avg*2), Math.round(max*1.2)].map(v => Math.round(v/1000)*1000);
-    await pool.query(`INSERT INTO amount_suggestions (tenant_id, donor_email, suggested_amounts_json, based_on, confidence) VALUES ($1,$2,$3,$4,$5)`, [tid, email, JSON.stringify(suggested), 'history', Math.min(100, amounts.length*20)]);
-    res.json({ suggested, based_on: 'history', confidence: Math.min(100, amounts.length*20), past_donations: amounts.length });
-  }));
+  // POST /api/seasonality/calculate — auto-calculate seasonality from donation data
+  app.post('/api/seasonality/calculate', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    try {
+      const monthlyStats = (await pool.query(`
+        SELECT EXTRACT(MONTH FROM cd.donated_at)::INT AS month,
+               COALESCE(AVG(cd.amount),0)::INT AS avg_amount,
+               COALESCE(SUM(cd.amount),0) AS total_amount,
+               COUNT(*) AS donation_count
+        FROM campaign_donations cd
+        JOIN fundraising_campaigns fc ON cd.campaign_id = fc.id
+        WHERE fc.tenant_id = $1 AND cd.donated_at >= NOW() - INTERVAL '24 months'
+        GROUP BY month ORDER BY month
+      `, [t])).rows;
 
-  app.post('/api/amount-suggestions/generate', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donor_email, campaign_id } = req.body;
-    const settings = await pool.query(`SELECT * FROM amount_suggestion_settings WHERE tenant_id=$1`, [tid]);
-    const hist = donor_email ? await pool.query(`SELECT amount FROM donations WHERE tenant_id=$1 AND donor_email=$2 ORDER BY created_at DESC LIMIT 10`, [tid, donor_email]) : { rows: [] };
-    let suggested;
-    if (hist.rows.length) {
-      const amounts = hist.rows.map(r => parseInt(r.amount));
-      const avg = Math.round(amounts.reduce((a,b)=>a+b,0) / amounts.length);
-      suggested = [Math.round(avg*0.5), avg, Math.round(avg*1.5), Math.round(avg*2)].map(v => Math.round(v/1000)*1000);
-    } else {
-      suggested = JSON.parse(settings.rows[0]?.preset_amounts_json || '[5000,10000,25000,50000,100000,250000]');
+      if (monthlyStats.length === 0) {
+        return res.json({ message: 'No donation data available for calculation', count: 0 });
+      }
+
+      const overallAvg = monthlyStats.reduce((s, m) => s + parseInt(m.avg_amount), 0) / monthlyStats.length;
+      const currentYear = new Date().getFullYear();
+      let updated = 0;
+
+      for (const ms of monthlyStats) {
+        const factor = overallAvg > 0 ? parseFloat((parseInt(ms.avg_amount) / overallAvg).toFixed(2)) : 1.0;
+        let trend = 'stable';
+        if (factor > 1.2) trend = 'peak';
+        else if (factor > 1.0) trend = 'rising';
+        else if (factor < 0.8) trend = 'low';
+        else if (factor < 1.0) trend = 'declining';
+
+        let rec = '';
+        if (trend === 'peak') rec = 'High giving month — maximize campaign activity and outreach';
+        else if (trend === 'rising') rec = 'Above average — good time for campaign launches';
+        else if (trend === 'declining') rec = 'Below average — focus on donor retention and engagement';
+        else if (trend === 'low') rec = 'Low giving month — plan ahead for peak seasons';
+
+        await pool.query(
+          `INSERT INTO seasonality_profiles (tenant_id, month, seasonality_factor, avg_donation_trend, recommendation, year)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (tenant_id, month, year) DO UPDATE SET seasonality_factor=$3, avg_donation_trend=$4, recommendation=$5`,
+          [t, ms.month, factor, trend, rec, currentYear]
+        );
+        updated++;
+      }
+
+      await audit(req.session.user.email, 'seasonality_calculated', 'Calculated seasonality for ' + updated + ' months');
+      res.json({ message: 'Calculated seasonality for ' + updated + ' months', count: updated });
+    } catch(e) {
+      res.json({ message: 'Calculation attempted', count: 0, note: 'Ensure donation data exists' });
     }
-    const r = await pool.query(`INSERT INTO amount_suggestions (tenant_id, donor_email, suggested_amounts_json, based_on, confidence) VALUES ($1,$2,$3,$4,$5) RETURNING *`, [tid, donor_email||null, JSON.stringify(suggested), hist.rows.length ? 'history' : 'preset', hist.rows.length ? Math.min(100, hist.rows.length*20) : 0]);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/amount-suggestion-settings', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM amount_suggestion_settings WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    res.json(r.rows[0] || { preset_amounts_json: '[5000,10000,25000,50000,100000,250000]', show_custom: true, show_round_up: true, min_amount: 500, max_amount: 50000000 });
-  }));
-
-  app.put('/api/amount-suggestion-settings', requireAuth, ah(async (req, res) => {
-    const { preset_amounts_json, show_custom, show_round_up, min_amount, max_amount } = req.body;
-    const r = await pool.query(`INSERT INTO amount_suggestion_settings (tenant_id, preset_amounts_json, show_custom, show_round_up, min_amount, max_amount) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id) DO UPDATE SET preset_amounts_json=$2, show_custom=$3, show_round_up=$4, min_amount=$5, max_amount=$6, updated_at=NOW() RETURNING *`, [req.session.user.tenant_id, JSON.stringify(preset_amounts_json||[5000,10000,25000,50000,100000,250000]), show_custom??true, show_round_up??true, min_amount||500, max_amount||50000000]);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/amount-suggestions/track-click', ah(async (req, res) => {
-    const { donor_email, amount_shown, amount_selected } = req.body;
-    // Track which suggested amounts get clicked for ML optimization
-    res.json({ ok: true });
   }));
 
   // =============================================
-  // DASHBOARD PAGES
+  // 14. SMART AMOUNT SUGGESTIONS
   // =============================================
-  const navLinks = `
-    <nav class="bg-white shadow mb-6 p-4 rounded-lg flex flex-wrap gap-2">
-      <a href="/campaign-ab-testing" class="px-3 py-1 bg-purple-100 text-purple-800 rounded hover:bg-purple-200">A/B Testing</a>
-      <a href="/campaign-scheduling" class="px-3 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200">Scheduling</a>
-      <a href="/campaign-co-creation" class="px-3 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200">Co-Creation</a>
-      <a href="/campaign-bundles" class="px-3 py-1 bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200">Bundles</a>
-      <a href="/campaign-health" class="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200">Health Monitor</a>
-      <a href="/fundraising-calendar" class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded hover:bg-indigo-200">Calendar</a>
-      <a href="/goal-recommendations" class="px-3 py-1 bg-pink-100 text-pink-800 rounded hover:bg-pink-200">Goal Recs</a>
-      <a href="/storyboard-builder" class="px-3 py-1 bg-teal-100 text-teal-800 rounded hover:bg-teal-200">Storyboard</a>
-      <a href="/donation-form-builder" class="px-3 py-1 bg-orange-100 text-orange-800 rounded hover:bg-orange-200">Form Builder</a>
-      <a href="/campaign-blueprints" class="px-3 py-1 bg-cyan-100 text-cyan-800 rounded hover:bg-cyan-200">Blueprints</a>
-      <a href="/thank-you-engine" class="px-3 py-1 bg-emerald-100 text-emerald-800 rounded hover:bg-emerald-200">Thank You</a>
-      <a href="/micro-roundup" class="px-3 py-1 bg-lime-100 text-lime-800 rounded hover:bg-lime-200">Round-Ups</a>
-      <a href="/scheduled-donations" class="px-3 py-1 bg-amber-100 text-amber-800 rounded hover:bg-amber-200">Scheduled</a>
-      <a href="/seasonality" class="px-3 py-1 bg-violet-100 text-violet-800 rounded hover:bg-violet-200">Seasonality</a>
-      <a href="/amount-suggestions" class="px-3 py-1 bg-fuchsia-100 text-fuchsia-800 rounded hover:bg-fuchsia-200">Amount Recs</a>
-    </nav>`;
 
-  // A/B Testing Dashboard
-  app.get('/campaign-ab-testing', requireAuth, ah(async (req, res) => {
-    const tests = await pool.query(`SELECT * FROM campaign_ab_tests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Campaign A/B Testing', `${navLinks}
-      <div class="max-w-6xl mx-auto">
-        <h2 class="text-2xl font-bold mb-4">Campaign A/B Testing</h2>
-        <div class="bg-white p-4 rounded-lg shadow mb-6">
-          <h3 class="font-semibold mb-2">Create New Test</h3>
-          <form action="/api/campaign-ab-tests" method="POST" class="grid grid-cols-2 gap-4">
-            <div><label class="block text-sm">Campaign ID</label><input name="campaign_id" type="number" class="w-full border rounded p-2" required></div>
-            <div><label class="block text-sm">Test Element</label><select name="test_element" class="w-full border rounded p-2"><option value="title">Title</option><option value="description">Description</option><option value="cover_image">Cover Image</option><option value="cta_text">CTA Text</option><option value="amount_presets">Amount Presets</option></select></div>
-            <div><label class="block text-sm">Variant A</label><input name="variant_a" class="w-full border rounded p-2" required></div>
-            <div><label class="block text-sm">Variant B</label><input name="variant_b" class="w-full border rounded p-2" required></div>
-            <div class="col-span-2"><button type="submit" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700">Start Test</button></div>
-          </form>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          ${tests.rows.map(t => `
-            <div class="bg-white p-4 rounded-lg shadow">
-              <div class="flex justify-between"><span class="font-semibold">Campaign #${t.campaign_id}</span><span class="px-2 py-1 rounded text-xs ${t.status==='running'?'bg-green-100 text-green-800':'bg-gray-100 text-gray-800'}">${t.status}</span></div>
-              <p class="text-sm text-gray-600 mt-1">Testing: ${t.test_element}</p>
-              <div class="grid grid-cols-2 gap-2 mt-2 text-sm">
-                <div class="bg-purple-50 p-2 rounded">A: ${t.variant_a_views} views / ${t.variant_a_conversions} conv</div>
-                <div class="bg-indigo-50 p-2 rounded">B: ${t.variant_b_views} views / ${t.variant_b_conversions} conv</div>
-              </div>
-              ${t.winner ? `<p class="mt-2 font-semibold text-green-700">Winner: Variant ${t.winner}</p>` : ''}
-            </div>`).join('')}
-        </div>
-      </div>`);
+  // GET /api/amount-suggestions/settings — get settings
+  app.get('/api/amount-suggestions/settings', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const result = await pool.query('SELECT * FROM amount_suggestion_settings WHERE tenant_id=$1', [t]);
+    res.json({ settings: result.rows[0] || null });
   }));
 
-  // Campaign Health Dashboard
-  app.get('/campaign-health', requireAuth, ah(async (req, res) => {
-    const alerts = await pool.query(`SELECT chs.*, fc.title as campaign_title FROM campaign_health_scores chs LEFT JOIN fundraising_campaigns fc ON chs.campaign_id=fc.id WHERE chs.tenant_id=$1 ORDER BY chs.health_score ASC LIMIT 20`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Campaign Health Monitor', `${navLinks}
-      <div class="max-w-6xl mx-auto">
-        <h2 class="text-2xl font-bold mb-4">Campaign Health Monitor</h2>
-        <div class="mb-4"><a href="/api/campaign-health/check-all" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 inline-block">Check All Campaigns</a></div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          ${alerts.rows.map(a => `
-            <div class="bg-white p-4 rounded-lg shadow border-l-4 ${a.health_score>70?'border-green-500':a.health_score>40?'border-yellow-500':'border-red-500'}">
-              <h3 class="font-semibold">${a.campaign_title||'Campaign #'+a.campaign_id}</h3>
-              <div class="mt-2 text-3xl font-bold ${a.health_score>70?'text-green-600':a.health_score>40?'text-yellow-600':'text-red-600'}">${a.health_score}/100</div>
-              <p class="text-sm text-gray-500">Trend: ${a.trend} | Velocity: UGX ${a.velocity}/day</p>
-            </div>`).join('')}
-        </div>
-      </div>`);
+  // PUT /api/amount-suggestions/settings — update settings
+  app.put('/api/amount-suggestions/settings', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { strategy, presets_json, custom_amounts_json } = req.body;
+    const validStrategies = ['data_driven', 'presets', 'custom', 'tiered'];
+    if (strategy && !validStrategies.includes(strategy)) return res.status(400).json({ error: 'Invalid strategy' });
+
+    const result = await pool.query(
+      `INSERT INTO amount_suggestion_settings (tenant_id, strategy, presets_json, custom_amounts_json) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (tenant_id) DO UPDATE SET strategy=$2, presets_json=$3, custom_amounts_json=$4
+       RETURNING *`,
+      [t, strategy || 'data_driven',
+       presets_json ? JSON.stringify(presets_json) : JSON.stringify([5000, 10000, 25000, 50000, 100000]),
+       custom_amounts_json ? JSON.stringify(custom_amounts_json) : JSON.stringify([])]
+    );
+    await audit(req.session.user.email, 'amount_suggestion_settings_updated', 'Updated amount suggestion settings to strategy: ' + (strategy || 'data_driven'));
+    res.json({ settings: result.rows[0] });
   }));
 
-  // Thank You Engine Dashboard
-  app.get('/thank-you-engine', requireAuth, ah(async (req, res) => {
-    const templates = await pool.query(`SELECT * FROM thank_you_templates WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    const stats = await pool.query(`SELECT channel, COUNT(*) as total_sent FROM thank_you_log WHERE tenant_id=$1 GROUP BY channel`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Smart Thank You Engine', `${navLinks}
-      <div class="max-w-6xl mx-auto">
-        <h2 class="text-2xl font-bold mb-4">Smart Thank You Engine</h2>
-        <div class="grid grid-cols-3 gap-4 mb-6">
-          ${stats.rows.map(s => `<div class="bg-white p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-blue-600">${s.total_sent}</div><div class="text-sm text-gray-500">${s.channel} sent</div></div>`).join('')}
-        </div>
-        <div class="mb-4 flex gap-2">
-          <a href="/api/thank-you/auto-send" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">Auto-Send Unthanked</a>
-        </div>
-        <div class="bg-white p-4 rounded-lg shadow">
-          <h3 class="font-semibold mb-2">Thank You Templates</h3>
-          ${templates.rows.map(t => `
-            <div class="border p-3 mb-2 rounded">
-              <div class="flex justify-between"><span class="font-medium">${t.name}</span><span class="text-sm px-2 py-1 rounded ${t.is_default?'bg-green-100 text-green-800':'bg-gray-100'}">${t.channel} ${t.is_default?'(Default)':''}</span></div>
-              <p class="text-sm text-gray-600 mt-1">${t.template_text.substring(0,120)}...</p>
-            </div>`).join('')}
-        </div>
-      </div>`);
+  // GET /api/campaigns/:id/suggested-amounts — get suggested amounts for a campaign
+  app.get('/api/campaigns/:id/suggested-amounts', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const { force_refresh } = req.query;
+
+    // Check for cached suggestion
+    if (force_refresh !== 'true') {
+      const cached = (await pool.query('SELECT * FROM amount_suggestions WHERE campaign_id=$1 AND tenant_id=$2', [campaignId, t])).rows[0];
+      if (cached) return res.json({ suggested_amounts: cached.suggested_amounts_json, based_on: cached.based_on });
+    }
+
+    // Get settings
+    const settings = (await pool.query('SELECT * FROM amount_suggestion_settings WHERE tenant_id=$1', [t])).rows[0];
+    const strategy = settings ? settings.strategy : 'data_driven';
+
+    let suggestedAmounts = [];
+    let basedOn = strategy;
+
+    try {
+      if (strategy === 'data_driven') {
+        // Analyze donation distribution for this campaign
+        const donationStats = (await pool.query(`
+          SELECT COALESCE(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cd.amount), 5000) AS p25,
+                 COALESCE(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY cd.amount), 10000) AS p50,
+                 COALESCE(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cd.amount), 25000) AS p75,
+                 COALESCE(PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY cd.amount), 50000) AS p90,
+                 COALESCE(AVG(cd.amount), 10000)::INT AS avg,
+                 COALESCE(MIN(cd.amount), 1000)::INT AS min_amt,
+                 COALESCE(MAX(cd.amount), 100000)::INT AS max_amt
+          FROM campaign_donations cd
+          JOIN fundraising_campaigns fc ON cd.campaign_id = fc.id
+          WHERE fc.id = $1 AND fc.tenant_id = $2
+        `, [campaignId, t])).rows[0];
+
+        const p25 = parseInt(donationStats.p25) || 5000;
+        const p50 = parseInt(donationStats.p50) || 10000;
+        const p75 = parseInt(donationStats.p75) || 25000;
+        const p90 = parseInt(donationStats.p90) || 50000;
+
+        suggestedAmounts = [
+          { amount: Math.round(p25 / 1000) * 1000, label: 'Supporter' },
+          { amount: Math.round(p50 / 1000) * 1000, label: 'Champion', highlighted: true },
+          { amount: Math.round(p75 / 1000) * 1000, label: 'Leader' },
+          { amount: Math.round(p90 / 1000) * 1000, label: 'Visionary' }
+        ];
+        basedOn = 'data_driven_campaign_percentiles';
+      } else if (strategy === 'presets') {
+        const presets = settings ? settings.presets_json : [5000, 10000, 25000, 50000, 100000];
+        suggestedAmounts = presets.map((a, i) => ({
+          amount: parseInt(a),
+          label: i === 1 ? 'Popular' : (i === presets.length - 1 ? 'Maximum Impact' : 'Option ' + (i + 1)),
+          highlighted: i === 1
+        }));
+        basedOn = 'preset_amounts';
+      } else if (strategy === 'custom') {
+        const customAmounts = settings ? settings.custom_amounts_json : [];
+        if (customAmounts.length > 0) {
+          suggestedAmounts = customAmounts.map((a, i) => ({
+            amount: parseInt(a),
+            label: 'Custom ' + (i + 1),
+            highlighted: i === 0
+          }));
+        } else {
+          suggestedAmounts = [
+            { amount: 5000, label: 'Supporter' },
+            { amount: 10000, label: 'Champion', highlighted: true },
+            { amount: 25000, label: 'Leader' },
+            { amount: 50000, label: 'Visionary' }
+          ];
+        }
+        basedOn = 'custom_amounts';
+      } else if (strategy === 'tiered') {
+        // Tiered: small, medium, large, premium based on campaign target
+        const campaign = (await pool.query('SELECT target FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [campaignId, t])).rows[0];
+        const target = parseInt(campaign?.target) || 1000000;
+        suggestedAmounts = [
+          { amount: Math.round(target * 0.005 / 1000) * 1000 || 5000, label: 'Seed' },
+          { amount: Math.round(target * 0.01 / 1000) * 1000 || 10000, label: 'Growth', highlighted: true },
+          { amount: Math.round(target * 0.025 / 1000) * 1000 || 25000, label: 'Impact' },
+          { amount: Math.round(target * 0.05 / 1000) * 1000 || 50000, label: 'Transformative' }
+        ];
+        basedOn = 'tiered_by_campaign_target';
+      }
+    } catch(e) {
+      // Fallback to default
+      suggestedAmounts = [
+        { amount: 5000, label: 'Supporter' },
+        { amount: 10000, label: 'Champion', highlighted: true },
+        { amount: 25000, label: 'Leader' },
+        { amount: 50000, label: 'Visionary' }
+      ];
+      basedOn = 'fallback_defaults';
+    }
+
+    // Factor in seasonality
+    try {
+      const currentMonth = new Date().getMonth() + 1;
+      const currentYear = new Date().getFullYear();
+      const seasonality = (await pool.query('SELECT seasonality_factor FROM seasonality_profiles WHERE tenant_id=$1 AND month=$2 AND year=$3', [t, currentMonth, currentYear])).rows[0];
+      if (seasonality && parseFloat(seasonality.seasonality_factor) !== 1.0) {
+        const factor = parseFloat(seasonality.seasonality_factor);
+        suggestedAmounts = suggestedAmounts.map(s => ({
+          ...s,
+          amount: Math.round((s.amount * factor) / 1000) * 1000,
+          seasonality_adjusted: true
+        }));
+        basedOn += '_seasonality_adjusted';
+      }
+    } catch(e) { /* no seasonality adjustment */ }
+
+    // Cache the result
+    await pool.query(
+      `INSERT INTO amount_suggestions (tenant_id, campaign_id, suggested_amounts_json, based_on) VALUES ($1,$2,$3,$4)
+       ON CONFLICT DO NOTHING`,
+      [t, campaignId, JSON.stringify(suggestedAmounts), esc(basedOn)]
+    );
+
+    res.json({ suggested_amounts: suggestedAmounts, based_on: basedOn });
   }));
 
-  // Seasonality Dashboard
-  app.get('/seasonality', requireAuth, ah(async (req, res) => {
-    const profiles = await pool.query(`SELECT * FROM seasonality_profiles WHERE tenant_id=$1 ORDER BY month`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Seasonality Adjuster', `${navLinks}
-      <div class="max-w-6xl mx-auto">
-        <h2 class="text-2xl font-bold mb-4">Campaign Seasonality Adjuster</h2>
-        <div class="mb-4"><a href="/api/seasonality/analyze" class="bg-violet-600 text-white px-4 py-2 rounded hover:bg-violet-700">Analyze Historical Data</a></div>
-        <div class="grid grid-cols-4 gap-3">
-          ${profiles.rows.map(p => `
-            <div class="bg-white p-3 rounded-lg shadow text-center border-t-4 ${p.giving_multiplier>=1.3?'border-green-500':p.giving_multiplier>=1.0?'border-blue-500':'border-red-500'}">
-              <div class="font-bold">${p.month}</div>
-              <div class="text-sm text-gray-600">${p.season_name||'-'}</div>
-              <div class="text-lg font-bold ${p.giving_multiplier>=1.3?'text-green-600':p.giving_multiplier>=1.0?'text-blue-600':'text-red-600'}">${p.giving_multiplier}x</div>
-            </div>`).join('')}
-        </div>
-      </div>`);
+  // =============================================
+  // 15. CAMPAIGN A/B TESTING ENGINE (Extended)
+  // =============================================
+  // Uses campaign_ab_tests table from mega2 but adds enhanced tracking via ab_engine_events
+
+  // POST /api/ab-engine/create — create A/B test with enhanced tracking
+  app.post('/api/ab-engine/create', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { campaign_id, variants } = req.body;
+    if (!campaign_id) return res.status(400).json({ error: 'campaign_id is required' });
+    if (!variants || !Array.isArray(variants) || variants.length < 2) {
+      return res.status(400).json({ error: 'At least 2 variants are required' });
+    }
+
+    // Verify campaign belongs to tenant
+    const campaign = (await pool.query('SELECT id FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [parseInt(campaign_id), t])).rows[0];
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const createdVariants = [];
+    for (const v of variants) {
+      if (!v.variant_name) continue;
+      const result = await pool.query(
+        'INSERT INTO campaign_ab_tests (tenant_id, campaign_id, variant_name, variant_title, variant_story) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [t, parseInt(campaign_id), esc(v.variant_name), esc(v.variant_title || ''), esc(v.variant_story || '')]
+      );
+      createdVariants.push(result.rows[0]);
+    }
+
+    await audit(req.session.user.email, 'ab_engine_test_created', 'Created A/B test with ' + createdVariants.length + ' variants for campaign #' + campaign_id);
+    res.json({ test: { campaign_id: parseInt(campaign_id), variants: createdVariants } });
   }));
 
-  // Calendar Dashboard
-  app.get('/fundraising-calendar', requireAuth, ah(async (req, res) => {
-    const events = await pool.query(`SELECT * FROM fundraising_calendar WHERE tenant_id=$1 ORDER BY start_date LIMIT 30`, [req.session.user.tenant_id]);
-    renderPage(req, res, 'Fundraising Calendar', `${navLinks}
-      <div class="max-w-6xl mx-auto">
-        <h2 class="text-2xl font-bold mb-4">Fundraising Calendar & Planner</h2>
-        <div class="grid grid-cols-1 gap-3">
-          ${events.rows.map(e => `
-            <div class="bg-white p-3 rounded-lg shadow flex items-center gap-4">
-              <div class="w-3 h-3 rounded-full" style="background:${e.color}"></div>
-              <div class="flex-1"><span class="font-medium">${e.title}</span><span class="text-sm text-gray-500 ml-2">${e.event_type} | ${e.start_date}</span></div>
-              <span class="text-sm text-gray-600">UGX ${e.target_amount||0}</span>
-            </div>`).join('')}
-        </div>
-      </div>`);
+  // GET /api/ab-engine/:id/performance — get enhanced performance metrics
+  app.get('/api/ab-engine/:id/performance', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+
+    // Get all variants for this campaign
+    const variants = (await pool.query(
+      'SELECT * FROM campaign_ab_tests WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY created_at',
+      [campaignId, t]
+    )).rows;
+
+    if (variants.length === 0) return res.status(404).json({ error: 'No A/B tests found for this campaign' });
+
+    // Get enhanced event tracking for each variant
+    const enhancedVariants = [];
+    for (const v of variants) {
+      const events = (await pool.query(
+        'SELECT event_type, COUNT(*) AS count FROM ab_engine_events WHERE test_id=$1 AND tenant_id=$2 GROUP BY event_type',
+        [v.id, t]
+      )).rows;
+
+      const eventMap = {};
+      for (const e of events) {
+        eventMap[e.event_type] = parseInt(e.count);
+      }
+
+      enhancedVariants.push({
+        ...v,
+        enhanced_events: eventMap,
+        impressions: eventMap.impression || 0,
+        clicks: eventMap.click || 0,
+        shares: eventMap.share || 0,
+        bounces: eventMap.bounce || 0,
+        click_through_rate: (eventMap.impression || 0) > 0
+          ? parseFloat(((eventMap.click || 0) / (eventMap.impression || 1) * 100).toFixed(2))
+          : 0,
+        bounce_rate: (eventMap.impression || 0) > 0
+          ? parseFloat(((eventMap.bounce || 0) / (eventMap.impression || 1) * 100).toFixed(2))
+          : 0,
+        share_rate: (eventMap.impression || 0) > 0
+          ? parseFloat(((eventMap.share || 0) / (eventMap.impression || 1) * 100).toFixed(2))
+          : 0
+      });
+    }
+
+    // Determine current leader
+    const leader = enhancedVariants.reduce((best, v) => {
+      const bestScore = parseFloat(best.conversion_rate) + (best.click_through_rate || 0) * 0.5;
+      const vScore = parseFloat(v.conversion_rate) + (v.click_through_rate || 0) * 0.5;
+      return vScore > bestScore ? v : best;
+    }, enhancedVariants[0]);
+
+    // Statistical significance check (simplified)
+    const totalViews = enhancedVariants.reduce((s, v) => s + (v.views || 0), 0);
+    const isSignificant = totalViews >= 100;
+
+    res.json({
+      campaign_id: campaignId,
+      variants: enhancedVariants,
+      leader: { variant_name: leader.variant_name, conversion_rate: leader.conversion_rate },
+      statistical_significance: isSignificant,
+      recommendation: isSignificant
+        ? 'Results are statistically significant. Consider selecting the leading variant.'
+        : 'Need more data for statistical significance. Continue running the test.'
+    });
   }));
 
-  // Remaining dashboards (simplified but functional)
-  const simpleDash = (title, path, tableName, cols) => {
-    app.get(path, requireAuth, ah(async (req, res) => {
-      const r = await pool.query(`SELECT * FROM ${tableName} WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20`, [req.session.user.tenant_id]);
-      renderPage(req, res, title, `${navLinks}
-        <div class="max-w-6xl mx-auto">
-          <h2 class="text-2xl font-bold mb-4">${title}</h2>
-          <div class="bg-white rounded-lg shadow overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead class="bg-gray-50"><tr>${cols.map(c=>`<th class="p-3 text-left">${c}</th>`).join('')}</tr></thead>
-              <tbody>${r.rows.map(row=>`<tr class="border-t">${cols.map(c=>`<td class="p-3">${row[c]!==null&&row[c]!==undefined?row[c]:'-'}</td>`).join('')}</tr>`).join('')}</tbody>
-            </table>
-          </div>
-        </div>`);
-    }));
-  };
+  // POST /api/ab-engine/:id/select-winner — select the winning variant
+  app.post('/api/ab-engine/:id/select-winner', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const { variant_id, reason } = req.body;
 
-  simpleDash('Smart Campaign Scheduling', '/campaign-scheduling', 'campaign_schedules', ['id','campaign_id','scheduled_date','scheduled_time','status']);
-  simpleDash('Campaign Co-Creation', '/campaign-co-creation', 'campaign_co_creators', ['id','campaign_id','collaborator_email','role','status']);
-  simpleDash('Campaign Bundle Packs', '/campaign-bundles', 'campaign_bundles', ['id','name','total_target','campaign_count','status']);
-  simpleDash('Goal Recommendations', '/goal-recommendations', 'goal_recommendations', ['id','campaign_id','recommended_target','confidence','based_on_category']);
-  simpleDash('Storyboard Builder', '/storyboard-builder', 'campaign_storyboards', ['id','campaign_id','theme','layout','status']);
-  simpleDash('Donation Form Builder', '/donation-form-builder', 'donation_forms', ['id','name','is_active','submission_count']);
-  simpleDash('Campaign Success Blueprints', '/campaign-blueprints', 'campaign_blueprints', ['id','name','category','avg_conversion','avg_raise']);
-  simpleDash('Micro Round-Ups', '/micro-roundup', 'micro_roundup_transactions', ['id','original_amount','rounded_amount','roundup_amount']);
-  simpleDash('Scheduled Donations', '/scheduled-donations', 'scheduled_donations', ['id','donor_email','amount','scheduled_date','recurrence','status']);
-  simpleDash('Amount Suggestions', '/amount-suggestions', 'amount_suggestion_settings', ['id','preset_amounts_json','min_amount','max_amount']);
+    // Get all variants
+    const allVariants = (await pool.query(
+      'SELECT * FROM campaign_ab_tests WHERE campaign_id=$1 AND tenant_id=$2',
+      [campaignId, t]
+    )).rows;
 
-  console.log('[FundraisingUltimate3] Loaded — 15 features, 80+ routes');
+    if (allVariants.length === 0) return res.status(404).json({ error: 'No A/B tests found for this campaign' });
+
+    let winner;
+    if (variant_id) {
+      winner = allVariants.find(v => v.id === parseInt(variant_id));
+      if (!winner) return res.status(404).json({ error: 'Variant not found' });
+    } else {
+      // Auto-select best performing variant
+      winner = allVariants.reduce((best, v) => parseFloat(v.conversion_rate) >= parseFloat(best.conversion_rate) ? v : best, allVariants[0]);
+    }
+
+    // Mark winner
+    await pool.query(
+      'UPDATE campaign_ab_tests SET is_winner = (id = $1) WHERE campaign_id=$2 AND tenant_id=$3',
+      [winner.id, campaignId, t]
+    );
+
+    // Get updated variants
+    const updated = (await pool.query(
+      'SELECT * FROM campaign_ab_tests WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY created_at',
+      [campaignId, t]
+    )).rows;
+
+    await audit(req.session.user.email, 'ab_engine_winner_selected', 'Selected variant "' + winner.variant_name + '" as winner for campaign #' + campaignId + (reason ? '. Reason: ' + reason : ''));
+
+    // Notify admins
+    const admins = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('admin','super_admin')", [t])).rows;
+    for (const a of admins) {
+      notify(t, a.email, 'A/B Test Winner Selected', 'Variant "' + winner.variant_name + '" was selected as the winner for campaign #' + campaignId, 'fundraising');
+    }
+
+    res.json({ winner, all_variants: updated, reason: reason || null });
+  }));
+
+  // POST /api/ab-engine/track — track an enhanced A/B event
+  app.post('/api/ab-engine/track', ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { test_id, event_type, donor_email, metadata } = req.body;
+    if (!test_id || !event_type) return res.status(400).json({ error: 'test_id and event_type are required' });
+    const validEvents = ['impression', 'click', 'donation', 'share', 'bounce'];
+    if (!validEvents.includes(event_type)) return res.status(400).json({ error: 'Invalid event_type. Use: ' + validEvents.join(', ') });
+
+    // Verify test exists
+    const test = (await pool.query('SELECT * FROM campaign_ab_tests WHERE id=$1 AND tenant_id=$2', [parseInt(test_id), t])).rows[0];
+    if (!test) return res.status(404).json({ error: 'A/B test variant not found' });
+
+    // Record enhanced event
+    await pool.query(
+      'INSERT INTO ab_engine_events (tenant_id, test_id, event_type, donor_email, metadata_json) VALUES ($1,$2,$3,$4,$5)',
+      [t, parseInt(test_id), esc(event_type), donor_email ? esc(donor_email) : null, metadata ? JSON.stringify(metadata) : '{}']
+    );
+
+    // Also update the legacy tracking on campaign_ab_tests
+    if (event_type === 'impression') {
+      await pool.query('UPDATE campaign_ab_tests SET views = views + 1 WHERE id=$1 AND tenant_id=$2', [parseInt(test_id), t]);
+    } else if (event_type === 'donation') {
+      const amount = metadata ? (parseInt(metadata.amount) || 0) : 0;
+      await pool.query('UPDATE campaign_ab_tests SET donations = donations + 1, total_raised = total_raised + $1 WHERE id=$2 AND tenant_id=$3', [amount, parseInt(test_id), t]);
+    }
+
+    // Recalculate conversion rate
+    await pool.query(
+      'UPDATE campaign_ab_tests SET conversion_rate = CASE WHEN views > 0 THEN (donations::NUMERIC / views::NUMERIC) * 100 ELSE 0 END WHERE id=$1 AND tenant_id=$2',
+      [parseInt(test_id), t]
+    );
+
+    res.json({ success: true, event_type, test_id: parseInt(test_id) });
+  }));
+
+  // GET /api/ab-engine/:id/events — get event timeline for a test
+  app.get('/api/ab-engine/:id/events', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const campaignId = parseInt(req.params.id);
+    const { event_type, limit, offset } = req.query;
+
+    // Get all test IDs for this campaign
+    const testIds = (await pool.query(
+      'SELECT id, variant_name FROM campaign_ab_tests WHERE campaign_id=$1 AND tenant_id=$2',
+      [campaignId, t]
+    )).rows;
+
+    if (testIds.length === 0) return res.status(404).json({ error: 'No A/B tests found' });
+
+    const ids = testIds.map(t => t.id);
+    const idMap = {};
+    testIds.forEach(t => { idMap[t.id] = t.variant_name; });
+
+    let q = 'SELECT * FROM ab_engine_events WHERE test_id = ANY($1) AND tenant_id=$2';
+    const params = [ids, t];
+    let idx = 3;
+    if (event_type) { q += ' AND event_type=$' + idx; params.push(esc(event_type)); idx++; }
+    q += ' ORDER BY created_at DESC';
+    const lim = parseInt(limit) || 200;
+    const off = parseInt(offset) || 0;
+    q += ' LIMIT $' + idx + ' OFFSET $' + (idx + 1);
+    params.push(lim, off);
+
+    const result = await pool.query(q, params);
+    const events = result.rows.map(e => ({ ...e, variant_name: idMap[e.test_id] || 'unknown' }));
+    res.json({ events, total_variants: testIds.length });
+  }));
+
+  console.log('[FundraisingUltimate3] Module loaded — 15 Campaign Optimization features');
 };

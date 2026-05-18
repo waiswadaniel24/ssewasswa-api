@@ -316,37 +316,29 @@ module.exports = function staffAccessControl(app, db, pool, renderPage, esc) {
       console.log('[StaffAccessControl] Migrations applied successfully (' + migrations.length + ' statements)');
 
       // Seed default roles if they don't exist (try/catch for safety)
-      // Check for a real tenant to avoid FK violation on tenant_id=0
-      return pool.query("SELECT id FROM tenants LIMIT 1").then(function(tr) {
-        var seedTid = tr.rows[0] ? tr.rows[0].id : 0;
-        if (!seedTid) {
-          console.warn('[StaffAccessControl] Seed skipped (no tenants exist yet)');
-          return;
+      return pool.query("SELECT COUNT(*)::int as cnt FROM role_permissions WHERE tenant_id = 0").then(function(r) {
+        if (r.rows[0].cnt === 0) {
+          var defaultRoles = [
+            { role_name: 'head_teacher', permissions: JSON.stringify({ Students: ['view','create','edit','delete','export'], Academics: ['view','create','edit','export'], Attendance: ['view','create','edit','export'], Reports: ['view','export'], Exams: ['view','create','edit','export'] }) },
+            { role_name: 'bursar', permissions: JSON.stringify({ Fees: ['view','create','edit','export'], Finance: ['view','create','edit','export'], Reports: ['view','export'], Students: ['view'] }) },
+            { role_name: 'teacher', permissions: JSON.stringify({ Students: ['view'], Attendance: ['view','create','edit'], Academics: ['view','create','edit'], Exams: ['view','create','edit'], Reports: ['view'] }) },
+            { role_name: 'receptionist', permissions: JSON.stringify({ Students: ['view','create'], Communications: ['view','create'], Attendance: ['view'] }) },
+            { role_name: 'data_entry', permissions: JSON.stringify({ Students: ['view','create','edit'], Attendance: ['view','create','edit'], Fees: ['view','create'] }) },
+            { role_name: 'viewer', permissions: JSON.stringify({ Students: ['view'], Reports: ['view'] }) }
+          ];
+          var seedChain = Promise.resolve();
+          defaultRoles.forEach(function(dr) {
+            seedChain = seedChain.then(function() {
+              return pool.query(
+                'INSERT INTO role_permissions (tenant_id, role_name, permissions) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+                [0, dr.role_name, dr.permissions]
+              );
+            });
+          });
+          return seedChain.then(function() {
+            console.log('[StaffAccessControl] Default role templates seeded');
+          });
         }
-        return pool.query("SELECT COUNT(*)::int as cnt FROM role_permissions WHERE tenant_id = $1", [seedTid]).then(function(r) {
-          if (r.rows[0].cnt === 0) {
-            var defaultRoles = [
-              { role_name: 'head_teacher', permissions: JSON.stringify({ Students: ['view','create','edit','delete','export'], Academics: ['view','create','edit','export'], Attendance: ['view','create','edit','export'], Reports: ['view','export'], Exams: ['view','create','edit','export'] }) },
-              { role_name: 'bursar', permissions: JSON.stringify({ Fees: ['view','create','edit','export'], Finance: ['view','create','edit','export'], Reports: ['view','export'], Students: ['view'] }) },
-              { role_name: 'teacher', permissions: JSON.stringify({ Students: ['view'], Attendance: ['view','create','edit'], Academics: ['view','create','edit'], Exams: ['view','create','edit'], Reports: ['view'] }) },
-              { role_name: 'receptionist', permissions: JSON.stringify({ Students: ['view','create'], Communications: ['view','create'], Attendance: ['view'] }) },
-              { role_name: 'data_entry', permissions: JSON.stringify({ Students: ['view','create','edit'], Attendance: ['view','create','edit'], Fees: ['view','create'] }) },
-              { role_name: 'viewer', permissions: JSON.stringify({ Students: ['view'], Reports: ['view'] }) }
-            ];
-            var seedChain = Promise.resolve();
-            defaultRoles.forEach(function(dr) {
-              seedChain = seedChain.then(function() {
-                return pool.query(
-                  'INSERT INTO role_permissions (tenant_id, role_name, permissions) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-                  [seedTid, dr.role_name, dr.permissions]
-                );
-              });
-            });
-            return seedChain.then(function() {
-              console.log('[StaffAccessControl] Default role templates seeded for tenant ' + seedTid);
-            });
-          }
-        });
       });
     }).catch(function(err) {
       console.error('[StaffAccessControl] Migration error:', err.message);

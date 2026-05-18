@@ -353,7 +353,7 @@ module.exports = function volunteerManager(app, db, pool, renderPage, esc) {
       await c.query('CREATE INDEX IF NOT EXISTS idx_vol_email ON volunteers(tenant_id, email)');
       await c.query('CREATE INDEX IF NOT EXISTS idx_vol_phone ON volunteers(tenant_id, phone)');
       await c.query('CREATE INDEX IF NOT EXISTS idx_vol_joined ON volunteers(tenant_id, joined_date)');
-      try { await c.query('CREATE INDEX IF NOT EXISTS idx_vol_skills ON volunteers USING gin(skills)'); } catch(e) {}
+      await c.query('CREATE INDEX IF NOT EXISTS idx_vol_skills ON volunteers USING gin(tenant_id, skills)');
       await c.query('CREATE INDEX IF NOT EXISTS idx_ve_tenant ON volunteer_events(tenant_id)');
       await c.query('CREATE INDEX IF NOT EXISTS idx_ve_status ON volunteer_events(tenant_id, status)');
       await c.query('CREATE INDEX IF NOT EXISTS idx_ve_type ON volunteer_events(tenant_id, event_type)');

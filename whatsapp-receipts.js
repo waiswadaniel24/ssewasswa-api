@@ -1608,8 +1608,8 @@ Contact: {{school_phone}}`
 
     // Update the old log entry status
     await pool.query(
-      `UPDATE whatsapp_receipt_log SET status = 'sent', error_message = NULL, sent_at = NOW(), sent_by = $1 WHERE id = $2`,
-      [uid, logId]
+      `UPDATE whatsapp_receipt_log SET status = 'sent', error_message = NULL, sent_at = NOW(), sent_by = $1 WHERE id = $2 AND tenant_id = $3`,
+      [uid, logId, tid]
     );
 
     // Log new entry
@@ -1873,8 +1873,8 @@ Contact: {{school_phone}}`
 
     // Set this as default
     await pool.query(
-      `UPDATE whatsapp_templates SET is_default = true, is_active = true, updated_at = NOW() WHERE id = $1`,
-      [tmplId]
+      `UPDATE whatsapp_templates SET is_default = true, is_active = true, updated_at = NOW() WHERE id = $1 AND tenant_id = $2`,
+      [tmplId, tid]
     );
 
     res.json({ ok: true });

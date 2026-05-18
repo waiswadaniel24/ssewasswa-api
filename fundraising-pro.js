@@ -52,7 +52,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   async function checkMilestones(campaignId, tenantId) {
     try {
-      const camp = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised FROM fundraising_campaigns c WHERE c.id=$1', [campaignId])).rows[0];
+      const camp = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id AND tenant_id=c.tenant_id) as raised FROM fundraising_campaigns c WHERE c.id=$1', [campaignId])).rows[0];
       if (!camp || !camp.target || camp.target <= 0) return;
 
       const pct = Math.round((parseInt(camp.raised) / parseInt(camp.target)) * 100);
@@ -61,7 +61,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
       for (const m of milestones) {
         if (pct >= m) {
-          const exists = (await pool.query('SELECT id FROM campaign_milestones WHERE campaign_id=$1 AND percentage=$2', [campaignId, m])).rows[0];
+          const exists = (await pool.query('SELECT id FROM campaign_milestones WHERE campaign_id=$1 AND percentage=$2 AND tenant_id=$3', [campaignId, m, tenantId])).rows[0];
           if (!exists) {
             await pool.query('INSERT INTO campaign_milestones(tenant_id,campaign_id,milestone_type,percentage,message) VALUES($1,$2,$3,$4,$5)',
               [tenantId, campaignId, 'percentage', m, labels[m] + ' - ' + m + '% of goal reached!']);
@@ -78,7 +78,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
             // If 100%, auto-close campaign
             if (m === 100) {
-              await pool.query("UPDATE fundraising_campaigns SET status='completed' WHERE id=$1", [campaignId]);
+              await pool.query("UPDATE fundraising_campaigns SET status='completed' WHERE id=$1 AND tenant_id=$2", [campaignId, tenantId]);
             }
           }
         }
@@ -91,18 +91,18 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   async function processMatchingDonation(campaignId, tenantId, donationAmount) {
     try {
-      const matches = (await pool.query("SELECT * FROM matching_donations WHERE campaign_id=$1 AND status='active' AND matched_so_far < max_amount AND (start_date IS NULL OR start_date <= CURRENT_DATE) AND (end_date IS NULL OR end_date >= CURRENT_DATE)", [campaignId])).rows;
+      const matches = (await pool.query("SELECT * FROM matching_donations WHERE campaign_id=$1 AND tenant_id=$2 AND status='active' AND matched_so_far < max_amount AND (start_date IS NULL OR start_date <= CURRENT_DATE) AND (end_date IS NULL OR end_date >= CURRENT_DATE)", [campaignId, tenantId])).rows;
       for (const match of matches) {
         const remaining = match.max_amount - match.matched_so_far;
         const matchedAmt = Math.min(Math.round(donationAmount * parseFloat(match.match_ratio)), remaining);
         if (matchedAmt > 0) {
-          await pool.query('UPDATE matching_donations SET matched_so_far=matched_so_far+$1 WHERE id=$2', [matchedAmt, match.id]);
+          await pool.query('UPDATE matching_donations SET matched_so_far=matched_so_far+$1 WHERE id=$2 AND tenant_id=$3', [matchedAmt, match.id, tenantId]);
           // Record the matched donation
           await pool.query('INSERT INTO campaign_donations(tenant_id,campaign_id,donor_name,amount,method,message) VALUES($1,$2,$3,$4,$5,$6)',
             [tenantId, campaignId, match.sponsor_name + ' (Matched)', matchedAmt, 'matching', 'Matched donation - ' + match.match_ratio + 'x match from ' + match.sponsor_name]);
           // Update matching total
           if (match.matched_so_far + matchedAmt >= match.max_amount) {
-            await pool.query("UPDATE matching_donations SET status='completed' WHERE id=$1", [match.id]);
+            await pool.query("UPDATE matching_donations SET status='completed' WHERE id=$1 AND tenant_id=$2", [match.id, tenantId]);
           }
         }
       }
@@ -140,7 +140,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
           donation_count = donor_profiles.donation_count + 1`,
         [tenantId, donorEmail, donorName || 'Anonymous', amount || 0]);
       // Update campaigns_supported count
-      await pool.query(`UPDATE donor_profiles SET campaigns_supported = (SELECT COUNT(DISTINCT campaign_id) FROM campaign_donations WHERE donor_name = $1 OR message LIKE '%' || $2 || '%') WHERE tenant_id = $3 AND user_email = $2`,
+      await pool.query(`UPDATE donor_profiles SET campaigns_supported = (SELECT COUNT(DISTINCT campaign_id) FROM campaign_donations WHERE (donor_name = $1 OR message LIKE '%' || $2 || '%') AND tenant_id = $3) WHERE tenant_id = $3 AND user_email = $2`,
         [donorName || 'Anonymous', donorEmail, tenantId]);
     } catch(e) { console.warn('[DonorProfile]', e.message); }
   }
@@ -149,7 +149,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // 1. SOCIAL SHARING BUTTONS
   // =============================================
   // API endpoint to get share data for a campaign
-  app.get('/api/pro/campaigns/:id/share', ah(async (req, res) => {
+  app.get('/api/campaigns/:id/share', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.json({ error: 'Not found' });
     const url = BASE_URL + '/discover/' + c.id;
@@ -171,7 +171,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 2. DONOR DASHBOARD
   // =============================================
-  app.get('/pro/my-donations', requireAuth, ah(async (req, res) => {
+  app.get('/my-donations/simple', requireAuth, ah(async (req, res) => {
     const email = req.session.user.email;
     const t = req.session.user.tenant_id;
 
@@ -188,7 +188,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     let donorProfile = (await pool.query('SELECT * FROM donor_profiles WHERE user_email=$1 AND tenant_id=$2', [email, t])).rows[0];
 
     // Get receipts
-    const receipts = (await pool.query('SELECT * FROM donation_receipts WHERE donor_email=$1 ORDER BY issued_at DESC LIMIT 50', [email])).rows;
+    const receipts = (await pool.query('SELECT * FROM donation_receipts WHERE donor_email=$1 AND tenant_id=$2 ORDER BY issued_at DESC LIMIT 50', [email, t])).rows;
 
     const totalDonated = myDonations.reduce((s, d) => s + (parseInt(d.amount) || 0), 0);
     const campaignsCount = new Set(myDonations.map(d => d.campaign_id)).size;
@@ -243,7 +243,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     await pool.query(`INSERT INTO donor_profiles (tenant_id, user_email, display_name, is_anonymous) VALUES ($1, $2, $3, $4)
       ON CONFLICT (tenant_id, user_email) DO UPDATE SET display_name = $3, is_anonymous = $4`,
       [t, email, display_name || req.session.user.name, !!is_anonymous]);
-    res.redirect('/my-donations');
+    await audit(req.session.user.email, 'donor_profile_updated', 'Updated donor profile for ' + email, t);
+    res.redirect('/my-donations/simple');
   }));
 
   // =============================================
@@ -251,10 +252,10 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   app.get('/fundraising/:id/payout', requireAuth, requireNotBanned, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
-    const c = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id) as raised, (SELECT COALESCE(SUM(amount),0) FROM campaign_payouts WHERE campaign_id=c.id AND status IN ($1,$2,$3)) as pending_payouts FROM fundraising_campaigns c WHERE c.id=$4 AND c.tenant_id=$5', ['pending','approved','processing', req.params.id, t])).rows[0];
+    const c = (await pool.query('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=c.id AND tenant_id=c.tenant_id) as raised, (SELECT COALESCE(SUM(amount),0) FROM campaign_payouts WHERE campaign_id=c.id AND tenant_id=c.tenant_id AND status IN ($1,$2,$3)) as pending_payouts FROM fundraising_campaigns c WHERE c.id=$4 AND c.tenant_id=$5', ['pending','approved','processing', req.params.id, t])).rows[0];
     if (!c) return res.status(404).send('Not found');
     const available = parseInt(c.raised) - parseInt(c.pending_payouts || 0);
-    const pastPayouts = (await pool.query('SELECT * FROM campaign_payouts WHERE campaign_id=$1 ORDER BY created_at DESC', [c.id])).rows;
+    const pastPayouts = (await pool.query('SELECT * FROM campaign_payouts WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [c.id, t])).rows;
 
     res.send(renderPage('Request Payout', `
       <div class="card" style="max-width:650px;margin:40px auto">
@@ -286,6 +287,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!c) return res.status(404).send('Not found');
     await pool.query('INSERT INTO campaign_payouts(tenant_id,campaign_id,amount,method,phone,account_name,account_number,notes,requested_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
       [t, c.id, amount || 0, method || 'mobile_money', phone || '', account_name || '', phone || '', notes || '', req.session.user.email]);
+    await audit(req.session.user.email, 'payout_requested', 'Requested payout of UGX ' + (parseInt(amount)||0).toLocaleString() + ' for campaign "' + c.title + '"', t);
     // Notify admins
     const admins = (await pool.query("SELECT email FROM users WHERE tenant_id=$1 AND role IN ('admin','super_admin')", [t])).rows;
     for (const a of admins) {
@@ -294,30 +296,44 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     res.redirect('/fundraising/' + c.id);
   }));
 
-  // Admin: Process payout requests
-  app.get('/pro/admin/payouts', requireAuth, ah(async (req, res) => {
+  // Admin: Process payout requests (admin/super_admin only)
+  app.get('/admin/payouts', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const payouts = (await pool.query('SELECT cp.*, fc.title as campaign_title FROM campaign_payouts cp JOIN fundraising_campaigns fc ON cp.campaign_id=fc.id WHERE cp.tenant_id=$1 ORDER BY cp.created_at DESC', [t])).rows;
     res.send(renderPage('Manage Payouts', `
       <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#ec4899)"><h1>Manage Payouts</h1><p>Process withdrawal requests</p></div>
       <div class="card">
         ${payouts.length ? '<table><tr><th>Campaign</th><th>Amount</th><th>Method</th><th>Phone/Account</th><th>Status</th><th>Date</th><th>Actions</th></tr>' +
-          payouts.map(p => '<tr><td>' + esc(p.campaign_title) + '</td><td style="font-weight:700">UGX ' + (parseInt(p.amount)||0).toLocaleString() + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.phone || p.account_number || '-') + '</td><td><span class="tag" style="background:' + (p.status==='completed'?'#d1fae5;color:#065f46':p.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b') + '">' + esc(p.status) + '</span></td><td>' + new Date(p.created_at).toLocaleDateString() + '</td><td>' + (p.status==='pending'?'<a href="/admin/payouts/'+p.id+'/approve" class="btn btn-sm btn-green">Approve</a> <a href="/admin/payouts/'+p.id+'/reject" class="btn btn-sm btn-red">Reject</a>':p.status==='approved'?'<a href="/admin/payouts/'+p.id+'/complete" class="btn btn-sm btn-green">Mark Complete</a>':'') + '</td></tr>').join('') + '</table>' : '<p class="muted" style="text-align:center;padding:40px">No payout requests yet.</p>'}
+          payouts.map(p => '<tr><td>' + esc(p.campaign_title) + '</td><td style="font-weight:700">UGX ' + (parseInt(p.amount)||0).toLocaleString() + '</td><td>' + esc(p.method) + '</td><td>' + esc(p.phone || p.account_number || '-') + '</td><td><span class="tag" style="background:' + (p.status==='completed'?'#d1fae5;color:#065f46':p.status==='pending'?'#fef3c7;color:#92400e':'#fee2e2;color:#991b1b') + '">' + esc(p.status) + '</span></td><td>' + new Date(p.created_at).toLocaleDateString() + '</td><td>' + (p.status==='pending'?'<form method="POST" action="/admin/payouts/'+p.id+'/approve" style="display:inline"><button type="submit" class="btn btn-sm btn-green">Approve</button></form> <form method="POST" action="/admin/payouts/'+p.id+'/reject" style="display:inline"><button type="submit" class="btn btn-sm btn-red">Reject</button></form>':p.status==='approved'?'<form method="POST" action="/admin/payouts/'+p.id+'/complete" style="display:inline"><button type="submit" class="btn btn-sm btn-green">Mark Complete</button></form>':'') + '</td></tr>').join('') + '</table>' : '<p class="muted" style="text-align:center;padding:40px">No payout requests yet.</p>'}
       </div>
     `, req.session.user));
   }));
 
-  app.get('/admin/payouts/:id/approve', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/approve', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     await pool.query("UPDATE campaign_payouts SET status='approved', processed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+    await audit(req.session.user.email, 'payout_approved', 'Approved payout #' + req.params.id, t);
     res.redirect('/admin/payouts');
   }));
 
-  app.get('/admin/payouts/:id/complete', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/complete', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const payout = (await pool.query('SELECT * FROM campaign_payouts WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!payout) return res.status(404).send('Not found');
     await pool.query("UPDATE campaign_payouts SET status='completed', processed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+    await audit(req.session.user.email, 'payout_completed', 'Completed payout #' + req.params.id, t);
     // Notify requester
     if (payout.requested_by) {
       notify(t, payout.requested_by, 'Payout Completed', 'Your payout of UGX ' + (parseInt(payout.amount)||0).toLocaleString() + ' has been processed!', 'fundraising');
@@ -325,29 +341,33 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     res.redirect('/admin/payouts');
   }));
 
-  app.get('/admin/payouts/:id/reject', requireAuth, ah(async (req, res) => {
+  app.post('/admin/payouts/:id/reject', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     await pool.query("UPDATE campaign_payouts SET status='rejected', processed_at=NOW() WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+    await audit(req.session.user.email, 'payout_rejected', 'Rejected payout #' + req.params.id, t);
     res.redirect('/admin/payouts');
   }));
 
   // =============================================
   // 4. DONOR WALL / RECOGNITION
   // =============================================
-  app.get('/pro/campaigns/:id/donors', ah(async (req, res) => {
+  app.get('/campaigns/:id/donors-list', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
 
     // Get donations with donor profiles (check if anonymous)
     const donations = (await pool.query(`SELECT cd.*, dp.is_anonymous, dp.display_name as profile_name
       FROM campaign_donations cd
-      LEFT JOIN donor_profiles dp ON cd.donor_name = dp.display_name AND dp.tenant_id = fc_tenant_id
-      JOIN fundraising_campaigns fc ON cd.campaign_id = fc.id
-      WHERE cd.campaign_id = $1
-      ORDER BY cd.amount DESC, cd.donated_at DESC LIMIT 100`, [c.id])).rows;
+      LEFT JOIN donor_profiles dp ON cd.donor_name = dp.display_name AND dp.tenant_id = cd.tenant_id
+      WHERE cd.campaign_id = $1 AND cd.tenant_id = $2
+      ORDER BY cd.amount DESC, cd.donated_at DESC LIMIT 100`, [c.id, c.tenant_id])).rows;
 
     // Simplified query that works
-    const simpleDonations = (await pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 AND amount > 0 ORDER BY amount DESC, donated_at DESC LIMIT 100', [c.id])).rows;
+    const simpleDonations = (await pool.query('SELECT * FROM campaign_donations WHERE campaign_id=$1 AND tenant_id=$2 AND amount > 0 ORDER BY amount DESC, donated_at DESC LIMIT 100', [c.id, c.tenant_id])).rows;
 
     const totalDonors = simpleDonations.length;
     const topDonors = simpleDonations.slice(0, 10);
@@ -383,7 +403,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 5. QR CODES FOR CAMPAIGNS
   // =============================================
-  app.get('/pro/campaigns/:id/qr', ah(async (req, res) => {
+  app.get('/campaigns/:id/qr-simple', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     const campaignUrl = BASE_URL + '/discover/' + c.id;
@@ -424,7 +444,12 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 6. REFUND HANDLING
   // =============================================
-  app.get('/pro/admin/refunds', requireAuth, ah(async (req, res) => {
+  // Admin: Refund management (admin/super_admin only)
+  app.get('/admin/refunds', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const transactions = (await pool.query(`SELECT it.*, fc.title as campaign_title, i.full_name as investor_name
       FROM investment_transactions it
@@ -444,13 +469,17 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
       <div class="card">
         <h2>Active Transactions</h2>
         ${transactions.length ? '<table><tr><th>Campaign</th><th>Investor</th><th>Amount</th><th>Type</th><th>Status</th><th>Date</th><th>Action</th></tr>' +
-          transactions.map(tx => '<tr><td>' + esc(tx.campaign_title) + '</td><td>' + esc(tx.investor_name || tx.investor_email) + '</td><td style="font-weight:700">UGX ' + (parseInt(tx.amount)||0).toLocaleString() + '</td><td><span class="tag">' + esc(tx.transaction_type) + '</span></td><td><span class="tag" style="background:' + (tx.status==='completed'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e') + '">' + esc(tx.status) + '</span></td><td>' + new Date(tx.created_at).toLocaleDateString() + '</td><td><a href="/admin/refunds/' + tx.id + '/process" class="btn btn-sm btn-red" onclick="return confirm(\'Process refund for this transaction?\')">Refund</a></td></tr>').join('') + '</table>' : '<p class="muted">No active transactions to refund.</p>'}
+          transactions.map(tx => '<tr><td>' + esc(tx.campaign_title) + '</td><td>' + esc(tx.investor_name || tx.investor_email) + '</td><td style="font-weight:700">UGX ' + (parseInt(tx.amount)||0).toLocaleString() + '</td><td><span class="tag">' + esc(tx.transaction_type) + '</span></td><td><span class="tag" style="background:' + (tx.status==='completed'?'#d1fae5;color:#065f46':'#fef3c7;color:#92400e') + '">' + esc(tx.status) + '</span></td><td>' + new Date(tx.created_at).toLocaleDateString() + '</td><td><form method="POST" action="/admin/refunds/' + tx.id + '/process" style="display:inline"><button type="submit" class="btn btn-sm btn-red" onclick="return confirm(\'Process refund for this transaction?\')">Refund</button></form></td></tr>').join('') + '</table>' : '<p class="muted">No active transactions to refund.</p>'}
       </div>
       ${refunded.length > 0 ? '<div class="card" style="margin-top:20px"><h2>Refund History</h2><table><tr><th>Campaign</th><th>Amount</th><th>Refunded</th></tr>' + refunded.map(tx => '<tr><td>' + esc(tx.campaign_title) + '</td><td>UGX ' + (parseInt(tx.amount)||0).toLocaleString() + '</td><td>' + new Date(tx.created_at).toLocaleDateString() + '</td></tr>').join('') + '</table></div>' : ''}
     `, req.session.user));
   }));
 
-  app.get('/admin/refunds/:id/process', requireAuth, ah(async (req, res) => {
+  app.post('/admin/refunds/:id/process', requireAuth, (req, res, next) => {
+    const u = req.session.user;
+    if (u.role !== 'admin' && u.role !== 'super_admin') return res.status(403).send('Admin access required');
+    next();
+  }, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const tx = (await pool.query('SELECT * FROM investment_transactions WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!tx) return res.status(404).send('Not found');
@@ -458,7 +487,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     await pool.query("UPDATE investment_transactions SET status='refunded' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
     // Deduct from investor total
     if (tx.investor_email) {
-      await pool.query('UPDATE fundraising_investors SET total_invested=GREATEST(0,total_invested-$1), campaigns_supported=GREATEST(0,campaigns_supported-1) WHERE user_email=$2', [tx.amount, tx.investor_email]);
+      await pool.query('UPDATE fundraising_investors SET total_invested=GREATEST(0,total_invested-$1), campaigns_supported=GREATEST(0,campaigns_supported-1) WHERE user_email=$2 AND tenant_id=$3', [tx.amount, tx.investor_email, t]);
     }
     // Deduct platform fee back
     if (tx.platform_fee > 0) {
@@ -475,8 +504,8 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 7. CAMPAIGN EMBED WIDGET
   // =============================================
-  app.get('/pro/campaigns/:id/embed', ah(async (req, res) => {
-    const c = (await pool.query('SELECT fc.*, t.name as org_name, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) as raised FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
+  app.get('/campaigns/:id/embed-simple', ah(async (req, res) => {
+    const c = (await pool.query('SELECT fc.*, t.name as org_name, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND tenant_id=fc.tenant_id) as raised FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
     const donateUrl = BASE_URL + '/discover/' + c.id + '/donate';
@@ -514,7 +543,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
 
   // Embeddable widget endpoint
   app.get('/campaigns/:id/widget', ah(async (req, res) => {
-    const c = (await pool.query('SELECT fc.*, t.name as org_name, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id) as raised FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
+    const c = (await pool.query('SELECT fc.*, t.name as org_name, (SELECT COALESCE(SUM(amount),0) FROM campaign_donations WHERE campaign_id=fc.id AND tenant_id=fc.tenant_id) as raised FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1 AND fc.is_public=true', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Campaign not found');
     const pct = c.target > 0 ? Math.min(100, Math.round(parseInt(c.raised||0)/parseInt(c.target||1)*100)) : 0;
     const donateUrl = BASE_URL + '/discover/' + c.id + '/donate';
@@ -525,11 +554,11 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 8. MATCHING DONATIONS
   // =============================================
-  app.get('/pro/fundraising/:id/matching', requireAuth, requireNotBanned, ah(async (req, res) => {
+  app.get('/fundraising/:id/matching', requireAuth, requireNotBanned, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!c) return res.status(404).send('Not found');
-    const matches = (await pool.query('SELECT * FROM matching_donations WHERE campaign_id=$1 ORDER BY created_at DESC', [c.id])).rows;
+    const matches = (await pool.query('SELECT * FROM matching_donations WHERE campaign_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [c.id, t])).rows;
 
     res.send(renderPage('Matching Donations - ' + c.title, `
       <div class="card" style="max-width:700px;margin:40px auto">
@@ -537,12 +566,12 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         <p class="muted" style="margin-bottom:20px">When a sponsor matches donations, every donation is multiplied — doubling or tripling the impact!</p>
         <a href="/fundraising/${c.id}/matching/new" class="btn btn-green" style="margin-bottom:20px">+ Add Matching Sponsor</a>
         ${matches.length > 0 ? '<table><tr><th>Sponsor</th><th>Match Ratio</th><th>Max Amount</th><th>Matched So Far</th><th>Status</th><th>Actions</th></tr>' +
-          matches.map(m => '<tr><td><strong>' + esc(m.sponsor_name) + '</strong>' + (m.sponsor_email ? '<br><span class="muted">' + esc(m.sponsor_email) + '</span>' : '') + '</td><td>' + m.match_ratio + 'x</td><td>UGX ' + (parseInt(m.max_amount)||0).toLocaleString() + '</td><td>UGX ' + (parseInt(m.matched_so_far)||0).toLocaleString() + '</td><td><span class="tag" style="background:' + (m.status==='active'?'#d1fae5;color:#065f46':m.status==='completed'?'#dbeafe;color:#1e40af':'#fef3c7;color:#92400e') + '">' + esc(m.status) + '</span></td><td>' + (m.status==='active'?'<a href="/fundraising/matching/'+m.id+'/pause" class="btn btn-sm">Pause</a>':'') + (m.status==='paused'?'<a href="/fundraising/matching/'+m.id+'/resume" class="btn btn-sm btn-green">Resume</a>':'') + '</td></tr>').join('') + '</table>' : '<p class="muted">No matching sponsors yet. Add a sponsor to double the impact of every donation!</p>'}
+          matches.map(m => '<tr><td><strong>' + esc(m.sponsor_name) + '</strong>' + (m.sponsor_email ? '<br><span class="muted">' + esc(m.sponsor_email) + '</span>' : '') + '</td><td>' + m.match_ratio + 'x</td><td>UGX ' + (parseInt(m.max_amount)||0).toLocaleString() + '</td><td>UGX ' + (parseInt(m.matched_so_far)||0).toLocaleString() + '</td><td><span class="tag" style="background:' + (m.status==='active'?'#d1fae5;color:#065f46':m.status==='completed'?'#dbeafe;color:#1e40af':'#fef3c7;color:#92400e') + '">' + esc(m.status) + '</span></td><td>' + (m.status==='active'?'<form method="POST" action="/fundraising/matching/'+m.id+'/pause" style="display:inline"><button type="submit" class="btn btn-sm">Pause</button></form>':'') + (m.status==='paused'?'<form method="POST" action="/fundraising/matching/'+m.id+'/resume" style="display:inline"><button type="submit" class="btn btn-sm btn-green">Resume</button></form>':'') + '</td></tr>').join('') + '</table>' : '<p class="muted">No matching sponsors yet. Add a sponsor to double the impact of every donation!</p>'}
       </div>
     `, req.session.user));
   }));
 
-  app.get('/pro/fundraising/:id/matching/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  app.get('/fundraising/:id/matching/new', requireAuth, requireNotBanned, ah(async (req, res) => {
     const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, req.session.user.tenant_id])).rows[0];
     if (!c) return res.status(404).send('Not found');
     res.send(renderPage('Add Matching Sponsor', `
@@ -566,21 +595,26 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     `, req.session.user));
   }));
 
-  app.post('/pro/fundraising/:id/matching/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  app.post('/fundraising/:id/matching/save', requireAuth, requireNotBanned, ah(async (req, res) => {
     const t = req.session.user.tenant_id;
     const { sponsor_name, sponsor_email, match_ratio, max_amount, start_date, end_date } = req.body;
     await pool.query('INSERT INTO matching_donations(tenant_id,campaign_id,sponsor_name,sponsor_email,match_ratio,max_amount,start_date,end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
       [t, req.params.id, sponsor_name, sponsor_email||null, match_ratio||1, max_amount||0, start_date||null, end_date||null]);
+    await audit(req.session.user.email, 'matching_donation_added', 'Added matching sponsor "' + sponsor_name + '" to campaign #' + req.params.id, t);
     res.redirect('/fundraising/' + req.params.id + '/matching');
   }));
 
-  app.get('/fundraising/matching/:id/pause', requireAuth, ah(async (req, res) => {
-    await pool.query("UPDATE matching_donations SET status='paused' WHERE id=$1", [req.params.id]);
+  app.post('/fundraising/matching/:id/pause', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    await pool.query("UPDATE matching_donations SET status='paused' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+    await audit(req.session.user.email, 'matching_donation_paused', 'Paused matching donation #' + req.params.id, t);
     res.redirect('back');
   }));
 
-  app.get('/fundraising/matching/:id/resume', requireAuth, ah(async (req, res) => {
-    await pool.query("UPDATE matching_donations SET status='active' WHERE id=$1", [req.params.id]);
+  app.post('/fundraising/matching/:id/resume', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    await pool.query("UPDATE matching_donations SET status='active' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+    await audit(req.session.user.email, 'matching_donation_resumed', 'Resumed matching donation #' + req.params.id, t);
     res.redirect('back');
   }));
 
@@ -591,18 +625,17 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     const t = req.session.user.tenant_id;
     const { comment } = req.body;
     if (!comment || !comment.trim()) return res.redirect('back');
-    const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1', [req.params.id])).rows[0];
+    const c = (await pool.query('SELECT * FROM fundraising_campaigns WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
     if (!c) return res.status(404).send('Not found');
-    const tenantId = c.tenant_id;
     await pool.query('INSERT INTO campaign_comments(tenant_id,campaign_id,user_email,user_name,comment) VALUES($1,$2,$3,$4,$5)',
-      [tenantId, req.params.id, req.session.user.email, req.session.user.name || 'Anonymous', comment.trim()]);
+      [t, req.params.id, req.session.user.email, req.session.user.name || 'Anonymous', comment.trim()]);
     res.redirect('back');
   }));
 
-  app.get('/campaigns/:id/comments', ah(async (req, res) => {
+  app.get('/api/campaigns/:id/comments', ah(async (req, res) => {
     const c = (await pool.query('SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.id=$1', [req.params.id])).rows[0];
     if (!c) return res.status(404).send('Not found');
-    const comments = (await pool.query('SELECT * FROM campaign_comments WHERE campaign_id=$1 AND is_public=true ORDER BY created_at DESC LIMIT 100', [c.id])).rows;
+    const comments = (await pool.query('SELECT * FROM campaign_comments WHERE campaign_id=$1 AND tenant_id=$2 AND is_public=true ORDER BY created_at DESC LIMIT 100', [c.id, c.tenant_id])).rows;
 
     res.send(renderPage('Comments - ' + c.title, `
       <div class="card" style="max-width:700px;margin:40px auto">
@@ -622,12 +655,12 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
     if (!donation) return res.status(404).send('Donation not found');
 
     // Generate or fetch receipt
-    let receipt = (await pool.query('SELECT * FROM donation_receipts WHERE donation_id=$1', [donation.id])).rows[0];
+    let receipt = (await pool.query('SELECT * FROM donation_receipts WHERE donation_id=$1 AND tenant_id=$2', [donation.id, donation.tenant_id])).rows[0];
     if (!receipt) {
       const receiptNo = generateReceiptNumber();
       await pool.query('INSERT INTO donation_receipts(tenant_id,donation_id,campaign_id,donor_name,donor_email,amount,method,receipt_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
         [donation.tenant_id, donation.id, donation.campaign_id, donation.donor_name, null, donation.amount, donation.method, receiptNo]);
-      receipt = (await pool.query('SELECT * FROM donation_receipts WHERE donation_id=$1', [donation.id])).rows[0];
+      receipt = (await pool.query('SELECT * FROM donation_receipts WHERE donation_id=$1 AND tenant_id=$2', [donation.id, donation.tenant_id])).rows[0];
     }
 
     res.send(renderPage('Donation Receipt', `
@@ -653,7 +686,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button onclick="window.print()" class="btn btn-green">Print Receipt</button>
-          <a href="/my-donations" class="btn btn-sm">Back to My Donations</a>
+          <a href="/my-donations/simple" class="btn btn-sm">Back to My Donations</a>
           <a href="/discover/${donation.campaign_id}" class="btn btn-sm">View Campaign</a>
         </div>
       </div>
@@ -664,7 +697,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
   // =============================================
   // 11. DEADLINE REMINDERS (cron-like check)
   // =============================================
-  app.get('/api/cron/deadline-reminders', ah(async (req, res) => {
+  app.post('/api/cron/deadline-reminders', requireAuth, ah(async (req, res) => {
     try {
       // Find campaigns expiring in 3 days, 1 day, and today
       const reminders = [
@@ -681,7 +714,7 @@ module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, ren
         const campaigns = (await pool.query("SELECT fc.*, t.name as org_name FROM fundraising_campaigns fc JOIN tenants t ON fc.tenant_id=t.id WHERE fc.deadline = $1 AND fc.status = 'active' AND fc.is_public = true", [dateStr])).rows;
         for (const c of campaigns) {
           // Check if already sent
-          const already = (await pool.query('SELECT id FROM campaign_deadline_reminders WHERE campaign_id=$1 AND reminder_type=$2', [c.id, r.type])).rows[0];
+          const already = (await pool.query('SELECT id FROM campaign_deadline_reminders WHERE campaign_id=$1 AND reminder_type=$2 AND tenant_id=$3', [c.id, r.type, c.tenant_id])).rows[0];
           if (!already) {
             const label = r.days === 0 ? 'ends TODAY' : 'ends in ' + r.days + ' day' + (r.days > 1 ? 's' : '');
             // Notify org admins

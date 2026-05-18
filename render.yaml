@@ -4,7 +4,8 @@ services:
     env: node
     plan: free
     buildCommand: npm install
-    startCommand: npm start
+    startCommand: node --max-old-space-size=400 server.js
+    healthCheckPath: /ping
     envVars:
       - key: NODE_ENV
         value: production
@@ -20,6 +21,8 @@ services:
         value: ou1SW4UV8CGS6odvi35dMaVIagaQGgFu91BpaXI7CIQ
       - key: GA_TRACKING_ID
         value: G-S0HQRDMMCS
+      - key: DEV_PASSWORD
+        sync: false
 
 databases:
   - name: ssewasswa-db

@@ -109,7 +109,7 @@ module.exports = function(app, pool, opts) {
     // 1. bus_routes
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bus_routes (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         name VARCHAR(255) NOT NULL,
         description TEXT,
@@ -121,19 +121,16 @@ module.exports = function(app, pool, opts) {
         operating_days JSON,
         morning_departure TIME,
         afternoon_departure TIME,
-        status ENUM('active','inactive','draft') DEFAULT 'draft',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_br_tenant (tenant_id),
-        INDEX idx_br_status (status),
-        INDEX idx_br_bus (assigned_bus_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        status TEXT DEFAULT 'draft',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
 
     // 2. bus_fleet
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bus_fleet (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         registration_number VARCHAR(50) NOT NULL,
         model VARCHAR(100),
@@ -144,46 +141,41 @@ module.exports = function(app, pool, opts) {
         insurance_expiry DATE,
         last_service_mileage INT DEFAULT 0,
         current_mileage INT DEFAULT 0,
-        fuel_type ENUM('diesel','petrol','electric','hybrid') DEFAULT 'diesel',
+        fuel_type TEXT DEFAULT 'diesel',
         fuel_capacity_litres INT DEFAULT 80,
-        status ENUM('active','maintenance','inactive','retired') DEFAULT 'active',
+        status TEXT DEFAULT 'active',
         purchase_date DATE,
         purchase_cost DECIMAL(10,2) DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uk_bf_reg_tenant (tenant_id, registration_number),
-        INDEX idx_bf_tenant (tenant_id),
-        INDEX idx_bf_status (status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uk_bf_reg_tenant UNIQUE (tenant_id, registration_number)
+      )
     `);
 
     // 3. bus_stops
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bus_stops (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         name VARCHAR(255) NOT NULL,
         latitude DECIMAL(10,7) DEFAULT 0,
         longitude DECIMAL(10,7) DEFAULT 0,
-        stop_type ENUM('pickup','dropoff','both') DEFAULT 'both',
+        stop_type TEXT DEFAULT 'both',
         route_id INT,
         stop_order INT DEFAULT 0,
         estimated_arrival_min INT DEFAULT 0,
         estimated_departure_min INT DEFAULT 0,
         landmark VARCHAR(255),
-        status ENUM('active','inactive') DEFAULT 'active',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_bs_tenant (tenant_id),
-        INDEX idx_bs_route (route_id),
-        INDEX idx_bs_status (status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
 
     // 4. bus_student_assignments
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bus_student_assignments (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_id INT NOT NULL,
         student_name VARCHAR(255),
@@ -195,97 +187,79 @@ module.exports = function(app, pool, opts) {
         parent_name VARCHAR(255),
         parent_phone VARCHAR(30),
         parent_email VARCHAR(255),
-        status ENUM('active','inactive','change_requested','transferred') DEFAULT 'active',
+        status TEXT DEFAULT 'active',
         change_request_reason TEXT,
-        assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_bsa_tenant (tenant_id),
-        INDEX idx_bsa_student (student_id),
-        INDEX idx_bsa_route (route_id),
-        INDEX idx_bsa_status (status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        assigned_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
 
     // 5. bus_trips
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bus_trips (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         route_id INT,
         bus_id INT,
         driver_name VARCHAR(255),
-        trip_type ENUM('morning','afternoon','special') DEFAULT 'morning',
+        trip_type TEXT DEFAULT 'morning',
         trip_date DATE NOT NULL,
-        planned_departure DATETIME,
-        actual_departure DATETIME,
-        planned_arrival DATETIME,
-        actual_arrival DATETIME,
+        planned_departure TIMESTAMPTZ,
+        actual_departure TIMESTAMPTZ,
+        planned_arrival TIMESTAMPTZ,
+        actual_arrival TIMESTAMPTZ,
         distance_km DECIMAL(8,2) DEFAULT 0,
         fuel_used_litres DECIMAL(6,2) DEFAULT 0,
         students_onboard INT DEFAULT 0,
         incidents TEXT,
         delay_minutes INT DEFAULT 0,
-        status ENUM('planned','in_progress','completed','cancelled') DEFAULT 'planned',
+        status TEXT DEFAULT 'planned',
         notes TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_bt_tenant (tenant_id),
-        INDEX idx_bt_route (route_id),
-        INDEX idx_bt_bus (bus_id),
-        INDEX idx_bt_date (trip_date),
-        INDEX idx_bt_status (status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
 
     // 6. bus_maintenance
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bus_maintenance (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         bus_id INT NOT NULL,
-        maintenance_type ENUM('oil_change','tire_rotation','brake_service','engine_service','bodywork','inspection','repair','other') DEFAULT 'oil_change',
+        maintenance_type TEXT DEFAULT 'oil_change',
         description TEXT,
         scheduled_date DATE,
         completed_date DATE,
         mileage_at_service INT DEFAULT 0,
         cost DECIMAL(10,2) DEFAULT 0,
         vendor VARCHAR(255),
-        status ENUM('scheduled','in_progress','completed','cancelled') DEFAULT 'scheduled',
+        status TEXT DEFAULT 'scheduled',
         next_service_mileage INT DEFAULT 0,
         next_service_date DATE,
         notes TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_bm_tenant (tenant_id),
-        INDEX idx_bm_bus (bus_id),
-        INDEX idx_bm_status (status),
-        INDEX idx_bm_date (scheduled_date)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
 
     // 7. bus_notifications_log
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bus_notifications_log (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         student_assignment_id INT,
         route_id INT,
         parent_phone VARCHAR(30),
         parent_email VARCHAR(255),
-        notification_type ENUM('bus_departed','bus_approaching','bus_arrived','delay','absent_student','route_change','general') DEFAULT 'general',
+        notification_type TEXT DEFAULT 'general',
         message TEXT,
-        sent_via ENUM('sms','email','push','in_app') DEFAULT 'in_app',
-        status ENUM('pending','sent','delivered','failed') DEFAULT 'pending',
-        sent_at DATETIME,
-        delivered_at DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_bnl_tenant (tenant_id),
-        INDEX idx_bnl_assignment (student_assignment_id),
-        INDEX idx_bnl_route (route_id),
-        INDEX idx_bnl_type (notification_type),
-        INDEX idx_bnl_status (status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        sent_via TEXT DEFAULT 'in_app',
+        status TEXT DEFAULT 'pending',
+        sent_at TIMESTAMPTZ,
+        delivered_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
   }
 
@@ -1814,14 +1788,13 @@ module.exports = function(app, pool, opts) {
     // Ensure settings table exists
     await pool.query(`
       CREATE TABLE IF NOT EXISTS bus_settings (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL,
         setting_key VARCHAR(100) NOT NULL,
         setting_value TEXT,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uk_bs_tenant_key (tenant_id, setting_key),
-        INDEX idx_bset_tenant (tenant_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uk_bs_tenant_key UNIQUE (tenant_id, setting_key)
+      )
     `);
 
     // Define which fields belong to which section

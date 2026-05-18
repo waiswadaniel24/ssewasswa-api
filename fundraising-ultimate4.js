@@ -1,746 +1,1681 @@
 /**
- * Fundraising Ultimate4 Module — Financial, Compliance & Legal Suite
- * Features: Fund Allocation, Budget Tracking, Reconciliation, Grant Management,
- * Endowment, Multi-Currency Wallet, Receipt Batches, Donation Splits,
- * Fund Categories, Anonymity Manager, Payment Router, Financial Dashboard Pro,
- * Compliance Vault, Audit Trail Pro, Fund Balance Calculator
+ * Fundraising Ultimate 4 — 15 Financial & Compliance Features
+ * Features:
+ *  1. Fund Allocation Manager
+ *  2. Budget vs Actual
+ *  3. Financial Reconciliation
+ *  4. Grant Management
+ *  5. Endowment Management
+ *  6. Multi-Currency Wallet
+ *  7. Receipt Batch Processing
+ *  8. Donation Split Manager
+ *  9. Fund Category Management
+ * 10. Donation Anonymity
+ * 11. Payment Method Router
+ * 12. Financial Dashboard Pro
+ * 13. Compliance Document Vault
+ * 14. Audit Trail Pro
+ * 15. Fund Balance Calculator
  */
 module.exports = function(app, pool, requireAuth, requireNotBanned, ah, esc, renderPage, audit, notify, sendEmail, sendSMS) {
-  const BASE_URL = process.env.BASE_URL || 'https://ssewasswa.onrender.com';
 
+  // =============================================
+  // DATABASE MIGRATIONS
+  // =============================================
   const migrations = [
-    // Feature 1: Fund Allocation Manager
-    `CREATE TABLE IF NOT EXISTS fund_allocations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, fund_name TEXT NOT NULL, fund_type TEXT DEFAULT 'unrestricted' CHECK (fund_type IN ('restricted','unrestricted','temporarily_restricted','endowment')), total_allocated INTEGER DEFAULT 0, total_spent INTEGER DEFAULT 0, total_remaining INTEGER DEFAULT 0, restrictions_json TEXT DEFAULT '{}', manager_email TEXT, status TEXT DEFAULT 'active' CHECK (status IN ('active','closed','archived')), created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS fund_allocation_entries (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, allocation_id INTEGER NOT NULL REFERENCES fund_allocations(id) ON DELETE CASCADE, campaign_id INTEGER, amount INTEGER NOT NULL, entry_type TEXT DEFAULT 'allocation' CHECK (entry_type IN ('allocation','spend','transfer','return')), description TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_fund_alloc_tenant ON fund_allocations(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_fund_alloc_entries_alloc ON fund_allocation_entries(allocation_id)`,
+    // 1. Fund Allocation Manager
+    `CREATE TABLE IF NOT EXISTS fund_allocations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      total_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
+      description TEXT,
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS fund_allocation_entries (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      allocation_id INTEGER REFERENCES fund_allocations(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,
+      amount NUMERIC(15,2) NOT NULL DEFAULT 0,
+      percentage NUMERIC(5,2) NOT NULL DEFAULT 0,
+      notes TEXT
+    )`,
 
-    // Feature 2: Budget vs Actual Tracking
-    `CREATE TABLE IF NOT EXISTS fundraising_budgets (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, period_start DATE NOT NULL, period_end DATE NOT NULL, total_budget INTEGER DEFAULT 0, total_actual INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK (status IN ('draft','active','closed')), created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS budget_line_items (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, budget_id INTEGER NOT NULL REFERENCES fundraising_budgets(id) ON DELETE CASCADE, category TEXT NOT NULL, budgeted_amount INTEGER DEFAULT 0, actual_amount INTEGER DEFAULT 0, variance INTEGER DEFAULT 0, notes TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_budgets_tenant ON fundraising_budgets(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_budget_lines_budget ON budget_line_items(budget_id)`,
+    // 2. Budget vs Actual
+    `CREATE TABLE IF NOT EXISTS fundraising_budgets (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      fiscal_year INTEGER NOT NULL,
+      total_budget NUMERIC(15,2) NOT NULL DEFAULT 0,
+      total_actual NUMERIC(15,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS budget_line_items (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      budget_id INTEGER REFERENCES fundraising_budgets(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,
+      budgeted NUMERIC(15,2) NOT NULL DEFAULT 0,
+      actual NUMERIC(15,2) NOT NULL DEFAULT 0,
+      variance NUMERIC(15,2) GENERATED ALWAYS AS (budgeted - actual) STORED
+    )`,
 
-    // Feature 3: Financial Reconciliation Engine
-    `CREATE TABLE IF NOT EXISTS reconciliation_batches (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, batch_name TEXT NOT NULL, period_start DATE, period_end DATE, total_expected INTEGER DEFAULT 0, total_reconciled INTEGER DEFAULT 0, total_unreconciled INTEGER DEFAULT 0, status TEXT DEFAULT 'open' CHECK (status IN ('open','in_progress','completed')), reconciled_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS reconciliation_items (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, batch_id INTEGER NOT NULL REFERENCES reconciliation_batches(id) ON DELETE CASCADE, donation_id INTEGER, expected_amount INTEGER, actual_amount INTEGER, bank_reference TEXT, status TEXT DEFAULT 'unmatched' CHECK (status IN ('matched','unmatched','partial','disputed')), matched_at TIMESTAMPTZ, notes TEXT)`,
-    `CREATE INDEX IF NOT EXISTS idx_recon_batches_tenant ON reconciliation_batches(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_recon_items_batch ON reconciliation_items(batch_id)`,
+    // 3. Financial Reconciliation
+    `CREATE TABLE IF NOT EXISTS reconciliation_batches (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      period_start DATE NOT NULL,
+      period_end DATE NOT NULL,
+      total_expected NUMERIC(15,2) NOT NULL DEFAULT 0,
+      total_actual NUMERIC(15,2) NOT NULL DEFAULT 0,
+      discrepancy NUMERIC(15,2) NOT NULL DEFAULT 0,
+      status TEXT DEFAULT 'open' CHECK (status IN ('open','in_progress','reconciled','discrepancy')),
+      reconciled_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS reconciliation_items (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      batch_id INTEGER REFERENCES reconciliation_batches(id) ON DELETE CASCADE,
+      record_type TEXT NOT NULL,
+      record_id INTEGER,
+      expected NUMERIC(15,2) NOT NULL DEFAULT 0,
+      actual NUMERIC(15,2) NOT NULL DEFAULT 0,
+      is_matched BOOLEAN DEFAULT false,
+      notes TEXT
+    )`,
 
-    // Feature 4: Grant Management System
-    `CREATE TABLE IF NOT EXISTS grants (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, grant_name TEXT NOT NULL, funder_name TEXT NOT NULL, funder_contact TEXT, amount_requested INTEGER DEFAULT 0, amount_awarded INTEGER DEFAULT 0, application_date DATE, decision_date DATE, start_date DATE, end_date DATE, status TEXT DEFAULT 'drafting' CHECK (status IN ('drafting','submitted','under_review','awarded','rejected','active','completed','cancelled')), restrictions_json TEXT DEFAULT '[]', reporting_requirements_json TEXT DEFAULT '[]', assigned_to TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS grant_reports (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, grant_id INTEGER NOT NULL REFERENCES grants(id) ON DELETE CASCADE, report_type TEXT DEFAULT 'progress' CHECK (report_type IN ('progress','financial','final','interim')), period_start DATE, period_end DATE, amount_spent INTEGER DEFAULT 0, narrative_text TEXT, submitted_at TIMESTAMPTZ, status TEXT DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','revision_requested')))`,
-    `CREATE INDEX IF NOT EXISTS idx_grants_tenant ON grants(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_grant_reports_grant ON grant_reports(grant_id)`,
+    // 4. Grant Management
+    `CREATE TABLE IF NOT EXISTS grants_ult4 (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      funder TEXT NOT NULL,
+      amount_requested NUMERIC(15,2) NOT NULL DEFAULT 0,
+      amount_awarded NUMERIC(15,2) NOT NULL DEFAULT 0,
+      start_date DATE,
+      end_date DATE,
+      status TEXT DEFAULT 'draft' CHECK (status IN ('draft','submitted','awarded','active','closed','rejected')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS grant_reports_ult4 (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      grant_id INTEGER REFERENCES grants_ult4(id) ON DELETE CASCADE,
+      report_type TEXT NOT NULL,
+      due_date DATE NOT NULL,
+      submitted_date DATE,
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending','submitted','overdue','approved')),
+      notes TEXT
+    )`,
 
-    // Feature 5: Endowment Management
-    `CREATE TABLE IF NOT EXISTS endowments (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, principal_amount INTEGER DEFAULT 0, current_value INTEGER DEFAULT 0, annual_return_rate NUMERIC DEFAULT 0, spending_rate NUMERIC DEFAULT 0.05, purpose TEXT, restrictions TEXT, manager_email TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS endowment_transactions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, endowment_id INTEGER NOT NULL REFERENCES endowments(id) ON DELETE CASCADE, transaction_type TEXT NOT NULL CHECK (transaction_type IN ('contribution','return','spending','rebalance','fee')), amount INTEGER NOT NULL, description TEXT, transaction_date DATE DEFAULT CURRENT_DATE, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    // 5. Endowment Management
+    `CREATE TABLE IF NOT EXISTS endowments (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      principal_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
+      current_value NUMERIC(15,2) NOT NULL DEFAULT 0,
+      spending_rate NUMERIC(5,2) NOT NULL DEFAULT 5.00,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS endowment_transactions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      endowment_id INTEGER REFERENCES endowments(id) ON DELETE CASCADE,
+      transaction_type TEXT NOT NULL CHECK (transaction_type IN ('contribution','withdrawal','investment_return','spending','adjustment')),
+      amount NUMERIC(15,2) NOT NULL,
+      date DATE NOT NULL DEFAULT CURRENT_DATE,
+      description TEXT
+    )`,
+
+    // 6. Multi-Currency Wallet
+    `CREATE TABLE IF NOT EXISTS currency_wallets (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      currency TEXT NOT NULL,
+      balance NUMERIC(15,2) NOT NULL DEFAULT 0,
+      is_primary BOOLEAN DEFAULT false,
+      UNIQUE(tenant_id, currency)
+    )`,
+    `CREATE TABLE IF NOT EXISTS currency_transactions (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      wallet_id INTEGER REFERENCES currency_wallets(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('deposit','withdrawal','transfer_in','transfer_out','exchange')),
+      amount NUMERIC(15,2) NOT NULL,
+      exchange_rate NUMERIC(10,4) DEFAULT 1.0000,
+      reference TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 7. Receipt Batch Processing
+    `CREATE TABLE IF NOT EXISTS receipt_batches (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      batch_name TEXT NOT NULL,
+      total_receipts INTEGER NOT NULL DEFAULT 0,
+      total_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
+      status TEXT DEFAULT 'draft' CHECK (status IN ('draft','generated','sent','completed')),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS receipt_batch_items (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      batch_id INTEGER REFERENCES receipt_batches(id) ON DELETE CASCADE,
+      donation_id INTEGER,
+      receipt_number TEXT NOT NULL,
+      amount NUMERIC(15,2) NOT NULL DEFAULT 0,
+      sent BOOLEAN DEFAULT false
+    )`,
+
+    // 8. Donation Split Manager
+    `CREATE TABLE IF NOT EXISTS donation_splits (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donation_id INTEGER NOT NULL,
+      total_amount NUMERIC(15,2) NOT NULL DEFAULT 0,
+      split_count INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS donation_split_items (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      split_id INTEGER REFERENCES donation_splits(id) ON DELETE CASCADE,
+      fund_category TEXT NOT NULL,
+      amount NUMERIC(15,2) NOT NULL DEFAULT 0,
+      percentage NUMERIC(5,2) NOT NULL DEFAULT 0
+    )`,
+
+    // 9. Fund Category Management
+    `CREATE TABLE IF NOT EXISTS fund_categories (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      is_restricted BOOLEAN DEFAULT false
+    )`,
+    `CREATE TABLE IF NOT EXISTS fund_category_assignments (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      category_id INTEGER REFERENCES fund_categories(id) ON DELETE CASCADE,
+      donation_id INTEGER NOT NULL,
+      amount NUMERIC(15,2) NOT NULL DEFAULT 0
+    )`,
+
+    // 10. Donation Anonymity
+    `CREATE TABLE IF NOT EXISTS donation_anonymity_settings (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE,
+      default_anonymous BOOLEAN DEFAULT false,
+      allow_anonymous BOOLEAN DEFAULT true,
+      show_amount BOOLEAN DEFAULT true,
+      show_name BOOLEAN DEFAULT true
+    )`,
+    `CREATE TABLE IF NOT EXISTS anonymous_donations (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      donation_id INTEGER NOT NULL,
+      donor_email TEXT,
+      display_name TEXT,
+      is_anonymous BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 11. Payment Method Router
+    `CREATE TABLE IF NOT EXISTS payment_routing_rules (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      conditions_json JSONB DEFAULT '{}',
+      gateway TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      is_active BOOLEAN DEFAULT true
+    )`,
+    `CREATE TABLE IF NOT EXISTS payment_routing_log (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      rule_id INTEGER REFERENCES payment_routing_rules(id) ON DELETE SET NULL,
+      donation_id INTEGER,
+      gateway TEXT NOT NULL,
+      routed_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 12. Financial Dashboard Pro
+    `CREATE TABLE IF NOT EXISTS financial_dashboard_config (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE UNIQUE,
+      widgets_json JSONB DEFAULT '[]',
+      refresh_interval INTEGER DEFAULT 60
+    )`,
+    `CREATE TABLE IF NOT EXISTS financial_snapshots (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      total_revenue NUMERIC(15,2) NOT NULL DEFAULT 0,
+      total_expenses NUMERIC(15,2) NOT NULL DEFAULT 0,
+      net NUMERIC(15,2) NOT NULL DEFAULT 0,
+      by_method_json JSONB DEFAULT '{}',
+      by_category_json JSONB DEFAULT '{}',
+      snapshot_date DATE NOT NULL DEFAULT CURRENT_DATE
+    )`,
+
+    // 13. Compliance Document Vault
+    `CREATE TABLE IF NOT EXISTS compliance_docs (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      file_url TEXT,
+      expiry_date DATE,
+      status TEXT DEFAULT 'active' CHECK (status IN ('active','expiring_soon','expired','archived')),
+      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS compliance_reminders (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      doc_id INTEGER REFERENCES compliance_docs(id) ON DELETE CASCADE,
+      reminder_date DATE NOT NULL,
+      sent BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 14. Audit Trail Pro
+    `CREATE TABLE IF NOT EXISTS enhanced_audit_trail (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      user_email TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER,
+      old_value TEXT,
+      new_value TEXT,
+      ip_address TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS audit_reports_ult4 (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      report_type TEXT NOT NULL,
+      date_range_start DATE NOT NULL,
+      date_range_end DATE NOT NULL,
+      findings_json JSONB DEFAULT '{}',
+      generated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // 15. Fund Balance Calculator
+    `CREATE TABLE IF NOT EXISTS fund_balances (
+      id SERIAL PRIMARY KEY,
+      tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+      fund_name TEXT NOT NULL,
+      category TEXT,
+      beginning_balance NUMERIC(15,2) NOT NULL DEFAULT 0,
+      additions NUMERIC(15,2) NOT NULL DEFAULT 0,
+      deductions NUMERIC(15,2) NOT NULL DEFAULT 0,
+      ending_balance NUMERIC(15,2) NOT NULL DEFAULT 0,
+      period_start DATE NOT NULL,
+      period_end DATE NOT NULL,
+      calculated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // Indexes
+    `CREATE INDEX IF NOT EXISTS idx_fund_allocations_tenant ON fund_allocations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fund_allocation_entries_alloc ON fund_allocation_entries(allocation_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fundraising_budgets_tenant ON fundraising_budgets(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_budget_line_items_budget ON budget_line_items(budget_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_reconciliation_batches_tenant ON reconciliation_batches(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_reconciliation_items_batch ON reconciliation_items(batch_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_grants_ult4_tenant ON grants_ult4(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_grant_reports_ult4_grant ON grant_reports_ult4(grant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_endowments_tenant ON endowments(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_endowment_tx_endow ON endowment_transactions(endowment_id)`,
-
-    // Feature 6: Multi-Currency Wallet
-    `CREATE TABLE IF NOT EXISTS currency_wallets (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, currency_code TEXT NOT NULL DEFAULT 'UGX', balance INTEGER DEFAULT 0, held_amount INTEGER DEFAULT 0, available_amount INTEGER DEFAULT 0, exchange_rate_to_base NUMERIC DEFAULT 1.0, last_updated TIMESTAMPTZ DEFAULT NOW(), UNIQUE(tenant_id, currency_code))`,
-    `CREATE TABLE IF NOT EXISTS currency_transactions (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, wallet_id INTEGER REFERENCES currency_wallets(id), transaction_type TEXT NOT NULL CHECK (transaction_type IN ('deposit','withdrawal','conversion','fee')), amount INTEGER NOT NULL, from_currency TEXT, to_currency TEXT, exchange_rate NUMERIC, fee INTEGER DEFAULT 0, reference TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_endowment_transactions_endowment ON endowment_transactions(endowment_id)`,
     `CREATE INDEX IF NOT EXISTS idx_currency_wallets_tenant ON currency_wallets(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_currency_tx_tenant ON currency_transactions(tenant_id)`,
-
-    // Feature 7: Receipt Batch Processing
-    `CREATE TABLE IF NOT EXISTS receipt_batches (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, batch_name TEXT NOT NULL, period_start DATE, period_end DATE, receipt_count INTEGER DEFAULT 0, total_amount INTEGER DEFAULT 0, status TEXT DEFAULT 'pending' CHECK (status IN ('pending','generated','sent','completed')), generated_by TEXT, generated_at TIMESTAMPTZ)`,
-    `CREATE TABLE IF NOT EXISTS receipt_batch_items (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, batch_id INTEGER NOT NULL REFERENCES receipt_batches(id) ON DELETE CASCADE, donation_id INTEGER, donor_email TEXT, donor_name TEXT, amount INTEGER, receipt_number TEXT, sent BOOLEAN DEFAULT false, sent_at TIMESTAMPTZ)`,
+    `CREATE INDEX IF NOT EXISTS idx_currency_transactions_wallet ON currency_transactions(wallet_id)`,
     `CREATE INDEX IF NOT EXISTS idx_receipt_batches_tenant ON receipt_batches(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_receipt_items_batch ON receipt_batch_items(batch_id)`,
-
-    // Feature 8: Donation Split Manager
-    `CREATE TABLE IF NOT EXISTS donation_splits (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donation_id INTEGER, split_config_json TEXT DEFAULT '{}', total_amount INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS donation_split_items (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, split_id INTEGER NOT NULL REFERENCES donation_splits(id) ON DELETE CASCADE, campaign_id INTEGER, fund_id INTEGER, amount INTEGER NOT NULL, percentage NUMERIC DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_receipt_batch_items_batch ON receipt_batch_items(batch_id)`,
     `CREATE INDEX IF NOT EXISTS idx_donation_splits_tenant ON donation_splits(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_split_items_split ON donation_split_items(split_id)`,
-
-    // Feature 9: Fund Category Management
-    `CREATE TABLE IF NOT EXISTS fund_categories (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, category_type TEXT DEFAULT 'operating' CHECK (category_type IN ('operating','program','admin','capital','emergency')), parent_id INTEGER REFERENCES fund_categories(id), is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS fund_category_assignments (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, category_id INTEGER NOT NULL REFERENCES fund_categories(id) ON DELETE CASCADE, campaign_id INTEGER NOT NULL, assigned_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_fund_cats_tenant ON fund_categories(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_fund_cat_assign_cat ON fund_category_assignments(category_id)`,
-
-    // Feature 10: Donation Anonymity Manager
-    `CREATE TABLE IF NOT EXISTS donation_anonymity_settings (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, allow_anonymous BOOLEAN DEFAULT true, allow_pseudonym BOOLEAN DEFAULT true, default_setting TEXT DEFAULT 'named' CHECK (default_setting IN ('named','anonymous','pseudonym')), display_format TEXT DEFAULT 'first_initial', updated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS anonymous_donations (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donation_id INTEGER, display_name TEXT, is_anonymous BOOLEAN DEFAULT false, reveal_to_org BOOLEAN DEFAULT false, message TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_anon_settings_tenant ON donation_anonymity_settings(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_anon_donations_tenant ON anonymous_donations(tenant_id)`,
-
-    // Feature 11: Payment Method Router
-    `CREATE TABLE IF NOT EXISTS payment_routing_rules (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, name TEXT NOT NULL, priority INTEGER DEFAULT 0, conditions_json TEXT DEFAULT '{}', target_method TEXT NOT NULL, target_provider TEXT, is_active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS payment_routing_log (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, donation_id INTEGER, routed_to TEXT, rule_id INTEGER, original_method TEXT, routing_reason TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_pay_routes_tenant ON payment_routing_rules(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_pay_route_log_tenant ON payment_routing_log(tenant_id)`,
-
-    // Feature 12: Financial Dashboard Pro
-    `CREATE TABLE IF NOT EXISTS financial_dashboard_config (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE UNIQUE, widgets_json TEXT DEFAULT '[]', layout_json TEXT DEFAULT '{}', refresh_interval INTEGER DEFAULT 300, updated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS financial_snapshots (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, total_revenue INTEGER DEFAULT 0, total_expenses INTEGER DEFAULT 0, net_position INTEGER DEFAULT 0, donation_count INTEGER DEFAULT 0, avg_donation INTEGER DEFAULT 0, period_start DATE, period_end DATE, calculated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_fin_dash_tenant ON financial_dashboard_config(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_fin_snapshots_tenant ON financial_snapshots(tenant_id)`,
-
-    // Feature 13: Compliance Document Vault
-    `CREATE TABLE IF NOT EXISTS compliance_docs (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, document_type TEXT NOT NULL CHECK (document_type IN ('certificate','license','registration','audit','policy','report','agreement','other')), title TEXT NOT NULL, file_url TEXT, expiry_date DATE, issuing_authority TEXT, status TEXT DEFAULT 'active' CHECK (status IN ('active','expired','pending_renewal','archived')), reviewed_by TEXT, reviewed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS compliance_reminders (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, document_id INTEGER NOT NULL REFERENCES compliance_docs(id) ON DELETE CASCADE, reminder_date DATE NOT NULL, sent BOOLEAN DEFAULT false, sent_at TIMESTAMPTZ)`,
+    `CREATE INDEX IF NOT EXISTS idx_donation_split_items_split ON donation_split_items(split_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fund_categories_tenant ON fund_categories(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fund_category_assignments_cat ON fund_category_assignments(category_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_anonymity_settings_tenant ON donation_anonymity_settings(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_anonymous_donations_tenant ON anonymous_donations(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_routing_rules_tenant ON payment_routing_rules(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_routing_log_tenant ON payment_routing_log(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_financial_dashboard_config_tenant ON financial_dashboard_config(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_financial_snapshots_tenant ON financial_snapshots(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_compliance_docs_tenant ON compliance_docs(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_compliance_reminders_doc ON compliance_reminders(document_id)`,
-
-    // Feature 14: Audit Trail Pro
-    `CREATE TABLE IF NOT EXISTS enhanced_audit_trail (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id INTEGER, old_values_json TEXT, new_values_json TEXT, ip_address TEXT, user_agent TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE TABLE IF NOT EXISTS audit_reports (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, report_name TEXT NOT NULL, filters_json TEXT DEFAULT '{}', generated_by TEXT, generated_at TIMESTAMPTZ DEFAULT NOW())`,
-    `CREATE INDEX IF NOT EXISTS idx_enhanced_audit_tenant ON enhanced_audit_trail(tenant_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_enhanced_audit_entity ON enhanced_audit_trail(entity_type, entity_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_audit_reports_tenant ON audit_reports(tenant_id)`,
-
-    // Feature 15: Fund Balance Calculator
-    `CREATE TABLE IF NOT EXISTS fund_balances (id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, fund_name TEXT NOT NULL, fund_type TEXT DEFAULT 'unrestricted', opening_balance INTEGER DEFAULT 0, total_inflows INTEGER DEFAULT 0, total_outflows INTEGER DEFAULT 0, closing_balance INTEGER DEFAULT 0, period_start DATE, period_end DATE, calculated_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_reminders_doc ON compliance_reminders(doc_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_enhanced_audit_trail_tenant ON enhanced_audit_trail(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_enhanced_audit_trail_entity ON enhanced_audit_trail(entity_type, entity_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_reports_ult4_tenant ON audit_reports_ult4(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_fund_balances_tenant ON fund_balances(tenant_id)`,
-
-    // Seed default fund categories
-    `INSERT INTO fund_categories (tenant_id, name, description, category_type) SELECT t.id, 'General Operations', 'Day-to-day operational expenses', 'operating' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM fund_categories WHERE tenant_id=t.id AND name='General Operations')`,
-    `INSERT INTO fund_categories (tenant_id, name, description, category_type) SELECT t.id, 'Program Funds', 'Funds for specific programs and projects', 'program' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM fund_categories WHERE tenant_id=t.id AND name='Program Funds')`,
-    `INSERT INTO fund_categories (tenant_id, name, description, category_type) SELECT t.id, 'Emergency Reserve', 'Funds reserved for emergencies', 'emergency' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM fund_categories WHERE tenant_id=t.id AND name='Emergency Reserve')`,
-    `INSERT INTO fund_categories (tenant_id, name, description, category_type) SELECT t.id, 'Capital Projects', 'Funds for capital improvements and assets', 'capital' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM fund_categories WHERE tenant_id=t.id AND name='Capital Projects')`,
-
-    // Seed default anonymity settings
-    `INSERT INTO donation_anonymity_settings (tenant_id, allow_anonymous, allow_pseudonym, default_setting) SELECT t.id, true, true, 'named' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM donation_anonymity_settings WHERE tenant_id=t.id)`,
-
-    // Seed default currency wallets
-    `INSERT INTO currency_wallets (tenant_id, currency_code, balance, exchange_rate_to_base) SELECT t.id, 'UGX', 0, 1.0 FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM currency_wallets WHERE tenant_id=t.id AND currency_code='UGX')`,
-    `INSERT INTO currency_wallets (tenant_id, currency_code, balance, exchange_rate_to_base) SELECT t.id, 'USD', 0, 3800 FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM currency_wallets WHERE tenant_id=t.id AND currency_code='USD')`,
-    `INSERT INTO currency_wallets (tenant_id, currency_code, balance, exchange_rate_to_base) SELECT t.id, 'KES', 0, 28 FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM currency_wallets WHERE tenant_id=t.id AND currency_code='KES')`,
-
-    // Seed default payment routing rules
-    `INSERT INTO payment_routing_rules (tenant_id, name, priority, conditions_json, target_method, target_provider) SELECT t.id, 'Default Mobile Money', 1, '{"amount_max":5000000}', 'mobile_money', 'auto' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM payment_routing_rules WHERE tenant_id=t.id AND name='Default Mobile Money')`,
-    `INSERT INTO payment_routing_rules (tenant_id, name, priority, conditions_json, target_method, target_provider) SELECT t.id, 'Large Amount Bank Transfer', 2, '{"amount_min":5000000}', 'bank_transfer', 'default' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM payment_routing_rules WHERE tenant_id=t.id AND name='Large Amount Bank Transfer')`,
-
-    // Seed default financial dashboard config
-    `INSERT INTO financial_dashboard_config (tenant_id, widgets_json, layout_json) SELECT t.id, '["revenue","expenses","net_position","donation_count","avg_donation"]', '{"columns":2}' FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM financial_dashboard_config WHERE tenant_id=t.id)`,
   ];
 
   (async () => {
     for (const q of migrations) {
-      try { await pool.query(q); } catch(e) {}
+      try { await pool.query(q); } catch(e) { /* already exists OK */ }
     }
-    console.log('[FundraisingUltimate4] Migrations complete — 15 features');
+    console.log('[FundraisingUlt4] Migrations complete');
+
+    // =============================================
+    // SEED DATA — per tenant
+    // =============================================
+
+    // Seed currency wallets: UGX (primary), USD, KES
+    await pool.query(`INSERT INTO currency_wallets (tenant_id, currency, balance, is_primary)
+      SELECT t.id, 'UGX', 0, true
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM currency_wallets WHERE tenant_id=t.id AND currency='UGX')`);
+    await pool.query(`INSERT INTO currency_wallets (tenant_id, currency, balance, is_primary)
+      SELECT t.id, 'USD', 0, false
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM currency_wallets WHERE tenant_id=t.id AND currency='USD')`);
+    await pool.query(`INSERT INTO currency_wallets (tenant_id, currency, balance, is_primary)
+      SELECT t.id, 'KES', 0, false
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM currency_wallets WHERE tenant_id=t.id AND currency='KES')`);
+
+    // Seed fund categories: General, Restricted, Endowment, Capital
+    await pool.query(`INSERT INTO fund_categories (tenant_id, name, description, is_restricted)
+      SELECT t.id, 'General Fund', 'Unrestricted general operating fund', false
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM fund_categories WHERE tenant_id=t.id AND name='General Fund')`);
+    await pool.query(`INSERT INTO fund_categories (tenant_id, name, description, is_restricted)
+      SELECT t.id, 'Restricted Fund', 'Donor-restricted fund for specific purposes', true
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM fund_categories WHERE tenant_id=t.id AND name='Restricted Fund')`);
+    await pool.query(`INSERT INTO fund_categories (tenant_id, name, description, is_restricted)
+      SELECT t.id, 'Endowment Fund', 'Long-term endowment investments', true
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM fund_categories WHERE tenant_id=t.id AND name='Endowment Fund')`);
+    await pool.query(`INSERT INTO fund_categories (tenant_id, name, description, is_restricted)
+      SELECT t.id, 'Capital Fund', 'Capital projects and improvements', false
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM fund_categories WHERE tenant_id=t.id AND name='Capital Fund')`);
+
+    // Seed payment routing rules: 2 rules
+    await pool.query(`INSERT INTO payment_routing_rules (tenant_id, name, conditions_json, gateway, priority, is_active)
+      SELECT t.id, 'Mobile Money Default', '{"min_amount":500,"max_amount":5000000,"currency":"UGX"}', 'mobile_money', 1, true
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM payment_routing_rules WHERE tenant_id=t.id AND name='Mobile Money Default')`);
+    await pool.query(`INSERT INTO payment_routing_rules (tenant_id, name, conditions_json, gateway, priority, is_active)
+      SELECT t.id, 'Card Gateway Large', '{"min_amount":5000001,"currency":"UGX"}', 'card_gateway', 2, true
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM payment_routing_rules WHERE tenant_id=t.id AND name='Card Gateway Large')`);
+
+    // Seed anonymity settings
+    await pool.query(`INSERT INTO donation_anonymity_settings (tenant_id, default_anonymous, allow_anonymous, show_amount, show_name)
+      SELECT t.id, false, true, true, true
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM donation_anonymity_settings WHERE tenant_id=t.id)`);
+
+    // Seed financial dashboard config
+    await pool.query(`INSERT INTO financial_dashboard_config (tenant_id, widgets_json, refresh_interval)
+      SELECT t.id, '["revenue_summary","expense_breakdown","fund_balances","recent_transactions"]', 60
+      FROM tenants t WHERE NOT EXISTS (SELECT 1 FROM financial_dashboard_config WHERE tenant_id=t.id)`);
+
+    console.log('[FundraisingUlt4] Seed data complete');
   })();
 
   // =============================================
+  // HELPER: Record enhanced audit entry
+  // =============================================
+  async function enhancedAudit(tenantId, userEmail, action, entityType, entityId, oldValue, newValue, ipAddress) {
+    try {
+      await pool.query(
+        'INSERT INTO enhanced_audit_trail (tenant_id, user_email, action, entity_type, entity_id, old_value, new_value, ip_address) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+        [tenantId, userEmail, action, entityType, entityId, oldValue || null, newValue || null, ipAddress || null]
+      );
+    } catch(e) { console.warn('[EnhancedAudit]', e.message); }
+  }
+
+  // ================================================================
   // FEATURE 1: FUND ALLOCATION MANAGER
-  // =============================================
+  // ================================================================
+
+  // GET /api/fund-allocations — List all fund allocations
   app.get('/api/fund-allocations', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM fund_allocations WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT fa.*, (SELECT COUNT(*) FROM fund_allocation_entries WHERE allocation_id=fa.id) as entry_count FROM fund_allocations fa WHERE fa.tenant_id=$1 ORDER BY fa.created_at DESC',
+      [t]
+    );
+    res.json(result.rows);
   }));
 
+  // POST /api/fund-allocations — Create a fund allocation
   app.post('/api/fund-allocations', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { fund_name, fund_type, total_allocated, restrictions_json, manager_email } = req.body;
-    if (!fund_name) return res.status(400).json({ error: 'fund_name required' });
-    const r = await pool.query(`INSERT INTO fund_allocations (tenant_id, fund_name, fund_type, total_allocated, total_remaining, restrictions_json, manager_email) VALUES ($1,$2,$3,$4,$4,$5,$6) RETURNING *`, [tid, esc(fund_name), fund_type||'unrestricted', total_allocated||0, JSON.stringify(restrictions_json||{}), manager_email||null]);
-    await audit(req, 'create', 'fund_allocations', r.rows[0].id);
-    res.json(r.rows[0]);
+    const t = req.session.user.tenant_id;
+    const { name, total_amount, description, is_active } = req.body;
+    if (!name || total_amount === undefined) return res.status(400).json({ error: 'name and total_amount are required' });
+    const result = await pool.query(
+      'INSERT INTO fund_allocations (tenant_id, name, total_amount, description, is_active) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [t, esc(name), parseFloat(total_amount), description ? esc(description) : null, is_active !== undefined ? is_active : true]
+    );
+    await audit(req.session.user.email, 'fund_allocation_created', 'Created fund allocation: ' + esc(name));
+    await enhancedAudit(t, req.session.user.email, 'create', 'fund_allocation', result.rows[0].id, null, JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
   }));
 
+  // PUT /api/fund-allocations/:id — Update a fund allocation
   app.put('/api/fund-allocations/:id', requireAuth, ah(async (req, res) => {
-    const { fund_name, fund_type, total_allocated, status } = req.body;
-    const r = await pool.query(`UPDATE fund_allocations SET fund_name=COALESCE($1,fund_name), fund_type=COALESCE($2,fund_type), total_allocated=COALESCE($3,total_allocated), total_remaining=total_allocated-total_spent, status=COALESCE($4,status) WHERE tenant_id=$5 AND id=$6 RETURNING *`, [fund_name?esc(fund_name):null, fund_type, total_allocated, status, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'fund_allocations', req.params.id);
-    res.json(r.rows[0]);
+    const t = req.session.user.tenant_id;
+    const { name, total_amount, description, is_active } = req.body;
+    const old = (await pool.query('SELECT * FROM fund_allocations WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Fund allocation not found' });
+    const result = await pool.query(
+      'UPDATE fund_allocations SET name=COALESCE($1,name), total_amount=COALESCE($2,total_amount), description=COALESCE($3,description), is_active=COALESCE($4,is_active) WHERE id=$5 AND tenant_id=$6 RETURNING *',
+      [name ? esc(name) : null, total_amount !== undefined ? parseFloat(total_amount) : null, description !== undefined ? esc(description) : null, is_active !== undefined ? is_active : null, req.params.id, t]
+    );
+    await audit(req.session.user.email, 'fund_allocation_updated', 'Updated fund allocation #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'update', 'fund_allocation', parseInt(req.params.id), JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
   }));
 
+  // DELETE /api/fund-allocations/:id — Delete a fund allocation
   app.delete('/api/fund-allocations/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM fund_allocations WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'delete', 'fund_allocations', req.params.id);
-    res.json({ ok: true });
+    const t = req.session.user.tenant_id;
+    const old = (await pool.query('SELECT * FROM fund_allocations WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Fund allocation not found' });
+    await pool.query('DELETE FROM fund_allocations WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+    await audit(req.session.user.email, 'fund_allocation_deleted', 'Deleted fund allocation #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'delete', 'fund_allocation', parseInt(req.params.id), JSON.stringify(old), null, req.ip);
+    res.json({ success: true });
   }));
 
-  app.post('/api/fund-allocations/:id/allocate', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { campaign_id, amount, entry_type, description } = req.body;
-    if (!amount) return res.status(400).json({ error: 'amount required' });
-    const fund = await pool.query(`SELECT * FROM fund_allocations WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
-    if (!fund.rows.length) return res.status(404).json({ error: 'Fund not found' });
-    const r = await pool.query(`INSERT INTO fund_allocation_entries (tenant_id, allocation_id, campaign_id, amount, entry_type, description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [tid, req.params.id, campaign_id||null, amount, entry_type||'allocation', esc(description||'')]);
-    if (entry_type === 'spend') {
-      await pool.query(`UPDATE fund_allocations SET total_spent=total_spent+$1, total_remaining=total_allocated-total_spent-$1 WHERE id=$2`, [amount, req.params.id]);
+  // GET /api/fund-allocations/:id/entries — List entries for an allocation
+  app.get('/api/fund-allocations/:id/entries', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const alloc = (await pool.query('SELECT * FROM fund_allocations WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!alloc) return res.status(404).json({ error: 'Fund allocation not found' });
+    const result = await pool.query(
+      'SELECT * FROM fund_allocation_entries WHERE allocation_id=$1 AND tenant_id=$2 ORDER BY id',
+      [req.params.id, t]
+    );
+    res.json({ allocation: alloc, entries: result.rows });
+  }));
+
+  // POST /api/fund-allocations/:id/entries — Add entries to an allocation
+  app.post('/api/fund-allocations/:id/entries', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const alloc = (await pool.query('SELECT * FROM fund_allocations WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!alloc) return res.status(404).json({ error: 'Fund allocation not found' });
+    const { entries } = req.body;
+    if (!entries || !Array.isArray(entries) || entries.length === 0) return res.status(400).json({ error: 'entries array is required' });
+    const inserted = [];
+    for (const e of entries) {
+      if (!e.category || e.amount === undefined) continue;
+      const r = await pool.query(
+        'INSERT INTO fund_allocation_entries (tenant_id, allocation_id, category, amount, percentage, notes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+        [t, parseInt(req.params.id), esc(e.category), parseFloat(e.amount), e.percentage !== undefined ? parseFloat(e.percentage) : 0, e.notes ? esc(e.notes) : null]
+      );
+      inserted.push(r.rows[0]);
     }
-    await audit(req, 'allocate', 'fund_allocation_entries', r.rows[0].id);
-    res.json(r.rows[0]);
+    await audit(req.session.user.email, 'fund_allocation_entries_added', 'Added entries to allocation #' + req.params.id);
+    res.json(inserted);
   }));
 
-  app.get('/api/fund-allocations/:id/balance', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT *, (total_allocated - total_spent) as calculated_remaining FROM fund_allocations WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows[0] || {});
-  }));
+  // ================================================================
+  // FEATURE 2: BUDGET VS ACTUAL
+  // ================================================================
 
-  app.get('/api/fund-allocations/summary', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT fund_type, COUNT(*) as count, SUM(total_allocated) as total_allocated, SUM(total_spent) as total_spent, SUM(total_remaining) as total_remaining FROM fund_allocations WHERE tenant_id=$1 GROUP BY fund_type`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 2: BUDGET VS ACTUAL TRACKING
-  // =============================================
+  // GET /api/fundraising-budgets — List all budgets
   app.get('/api/fundraising-budgets', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT b.*, COUNT(bl.id) as line_item_count FROM fundraising_budgets b LEFT JOIN budget_line_items bl ON b.id=bl.budget_id WHERE b.tenant_id=$1 GROUP BY b.id ORDER BY b.created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT * FROM fundraising_budgets WHERE tenant_id=$1 ORDER BY fiscal_year DESC, created_at DESC',
+      [t]
+    );
+    res.json(result.rows);
   }));
 
+  // POST /api/fundraising-budgets — Create a budget
   app.post('/api/fundraising-budgets', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, period_start, period_end, total_budget } = req.body;
-    if (!name || !period_start) return res.status(400).json({ error: 'name and period_start required' });
-    const r = await pool.query(`INSERT INTO fundraising_budgets (tenant_id, name, period_start, period_end, total_budget, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [tid, esc(name), period_start, period_end||null, total_budget||0, req.session.user.email]);
-    await audit(req, 'create', 'fundraising_budgets', r.rows[0].id);
-    res.json(r.rows[0]);
+    const t = req.session.user.tenant_id;
+    const { name, fiscal_year, total_budget, total_actual } = req.body;
+    if (!name || !fiscal_year) return res.status(400).json({ error: 'name and fiscal_year are required' });
+    const result = await pool.query(
+      'INSERT INTO fundraising_budgets (tenant_id, name, fiscal_year, total_budget, total_actual) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [t, esc(name), parseInt(fiscal_year), parseFloat(total_budget) || 0, parseFloat(total_actual) || 0]
+    );
+    await audit(req.session.user.email, 'budget_created', 'Created budget: ' + esc(name));
+    await enhancedAudit(t, req.session.user.email, 'create', 'fundraising_budget', result.rows[0].id, null, JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
   }));
 
+  // PUT /api/fundraising-budgets/:id — Update a budget
+  app.put('/api/fundraising-budgets/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, fiscal_year, total_budget, total_actual } = req.body;
+    const old = (await pool.query('SELECT * FROM fundraising_budgets WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Budget not found' });
+    const result = await pool.query(
+      'UPDATE fundraising_budgets SET name=COALESCE($1,name), fiscal_year=COALESCE($2,fiscal_year), total_budget=COALESCE($3,total_budget), total_actual=COALESCE($4,total_actual) WHERE id=$5 AND tenant_id=$6 RETURNING *',
+      [name ? esc(name) : null, fiscal_year ? parseInt(fiscal_year) : null, total_budget !== undefined ? parseFloat(total_budget) : null, total_actual !== undefined ? parseFloat(total_actual) : null, req.params.id, t]
+    );
+    await audit(req.session.user.email, 'budget_updated', 'Updated budget #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'update', 'fundraising_budget', parseInt(req.params.id), JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // GET /api/fundraising-budgets/:id/line-items — List line items for a budget
+  app.get('/api/fundraising-budgets/:id/line-items', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const budget = (await pool.query('SELECT * FROM fundraising_budgets WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!budget) return res.status(404).json({ error: 'Budget not found' });
+    const result = await pool.query(
+      'SELECT * FROM budget_line_items WHERE budget_id=$1 AND tenant_id=$2 ORDER BY id',
+      [req.params.id, t]
+    );
+    res.json({ budget, line_items: result.rows });
+  }));
+
+  // POST /api/fundraising-budgets/:id/line-items — Add line items to a budget
   app.post('/api/fundraising-budgets/:id/line-items', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { category, budgeted_amount, notes } = req.body;
-    if (!category) return res.status(400).json({ error: 'category required' });
-    const r = await pool.query(`INSERT INTO budget_line_items (tenant_id, budget_id, category, budgeted_amount, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *`, [tid, req.params.id, esc(category), budgeted_amount||0, esc(notes||'')]);
-    await audit(req, 'create', 'budget_line_items', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/fundraising-budgets/:id/variance', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT *, (budgeted_amount - actual_amount) as variance FROM budget_line_items WHERE tenant_id=$1 AND budget_id=$2 ORDER BY category`, [req.session.user.tenant_id, req.params.id]);
-    const totals = await pool.query(`SELECT SUM(budgeted_amount) as total_budget, SUM(actual_amount) as total_actual FROM budget_line_items WHERE tenant_id=$1 AND budget_id=$2`, [req.session.user.tenant_id, req.params.id]);
-    res.json({ line_items: r.rows, totals: totals.rows[0] });
-  }));
-
-  app.post('/api/fundraising-budgets/:id/actuals', requireAuth, ah(async (req, res) => {
-    const { line_item_id, actual_amount } = req.body;
-    const r = await pool.query(`UPDATE budget_line_items SET actual_amount=$1, variance=budgeted_amount-$1, updated_at=NOW() WHERE tenant_id=$2 AND budget_id=$3 AND id=$4 RETURNING *`, [actual_amount||0, req.session.user.tenant_id, req.params.id, line_item_id]);
-    await pool.query(`UPDATE fundraising_budgets SET total_actual=(SELECT SUM(actual_amount) FROM budget_line_items WHERE budget_id=$1) WHERE id=$1`, [req.params.id]);
-    res.json(r.rows[0]);
-  }));
-
-  // =============================================
-  // FEATURE 3: FINANCIAL RECONCILIATION
-  // =============================================
-  app.get('/api/reconciliation', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM reconciliation_batches WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/reconciliation', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { batch_name, period_start, period_end, total_expected } = req.body;
-    if (!batch_name) return res.status(400).json({ error: 'batch_name required' });
-    const r = await pool.query(`INSERT INTO reconciliation_batches (tenant_id, batch_name, period_start, period_end, total_expected, total_unreconciled, reconciled_by) VALUES ($1,$2,$3,$4,$5,$5,$6) RETURNING *`, [tid, esc(batch_name), period_start||null, period_end||null, total_expected||0, req.session.user.email]);
-    await audit(req, 'create', 'reconciliation_batches', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/reconciliation/:id/match', requireAuth, ah(async (req, res) => {
-    const { donation_id, actual_amount, bank_reference, notes } = req.body;
-    const r = await pool.query(`INSERT INTO reconciliation_items (tenant_id, batch_id, donation_id, expected_amount, actual_amount, bank_reference, status, matched_at, notes) VALUES ($1,$2,$3,$4,$5,$6,'matched',NOW(),$7) RETURNING *`, [req.session.user.tenant_id, req.params.id, donation_id||null, req.body.expected_amount||0, actual_amount||0, esc(bank_reference||''), esc(notes||'')]);
-    await pool.query(`UPDATE reconciliation_batches SET total_reconciled=total_reconciled+COALESCE($1,0), total_unreconciled=total_expected-total_reconciled-COALESCE($1,0) WHERE id=$2`, [actual_amount||0, req.params.id]);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/reconciliation/:id/auto-match', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const batch = await pool.query(`SELECT * FROM reconciliation_batches WHERE tenant_id=$1 AND id=$2`, [tid, req.params.id]);
-    if (!batch.rows.length) return res.status(404).json({ error: 'Batch not found' });
-    const unmatched = await pool.query(`SELECT d.id, d.amount, d.donor_email FROM donations d LEFT JOIN reconciliation_items ri ON d.id=ri.donation_id AND ri.batch_id=$1 WHERE d.tenant_id=$2 AND d.created_at BETWEEN $3 AND $4 AND ri.id IS NULL`, [req.params.id, tid, batch.rows[0].period_start||'2000-01-01', batch.rows[0].period_end||'2099-12-31']);
-    let matched = 0;
-    for (const d of unmatched.rows) {
-      await pool.query(`INSERT INTO reconciliation_items (tenant_id, batch_id, donation_id, expected_amount, actual_amount, status, matched_at) VALUES ($1,$2,$3,$4,$4,'matched',NOW())`, [tid, req.params.id, d.id, d.amount]);
-      matched++;
-    }
-    await pool.query(`UPDATE reconciliation_batches SET total_reconciled=(SELECT COALESCE(SUM(actual_amount),0) FROM reconciliation_items WHERE batch_id=$1 AND status='matched'), total_unreconciled=total_expected-(SELECT COALESCE(SUM(actual_amount),0) FROM reconciliation_items WHERE batch_id=$1 AND status='matched') WHERE id=$1`, [req.params.id]);
-    res.json({ matched, total_unmatched: unmatched.rows.length });
-  }));
-
-  app.get('/api/reconciliation/:id/report', requireAuth, ah(async (req, res) => {
-    const batch = await pool.query(`SELECT * FROM reconciliation_batches WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    const items = await pool.query(`SELECT * FROM reconciliation_items WHERE tenant_id=$1 AND batch_id=$2`, [req.session.user.tenant_id, req.params.id]);
-    res.json({ batch: batch.rows[0], items: items.rows });
-  }));
-
-  // =============================================
-  // FEATURE 4: GRANT MANAGEMENT
-  // =============================================
-  app.get('/api/grants', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM grants WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/grants', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { grant_name, funder_name, funder_contact, amount_requested, application_date, start_date, end_date, restrictions_json, reporting_requirements_json, assigned_to } = req.body;
-    if (!grant_name || !funder_name) return res.status(400).json({ error: 'grant_name and funder_name required' });
-    const r = await pool.query(`INSERT INTO grants (tenant_id, grant_name, funder_name, funder_contact, amount_requested, application_date, start_date, end_date, restrictions_json, reporting_requirements_json, assigned_to) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [tid, esc(grant_name), esc(funder_name), esc(funder_contact||''), amount_requested||0, application_date||null, start_date||null, end_date||null, JSON.stringify(restrictions_json||[]), JSON.stringify(reporting_requirements_json||[]), assigned_to||null]);
-    await audit(req, 'create', 'grants', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.put('/api/grants/:id', requireAuth, ah(async (req, res) => {
-    const { status, amount_awarded, decision_date } = req.body;
-    const r = await pool.query(`UPDATE grants SET status=COALESCE($1,status), amount_awarded=COALESCE($2,amount_awarded), decision_date=COALESCE($3,decision_date) WHERE tenant_id=$4 AND id=$5 RETURNING *`, [status, amount_awarded, decision_date, req.session.user.tenant_id, req.params.id]);
-    await audit(req, 'update', 'grants', req.params.id);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/grants/:id/submit-report', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { report_type, period_start, period_end, amount_spent, narrative_text } = req.body;
-    const r = await pool.query(`INSERT INTO grant_reports (tenant_id, grant_id, report_type, period_start, period_end, amount_spent, narrative_text, submitted_at, status) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),'submitted') RETURNING *`, [tid, req.params.id, report_type||'progress', period_start||null, period_end||null, amount_spent||0, esc(narrative_text||'')]);
-    await audit(req, 'create', 'grant_reports', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/grants/:id/reports', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM grant_reports WHERE tenant_id=$1 AND grant_id=$2 ORDER BY submitted_at DESC`, [req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows);
-  }));
-
-  app.get('/api/grants/upcoming-deadlines', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM grants WHERE tenant_id=$1 AND status IN ('active','awarded') AND end_date <= CURRENT_DATE + INTERVAL '90 days' ORDER BY end_date`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 5: ENDOWMENT MANAGEMENT
-  // =============================================
-  app.get('/api/endowments', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM endowments WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/endowments', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, principal_amount, annual_return_rate, spending_rate, purpose, restrictions, manager_email } = req.body;
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const r = await pool.query(`INSERT INTO endowments (tenant_id, name, principal_amount, current_value, annual_return_rate, spending_rate, purpose, restrictions, manager_email) VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8) RETURNING *`, [tid, esc(name), principal_amount||0, annual_return_rate||0, spending_rate||0.05, esc(purpose||''), esc(restrictions||''), manager_email||null]);
-    await audit(req, 'create', 'endowments', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/endowments/:id/transaction', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { transaction_type, amount, description, transaction_date } = req.body;
-    if (!transaction_type || !amount) return res.status(400).json({ error: 'transaction_type and amount required' });
-    const r = await pool.query(`INSERT INTO endowment_transactions (tenant_id, endowment_id, transaction_type, amount, description, transaction_date) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [tid, req.params.id, transaction_type, amount, esc(description||''), transaction_date||'CURRENT_DATE']);
-    if (transaction_type === 'contribution' || transaction_type === 'return') {
-      await pool.query(`UPDATE endowments SET current_value=current_value+$1 WHERE id=$2`, [amount, req.params.id]);
-    } else if (transaction_type === 'spending' || transaction_type === 'fee') {
-      await pool.query(`UPDATE endowments SET current_value=GREATEST(0, current_value-$1) WHERE id=$2`, [amount, req.params.id]);
-    }
-    await audit(req, 'create', 'endowment_transactions', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/endowments/:id/performance', requireAuth, ah(async (req, res) => {
-    const endow = await pool.query(`SELECT * FROM endowments WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    const txs = await pool.query(`SELECT transaction_type, SUM(amount) as total FROM endowment_transactions WHERE tenant_id=$1 AND endowment_id=$2 GROUP BY transaction_type`, [req.session.user.tenant_id, req.params.id]);
-    const e = endow.rows[0] || {};
-    const returns = (txs.rows.find(t=>t.transaction_type==='return')?.total || 0);
-    const roi = e.principal_amount > 0 ? (returns / e.principal_amount * 100).toFixed(2) : 0;
-    res.json({ ...e, transactions: txs.rows, total_returns: returns, roi_percentage: roi });
-  }));
-
-  // =============================================
-  // FEATURE 6: MULTI-CURRENCY WALLET
-  // =============================================
-  app.get('/api/currency-wallets', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM currency_wallets WHERE tenant_id=$1 ORDER BY currency_code`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/currency-wallets/convert', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { from_currency, to_currency, amount } = req.body;
-    if (!from_currency || !to_currency || !amount) return res.status(400).json({ error: 'from_currency, to_currency, and amount required' });
-    const fromW = await pool.query(`SELECT * FROM currency_wallets WHERE tenant_id=$1 AND currency_code=$2`, [tid, from_currency]);
-    const toW = await pool.query(`SELECT * FROM currency_wallets WHERE tenant_id=$1 AND currency_code=$2`, [tid, to_currency]);
-    if (!fromW.rows.length || !toW.rows.length) return res.status(404).json({ error: 'Wallet not found' });
-    if (fromW.rows[0].available_amount < amount) return res.status(400).json({ error: 'Insufficient balance' });
-    const converted = Math.round(amount * fromW.rows[0].exchange_rate_to_base / toW.rows[0].exchange_rate_to_base);
-    const fee = Math.round(converted * 0.01);
-    await pool.query(`UPDATE currency_wallets SET balance=balance-$1, available_amount=available_amount-$1, last_updated=NOW() WHERE tenant_id=$2 AND currency_code=$3`, [amount, tid, from_currency]);
-    await pool.query(`UPDATE currency_wallets SET balance=balance+$1, available_amount=available_amount+$1, last_updated=NOW() WHERE tenant_id=$2 AND currency_code=$3`, [converted - fee, tid, to_currency]);
-    await pool.query(`INSERT INTO currency_transactions (tenant_id, wallet_id, transaction_type, amount, from_currency, to_currency, exchange_rate, fee) VALUES ($1,$2,'conversion',$3,$4,$5,$6,$7)`, [tid, toW.rows[0].id, converted, from_currency, to_currency, fromW.rows[0].exchange_rate_to_base / toW.rows[0].exchange_rate_to_base, fee]);
-    res.json({ converted, fee, net_received: converted - fee });
-  }));
-
-  app.get('/api/currency-wallets/:code/transactions', requireAuth, ah(async (req, res) => {
-    const w = await pool.query(`SELECT id FROM currency_wallets WHERE tenant_id=$1 AND currency_code=$2`, [req.session.user.tenant_id, req.params.code]);
-    if (!w.rows.length) return res.json([]);
-    const r = await pool.query(`SELECT * FROM currency_transactions WHERE tenant_id=$1 AND wallet_id=$2 ORDER BY created_at DESC LIMIT 50`, [req.session.user.tenant_id, w.rows[0].id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/currency-wallets/exchange-rates', requireAuth, ah(async (req, res) => {
-    const { rates } = req.body; // { USD: 3800, KES: 28, ... }
-    if (!rates) return res.status(400).json({ error: 'rates object required' });
-    for (const [code, rate] of Object.entries(rates)) {
-      await pool.query(`UPDATE currency_wallets SET exchange_rate_to_base=$1, last_updated=NOW() WHERE tenant_id=$2 AND currency_code=$3`, [rate, req.session.user.tenant_id, code]);
-    }
-    res.json({ ok: true, updated: Object.keys(rates).length });
-  }));
-
-  // =============================================
-  // FEATURE 7: RECEIPT BATCH PROCESSING
-  // =============================================
-  app.post('/api/receipt-batches/generate', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { batch_name, period_start, period_end } = req.body;
-    const donations = await pool.query(`SELECT d.id, d.donor_email, d.donor_name, d.amount FROM donations d LEFT JOIN receipt_batch_items rbi ON d.id=rbi.donation_id WHERE d.tenant_id=$1 AND d.created_at BETWEEN $2 AND $3 AND rbi.id IS NULL`, [tid, period_start||'2000-01-01', period_end||'2099-12-31']);
-    if (!donations.rows.length) return res.json({ message: 'No unreceipted donations found', count: 0 });
-    const batch = await pool.query(`INSERT INTO receipt_batches (tenant_id, batch_name, period_start, period_end, receipt_count, total_amount, status, generated_by, generated_at) VALUES ($1,$2,$3,$4,$5,$6,'generated',$7,NOW()) RETURNING *`, [tid, esc(batch_name||'Batch '+new Date().toISOString().split('T')[0]), period_start||null, period_end||null, donations.rows.length, donations.rows.reduce((s,d)=>s+parseInt(d.amount||0),0), req.session.user.email]);
-    for (const d of donations.rows) {
-      const receiptNum = `RCP-${tid}-${d.id}-${Date.now()}`;
-      await pool.query(`INSERT INTO receipt_batch_items (tenant_id, batch_id, donation_id, donor_email, donor_name, amount, receipt_number) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [tid, batch.rows[0].id, d.id, d.donor_email, d.donor_name, d.amount, receiptNum]);
-    }
-    await audit(req, 'create', 'receipt_batches', batch.rows[0].id);
-    res.json(batch.rows[0]);
-  }));
-
-  app.get('/api/receipt-batches', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM receipt_batches WHERE tenant_id=$1 ORDER BY generated_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/receipt-batches/:id/send', requireAuth, ah(async (req, res) => {
-    const items = await pool.query(`SELECT * FROM receipt_batch_items WHERE tenant_id=$1 AND batch_id=$2 AND sent=false`, [req.session.user.tenant_id, req.params.id]);
-    let sent = 0;
-    for (const item of items.rows) {
-      try { await sendEmail(item.donor_email, 'Donation Receipt', `Receipt #${item.receipt_number}: UGX ${item.amount}`); } catch(e){}
-      await pool.query(`UPDATE receipt_batch_items SET sent=true, sent_at=NOW() WHERE id=$1`, [item.id]);
-      sent++;
-    }
-    await pool.query(`UPDATE receipt_batches SET status='sent' WHERE id=$1 AND (SELECT COUNT(*) FROM receipt_batch_items WHERE batch_id=$1 AND sent=true) = (SELECT COUNT(*) FROM receipt_batch_items WHERE batch_id=$1)`, [req.params.id]);
-    res.json({ sent, total: items.rows.length });
-  }));
-
-  app.get('/api/receipt-batches/:id/items', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM receipt_batch_items WHERE tenant_id=$1 AND batch_id=$2 ORDER BY donor_name`, [req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows);
-  }));
-
-  // =============================================
-  // FEATURE 8: DONATION SPLIT MANAGER
-  // =============================================
-  app.post('/api/donation-splits', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { donation_id, split_config, items } = req.body;
-    if (!items || !items.length) return res.status(400).json({ error: 'items array required' });
-    const total = items.reduce((s,i)=>s+parseInt(i.amount||0),0);
-    const r = await pool.query(`INSERT INTO donation_splits (tenant_id, donation_id, split_config_json, total_amount) VALUES ($1,$2,$3,$4) RETURNING *`, [tid, donation_id||null, JSON.stringify(split_config||{}), total]);
+    const t = req.session.user.tenant_id;
+    const budget = (await pool.query('SELECT * FROM fundraising_budgets WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!budget) return res.status(404).json({ error: 'Budget not found' });
+    const { items } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items array is required' });
+    const inserted = [];
     for (const item of items) {
-      await pool.query(`INSERT INTO donation_split_items (tenant_id, split_id, campaign_id, fund_id, amount, percentage) VALUES ($1,$2,$3,$4,$5,$6)`, [tid, r.rows[0].id, item.campaign_id||null, item.fund_id||null, item.amount, total>0?Math.round(item.amount/total*10000)/100:0]);
+      if (!item.category || item.budgeted === undefined) continue;
+      const r = await pool.query(
+        'INSERT INTO budget_line_items (tenant_id, budget_id, category, budgeted, actual) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [t, parseInt(req.params.id), esc(item.category), parseFloat(item.budgeted), parseFloat(item.actual) || 0]
+      );
+      inserted.push(r.rows[0]);
     }
-    await audit(req, 'create', 'donation_splits', r.rows[0].id);
-    res.json(r.rows[0]);
+    await audit(req.session.user.email, 'budget_line_items_added', 'Added line items to budget #' + req.params.id);
+    res.json(inserted);
   }));
 
-  app.get('/api/donation-splits/:donationId', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT ds.*, json_agg(json_build_object('campaign_id',dsi.campaign_id,'fund_id',dsi.fund_id,'amount',dsi.amount,'percentage',dsi.percentage)) as items FROM donation_splits ds LEFT JOIN donation_split_items dsi ON ds.id=dsi.split_id WHERE ds.tenant_id=$1 AND ds.donation_id=$2 GROUP BY ds.id`, [req.session.user.tenant_id, req.params.donationId]);
-    res.json(r.rows);
+  // PUT /api/fundraising-budgets/:id/line-items — Update line items for a budget
+  app.put('/api/fundraising-budgets/:id/line-items', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { items } = req.body;
+    if (!items || !Array.isArray(items)) return res.status(400).json({ error: 'items array is required' });
+    const updated = [];
+    for (const item of items) {
+      if (!item.id) continue;
+      const r = await pool.query(
+        'UPDATE budget_line_items SET category=COALESCE($1,category), budgeted=COALESCE($2,budgeted), actual=COALESCE($3,actual) WHERE id=$4 AND tenant_id=$5 AND budget_id=$6 RETURNING *',
+        [item.category ? esc(item.category) : null, item.budgeted !== undefined ? parseFloat(item.budgeted) : null, item.actual !== undefined ? parseFloat(item.actual) : null, item.id, t, req.params.id]
+      );
+      if (r.rows[0]) updated.push(r.rows[0]);
+    }
+    await audit(req.session.user.email, 'budget_line_items_updated', 'Updated line items for budget #' + req.params.id);
+    res.json(updated);
   }));
 
-  app.get('/api/donation-splits/campaign/:campaignId', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT dsi.*, ds.donation_id, ds.total_amount FROM donation_split_items dsi JOIN donation_splits ds ON dsi.split_id=ds.id WHERE dsi.tenant_id=$1 AND dsi.campaign_id=$2`, [req.session.user.tenant_id, req.params.campaignId]);
-    res.json(r.rows);
+  // GET /api/fundraising-budgets/:id/variance — Get variance analysis for a budget
+  app.get('/api/fundraising-budgets/:id/variance', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const budget = (await pool.query('SELECT * FROM fundraising_budgets WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!budget) return res.status(404).json({ error: 'Budget not found' });
+    const items = await pool.query(
+      'SELECT *, (budgeted - actual) as variance, CASE WHEN budgeted > 0 THEN ROUND(((budgeted - actual) / budgeted) * 100, 2) ELSE 0 END as variance_pct FROM budget_line_items WHERE budget_id=$1 AND tenant_id=$2 ORDER BY id',
+      [req.params.id, t]
+    );
+    const totalBudgeted = items.rows.reduce((s, i) => s + parseFloat(i.budgeted), 0);
+    const totalActual = items.rows.reduce((s, i) => s + parseFloat(i.actual), 0);
+    const totalVariance = totalBudgeted - totalActual;
+    res.json({
+      budget,
+      line_items: items.rows,
+      summary: { total_budgeted: totalBudgeted, total_actual: totalActual, total_variance: totalVariance, variance_pct: totalBudgeted > 0 ? Math.round((totalVariance / totalBudgeted) * 10000) / 100 : 0 }
+    });
   }));
 
-  // =============================================
-  // FEATURE 9: FUND CATEGORIES
-  // =============================================
+  // ================================================================
+  // FEATURE 3: FINANCIAL RECONCILIATION
+  // ================================================================
+
+  // GET /api/reconciliation — List reconciliation batches
+  app.get('/api/reconciliation', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const status = req.query.status;
+    let query = 'SELECT * FROM reconciliation_batches WHERE tenant_id=$1';
+    const params = [t];
+    if (status) { query += ' AND status=$2'; params.push(status); }
+    query += ' ORDER BY created_at DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  }));
+
+  // POST /api/reconciliation — Create a reconciliation batch
+  app.post('/api/reconciliation', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { period_start, period_end, total_expected, total_actual, items } = req.body;
+    if (!period_start || !period_end) return res.status(400).json({ error: 'period_start and period_end are required' });
+    const exp = parseFloat(total_expected) || 0;
+    const act = parseFloat(total_actual) || 0;
+    const disc = exp - act;
+    const result = await pool.query(
+      'INSERT INTO reconciliation_batches (tenant_id, period_start, period_end, total_expected, total_actual, discrepancy, status) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [t, period_start, period_end, exp, act, disc, disc === 0 ? 'reconciled' : 'open']
+    );
+    const batch = result.rows[0];
+    // Insert items if provided
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        await pool.query(
+          'INSERT INTO reconciliation_items (tenant_id, batch_id, record_type, record_id, expected, actual, is_matched, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+          [t, batch.id, esc(item.record_type), item.record_id || null, parseFloat(item.expected) || 0, parseFloat(item.actual) || 0, item.expected === item.actual, item.notes ? esc(item.notes) : null]
+        );
+      }
+    }
+    await audit(req.session.user.email, 'reconciliation_created', 'Created reconciliation batch #' + batch.id);
+    await enhancedAudit(t, req.session.user.email, 'create', 'reconciliation_batch', batch.id, null, JSON.stringify(batch), req.ip);
+    res.json(batch);
+  }));
+
+  // POST /api/reconciliation/:id/reconcile — Reconcile a batch
+  app.post('/api/reconciliation/:id/reconcile', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const old = (await pool.query('SELECT * FROM reconciliation_batches WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Reconciliation batch not found' });
+    if (old.status === 'reconciled') return res.status(400).json({ error: 'Batch already reconciled' });
+
+    // Recalculate from items
+    const items = await pool.query('SELECT * FROM reconciliation_items WHERE batch_id=$1 AND tenant_id=$2', [req.params.id, t]);
+    let totalExpected = 0, totalActual = 0;
+    for (const item of items.rows) {
+      totalExpected += parseFloat(item.expected);
+      totalActual += parseFloat(item.actual);
+      // Mark matched items
+      const matched = parseFloat(item.expected) === parseFloat(item.actual);
+      await pool.query('UPDATE reconciliation_items SET is_matched=$1 WHERE id=$2 AND tenant_id=$3', [matched, item.id, t]);
+    }
+
+    const discrepancy = totalExpected - totalActual;
+    const status = discrepancy === 0 ? 'reconciled' : 'discrepancy';
+    const result = await pool.query(
+      'UPDATE reconciliation_batches SET total_expected=$1, total_actual=$2, discrepancy=$3, status=$4, reconciled_at=NOW() WHERE id=$5 AND tenant_id=$6 RETURNING *',
+      [totalExpected, totalActual, discrepancy, status, req.params.id, t]
+    );
+    await audit(req.session.user.email, 'reconciliation_completed', 'Reconciled batch #' + req.params.id + ' status=' + status);
+    await enhancedAudit(t, req.session.user.email, 'reconcile', 'reconciliation_batch', parseInt(req.params.id), JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // GET /api/reconciliation/:id/items — Get items for a reconciliation batch
+  app.get('/api/reconciliation/:id/items', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const batch = (await pool.query('SELECT * FROM reconciliation_batches WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!batch) return res.status(404).json({ error: 'Reconciliation batch not found' });
+    const items = await pool.query('SELECT * FROM reconciliation_items WHERE batch_id=$1 AND tenant_id=$2 ORDER BY id', [req.params.id, t]);
+    res.json({ batch, items: items.rows });
+  }));
+
+  // ================================================================
+  // FEATURE 4: GRANT MANAGEMENT
+  // ================================================================
+
+  // GET /api/grants-ult4 — List all grants
+  app.get('/api/grants-ult4', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const status = req.query.status;
+    let query = 'SELECT g.*, (SELECT COUNT(*) FROM grant_reports_ult4 WHERE grant_id=g.id) as report_count FROM grants_ult4 g WHERE g.tenant_id=$1';
+    const params = [t];
+    if (status) { query += ' AND g.status=$2'; params.push(status); }
+    query += ' ORDER BY g.created_at DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  }));
+
+  // POST /api/grants-ult4 — Create a grant
+  app.post('/api/grants-ult4', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, funder, amount_requested, amount_awarded, start_date, end_date, status } = req.body;
+    if (!name || !funder) return res.status(400).json({ error: 'name and funder are required' });
+    const result = await pool.query(
+      'INSERT INTO grants_ult4 (tenant_id, name, funder, amount_requested, amount_awarded, start_date, end_date, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [t, esc(name), esc(funder), parseFloat(amount_requested) || 0, parseFloat(amount_awarded) || 0, start_date || null, end_date || null, status || 'draft']
+    );
+    await audit(req.session.user.email, 'grant_created', 'Created grant: ' + esc(name));
+    await enhancedAudit(t, req.session.user.email, 'create', 'grant', result.rows[0].id, null, JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // PUT /api/grants-ult4/:id — Update a grant
+  app.put('/api/grants-ult4/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, funder, amount_requested, amount_awarded, start_date, end_date, status } = req.body;
+    const old = (await pool.query('SELECT * FROM grants_ult4 WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Grant not found' });
+    const result = await pool.query(
+      'UPDATE grants_ult4 SET name=COALESCE($1,name), funder=COALESCE($2,funder), amount_requested=COALESCE($3,amount_requested), amount_awarded=COALESCE($4,amount_awarded), start_date=COALESCE($5,start_date), end_date=COALESCE($6,end_date), status=COALESCE($7,status) WHERE id=$8 AND tenant_id=$9 RETURNING *',
+      [name ? esc(name) : null, funder ? esc(funder) : null, amount_requested !== undefined ? parseFloat(amount_requested) : null, amount_awarded !== undefined ? parseFloat(amount_awarded) : null, start_date || null, end_date || null, status || null, req.params.id, t]
+    );
+    await audit(req.session.user.email, 'grant_updated', 'Updated grant #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'update', 'grant', parseInt(req.params.id), JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // GET /api/grants-ult4/:id/reports — List reports for a grant
+  app.get('/api/grants-ult4/:id/reports', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const grant = (await pool.query('SELECT * FROM grants_ult4 WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!grant) return res.status(404).json({ error: 'Grant not found' });
+    const reports = await pool.query('SELECT * FROM grant_reports_ult4 WHERE grant_id=$1 AND tenant_id=$2 ORDER BY due_date', [req.params.id, t]);
+    res.json({ grant, reports: reports.rows });
+  }));
+
+  // POST /api/grants-ult4/:id/reports — Add a report to a grant
+  app.post('/api/grants-ult4/:id/reports', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const grant = (await pool.query('SELECT * FROM grants_ult4 WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!grant) return res.status(404).json({ error: 'Grant not found' });
+    const { report_type, due_date, submitted_date, status, notes } = req.body;
+    if (!report_type || !due_date) return res.status(400).json({ error: 'report_type and due_date are required' });
+    const result = await pool.query(
+      'INSERT INTO grant_reports_ult4 (tenant_id, grant_id, report_type, due_date, submitted_date, status, notes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [t, parseInt(req.params.id), esc(report_type), due_date, submitted_date || null, status || 'pending', notes ? esc(notes) : null]
+    );
+    await audit(req.session.user.email, 'grant_report_added', 'Added report to grant #' + req.params.id);
+    res.json(result.rows[0]);
+  }));
+
+  // ================================================================
+  // FEATURE 5: ENDOWMENT MANAGEMENT
+  // ================================================================
+
+  // GET /api/endowments — List all endowments
+  app.get('/api/endowments', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT e.*, (SELECT COALESCE(SUM(amount),0) FROM endowment_transactions WHERE endowment_id=e.id AND transaction_type=\'contribution\') as total_contributions, (SELECT COALESCE(SUM(amount),0) FROM endowment_transactions WHERE endowment_id=e.id AND transaction_type=\'withdrawal\') as total_withdrawals FROM endowments e WHERE e.tenant_id=$1 ORDER BY e.created_at DESC',
+      [t]
+    );
+    res.json(result.rows);
+  }));
+
+  // POST /api/endowments — Create an endowment
+  app.post('/api/endowments', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, principal_amount, current_value, spending_rate } = req.body;
+    if (!name || principal_amount === undefined) return res.status(400).json({ error: 'name and principal_amount are required' });
+    const result = await pool.query(
+      'INSERT INTO endowments (tenant_id, name, principal_amount, current_value, spending_rate) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [t, esc(name), parseFloat(principal_amount), parseFloat(current_value) || parseFloat(principal_amount), parseFloat(spending_rate) || 5.00]
+    );
+    await audit(req.session.user.email, 'endowment_created', 'Created endowment: ' + esc(name));
+    await enhancedAudit(t, req.session.user.email, 'create', 'endowment', result.rows[0].id, null, JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // PUT /api/endowments/:id — Update an endowment
+  app.put('/api/endowments/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, principal_amount, current_value, spending_rate } = req.body;
+    const old = (await pool.query('SELECT * FROM endowments WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Endowment not found' });
+    const result = await pool.query(
+      'UPDATE endowments SET name=COALESCE($1,name), principal_amount=COALESCE($2,principal_amount), current_value=COALESCE($3,current_value), spending_rate=COALESCE($4,spending_rate) WHERE id=$5 AND tenant_id=$6 RETURNING *',
+      [name ? esc(name) : null, principal_amount !== undefined ? parseFloat(principal_amount) : null, current_value !== undefined ? parseFloat(current_value) : null, spending_rate !== undefined ? parseFloat(spending_rate) : null, req.params.id, t]
+    );
+    await audit(req.session.user.email, 'endowment_updated', 'Updated endowment #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'update', 'endowment', parseInt(req.params.id), JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // GET /api/endowments/:id/transactions — List transactions for an endowment
+  app.get('/api/endowments/:id/transactions', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const endowment = (await pool.query('SELECT * FROM endowments WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!endowment) return res.status(404).json({ error: 'Endowment not found' });
+    const txns = await pool.query('SELECT * FROM endowment_transactions WHERE endowment_id=$1 AND tenant_id=$2 ORDER BY date DESC, id DESC', [req.params.id, t]);
+    res.json({ endowment, transactions: txns.rows });
+  }));
+
+  // POST /api/endowments/:id/transactions — Add a transaction to an endowment
+  app.post('/api/endowments/:id/transactions', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const endowment = (await pool.query('SELECT * FROM endowments WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!endowment) return res.status(404).json({ error: 'Endowment not found' });
+    const { transaction_type, amount, date, description } = req.body;
+    if (!transaction_type || amount === undefined) return res.status(400).json({ error: 'transaction_type and amount are required' });
+    const amt = parseFloat(amount);
+    const result = await pool.query(
+      'INSERT INTO endowment_transactions (tenant_id, endowment_id, transaction_type, amount, date, description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, parseInt(req.params.id), transaction_type, amt, date || 'CURRENT_DATE', description ? esc(description) : null]
+    );
+    // Update endowment current_value atomically (no race condition)
+    if (transaction_type === 'adjustment') {
+      await pool.query('UPDATE endowments SET current_value=$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING *', [amt, req.params.id, t]);
+    } else {
+      const increment = (transaction_type === 'contribution' || transaction_type === 'investment_return') ? amt : -amt;
+      await pool.query('UPDATE endowments SET current_value=current_value+$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING *', [increment, req.params.id, t]);
+    }
+    await audit(req.session.user.email, 'endowment_transaction_added', 'Added ' + transaction_type + ' to endowment #' + req.params.id);
+    res.json(result.rows[0]);
+  }));
+
+  // ================================================================
+  // FEATURE 6: MULTI-CURRENCY WALLET
+  // ================================================================
+
+  // GET /api/currency-wallets — List all wallets
+  app.get('/api/currency-wallets', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT w.*, (SELECT COUNT(*) FROM currency_transactions WHERE wallet_id=w.id) as transaction_count FROM currency_wallets w WHERE w.tenant_id=$1 ORDER BY w.is_primary DESC, w.currency ASC',
+      [t]
+    );
+    res.json(result.rows);
+  }));
+
+  // POST /api/currency-wallets — Create a wallet
+  app.post('/api/currency-wallets', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { currency, balance, is_primary } = req.body;
+    if (!currency) return res.status(400).json({ error: 'currency is required' });
+    const existing = (await pool.query('SELECT * FROM currency_wallets WHERE tenant_id=$1 AND currency=$2', [t, esc(currency)])).rows[0];
+    if (existing) return res.status(409).json({ error: 'Wallet for ' + currency + ' already exists' });
+    const result = await pool.query(
+      'INSERT INTO currency_wallets (tenant_id, currency, balance, is_primary) VALUES ($1,$2,$3,$4) RETURNING *',
+      [t, esc(currency).toUpperCase(), parseFloat(balance) || 0, is_primary || false]
+    );
+    await audit(req.session.user.email, 'currency_wallet_created', 'Created ' + currency + ' wallet');
+    res.json(result.rows[0]);
+  }));
+
+  // GET /api/currency-wallets/:id/transactions — List transactions for a wallet
+  app.get('/api/currency-wallets/:id/transactions', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const wallet = (await pool.query('SELECT * FROM currency_wallets WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+    const txns = await pool.query('SELECT * FROM currency_transactions WHERE wallet_id=$1 AND tenant_id=$2 ORDER BY created_at DESC', [req.params.id, t]);
+    res.json({ wallet, transactions: txns.rows });
+  }));
+
+  // POST /api/currency-wallets/:id/transactions — Add a transaction to a wallet
+  app.post('/api/currency-wallets/:id/transactions', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const wallet = (await pool.query('SELECT * FROM currency_wallets WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+    const { type, amount, exchange_rate, reference } = req.body;
+    if (!type || amount === undefined) return res.status(400).json({ error: 'type and amount are required' });
+    const amt = parseFloat(amount);
+    // Update wallet balance
+    let newBalance = parseFloat(wallet.balance);
+    if (type === 'deposit' || type === 'transfer_in' || type === 'exchange') {
+      newBalance += amt;
+    } else if (type === 'withdrawal' || type === 'transfer_out') {
+      if (newBalance < amt) return res.status(400).json({ error: 'Insufficient balance' });
+      newBalance -= amt;
+    }
+    const result = await pool.query(
+      'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, parseInt(req.params.id), type, amt, parseFloat(exchange_rate) || 1.0, reference ? esc(reference) : null]
+    );
+    await pool.query('UPDATE currency_wallets SET balance=$1 WHERE id=$2 AND tenant_id=$3', [newBalance, req.params.id, t]);
+    await audit(req.session.user.email, 'currency_transaction', type + ' ' + amt + ' ' + wallet.currency);
+    res.json(result.rows[0]);
+  }));
+
+  // POST /api/currency-wallets/transfer — Transfer between wallets (with row-level locking to prevent double-spend)
+  app.post('/api/currency-wallets/transfer', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { from_wallet_id, to_wallet_id, amount, exchange_rate, reference } = req.body;
+    if (!from_wallet_id || !to_wallet_id || !amount) return res.status(400).json({ error: 'from_wallet_id, to_wallet_id, and amount are required' });
+    if (from_wallet_id === to_wallet_id) return res.status(400).json({ error: 'Cannot transfer to the same wallet' });
+    const amt = parseFloat(amount);
+    const rate = parseFloat(exchange_rate) || 1.0;
+    const convertedAmount = amt * rate;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Lock source wallet row
+      const fromResult = await client.query('SELECT * FROM currency_wallets WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [from_wallet_id, t]);
+      if (fromResult.rows.length === 0 || parseFloat(fromResult.rows[0].balance) < amt) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Insufficient balance' });
+      }
+      const fromWallet = fromResult.rows[0];
+
+      // Lock destination wallet row
+      const toResult = await client.query('SELECT * FROM currency_wallets WHERE id=$1 AND tenant_id=$2 FOR UPDATE', [to_wallet_id, t]);
+      if (toResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(404).json({ error: 'Destination wallet not found' });
+      }
+      const toWallet = toResult.rows[0];
+
+      // Debit source
+      await client.query('UPDATE currency_wallets SET balance=balance-$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', [amt, from_wallet_id, t]);
+      await client.query(
+        'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6)',
+        [t, from_wallet_id, 'transfer_out', amt, rate, reference ? esc(reference) : 'Transfer to ' + toWallet.currency]
+      );
+
+      // Credit destination
+      await client.query('UPDATE currency_wallets SET balance=balance+$1, updated_at=NOW() WHERE id=$2 AND tenant_id=$3', [convertedAmount, to_wallet_id, t]);
+      await client.query(
+        'INSERT INTO currency_transactions (tenant_id, wallet_id, type, amount, exchange_rate, reference) VALUES ($1,$2,$3,$4,$5,$6)',
+        [t, to_wallet_id, 'transfer_in', convertedAmount, rate, reference ? esc(reference) : 'Transfer from ' + fromWallet.currency]
+      );
+
+      await client.query('COMMIT');
+      client.release();
+
+      await audit(req.session.user.email, 'currency_transfer', 'Transferred ' + amt + ' ' + fromWallet.currency + ' to ' + convertedAmount + ' ' + toWallet.currency);
+      res.json({ success: true, from: fromWallet.currency, to: toWallet.currency, amount: amt, converted: convertedAmount, rate });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      return res.status(500).json({ error: e.message });
+    }
+  }));
+
+  // ================================================================
+  // FEATURE 7: RECEIPT BATCH PROCESSING
+  // ================================================================
+
+  // GET /api/receipt-batches — List receipt batches
+  app.get('/api/receipt-batches', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT rb.*, (SELECT COUNT(*) FROM receipt_batch_items WHERE batch_id=rb.id) as item_count FROM receipt_batches rb WHERE rb.tenant_id=$1 ORDER BY rb.created_at DESC',
+      [t]
+    );
+    res.json(result.rows);
+  }));
+
+  // POST /api/receipt-batches — Create a receipt batch
+  app.post('/api/receipt-batches', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { batch_name, donations } = req.body;
+    if (!batch_name) return res.status(400).json({ error: 'batch_name is required' });
+    const result = await pool.query(
+      'INSERT INTO receipt_batches (tenant_id, batch_name, total_receipts, total_amount, status) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [t, esc(batch_name), 0, 0, 'draft']
+    );
+    const batch = result.rows[0];
+
+    // Add donation items if provided
+    if (donations && Array.isArray(donations)) {
+      for (const d of donations) {
+        const receiptNum = 'RCT-' + batch.id + '-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        await pool.query(
+          'INSERT INTO receipt_batch_items (tenant_id, batch_id, donation_id, receipt_number, amount, sent) VALUES ($1,$2,$3,$4,$5,$6)',
+          [t, batch.id, d.donation_id || null, receiptNum, parseFloat(d.amount) || 0, false]
+        );
+      }
+      // Update batch totals
+      const totals = await pool.query(
+        'SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM receipt_batch_items WHERE batch_id=$1 AND tenant_id=$2',
+        [batch.id, t]
+      );
+      await pool.query(
+        'UPDATE receipt_batches SET total_receipts=$1, total_amount=$2 WHERE id=$3 AND tenant_id=$4',
+        [parseInt(totals.rows[0].cnt), parseFloat(totals.rows[0].total), batch.id, t]
+      );
+    }
+
+    await audit(req.session.user.email, 'receipt_batch_created', 'Created receipt batch: ' + esc(batch_name));
+    res.json(batch);
+  }));
+
+  // POST /api/receipt-batches/:id/generate — Generate receipts for a batch
+  app.post('/api/receipt-batches/:id/generate', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const batch = (await pool.query('SELECT * FROM receipt_batches WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!batch) return res.status(404).json({ error: 'Receipt batch not found' });
+    if (batch.status !== 'draft') return res.status(400).json({ error: 'Only draft batches can be generated' });
+
+    // Generate receipt numbers for items that don't have one
+    const items = await pool.query('SELECT * FROM receipt_batch_items WHERE batch_id=$1 AND tenant_id=$2', [req.params.id, t]);
+    for (const item of items.rows) {
+      if (!item.receipt_number || item.receipt_number === '') {
+        const newNum = 'RCT-' + batch.id + '-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        await pool.query('UPDATE receipt_batch_items SET receipt_number=$1 WHERE id=$2 AND tenant_id=$3', [newNum, item.id, t]);
+      }
+    }
+
+    await pool.query("UPDATE receipt_batches SET status='generated' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+    await audit(req.session.user.email, 'receipt_batch_generated', 'Generated receipts for batch #' + req.params.id);
+    res.json({ success: true, message: 'Receipts generated for batch #' + req.params.id });
+  }));
+
+  // POST /api/receipt-batches/:id/send — Send receipts for a batch
+  app.post('/api/receipt-batches/:id/send', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const batch = (await pool.query('SELECT * FROM receipt_batches WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!batch) return res.status(404).json({ error: 'Receipt batch not found' });
+    if (batch.status !== 'generated') return res.status(400).json({ error: 'Only generated batches can be sent' });
+
+    // Mark all items as sent
+    await pool.query('UPDATE receipt_batch_items SET sent=true WHERE batch_id=$1 AND tenant_id=$2', [req.params.id, t]);
+    await pool.query("UPDATE receipt_batches SET status='sent' WHERE id=$1 AND tenant_id=$2", [req.params.id, t]);
+
+    await audit(req.session.user.email, 'receipt_batch_sent', 'Sent receipts for batch #' + req.params.id);
+    res.json({ success: true, message: 'Receipts sent for batch #' + req.params.id });
+  }));
+
+  // ================================================================
+  // FEATURE 8: DONATION SPLIT MANAGER
+  // ================================================================
+
+  // GET /api/donation-splits — List donation splits
+  app.get('/api/donation-splits', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const donation_id = req.query.donation_id;
+    let query = 'SELECT ds.*, (SELECT COUNT(*) FROM donation_split_items WHERE split_id=ds.id) as item_count FROM donation_splits ds WHERE ds.tenant_id=$1';
+    const params = [t];
+    if (donation_id) { query += ' AND ds.donation_id=$2'; params.push(donation_id); }
+    query += ' ORDER BY ds.created_at DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  }));
+
+  // POST /api/donation-splits — Create a donation split
+  app.post('/api/donation-splits', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { donation_id, total_amount, items } = req.body;
+    if (!donation_id || total_amount === undefined) return res.status(400).json({ error: 'donation_id and total_amount are required' });
+
+    const result = await pool.query(
+      'INSERT INTO donation_splits (tenant_id, donation_id, total_amount, split_count) VALUES ($1,$2,$3,$4) RETURNING *',
+      [t, parseInt(donation_id), parseFloat(total_amount), 0]
+    );
+    const split = result.rows[0];
+
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        if (!item.fund_category || item.amount === undefined) continue;
+        await pool.query(
+          'INSERT INTO donation_split_items (tenant_id, split_id, fund_category, amount, percentage) VALUES ($1,$2,$3,$4,$5)',
+          [t, split.id, esc(item.fund_category), parseFloat(item.amount), item.percentage !== undefined ? parseFloat(item.percentage) : 0]
+        );
+      }
+      const count = (await pool.query('SELECT COUNT(*) as cnt FROM donation_split_items WHERE split_id=$1 AND tenant_id=$2', [split.id, t])).rows[0].cnt;
+      await pool.query('UPDATE donation_splits SET split_count=$1 WHERE id=$2 AND tenant_id=$3', [parseInt(count), split.id, t]);
+    }
+
+    await audit(req.session.user.email, 'donation_split_created', 'Created split for donation #' + donation_id);
+    res.json(split);
+  }));
+
+  // GET /api/donation-splits/:id/items — Get items for a donation split
+  app.get('/api/donation-splits/:id/items', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const split = (await pool.query('SELECT * FROM donation_splits WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!split) return res.status(404).json({ error: 'Donation split not found' });
+    const items = await pool.query('SELECT * FROM donation_split_items WHERE split_id=$1 AND tenant_id=$2 ORDER BY id', [req.params.id, t]);
+    res.json({ split, items: items.rows });
+  }));
+
+  // ================================================================
+  // FEATURE 9: FUND CATEGORY MANAGEMENT
+  // ================================================================
+
+  // GET /api/fund-categories — List all fund categories
   app.get('/api/fund-categories', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT fc.*, (SELECT COUNT(*) FROM fund_category_assignments WHERE category_id=fc.id) as campaign_count FROM fund_categories fc WHERE fc.tenant_id=$1 ORDER BY fc.category_type, fc.name`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT fc.*, (SELECT COALESCE(SUM(amount),0) FROM fund_category_assignments WHERE category_id=fc.id) as total_assigned FROM fund_categories fc WHERE fc.tenant_id=$1 ORDER BY fc.id',
+      [t]
+    );
+    res.json(result.rows);
   }));
 
+  // POST /api/fund-categories — Create a fund category
   app.post('/api/fund-categories', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { name, description, category_type, parent_id } = req.body;
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const r = await pool.query(`INSERT INTO fund_categories (tenant_id, name, description, category_type, parent_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`, [tid, esc(name), esc(description||''), category_type||'operating', parent_id||null]);
-    await audit(req, 'create', 'fund_categories', r.rows[0].id);
-    res.json(r.rows[0]);
+    const t = req.session.user.tenant_id;
+    const { name, description, is_restricted } = req.body;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const result = await pool.query(
+      'INSERT INTO fund_categories (tenant_id, name, description, is_restricted) VALUES ($1,$2,$3,$4) RETURNING *',
+      [t, esc(name), description ? esc(description) : null, is_restricted || false]
+    );
+    await audit(req.session.user.email, 'fund_category_created', 'Created fund category: ' + esc(name));
+    await enhancedAudit(t, req.session.user.email, 'create', 'fund_category', result.rows[0].id, null, JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
   }));
 
+  // PUT /api/fund-categories/:id — Update a fund category
   app.put('/api/fund-categories/:id', requireAuth, ah(async (req, res) => {
-    const { name, description, category_type, is_active } = req.body;
-    const r = await pool.query(`UPDATE fund_categories SET name=COALESCE($1,name), description=COALESCE($2,description), category_type=COALESCE($3,category_type), is_active=COALESCE($4,is_active) WHERE tenant_id=$5 AND id=$6 RETURNING *`, [name?esc(name):null, description?esc(description):null, category_type, is_active, req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows[0]);
+    const t = req.session.user.tenant_id;
+    const { name, description, is_restricted } = req.body;
+    const old = (await pool.query('SELECT * FROM fund_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Fund category not found' });
+    const result = await pool.query(
+      'UPDATE fund_categories SET name=COALESCE($1,name), description=COALESCE($2,description), is_restricted=COALESCE($3,is_restricted) WHERE id=$4 AND tenant_id=$5 RETURNING *',
+      [name ? esc(name) : null, description !== undefined ? esc(description) : null, is_restricted !== undefined ? is_restricted : null, req.params.id, t]
+    );
+    await audit(req.session.user.email, 'fund_category_updated', 'Updated fund category #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'update', 'fund_category', parseInt(req.params.id), JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
   }));
 
+  // DELETE /api/fund-categories/:id — Delete a fund category
   app.delete('/api/fund-categories/:id', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM fund_categories WHERE tenant_id=$1 AND id=$2`, [req.session.user.tenant_id, req.params.id]);
-    res.json({ ok: true });
+    const t = req.session.user.tenant_id;
+    const old = (await pool.query('SELECT * FROM fund_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Fund category not found' });
+    await pool.query('DELETE FROM fund_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+    await audit(req.session.user.email, 'fund_category_deleted', 'Deleted fund category #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'delete', 'fund_category', parseInt(req.params.id), JSON.stringify(old), null, req.ip);
+    res.json({ success: true });
   }));
 
-  app.post('/api/fund-categories/:id/assign/:campaignId', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`INSERT INTO fund_category_assignments (tenant_id, category_id, campaign_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING *`, [req.session.user.tenant_id, req.params.id, req.params.campaignId]);
-    res.json(r.rows[0] || { ok: true });
+  // POST /api/fund-categories/:id/assign — Assign a donation to a fund category
+  app.post('/api/fund-categories/:id/assign', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const category = (await pool.query('SELECT * FROM fund_categories WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!category) return res.status(404).json({ error: 'Fund category not found' });
+    const { donation_id, amount } = req.body;
+    if (!donation_id || amount === undefined) return res.status(400).json({ error: 'donation_id and amount are required' });
+    const result = await pool.query(
+      'INSERT INTO fund_category_assignments (tenant_id, category_id, donation_id, amount) VALUES ($1,$2,$3,$4) RETURNING *',
+      [t, parseInt(req.params.id), parseInt(donation_id), parseFloat(amount)]
+    );
+    await audit(req.session.user.email, 'fund_category_assigned', 'Assigned donation #' + donation_id + ' to category ' + category.name);
+    res.json(result.rows[0]);
   }));
 
-  app.delete('/api/fund-categories/:id/unassign/:campaignId', requireAuth, ah(async (req, res) => {
-    await pool.query(`DELETE FROM fund_category_assignments WHERE tenant_id=$1 AND category_id=$2 AND campaign_id=$3`, [req.session.user.tenant_id, req.params.id, req.params.campaignId]);
-    res.json({ ok: true });
-  }));
+  // ================================================================
+  // FEATURE 10: DONATION ANONYMITY
+  // ================================================================
 
-  app.get('/api/fund-categories/tree', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM fund_categories WHERE tenant_id=$1 AND is_active=true ORDER BY category_type, name`, [req.session.user.tenant_id]);
-    const tree = r.rows.filter(c=>!c.parent_id).map(p => ({ ...p, children: r.rows.filter(c => c.parent_id === p.id) }));
-    res.json(tree);
-  }));
-
-  // =============================================
-  // FEATURES 10-15: Simplified CRUD routes
-  // =============================================
-
-  // Feature 10: Donation Anonymity
-  app.get('/api/donation-anonymity/settings', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM donation_anonymity_settings WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    res.json(r.rows[0] || { allow_anonymous: true, allow_pseudonym: true, default_setting: 'named', display_format: 'first_initial' });
-  }));
-
-  app.put('/api/donation-anonymity/settings', requireAuth, ah(async (req, res) => {
-    const { allow_anonymous, allow_pseudonym, default_setting, display_format } = req.body;
-    const r = await pool.query(`INSERT INTO donation_anonymity_settings (tenant_id, allow_anonymous, allow_pseudonym, default_setting, display_format) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (tenant_id) DO UPDATE SET allow_anonymous=$2, allow_pseudonym=$3, default_setting=$4, display_format=$5, updated_at=NOW() RETURNING *`, [req.session.user.tenant_id, allow_anonymous??true, allow_pseudonym??true, default_setting||'named', display_format||'first_initial']);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/donation-anonymity/set', requireAuth, ah(async (req, res) => {
-    const { donation_id, display_name, is_anonymous, reveal_to_org, message } = req.body;
-    const r = await pool.query(`INSERT INTO anonymous_donations (tenant_id, donation_id, display_name, is_anonymous, reveal_to_org, message) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [req.session.user.tenant_id, donation_id, esc(display_name||''), is_anonymous||false, reveal_to_org||false, esc(message||'')]);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/donation-anonymity/stats', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT COUNT(*) as total, COUNT(CASE WHEN is_anonymous THEN 1 END) as anonymous, COUNT(CASE WHEN NOT is_anonymous THEN 1 END) as named FROM anonymous_donations WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    res.json(r.rows[0]);
-  }));
-
-  // Feature 11: Payment Method Router
-  app.get('/api/payment-routing', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM payment_routing_rules WHERE tenant_id=$1 ORDER BY priority`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/payment-routing', requireAuth, ah(async (req, res) => {
-    const { name, priority, conditions_json, target_method, target_provider } = req.body;
-    if (!name || !target_method) return res.status(400).json({ error: 'name and target_method required' });
-    const r = await pool.query(`INSERT INTO payment_routing_rules (tenant_id, name, priority, conditions_json, target_method, target_provider) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [req.session.user.tenant_id, esc(name), priority||0, JSON.stringify(conditions_json||{}), esc(target_method), esc(target_provider||'')]);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/payment-routing/route', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { amount, method, donation_id } = req.body;
-    const rules = await pool.query(`SELECT * FROM payment_routing_rules WHERE tenant_id=$1 AND is_active=true ORDER BY priority`, [tid]);
-    let routedTo = method || 'mobile_money';
-    let ruleId = null;
-    let reason = 'No matching rule, using default';
-    for (const rule of rules.rows) {
-      const conds = JSON.parse(rule.conditions_json || '{}');
-      let matches = true;
-      if (conds.amount_min && amount < conds.amount_min) matches = false;
-      if (conds.amount_max && amount > conds.amount_max) matches = false;
-      if (matches) { routedTo = rule.target_method; ruleId = rule.id; reason = `Matched rule: ${rule.name}`; break; }
+  // GET /api/anonymity-settings — Get anonymity settings for tenant
+  app.get('/api/anonymity-settings', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    let settings = (await pool.query('SELECT * FROM donation_anonymity_settings WHERE tenant_id=$1', [t])).rows[0];
+    if (!settings) {
+      // Create default settings
+      const r = await pool.query(
+        'INSERT INTO donation_anonymity_settings (tenant_id, default_anonymous, allow_anonymous, show_amount, show_name) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [t, false, true, true, true]
+      );
+      settings = r.rows[0];
     }
-    await pool.query(`INSERT INTO payment_routing_log (tenant_id, donation_id, routed_to, rule_id, original_method, routing_reason) VALUES ($1,$2,$3,$4,$5,$6)`, [tid, donation_id||null, routedTo, ruleId, method||'', reason]);
-    res.json({ routed_to: routedTo, rule_id: ruleId, reason });
+    res.json(settings);
   }));
 
-  app.get('/api/payment-routing/log', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM payment_routing_log WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+  // PUT /api/anonymity-settings — Update anonymity settings
+  app.put('/api/anonymity-settings', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { default_anonymous, allow_anonymous, show_amount, show_name } = req.body;
+    const old = (await pool.query('SELECT * FROM donation_anonymity_settings WHERE tenant_id=$1', [t])).rows[0];
+    let result;
+    if (old) {
+      result = await pool.query(
+        'UPDATE donation_anonymity_settings SET default_anonymous=COALESCE($1,default_anonymous), allow_anonymous=COALESCE($2,allow_anonymous), show_amount=COALESCE($3,show_amount), show_name=COALESCE($4,show_name) WHERE tenant_id=$5 RETURNING *',
+        [default_anonymous !== undefined ? default_anonymous : null, allow_anonymous !== undefined ? allow_anonymous : null, show_amount !== undefined ? show_amount : null, show_name !== undefined ? show_name : null, t]
+      );
+    } else {
+      result = await pool.query(
+        'INSERT INTO donation_anonymity_settings (tenant_id, default_anonymous, allow_anonymous, show_amount, show_name) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [t, default_anonymous || false, allow_anonymous !== undefined ? allow_anonymous : true, show_amount !== undefined ? show_amount : true, show_name !== undefined ? show_name : true]
+      );
+    }
+    await audit(req.session.user.email, 'anonymity_settings_updated', 'Updated donation anonymity settings');
+    await enhancedAudit(t, req.session.user.email, 'update', 'anonymity_settings', null, JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
   }));
 
-  app.get('/api/payment-routing/stats', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT routed_to, COUNT(*) as count FROM payment_routing_log WHERE tenant_id=$1 GROUP BY routed_to`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+  // GET /api/anonymous-donations — List anonymous donations
+  app.get('/api/anonymous-donations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT * FROM anonymous_donations WHERE tenant_id=$1 ORDER BY created_at DESC',
+      [t]
+    );
+    res.json(result.rows);
   }));
 
-  // Feature 12: Financial Dashboard Pro
+  // POST /api/anonymous-donations — Create an anonymous donation record
+  app.post('/api/anonymous-donations', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { donation_id, donor_email, display_name, is_anonymous } = req.body;
+    if (!donation_id) return res.status(400).json({ error: 'donation_id is required' });
+
+    // Check anonymity settings
+    const settings = (await pool.query('SELECT * FROM donation_anonymity_settings WHERE tenant_id=$1', [t])).rows[0];
+    const allowAnon = settings ? settings.allow_anonymous : true;
+    const defaultAnon = settings ? settings.default_anonymous : false;
+
+    const result = await pool.query(
+      'INSERT INTO anonymous_donations (tenant_id, donation_id, donor_email, display_name, is_anonymous) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [t, parseInt(donation_id), donor_email ? esc(donor_email) : null, display_name ? esc(display_name) : 'Anonymous Donor', is_anonymous !== undefined ? is_anonymous : defaultAnon]
+    );
+    await audit(req.session.user.email, 'anonymous_donation_recorded', 'Recorded anonymous donation for donation #' + donation_id);
+    res.json(result.rows[0]);
+  }));
+
+  // ================================================================
+  // FEATURE 11: PAYMENT METHOD ROUTER
+  // ================================================================
+
+  // GET /api/payment-routing-rules — List all routing rules
+  app.get('/api/payment-routing-rules', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const result = await pool.query(
+      'SELECT * FROM payment_routing_rules WHERE tenant_id=$1 ORDER BY priority ASC, id ASC',
+      [t]
+    );
+    res.json(result.rows);
+  }));
+
+  // POST /api/payment-routing-rules — Create a routing rule
+  app.post('/api/payment-routing-rules', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, conditions_json, gateway, priority, is_active } = req.body;
+    if (!name || !gateway) return res.status(400).json({ error: 'name and gateway are required' });
+    const result = await pool.query(
+      'INSERT INTO payment_routing_rules (tenant_id, name, conditions_json, gateway, priority, is_active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, esc(name), typeof conditions_json === 'object' ? JSON.stringify(conditions_json) : (conditions_json || '{}'), esc(gateway), parseInt(priority) || 0, is_active !== undefined ? is_active : true]
+    );
+    await audit(req.session.user.email, 'payment_routing_rule_created', 'Created routing rule: ' + esc(name));
+    await enhancedAudit(t, req.session.user.email, 'create', 'payment_routing_rule', result.rows[0].id, null, JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // PUT /api/payment-routing-rules/:id — Update a routing rule
+  app.put('/api/payment-routing-rules/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, conditions_json, gateway, priority, is_active } = req.body;
+    const old = (await pool.query('SELECT * FROM payment_routing_rules WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Routing rule not found' });
+    const result = await pool.query(
+      'UPDATE payment_routing_rules SET name=COALESCE($1,name), conditions_json=COALESCE($2,conditions_json), gateway=COALESCE($3,gateway), priority=COALESCE($4,priority), is_active=COALESCE($5,is_active) WHERE id=$6 AND tenant_id=$7 RETURNING *',
+      [name ? esc(name) : null, conditions_json ? (typeof conditions_json === 'object' ? JSON.stringify(conditions_json) : conditions_json) : null, gateway ? esc(gateway) : null, priority !== undefined ? parseInt(priority) : null, is_active !== undefined ? is_active : null, req.params.id, t]
+    );
+    await audit(req.session.user.email, 'payment_routing_rule_updated', 'Updated routing rule #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'update', 'payment_routing_rule', parseInt(req.params.id), JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // DELETE /api/payment-routing-rules/:id — Delete a routing rule
+  app.delete('/api/payment-routing-rules/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const old = (await pool.query('SELECT * FROM payment_routing_rules WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Routing rule not found' });
+    await pool.query('DELETE FROM payment_routing_rules WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+    await audit(req.session.user.email, 'payment_routing_rule_deleted', 'Deleted routing rule #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'delete', 'payment_routing_rule', parseInt(req.params.id), JSON.stringify(old), null, req.ip);
+    res.json({ success: true });
+  }));
+
+  // GET /api/payment-routing-log — List routing log entries
+  app.get('/api/payment-routing-log', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const result = await pool.query(
+      'SELECT prl.*, prr.name as rule_name FROM payment_routing_log prl LEFT JOIN payment_routing_rules prr ON prl.rule_id=prr.id WHERE prl.tenant_id=$1 ORDER BY prl.routed_at DESC LIMIT $2',
+      [t, limit]
+    );
+    res.json(result.rows);
+  }));
+
+  // ================================================================
+  // FEATURE 12: FINANCIAL DASHBOARD PRO
+  // ================================================================
+
+  // GET /api/financial-dashboard — Get dashboard config + latest snapshot
   app.get('/api/financial-dashboard', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const revenue = await pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM donations WHERE tenant_id=$1`, [tid]);
-    const expenses = await pool.query(`SELECT COALESCE(SUM(amount),0) as total FROM fund_allocation_entries WHERE tenant_id=$1 AND entry_type='spend'`, [tid]);
-    const donors = await pool.query(`SELECT COUNT(DISTINCT donor_email) as cnt FROM donations WHERE tenant_id=$1`, [tid]);
-    const avg = await pool.query(`SELECT COALESCE(AVG(amount),0) as avg FROM donations WHERE tenant_id=$1`, [tid]);
-    res.json({ total_revenue: parseInt(revenue.rows[0]?.total||0), total_expenses: parseInt(expenses.rows[0]?.total||0), net_position: parseInt(revenue.rows[0]?.total||0) - parseInt(expenses.rows[0]?.total||0), donor_count: parseInt(donors.rows[0]?.cnt||0), avg_donation: Math.round(parseFloat(avg.rows[0]?.avg||0)) });
-  }));
-
-  app.get('/api/financial-dashboard/config', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM financial_dashboard_config WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    res.json(r.rows[0] || { widgets_json: '[]', layout_json: '{}', refresh_interval: 300 });
-  }));
-
-  app.put('/api/financial-dashboard/config', requireAuth, ah(async (req, res) => {
-    const { widgets_json, layout_json, refresh_interval } = req.body;
-    const r = await pool.query(`INSERT INTO financial_dashboard_config (tenant_id, widgets_json, layout_json, refresh_interval) VALUES ($1,$2,$3,$4) ON CONFLICT (tenant_id) DO UPDATE SET widgets_json=$2, layout_json=$3, refresh_interval=$4, updated_at=NOW() RETURNING *`, [req.session.user.tenant_id, JSON.stringify(widgets_json||[]), JSON.stringify(layout_json||{}), refresh_interval||300]);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/financial-dashboard/snapshots', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM financial_snapshots WHERE tenant_id=$1 ORDER BY calculated_at DESC LIMIT 30`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/financial-dashboard/snapshot', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { period_start, period_end } = req.body;
-    const rev = await pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM donations WHERE tenant_id=$1 AND created_at BETWEEN $2 AND $3`, [tid, period_start||'2000-01-01', period_end||'2099-12-31']);
-    const exp = await pool.query(`SELECT COALESCE(SUM(amount),0) as t FROM fund_allocation_entries WHERE tenant_id=$1 AND entry_type='spend' AND created_at BETWEEN $2 AND $3`, [tid, period_start||'2000-01-01', period_end||'2099-12-31']);
-    const cnt = await pool.query(`SELECT COUNT(*) as c FROM donations WHERE tenant_id=$1 AND created_at BETWEEN $2 AND $3`, [tid, period_start||'2000-01-01', period_end||'2099-12-31']);
-    const r = await pool.query(`INSERT INTO financial_snapshots (tenant_id, total_revenue, total_expenses, net_position, donation_count, avg_donation, period_start, period_end) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`, [tid, parseInt(rev.rows[0]?.t||0), parseInt(exp.rows[0]?.t||0), parseInt(rev.rows[0]?.t||0)-parseInt(exp.rows[0]?.t||0), parseInt(cnt.rows[0]?.c||0), cnt.rows[0]?.c>0?Math.round(parseInt(rev.rows[0]?.t||0)/parseInt(cnt.rows[0]?.c||1)):0, period_start, period_end]);
-    res.json(r.rows[0]);
-  }));
-
-  // Feature 13: Compliance Document Vault
-  app.get('/api/compliance-docs', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM compliance_docs WHERE tenant_id=$1 ORDER BY created_at DESC`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/compliance-docs', requireAuth, ah(async (req, res) => {
-    const { document_type, title, file_url, expiry_date, issuing_authority } = req.body;
-    if (!title || !document_type) return res.status(400).json({ error: 'title and document_type required' });
-    const r = await pool.query(`INSERT INTO compliance_docs (tenant_id, document_type, title, file_url, expiry_date, issuing_authority) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [req.session.user.tenant_id, document_type, esc(title), esc(file_url||''), expiry_date||null, esc(issuing_authority||'')]);
-    await audit(req, 'create', 'compliance_docs', r.rows[0].id);
-    res.json(r.rows[0]);
-  }));
-
-  app.post('/api/compliance-docs/:id/review', requireAuth, ah(async (req, res) => {
-    const { status } = req.body;
-    const r = await pool.query(`UPDATE compliance_docs SET reviewed_by=$1, reviewed_at=NOW(), status=COALESCE($2,status) WHERE tenant_id=$3 AND id=$4 RETURNING *`, [req.session.user.email, status, req.session.user.tenant_id, req.params.id]);
-    res.json(r.rows[0]);
-  }));
-
-  app.get('/api/compliance-docs/expiring', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM compliance_docs WHERE tenant_id=$1 AND expiry_date <= CURRENT_DATE + INTERVAL '30 days' AND status='active' ORDER BY expiry_date`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  // Feature 14: Audit Trail Pro
-  app.get('/api/audit-trail', requireAuth, ah(async (req, res) => {
-    const { entity_type, user_email, limit } = req.query;
-    let q = `SELECT * FROM enhanced_audit_trail WHERE tenant_id=$1`;
-    const params = [req.session.user.tenant_id];
-    let idx = 2;
-    if (entity_type) { q += ` AND entity_type=$${idx}`; params.push(entity_type); idx++; }
-    if (user_email) { q += ` AND user_email=$${idx}`; params.push(user_email); idx++; }
-    q += ` ORDER BY created_at DESC LIMIT $${idx}`;
-    params.push(parseInt(limit)||100);
-    const r = await pool.query(q, params);
-    res.json(r.rows);
-  }));
-
-  app.get('/api/audit-trail/entity/:type/:id', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM enhanced_audit_trail WHERE tenant_id=$1 AND entity_type=$2 AND entity_id=$3 ORDER BY created_at DESC`, [req.session.user.tenant_id, req.params.type, req.params.id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/audit-trail/report', requireAuth, ah(async (req, res) => {
-    const { report_name, filters } = req.body;
-    const r = await pool.query(`INSERT INTO audit_reports (tenant_id, report_name, filters_json, generated_by, generated_at) VALUES ($1,$2,$3,$4,NOW()) RETURNING *`, [req.session.user.tenant_id, esc(report_name||'Audit Report'), JSON.stringify(filters||{}), req.session.user.email]);
-    res.json(r.rows[0]);
-  }));
-
-  // Feature 15: Fund Balance Calculator
-  app.get('/api/fund-balances', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT * FROM fund_balances WHERE tenant_id=$1 ORDER BY fund_name`, [req.session.user.tenant_id]);
-    res.json(r.rows);
-  }));
-
-  app.post('/api/fund-balances/calculate', requireAuth, ah(async (req, res) => {
-    const tid = req.session.user.tenant_id;
-    const { period_start, period_end } = req.body;
-    const allocations = await pool.query(`SELECT fa.fund_name, fa.fund_type, COALESCE(SUM(CASE WHEN fae.entry_type IN ('allocation','return') THEN fae.amount ELSE 0 END),0) as inflows, COALESCE(SUM(CASE WHEN fae.entry_type IN ('spend','fee') THEN fae.amount ELSE 0 END),0) as outflows FROM fund_allocations fa LEFT JOIN fund_allocation_entries fae ON fa.id=fae.allocation_id AND fae.tenant_id=$1 WHERE fa.tenant_id=$1 GROUP BY fa.id, fa.fund_name, fa.fund_type`, [tid]);
-    for (const a of allocations.rows) {
-      const opening = parseInt(a.inflows) - parseInt(a.outflows);
-      await pool.query(`INSERT INTO fund_balances (tenant_id, fund_name, fund_type, opening_balance, total_inflows, total_outflows, closing_balance, period_start, period_end) VALUES ($1,$2,$3,0,$4,$5,$6,$7,$8)`, [tid, a.fund_name, a.fund_type, a.inflows, a.outflows, parseInt(a.inflows)-parseInt(a.outflows), period_start||null, period_end||null]);
+    const t = req.session.user.tenant_id;
+    let config = (await pool.query('SELECT * FROM financial_dashboard_config WHERE tenant_id=$1', [t])).rows[0];
+    if (!config) {
+      const r = await pool.query(
+        'INSERT INTO financial_dashboard_config (tenant_id, widgets_json, refresh_interval) VALUES ($1,$2,$3) RETURNING *',
+        [t, '["revenue_summary","expense_breakdown","fund_balances","recent_transactions"]', 60]
+      );
+      config = r.rows[0];
     }
-    res.json({ calculated: allocations.rows.length, funds: allocations.rows });
+    const latestSnapshot = (await pool.query(
+      'SELECT * FROM financial_snapshots WHERE tenant_id=$1 ORDER BY snapshot_date DESC LIMIT 1',
+      [t]
+    )).rows[0] || null;
+    res.json({ config, latest_snapshot: latestSnapshot });
   }));
 
-  app.get('/api/fund-balances/summary', requireAuth, ah(async (req, res) => {
-    const r = await pool.query(`SELECT fund_type, SUM(opening_balance) as opening, SUM(total_inflows) as inflows, SUM(total_outflows) as outflows, SUM(closing_balance) as closing FROM fund_balances WHERE tenant_id=$1 GROUP BY fund_type`, [req.session.user.tenant_id]);
-    res.json(r.rows);
+  // PUT /api/financial-dashboard — Update dashboard config
+  app.put('/api/financial-dashboard', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { widgets_json, refresh_interval } = req.body;
+    const old = (await pool.query('SELECT * FROM financial_dashboard_config WHERE tenant_id=$1', [t])).rows[0];
+    let result;
+    if (old) {
+      result = await pool.query(
+        'UPDATE financial_dashboard_config SET widgets_json=COALESCE($1,widgets_json), refresh_interval=COALESCE($2,refresh_interval) WHERE tenant_id=$3 RETURNING *',
+        [widgets_json ? (typeof widgets_json === 'object' ? JSON.stringify(widgets_json) : widgets_json) : null, refresh_interval !== undefined ? parseInt(refresh_interval) : null, t]
+      );
+    } else {
+      result = await pool.query(
+        'INSERT INTO financial_dashboard_config (tenant_id, widgets_json, refresh_interval) VALUES ($1,$2,$3) RETURNING *',
+        [t, widgets_json ? (typeof widgets_json === 'object' ? JSON.stringify(widgets_json) : widgets_json) : '[]', refresh_interval || 60]
+      );
+    }
+    await audit(req.session.user.email, 'financial_dashboard_config_updated', 'Updated financial dashboard configuration');
+    res.json(result.rows[0]);
   }));
 
-  // =============================================
-  // DASHBOARD PAGES
-  // =============================================
-  const navLinks = `
-    <nav class="bg-white shadow mb-6 p-4 rounded-lg flex flex-wrap gap-2">
-      <a href="/fund-allocations" class="px-3 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200">Funds</a>
-      <a href="/budget-tracking" class="px-3 py-1 bg-green-100 text-green-800 rounded hover:bg-green-200">Budgets</a>
-      <a href="/reconciliation" class="px-3 py-1 bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200">Reconciliation</a>
-      <a href="/grant-management" class="px-3 py-1 bg-purple-100 text-purple-800 rounded hover:bg-purple-200">Grants</a>
-      <a href="/endowment-management" class="px-3 py-1 bg-indigo-100 text-indigo-800 rounded hover:bg-indigo-200">Endowments</a>
-      <a href="/currency-wallets" class="px-3 py-1 bg-pink-100 text-pink-800 rounded hover:bg-pink-200">Currency</a>
-      <a href="/receipt-batches" class="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200">Receipts</a>
-      <a href="/fund-categories" class="px-3 py-1 bg-teal-100 text-teal-800 rounded hover:bg-teal-200">Categories</a>
-      <a href="/donation-anonymity" class="px-3 py-1 bg-gray-100 text-gray-800 rounded hover:bg-gray-200">Anonymity</a>
-      <a href="/payment-routing" class="px-3 py-1 bg-orange-100 text-orange-800 rounded hover:bg-orange-200">Payment Router</a>
-      <a href="/financial-dashboard-pro" class="px-3 py-1 bg-cyan-100 text-cyan-800 rounded hover:bg-cyan-200">Dashboard Pro</a>
-      <a href="/compliance-docs" class="px-3 py-1 bg-emerald-100 text-emerald-800 rounded hover:bg-emerald-200">Compliance</a>
-      <a href="/audit-trail-pro" class="px-3 py-1 bg-amber-100 text-amber-800 rounded hover:bg-amber-200">Audit Trail</a>
-      <a href="/fund-balances" class="px-3 py-1 bg-violet-100 text-violet-800 rounded hover:bg-violet-200">Balances</a>
-    </nav>`;
-
-  // Financial Dashboard Pro
-  app.get('/financial-dashboard-pro', requireAuth, ah(async (req, res) => {
-    const stats = await pool.query(`SELECT COALESCE(SUM(amount),0) as revenue FROM donations WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    const exp = await pool.query(`SELECT COALESCE(SUM(amount),0) as expenses FROM fund_allocation_entries WHERE tenant_id=$1 AND entry_type='spend'`, [req.session.user.tenant_id]);
-    const donors = await pool.query(`SELECT COUNT(DISTINCT donor_email) as cnt FROM donations WHERE tenant_id=$1`, [req.session.user.tenant_id]);
-    const rev = parseInt(stats.rows[0]?.revenue || 0);
-    const expAmt = parseInt(exp.rows[0]?.expenses || 0);
-    renderPage(req, res, 'Financial Dashboard Pro', `${navLinks}
-      <div class="max-w-6xl mx-auto">
-        <h2 class="text-2xl font-bold mb-4">Financial Dashboard Pro</h2>
-        <div class="grid grid-cols-4 gap-4 mb-6">
-          <div class="bg-green-50 p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-green-600">UGX ${rev.toLocaleString()}</div><div class="text-sm text-gray-600">Total Revenue</div></div>
-          <div class="bg-red-50 p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-red-600">UGX ${expAmt.toLocaleString()}</div><div class="text-sm text-gray-600">Total Expenses</div></div>
-          <div class="bg-blue-50 p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold ${rev-expAmt>=0?'text-blue-600':'text-red-600'}">UGX ${(rev-expAmt).toLocaleString()}</div><div class="text-sm text-gray-600">Net Position</div></div>
-          <div class="bg-purple-50 p-4 rounded-lg shadow text-center"><div class="text-2xl font-bold text-purple-600">${donors.rows[0]?.cnt||0}</div><div class="text-sm text-gray-600">Unique Donors</div></div>
-        </div>
-      </div>`);
+  // POST /api/financial-dashboard/snapshot — Create a financial snapshot
+  app.post('/api/financial-dashboard/snapshot', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { total_revenue, total_expenses, net, by_method_json, by_category_json, snapshot_date } = req.body;
+    const rev = parseFloat(total_revenue) || 0;
+    const exp = parseFloat(total_expenses) || 0;
+    const netVal = net !== undefined ? parseFloat(net) : (rev - exp);
+    const result = await pool.query(
+      'INSERT INTO financial_snapshots (tenant_id, total_revenue, total_expenses, net, by_method_json, by_category_json, snapshot_date) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [t, rev, exp, netVal, by_method_json ? (typeof by_method_json === 'object' ? JSON.stringify(by_method_json) : by_method_json) : '{}', by_category_json ? (typeof by_category_json === 'object' ? JSON.stringify(by_category_json) : by_category_json) : '{}', snapshot_date || 'CURRENT_DATE']
+    );
+    await audit(req.session.user.email, 'financial_snapshot_created', 'Created financial snapshot');
+    res.json(result.rows[0]);
   }));
 
-  // Simplified table dashboards for remaining features
-  const simpleDash = (title, path, tableName, cols) => {
-    app.get(path, requireAuth, ah(async (req, res) => {
-      const r = await pool.query(`SELECT * FROM ${tableName} WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20`, [req.session.user.tenant_id]);
-      renderPage(req, res, title, `${navLinks}
-        <div class="max-w-6xl mx-auto">
-          <h2 class="text-2xl font-bold mb-4">${title}</h2>
-          <div class="bg-white rounded-lg shadow overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead class="bg-gray-50"><tr>${cols.map(c=>`<th class="p-3 text-left">${c}</th>`).join('')}</tr></thead>
-              <tbody>${r.rows.map(row=>`<tr class="border-t">${cols.map(c=>`<td class="p-3">${row[c]!==null&&row[c]!==undefined?row[c]:'-'}</td>`).join('')}</tr>`).join('')}</tbody>
-            </table>
-          </div>
-        </div>`);
-    }));
-  };
+  // ================================================================
+  // FEATURE 13: COMPLIANCE DOCUMENT VAULT
+  // ================================================================
 
-  simpleDash('Fund Allocations', '/fund-allocations', 'fund_allocations', ['id','fund_name','fund_type','total_allocated','total_spent','total_remaining','status']);
-  simpleDash('Budget Tracking', '/budget-tracking', 'fundraising_budgets', ['id','name','period_start','total_budget','total_actual','status']);
-  simpleDash('Reconciliation', '/reconciliation', 'reconciliation_batches', ['id','batch_name','total_expected','total_reconciled','total_unreconciled','status']);
-  simpleDash('Grant Management', '/grant-management', 'grants', ['id','grant_name','funder_name','amount_requested','amount_awarded','status']);
-  simpleDash('Endowment Management', '/endowment-management', 'endowments', ['id','name','principal_amount','current_value','annual_return_rate']);
-  simpleDash('Multi-Currency Wallets', '/currency-wallets', 'currency_wallets', ['id','currency_code','balance','available_amount','exchange_rate_to_base']);
-  simpleDash('Receipt Batches', '/receipt-batches', 'receipt_batches', ['id','batch_name','receipt_count','total_amount','status']);
-  simpleDash('Fund Categories', '/fund-categories', 'fund_categories', ['id','name','category_type','is_active']);
-  simpleDash('Donation Anonymity', '/donation-anonymity', 'anonymous_donations', ['id','donation_id','display_name','is_anonymous','message']);
-  simpleDash('Payment Routing', '/payment-routing', 'payment_routing_rules', ['id','name','priority','target_method','target_provider','is_active']);
-  simpleDash('Compliance Docs', '/compliance-docs', 'compliance_docs', ['id','document_type','title','expiry_date','status']);
-  simpleDash('Audit Trail Pro', '/audit-trail-pro', 'enhanced_audit_trail', ['id','user_email','action','entity_type','entity_id','created_at']);
-  simpleDash('Fund Balances', '/fund-balances', 'fund_balances', ['id','fund_name','fund_type','opening_balance','total_inflows','total_outflows','closing_balance']);
+  // GET /api/compliance-docs — List all compliance documents
+  app.get('/api/compliance-docs', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const category = req.query.category;
+    const status = req.query.status;
+    let query = 'SELECT cd.*, (SELECT COUNT(*) FROM compliance_reminders WHERE doc_id=cd.id) as reminder_count FROM compliance_docs cd WHERE cd.tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (category) { query += ' AND cd.category=$' + idx; params.push(category); idx++; }
+    if (status) { query += ' AND cd.status=$' + idx; params.push(status); idx++; }
+    query += ' ORDER BY cd.uploaded_at DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  }));
 
-  console.log('[FundraisingUltimate4] Loaded — 15 features, 75+ routes');
+  // POST /api/compliance-docs — Upload a compliance document
+  app.post('/api/compliance-docs', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, category, file_url, expiry_date, status } = req.body;
+    if (!name || !category) return res.status(400).json({ error: 'name and category are required' });
+    const result = await pool.query(
+      'INSERT INTO compliance_docs (tenant_id, name, category, file_url, expiry_date, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [t, esc(name), esc(category), file_url ? esc(file_url) : null, expiry_date || null, status || 'active']
+    );
+    await audit(req.session.user.email, 'compliance_doc_uploaded', 'Uploaded compliance doc: ' + esc(name));
+    await enhancedAudit(t, req.session.user.email, 'create', 'compliance_doc', result.rows[0].id, null, JSON.stringify(result.rows[0]), req.ip);
+
+    // Check if doc is expiring soon (within 30 days)
+    if (expiry_date) {
+      const expDate = new Date(expiry_date);
+      const now = new Date();
+      const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      if (expDate <= thirtyDaysFromNow) {
+        await pool.query("UPDATE compliance_docs SET status='expiring_soon' WHERE id=$1 AND tenant_id=$2", [result.rows[0].id, t]);
+      }
+      if (expDate <= now) {
+        await pool.query("UPDATE compliance_docs SET status='expired' WHERE id=$1 AND tenant_id=$2", [result.rows[0].id, t]);
+      }
+    }
+
+    res.json(result.rows[0]);
+  }));
+
+  // PUT /api/compliance-docs/:id — Update a compliance document
+  app.put('/api/compliance-docs/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { name, category, file_url, expiry_date, status } = req.body;
+    const old = (await pool.query('SELECT * FROM compliance_docs WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Compliance document not found' });
+    const result = await pool.query(
+      'UPDATE compliance_docs SET name=COALESCE($1,name), category=COALESCE($2,category), file_url=COALESCE($3,file_url), expiry_date=COALESCE($4,expiry_date), status=COALESCE($5,status) WHERE id=$6 AND tenant_id=$7 RETURNING *',
+      [name ? esc(name) : null, category ? esc(category) : null, file_url ? esc(file_url) : null, expiry_date || null, status || null, req.params.id, t]
+    );
+    await audit(req.session.user.email, 'compliance_doc_updated', 'Updated compliance doc #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'update', 'compliance_doc', parseInt(req.params.id), JSON.stringify(old), JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // DELETE /api/compliance-docs/:id — Delete a compliance document
+  app.delete('/api/compliance-docs/:id', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const old = (await pool.query('SELECT * FROM compliance_docs WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Compliance document not found' });
+    await pool.query('DELETE FROM compliance_docs WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+    await audit(req.session.user.email, 'compliance_doc_deleted', 'Deleted compliance doc #' + req.params.id);
+    await enhancedAudit(t, req.session.user.email, 'delete', 'compliance_doc', parseInt(req.params.id), JSON.stringify(old), null, req.ip);
+    res.json({ success: true });
+  }));
+
+  // GET /api/compliance-docs/:id/reminders — List reminders for a compliance document
+  app.get('/api/compliance-docs/:id/reminders', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const doc = (await pool.query('SELECT * FROM compliance_docs WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!doc) return res.status(404).json({ error: 'Compliance document not found' });
+    const reminders = await pool.query('SELECT * FROM compliance_reminders WHERE doc_id=$1 AND tenant_id=$2 ORDER BY reminder_date', [req.params.id, t]);
+    res.json({ doc, reminders: reminders.rows });
+  }));
+
+  // POST /api/compliance-docs/:id/reminders — Add a reminder for a compliance document
+  app.post('/api/compliance-docs/:id/reminders', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const doc = (await pool.query('SELECT * FROM compliance_docs WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+    if (!doc) return res.status(404).json({ error: 'Compliance document not found' });
+    const { reminder_date } = req.body;
+    if (!reminder_date) return res.status(400).json({ error: 'reminder_date is required' });
+    const result = await pool.query(
+      'INSERT INTO compliance_reminders (tenant_id, doc_id, reminder_date, sent) VALUES ($1,$2,$3,$4) RETURNING *',
+      [t, parseInt(req.params.id), reminder_date, false]
+    );
+    await audit(req.session.user.email, 'compliance_reminder_created', 'Created reminder for doc #' + req.params.id);
+    res.json(result.rows[0]);
+  }));
+
+  // ================================================================
+  // FEATURE 14: AUDIT TRAIL PRO
+  // ================================================================
+
+  // GET /api/audit-trail-pro — List enhanced audit trail entries
+  app.get('/api/audit-trail-pro', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const entity_type = req.query.entity_type;
+    const user_email = req.query.user_email;
+    const action = req.query.action;
+    const date_from = req.query.date_from;
+    const date_to = req.query.date_to;
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+
+    let query = 'SELECT * FROM enhanced_audit_trail WHERE tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+
+    if (entity_type) { query += ' AND entity_type=$' + idx; params.push(entity_type); idx++; }
+    if (user_email) { query += ' AND user_email=$' + idx; params.push(user_email); idx++; }
+    if (action) { query += ' AND action=$' + idx; params.push(action); idx++; }
+    if (date_from) { query += ' AND created_at >= $' + idx; params.push(date_from); idx++; }
+    if (date_to) { query += ' AND created_at <= $' + idx; params.push(date_to); idx++; }
+
+    query += ' ORDER BY created_at DESC LIMIT $' + idx;
+    params.push(limit);
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  }));
+
+  // POST /api/audit-trail-pro/report — Generate an audit report
+  app.post('/api/audit-trail-pro/report', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { report_type, date_range_start, date_range_end } = req.body;
+    if (!report_type || !date_range_start || !date_range_end) return res.status(400).json({ error: 'report_type, date_range_start, and date_range_end are required' });
+
+    // Gather audit data for the report
+    const entries = await pool.query(
+      'SELECT * FROM enhanced_audit_trail WHERE tenant_id=$1 AND created_at >= $2 AND created_at <= $3 ORDER BY created_at',
+      [t, date_range_start, date_range_end]
+    );
+
+    // Build findings summary
+    const actionCounts = {};
+    const entityCounts = {};
+    const userCounts = {};
+    for (const entry of entries.rows) {
+      actionCounts[entry.action] = (actionCounts[entry.action] || 0) + 1;
+      entityCounts[entry.entity_type] = (entityCounts[entry.entity_type] || 0) + 1;
+      userCounts[entry.user_email] = (userCounts[entry.user_email] || 0) + 1;
+    }
+
+    const findings = {
+      total_entries: entries.rows.length,
+      action_breakdown: actionCounts,
+      entity_breakdown: entityCounts,
+      user_breakdown: userCounts,
+      date_range: { start: date_range_start, end: date_range_end },
+      generated_by: req.session.user.email
+    };
+
+    const result = await pool.query(
+      'INSERT INTO audit_reports_ult4 (tenant_id, report_type, date_range_start, date_range_end, findings_json, generated_at) VALUES ($1,$2,$3,$4,$5,NOW()) RETURNING *',
+      [t, esc(report_type), date_range_start, date_range_end, JSON.stringify(findings)]
+    );
+
+    await audit(req.session.user.email, 'audit_report_generated', 'Generated ' + report_type + ' audit report');
+    res.json({ report: result.rows[0], findings });
+  }));
+
+  // ================================================================
+  // FEATURE 15: FUND BALANCE CALCULATOR
+  // ================================================================
+
+  // GET /api/fund-balances — List fund balances
+  app.get('/api/fund-balances', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const period_start = req.query.period_start;
+    const period_end = req.query.period_end;
+    let query = 'SELECT * FROM fund_balances WHERE tenant_id=$1';
+    const params = [t];
+    let idx = 2;
+    if (period_start) { query += ' AND period_start >= $' + idx; params.push(period_start); idx++; }
+    if (period_end) { query += ' AND period_end <= $' + idx; params.push(period_end); idx++; }
+    query += ' ORDER BY fund_name ASC, period_start DESC';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  }));
+
+  // POST /api/fund-balances — Create a fund balance record
+  app.post('/api/fund-balances', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { fund_name, category, beginning_balance, additions, deductions, period_start, period_end } = req.body;
+    if (!fund_name || !period_start || !period_end) return res.status(400).json({ error: 'fund_name, period_start, and period_end are required' });
+    const begBal = parseFloat(beginning_balance) || 0;
+    const adds = parseFloat(additions) || 0;
+    const deds = parseFloat(deductions) || 0;
+    const endBal = begBal + adds - deds;
+    const result = await pool.query(
+      'INSERT INTO fund_balances (tenant_id, fund_name, category, beginning_balance, additions, deductions, ending_balance, period_start, period_end, calculated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *',
+      [t, esc(fund_name), category ? esc(category) : null, begBal, adds, deds, endBal, period_start, period_end]
+    );
+    await audit(req.session.user.email, 'fund_balance_created', 'Created fund balance for: ' + esc(fund_name));
+    await enhancedAudit(t, req.session.user.email, 'create', 'fund_balance', result.rows[0].id, null, JSON.stringify(result.rows[0]), req.ip);
+    res.json(result.rows[0]);
+  }));
+
+  // POST /api/fund-balances/recalculate — Recalculate all fund balances
+  app.post('/api/fund-balances/recalculate', requireAuth, ah(async (req, res) => {
+    const t = req.session.user.tenant_id;
+    const { period_start, period_end } = req.body;
+    if (!period_start || !period_end) return res.status(400).json({ error: 'period_start and period_end are required' });
+
+    // Gather data from fund categories, endowment transactions, and currency wallets
+    const categories = await pool.query('SELECT * FROM fund_categories WHERE tenant_id=$1', [t]);
+    const endowments = await pool.query('SELECT * FROM endowments WHERE tenant_id=$1', [t]);
+    const wallets = await pool.query('SELECT * FROM currency_wallets WHERE tenant_id=$1', [t]);
+
+    const recalculated = [];
+
+    // Calculate from fund categories and their assignments
+    for (const cat of categories.rows) {
+      const assignments = await pool.query(
+        'SELECT COALESCE(SUM(amount),0) as total FROM fund_category_assignments WHERE category_id=$1 AND tenant_id=$2',
+        [cat.id, t]
+      );
+      const total = parseFloat(assignments.rows[0].total) || 0;
+      // Check if there's already a balance for this period
+      const existing = (await pool.query(
+        'SELECT * FROM fund_balances WHERE tenant_id=$1 AND fund_name=$2 AND period_start=$3 AND period_end=$4',
+        [t, cat.name, period_start, period_end]
+      )).rows[0];
+
+      if (existing) {
+        const endBal = parseFloat(existing.beginning_balance) + total - parseFloat(existing.deductions);
+        const r = await pool.query(
+          'UPDATE fund_balances SET additions=$1, ending_balance=$2, calculated_at=NOW() WHERE id=$3 AND tenant_id=$4 RETURNING *',
+          [total, endBal, existing.id, t]
+        );
+        recalculated.push(r.rows[0]);
+      } else {
+        const r = await pool.query(
+          'INSERT INTO fund_balances (tenant_id, fund_name, category, beginning_balance, additions, deductions, ending_balance, period_start, period_end, calculated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *',
+          [t, cat.name, cat.description || cat.name, 0, total, 0, total, period_start, period_end]
+        );
+        recalculated.push(r.rows[0]);
+      }
+    }
+
+    // Add endowment balances
+    for (const endo of endowments.rows) {
+      const txns = await pool.query(
+        "SELECT transaction_type, COALESCE(SUM(amount),0) as total FROM endowment_transactions WHERE endowment_id=$1 AND tenant_id=$2 AND date >= $3 AND date <= $4 GROUP BY transaction_type",
+        [endo.id, t, period_start, period_end]
+      );
+      let contributions = 0, withdrawals = 0, investmentReturns = 0, spending = 0;
+      for (const txn of txns.rows) {
+        const total = parseFloat(txn.total) || 0;
+        if (txn.transaction_type === 'contribution') contributions = total;
+        else if (txn.transaction_type === 'withdrawal') withdrawals = total;
+        else if (txn.transaction_type === 'investment_return') investmentReturns = total;
+        else if (txn.transaction_type === 'spending') spending = total;
+      }
+      const additions = contributions + investmentReturns;
+      const deductions = withdrawals + spending;
+      const begBal = parseFloat(endo.principal_amount);
+      const endBal = begBal + additions - deductions;
+
+      const existing = (await pool.query(
+        'SELECT * FROM fund_balances WHERE tenant_id=$1 AND fund_name=$2 AND period_start=$3 AND period_end=$4',
+        [t, 'Endowment: ' + endo.name, period_start, period_end]
+      )).rows[0];
+
+      if (existing) {
+        const r = await pool.query(
+          'UPDATE fund_balances SET beginning_balance=$1, additions=$2, deductions=$3, ending_balance=$4, calculated_at=NOW() WHERE id=$5 AND tenant_id=$6 RETURNING *',
+          [begBal, additions, deductions, endBal, existing.id, t]
+        );
+        recalculated.push(r.rows[0]);
+      } else {
+        const r = await pool.query(
+          'INSERT INTO fund_balances (tenant_id, fund_name, category, beginning_balance, additions, deductions, ending_balance, period_start, period_end, calculated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *',
+          [t, 'Endowment: ' + endo.name, 'endowment', begBal, additions, deductions, endBal, period_start, period_end]
+        );
+        recalculated.push(r.rows[0]);
+      }
+    }
+
+    // Add wallet balances
+    for (const wallet of wallets.rows) {
+      const existing = (await pool.query(
+        'SELECT * FROM fund_balances WHERE tenant_id=$1 AND fund_name=$2 AND period_start=$3 AND period_end=$4',
+        [t, 'Wallet: ' + wallet.currency, period_start, period_end]
+      )).rows[0];
+
+      const currentBal = parseFloat(wallet.balance);
+      if (existing) {
+        const r = await pool.query(
+          'UPDATE fund_balances SET ending_balance=$1, calculated_at=NOW() WHERE id=$2 AND tenant_id=$3 RETURNING *',
+          [currentBal, existing.id, t]
+        );
+        recalculated.push(r.rows[0]);
+      } else {
+        const r = await pool.query(
+          'INSERT INTO fund_balances (tenant_id, fund_name, category, beginning_balance, additions, deductions, ending_balance, period_start, period_end, calculated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *',
+          [t, 'Wallet: ' + wallet.currency, 'wallet', 0, currentBal, 0, currentBal, period_start, period_end]
+        );
+        recalculated.push(r.rows[0]);
+      }
+    }
+
+    await audit(req.session.user.email, 'fund_balances_recalculated', 'Recalculated fund balances for period ' + period_start + ' to ' + period_end);
+    res.json({ success: true, recalculated_count: recalculated.length, balances: recalculated });
+  }));
+
 };

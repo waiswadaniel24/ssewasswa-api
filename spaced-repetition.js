@@ -74,7 +74,7 @@ module.exports = function(app, pool, opts) {
   async function ensureTables() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS flashcard_decks (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
         name VARCHAR(255) NOT NULL,
         description TEXT,
@@ -82,45 +82,41 @@ module.exports = function(app, pool, opts) {
         topic VARCHAR(100),
         chapter VARCHAR(100),
         owner_id INT NOT NULL DEFAULT 0,
-        owner_type ENUM('teacher','student') NOT NULL DEFAULT 'student',
+        owner_type TEXT NOT NULL DEFAULT 'student',
         card_count INT NOT NULL DEFAULT 0,
         new_count INT NOT NULL DEFAULT 0,
         learning_count INT NOT NULL DEFAULT 0,
         mastered_count INT NOT NULL DEFAULT 0,
-        is_shared TINYINT(1) NOT NULL DEFAULT 0,
+        is_shared SMALLINT NOT NULL DEFAULT 0,
         share_count INT NOT NULL DEFAULT 0,
         download_count INT NOT NULL DEFAULT 0,
         avg_rating DECIMAL(3,2) NOT NULL DEFAULT 0.00,
         cover_color VARCHAR(20) DEFAULT '#6366f1',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_tenant (tenant_id),
-        INDEX idx_owner (tenant_id, owner_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS flashcards (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
         deck_id INT NOT NULL DEFAULT 0,
         front_content TEXT NOT NULL,
         back_content TEXT NOT NULL,
-        card_type ENUM('basic','multiple_choice','true_false','fill_blank','image') NOT NULL DEFAULT 'basic',
+        card_type TEXT NOT NULL DEFAULT 'basic',
         options JSON,
         hint TEXT,
         audio_url VARCHAR(500),
         image_url VARCHAR(500),
-        difficulty TINYINT NOT NULL DEFAULT 1,
+        difficulty SMALLINT NOT NULL DEFAULT 1,
         sort_order INT NOT NULL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_deck (tenant_id, deck_id),
-        INDEX idx_type (tenant_id, card_type)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS flashcard_progress (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
         card_id INT NOT NULL DEFAULT 0,
         user_id INT NOT NULL DEFAULT 0,
@@ -129,19 +125,17 @@ module.exports = function(app, pool, opts) {
         repetitions INT NOT NULL DEFAULT 0,
         next_review_date DATE,
         last_review_date DATE,
-        last_quality TINYINT DEFAULT NULL,
+        last_quality SMALLINT DEFAULT NULL,
         total_reviews INT NOT NULL DEFAULT 0,
         correct_reviews INT NOT NULL DEFAULT 0,
-        status ENUM('new','learning','mastered','suspended') NOT NULL DEFAULT 'new',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY uk_card_user (tenant_id, card_id, user_id),
-        INDEX idx_next_review (tenant_id, user_id, next_review_date),
-        INDEX idx_status (tenant_id, user_id, status)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        status TEXT NOT NULL DEFAULT 'new',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uk_card_user UNIQUE (tenant_id, card_id, user_id)
+      )
     `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS study_sessions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
         user_id INT NOT NULL DEFAULT 0,
         deck_id INT NOT NULL DEFAULT 0,
@@ -152,36 +146,33 @@ module.exports = function(app, pool, opts) {
         easy_count INT NOT NULL DEFAULT 0,
         duration_seconds INT NOT NULL DEFAULT 0,
         xp_earned INT NOT NULL DEFAULT 0,
-        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        completed_at DATETIME DEFAULT NULL,
-        INDEX idx_user (tenant_id, user_id, started_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMPTZ DEFAULT NULL
+      )
     `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS flashcard_imports (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
         user_id INT NOT NULL DEFAULT 0,
         deck_id INT NOT NULL DEFAULT 0,
-        source_type ENUM('csv','json') NOT NULL,
+        source_type TEXT NOT NULL,
         cards_imported INT NOT NULL DEFAULT 0,
         errors JSON,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_user (tenant_id, user_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
     `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS deck_ratings (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         tenant_id INT NOT NULL DEFAULT 0,
         deck_id INT NOT NULL DEFAULT 0,
         user_id INT NOT NULL DEFAULT 0,
-        rating TINYINT NOT NULL DEFAULT 5,
+        rating SMALLINT NOT NULL DEFAULT 5,
         review_text TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY uk_deck_user (tenant_id, deck_id, user_id),
-        INDEX idx_deck (tenant_id, deck_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uk_deck_user UNIQUE (tenant_id, deck_id, user_id)
+      )
     `);
   }
 
