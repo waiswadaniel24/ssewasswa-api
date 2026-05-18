@@ -37337,6 +37337,7 @@ try {
 
 // === START SERVER (after all routes are registered) ===
 const PORT = process.env.PORT || 3000;
+const server = require('http').createServer(app);
 server.listen(PORT, () => {
   console.log(`Comfort Platform LIVE on ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
