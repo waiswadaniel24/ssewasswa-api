@@ -103,52 +103,83 @@ module.exports = function customForms(app, db, pool, renderPage, esc) {
   // DATABASE MIGRATIONS (async IIFE)
   // ============================================================
   (async () => {
-    const c = await pool.connect().catch(() => null);
-    if (!c) { console.error('[CustomForms] Cannot connect to DB for migrations'); return; }
     try {
-      await c.query(`CREATE TABLE IF NOT EXISTS custom_forms (
+      // Create tables in dependency order: forms first, then submissions, then fields/values
+      await pool.query(`CREATE TABLE IF NOT EXISTS custom_forms (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         title VARCHAR(500) NOT NULL, description TEXT, status VARCHAR(20) DEFAULT 'draft',
         is_public BOOLEAN DEFAULT false, allow_anonymous BOOLEAN DEFAULT false,
         created_by INTEGER, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS custom_fields (
+
+      await pool.query(`CREATE TABLE IF NOT EXISTS form_submissions (
+        id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        form_id INTEGER, respondent_id INTEGER, respondent_name VARCHAR(255),
+        respondent_email VARCHAR(255), ip_address VARCHAR(45),
+        submitted_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+
+      await pool.query(`CREATE TABLE IF NOT EXISTS custom_fields (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         form_id INTEGER, field_type VARCHAR(50), label VARCHAR(255),
         placeholder TEXT, help_text TEXT, is_required BOOLEAN DEFAULT false,
         options TEXT, sort_order INTEGER DEFAULT 0, validations TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS custom_field_values (
+
+      await pool.query(`CREATE TABLE IF NOT EXISTS custom_field_values (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         submission_id INTEGER, field_id INTEGER, field_label VARCHAR(255),
         field_value TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS form_submissions (
-        id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        form_id INTEGER, respondent_id INTEGER, respondent_name VARCHAR(255),
-        respondent_email VARCHAR(255), ip_address VARCHAR(45),
-        submitted_at TIMESTAMPTZ DEFAULT NOW()
-      )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS form_field_options (
+
+      await pool.query(`CREATE TABLE IF NOT EXISTS form_field_options (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         field_id INTEGER, option_label VARCHAR(255), option_value VARCHAR(255),
         sort_order INTEGER DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE TABLE IF NOT EXISTS form_submission_files (
+
+      await pool.query(`CREATE TABLE IF NOT EXISTS form_submission_files (
         id SERIAL PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         submission_id INTEGER, field_id INTEGER, file_name VARCHAR(255),
         file_url TEXT, file_size INTEGER, uploaded_at TIMESTAMPTZ DEFAULT NOW()
       )`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_cf_tenant ON custom_forms(tenant_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_cfields_form ON custom_fields(form_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_cfv_submission ON custom_field_values(submission_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fs_form ON form_submissions(form_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_ffo_field ON form_field_options(field_id)`);
-      await c.query(`CREATE INDEX IF NOT EXISTS idx_fsf_submission ON form_submission_files(submission_id)`);
+
+      // Add missing columns if tables already existed from prior partial migration
+      const alterMigrations = [
+        `ALTER TABLE custom_field_values ADD COLUMN IF NOT EXISTS submission_id INTEGER`,
+        `ALTER TABLE custom_field_values ADD COLUMN IF NOT EXISTS field_id INTEGER`,
+        `ALTER TABLE custom_field_values ADD COLUMN IF NOT EXISTS field_label VARCHAR(255)`,
+        `ALTER TABLE custom_field_values ADD COLUMN IF NOT EXISTS field_value TEXT`,
+        `ALTER TABLE form_submission_files ADD COLUMN IF NOT EXISTS submission_id INTEGER`,
+        `ALTER TABLE form_submission_files ADD COLUMN IF NOT EXISTS field_id INTEGER`,
+        `ALTER TABLE form_submission_files ADD COLUMN IF NOT EXISTS file_name VARCHAR(255)`,
+        `ALTER TABLE form_submission_files ADD COLUMN IF NOT EXISTS file_url TEXT`,
+        `ALTER TABLE form_submission_files ADD COLUMN IF NOT EXISTS file_size INTEGER`,
+        `ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS respondent_id INTEGER`,
+        `ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS respondent_name VARCHAR(255)`,
+        `ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS respondent_email VARCHAR(255)`,
+        `ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45)`,
+      ];
+      for (const sql of alterMigrations) {
+        try { await pool.query(sql); } catch(e) { /* column may already exist */ }
+      }
+
+      // Create indexes
+      const indexMigrations = [
+        `CREATE INDEX IF NOT EXISTS idx_cf_tenant ON custom_forms(tenant_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_cfields_form ON custom_fields(form_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_cfv_submission ON custom_field_values(submission_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_fs_form ON form_submissions(form_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_ffo_field ON form_field_options(field_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_fsf_submission ON form_submission_files(submission_id)`,
+      ];
+      for (const sql of indexMigrations) {
+        try { await pool.query(sql); } catch(e) { /* index may already exist */ }
+      }
+
       console.log('[CustomForms] Migrations applied successfully');
     } catch (e) { console.error('[CustomForms] Migration error:', e.message); }
-    finally { c.release(); }
   })();
 
   // ============================================================
