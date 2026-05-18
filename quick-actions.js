@@ -6,7 +6,7 @@
 module.exports = function (app, pool, opts) {
   const esc = opts.esc || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
   const tenantId = (req) => req.session?.user?.tenant_id || 0;
-  const renderPage = opts.renderPage || ((req, title, body) => body);
+  const renderPage = opts.renderPage || ((title, body, user) => body);
   const ah = opts.ah || ((h) => h);
   const requireAuth = opts.requireAuth || ((req, res, next) => next());
   const audit = opts.audit || (() => {});
@@ -195,9 +195,8 @@ function togglePin(key,btn){
   }).catch(e=>console.error(e));
 }
 function qaToast(msg,bg){var t=document.createElement('div');t.className='qa-toast';t.style.background=bg||'#4f46e5';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove()},2800)}
-if(typeof qaToastOnce==='undefined'){qaToastOnce=true;
-  ${JSON.stringify(JSON.stringify(req.session?.qaToast || null)) && ''/* placeholder — actual toast injected per-route */}
-}
+if(typeof qaToastOnce==='undefined'){qaToastOnce=true;}
+/* TOAST_PLACEHOLDER — injected per-route */
 </script>`;
 
   /* ── 1. GET / — Dashboard ─────────────────────────────── */
@@ -302,7 +301,7 @@ if(typeof qaToastOnce==='undefined'){qaToastOnce=true;
     }
     function qaToast(msg,bg){var t=document.createElement('div');t.className='qa-toast';t.style.background=bg||'#4f46e5';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove()},2800)}
     </script>`;
-    res.send(renderPage(req, 'Quick Actions', body));
+    res.send(renderPage('Quick Actions', body, req.session.user));
   });
 
   /* ── 2. GET /add-student — Form ───────────────────────── */
@@ -343,7 +342,7 @@ if(typeof qaToastOnce==='undefined'){qaToastOnce=true;
         </form>
       </div>
     </div>`;
-    res.send(renderPage(req, 'Quick Add Student', body));
+    res.send(renderPage('Quick Add Student', body, req.session.user));
   });
 
   /* ── 3. POST /add-student ─────────────────────────────── */
@@ -428,7 +427,7 @@ if(typeof qaToastOnce==='undefined'){qaToastOnce=true;
     }
     function qaToast(msg,bg){var t=document.createElement('div');t.className='qa-toast';t.style.background=bg||'#4f46e5';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove()},2800)}
     </script>`;
-    res.send(renderPage(req, 'Record Attendance', body));
+    res.send(renderPage('Record Attendance', body, req.session.user));
   });
 
   /* ── 5. POST /record-attendance ───────────────────────── */
@@ -499,7 +498,7 @@ if(typeof qaToastOnce==='undefined'){qaToastOnce=true;
       document.getElementById('recipInput').value=s.join(',');
     }
     </script>`;
-    res.send(renderPage(req, 'Send Message', body));
+    res.send(renderPage('Send Message', body, req.session.user));
   });
 
   /* ── 7. POST /send-message ────────────────────────────── */
@@ -560,7 +559,7 @@ if(typeof qaToastOnce==='undefined'){qaToastOnce=true;
         </form>
       </div>
     </div>`;
-    res.send(renderPage(req, 'Create Fee Record', body));
+    res.send(renderPage('Create Fee Record', body, req.session.user));
   });
 
   /* ── 9. POST /create-fee ──────────────────────────────── */
@@ -670,7 +669,7 @@ if(typeof qaToastOnce==='undefined'){qaToastOnce=true;
         ${pagination}
       </div>
     </div>`;
-    res.send(renderPage(req, 'Action History', body));
+    res.send(renderPage('Action History', body, req.session.user));
   });
 
   /* ── 12. GET /api — JSON catalog ──────────────────────── */

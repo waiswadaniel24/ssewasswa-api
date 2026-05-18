@@ -19,7 +19,6 @@ module.exports = function (app, pool, opts) {
 
   const renderPage = opts.renderPage || ((_, __, body) => body);
   const ah = opts.ah || ((fn) => fn);
-  const requireAuth = opts.requireAuth || ((_, __, fn) => fn);
   const audit = opts.audit || (() => {});
 
   const tenantId = (req) => req.session?.user?.tenant_id || 0;
@@ -287,7 +286,7 @@ module.exports = function (app, pool, opts) {
   // ===========================================================================
 
   // ---------- 1. Dashboard ----------
-  app.get('/school/sessions', requireAuth('/school/sessions', 'view', ah(async (req, res) => {
+  app.get('/school/sessions', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const [ac, uc, dc, sc, recent, failed24] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS n FROM user_sessions WHERE tenant_id=$1 AND expires_at > NOW()`, [tid]),
@@ -357,10 +356,10 @@ module.exports = function (app, pool, opts) {
   </div>
 </div>`;
     res.send(renderPage(req, res, body));
-  })));
+  }));
 
   // ---------- 2. Active Sessions ----------
-  app.get('/school/sessions/active', requireAuth('/school/sessions/active', 'view', ah(async (req, res) => {
+  app.get('/school/sessions/active', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const { search } = req.query;
     let query = `SELECT * FROM user_sessions WHERE tenant_id=$1 AND expires_at > NOW()`;
@@ -414,10 +413,10 @@ module.exports = function (app, pool, opts) {
   </table></div></div>
 </div>`;
     res.send(renderPage(req, res, body));
-  })));
+  }));
 
   // ---------- 3. Terminate Session ----------
-  app.post('/school/sessions/:id/terminate', requireAuth('/school/sessions', 'manage', ah(async (req, res) => {
+  app.post('/school/sessions/:id/terminate', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const sid = parseInt(req.params.id, 10);
     const { rows } = await pool.query(`SELECT user_email, session_id FROM user_sessions WHERE id=$1 AND tenant_id=$2`, [sid, tid]);
@@ -426,10 +425,10 @@ module.exports = function (app, pool, opts) {
       audit(req, 'session_terminate', `Terminated session ${sid} for ${rows[0].user_email}`);
     }
     res.redirect('/school/sessions/active');
-  })));
+  }));
 
   // ---------- 4. Terminate All Others ----------
-  app.post('/school/sessions/terminate-all', requireAuth('/school/sessions', 'manage', ah(async (req, res) => {
+  app.post('/school/sessions/terminate-all', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const email = currentEmail(req);
     const mySid = req.sessionID || '';
@@ -438,10 +437,10 @@ module.exports = function (app, pool, opts) {
       [tid, email, mySid]);
     audit(req, 'session_terminate_all', `Terminated ${rows.length} other sessions for ${email}`);
     res.redirect('/school/sessions/active');
-  })));
+  }));
 
   // ---------- 5. Terminate User Sessions ----------
-  app.post('/school/sessions/terminate-user/:email', requireAuth('/school/sessions', 'manage', ah(async (req, res) => {
+  app.post('/school/sessions/terminate-user/:email', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const email = req.params.email;
     const { rows } = await pool.query(
@@ -449,10 +448,10 @@ module.exports = function (app, pool, opts) {
       [tid, email]);
     audit(req, 'session_terminate_user', `Terminated ${rows.length} sessions for ${email}`);
     res.redirect('/school/sessions/active');
-  })));
+  }));
 
   // ---------- 6. Login History ----------
-  app.get('/school/sessions/login-history', requireAuth('/school/sessions/login-history', 'view', ah(async (req, res) => {
+  app.get('/school/sessions/login-history', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const { date_from, date_to, search, status: statusFilter, page = '1' } = req.query;
     const limit = 25;
@@ -516,10 +515,10 @@ module.exports = function (app, pool, opts) {
   <div class="s-flex" style="margin-top:16px">${paginationHtml(page, totalPages, extraQ)}</div>
 </div>`;
     res.send(renderPage(req, res, body));
-  })));
+  }));
 
   // ---------- 7. Devices ----------
-  app.get('/school/sessions/devices', requireAuth('/school/sessions/devices', 'view', ah(async (req, res) => {
+  app.get('/school/sessions/devices', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const [dr, br, or] = await Promise.all([
       pool.query(`SELECT device_type, COUNT(*)::int AS cnt FROM user_sessions WHERE tenant_id=$1 AND expires_at > NOW() GROUP BY device_type ORDER BY cnt DESC`, [tid]),
@@ -567,10 +566,10 @@ module.exports = function (app, pool, opts) {
   <div class="s-card" style="padding:20px;margin-bottom:24px"><div class="s-bar-chart">${barHtml(osList)}</div></div>
 </div>`;
     res.send(renderPage(req, res, body));
-  })));
+  }));
 
   // ---------- 8. Suspicious Logins ----------
-  app.get('/school/sessions/suspicious', requireAuth('/school/sessions/suspicious', 'view', ah(async (req, res) => {
+  app.get('/school/sessions/suspicious', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const [flaggedR, whitelistedR] = await Promise.all([
       pool.query(`SELECT * FROM suspicious_logins WHERE tenant_id=$1 AND is_whitelisted=false ORDER BY created_at DESC`, [tid]),
@@ -633,10 +632,10 @@ module.exports = function (app, pool, opts) {
     </table></div></div>` : ''}
 </div>`;
     res.send(renderPage(req, res, body));
-  })));
+  }));
 
   // ---------- 9. Whitelist Suspicious Login ----------
-  app.post('/school/sessions/suspicious/:id/whitelist', requireAuth('/school/sessions/suspicious', 'manage', ah(async (req, res) => {
+  app.post('/school/sessions/suspicious/:id/whitelist', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const sid = parseInt(req.params.id, 10);
     const { rows } = await pool.query(`SELECT user_email FROM suspicious_logins WHERE id=$1 AND tenant_id=$2`, [sid, tid]);
@@ -645,10 +644,10 @@ module.exports = function (app, pool, opts) {
       audit(req, 'suspicious_whitelist', `Whitelisted suspicious login #${sid} for ${rows[0].user_email}`);
     }
     res.redirect('/school/sessions/suspicious');
-  })));
+  }));
 
   // ---------- 10. Geographic Distribution ----------
-  app.get('/school/sessions/geo', requireAuth('/school/sessions/geo', 'view', ah(async (req, res) => {
+  app.get('/school/sessions/geo', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const [sr, hr] = await Promise.all([
       pool.query(`SELECT location, COUNT(*)::int AS cnt, COUNT(DISTINCT user_email)::int AS users FROM user_sessions WHERE tenant_id=$1 AND expires_at > NOW() GROUP BY location ORDER BY cnt DESC LIMIT 15`, [tid]),
@@ -699,10 +698,10 @@ module.exports = function (app, pool, opts) {
   <div class="s-table-wrap">${geoTable(histLocs)}</div>
 </div>`;
     res.send(renderPage(req, res, body));
-  })));
+  }));
 
   // ---------- 11. Session Policy (GET) ----------
-  app.get('/school/sessions/policy', requireAuth('/school/sessions/policy', 'view', ah(async (req, res) => {
+  app.get('/school/sessions/policy', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const [pr, sr] = await Promise.all([
       pool.query(`SELECT * FROM session_policies WHERE tenant_id=$1`, [tid]),
@@ -778,10 +777,10 @@ module.exports = function (app, pool, opts) {
   </div>
 </div>`;
     res.send(renderPage(req, res, body));
-  })));
+  }));
 
   // ---------- 12. Session Policy (POST) ----------
-  app.post('/school/sessions/policy', requireAuth('/school/sessions/policy', 'manage', ah(async (req, res) => {
+  app.post('/school/sessions/policy', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const maxConcurrent = Math.min(50, Math.max(1, parseInt(req.body.max_concurrent_sessions, 10) || 5));
     const timeout = Math.min(1440, Math.max(5, parseInt(req.body.session_timeout_minutes, 10) || 60));
@@ -801,10 +800,10 @@ module.exports = function (app, pool, opts) {
     audit(req, 'session_policy_update',
       `Updated session policy: timeout=${timeout}m, maxConcurrent=${maxConcurrent}, maxDevices=${maxDevices}, enforceIp=${enforceIp}, requireMfa=${requireMfa}`);
     res.redirect('/school/sessions/policy');
-  })));
+  }));
 
   // ---------- 13. API: Session Stats (JSON) ----------
-  app.get('/school/sessions/api/stats', requireAuth('/school/sessions', 'view', ah(async (req, res) => {
+  app.get('/school/sessions/api/stats', requireAuth, ah(async (req, res) => {
     const tid = tenantId(req);
     const [ac, uc, sc] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS n FROM user_sessions WHERE tenant_id=$1 AND expires_at > NOW()`, [tid]),
@@ -817,7 +816,7 @@ module.exports = function (app, pool, opts) {
       suspiciousLogins: sc.rows[0].n,
       timestamp: new Date().toISOString(),
     });
-  })));
+  }));
 
   console.log('[session-manager] ✅ 13 routes registered under /school/sessions');
 };

@@ -25,7 +25,6 @@ module.exports = function (app, pool, opts) {
 
   const renderPage = opts.renderPage || ((title, content, user) => content);
   const ah = opts.ah || ((fn) => fn);
-  const requireAuth = opts.requireAuth || ((_, __, fn) => fn);
   const audit = opts.audit || (() => {});
 
   const tenantId = (req) => req.session?.user?.tenant_id || req.session?.user?.school_id || 0;
@@ -305,7 +304,7 @@ module.exports = function (app, pool, opts) {
   // ===========================================================================
 
   // ---------- 1. GET / — Dashboard ----------
-  app.get('/admin/encryption-keys', requireAuth('/admin/encryption-keys', 'view', ah(async (req, res) => {
+  app.get('/admin/encryption-keys', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const [totalKeys, activeKeys, rotatedThisMonth, overdueKeys, recentUsage, upcomingRotations] = await Promise.all([
       pool.query('SELECT COUNT(*)::int AS n FROM encryption_keys WHERE school_id = $1', [sid]),
@@ -375,10 +374,10 @@ module.exports = function (app, pool, opts) {
       '</div>' +
     '</div>';
     res.send(renderPage('Encryption Key Manager', body, req.session?.user));
-  })));
+  }));
 
   // ---------- 2. GET /data — JSON keys list (also HTML view) ----------
-  app.get('/admin/encryption-keys/data', requireAuth('/admin/encryption-keys/data', 'view', ah(async (req, res) => {
+  app.get('/admin/encryption-keys/data', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const format = req.query.format;
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -463,10 +462,10 @@ module.exports = function (app, pool, opts) {
       (totalPages > 1 ? '<div class="ekm-flex" style="margin-top:16px">' + paginationHtml(page, totalPages, '/admin/encryption-keys/data') + '</div>' : '') +
     '</div>';
     res.send(renderPage('Encryption Keys', body, req.session?.user));
-  })));
+  }));
 
   // ---------- 3. POST /create — Generate new key ----------
-  app.post('/admin/encryption-keys/create', requireAuth('/admin/encryption-keys', 'manage', ah(async (req, res) => {
+  app.post('/admin/encryption-keys/create', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const uid = currentUserId(req);
     const ip = clientIp(req);
@@ -495,10 +494,10 @@ module.exports = function (app, pool, opts) {
 
     req.session.ekm_flash = { type: 'success', msg: 'Key "' + key_name.trim() + '" created successfully. Rotation in ' + rotDays + ' days.' };
     res.redirect('/admin/encryption-keys/data');
-  })));
+  }));
 
   // ---------- 4. PUT /:id — Update key metadata ----------
-  app.put('/admin/encryption-keys/:id', requireAuth('/admin/encryption-keys', 'manage', ah(async (req, res) => {
+  app.put('/admin/encryption-keys/:id', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const uid = currentUserId(req);
     const keyId = parseInt(req.params.id, 10);
@@ -523,10 +522,10 @@ module.exports = function (app, pool, opts) {
     audit(req, 'key_update', 'Updated encryption key: ' + (key_name || keyRow.key_name));
 
     res.json({ success: true, message: 'Key updated.' });
-  })));
+  }));
 
   // ---------- 5. DELETE /:id — Delete key ----------
-  app.post('/admin/encryption-keys/:id/delete', requireAuth('/admin/encryption-keys', 'manage', ah(async (req, res) => {
+  app.post('/admin/encryption-keys/:id/delete', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const keyId = parseInt(req.params.id, 10);
     const keyRow = (await pool.query('SELECT * FROM encryption_keys WHERE id = $1 AND school_id = $2', [keyId, sid])).rows[0];
@@ -542,10 +541,10 @@ module.exports = function (app, pool, opts) {
 
     req.session.ekm_flash = { type: 'success', msg: 'Key "' + keyRow.key_name + '" deleted permanently.' };
     res.redirect('/admin/encryption-keys/data');
-  })));
+  }));
 
   // ---------- 6. POST /:id/rotate — Manual key rotation ----------
-  app.post('/admin/encryption-keys/:id/rotate', requireAuth('/admin/encryption-keys', 'manage', ah(async (req, res) => {
+  app.post('/admin/encryption-keys/:id/rotate', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const keyId = parseInt(req.params.id, 10);
     const keyRow = (await pool.query('SELECT * FROM encryption_keys WHERE id = $1 AND school_id = $2', [keyId, sid])).rows[0];
@@ -563,10 +562,10 @@ module.exports = function (app, pool, opts) {
 
     req.session.ekm_flash = { type: 'success', msg: 'Key "' + keyRow.key_name + '" rotated successfully. Next rotation in ' + (keyRow.rotation_days || 90) + ' days.' };
     res.redirect('/admin/encryption-keys/data');
-  })));
+  }));
 
   // ---------- 7. POST /:id/deactivate — Deactivate key ----------
-  app.post('/admin/encryption-keys/:id/deactivate', requireAuth('/admin/encryption-keys', 'manage', ah(async (req, res) => {
+  app.post('/admin/encryption-keys/:id/deactivate', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const keyId = parseInt(req.params.id, 10);
     const keyRow = (await pool.query('SELECT * FROM encryption_keys WHERE id = $1 AND school_id = $2', [keyId, sid])).rows[0];
@@ -581,10 +580,10 @@ module.exports = function (app, pool, opts) {
 
     req.session.ekm_flash = { type: 'warning', msg: 'Key "' + keyRow.key_name + '" has been deactivated.' };
     res.redirect('/admin/encryption-keys/data');
-  })));
+  }));
 
   // ---------- 8. GET /:id/usage — Key usage log ----------
-  app.get('/admin/encryption-keys/:id/usage', requireAuth('/admin/encryption-keys', 'view', ah(async (req, res) => {
+  app.get('/admin/encryption-keys/:id/usage', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const keyId = parseInt(req.params.id, 10);
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -639,10 +638,10 @@ module.exports = function (app, pool, opts) {
       (totalPages > 1 ? '<div class="ekm-flex" style="margin-top:16px">' + paginationHtml(page, totalPages, '/admin/encryption-keys/' + keyId + '/usage') + '</div>' : '') +
     '</div>';
     res.send(renderPage('Key Usage', body, req.session?.user));
-  })));
+  }));
 
   // ---------- 9. GET /audit — All key operations audit ----------
-  app.get('/admin/encryption-keys/audit', requireAuth('/admin/encryption-keys/audit', 'view', ah(async (req, res) => {
+  app.get('/admin/encryption-keys/audit', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = 30;
@@ -719,10 +718,10 @@ module.exports = function (app, pool, opts) {
       (totalPages > 1 ? '<div class="ekm-flex" style="margin-top:16px">' + paginationHtml(page, totalPages, '/admin/encryption-keys/audit') + '</div>' : '') +
     '</div>';
     res.send(renderPage('Key Audit Log', body, req.session?.user));
-  })));
+  }));
 
   // ---------- 10. POST /bulk-rotate — Rotate multiple keys ----------
-  app.post('/admin/encryption-keys/bulk-rotate', requireAuth('/admin/encryption-keys', 'manage', ah(async (req, res) => {
+  app.post('/admin/encryption-keys/bulk-rotate', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const uid = currentUserId(req);
     const ip = clientIp(req);
@@ -745,10 +744,10 @@ module.exports = function (app, pool, opts) {
     audit(req, 'key_bulk_rotate', 'Bulk rotated ' + rotated + ' key(s)');
     req.session.ekm_flash = { type: 'success', msg: rotated + ' key(s) rotated successfully.' + (eligibleKeys.length - rotated > 0 ? ' ' + (eligibleKeys.length - rotated) + ' failed.' : '') };
     res.redirect('/admin/encryption-keys/data');
-  })));
+  }));
 
   // ---------- 11. GET /export — Export key metadata (not values) ----------
-  app.get('/admin/encryption-keys/export', requireAuth('/admin/encryption-keys/export', 'view', ah(async (req, res) => {
+  app.get('/admin/encryption-keys/export', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const format = req.query.format || 'html';
 
@@ -820,10 +819,10 @@ module.exports = function (app, pool, opts) {
       '</table></div></div>' +
     '</div>';
     res.send(renderPage('Encryption Overview', body, req.session?.user));
-  })));
+  }));
 
   // ---------- 12. GET /settings — Encryption settings ----------
-  app.get('/admin/encryption-keys/settings', requireAuth('/admin/encryption-keys/settings', 'view', ah(async (req, res) => {
+  app.get('/admin/encryption-keys/settings', requireAuth, ah(async (req, res) => {
     const sid = tenantId(req);
     const [keyStats, algoStats, usageStats] = await Promise.all([
       pool.query("SELECT algorithm, COUNT(*)::int AS cnt, AVG(key_length)::int AS avg_length FROM encryption_keys WHERE school_id = $1 GROUP BY algorithm ORDER BY cnt DESC", [sid]),
@@ -943,5 +942,5 @@ module.exports = function (app, pool, opts) {
       '</div>' +
     '</div>';
     res.send(renderPage('Encryption Settings', body, req.session?.user));
-  })));
+  }));
 };
