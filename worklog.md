@@ -156,3 +156,23 @@ Stage Summary:
 - REMOVED: View toggle floating buttons (Grid/Compact/List) from both renderPage & renderPageV3
 - IMPROVED: Beautiful adaptive grid with card hover lift effect across all screen sizes
 - ENHANCED: Dropdown menus now fully functional with hover on desktop, click on mobile, Escape key support
+
+---
+Task ID: 2
+Agent: Super Z (Main)
+Task: Fix smooth portal switching + hide Dev demo tenants from execute table
+
+Work Log:
+- User reported portal switching wasn't smooth and Dev demo tenants cluttered the execute table
+- Analyzed /switch-portal (GET form-based POST + full redirect) and /dev/switch-tenant (same pattern)
+- Analyzed /dev/master tenant management table — shows ALL tenants including Dev auto-created ones
+- Replaced /switch-portal GET form submissions with AJAX fetch-based switching
+- Added full-screen loading overlay with spinner animation
+- Added JSON response support to POST /switch-portal and POST /dev/switch-tenant
+- Added demo tenant filtering to Dev Hub tenant management table
+- Pushed to GitHub (commit 7f1ddbb)
+
+Stage Summary:
+- SMOOTH PORTAL SWITCHING: Click any portal card → spinner appears → "Switching to..." → "Done! Redirecting..." → card turns green → instant redirect (400ms). No more full page reload lag.
+- DEMO TENANT FILTERING: Dev auto-created tenants (Dev School Portal, Dev Church Portal, etc.) hidden by default from the tenant management table. "Show Dev Demo Tenants" checkbox reveals them. Demo rows highlighted yellow with "DEMO" badge.
+
