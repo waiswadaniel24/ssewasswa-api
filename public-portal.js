@@ -129,7 +129,7 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
 .footer-grid a{color:#94a3b8;font-size:13px;display:block;margin-bottom:8px}
 .footer-grid a:hover{color:white}
 .footer-bottom{text-align:center;margin-top:32px;padding-top:24px;border-top:1px solid #334155;font-size:13px;color:#64748b}
-@media(max-width:768px){.nav-links{display:none}.hero{padding:40px 16px}.hero h1{font-size:28px}.section{padding:40px 16px}.section-title{font-size:24px}.grid{grid-template-columns:1fr}.hero-buttons{flex-direction:column;align-items:center}}
+.hamburger{display:none;background:none;border:none;font-size:28px;cursor:pointer;color:#1e293b;padding:4px 8px}.mobile-menu{display:none;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;box-shadow:0 8px 20px rgba(0,0,0,0.08);z-index:99;padding:16px 24px;flex-direction:column;gap:4px}.mobile-menu.open{display:flex}.mobile-menu a{padding:12px 0;font-size:15px;color:#475569;text-decoration:none;font-weight:500;border-bottom:1px solid #f1f5f9}.mobile-menu a:last-child{border:none}.mobile-menu a:hover{color:#4f46e5}.whatsapp-float{position:fixed;bottom:24px;right:24px;width:60px;height:60px;background:#25d366;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(37,211,102,0.4);z-index:90;transition:0.3s;text-decoration:none;color:white;font-size:30px}.whatsapp-float:hover{transform:scale(1.1);box-shadow:0 6px 24px rgba(37,211,102,0.5);text-decoration:none}.cookie-banner{position:fixed;bottom:0;left:0;right:0;background:#1e293b;color:white;padding:16px 24px;z-index:200;display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;font-size:14px;box-shadow:0 -4px 20px rgba(0,0,0,0.2)}.cookie-banner a{color:#93c5fd;text-decoration:underline}.cookie-banner button{padding:8px 20px;border-radius:8px;border:none;font-weight:700;font-size:13px;cursor:pointer}.cookie-accept{background:#059669;color:white}.cookie-dismiss{background:transparent;color:#94a3b8;border:1px solid #475569!important}.back-to-top{position:fixed;bottom:24px;left:24px;width:48px;height:48px;background:#4f46e5;border-radius:50%;display:none;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(79,70,229,0.3);z-index:90;cursor:pointer;color:white;font-size:20px;border:none;transition:0.3s}.back-to-top:hover{transform:scale(1.1)}.back-to-top.visible{display:flex}.counter-section{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;max-width:900px;margin:0 auto;padding:40px 20px}.counter-item{text-align:center}.counter-num{font-size:clamp(32px,5vw,48px);font-weight:900;color:#4f46e5}.counter-label{font-size:14px;color:#64748b;margin-top:4px}@media(max-width:768px){.nav-links{display:none}.hamburger{display:block}.mobile-menu{display:none}.hero{padding:40px 16px}.hero h1{font-size:28px}.section{padding:40px 16px}.section-title{font-size:24px}.grid{grid-template-columns:1fr}.hero-buttons{flex-direction:column;align-items:center}.counter-section{grid-template-columns:repeat(2,1fr);gap:16px}.cookie-banner{flex-direction:column;text-align:center;padding:20px}}
 </style></head><body>
 
 <nav class="nav">
@@ -143,6 +143,19 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
     <a href="/contact">Contact</a>
     <a href="/login" class="btn btn-outline">Login</a>
     <a href="/register" class="btn btn-primary">Start Free</a>
+  </div>
+  <button class="hamburger" onclick="document.getElementById('mobileMenu').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="/#features">Features</a>
+    <a href="/#pricing">Pricing</a>
+    <a href="/#testimonials">Testimonials</a>
+    <a href="/#faq">FAQ</a>
+    <a href="/about">About</a>
+    <a href="/contact">Contact</a>
+    <a href="/blog">Blog</a>
+    <a href="/help-center">Help Center</a>
+    <a href="/login">Login</a>
+    <a href="/register">Start Free →</a>
   </div>
 </nav>
 
@@ -160,6 +173,13 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
     <span>✓ 500+ users across Africa</span>
   </div>
 </section>
+
+<div class="counter-section" id="counters">
+  <div class="counter-item"><div class="counter-num" data-target="500">0</div><div class="counter-label">Active Institutions</div></div>
+  <div class="counter-item"><div class="counter-num" data-target="100">0</div><div class="counter-label">Features Built</div></div>
+  <div class="counter-item"><div class="counter-num" data-target="15">0</div><div class="counter-label">Institution Types</div></div>
+  <div class="counter-item"><div class="counter-num" data-target="99">0</div><div class="counter-label">Uptime %</div></div>
+</div>
 
 <section class="section" id="features">
   <div class="container">
@@ -292,6 +312,16 @@ footer{background:#1e293b;color:white;padding:48px 20px 24px}
   </div>
 </section>
 
+<a href="https://wa.me/256700000000" class="whatsapp-float" target="_blank" rel="noopener" aria-label="Chat on WhatsApp">💬</a>
+<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Back to top">↑</button>
+<div class="cookie-banner" id="cookieBanner">
+  <span>We use cookies to improve your experience. By continuing, you agree to our <a href="/privacy">Privacy Policy</a>.</span>
+  <div style="display:flex;gap:8px">
+    <button class="cookie-accept" onclick="acceptCookies()">Accept</button>
+    <button class="cookie-dismiss" onclick="dismissCookies()">Dismiss</button>
+  </div>
+</div>
+
 <footer>
   <div class="footer-grid">
     <div><h4>◆ Comfort</h4><p style="color:#94a3b8;font-size:13px;line-height:1.8">The Operating System for African Institutions. One platform, all your operations.</p></div>
@@ -308,6 +338,64 @@ document.querySelectorAll('a[href^="#"]').forEach(a => {
 });
 // Register service worker
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
+
+// === Hamburger menu: close on link click ===
+document.querySelectorAll('#mobileMenu a').forEach(a => {
+  a.addEventListener('click', () => document.getElementById('mobileMenu').classList.remove('open'));
+});
+
+// === Animated counters (IntersectionObserver) ===
+(function(){
+  var counters = document.querySelectorAll('.counter-num[data-target]');
+  var animated = false;
+  function animateCounters(){
+    if(animated) return;
+    animated = true;
+    counters.forEach(function(el){
+      var target = parseInt(el.getAttribute('data-target'));
+      var duration = 2000;
+      var start = 0;
+      var startTime = null;
+      function step(ts){
+        if(!startTime) startTime = ts;
+        var progress = Math.min((ts - startTime) / duration, 1);
+        var eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = Math.floor(eased * target) + (target >= 99 && target <= 100 ? '%' : '+');
+        if(progress < 1) requestAnimationFrame(step);
+        else el.textContent = target + (target >= 99 && target <= 100 ? '%' : '+');
+      }
+      requestAnimationFrame(step);
+    });
+  }
+  if(counters.length > 0 && 'IntersectionObserver' in window){
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){if(e.isIntersecting){animateCounters();obs.disconnect();}});
+    }, {threshold: 0.3});
+    obs.observe(document.getElementById('counters'));
+  }
+})();
+
+// === Back to top button ===
+(function(){
+  var btn = document.getElementById('backToTop');
+  if(!btn) return;
+  window.addEventListener('scroll', function(){
+    if(window.scrollY > 600) btn.classList.add('visible');
+    else btn.classList.remove('visible');
+  });
+})();
+
+// === Cookie consent ===
+(function(){
+  var banner = document.getElementById('cookieBanner');
+  if(!banner) return;
+  if(localStorage.getItem('cookieAccepted') || localStorage.getItem('cookieDismissed')){
+    banner.style.display = 'none';
+    return;
+  }
+  window.acceptCookies = function(){ localStorage.setItem('cookieAccepted','1'); banner.style.display='none'; };
+  window.dismissCookies = function(){ localStorage.setItem('cookieDismissed','1'); banner.style.display='none'; };
+})();
 </script>
 </body></html>`;
     res.send(html);

@@ -27218,6 +27218,30 @@ try {
   console.warn('[PublicPortal] Failed to load public portal:', e.message);
 }
 
+// === PUBLIC BLOG (posts, comments, search, RSS, admin CRUD) ===
+try {
+  require('./public-blog')(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger);
+  console.log('[PublicBlog] Blog system loaded');
+} catch (e) {
+  console.warn('[PublicBlog] Failed to load blog:', e.message);
+}
+
+// === PUBLIC SEO (sitemap, robots, privacy, terms, help-center, pricing, health-check, 404) ===
+try {
+  require('./public-seo')(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger);
+  console.log('[PublicSEO] SEO and static pages loaded');
+} catch (e) {
+  console.warn('[PublicSEO] Failed to load SEO:', e.message);
+}
+
+// === PUBLIC NEWSLETTER (double opt-in, unsubscribe, preferences, campaigns, CSV export) ===
+try {
+  require('./public-newsletter')(app, pool, bcrypt, ah, esc, renderPage, audit, sendEmail, queueEmail, logger);
+  console.log('[PublicNewsletter] Newsletter system loaded');
+} catch (e) {
+  console.warn('[PublicNewsletter] Failed to load newsletter:', e.message);
+}
+
 // === BUSINESS SPECIALIZATIONS (hotel, restaurant, retail, salon, pharmacy, gym, hardware, supermarket, transport, electronics) ===
 try {
   const bizSpec = require('./business-specializations');
