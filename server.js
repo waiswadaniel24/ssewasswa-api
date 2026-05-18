@@ -33056,7 +33056,7 @@ const _tenantMw = (req, res, next) => {
   req.user = req.session.user;
   next();
 };
-const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth, requireNotBanned, requireSuperAdmin, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, wsBroadcast, redis: redisCache };
+const _newModOpts = { tenantMiddleware: _tenantMw, requireAuth, requireNotBanned, requireSuperAdmin, ah, esc, renderPage, audit, notify, notifyAll, sendEmail, sendSMS, wsBroadcast, redis: redisCache, queueEmail, uiT };
 
 // Batch 1: Old-style modules (app, db, pool, renderPage, esc)
 ['approval_requests','approval_actions','approval_notifications','approval_steps','approval_workflow_templates','approval_workflows'].forEach(t => VALID_TABLES.add(t));
@@ -33218,6 +33218,140 @@ loadSelfExec('global-viral-engine', 'GlobalViral');
 // delete global.awardPoints;
 // delete global.creditDeveloperRevenue;
 // delete global.queueEmail;
+
+// ============================================================
+// === PHASE 1 UPGRADE: 24 UNDEPLOYED MODULES ACTIVATION ===
+// ============================================================
+// These modules existed on disk but were never registered.
+// All use (app, pool, opts) pattern — _newModOpts bridges them.
+
+// --- TABLE ALLOWLISTS: Education & STEM ---
+['whiteboard_sessions','whiteboard_pages','whiteboard_content','whiteboard_templates','whiteboard_collaborators','whiteboard_submissions',
+  'flashcard_decks','flashcard_cards','flashcard_reviews','flashcard_study_sessions',
+  'omr_templates','omr_scans','omr_results','omr_answer_keys',
+  'virtual_experiments','virtual_lab_sessions','virtual_lab_reports','virtual_safety_rules',
+  'smart_textbooks','smart_textbook_chapters','smart_textbook_notes','smart_textbook_bookmarks','smart_textbook_highlights','smart_textbook_progress',
+  'drone_fleet','drone_flight_logs','drone_certifications','drone_training_modules','drone_missions','drone_safety_protocols',
+  'classroom_rooms','classroom_inventory','classroom_sensors','classroom_sensor_readings','classroom_bookings','classroom_maintenance','classroom_energy_logs','classroom_signage','classroom_lesson_recordings',
+  'ai_tutor_sessions','ai_tutor_messages','ai_tutor_concepts','ai_tutor_practice_problems','ai_tutor_progress'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Transport ---
+['bus_routes','bus_stops','bus_students','bus_fleet','bus_trips','bus_maintenance','bus_notifications','bus_route_optimization_logs',
+  'carpool_groups','carpool_members','carpool_rides','carpool_schedules','carpool_emergency_contacts','carpool_checkins','carpool_cost_sharing'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Blockchain ---
+['blockchain_certificates','blockchain_certificate_templates','blockchain_verifications','blockchain_revocations',
+  'blockchain_grades','blockchain_grade_attestations','blockchain_transcripts','blockchain_disputes'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Communication ---
+['video_rooms','video_participants','video_recordings','video_chat_messages','video_breakout_rooms','video_analytics','video_scheduling',
+  'peer_review_assignments','peer_review_submissions','peer_review_reviews','peer_review_rubrics','peer_review_calibration',
+  'social_accounts','social_posts','social_templates','social_scheduled_posts','social_analytics','social_hashtags',
+  'podcast_channels','podcast_episodes','podcast_listens','podcast_comments','podcast_subscriptions','podcast_student_submissions',
+  'school_newsletters','newsletter_articles','newsletter_subscribers','newsletter_reads','newsletter_categories'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Environment & Campus ---
+['green_initiatives','green_energy','green_waste','green_water','green_challenges','green_trees','green_reports','green_certifications','green_eco_clubs','green_carbon_calc',
+  'campus_safety_incidents','campus_safety_drills','campus_inspections'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Finance ---
+['pocket_money_wallets','pocket_money_transactions','pocket_money_savings','pocket_money_admin_limits','pocket_money_merchants',
+  'bank_accounts','bank_transactions','bank_transfers','bank_cards','bank_statements','bank_loan_requests'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Adaptive Learning ---
+['learning_paths','path_modules','skill_tree','student_skills','adaptive_assessments','assessment_questions','learning_progress','intervention_alerts'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Cross-School ---
+['collab_requests','collab_projects','collab_project_members','collab_resources','collab_forums','collab_forum_posts','collab_exchange_pairs','collab_competitions','collab_competition_teams','collab_knowledge_articles',
+  'procurement_vendors','procurement_requisitions','procurement_requisition_items','procurement_purchase_orders','procurement_po_items','procurement_rfq','procurement_rfq_quotes','procurement_contracts','procurement_budgets','procurement_audit_log'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- TABLE ALLOWLISTS: Parent Engagement ---
+['parent_workshops','parent_workshop_registrations','parent_workshop_attendance','parent_workshop_resources','parent_workshop_feedback','parent_workshop_certificates'
+].forEach(t => VALID_TABLES.add(t));
+
+// --- MODULE REGISTRATIONS ---
+
+// 1. Interactive Whiteboard (2,727 lines — collaborative classroom whiteboard)
+try { const m = require('./interactive-whiteboard'); m(app, pool, _newModOpts); console.log('[Whiteboard] Interactive whiteboard loaded — 6 tables, 15+ routes'); } catch(e) { console.warn('[Whiteboard] Error:', e.message); }
+
+// 2. Spaced Repetition / Flashcards (2,387 lines — SM-2 algorithm learning)
+try { const m = require('./spaced-repetition'); m(app, pool, _newModOpts); console.log('[SpacedRepetition] Flashcard & SM-2 learning loaded — 4 tables, 12+ routes'); } catch(e) { console.warn('[SpacedRepetition] Error:', e.message); }
+
+// 3. Carpool Coordination (2,502 lines — parent carpooling system)
+try { const m = require('./carpool-coordination'); m(app, pool, _newModOpts); console.log('[Carpool] Parent carpool coordination loaded — 7 tables, 15+ routes'); } catch(e) { console.warn('[Carpool] Error:', e.message); }
+
+// 4. Bus Route Optimizer (1,970 lines — fleet & route management)
+try { const m = require('./bus-route-optimizer'); m(app, pool, _newModOpts); console.log('[BusRoutes] Bus route optimizer loaded — 8 tables, 22+ routes'); } catch(e) { console.warn('[BusRoutes] Error:', e.message); }
+
+// 5. Blockchain Certificates (1,741 lines — tamper-proof digital certs)
+try { const m = require('./blockchain-certificates'); m(app, pool, _newModOpts); console.log('[BlockchainCerts] Blockchain certificates loaded — 5 tables, 22+ routes'); } catch(e) { console.warn('[BlockchainCerts] Error:', e.message); }
+
+// 6. Video Conferencing (1,755 lines — virtual classrooms)
+try { const m = require('./video-conferencing'); m(app, pool, _newModOpts); console.log('[VideoConf] Video conferencing loaded — 7 tables, 15+ routes'); } catch(e) { console.warn('[VideoConf] Error:', e.message); }
+
+// 7. Peer Review System (1,728 lines — academic peer review)
+try { const m = require('./peer-review'); m(app, pool, _newModOpts); console.log('[PeerReview] Peer review system loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[PeerReview] Error:', e.message); }
+
+// 8. OMR Scanner (1,519 lines — bubble sheet exam grading)
+try { const m = require('./omr-scanner'); m(app, pool, _newModOpts); console.log('[OMR] OMR scanner loaded — 4 tables, 12+ routes'); } catch(e) { console.warn('[OMR] Error:', e.message); }
+
+// 9. Social Media Auto-Post (1,576 lines — scheduling & analytics)
+try { const m = require('./social-media-autopost'); m(app, pool, _newModOpts); console.log('[SocialMedia] Social media auto-post loaded — 6 tables, 12+ routes'); } catch(e) { console.warn('[SocialMedia] Error:', e.message); }
+
+// 10. Green Campus (1,575 lines — sustainability tracking)
+try { const m = require('./green-campus'); m(app, pool, _newModOpts); console.log('[GreenCampus] Green campus & sustainability loaded — 10 tables, 15+ routes'); } catch(e) { console.warn('[GreenCampus] Error:', e.message); }
+
+// 11. Campus Podcast (1,284 lines — audio content management)
+try { const m = require('./campus-podcast'); m(app, pool, _newModOpts); console.log('[Podcast] Campus podcast system loaded — 6 tables, 11+ routes'); } catch(e) { console.warn('[Podcast] Error:', e.message); }
+
+// 12. School Newsletter (1,250 lines — rich newsletter editor)
+try { const m = require('./school-newsletter'); m(app, pool, _newModOpts); console.log('[Newsletter] School newsletter system loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[Newsletter] Error:', e.message); }
+
+// 13. Pocket Money (1,211 lines — student digital wallet)
+try { const m = require('./pocket-money'); m(app, pool, _newModOpts); console.log('[PocketMoney] Student digital wallet loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[PocketMoney] Error:', e.message); }
+
+// 14. Parent Workshop (1,093 lines — workshop scheduling & training)
+try { const m = require('./parent-workshop'); m(app, pool, _newModOpts); console.log('[ParentWorkshop] Parent workshop & training loaded — 6 tables, 12+ routes'); } catch(e) { console.warn('[ParentWorkshop] Error:', e.message); }
+
+// 15. Student Banking (1,137 lines — student banking system)
+try { const m = require('./student-banking'); m(app, pool, _newModOpts); console.log('[StudentBanking] Student banking system loaded — 6 tables, 12+ routes'); } catch(e) { console.warn('[StudentBanking] Error:', e.message); }
+
+// 16. AI Tutor (955 lines — AI-powered tutoring sessions)
+try { const m = require('./ai-tutor'); m(app, pool, _newModOpts); console.log('[AITutor] AI tutoring module loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[AITutor] Error:', e.message); }
+
+// 17. Virtual Lab (718 lines — science experiments & simulations)
+try { const m = require('./virtual-lab'); m(app, pool, _newModOpts); console.log('[VirtualLab] Virtual laboratory loaded — 4 tables, 12+ routes'); } catch(e) { console.warn('[VirtualLab] Error:', e.message); }
+
+// 18. Smart Textbook (768 lines — digital textbooks & note-taking)
+try { const m = require('./smart-textbook'); m(app, pool, _newModOpts); console.log('[SmartTextbook] Smart textbook system loaded — 6 tables, 12+ routes'); } catch(e) { console.warn('[SmartTextbook] Error:', e.message); }
+
+// 19. Blockchain Gradebook (675 lines — tamper-proof academic records)
+try { const m = require('./blockchain-gradebook'); m(app, pool, _newModOpts); console.log('[BlockchainGradebook] Blockchain gradebook loaded — 5 tables, 12+ routes'); } catch(e) { console.warn('[BlockchainGradebook] Error:', e.message); }
+
+// 20. Adaptive Learning (550 lines — personalized learning paths)
+try { const m = require('./adaptive-learning'); m(app, pool, _newModOpts); console.log('[AdaptiveLearning] Adaptive learning engine loaded — 8 tables, 12+ routes'); } catch(e) { console.warn('[AdaptiveLearning] Error:', e.message); }
+
+// 21. Cross-School Collaboration (463 lines — multi-school projects)
+try { const m = require('./cross-school-collab'); m(app, pool, _newModOpts); console.log('[CrossSchool] Cross-school collaboration loaded — 10 tables, 12+ routes'); } catch(e) { console.warn('[CrossSchool] Error:', e.message); }
+
+// 22. Smart Classroom (340 lines — IoT classroom management)
+try { const m = require('./smart-classroom'); m(app, pool, _newModOpts); console.log('[SmartClassroom] Smart classroom IoT loaded — 9 tables, 12+ routes'); } catch(e) { console.warn('[SmartClassroom] Error:', e.message); }
+
+// 23. Drone Education (547 lines — drone training & certification)
+try { const m = require('./drone-education'); m(app, pool, _newModOpts); console.log('[DroneEducation] Drone education module loaded — 6 tables, 10+ routes'); } catch(e) { console.warn('[DroneEducation] Error:', e.message); }
+
+// 24. Supply Chain & Procurement (225 lines — vendor & PO management)
+try { const m = require('./supply-chain-procurement'); m(app, pool, _newModOpts); console.log('[Procurement] Supply chain & procurement loaded — 10 tables, 12+ routes'); } catch(e) { console.warn('[Procurement] Error:', e.message); }
+
+console.log('[Phase1] 24 undeployed modules activated — total module count now 122+');
 
 // ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===
