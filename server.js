@@ -1,5 +1,14 @@
 require('dotenv').config();
 
+// === CRITICAL: Global error handlers — prevent unhandled rejections from crashing the process ===
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL-CATCH] Unhandled Rejection:', reason instanceof Error ? reason.message : reason, reason?.stack?.split('\n')[1] || '');
+});
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL-CATCH] Uncaught Exception:', err.message, err.stack?.split('\n')[1] || '');
+  // Do NOT exit — keep the server running. Only exit on truly catastrophic errors.
+});
+
 // === ENV VAR NORMALIZATION ===
 // Map Render env var names to what the app expects
 if (!process.env.GOOGLE_CLIENT_ID && process.env.ClientID) process.env.GOOGLE_CLIENT_ID = process.env.ClientID;
