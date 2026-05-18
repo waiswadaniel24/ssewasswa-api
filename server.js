@@ -357,7 +357,9 @@ const VALID_TABLES = new Set([
   'reorder_rules', 'reorder_alerts',
   'appraisals', 'appraisal_criteria', 'appraisal_scores',
   'health_visits', 'health_screenings',
-  'tithes_records', 'giving_campaigns', 'analytics_snapshots', 'student_submissions'
+  'tithes_records', 'giving_campaigns', 'analytics_snapshots', 'student_submissions',
+  'resolution_votes', 'committees', 'committee_members', 'finance_categories', 'event_rsvps',
+  'org_tasks', 'org_task_comments', 'org_notifications', 'board_resolutions'
 ]);
 const validateTable = (table) => {
   if (!VALID_TABLES.has(table)) throw new Error(`Invalid table name: ${table}`);
@@ -911,7 +913,26 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS budget_items (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, category TEXT NOT NULL, planned INTEGER DEFAULT 0, actual INTEGER DEFAULT 0, month TEXT, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS goals (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, target INTEGER DEFAULT 0, current INTEGER DEFAULT 0, deadline DATE, created_at TIMESTAMP DEFAULT NOW())`,
   `CREATE TABLE IF NOT EXISTS personal_notes (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, content TEXT, created_at TIMESTAMP DEFAULT NOW())`,
-  // === SAFE COLUMN MIGRATIONS (handles tables created by older schema versions) ===
+  // === ORG PORTAL TABLES (moved from GET route handlers to avoid DDL on read requests) ===
+  `ALTER TABLE org_finance ADD COLUMN IF NOT EXISTS category VARCHAR(255)`,
+  `CREATE TABLE IF NOT EXISTS resolution_votes (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, resolution_id INT NOT NULL, voter_email TEXT NOT NULL, direction TEXT NOT NULL, voted_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(resolution_id, voter_email))`,
+  `CREATE TABLE IF NOT EXISTS committees (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(255) NOT NULL, description TEXT, chairperson VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS committee_members (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, committee_id INT NOT NULL, member_id INT NOT NULL, role VARCHAR(100) DEFAULT 'member', joined_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(committee_id, member_id))`,
+  `CREATE TABLE IF NOT EXISTS finance_categories (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(255) NOT NULL, type VARCHAR(20) NOT NULL, budget_amount NUMERIC DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS event_rsvps (id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, event_id INT NOT NULL, member_id INT, name VARCHAR(255) NOT NULL, response VARCHAR(20) DEFAULT 'yes', responded_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: TASK MANAGEMENT ===
+  `CREATE TABLE IF NOT EXISTS org_tasks (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT, assigned_to INTEGER REFERENCES members(id) ON DELETE SET NULL, assigned_by TEXT, priority VARCHAR(20) DEFAULT 'medium', status VARCHAR(20) DEFAULT 'pending', due_date DATE, completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  `CREATE TABLE IF NOT EXISTS org_task_comments (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, task_id INTEGER REFERENCES org_tasks(id) ON DELETE CASCADE, comment TEXT NOT NULL, commented_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: IN-APP NOTIFICATIONS ===
+  `CREATE TABLE IF NOT EXISTS org_notifications (id SERIAL PRIMARY KEY, tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, user_email TEXT NOT NULL, title TEXT NOT NULL, message TEXT, link TEXT, is_read BOOLEAN DEFAULT false, read_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW())`,
+  // === ORG PORTAL: COMMITTEE MEETINGS ===
+  `ALTER TABLE committees ADD COLUMN IF NOT EXISTS meeting_day VARCHAR(20)`,
+  `ALTER TABLE committees ADD COLUMN IF NOT EXISTS meeting_time VARCHAR(10)`,
+  // === ORG PORTAL: RECURRING EVENTS ===
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT false`,
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS recurring_pattern VARCHAR(20)`,
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS recurring_end_date DATE`,
+  // === SAFE COLUMN MIGRATIONS ===
   // tenants: all columns except id, name, type (which existed in the original table)
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email TEXT`,
   `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone TEXT`,
@@ -4661,6 +4682,8 @@ app.get('/portal/organization', requireAuth, requireNotBanned, ah(async (req, re
       <div class="card" style="background:#ecfeff;border:2px solid #0891b2"><h3 style="color:#0891b2">Committees</h3><a href="/org/committees" class="btn btn-sm">Working Groups</a></div>
       <div class="card" style="background:#fffbeb;border:2px solid #d97706"><h3 style="color:#d97706">Budget</h3><a href="/org/finance/categories" class="btn btn-sm">Budget vs Actual</a></div>
       <div class="card" style="background:#f0fdf4;border:2px solid #15803d"><h3 style="color:#15803d">Import</h3><a href="/org/members/import" class="btn btn-sm">CSV Import</a></div>
+      <div class="card" style="background:#eff6ff;border:2px solid #1e40af"><h3 style="color:#1e40af">Tasks</h3><a href="/org/tasks" class="btn btn-sm">Task Manager</a></div>
+      <div class="card" style="background:#faf5ff;border:2px solid #7c3aed"><h3 style="color:#7c3aed">Notifications</h3><a href="/org/notifications" class="btn btn-sm">In-App Alerts</a></div>
       <div class="card" style="background:#dbeafe;border:2px solid #3b82f6"><h3 style="color:#3b82f6">Workers</h3><a href="/dashboard/workers" class="btn btn-sm">Manage Workers</a><a href="/worker/login" class="btn btn-sm" style="margin-top:8px">Worker Login</a></div>
       <div class="card" style="background:#fdf2f8;border:2px solid #ec4899"><h3 style="color:#ec4899">Sick Bay</h3><p class="muted" style="font-size:12px">First aid for staff & visitors</p><a href="/sickbay" class="btn btn-sm" style="background:#ec4899;color:white">Sick Bay</a></div>
     </div>
@@ -4892,7 +4915,7 @@ app.get('/org/events', requireAuth, requireNotBanned, ah(async (req, res) => {
       <div class="grid">
         ${events.map(e => `
           <div class="card">
-            <h3>${esc(e.name)}</h3>
+            <h3>${esc(e.name)}${e.is_recurring ? ` <span class="tag" style="background:#eff6ff;color:#1e40af;font-size:11px">${esc(e.recurring_pattern||'recurring')}</span>` : ''}</h3>
             <p class="muted">${e.event_date ? new Date(e.event_date).toLocaleDateString() : 'TBD'} ${e.venue ? '@ ' + esc(e.venue) : ''}</p>
             ${e.description ? `<p>${esc(e.description)}</p>` : ''}
             <p>Budget: UGX ${parseInt(e.budget).toLocaleString()}</p>
@@ -4914,16 +4937,45 @@ app.get('/org/events/new', requireAuth, requireNotBanned, (req, res) => {
         <input name="venue" placeholder="Venue">
         <textarea name="description" placeholder="Event Description" rows="3"></textarea>
         <input name="budget" type="number" placeholder="Budget UGX">
-        <button class="btn">Create Event</button>
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;margin:10px 0">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="is_recurring" id="recurringCheck" onchange="document.getElementById('recurringOpts').style.display=this.checked?'block':'none'"> Make this a recurring event</label>
+          <div id="recurringOpts" style="display:none;margin-top:10px">
+            <div class="grid" style="grid-template-columns:1fr 1fr">
+              <div><label>Repeat</label><select name="recurring_pattern"><option value="daily">Daily</option><option value="weekly" selected>Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option></select></div>
+              <div><label>Until</label><input name="recurring_end_date" type="date"></div>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-green">Create Event</button>
       </form>
     </div>
   `, req.session.user));
 });
 
 app.post('/org/events/save', requireAuth, requireNotBanned, ah(async (req, res) => {
-  const { name, event_date, venue, description, budget } = req.body;
-  await pool.query('INSERT INTO events(tenant_id,name,event_date,venue,description,budget) VALUES($1,$2,$3,$4,$5,$6)', [req.session.user.tenant_id, name, event_date, venue, description, budget || 0]);
-  await audit(req.session.user.email, 'create_event', `Created event: ${name}`);
+  const t = req.session.user.tenant_id;
+  const { name, event_date, venue, description, budget, is_recurring, recurring_pattern, recurring_end_date } = req.body;
+  const recurring = is_recurring === 'on' || is_recurring === 'true';
+  const pattern = recurring ? (recurring_pattern || 'weekly') : null;
+  const endDate = recurring ? (recurring_end_date || null) : null;
+  await pool.query('INSERT INTO events(tenant_id,name,event_date,venue,description,budget,is_recurring,recurring_pattern,recurring_end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, name, event_date, venue, description, budget || 0, recurring, pattern, endDate]);
+  await audit(req.session.user.email, 'create_event', `Created event: ${name}${recurring ? ` (${pattern})` : ''}`);
+  // Generate recurring occurrences
+  if (recurring && event_date && endDate && pattern) {
+    const startDate = new Date(event_date);
+    const end = new Date(endDate);
+    const intervals = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+    const days = intervals[pattern] || 7;
+    let current = new Date(startDate);
+    current.setDate(current.getDate() + days);
+    let count = 0;
+    while (current <= end && count < 52) {
+      await pool.query('INSERT INTO events(tenant_id,name,event_date,venue,description,budget,is_recurring,recurring_pattern,recurring_end_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [t, name, current.toISOString().split('T')[0], venue, description, budget || 0, true, pattern, endDate]);
+      current.setDate(current.getDate() + days);
+      count++;
+    }
+    if (count > 0) await audit(req.session.user.email, 'create_recurring_events', `Generated ${count} recurring instances for: ${name}`);
+  }
   res.redirect('/org/events');
 }));
 
@@ -5086,7 +5138,7 @@ app.get('/org/finance', requireAuth, requireNotBanned, ah(async (req, res) => {
   const expense = parseInt(totals.expense);
   const totalPages = Math.ceil(parseInt(total) / limit);
   // Get finance categories for dropdown
-  await pool.query(`ALTER TABLE org_finance ADD COLUMN IF NOT EXISTS category VARCHAR(255)`).catch(() => {});
+  // category column now in startup migrations
   const finCats = (await pool.query('SELECT * FROM finance_categories WHERE tenant_id=$1 ORDER BY type, name', [t])).rows;
   const incomeCats = finCats.filter(c => c.type === 'income').map(c => c.name);
   const expenseCats = finCats.filter(c => c.type === 'expense').map(c => c.name);
@@ -16157,12 +16209,7 @@ app.get('/org/resolutions/:id/vote', requireAuth, requireNotBanned, ah(async (re
   const t = req.session.user.tenant_id;
   const res_ = (await pool.query('SELECT * FROM board_resolutions WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!res_) return res.status(404).send('Not found');
-  // Ensure resolution_votes table exists
-  await pool.query(`CREATE TABLE IF NOT EXISTS resolution_votes (
-    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, resolution_id INT NOT NULL, voter_email TEXT NOT NULL,
-    direction TEXT NOT NULL, voted_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(resolution_id, voter_email)
-  )`).catch(() => {});
+  // resolution_votes table now in startup migrations
   // Check if this user already voted
   const existingVote = (await pool.query('SELECT direction FROM resolution_votes WHERE resolution_id=$1 AND voter_email=$2 AND tenant_id=$3', [req.params.id, req.session.user.email, t])).rows[0];
   const votedMsg = existingVote ? `<div class="alert" style="background:#fef3c7;padding:12px;border-radius:8px;margin-bottom:15px">You already voted <strong>${esc(existingVote.direction)}</strong> on this resolution.</div>` : '';
@@ -16183,12 +16230,7 @@ app.post('/org/resolutions/:id/vote/:direction', requireAuth, requireNotBanned, 
   if (!col) return res.status(400).send('Invalid vote direction');
   const t = req.session.user.tenant_id;
   const voterEmail = req.session.user.email;
-  // Ensure resolution_votes table exists
-  await pool.query(`CREATE TABLE IF NOT EXISTS resolution_votes (
-    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, resolution_id INT NOT NULL, voter_email TEXT NOT NULL,
-    direction TEXT NOT NULL, voted_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(resolution_id, voter_email)
-  )`).catch(() => {});
+  // resolution_votes table now in startup migrations
   // Check for duplicate vote
   const existingVote = (await pool.query('SELECT id FROM resolution_votes WHERE resolution_id=$1 AND voter_email=$2 AND tenant_id=$3', [req.params.id, voterEmail, t])).rows[0];
   if (existingVote) return res.status(400).send('You have already voted on this resolution.');
@@ -16518,21 +16560,12 @@ app.post('/org/members/import/save', requireAuth, requireNotBanned, ah(async (re
 // =============================================
 app.get('/org/committees', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query(`CREATE TABLE IF NOT EXISTS committees (
-    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(255) NOT NULL,
-    description TEXT, chairperson VARCHAR(255), created_at TIMESTAMPTZ DEFAULT NOW()
-  )`).catch(() => {});
-  await pool.query(`CREATE TABLE IF NOT EXISTS committee_members (
-    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, committee_id INT NOT NULL,
-    member_id INT NOT NULL, role VARCHAR(100) DEFAULT 'member',
-    joined_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(committee_id, member_id)
-  )`).catch(() => {});
+  // committees/committee_members tables now in startup migrations
   const committees = (await pool.query('SELECT c.*, (SELECT COUNT(*) FROM committee_members cm WHERE cm.committee_id=c.id) as member_count FROM committees c WHERE c.tenant_id=$1 ORDER BY c.name', [t])).rows;
   res.send(renderPage('Committees', `
     <div class="hero" style="background:linear-gradient(135deg,#0891b2,#0e7490)"><h1>Committees & Groups</h1><p>Organize members into working groups and committees</p></div>
     <div class="card"><a href="/org/committees/new" class="btn" style="margin-bottom:15px">+ Create Committee</a>
-      ${committees.length ? `<table><tr><th>Name</th><th>Chairperson</th><th>Members</th><th>Created</th><th>Actions</th></tr>${committees.map(c => `<tr><td><strong>${esc(c.name)}</strong>${c.description ? `<br><span class="muted">${esc(c.description)}</span>` : ''}</td><td>${esc(c.chairperson||'-')}</td><td>${c.member_count}</td><td>${new Date(c.created_at).toLocaleDateString()}</td><td><a href="/org/committees/${c.id}" class="btn btn-sm">Manage</a> <form method="POST" action="/org/committees/${c.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No committees yet. Create one to organize your members.</p>'}
+      ${committees.length ? `<table><tr><th>Name</th><th>Chairperson</th><th>Meeting</th><th>Members</th><th>Created</th><th>Actions</th></tr>${committees.map(c => `<tr><td><strong>${esc(c.name)}</strong>${c.description ? `<br><span class="muted">${esc(c.description)}</span>` : ''}</td><td>${esc(c.chairperson||'-')}</td><td>${c.meeting_day ? esc(c.meeting_day)+' '+esc(c.meeting_time||'') : '-'}</td><td>${c.member_count}</td><td>${new Date(c.created_at).toLocaleDateString()}</td><td><a href="/org/committees/${c.id}" class="btn btn-sm">Manage</a> <a href="/org/committees/${c.id}/edit" class="btn btn-sm">Edit</a> <form method="POST" action="/org/committees/${c.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-red">Delete</button></form></td></tr>`).join('')}</table>` : '<p class="muted">No committees yet. Create one to organize your members.</p>'}
     </div>
   `, req.session.user));
 }));
@@ -16602,11 +16635,7 @@ app.post('/org/committees/:id/delete', requireAuth, requireNotBanned, ah(async (
 // =============================================
 app.get('/org/finance/categories', requireAuth, requireNotBanned, ah(async (req, res) => {
   const t = req.session.user.tenant_id;
-  await pool.query(`CREATE TABLE IF NOT EXISTS finance_categories (
-    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(255) NOT NULL,
-    type VARCHAR(20) NOT NULL, budget_amount NUMERIC DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-  )`).catch(() => {});
+  // finance_categories table now in startup migrations
   const categories = (await pool.query('SELECT fc.*, (SELECT COALESCE(SUM(amount),0) FROM org_finance WHERE tenant_id=fc.tenant_id AND category=fc.name) as actual FROM finance_categories fc WHERE fc.tenant_id=$1 ORDER BY fc.type, fc.name', [t])).rows;
   const incomeCats = categories.filter(c => c.type === 'income');
   const expenseCats = categories.filter(c => c.type === 'expense');
@@ -16665,11 +16694,7 @@ app.get('/org/events/rsvp/:id', requireAuth, requireNotBanned, ah(async (req, re
   const t = req.session.user.tenant_id;
   const event = (await pool.query('SELECT * FROM events WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
   if (!event) return res.status(404).send('Not found');
-  await pool.query(`CREATE TABLE IF NOT EXISTS event_rsvps (
-    id SERIAL PRIMARY KEY, tenant_id INT NOT NULL, event_id INT NOT NULL,
-    member_id INT, name VARCHAR(255) NOT NULL, response VARCHAR(20) DEFAULT 'yes',
-    responded_at TIMESTAMPTZ DEFAULT NOW()
-  )`).catch(() => {});
+  // event_rsvps table now in startup migrations
   const rsvps = (await pool.query('SELECT r.*, m.email, m.phone FROM event_rsvps r LEFT JOIN members m ON m.id=r.member_id WHERE r.event_id=$1 AND r.tenant_id=$2 ORDER BY r.responded_at DESC', [event.id, t])).rows;
   const yesCount = rsvps.filter(r => r.response === 'yes').length;
   const noCount = rsvps.filter(r => r.response === 'no').length;
@@ -16707,6 +16732,298 @@ app.post('/org/events/rsvp/:id/save', requireAuth, requireNotBanned, ah(async (r
   await pool.query('INSERT INTO event_rsvps(tenant_id,event_id,member_id,name,response) VALUES($1,$2,$3,$4,$5)', [t, req.params.id, member_id || null, rsvpName, response || 'yes']);
   await audit(req.session.user.email, 'event_rsvp', `RSVP ${response} for ${rsvpName} on event ${req.params.id}`);
   res.redirect(`/org/events/rsvp/${req.params.id}`);
+}));
+
+
+// =============================================
+// ORG: TASK MANAGEMENT
+// =============================================
+app.get('/org/tasks', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const statusFilter = req.query.status || '';
+  const priorityFilter = req.query.priority || '';
+  const search = req.query.search || '';
+  const page = parseInt(req.query.page) || 1;
+  const limit = 25;
+  const offset = (page - 1) * limit;
+  let where = 'WHERE ot.tenant_id=$1';
+  const params = [t];
+  let pIdx = 2;
+  if (statusFilter) { where += ` AND ot.status=$${pIdx++}`; params.push(statusFilter); }
+  if (priorityFilter) { where += ` AND ot.priority=$${pIdx++}`; params.push(priorityFilter); }
+  if (search) { where += ` AND (ot.title ILIKE $${pIdx++} OR ot.description ILIKE $${pIdx++})`; params.push(`%${search}%`, `%${search}%`); }
+  const total = (await pool.query(`SELECT COUNT(*) FROM org_tasks ot ${where}`, params)).rows[0].count;
+  const tasks = (await pool.query(`SELECT ot.*, m.name as assignee_name FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to ${where} ORDER BY CASE ot.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 END, ot.due_date ASC NULLS LAST, ot.created_at DESC LIMIT $${pIdx++} OFFSET $${pIdx++}`, [...params, limit, offset])).rows;
+  const totalPages = Math.ceil(parseInt(total) / limit);
+  // Stats for dashboard cards
+  const stats = (await pool.query(`SELECT COUNT(*) FILTER(WHERE status='pending') as pending, COUNT(*) FILTER(WHERE status='in_progress') as in_progress, COUNT(*) FILTER(WHERE status='completed') as completed, COUNT(*) FILTER(WHERE status='overdue' OR (status!='completed' AND due_date < CURRENT_DATE)) as overdue, COUNT(*) as total FROM org_tasks WHERE tenant_id=$1`, [t])).rows[0];
+  res.send(renderPage('Task Management', `
+    <div class="hero" style="background:linear-gradient(135deg,#1e40af,#3b82f6)"><h1>Task Management</h1><p>Assign, track, and complete organizational tasks</p></div>
+    <div class="stats">
+      <div class="stat-card"><div class="stat-num" style="color:#f59e0b">${stats.pending}</div><div>Pending</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#3b82f6">${stats.in_progress}</div><div>In Progress</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#059669">${stats.completed}</div><div>Completed</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:#dc2626">${stats.overdue}</div><div>Overdue</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:15px">
+        <a href="/org/tasks/new" class="btn btn-green">+ New Task</a>
+        <form method="GET" action="/org/tasks" style="display:flex;gap:8px;flex-wrap:wrap">
+          <input name="search" placeholder="Search tasks..." value="${esc(search)}" style="padding:8px;min-width:200px">
+          <select name="status" style="padding:8px"><option value="">All Status</option><option value="pending" ${statusFilter==='pending'?'selected':''}>Pending</option><option value="in_progress" ${statusFilter==='in_progress'?'selected':''}>In Progress</option><option value="completed" ${statusFilter==='completed'?'selected':''}>Completed</option><option value="overdue" ${statusFilter==='overdue'?'selected':''}>Overdue</option></select>
+          <select name="priority" style="padding:8px"><option value="">All Priority</option><option value="critical" ${priorityFilter==='critical'?'selected':''}>Critical</option><option value="high" ${priorityFilter==='high'?'selected':''}>High</option><option value="medium" ${priorityFilter==='medium'?'selected':''}>Medium</option><option value="low" ${priorityFilter==='low'?'selected':''}>Low</option></select>
+          <button class="btn btn-sm">Filter</button>
+        </form>
+      </div>
+      ${tasks.length ? `<table><tr><th>Title</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Due Date</th><th>Actions</th></tr>${tasks.map(tsk => {
+        const prioColors = {critical:'#dc2626',high:'#f59e0b',medium:'#3b82f6',low:'#6b7280'};
+        const statusColors = {pending:'#f59e0b',in_progress:'#3b82f6',completed:'#059669',overdue:'#dc2626'};
+        const isOverdue = tsk.status !== 'completed' && tsk.due_date && new Date(tsk.due_date) < new Date();
+        const displayStatus = isOverdue ? 'overdue' : tsk.status;
+        return `<tr><td><strong>${esc(tsk.title)}</strong>${tsk.description ? `<br><span class="muted">${esc(tsk.description.substring(0,60))}${tsk.description.length>60?'...':''}</span>` : ''}</td><td>${esc(tsk.assignee_name||'Unassigned')}</td><td><span class="tag" style="background:${prioColors[tsk.priority]||'#6b7280'}20;color:${prioColors[tsk.priority]||'#6b7280'}">${tsk.priority}</span></td><td><span class="tag" style="background:${statusColors[displayStatus]||'#6b7280'}20;color:${statusColors[displayStatus]||'#6b7280'}">${displayStatus.replace('_',' ')}</span></td><td>${tsk.due_date ? new Date(tsk.due_date).toLocaleDateString() : '-'}${isOverdue ? ' <span style="color:#dc2626">&#9888;</span>' : ''}</td><td><a href="/org/tasks/${tsk.id}" class="btn btn-sm">View</a></td></tr>`;
+      }).join('')}</table>` : '<p class="muted">No tasks found. Create your first task to get started.</p>'}
+      ${totalPages > 1 ? `<div style="margin-top:15px;text-align:center">${Array.from({length:totalPages},(_,i)=>`<a href="/org/tasks?page=${i+1}&status=${statusFilter}&priority=${priorityFilter}&search=${encodeURIComponent(search)}" class="btn btn-sm ${i+1===page?'btn-green':''}" style="margin:2px">${i+1}</a>`).join('')}</div>` : ''}
+    </div>
+  `, req.session.user));
+}));
+
+app.get('/org/tasks/new', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const members = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  res.send(renderPage('Create Task', `<div class="card" style="max-width:700px;margin:0 auto"><h2>Create New Task</h2>
+    <form method="POST" action="/org/tasks/save">
+      <label>Task Title</label><input name="title" required placeholder="Design annual report layout">
+      <label>Description</label><textarea name="description" rows="3" placeholder="Detailed task description..."></textarea>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Assign To</label><select name="assigned_to"><option value="">Unassigned</option>${members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select></div>
+        <div><label>Priority</label><select name="priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Due Date</label><input name="due_date" type="date"></div>
+        <div><label>Initial Status</label><select name="status"><option value="pending">Pending</option><option value="in_progress">In Progress</option></select></div>
+      </div>
+      <button class="btn btn-green">Create Task</button>
+      <a href="/org/tasks" class="btn" style="margin-left:8px">Cancel</a>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/tasks/save', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { title, description, assigned_to, priority, status, due_date } = req.body;
+  await pool.query('INSERT INTO org_tasks(tenant_id,title,description,assigned_to,assigned_by,priority,status,due_date) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [t, title, description || null, assigned_to || null, req.session.user.email, priority || 'medium', status || 'pending', due_date || null]);
+  await audit(req.session.user.email, 'create_task', `Created task: ${title}`);
+  // Notify the assignee if assigned
+  if (assigned_to) {
+    const assignee = (await pool.query('SELECT email FROM members WHERE id=$1 AND tenant_id=$2', [assigned_to, t])).rows[0];
+    if (assignee && assignee.email) {
+      await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, assignee.email, 'New Task Assigned', `You have been assigned: ${title}`, '/org/tasks']);
+    }
+  }
+  res.redirect('/org/tasks');
+}));
+
+app.get('/org/tasks/:id', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const task = (await pool.query('SELECT ot.*, m.name as assignee_name, m.email as assignee_email FROM org_tasks ot LEFT JOIN members m ON m.id=ot.assigned_to WHERE ot.id=$1 AND ot.tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!task) return res.status(404).send('Task not found');
+  const comments = (await pool.query('SELECT * FROM org_task_comments WHERE task_id=$1 AND tenant_id=$2 ORDER BY created_at ASC', [task.id, t])).rows;
+  const members = (await pool.query('SELECT id,name FROM members WHERE tenant_id=$1 ORDER BY name', [t])).rows;
+  const prioColors = {critical:'#dc2626',high:'#f59e0b',medium:'#3b82f6',low:'#6b7280'};
+  const statusColors = {pending:'#f59e0b',in_progress:'#3b82f6',completed:'#059669',overdue:'#dc2626'};
+  const isOverdue = task.status !== 'completed' && task.due_date && new Date(task.due_date) < new Date();
+  res.send(renderPage(task.title, `
+    <div class="card" style="max-width:800px;margin:0 auto">
+      <h2>${esc(task.title)}</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">
+        <span class="tag" style="background:${prioColors[task.priority]||'#6b7280'}20;color:${prioColors[task.priority]||'#6b7280'};font-size:14px">${task.priority} priority</span>
+        <span class="tag" style="background:${statusColors[isOverdue?'overdue':task.status]||'#6b7280'}20;color:${statusColors[isOverdue?'overdue':task.status]||'#6b7280'};font-size:14px">${isOverdue?'overdue':task.status.replace('_',' ')}</span>
+        ${task.due_date ? `<span class="tag" style="font-size:14px">Due: ${new Date(task.due_date).toLocaleDateString()}${isOverdue?' <span style="color:#dc2626">&#9888; OVERDUE</span>':''}</span>` : ''}
+      </div>
+      ${task.description ? `<p>${esc(task.description)}</p>` : ''}
+      <p class="muted">Assigned to: ${esc(task.assignee_name||'Unassigned')} | Created by: ${esc(task.assigned_by||'-')} | Created: ${new Date(task.created_at).toLocaleDateString()}${task.completed_at ? ' | Completed: '+new Date(task.completed_at).toLocaleDateString() : ''}</p>
+
+      <h3 style="margin-top:25px">Update Status</h3>
+      <form method="POST" action="/org/tasks/${task.id}/status" style="display:flex;gap:8px;flex-wrap:wrap">
+        <select name="status" style="padding:8px"><option value="pending" ${task.status==='pending'?'selected':''}>Pending</option><option value="in_progress" ${task.status==='in_progress'?'selected':''}>In Progress</option><option value="completed" ${task.status==='completed'?'selected':''}>Completed</option></select>
+        <button class="btn btn-sm btn-green">Update</button>
+      </form>
+
+      <h3 style="margin-top:25px">Edit Task</h3>
+      <form method="POST" action="/org/tasks/${task.id}/update">
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Reassign To</label><select name="assigned_to"><option value="">Unassigned</option>${members.map(m => `<option value="${m.id}" ${m.id===task.assigned_to?'selected':''}>${esc(m.name)}</option>`).join('')}</select></div>
+          <div><label>Priority</label><select name="priority"><option value="low" ${task.priority==='low'?'selected':''}>Low</option><option value="medium" ${task.priority==='medium'?'selected':''}>Medium</option><option value="high" ${task.priority==='high'?'selected':''}>High</option><option value="critical" ${task.priority==='critical'?'selected':''}>Critical</option></select></div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div><label>Due Date</label><input name="due_date" type="date" value="${task.due_date ? task.due_date.toISOString().split('T')[0] : ''}"></div>
+          <div><label>Description</label><textarea name="description" rows="2">${esc(task.description||'')}</textarea></div>
+        </div>
+        <button class="btn btn-sm" style="margin-top:8px">Save Changes</button>
+      </form>
+
+      <h3 style="margin-top:25px">Comments (${comments.length})</h3>
+      ${comments.length ? comments.map(c => `<div style="background:#f8fafc;border-radius:8px;padding:10px;margin:8px 0"><strong>${esc(c.commented_by||'Anonymous')}</strong> <span class="muted">${new Date(c.created_at).toLocaleString()}</span><p style="margin:5px 0">${esc(c.comment)}</p></div>`).join('') : '<p class="muted">No comments yet</p>'}
+      <form method="POST" action="/org/tasks/${task.id}/comment" style="display:flex;gap:8px;margin-top:10px">
+        <input name="comment" placeholder="Add a comment..." required style="flex:1;padding:8px">
+        <button class="btn btn-sm btn-green">Comment</button>
+      </form>
+
+      <div style="margin-top:20px;display:flex;gap:8px">
+        <form method="POST" action="/org/tasks/${task.id}/delete" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-red" onclick="return confirm('Delete this task?')">Delete Task</button></form>
+        <a href="/org/tasks" class="btn">Back to Tasks</a>
+      </div>
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/tasks/:id/status', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { status } = req.body;
+  const VALID = ['pending','in_progress','completed'];
+  if (!VALID.includes(status)) return res.status(400).send('Invalid status');
+  const completedAt = status === 'completed' ? 'NOW()' : null;
+  if (completedAt) {
+    await pool.query('UPDATE org_tasks SET status=$1, completed_at=NOW() WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
+  } else {
+    await pool.query('UPDATE org_tasks SET status=$1, completed_at=NULL WHERE id=$2 AND tenant_id=$3', [status, req.params.id, t]);
+  }
+  await audit(req.session.user.email, 'update_task_status', `Task ${req.params.id} status -> ${status}`);
+  // Mark overdue tasks
+  if (status === 'completed') {
+    await pool.query("UPDATE org_tasks SET status='completed' WHERE id=$1 AND tenant_id=$2 AND due_date < CURRENT_DATE AND status='overdue'", [req.params.id, t]);
+  }
+  res.redirect(`/org/tasks/${req.params.id}`);
+}));
+
+app.post('/org/tasks/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { assigned_to, priority, due_date, description } = req.body;
+  const oldTask = (await pool.query('SELECT assigned_to FROM org_tasks WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!oldTask) return res.status(404).send('Not found');
+  await pool.query('UPDATE org_tasks SET assigned_to=$1,priority=$2,due_date=$3,description=$4 WHERE id=$5 AND tenant_id=$6', [assigned_to || null, priority || 'medium', due_date || null, description || null, req.params.id, t]);
+  // Notify newly assigned member if changed
+  if (assigned_to && parseInt(assigned_to) !== oldTask.assigned_to) {
+    const assignee = (await pool.query('SELECT email,name FROM members WHERE id=$1 AND tenant_id=$2', [assigned_to, t])).rows[0];
+    if (assignee && assignee.email) {
+      await pool.query('INSERT INTO org_notifications(tenant_id,user_email,title,message,link) VALUES($1,$2,$3,$4,$5)', [t, assignee.email, 'Task Reassigned', `You have been reassigned to a task. Check your tasks.`, `/org/tasks/${req.params.id}`]);
+    }
+  }
+  await audit(req.session.user.email, 'update_task', `Updated task ${req.params.id}`);
+  res.redirect(`/org/tasks/${req.params.id}`);
+}));
+
+app.post('/org/tasks/:id/comment', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { comment } = req.body;
+  if (!comment || !comment.trim()) return res.redirect(`/org/tasks/${req.params.id}`);
+  await pool.query('INSERT INTO org_task_comments(tenant_id,task_id,comment,commented_by) VALUES($1,$2,$3,$4)', [t, req.params.id, comment, req.session.user.email]);
+  await audit(req.session.user.email, 'task_comment', `Commented on task ${req.params.id}`);
+  res.redirect(`/org/tasks/${req.params.id}`);
+}));
+
+app.post('/org/tasks/:id/delete', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('DELETE FROM org_task_comments WHERE task_id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await pool.query('DELETE FROM org_tasks WHERE id=$1 AND tenant_id=$2', [req.params.id, t]);
+  await audit(req.session.user.email, 'delete_task', `Deleted task ${req.params.id}`);
+  res.redirect('/org/tasks');
+}));
+
+
+// =============================================
+// ORG: IN-APP NOTIFICATIONS
+// =============================================
+app.get('/org/notifications', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const userEmail = req.session.user.email;
+  const filter = req.query.filter || 'all'; // all, unread, read
+  let where = 'WHERE tenant_id=$1 AND user_email=$2';
+  const params = [t, userEmail];
+  if (filter === 'unread') { where += ' AND is_read=false'; }
+  if (filter === 'read') { where += ' AND is_read=true'; }
+  const total = (await pool.query(`SELECT COUNT(*) FROM org_notifications ${where}`, params)).rows[0].count;
+  const notifications = (await pool.query(`SELECT * FROM org_notifications ${where} ORDER BY created_at DESC LIMIT 50`, params)).rows;
+  const unreadCount = (await pool.query('SELECT COUNT(*) FROM org_notifications WHERE tenant_id=$1 AND user_email=$2 AND is_read=false', [t, userEmail])).rows[0].count;
+  res.send(renderPage('Notifications', `
+    <div class="hero" style="background:linear-gradient(135deg,#7c3aed,#6d28d9)"><h1>Notifications</h1><p>${unreadCount > 0 ? `You have ${unreadCount} unread notification${unreadCount>1?'s':''}` : 'You are all caught up!'}</p></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;gap:6px">
+          <a href="/org/notifications?filter=all" class="btn btn-sm ${filter==='all'?'btn-green':''}">All</a>
+          <a href="/org/notifications?filter=unread" class="btn btn-sm ${filter==='unread'?'btn-green':''}">Unread (${unreadCount})</a>
+          <a href="/org/notifications?filter=read" class="btn btn-sm ${filter==='read'?'btn-green':''}">Read</a>
+        </div>
+        <form method="POST" action="/org/notifications/mark-all-read" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm">Mark All Read</button></form>
+      </div>
+      ${notifications.length ? notifications.map(n => `
+        <div style="display:flex;justify-content:space-between;align-items:start;padding:12px;border-radius:8px;margin:6px 0;background:${n.is_read?'#f8fafc':'#eff6ff'};border-left:4px solid ${n.is_read?'#d1d5db':'#3b82f6'}">
+          <div style="flex:1">
+            <strong>${esc(n.title)}</strong>
+            ${n.message ? `<p style="margin:4px 0;color:#4b5563">${esc(n.message)}</p>` : ''}
+            <span class="muted" style="font-size:12px">${new Date(n.created_at).toLocaleString()}</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            ${n.link ? `<a href="${esc(n.link)}" class="btn btn-sm">View</a>` : ''}
+            ${!n.is_read ? `<form method="POST" action="/org/notifications/${n.id}/read" style="display:inline"><input type="hidden" name="_csrf" value="${req.csrfToken}"><button class="btn btn-sm btn-green">Read</button></form>` : ''}
+          </div>
+        </div>
+      `).join('') : '<p class="muted">No notifications</p>'}
+    </div>
+  `, req.session.user));
+}));
+
+app.post('/org/notifications/:id/read', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE org_notifications SET is_read=true, read_at=NOW() WHERE id=$1 AND tenant_id=$2 AND user_email=$3', [req.params.id, t, req.session.user.email]);
+  res.redirect('back');
+}));
+
+app.post('/org/notifications/mark-all-read', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  await pool.query('UPDATE org_notifications SET is_read=true, read_at=NOW() WHERE tenant_id=$1 AND user_email=$2 AND is_read=false', [t, req.session.user.email]);
+  res.redirect('/org/notifications');
+}));
+
+// API: Get unread notification count (for bell icon)
+app.get('/org/notifications/count', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const count = (await pool.query('SELECT COUNT(*) FROM org_notifications WHERE tenant_id=$1 AND user_email=$2 AND is_read=false', [t, req.session.user.email])).rows[0].count;
+  res.json({ unread: parseInt(count) });
+}));
+
+
+// =============================================
+// ORG: COMMITTEE EDIT + MEETING SCHEDULE
+// =============================================
+app.get('/org/committees/:id/edit', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const committee = (await pool.query('SELECT * FROM committees WHERE id=$1 AND tenant_id=$2', [req.params.id, t])).rows[0];
+  if (!committee) return res.status(404).send('Not found');
+  res.send(renderPage('Edit Committee', `<div class="card" style="max-width:600px;margin:0 auto"><h2>Edit: ${esc(committee.name)}</h2>
+    <form method="POST" action="/org/committees/${committee.id}/update">
+      <label>Name</label><input name="name" required value="${esc(committee.name)}">
+      <label>Description</label><textarea name="description" rows="3">${esc(committee.description||'')}</textarea>
+      <label>Chairperson</label><input name="chairperson" value="${esc(committee.chairperson||'')}">
+      <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div><label>Meeting Day</label><select name="meeting_day">
+          <option value="">None</option>
+          ${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => `<option value="${d}" ${committee.meeting_day===d?'selected':''}>${d}</option>`).join('')}
+        </select></div>
+        <div><label>Meeting Time</label><input name="meeting_time" type="time" value="${committee.meeting_time||'09:00'}"></div>
+      </div>
+      <button class="btn btn-green">Save Changes</button>
+      <a href="/org/committees/${committee.id}" class="btn" style="margin-left:8px">Cancel</a>
+    </form></div>
+  `, req.session.user));
+}));
+
+app.post('/org/committees/:id/update', requireAuth, requireNotBanned, ah(async (req, res) => {
+  const t = req.session.user.tenant_id;
+  const { name, description, chairperson, meeting_day, meeting_time } = req.body;
+  await pool.query('UPDATE committees SET name=$1,description=$2,chairperson=$3,meeting_day=$4,meeting_time=$5 WHERE id=$6 AND tenant_id=$7', [name, description || null, chairperson || null, meeting_day || null, meeting_time || null, req.params.id, t]);
+  await audit(req.session.user.email, 'update_committee', `Updated committee: ${name}`);
+  res.redirect(`/org/committees/${req.params.id}`);
 }));
 
 
