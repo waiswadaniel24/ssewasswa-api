@@ -34763,6 +34763,56 @@ try { const m = require('./supply-chain-procurement'); m(app, pool, _newModOpts)
 console.log('[Phase1] 24 undeployed modules activated — total module count now 122+');
 
 // ============================================================
+// === PHASE 2 UPGRADE: 10 NEW FEATURE MODULES ===
+// ============================================================
+// Brand-new modules built from scratch for the Dev Portal upgrade.
+
+// --- TABLE ALLOWLISTS: Phase 2 New Modules ---
+['mfa_secrets','mfa_backup_codes','mfa_verification_log','mfa_trusted_devices','mfa_settings',
+  'rbac_roles','rbac_permissions','rbac_role_permissions','rbac_user_roles','rbac_permission_audit',
+  'health_metrics','health_slow_queries','health_alerts','health_cron_log','health_changelog','health_maintenance','health_error_log',
+  'integration_api_keys','integration_webhooks','integration_webhook_deliveries','integration_activity_log',
+  'gdpr_consents','gdpr_export_requests','gdpr_deletion_requests','gdpr_cookie_audit','gdpr_retention_policies','gdpr_compliance_reports','gdpr_data_access_log',
+  'feature_flags','feature_flag_assignments','feature_experiments','feature_experiment_events','feature_segments','feature_flag_audit',
+  'custom_dashboards','dashboard_widgets','dashboard_widget_data',
+  'onboarding_progress','onboarding_data',
+  'announcements','announcement_reads','announcement_templates',
+  'data_recycle_bin','data_archives','data_backup_points','data_retention_log'
+].forEach(t => VALID_TABLES.add(t));
+
+// 1. TOTP MFA System (930 lines — Google Authenticator, backup codes, rate limiting, AES encryption)
+try { const m = require('./mfa-totp'); m(app, pool, _newModOpts); console.log('[MFA] TOTP multi-factor authentication loaded — 5 tables, 12 routes'); } catch(e) { console.warn('[MFA] Error:', e.message); }
+
+// 2. Advanced RBAC Manager (760 lines — 38 permissions, 7 roles, visual matrix, audit trail)
+try { const m = require('./rbac-manager'); m(app, pool, _newModOpts); console.log('[RBAC] Advanced role-based access control loaded — 5 tables, 14 routes'); } catch(e) { console.warn('[RBAC] Error:', e.message); }
+
+// 3. System Health Monitor (956 lines — KPIs, SVG charts, metrics, maintenance mode)
+try { const m = require('./system-health'); m(app, pool, _newModOpts); console.log('[Health] System health monitor loaded — 7 tables, 16 routes'); } catch(e) { console.warn('[Health] Error:', e.message); }
+
+// 4. API Key & Webhook Manager (706 lines — key generation, HMAC signing, delivery logs)
+try { const m = require('./api-webhook-manager'); m(app, pool, _newModOpts); console.log('[Integrations] API key & webhook manager loaded — 4 tables, 15 routes'); } catch(e) { console.warn('[Integrations] Error:', e.message); }
+
+// 5. GDPR Compliance Center (852 lines — data export, deletion, consent, retention)
+try { const m = require('./gdpr-compliance'); m(app, pool, _newModOpts); console.log('[GDPR] Privacy compliance center loaded — 7 tables, 17 routes'); } catch(e) { console.warn('[GDPR] Error:', e.message); }
+
+// 6. Feature Flags & A/B Testing (757 lines — flag management, chi-squared significance)
+try { const m = require('./feature-flags'); m(app, pool, _newModOpts); console.log('[Features] Feature flags & A/B testing loaded — 6 tables, 20 routes'); } catch(e) { console.warn('[Features] Error:', e.message); }
+
+// 7. Custom Dashboard Builder (668 lines — widget builder, SVG charts, drag-drop layout)
+try { const m = require('./dashboard-builder'); m(app, pool, _newModOpts); console.log('[DashBuilder] Custom dashboard builder loaded — 2 tables, 12 routes'); } catch(e) { console.warn('[DashBuilder] Error:', e.message); }
+
+// 8. User Onboarding Wizard (723 lines — 5-step setup wizard, CSV import)
+try { const m = require('./user-onboarding'); m(app, pool, _newModOpts); console.log('[Onboarding] User onboarding wizard loaded — 2 tables, 14 routes'); } catch(e) { console.warn('[Onboarding] Error:', e.message); }
+
+// 9. Announcement Broadcast System (321 lines — priority levels, read tracking, templates)
+try { const m = require('./announcement-system'); m(app, pool, _newModOpts); console.log('[Announcements] Broadcast system loaded — 3 tables, 12 routes'); } catch(e) { console.warn('[Announcements] Error:', e.message); }
+
+// 10. Data Archive & Management (668 lines — recycle bin, backups, audit export, retention)
+try { const m = require('./data-archive'); m(app, pool, _newModOpts); console.log('[DataMgmt] Data archive & management loaded — 4 tables, 19 routes'); } catch(e) { console.warn('[DataMgmt] Error:', e.message); }
+
+console.log('[Phase2] 10 new feature modules activated — total module count now 132+');
+
+// ============================================================
 // === FUNDRAISING ENHANCEMENTS — Professional Features ===
 // Social Sharing, Donor Dashboard, Payouts, Donor Wall, QR Codes,
 // Refund Handling, Embed Widget, Matching Donations, Comments,
